@@ -56,11 +56,11 @@ pub fn AddressTrail(
                 "__VMUX_ADDRESS_DURATION__",
                 &crate::motion::Motion::LAYOUT_MS.to_string(),
             );
-        let _ = document::eval(&script);
+        crate::transport::Host::run_script(script);
     });
     let motion_id = root_id.clone();
     use_drop(move || {
-        let _ = document::eval(&format!(
+        crate::transport::Host::run_script(format!(
             "globalThis.__vmuxAddressMotion?.get({motion_id:?})?.();"
         ));
     });
@@ -369,6 +369,7 @@ mod tests {
     struct TrailProbe {
         requests: RefCell<Vec<PageAddressRequest>>,
         popup: RefCell<Vec<bool>>,
+        scripts: RefCell<Vec<String>>,
     }
 
     impl PageHost for TrailProbe {
@@ -384,6 +385,30 @@ mod tests {
         fn listen(&self, _id: &str, _listener: BytesListener) -> Result<(), EventListenerError> {
             Ok(())
         }
+
+        fn run_script(&self, script: String) {
+            self.scripts.borrow_mut().push(script);
+        }
+    }
+
+    #[test]
+    fn mounted_trail_installs_and_releases_motion_through_its_page_host() {
+        let probe = Rc::new(TrailProbe::default());
+        let _host = HostScope::enter(probe.clone());
+        let mut dom = VirtualDom::new(MotionTrail);
+        dom.rebuild_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(probe.scripts.borrow().len(), 1);
+        dom.render_immediate_to_vec();
+        assert_eq!(probe.scripts.borrow().len(), 1);
+        drop(dom);
+        assert_eq!(probe.scripts.borrow().len(), 2);
+    }
+
+    #[component]
+    fn MotionTrail() -> Element {
+        let state = PageAddress::default();
+        rsx! { AddressTrail { state } }
     }
 
     #[component]

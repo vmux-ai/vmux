@@ -1796,7 +1796,9 @@ adapter atomically replaces the cache and excludes relative uptime text to avoid
 from polling alone. Missing or invalid caches fall back to daemon discovery, and failed
 writes retain live entities. Configuration remains selectable and stopped VM projections
 mark its containers stopped; live logs require the daemon. One root UI-state subscription
-survives these transitions. A thin divider separates the side sheet and details.
+survives these transitions. Projection compares the current retained `UiState` before publishing:
+idle updates send nothing, while state changes and page-ready replay preserve synchronization.
+A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. Selected addresses fold
 `VM → Docker → Containers` into an ancestor menu, leaving
 `… → group → service → Info/Logs`; standalone entries retain their container name.
