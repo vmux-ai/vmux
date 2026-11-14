@@ -43,7 +43,7 @@ class Fixture {
     this.github = {
       rest: {
         pulls: { list: async () => ({ data: this.pulls || [] }) },
-        repos: { getBranch: async ({ branch }) => { this.baseBranch = branch; return { data: { commit: { sha: this.base } } }; } },
+        repos: { getBranch: async ({ branch }) => { this.baseBranch = branch; return { data: { commit: { sha: this.tip || this.base } } }; } },
         actions: {
           listWorkflowRuns: async () => ({ data: { workflow_runs: this.runs || [this.run] } }),
           getWorkflowRun: async () => { this.polls++; return { data: { ...this.run, status: 'completed', conclusion: this.finish || 'success' } }; },
@@ -64,6 +64,11 @@ class Fixture {
     this.git('add', '.');
     this.git('commit', '-m', message);
     return this.git('rev-parse', 'HEAD');
+  }
+
+  synthetic(base, head) {
+    const tree = this.git('merge-tree', '--write-tree', base, head).split('\n')[0];
+    return this.git('commit-tree', tree, '-p', base, '-p', head, '-m', 'Synthetic PR merge');
   }
 }
 
@@ -145,6 +150,7 @@ test('fork PRs and version changes always execute normal PR checks', async (t) =
   release.git('checkout', 'main');
   release.git('merge', '--no-ff', 'feature', '-m', 'release merge');
   release.context.sha = release.git('rev-parse', 'HEAD');
+  release.tip = release.context.sha;
   const plan = await release.preflight.plan();
   assert.equal(plan.release, true);
   assert.equal(plan.reuse, '');
@@ -158,7 +164,7 @@ test('matching Git trees cannot reuse a run executed with an older CI definition
     fixture.base = fixture.commit('update base CI');
     fixture.tree = fixture.git('rev-parse', 'HEAD^{tree}');
     fixture.context.payload.pull_request.base.sha = fixture.base;
-    fixture.context.sha = fixture.base;
+    fixture.context.sha = fixture.synthetic(fixture.base, fixture.head);
     fixture.artifacts = [{ name: Preflight.artifact({ ...fixture.identity, base: fixture.base, tree: fixture.tree }), expired: false }];
     assert.equal((await fixture.preflight.plan()).reuse, '');
     assert.equal(fixture.outputs.reusable, 'false');
@@ -197,6 +203,31 @@ test('unexpected PR merge trees fail instead of reusing evidence', async (t) => 
   const fixture = new Fixture(t);
   fixture.context.sha = fixture.head;
   await assert.rejects(fixture.preflight.plan(), /does not match/);
+});
+
+test('PR merges capture an advanced target base without reusing older branch evidence', async (t) => {
+  const fixture = new Fixture(t);
+  fixture.git('checkout', '--detach', fixture.base);
+  fs.writeFileSync(path.join(fixture.root, 'advanced.txt'), 'Advanced main\n');
+  fixture.base = fixture.commit('Advance target branch');
+  fixture.context.sha = fixture.synthetic(fixture.base, fixture.head);
+  const plan = await fixture.preflight.plan();
+  assert.equal(plan.base, fixture.base);
+  assert.equal(plan.tree, fixture.git('rev-parse', `${fixture.context.sha}^{tree}`));
+  assert.equal(plan.reuse, '');
+  assert.equal(fixture.baseBranch, 'main');
+});
+
+test('PR merge inputs reject reversed parents and bases outside the target branch', async (t) => {
+  const reversed = new Fixture(t);
+  reversed.context.sha = reversed.synthetic(reversed.head, reversed.base);
+  await assert.rejects(reversed.preflight.plan(), /does not match/);
+  const unrelated = new Fixture(t);
+  unrelated.git('checkout', '--detach', unrelated.base);
+  fs.writeFileSync(path.join(unrelated.root, 'other.txt'), 'Other branch\n');
+  const base = unrelated.commit('Commit outside target branch');
+  unrelated.context.sha = unrelated.synthetic(base, unrelated.head);
+  await assert.rejects(unrelated.preflight.plan(), /target branch ancestry/);
 });
 
 test('prepared checkouts compile the merged code from both branches', (t) => {

@@ -1,9 +1,15 @@
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::reflect::{AppTypeRegistry, ReflectComponent};
 use bevy_ecs::relationship::{Relationship, RelationshipTarget};
 use bevy_ecs::system::{SystemParam, SystemState};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use bevy_reflect::{
+    FromType, Reflect, ReflectDeserialize, ReflectSerialize, TypeInfo, TypeRegistration,
+    TypeRegistry, Typed,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::any::TypeId;
 use std::collections::{HashMap, HashSet, VecDeque};
 use uuid::Uuid;
 
@@ -13,7 +19,7 @@ pub struct Plugin;
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Schema>()
+        app.init_resource::<AppTypeRegistry>()
             .configure_sets(
                 Update,
                 (Set::Restore, Set::Detect, Set::Capture, Set::Confirm).chain(),
@@ -22,6 +28,14 @@ impl bevy_app::Plugin for Plugin {
             .add_systems(Update, detect.in_set(Set::Detect))
             .add_systems(Update, capture.in_set(Set::Capture))
             .add_systems(Update, confirm.in_set(Set::Confirm));
+        let registry = app.world().resource::<AppTypeRegistry>();
+        let mut registry = registry.write();
+        registry.register_derived_types();
+        registry.register::<Name>();
+        registry
+            .get_mut(TypeId::of::<Name>())
+            .unwrap()
+            .insert(ReflectStored::new::<Name>("name", 1));
     }
 }
 
@@ -62,6 +76,29 @@ pub struct Record {
 }
 
 impl Record {
+    pub fn set<T: Component + Reflect>(
+        &mut self,
+        registry: &TypeRegistry,
+        value: &T,
+    ) -> Result<(), String> {
+        let registration = registry
+            .get(TypeId::of::<T>())
+            .ok_or("component type is not registered")?;
+        let metadata = registration
+            .data::<ReflectStored>()
+            .ok_or("component is not stored")?;
+        ReflectStored::registration(registry, metadata.key)?;
+        let encoded = metadata.encode(registration, value)?;
+        for component in &mut self.components {
+            if component.key == metadata.key {
+                *component = encoded;
+                return Ok(());
+            }
+        }
+        self.components.push(encoded);
+        Ok(())
+    }
+
     pub fn is_valid(&self) -> bool {
         if self.scope_id.is_nil()
             || self.id.is_nil()
@@ -94,36 +131,161 @@ impl Record {
     }
 }
 
-#[derive(Clone)]
-struct Codec {
-    key: &'static str,
+#[derive(Reflect)]
+pub struct Format {
+    key: String,
     version: i32,
-    encode: fn(&EntityRef<'_>) -> Result<Option<Value>, String>,
-    decode: fn(&mut EntityWorldMut<'_>, Value) -> Result<(), String>,
 }
 
-impl Codec {
-    fn encode<T: Component + Serialize>(entity: &EntityRef<'_>) -> Result<Option<Value>, String> {
-        let Some(component) = entity.get::<T>() else {
-            return Ok(None);
-        };
-        serde_json::to_value(component)
-            .map(Some)
-            .map_err(|error| error.to_string())
+impl Format {
+    pub fn new(key: &str, version: i32) -> Self {
+        assert!(!key.is_empty() && version > 0);
+        Self {
+            key: key.to_string(),
+            version,
+        }
     }
 
-    fn decode<T: Component + DeserializeOwned>(
+    fn of<T: Typed>() -> &'static Self {
+        let format = match T::type_info() {
+            TypeInfo::Struct(info) => info.get_attribute::<Self>(),
+            TypeInfo::TupleStruct(info) => info.get_attribute::<Self>(),
+            TypeInfo::Enum(info) => info.get_attribute::<Self>(),
+            _ => None,
+        };
+        format.expect("stored types require a Format reflection attribute")
+    }
+}
+
+#[derive(Clone)]
+pub struct ReflectStored {
+    key: &'static str,
+    version: i32,
+    insert: fn(&mut EntityWorldMut<'_>, Box<dyn Reflect>) -> Result<(), String>,
+}
+
+impl<T: Component + Typed> FromType<T> for ReflectStored {
+    fn from_type() -> Self {
+        let format = Format::of::<T>();
+        Self::new::<T>(&format.key, format.version)
+    }
+}
+
+impl ReflectStored {
+    pub fn new<T: Component + Reflect>(key: &'static str, version: i32) -> Self {
+        assert!(!key.is_empty() && version > 0);
+        Self {
+            key,
+            version,
+            insert: Self::insert::<T>,
+        }
+    }
+
+    fn insert<T: Component + Reflect>(
         entity: &mut EntityWorldMut<'_>,
-        value: Value,
+        value: Box<dyn Reflect>,
     ) -> Result<(), String> {
-        let component = serde_json::from_value::<T>(value).map_err(|error| error.to_string())?;
+        let component = value
+            .take::<T>()
+            .map_err(|_| "decoded component type mismatch".to_string())?;
         entity.insert(component);
+        Ok(())
+    }
+
+    fn encode(
+        &self,
+        registration: &TypeRegistration,
+        value: &dyn Reflect,
+    ) -> Result<StoredComponent, String> {
+        let serializer = registration
+            .data::<ReflectSerialize>()
+            .ok_or_else(|| format!("missing serde serialization for {}", self.key))?;
+        let value = serializer
+            .serialize(value, serde_json::value::Serializer)
+            .map_err(|error| error.to_string())?;
+        Ok(StoredComponent {
+            key: self.key.to_string(),
+            version: self.version,
+            value,
+        })
+    }
+
+    fn registration<'a>(
+        registry: &'a TypeRegistry,
+        key: &str,
+    ) -> Result<&'a TypeRegistration, String> {
+        let mut found = None;
+        for registration in registry.iter() {
+            let Some(metadata) = registration.data::<Self>() else {
+                continue;
+            };
+            if metadata.key != key {
+                continue;
+            }
+            if found.is_some() {
+                return Err(format!("ambiguous component key {key}"));
+            }
+            found = Some(registration);
+        }
+        found.ok_or_else(|| format!("unknown component {key}"))
+    }
+
+    fn capture(
+        registry: &TypeRegistry,
+        entity: &EntityRef<'_>,
+    ) -> Result<Vec<StoredComponent>, String> {
+        let mut components = Vec::new();
+        let mut keys = HashSet::new();
+        for registration in registry.iter() {
+            let Some(metadata) = registration.data::<Self>() else {
+                continue;
+            };
+            if !keys.insert(metadata.key) {
+                return Err(format!("ambiguous component key {}", metadata.key));
+            }
+            let component = registration
+                .data::<ReflectComponent>()
+                .ok_or_else(|| format!("missing component reflection for {}", metadata.key))?;
+            let Some(value) = component.reflect(*entity) else {
+                continue;
+            };
+            components.push(metadata.encode(registration, value)?);
+        }
+        Ok(components)
+    }
+
+    fn restore(
+        registry: &TypeRegistry,
+        entity: &mut EntityWorldMut<'_>,
+        components: Vec<StoredComponent>,
+    ) -> Result<(), String> {
+        let mut seen = HashSet::new();
+        for stored in components {
+            if !seen.insert(stored.key.clone()) {
+                return Err(format!("duplicate component {}", stored.key));
+            }
+            let registration = Self::registration(registry, &stored.key)?;
+            let metadata = registration.data::<Self>().unwrap();
+            if metadata.version != stored.version {
+                return Err(format!("unsupported version of {}", stored.key));
+            }
+            let deserializer = registration
+                .data::<ReflectDeserialize>()
+                .ok_or_else(|| format!("missing serde deserialization for {}", stored.key))?;
+            let value = deserializer
+                .deserialize(stored.value)
+                .map_err(|error| error.to_string())?;
+            registration
+                .data::<ReflectComponent>()
+                .ok_or_else(|| format!("missing component reflection for {}", stored.key))?;
+            (metadata.insert)(entity, value)?;
+        }
         Ok(())
     }
 }
 
 #[derive(Clone)]
-struct RelationshipCodec {
+pub struct ReflectRelationship {
     key: &'static str,
     version: i32,
     owned: bool,
@@ -131,84 +293,40 @@ struct RelationshipCodec {
     decode: fn(&mut World, Entity, Entity) -> Result<(), String>,
 }
 
-#[derive(Resource, Default, Clone)]
-pub struct Schema {
-    codecs: Vec<Codec>,
-    relationships: Vec<RelationshipCodec>,
+impl<R: Relationship + Typed> FromType<R> for ReflectRelationship {
+    fn from_type() -> Self {
+        let format = Format::of::<R>();
+        Self::new::<R>(&format.key, format.version)
+    }
 }
 
-impl Schema {
-    pub fn new() -> Self {
+impl ReflectRelationship {
+    pub fn new<R: Relationship>(key: &'static str, version: i32) -> Self {
+        assert!(!key.is_empty() && version > 0);
         Self {
-            codecs: Vec::new(),
-            relationships: Vec::new(),
-        }
-    }
-
-    pub fn register<T: Component + Serialize + DeserializeOwned>(
-        &mut self,
-        key: &'static str,
-        version: i32,
-    ) {
-        assert!(
-            version > 0 && !key.is_empty() && !self.codecs.iter().any(|codec| codec.key == key)
-        );
-        self.codecs.push(Codec {
-            key,
-            version,
-            encode: Codec::encode::<T>,
-            decode: Codec::decode::<T>,
-        });
-    }
-
-    pub fn register_relationship<R: Relationship>(&mut self, key: &'static str, version: i32) {
-        assert!(
-            version > 0
-                && !key.is_empty()
-                && !self.relationships.iter().any(|codec| codec.key == key)
-        );
-        self.relationships.push(RelationshipCodec {
             key,
             version,
             owned: <R::RelationshipTarget as RelationshipTarget>::LINKED_SPAWN,
             encode: CaptureInput::target::<R>,
             decode: RestoreInput::relate::<R>,
-        });
-    }
-
-    pub fn capture(&self, entity: &EntityRef<'_>) -> Result<Vec<StoredComponent>, String> {
-        let mut components = Vec::new();
-        for codec in &self.codecs {
-            if let Some(value) = (codec.encode)(entity)? {
-                components.push(StoredComponent {
-                    key: codec.key.to_string(),
-                    version: codec.version,
-                    value,
-                });
-            }
         }
-        Ok(components)
     }
 
-    pub fn restore(
-        &self,
-        entity: &mut EntityWorldMut<'_>,
-        components: Vec<StoredComponent>,
-    ) -> Result<(), String> {
-        let mut seen = HashSet::new();
-        for component in components {
-            if !seen.insert(component.key.clone()) {
-                return Err(format!("duplicate component {}", component.key));
-            }
-            let Some(codec) = self.codecs.iter().find(|codec| codec.key == component.key) else {
-                return Err(format!("unknown component {}", component.key));
+    fn of<'a>(registry: &'a TypeRegistry, key: &str) -> Result<&'a Self, String> {
+        let mut found = None;
+        for registration in registry.iter() {
+            let Some(metadata) = registration.data::<Self>() else {
+                continue;
             };
-            if codec.version != component.version {
-                return Err(format!("unsupported version of {}", component.key));
+            if metadata.key != key {
+                continue;
             }
-            (codec.decode)(entity, component.value)?;
+            if found.is_some() {
+                return Err(format!("ambiguous relationship key {key}"));
+            }
+            found = Some(metadata);
         }
-        Ok(())
+        found.ok_or_else(|| format!("unknown relationship {key}"))
     }
 }
 
@@ -317,14 +435,14 @@ pub enum Set {
 #[derive(SystemParam)]
 struct RestoreInput<'w, 's> {
     requests: Query<'w, 's, Entity, With<RestoreRequest>>,
-    schema: Res<'w, Schema>,
+    registry: Res<'w, AppTypeRegistry>,
 }
 
 impl RestoreInput<'_, '_> {
     fn materialize(
         graph: Graph,
         world: &mut World,
-        schema: &Schema,
+        registry: &TypeRegistry,
     ) -> Result<Vec<Entity>, String> {
         graph.validate()?;
         let mut identities = HashMap::new();
@@ -342,7 +460,7 @@ impl RestoreInput<'_, '_> {
             identities.insert(record.id, id);
             entities.push(id);
         }
-        let result = Self::apply(graph, world, schema, &identities);
+        let result = Self::apply(graph, world, registry, &identities);
         if let Err(error) = result {
             for entity in &entities {
                 if let Ok(entity) = world.get_entity_mut(*entity) {
@@ -357,24 +475,19 @@ impl RestoreInput<'_, '_> {
     fn apply(
         graph: Graph,
         world: &mut World,
-        schema: &Schema,
+        registry: &TypeRegistry,
         identities: &HashMap<Uuid, Entity>,
     ) -> Result<(), String> {
         for record in &graph.0 {
-            schema.restore(
+            ReflectStored::restore(
+                registry,
                 &mut world.entity_mut(identities[&record.id]),
                 record.components.clone(),
             )?;
         }
         for record in graph.0 {
             for relationship in record.relationships {
-                let Some(codec) = schema
-                    .relationships
-                    .iter()
-                    .find(|codec| codec.key == relationship.key)
-                else {
-                    return Err(format!("unknown relationship {}", relationship.key));
-                };
+                let codec = ReflectRelationship::of(registry, &relationship.key)?;
                 if codec.version != relationship.version
                     || codec.owned != relationship.owned
                     || relationship.position != 0
@@ -408,16 +521,17 @@ impl RestoreInput<'_, '_> {
 }
 
 fn restore(world: &mut World, pending: &mut SystemState<RestoreInput>) {
-    let (requests, schema) = {
+    let (requests, registry) = {
         let input = pending.get(world).expect("restore query");
         if input.requests.is_empty() {
             return;
         }
         (
             input.requests.iter().collect::<Vec<_>>(),
-            input.schema.clone(),
+            (*input.registry).clone(),
         )
     };
+    let registry = registry.read();
     for request in requests {
         let graph = world
             .entity_mut(request)
@@ -432,7 +546,7 @@ fn restore(world: &mut World, pending: &mut SystemState<RestoreInput>) {
                 !record.relationships.iter().any(|relation| relation.owned),
             ));
         }
-        let restored = RestoreInput::materialize(graph, world, &schema);
+        let restored = RestoreInput::materialize(graph, world, &registry);
         if let Ok(entities) = &restored {
             for (entity, (scope, revision, root)) in entities.iter().zip(metadata) {
                 let mut entity = world.entity_mut(*entity);
@@ -460,12 +574,12 @@ fn detect(
 #[derive(SystemParam)]
 struct CaptureInput<'w, 's> {
     requests: Query<'w, 's, Entity, With<CaptureRequest>>,
-    schema: Res<'w, Schema>,
+    registry: Res<'w, AppTypeRegistry>,
 }
 
 impl CaptureInput<'_, '_> {
     fn record(
-        schema: &Schema,
+        registry: &TypeRegistry,
         scope_id: Uuid,
         world: &World,
         entity: Entity,
@@ -481,7 +595,14 @@ impl CaptureInput<'_, '_> {
             .get::<Revision>(entity)
             .ok_or("missing entity revision")?;
         let mut relationships = Vec::new();
-        for codec in &schema.relationships {
+        let mut keys = HashSet::new();
+        for registration in registry.iter() {
+            let Some(codec) = registration.data::<ReflectRelationship>() else {
+                continue;
+            };
+            if !keys.insert(codec.key) {
+                return Err(format!("ambiguous relationship key {}", codec.key));
+            }
             if let Some(target) = (codec.encode)(world, entity)? {
                 relationships.push(StoredRelationship {
                     key: codec.key.to_string(),
@@ -497,7 +618,7 @@ impl CaptureInput<'_, '_> {
                 .cmp(&right.key)
                 .then(left.position.cmp(&right.position))
         });
-        let mut components = schema.capture(&world.entity(entity))?;
+        let mut components = ReflectStored::capture(registry, &world.entity(entity))?;
         components.sort_by(|left, right| left.key.cmp(&right.key));
         let record = Record {
             scope_id,
@@ -538,22 +659,23 @@ impl CaptureInput<'_, '_> {
 }
 
 fn capture(world: &mut World, pending: &mut SystemState<CaptureInput>) {
-    let (requests, schema) = {
+    let (requests, registry) = {
         let input = pending.get(world).expect("capture query");
         if input.requests.is_empty() {
             return;
         }
         (
             input.requests.iter().collect::<Vec<_>>(),
-            input.schema.clone(),
+            (*input.registry).clone(),
         )
     };
+    let registry = registry.read();
     for entity in requests {
         let request = world.entity_mut(entity).take::<CaptureRequest>().unwrap();
         let mut records = Vec::new();
         let mut result = Ok(());
         for entity in request.entities {
-            match CaptureInput::record(&schema, request.scope_id, world, entity) {
+            match CaptureInput::record(&registry, request.scope_id, world, entity) {
                 Ok(record) => records.push(record),
                 Err(error) => {
                     result = Err(error);
@@ -601,13 +723,15 @@ fn confirm(
 mod tests {
     use super::*;
 
-    #[derive(Component, Serialize, Deserialize)]
+    #[derive(Component, Reflect, Serialize, Deserialize)]
+    #[reflect(Component, Serialize, Deserialize, Stored, @Format::new("preferences", 2))]
     struct Preferences {
         appearance: Appearance,
+        #[reflect(ignore)]
         fonts: Vec<Font>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Reflect, Serialize, Deserialize)]
     enum Appearance {
         Custom {
             foreground: String,
@@ -627,36 +751,58 @@ mod tests {
             "appearance": {"Custom": {"foreground": "#eeeeee", "background": "#111111"}},
             "fonts": [{"family": "Mono", "size": 14}, {"family": "Fallback", "size": 16}]
         });
-        let mut schema = Schema::new();
-        schema.register::<Preferences>("preferences", 2);
-        let mut world = World::new();
-        let entity = world.spawn(Dirty).id();
-        schema
-            .restore(
-                &mut world.entity_mut(entity),
-                vec![StoredComponent {
-                    key: "preferences".to_string(),
-                    version: 2,
-                    value: expected.clone(),
-                }],
-            )
-            .expect("restore independent fixture");
-        let captured = schema
-            .capture(&world.entity(entity))
-            .expect("capture registered values");
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].key, "preferences");
-        assert_eq!(captured[0].version, 2);
-        assert_eq!(captured[0].value, expected);
-        let restored = world.spawn_empty().id();
-        schema
-            .restore(&mut world.entity_mut(restored), captured)
-            .expect("restore again");
-        assert!(world.get::<Dirty>(restored).is_none());
-        let captured = schema
-            .capture(&world.entity(restored))
-            .expect("capture restored values");
-        assert_eq!(captured[0].value, expected);
+        let scope = Uuid::new_v4();
+        let mut record = Record::fixture(scope, Uuid::new_v4(), "", None);
+        record.components = vec![StoredComponent {
+            key: "preferences".to_string(),
+            version: 2,
+            value: expected.clone(),
+        }];
+        let mut app = Plugin::fixture();
+        let request = app
+            .world_mut()
+            .spawn(RestoreRequest(Graph(vec![record])))
+            .id();
+        app.update();
+        let Restored(Ok(entities)) = app.world().get::<Restored>(request).unwrap() else {
+            panic!("restore independent fixture")
+        };
+        let entity = entities[0];
+        let preferences = app
+            .world()
+            .get::<Preferences>(entity)
+            .expect("materialized typed component");
+        assert_eq!(serde_json::to_value(preferences).unwrap(), expected);
+        app.world_mut().entity_mut(entity).insert(Dirty);
+        app.world_mut().entity_mut(request).insert(CaptureRequest {
+            scope_id: scope,
+            entities: vec![entity],
+        });
+        app.update();
+        let Captured(Ok(records)) = app.world().get::<Captured>(request).unwrap() else {
+            panic!("capture generated component metadata")
+        };
+        assert_eq!(records[0].components.len(), 1);
+        assert_eq!(records[0].components[0].key, "preferences");
+        assert_eq!(records[0].components[0].version, 2);
+        assert_eq!(records[0].components[0].value, expected);
+        let records = records.clone();
+        let restored = app.world_mut().spawn(RestoreRequest(Graph(records))).id();
+        app.update();
+        let Restored(Ok(entities)) = app.world().get::<Restored>(restored).unwrap() else {
+            panic!("restore captured values")
+        };
+        let entity = entities[0];
+        assert!(app.world().get::<Dirty>(entity).is_none());
+        app.world_mut().entity_mut(restored).insert(CaptureRequest {
+            scope_id: scope,
+            entities: vec![entity],
+        });
+        app.update();
+        let Captured(Ok(records)) = app.world().get::<Captured>(restored).unwrap() else {
+            panic!("capture restored values")
+        };
+        assert_eq!(records[0].components[0].value, expected);
     }
 
     impl Record {
@@ -685,12 +831,19 @@ mod tests {
         }
     }
 
-    impl Schema {
-        fn fixture() -> Self {
-            let mut schema = Schema::new();
-            schema.register::<Name>("name", 1);
-            schema.register_relationship::<ChildOf>("parent", 1);
-            schema
+    impl Plugin {
+        fn fixture() -> App {
+            let mut app = App::new();
+            app.add_plugins(Plugin);
+            let registry = app.world().resource::<AppTypeRegistry>();
+            let mut registry = registry.write();
+            registry.register::<ChildOf>();
+            registry
+                .get_mut(TypeId::of::<ChildOf>())
+                .unwrap()
+                .insert(ReflectRelationship::new::<ChildOf>("parent", 1));
+            drop(registry);
+            app
         }
     }
 
@@ -699,8 +852,7 @@ mod tests {
         let scope = Uuid::new_v4();
         let root = Uuid::new_v4();
         let child = Uuid::new_v4();
-        let mut app = App::new();
-        app.add_plugins(Plugin).insert_resource(Schema::fixture());
+        let mut app = Plugin::fixture();
         let request = app
             .world_mut()
             .spawn(RestoreRequest(Graph(vec![
@@ -822,8 +974,7 @@ mod tests {
             vec![Record::fixture(scope, a, "A", None), wrong_version],
             vec![Record::fixture(scope, a, "A", None), invalid_value],
         ] {
-            let mut app = App::new();
-            app.add_plugins(Plugin).insert_resource(Schema::fixture());
+            let mut app = Plugin::fixture();
             let request = app.world_mut().spawn(RestoreRequest(Graph(records))).id();
             app.update();
             assert!(matches!(
@@ -833,6 +984,59 @@ mod tests {
             let mut identities = app.world_mut().query::<&Id>();
             assert_eq!(identities.iter(app.world()).count(), 0);
         }
+    }
+
+    #[derive(Component, Reflect, Serialize, Deserialize)]
+    #[reflect(Component, Serialize, Deserialize, Stored, no_auto_register, @Format::new("name", 1))]
+    struct ConflictingName(String);
+
+    #[test]
+    fn ambiguous_storage_keys_refuse_restore_and_capture_without_partial_entities() {
+        let scope = Uuid::new_v4();
+        let mut app = Plugin::fixture();
+        let original = app
+            .world_mut()
+            .spawn(RestoreRequest(Graph(vec![Record::fixture(
+                scope,
+                Uuid::new_v4(),
+                "Original",
+                None,
+            )])))
+            .id();
+        app.update();
+        let Restored(Ok(entities)) = app.world().get::<Restored>(original).unwrap() else {
+            panic!("restore before conflicting registration")
+        };
+        let entity = entities[0];
+        app.register_type::<ConflictingName>();
+        let rejected = app
+            .world_mut()
+            .spawn(RestoreRequest(Graph(vec![Record::fixture(
+                scope,
+                Uuid::new_v4(),
+                "Rejected",
+                None,
+            )])))
+            .id();
+        app.world_mut().entity_mut(original).insert(CaptureRequest {
+            scope_id: scope,
+            entities: vec![entity],
+        });
+        app.update();
+        assert!(matches!(
+            app.world().get::<Restored>(rejected),
+            Some(Restored(Err(_)))
+        ));
+        assert!(matches!(
+            app.world().get::<Captured>(original),
+            Some(Captured(Err(_)))
+        ));
+        let mut identities = app.world_mut().query::<&Id>();
+        assert_eq!(identities.iter(app.world()).count(), 1);
+        assert_eq!(
+            app.world().get::<Name>(entity).unwrap().as_str(),
+            "Original"
+        );
     }
 
     #[test]

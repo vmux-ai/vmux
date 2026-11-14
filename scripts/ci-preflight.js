@@ -16,7 +16,7 @@ class Preflight {
     const { payload, eventName, repo, sha, ref } = this.context;
     const pull = payload.pull_request;
     const head = pull ? pull.head.sha : sha;
-    let base = pull ? pull.base.sha : '';
+    let base = pull ? await this.pullBase(pull, sha) : '';
     const branch = pull ? pull.head.ref : ref.replace(/^refs\/heads\//, '');
     const feature = eventName === 'push' && ![payload.repository.default_branch, 'main', 'master'].includes(branch) && !branch.startsWith('release/');
     let baseBranch = pull ? pull.base.ref : payload.repository.default_branch;
@@ -50,6 +50,28 @@ class Preflight {
     }
     if (feature && reusable) fs.writeFileSync(`${this.root}/ci-preflight-inputs.json`, `${JSON.stringify(identity)}\n`);
     return { ...identity, feature, release, reuse };
+  }
+
+  async pullBase(pull, sha) {
+    this.fetch(sha);
+    const parents = this.git('show', '-s', '--format=%P', sha).split(' ');
+    if (parents.length !== 2 || parents[1] !== pull.head.sha) {
+      throw new Error('PR checkout does not match its expected merge parents');
+    }
+    const base = parents[0];
+    Preflight.sha(base);
+    if (base === pull.base.sha) return base;
+    this.fetch(pull.base.sha);
+    const { data } = await this.github.rest.repos.getBranch({ ...this.context.repo, branch: pull.base.ref });
+    const tip = data.commit.sha;
+    this.fetch(tip);
+    try {
+      this.git('merge-base', '--is-ancestor', pull.base.sha, base);
+      this.git('merge-base', '--is-ancestor', base, tip);
+    } catch {
+      throw new Error('PR checkout base is not on the target branch ancestry');
+    }
+    return base;
   }
 
   compatible(head, tree) {

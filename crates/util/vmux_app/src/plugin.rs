@@ -6,6 +6,12 @@ use vmux_macro::app_plugin;
 pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop, daemon, cli, mcp)]
     Ecs(VmuxEcsPlugin),
+    #[plugin(feature = "account", desktop, requires(ecs))]
+    Account(vmux_account::Plugin),
+    #[plugin(feature = "account-local", desktop, requires(account))]
+    AccountLocal(vmux_account::local::Plugin),
+    #[plugin(feature = "profile-account", desktop, requires(account_local, runtime))]
+    ProfileAccount(crate::profile_account::Plugin),
     #[plugin(feature = "cli", cli, mcp, requires(ecs))]
     CliTools(crate::VmuxToolPlugin),
     #[plugin(feature = "daemon", daemon, requires(ecs))]
@@ -67,7 +73,7 @@ pub enum VmuxPlugin {
     Simulator(vmux_simulator::SimulatorPlugin),
     #[plugin(feature = "shortcut", desktop, requires(runtime))]
     Shortcut(vmux_shortcut::ShortcutPlugin),
-    #[plugin(feature = "team", desktop, requires(runtime))]
+    #[plugin(feature = "team", desktop, requires(runtime, profile_account))]
     Team(vmux_team::TeamPlugin),
     #[plugin(feature = "space", desktop, requires(layout_runtime))]
     Space(vmux_space::SpacePlugin),

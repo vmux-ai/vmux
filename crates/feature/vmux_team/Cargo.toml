@@ -21,6 +21,8 @@ vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 vmux_page = { path = "../../util/vmux_page" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
+vmux_account = { path = "../vmux_account" }
+uuid = { workspace = true }
 serde_json = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
 bevy = { workspace = true }

@@ -462,13 +462,23 @@ projections. Compiler predicates and token spans only translate external build i
 output; they do not retain product state. Existing cancellable subprocess execution bounds reads,
 and every projection drops before the step completes.
 
-Record serialization owns only immutable schema metadata, scoped JSON records, and write
-receipts. The Schema resource registers stateless component/relationship codec pointers;
-record request/result components retain received or captured values until materialization,
-confirmation, or cancellation. Bevy plugin installation and dynamic tombstone conversion are
-explicit framework boundaries. Nested serde compatibility fixtures are test-only adapters
-to that schema and do not define a product model. Cached exclusive SystemState parameters
-prove the same typed ownership as ordinary registered systems; shadowed wrappers do not.
+Account local IO boundaries consume root-owned immutable load/write requests and publish bounded
+SQLite/file observations or durable receipts. They perform serialization, locks, atomic generation
+checks and empty-directory compensation only. Profile selection, names, imports and reconciliation
+remain in registered catalog/mutation systems. Stateless Bevy plugin installation, native SQLite
+jobs, rollback guards and Team DOM/input adapters have item-specific policy records. Test fixtures
+own isolated App/data roots rather than a second product model.
+
+Record serialization uses Bevy's AppTypeRegistry as its only type registry. Reflect derives
+register component/serde TypeData and immutable storage metadata; custom type attributes declare
+stable keys and versions. Serde-decoded components are inserted as owned typed values so fields
+excluded from reflection retain their serialized contents. The shared record plugin installs
+automatic registration and the foreign Name mapping. Relationship TypeData converts typed Entity links to stable UUIDs and
+retains Bevy's linked ownership rule. Unknown, ambiguous or incompatible metadata fails closed.
+Record request/result components own received or captured values until materialization,
+confirmation or cancellation. Bevy registration and bounded JSON/relationship conversion are
+explicit framework boundaries; nested compatibility fixtures remain test-only adapters.
+Cached exclusive SystemState parameters prove the same typed ownership as registered systems.
 
 The UI stylesheet build adapter invokes Tailwind and emits Cargo dependency metadata before
 application composition. `VMUX_SKIP_DX_BUILD` omits stylesheet generation and its source watches
@@ -725,8 +735,9 @@ The native `host` bundle is explicit in Vmux consumers.
 
 The independent `records` feature exposes `vmux_ecs::record` for scoped, versioned JSON
 records and metadata-only write receipts. Its plugin reuses shared `Uuid`, `Revision`, and
-`Name` components; registered component and relationship codecs preserve nested values and
-stable target UUIDs. Restore, dirty-revision detection, capture, and receipt confirmation run
+`Name` components; automatically registered Bevy reflection metadata preserves serde's nested
+values and stable relationship target UUIDs. Features declare storage metadata alongside their
+Reflect derives without a second registry or a per-type plugin registration list. Restore, dirty-revision detection, capture, and receipt confirmation run
 in that order. Dynamic restore/capture are the only exclusive systems in this lifecycle.
 Request ownership removes restored roots and descendants; failed restore removes partial
 materialization. Confirmation checks the stable entity ID and leaves newer edits dirty.
@@ -2514,6 +2525,27 @@ moves and resize and are consumed by both hosted child placement and native wind
 Sidebar rows preserve their identity and animate from their previous DOM rectangles.
 Ready Git pages retry checkout-context publication when parent or slot binding arrives late.
 
+`vmux_account` owns local Account/Profile identity, the typed Profile-to-Account ownership
+relationship, import and create/rename lifecycles, and durable name revisions. Its renderer-free
+core composes the shared record plugin with catalog and mutation plugins. Shared ProfileId and
+ProfileLabel remain available below host-only code: directory IDs retain their existing paths,
+while Uuid identifies durable entities. Seed and create systems compose ordinary ECS bundles
+and capture their registered fields; create proposals become canonical only after acceptance.
+Failure and replay remove operation-owned proposals. Typed encoding of rename proposals keeps
+storage keys out of feature code. vmux_app composes the optional local adapter and a
+runtime binding plugin; Team emits typed intents and projects canonical labels, including
+Space labels after restoration and refresh. Signing in and uploading remain separate later
+capabilities.
+
+The local adapter stores versioned Record JSON and receipts in accounts.sqlite under the
+existing shared data directory. Transactions guard the store generation and operation identity;
+concurrent hosts cannot overwrite a newer accepted graph. Legacy directories and display_name
+files seed missing records without renaming or deleting them. Canonical names change only after
+commit. Owned jobs, pending proposals and request correlations expire with their roots; failures
+preserve prior data and form drafts. Replayed operations return original receipts and refresh
+current data without reverting later edits. The Team form remains open during saves, preserves
+new input and rejects stale completions from a previous form/account.
+
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
 `vmux_ecs` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
@@ -2550,6 +2582,9 @@ notarization. Feature-branch pushes start the same affected checks before a PR e
 same packaging filter and fast non-release app bundle. Each runner checks out a temporary merge
 of the captured base and head and verifies its Git tree before compiling. An existing PR selects
 its actual base branch, including stacked PRs; otherwise the default branch supplies the base.
+PR planning reads that base from the immutable synthetic merge commit and verifies its head parent.
+When the target advanced beyond the event payload, both base commits must belong to the target
+branch ancestry before the exact merged tree can supply reusable CI evidence.
 
 Feature CI parses changed Rust files with `vmux ci-native` and the optional `ci-syntax`
 feature. The development CLI enables this feature; ordinary product builds need not link the syntax
