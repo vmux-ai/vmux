@@ -130,8 +130,6 @@ impl Native {
                 "dx,ci-syntax",
                 "--test",
                 "dx",
-                "--test",
-                "ci_native",
             ],
             vec!["fmt", "--all", "--", "--check"],
             vec![

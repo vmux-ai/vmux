@@ -448,6 +448,11 @@ or persistence; rendering code does not feed a normalized snapshot back as busin
 
 ### ECS ownership boundaries
 
+The DX `Work::NativeInputs` step owns its Git comparison and disposable Cargo/module/syntax
+projections. Compiler predicates and token spans only translate external build inputs into CI
+output; they do not retain product state. Existing cancellable subprocess execution bounds reads,
+and every projection drops before the step completes.
+
 Record serialization owns only immutable schema metadata, scoped JSON records, and write
 receipts. The Schema resource registers stateless component/relationship codec pointers;
 record request/result components retain received or captured values until materialization,
@@ -2473,7 +2478,8 @@ of the captured base and head and verifies its Git tree before compiling. An exi
 its actual base branch, including stacked PRs; otherwise the default branch supplies the base.
 
 Feature CI parses changed Rust files with `vmux ci-native` and the optional `ci-syntax`
-feature. The development CLI enables this feature; ordinary product builds need not link the syntax parser. The classifier compares original
+feature. The development CLI enables this feature; ordinary product builds need not link the syntax
+parser. The classifier compares original
 Rust tokens after removing syntax nodes proven disabled with `test=false`; unknown cfg predicates
 remain in the comparison. `cfg_attr` payloads are inspected recursively, and platform/feature `cfg!`
 predicates retain the containing test body. Cargo library roots and enclosing module declarations

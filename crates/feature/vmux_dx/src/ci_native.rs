@@ -296,7 +296,9 @@ struct Source {
 
 impl Source {
     fn parse(text: &str) -> Result<Self> {
-        let tokens: TokenStream = text.parse()?;
+        let tokens: TokenStream = text
+            .parse::<TokenStream>()
+            .map_err(|error| error.to_string())?;
         let file: syn::File = syn::parse2(tokens.clone())?;
         let mut collector = Collector::default();
         collector.inspect(&file.attrs, file.span());

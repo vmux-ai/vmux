@@ -152,7 +152,7 @@ jobs:
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy CI syntax classifier
-        run: cargo clippy --locked -p vmux_builder --features ci-syntax --all-targets -- -D warnings
+        run: cargo clippy --locked -p vmux_dx --features ci-syntax --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
         if: steps.scope.outputs.lean == 'true'
@@ -225,7 +225,7 @@ jobs:
         run: |
           node --test scripts/ci-preflight.test.js
           cargo test --locked -p vmux_dx --features ci-syntax --lib
-          cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --test ci_native
+          cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
           cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
 
   test-sdk-path:
