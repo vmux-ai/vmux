@@ -290,6 +290,46 @@ mod tests {
     }
 
     #[test]
+    fn build_titles_follow_the_selected_branch_and_detached_revision() {
+        let fixture = Fixture::new();
+        let worktree = fixture.worktree("fixture/topic", "different-directory");
+        let checkout = Checkout::resolve(&worktree, None).unwrap();
+        assert_eq!(checkout.title("dev", "Vmux").unwrap(), "Vmux Dev (fixture/topic)");
+        assert_eq!(checkout.title("local", "Vmux").unwrap(), "Vmux (fixture/topic)");
+        assert_eq!(checkout.title("release", "Vmux").unwrap(), "Vmux");
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&worktree)
+            .args(["branch", "-m", "fixture/renamed"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(checkout.title("dev", "Vmux").unwrap(), "Vmux Dev (fixture/renamed)");
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&worktree)
+            .args(["checkout", "--detach"])
+            .output()
+            .unwrap()
+            .status;
+        assert!(status.success());
+        let revision = Command::new("git")
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--short=7", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(revision.status.success());
+        assert_eq!(
+            checkout.title("local", "Vmux").unwrap(),
+            format!(
+                "Vmux ({})",
+                std::str::from_utf8(&revision.stdout).unwrap().trim()
+            )
+        );
+    }
+
+    #[test]
     fn branch_name_resolves_a_differently_named_worktree_and_directory_alias_remains_available() {
         let fixture = Fixture::new();
         let worktree = fixture.worktree("topic/navigation", "checkout-with-another-name");

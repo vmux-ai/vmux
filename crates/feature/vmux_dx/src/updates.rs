@@ -472,7 +472,11 @@ fn collect(
                 commands.spawn(Step::Publish(verified.clone()).bundle(entity));
             }
             Ok(Completion::Published(published)) => {
-                println!("CLI {} installed", published.version());
+                if request.automatic {
+                    eprintln!("CLI {} installed", published.version());
+                } else {
+                    println!("CLI {} installed", published.version());
+                }
                 if request.automatic {
                     commands.entity(entity).remove::<Lease>();
                     commands.spawn(Step::Handoff(published.clone()).bundle(entity));
@@ -531,10 +535,17 @@ fn select(
                     }
                 };
             if request.check || !available {
-                println!(
-                    "CLI release: {} (installed {})",
-                    release.version, installation.version
-                );
+                if request.automatic {
+                    eprintln!(
+                        "CLI release: {} (installed {})",
+                        release.version, installation.version
+                    );
+                } else {
+                    println!(
+                        "CLI release: {} (installed {})",
+                        release.version, installation.version
+                    );
+                }
                 commands
                     .entity(entity)
                     .insert((OperationState::Succeeded, CliResult::default()))

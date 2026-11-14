@@ -223,6 +223,7 @@ fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut comman
             continue;
         }
         if invocation.is("dx.internal") && invocation.value("task") == Some("cli-release") {
+            environment.remove("CARGO_BUILD_TARGET");
             environment.set(
                 "CARGO_TARGET_DIR",
                 checkout.root.join(".build-tools/standalone").as_os_str(),

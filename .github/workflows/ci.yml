@@ -987,8 +987,8 @@ jobs:
             "target/release/${BINARY_ARCHIVE_NAME}"
             "target/release/${APP_ARCHIVE_NAME}"
             "target/release/${APP_SIGNATURE_NAME}"
-            "target/release/${CLI_ARCHIVE_NAME}"
-            "target/release/${CLI_SIGNATURE_NAME}"
+            ".build-tools/standalone/release/${CLI_ARCHIVE_NAME}"
+            ".build-tools/standalone/release/${CLI_SIGNATURE_NAME}"
           )
           if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
             is_draft=$(jq -r .isDraft /tmp/r.json)

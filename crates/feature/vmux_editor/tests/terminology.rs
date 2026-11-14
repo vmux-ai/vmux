@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 
 const ALLOWED_PREFIXES: &[&str] = &["crates/feature/vmux_extension/"];
 const ALLOWED_FILES: &[&str] = &[
-    "crates/feature/vmux_dx/src/native/cef_source.rs",
-    "crates/feature/vmux_dx/src/native/conformance.rs",
     "crates/util/vmux_mcp/src/tools/param.rs",
     "crates/util/vmux_browser/src/lib.rs",
     "crates/util/vmux_browser/src/page_life.rs",
@@ -29,6 +27,11 @@ fn browser_brand_terms_stay_in_browser_compatibility_code() {
             .iter()
             .any(|prefix| relative.starts_with(prefix))
             || ALLOWED_FILES.contains(&relative.as_ref())
+            || matches!(
+                relative.as_ref(),
+                "crates/feature/vmux_dx/src/native/cef_source.rs"
+                    | "crates/feature/vmux_dx/src/native/conformance.rs"
+            )
         {
             continue;
         }

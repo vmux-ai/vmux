@@ -216,6 +216,44 @@ fn invalid_cli_update_channels_are_refused_before_storage_access() {
 }
 
 #[test]
+#[cfg(not(feature = "runtime"))]
+fn automatic_cli_check_keeps_machine_readable_command_output_on_stdout() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("bin/vmux");
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    std::fs::copy(assert_cmd::cargo::cargo_bin("vmux"), &executable).unwrap();
+    let curl = directory.path().join("curl");
+    std::fs::write(
+        &curl,
+        format!(
+            "#!/bin/sh\nprintf '%s' '{{\"version\":\"v{}\",\"cli\":{{}}}}'\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = Command::new(executable);
+    command
+        .env("VMUX_CLI_UPDATE_ROOT", directory.path().join("updates"))
+        .env("VMUX_UPDATE_PUBLIC_KEY", "fixture")
+        .env("CURL_BIN", curl)
+        .args([
+            "internal",
+            "nightly-version",
+            "--",
+            "0.0.34",
+            "20261114",
+            "1",
+            "1",
+        ])
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .success()
+        .stdout("0.0.35-nightly.20261114.1.1\n")
+        .stderr(predicate::str::contains("CLI release:"));
+}
+
+#[test]
 fn cli_update_lock_excludes_another_process_until_its_owner_releases_it() {
     let directory = tempfile::tempdir().unwrap();
     let lock = std::fs::OpenOptions::new()

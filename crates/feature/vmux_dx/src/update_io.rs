@@ -316,6 +316,7 @@ impl Installation {
         let backup = verified.temporary.path().join("previous");
         fs::copy(&self.executable, &backup)?;
         File::open(&backup)?.sync_all()?;
+        Signals::check()?;
         fs::rename(&verified.path, &self.executable)?;
         Ok(Published {
             executable: self.executable.clone(),

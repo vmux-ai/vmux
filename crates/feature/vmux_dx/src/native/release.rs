@@ -61,7 +61,7 @@ impl Native {
         } else {
             format!("vmux-cli-v{version}-aarch64-apple-darwin.tar.gz")
         };
-        let directory = self.checkout.root.join("target/release");
+        let directory = self.checkout.directory("release");
         fs::create_dir_all(&directory)?;
         let temporary = Temporary::create(&directory, ".cli-release")?;
         let archive = temporary.path().join(&name);
