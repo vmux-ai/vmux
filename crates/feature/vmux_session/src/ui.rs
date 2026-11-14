@@ -31,7 +31,7 @@ pub(crate) struct ChatPage;
     page = "agent-onboarding",
     component = Page,
     states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "OnboardingUiState", "KeyEntryUiState", "KeyClaimsUiState"],
-    document_url = vmux_api::VmuxRoute::SESSIONS_ROOT,
+    document_url = "vmux://start/",
     dom_group = "agent-conversation",
     preserve_title,
     no_favicon,
@@ -201,5 +201,16 @@ impl FilePlacement {
         if let Ok(size) = data.get_content_box_size() {
             self.0.set(size.width);
         }
+    }
+}
+
+#[cfg(test)]
+mod page_routing_tests {
+    #[test]
+    fn setup_and_connected_conversations_preserve_the_same_document_and_dom() {
+        let setup = super::AgentOnboardingPage::PAGE;
+        let session = super::ChatPage::PAGE;
+        assert!(setup.preserves_dom_for(&session));
+        assert!(session.preserves_dom_for(&setup));
     }
 }

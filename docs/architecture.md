@@ -2215,6 +2215,8 @@ When the bound Session becomes usable, its existing view receives the ordinary S
 Topic and Session registrations share a document, DOM group, and root component, so this URL
 change retains the same SessionDetail scope. Setup views never receive collection mutation
 authority. Browser sign-in resolves its source by the Stack's Session target rather than its URL.
+Session binding and name projection preserve the setup topic and guide title. Only the setup
+controller advances the view to its ordinary Session route after the agent becomes usable.
 
 Dioxus renders the transition in CSS against reserved welcome geometry: the existing visual guide
 moves up and the composer moves down, while the choice area opens above its input. The native
