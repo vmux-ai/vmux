@@ -1,9 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::logs::Logs;
-use crate::pairing::{
-    AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest, PairingFailure,
-};
+use crate::pairing::{AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest};
 use crate::runtime::RuntimeHandle;
 use crate::session::{LeaveSession, RestartSession, use_session};
 use bevy_app::{App as BevyApp, AppExit, Plugin};
@@ -96,23 +94,14 @@ impl MobileRunner {
             });
         dioxus::LaunchBuilder::mobile()
             .with_cfg(config)
-            .launch(MobileApp);
+            .launch(AppBody);
         AppExit::Success
     }
 }
 
 #[component]
-fn MobileApp() -> Element {
-    use_context_provider(RuntimeHandle::ui);
-    rsx! {
-        AppHead {}
-        AppBody {}
-    }
-}
-
-#[component]
 fn AppBody() -> Element {
-    let runtime = use_context::<RuntimeHandle>();
+    let runtime = use_context_provider(RuntimeHandle::ui);
     transition::install(&dioxus::mobile::window());
     qr_scanner::install(&dioxus::mobile::window(), runtime.clone());
     let connection = pairing::use_connection(runtime.clone());
@@ -154,20 +143,18 @@ fn AppBody() -> Element {
 
     let view = (connection.view)();
 
-    if view.auth == AuthState::Loading {
-        return rsx! {
+    let content = if view.auth == AuthState::Loading {
+        rsx! {
             div { class: "flex h-dvh items-center justify-center bg-background text-foreground",
                 div { class: "h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" }
             }
-        };
-    }
-
-    if view.auth == AuthState::Unpaired {
+        }
+    } else if view.auth == AuthState::Unpaired {
         let value_runtime = runtime.clone();
         let pair_runtime = runtime.clone();
         let scan_runtime = runtime.clone();
         let pair_url = view.pair_url.clone();
-        return rsx! {
+        rsx! {
             PairScreen {
                 value: view.pair_url,
                 error: view.error,
@@ -179,16 +166,12 @@ fn AppBody() -> Element {
                     pair_runtime.send(PairRequest(pair_url.clone()));
                 },
                 on_scan: move |_| {
-                    if let Err(message) = qr_scanner::open() {
-                        scan_runtime.send(PairingFailure(message));
-                    }
+                    scan_runtime.send(pairing::ScanRequest);
                 },
             }
-        };
-    }
-
-    if team_open() {
-        return rsx! {
+        }
+    } else if team_open() {
+        rsx! {
             div { class: "flex h-dvh flex-col bg-background text-foreground",
                 div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
                     button {
@@ -200,70 +183,58 @@ fn AppBody() -> Element {
                 }
                 div { class: "min-h-0 flex-1", vmux_team::ui::Page {} }
             }
-        };
-    }
-
-    if session.is_open() {
-        return rsx! {
+        }
+    } else if session.is_open() {
+        rsx! {
             vmux_session::ui::Page {}
+        }
+    } else {
+        let (dot, pill, label) = if view.reachable {
+            (
+                "h-1.5 w-1.5 rounded-full bg-success",
+                "flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success",
+                translate("mobile-status-connected"),
+            )
+        } else {
+            (
+                "h-1.5 w-1.5 rounded-full bg-muted-foreground",
+                "flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground",
+                translate("mobile-status-reaching"),
+            )
         };
-    }
-
-    rsx! {
-        div { class: "relative h-dvh bg-background",
-            div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
-                vmux_start::ui::Page {}
-            }
-            LinkStatus {
-                reachable: view.reachable,
-                on_team: move |_| team_open.set(true),
-                on_disconnect: move |_| {
-                    runtime.send(DisconnectRequest);
-                },
+        rsx! {
+            div { class: "relative h-dvh bg-background",
+                div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
+                    vmux_start::ui::Page {}
+                }
+                header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
+                    span { class: "text-sm font-semibold tracking-tight text-foreground", {vmux_app::host::Product::name()} }
+                    span { class: "pointer-events-auto ml-auto {pill}",
+                        span { class: "{dot}" }
+                        {label}
+                    }
+                    button {
+                        class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                        r#type: "button",
+                        onclick: move |_| team_open.set(true),
+                        {translate("mobile-start-team")}
+                    }
+                    button {
+                        class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                        r#type: "button",
+                        onclick: move |_| runtime.send(DisconnectRequest),
+                        {translate("mobile-pair-disconnect")}
+                    }
+                }
             }
         }
-    }
-}
-
-#[component]
-fn LinkStatus(
-    reachable: bool,
-    on_team: EventHandler<()>,
-    on_disconnect: EventHandler<()>,
-) -> Element {
-    let (dot, pill, label) = if reachable {
-        (
-            "h-1.5 w-1.5 rounded-full bg-success",
-            "flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success",
-            translate("mobile-status-connected"),
-        )
-    } else {
-        (
-            "h-1.5 w-1.5 rounded-full bg-muted-foreground",
-            "flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground",
-            translate("mobile-status-reaching"),
-        )
     };
     rsx! {
-        header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
-            span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
-            span { class: "pointer-events-auto ml-auto {pill}",
-                span { class: "{dot}" }
-                {label}
-            }
-            button {
-                class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
-                r#type: "button",
-                onclick: move |_| on_team.call(()),
-                {translate("mobile-start-team")}
-            }
-            button {
-                class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
-                r#type: "button",
-                onclick: move |_| on_disconnect.call(()),
-                {translate("mobile-pair-disconnect")}
-            }
-        }
+        document::Title { {vmux_app::host::Product::name()} }
+        document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" }
+        document::Meta { name: "color-scheme", content: "light dark" }
+        document::Stylesheet { href: TAILWIND_CSS }
+        {content}
     }
 }
 
@@ -289,15 +260,5 @@ fn PairScreen(
                 }
             }
         }
-    }
-}
-
-#[component]
-fn AppHead() -> Element {
-    rsx! {
-        document::Title { "Vmux" }
-        document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" }
-        document::Meta { name: "color-scheme", content: "light dark" }
-        document::Stylesheet { href: TAILWIND_CSS }
     }
 }

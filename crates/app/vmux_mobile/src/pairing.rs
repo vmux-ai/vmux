@@ -5,7 +5,7 @@ use bevy_ecs::change_detection::{DetectChanges, Ref};
 use bevy_ecs::component::Component;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use bevy_ecs::system::{Commands, NonSendMut, Query, Single};
+use bevy_ecs::system::{Commands, NonSendMarker, NonSendMut, Query, Single};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,7 @@ impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()
+            .add_message::<ScanRequest>()
             .add_message::<PairingFailure>()
             .add_message::<DisconnectRequest>()
             .insert_non_send(ConnectionSubscribers::default())
@@ -35,6 +36,7 @@ impl BevyPlugin for Plugin {
                 Update,
                 (
                     change_link,
+                    scan,
                     pair,
                     fail,
                     disconnect,
@@ -59,7 +61,7 @@ struct ConnectionSnapshot {
 struct ConnectionSubscribers(Vec<Box<dyn FnMut(ConnectionSnapshot)>>);
 
 fn spawn_state(mut commands: Commands) {
-    commands.spawn(ConnectionState::default());
+    commands.spawn((ConnectionState::default(), StoredCredentials::default()));
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -125,6 +127,35 @@ pub(crate) struct PairLinkChanged(pub(crate) String);
 
 #[derive(Message)]
 pub(crate) struct PairRequest(pub(crate) String);
+
+#[derive(Message)]
+pub(crate) struct ScanRequest;
+
+impl ScanRequest {
+    fn unavailable() -> Option<String> {
+        qr_scanner::ScannerSupport::detect(&Self).unavailable()
+    }
+
+    fn open(&self) -> Result<(), String> {
+        qr_scanner::open(self)
+    }
+
+    pub(crate) fn permitted(&self) -> bool {
+        vmux_app::host::Product::camera()
+    }
+}
+
+fn scan(
+    _main_thread: NonSendMarker,
+    mut requests: MessageReader<ScanRequest>,
+    mut failures: MessageWriter<PairingFailure>,
+) {
+    for request in requests.read() {
+        if let Err(message) = request.open() {
+            failures.write(PairingFailure(message));
+        }
+    }
+}
 
 #[derive(Message)]
 pub(crate) struct PairingFailure(pub(crate) String);
@@ -267,13 +298,17 @@ struct ConnectionRefresh {
 }
 
 fn restore_connection(
-    mut states: Query<(bevy_ecs::entity::Entity, &mut ConnectionState)>,
+    mut states: Query<(
+        bevy_ecs::entity::Entity,
+        &mut ConnectionState,
+        &StoredCredentials,
+    )>,
     mut commands: Commands,
 ) {
-    let Ok((entity, mut state)) = states.single_mut() else {
+    let Ok((entity, mut state, storage)) = states.single_mut() else {
         return;
     };
-    let Some(credentials) = StoredCredentials::load() else {
+    let Some(credentials) = storage.load() else {
         state.view.auth = AuthState::Unpaired;
         return;
     };
@@ -349,22 +384,22 @@ fn fail(mut failures: MessageReader<PairingFailure>, mut states: Query<&mut Conn
 
 fn disconnect(
     mut requests: MessageReader<DisconnectRequest>,
-    mut states: Query<&mut ConnectionState>,
+    mut states: Query<(&mut ConnectionState, &StoredCredentials)>,
     mut leaves: MessageWriter<crate::session::LeaveSession>,
 ) {
-    let Ok(mut state) = states.single_mut() else {
+    let Ok((mut state, storage)) = states.single_mut() else {
         return;
     };
     for _ in requests.read() {
         leaves.write(crate::session::LeaveSession);
-        StoredCredentials::clear();
+        storage.clear();
         state.clear();
     }
 }
 
 fn finish(
     mut attempts: Query<(bevy_ecs::entity::Entity, &mut ConnectionAttempt)>,
-    mut states: Query<&mut ConnectionState>,
+    mut states: Query<(&mut ConnectionState, &StoredCredentials)>,
     mut commands: Commands,
 ) {
     for (entity, mut attempt) in &mut attempts {
@@ -372,7 +407,7 @@ fn finish(
             continue;
         };
         commands.entity(entity).despawn();
-        let Ok(mut state) = states.get_mut(attempt.target) else {
+        let Ok((mut state, storage)) = states.get_mut(attempt.target) else {
             continue;
         };
         if attempt.generation != state.operation_generation {
@@ -385,7 +420,7 @@ fn finish(
         let output = match result {
             Ok(output) => output,
             Err(error) => {
-                StoredCredentials::clear();
+                storage.clear();
                 state.view.auth = AuthState::Unpaired;
                 state.view.error = error.to_string();
                 continue;
@@ -394,7 +429,7 @@ fn finish(
         match output.sessions {
             Ok(sessions) => {
                 if let Some(credentials) = output.credentials {
-                    StoredCredentials::save(&credentials);
+                    storage.save(&credentials);
                 }
                 state.replace_api(Some(output.api));
                 state.view.auth = AuthState::Paired;
@@ -407,7 +442,7 @@ fn finish(
             }
             Err(ApiError::Unauthorized) => {
                 output.api.close();
-                StoredCredentials::clear();
+                storage.clear();
                 state.view.auth = AuthState::Unpaired;
                 state.view.error = match attempt.source {
                     ConnectionSource::Restore => translate("mobile-error-pairing-expired"),
@@ -459,7 +494,7 @@ fn refresh(
 
 fn finish_refresh(
     mut refreshes: Query<(bevy_ecs::entity::Entity, &mut ConnectionRefresh)>,
-    mut states: Query<&mut ConnectionState>,
+    mut states: Query<(&mut ConnectionState, &StoredCredentials)>,
     mut leaves: MessageWriter<crate::session::LeaveSession>,
     mut commands: Commands,
 ) {
@@ -468,7 +503,7 @@ fn finish_refresh(
             continue;
         };
         commands.entity(entity).despawn();
-        let Ok(mut state) = states.get_mut(refresh.target) else {
+        let Ok((mut state, storage)) = states.get_mut(refresh.target) else {
             continue;
         };
         if refresh.api_generation != state.api_generation {
@@ -483,7 +518,7 @@ fn finish_refresh(
             }
             Err(ApiError::Unauthorized) => {
                 leaves.write(crate::session::LeaveSession);
-                StoredCredentials::clear();
+                storage.clear();
                 state.clear();
                 state.view.error = translate("mobile-error-pairing-expired");
             }
@@ -679,7 +714,7 @@ pub(super) struct PairCardProps {
 
 #[component]
 pub(super) fn PairCard(props: PairCardProps) -> Element {
-    let unavailable = use_hook(|| qr_scanner::ScannerSupport::detect().unavailable());
+    let unavailable = use_hook(ScanRequest::unavailable);
     let mut show_link = use_signal(|| unavailable.is_some() || !props.value.trim().is_empty());
 
     rsx! {

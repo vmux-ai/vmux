@@ -38,7 +38,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 quinn = { workspace = true }
 vmux_transport = { path = "../../util/vmux_transport" }
-vmux_app = { path = "../../util/vmux_app", features = ["mobile"] }
+vmux_app = { path = "../../util/vmux_app", features = ["mobile", "host"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }

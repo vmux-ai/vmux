@@ -39,6 +39,14 @@ impl Product {
         env!("VMUX_HOST_BUNDLE_ID")
     }
 
+    pub const fn mobile_id() -> &'static str {
+        env!("VMUX_HOST_MOBILE_ID")
+    }
+
+    pub const fn remote_data_name() -> &'static str {
+        env!("VMUX_HOST_REMOTE_DATA_NAME")
+    }
+
     pub const fn service_id() -> &'static str {
         env!("VMUX_HOST_SERVICE_ID")
     }

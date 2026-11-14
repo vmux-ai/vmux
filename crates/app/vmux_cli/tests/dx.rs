@@ -1,6 +1,8 @@
 #![cfg(feature = "dx")]
 
 use assert_cmd::Command;
+#[cfg(not(feature = "runtime"))]
+use assert_cmd::assert::OutputAssertExt;
 use predicates::prelude::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -246,7 +248,20 @@ fn automatic_cli_check_keeps_machine_readable_command_output_on_stdout() {
             "1",
             "1",
         ])
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(30));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let output = loop {
+        match command.output() {
+            Ok(output) => break output,
+            Err(error)
+                if error.raw_os_error() == Some(26) && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => panic!("CLI fixture could not start: {error}"),
+        }
+    };
+    output
         .assert()
         .success()
         .stdout("0.0.35-nightly.20261114.1.1\n")
@@ -393,6 +408,12 @@ impl Fixture {
             "packaging/macos/dmg-background.png",
             "packaging/macos/crash_reporter.cfg",
             "packaging/macos/ai.vmux.service.plist",
+            "packaging/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+            "packaging/ios/Assets.xcassets/AppIcon.appiconset/Contents.json",
+            "packaging/ios/Info.plist",
+            "packaging/ios/LaunchScreen.storyboard",
+            "packaging/ios/PrivacyInfo.xcprivacy",
+            "packaging/ios/Vmux.entitlements",
         ] {
             let destination = root.join(name);
             std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
@@ -548,6 +569,49 @@ done
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, source).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn native(&self, program: &str) -> std::process::Command {
+        let mut command = std::process::Command::new(program);
+        command.current_dir(&self.root).env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", self.root.join("bin").display()),
+        );
+        command
+    }
+
+    #[cfg(target_os = "macos")]
+    fn ios_tools(&self) {
+        self.script(
+            "plist-buddy",
+            "#!/bin/sh\nexec /usr/libexec/PlistBuddy \"$@\"\n",
+        );
+        self.script("xcrun", r#"#!/usr/bin/env python3
+import pathlib,plistlib,shutil,sys
+args=sys.argv[1:]
+if '--show-sdk-version' in args:
+    print('18.0'); raise SystemExit
+if '--show-sdk-build-version' in args:
+    print('22A'); raise SystemExit
+output=pathlib.Path(args[args.index('--compile')+1])
+if args[0]=='actool':
+    output.mkdir(parents=True,exist_ok=True)
+    selected=pathlib.Path(args[1])/'AppIcon.appiconset/AppIcon-1024.png'
+    shutil.copyfile(selected,output/'Assets.car')
+    shutil.copyfile(selected,output/'AppIcon60x60@2x.png')
+    with open(args[args.index('--output-partial-info-plist')+1],'wb') as target:
+        plistlib.dump({'CFBundleIcons':{'CFBundlePrimaryIcon':{'CFBundleIconName':'AppIcon'}}},target)
+elif args[0]=='ibtool':
+    shutil.copyfile(args[1],output)
+else:
+    raise SystemExit('unsupported xcrun fixture arguments')
+"#);
+        self.script(
+            "xcodebuild",
+            "#!/bin/sh\nprintf 'Xcode 16.1\\nBuild version 16B40\\n'\n",
+        );
+        self.script("sw_vers", "#!/bin/sh\nprintf '24A\\n'\n");
     }
 
     fn command(&self) -> Command {
@@ -857,6 +921,296 @@ fn package_executables_have_one_main_binary_and_no_case_insensitive_name_collisi
             .map(String::from)
             .collect()
     );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn mobile_signing_matches_product_identity_and_cleans_up_after_refusal_or_failure() {
+    for (matching_profile, signing_failure) in [(true, false), (false, false), (true, true)] {
+        let project = Fixture::new();
+        project.script(
+            "security",
+            r#"#!/usr/bin/env python3
+import json,os,pathlib,plistlib,sys
+args=sys.argv[1:]
+with pathlib.Path('security.jsonl').open('a') as output:
+    output.write(json.dumps(args)+'\n')
+if args[0]=='list-keychains' and '-s' not in args:
+    print('"/fixture/login.keychain-db"')
+elif args[0]=='cms':
+    plistlib.dump({'Entitlements':{'application-identifier':os.environ['FIXTURE_PROFILE_ID']}},sys.stdout.buffer)
+elif args[0]=='find-identity':
+    print('1) FIXTURE "Fixture Distribution"')
+"#,
+        );
+        project.script(
+            "dx",
+            r#"#!/usr/bin/env python3
+import os,pathlib,plistlib
+app=pathlib.Path(os.environ['CARGO_TARGET_DIR'])/'dx/vmux_mobile/release/ios/VmuxMobile.app'
+app.mkdir(parents=True,exist_ok=True)
+(app/'vmux_mobile').write_text('binary')
+(app/'_CodeSignature').mkdir(exist_ok=True)
+with (app/'Info.plist').open('wb') as output:
+    plistlib.dump({},output)
+pathlib.Path('dx-built').write_text('built')
+"#,
+        );
+        project.ios_tools();
+        project.script(
+            "codesign",
+            r#"#!/usr/bin/env python3
+import json,os,pathlib,plistlib,sys
+args=sys.argv[1:]
+if '--entitlements' in args:
+    with open(args[args.index('--entitlements')+1],'rb') as source:
+        entitlements=plistlib.load(source)
+    pathlib.Path('signed.json').write_text(json.dumps({'args':args,'entitlements':entitlements}))
+    if os.environ['FIXTURE_SIGN_FAILURE']=='1':
+        raise SystemExit(47)
+"#,
+        );
+        project.script(
+            "ditto",
+            r#"#!/usr/bin/env python3
+import pathlib,sys,zipfile
+with zipfile.ZipFile(sys.argv[-1],'w') as archive:
+    for file in pathlib.Path('Payload').rglob('*'):
+        if file.is_file():
+            archive.write(file,str(file))
+"#,
+        );
+        std::fs::write(
+            project.root.join("custom.entitlements"),
+            r#"<?xml version="1.0"?><plist version="1.0"><dict>
+<key>get-task-allow</key><false/>
+<key>nested</key><dict><key>identity</key><string>$(TeamIdentifierPrefix){{BUNDLE_ID}}</string></dict>
+<key>keychain-access-groups</key><array><string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string><string>{{TEAM_ID}}.{{BUNDLE_ID}}</string></array>
+</dict></plist>"#,
+        )
+        .unwrap();
+        let output = project
+            .command()
+            .args(["internal", "ios-release"])
+            .env("VMUX_HOST_NAME", "Atlas & Co")
+            .env("VMUX_HOST_NAMESPACE", "org.example.atlas")
+            .env(
+                "VMUX_HOST_MOBILE_ENTITLEMENTS",
+                project.root.join("custom.entitlements"),
+            )
+            .env("APPLE_TEAM_ID", "FIXTURETEAM")
+            .env("APPLE_IOS_SIGNING_IDENTITY", "Fixture Distribution")
+            .env("APPLE_IOS_CERTIFICATE", "QUJD")
+            .env("APPLE_IOS_CERTIFICATE_PASSWORD", "fixture-password")
+            .env("APPLE_IOS_PROVISIONING_PROFILE", "QUJD")
+            .env("DX_BIN", project.root.join("bin/dx"))
+            .env("VMUX_IOS_UPLOAD", "0")
+            .env(
+                "FIXTURE_PROFILE_ID",
+                if matching_profile {
+                    "FIXTURETEAM.org.example.atlas.mobile"
+                } else {
+                    "FIXTURETEAM.ai.vmux.mobile"
+                },
+            )
+            .env(
+                "FIXTURE_SIGN_FAILURE",
+                if signing_failure { "1" } else { "0" },
+            )
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            matching_profile && !signing_failure,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(project.root.join("dx-built").exists(), matching_profile);
+        assert_eq!(project.root.join("signed.json").exists(), matching_profile);
+        let verification = project.native("python3").arg("-c").arg(r#"
+import json,pathlib,sys,zipfile,plistlib
+root=pathlib.Path(sys.argv[1]); target=pathlib.Path(sys.argv[2]); signed=sys.argv[3]=='true'; successful=sys.argv[4]=='true'
+calls=[json.loads(line) for line in (root/'security.jsonl').read_text().splitlines()]
+created=next(args[-1] for args in calls if args[0]=='create-keychain')
+assert any(args==['delete-keychain',created] for args in calls)
+assert calls[-2]==['list-keychains','-d','user','-s','/fixture/login.keychain-db']
+assert not pathlib.Path(created).parent.exists()
+if signed:
+    sign=json.loads((root/'signed.json').read_text())
+    identity='FIXTURETEAM.org.example.atlas.mobile'
+    assert sign['entitlements']['application-identifier']==identity
+    assert sign['entitlements']['com.apple.developer.team-identifier']=='FIXTURETEAM'
+    assert sign['entitlements']['keychain-access-groups']==[identity,identity]
+    assert sign['entitlements']['get-task-allow'] is False
+    assert sign['entitlements']['nested']['identity']==identity
+    assert '--keychain' in sign['args'] and created in sign['args']
+archives=list((target/'dx/vmux_mobile/release/ios/ipa').glob('*.ipa'))
+assert len(archives)==int(successful)
+if successful:
+    assert archives[0].name.startswith('Atlas & Co_')
+    with zipfile.ZipFile(archives[0]) as archive:
+        info=plistlib.loads(archive.read('Payload/VmuxMobile.app/Info.plist'))
+        assert info['CFBundleIdentifier']=='org.example.atlas.mobile'
+        assert info['CFBundleDisplayName']=='Atlas & Co'
+"#).arg(&project.root).arg(&project.target).arg(matching_profile.to_string()).arg((matching_profile && !signing_failure).to_string()).output().unwrap();
+        assert!(
+            verification.status.success(),
+            "{}",
+            String::from_utf8_lossy(&verification.stderr)
+        );
+    }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn mobile_resource_projection_uses_selected_identity_and_assets_without_changing_templates() {
+    for custom in [false, true] {
+        let project = Fixture::new();
+        project.ios_tools();
+        let app = project.root.join("input.app");
+        std::fs::create_dir(&app).unwrap();
+        std::fs::write(app.join("vmux_mobile"), "fixture mobile binary").unwrap();
+        std::fs::copy(
+            project.root.join("packaging/ios/Info.plist"),
+            app.join("Info.plist"),
+        )
+        .unwrap();
+        let original_icon = std::fs::read(
+            project
+                .root
+                .join("packaging/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"),
+        )
+        .unwrap();
+        let icon = project.root.join("custom-icon.png");
+        let output = project.native("python3").arg("-c").arg(r#"
+import pathlib,struct,sys,zlib
+def chunk(kind,data):
+    return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
+row=b'\0'+bytes([240,80,20,255])*1024
+png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>2I5B',1024,1024,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(row*1024))+chunk(b'IEND',b'')
+pathlib.Path(sys.argv[1]).write_bytes(png)
+"#).arg(&icon).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let name = if custom { "Atlas \"Lab\" & Co" } else { "Vmux" };
+        let namespace = if custom {
+            "org.example.atlas"
+        } else {
+            "ai.vmux"
+        };
+        let selected_icon = if custom {
+            icon
+        } else {
+            project
+                .root
+                .join("packaging/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png")
+        };
+        let launch = project.root.join("selected.storyboard");
+        let privacy = project.root.join("selected.xcprivacy");
+        let template = project.root.join("selected.plist");
+        std::fs::write(&launch, "selected launch screen").unwrap();
+        std::fs::write(&privacy, "selected privacy manifest").unwrap();
+        let mut selected =
+            plist::Value::from_file(project.root.join("packaging/ios/Info.plist")).unwrap();
+        selected
+            .as_dictionary_mut()
+            .unwrap()
+            .insert("SelectedTemplate".into(), "selected template".into());
+        selected.to_file_xml(&template).unwrap();
+        let mut command = project.command();
+        if custom {
+            command
+                .env("VMUX_HOST_MOBILE_LAUNCH", &launch)
+                .env("VMUX_HOST_MOBILE_PRIVACY", &privacy)
+                .env("VMUX_HOST_MOBILE_PLIST", &template);
+        }
+        let output = command
+            .args(["internal", "ios-resources"])
+            .env("VMUX_IOS_APP_BUNDLE", &app)
+            .env("VMUX_HOST_NAME", name)
+            .env("VMUX_HOST_NAMESPACE", namespace)
+            .env("VMUX_HOST_MOBILE_ICON", &selected_icon)
+            .env("VMUX_IOS_BUILD_NUMBER", "19")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let layout = project
+            .command()
+            .args(["internal", "ios-verify"])
+            .env("VMUX_IOS_APP_BUNDLE", &app)
+            .env("VMUX_HOST_NAME", name)
+            .env("VMUX_HOST_NAMESPACE", namespace)
+            .env("VMUX_HOST_MOBILE_ICON", &selected_icon)
+            .output()
+            .unwrap();
+        assert!(
+            layout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&layout.stderr)
+        );
+        assert_eq!(
+            std::fs::read(app.join("Assets.car")).unwrap(),
+            std::fs::read(&selected_icon).unwrap()
+        );
+        assert_eq!(
+            std::fs::read(
+                project
+                    .root
+                    .join("packaging/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png")
+            )
+            .unwrap(),
+            original_icon
+        );
+        if custom {
+            assert_eq!(
+                std::fs::read(app.join("LaunchScreen.storyboardc")).unwrap(),
+                std::fs::read(&launch).unwrap()
+            );
+            assert_eq!(
+                std::fs::read(app.join("PrivacyInfo.xcprivacy")).unwrap(),
+                std::fs::read(&privacy).unwrap()
+            );
+            let info = plist::Value::from_file(app.join("Info.plist")).unwrap();
+            assert_eq!(
+                info.as_dictionary().unwrap()["SelectedTemplate"].as_string(),
+                Some("selected template")
+            );
+        }
+        let output = project
+            .native("python3")
+            .arg("-c")
+            .arg(
+                r#"
+import pathlib,plistlib,sys
+app=pathlib.Path(sys.argv[1]); name=sys.argv[2]; identifier=sys.argv[3]+'.mobile'
+with (app/'Info.plist').open('rb') as source: info=plistlib.load(source)
+assert info['CFBundleIdentifier']==identifier
+assert info['CFBundleName']==name and info['CFBundleDisplayName']==name
+assert info['CFBundleVersion']=='19'
+assert info['CFBundleURLTypes'][0]['CFBundleURLName']==identifier
+assert info['DTPlatformName']=='iphoneos'
+assert (app/'PrivacyInfo.xcprivacy').is_file()
+assert (app/'LaunchScreen.storyboardc').is_file()
+"#,
+            )
+            .arg(&app)
+            .arg(name)
+            .arg(namespace)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[cfg(all(unix, feature = "ci-syntax"))]
