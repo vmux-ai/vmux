@@ -435,6 +435,11 @@ application composition. `VMUX_SKIP_DX_BUILD` omits stylesheet generation and it
 for headless checks; locale generation remains active. Cargo tracks the flag so normal builds
 restore source watches and regenerate the complete asset bundle when that mode ends.
 
+Boundary input provenance follows the private production systems and observers registered by
+that actual Bevy Plugin, then verified SystemParam, Query/Res/On and alias borrow paths. Scheduling
+dependencies, unrelated registrations, test-only fields and owned Component/Resource copies cannot
+supply that edge. This strengthens connection evidence without making legacy state canonical.
+
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.
