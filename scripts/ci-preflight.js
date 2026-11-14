@@ -40,15 +40,27 @@ class Preflight {
       }
     }
     const identity = { head, base, tree, branch, repository: `${repo.owner}/${repo.repo}` };
+    const reusable = Boolean(base && !release && this.compatible(head, tree));
     let reuse = '';
-    if (pull && !release && pull.head.repo?.full_name === identity.repository) {
+    if (pull && reusable && pull.head.repo?.full_name === identity.repository) {
       reuse = await this.reuse(identity);
     }
-    for (const [name, value] of Object.entries({ head, base, tree, feature, release, reuse, receipt: base && !release ? Preflight.artifact(identity) : '' })) {
+    for (const [name, value] of Object.entries({ head, base, tree, feature, release, reusable, reuse, receipt: reusable ? Preflight.artifact(identity) : '' })) {
       this.core.setOutput(name, String(value));
     }
-    if (feature && !release) fs.writeFileSync(`${this.root}/ci-preflight-inputs.json`, `${JSON.stringify(identity)}\n`);
+    if (feature && reusable) fs.writeFileSync(`${this.root}/ci-preflight-inputs.json`, `${JSON.stringify(identity)}\n`);
     return { ...identity, feature, release, reuse };
+  }
+
+  compatible(head, tree) {
+    for (const path of ['.github/workflows/ci.yml', '.github/actions/prepare-ci/action.yml', 'scripts/ci-preflight.js']) {
+      try {
+        if (this.git('rev-parse', `${head}:${path}`) !== this.git('rev-parse', `${tree}:${path}`)) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
   }
 
   async reuse(identity) {
@@ -148,9 +160,9 @@ class Preflight {
   }
 
   static checkout(env = process.env, root = process.cwd()) {
-    if (!env.VMUX_CI_BASE) return;
-    for (const sha of [env.VMUX_CI_BASE, env.VMUX_CI_HEAD, env.VMUX_CI_TREE]) Preflight.sha(sha);
     const git = new Preflight({ root });
+    if (!env.VMUX_CI_BASE) return git.git('rev-parse', 'HEAD');
+    for (const sha of [env.VMUX_CI_BASE, env.VMUX_CI_HEAD, env.VMUX_CI_TREE]) Preflight.sha(sha);
     git.fetch(env.VMUX_CI_BASE);
     git.fetch(env.VMUX_CI_HEAD);
     const tree = git.git('merge-tree', '--write-tree', env.VMUX_CI_BASE, env.VMUX_CI_HEAD).split('\n')[0];
@@ -161,6 +173,7 @@ class Preflight {
       env: { ...git.environment, GIT_AUTHOR_NAME: 'CI', GIT_COMMITTER_NAME: 'CI', GIT_AUTHOR_EMAIL: 'ci@vmux.ai', GIT_COMMITTER_EMAIL: 'ci@vmux.ai', GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
     }).trim();
     git.git('checkout', '--detach', commit);
+    return commit;
   }
 
   static record(env = process.env, root = process.cwd()) {
@@ -171,7 +184,7 @@ class Preflight {
     const website = results.changes.outputs.website === 'true';
     if (results.website?.result !== (website ? 'success' : 'skipped')) throw new Error('Cannot record preflight: unexpected website result');
     const plan = results.plan.outputs;
-    if (plan.feature !== 'true' || plan.release !== 'false' || plan.reuse) throw new Error('Only original non-release branch CI can record preflight');
+    if (plan.feature !== 'true' || plan.release !== 'false' || plan.reusable !== 'true' || plan.reuse) throw new Error('Only original non-release branch CI with matching execution definitions can record preflight');
     const identity = { head: plan.head, base: plan.base, tree: plan.tree };
     const name = Preflight.artifact(identity);
     if (plan.receipt !== name) throw new Error('Preflight artifact identity does not match the plan');
@@ -182,7 +195,10 @@ class Preflight {
 module.exports = Preflight;
 
 if (require.main === module) {
-  if (process.argv[2] === 'checkout') Preflight.checkout();
+  if (process.argv[2] === 'checkout') {
+    const commit = Preflight.checkout();
+    if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `commit=${commit}\n`);
+  }
   else if (process.argv[2] === 'record') Preflight.record();
   else throw new Error('Expected checkout or record');
 }

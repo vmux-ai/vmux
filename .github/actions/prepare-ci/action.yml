@@ -1,5 +1,9 @@
 name: Prepare CI checkout
 description: Validate and check out the exact planned base/head merge tree
+outputs:
+  commit:
+    description: Verified local checkout commit
+    value: ${{ steps.checkout.outputs.commit }}
 inputs:
   head:
     required: true
@@ -13,7 +17,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - shell: bash
+    - id: checkout
+      shell: bash
       env:
         VMUX_CI_HEAD: ${{ inputs.head }}
         VMUX_CI_BASE: ${{ inputs.base }}
