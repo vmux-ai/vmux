@@ -7,7 +7,7 @@ publish = false
 
 [features]
 default = ["runtime", "dx"]
-runtime = ["dep:tokio", "dep:vmux_app", "vmux_ecs/host"]
+runtime = ["dep:tokio", "dep:vmux_app", "vmux_ecs/host", "vmux_dx?/runtime-cli"]
 dx = ["dep:vmux_dx"]
 
 [[bin]]
@@ -30,6 +30,7 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 semver = "1"
+serde_json = { workspace = true }
 toml = { workspace = true }
 
 [lints]

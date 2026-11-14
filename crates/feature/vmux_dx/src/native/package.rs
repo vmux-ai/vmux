@@ -700,14 +700,14 @@ impl Native {
     }
 }
 
-struct Publication {
+pub(super) struct Publication {
     changes: Vec<(PathBuf, Option<PathBuf>)>,
     retained: std::sync::Arc<std::sync::atomic::AtomicBool>,
     staging: PathBuf,
 }
 
 impl Publication {
-    fn new(staging: &Temporary) -> Self {
+    pub(super) fn new(staging: &Temporary) -> Self {
         Self {
             changes: Vec::new(),
             retained: staging.retention(),
@@ -715,7 +715,7 @@ impl Publication {
         }
     }
 
-    fn publish(&mut self, source: &Path, destination: &Path) -> Result<()> {
+    pub(super) fn publish(&mut self, source: &Path, destination: &Path) -> Result<()> {
         let backup = if destination.exists() {
             if fs::symlink_metadata(destination)?.is_symlink() {
                 return Err("Refusing to replace a symlink artifact".into());
@@ -731,7 +731,7 @@ impl Publication {
         Ok(())
     }
 
-    fn commit(&mut self) {
+    pub(super) fn commit(&mut self) {
         self.changes.clear();
     }
 }

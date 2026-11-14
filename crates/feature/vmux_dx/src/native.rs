@@ -15,6 +15,7 @@ use crate::repository::Checkout;
 mod cache;
 mod cef;
 mod cef_source;
+mod conformance;
 mod debug;
 mod dependencies;
 mod integration;

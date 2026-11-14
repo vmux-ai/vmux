@@ -1898,6 +1898,26 @@ React-style, in one atomic transaction.
 
 ### Development commands
 
+The CLI's release updater is an independent `vmux_dx::updates::Plugin` composed
+before product startup and alongside DX for explicit `update` requests. Accepted
+operations own `Request`, `Installation`, persisted `Preferences`, and `Release`.
+Child `Step` entities own bounded IO receipts and process/installation leases;
+private systems apply channel/version policy and advance only accepted results.
+The standalone CLI uses stable/preview endpoints and a separate signed CLI map
+in the existing desktop manifests. Releases embed `VMUX_UPDATE_PUBLIC_KEY`.
+`update_io` translates HTTPS, minisign, constrained tar decoding, executable probes,
+file locks, atomic replacement/rollback, and one child-command handoff. Its temporary
+handles expire on completion; failed restoration retains the reported backup.
+Automatic checks are hourly on invocation; failures preserve command availability.
+Channel selection and auto-update settings live in `.vmux/cli/update.json` beneath
+the user's home. Source builds without a trust key retain checkout refresh;
+build-cache and application-bundle executables are excluded from standalone update.
+The CLI runtime feature propagates `vmux_dx/runtime-cli`, so its installation snapshot
+also refuses replacing a runtime-enabled CLI with a DX-only release artifact.
+Help/version and handoff invocations bypass release checks. Release compilation and
+signed CLI archive publication are predecessor-linked DX `Work` entities, with
+staged filesystem publication shared with the packaging adapter.
+
 ```text
 agent: vmux build -b navigation -> signed Vmux Dev.app -> user: vmux run -b navigation
 local package: vmux build -b navigation -p local

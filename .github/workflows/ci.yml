@@ -816,6 +816,8 @@ jobs:
             echo "BINARY_ARCHIVE_NAME=$VMUX_BINARY_ARCHIVE_NAME"
             echo "APP_ARCHIVE_NAME=$VMUX_APP_ARCHIVE_NAME"
             echo "APP_SIGNATURE_NAME=$VMUX_APP_SIGNATURE_NAME"
+            echo "CLI_ARCHIVE_NAME=$VMUX_CLI_ARCHIVE_NAME"
+            echo "CLI_SIGNATURE_NAME=$VMUX_CLI_SIGNATURE_NAME"
             echo "DMG_URL=$VMUX_DMG_URL"
           } >> "$GITHUB_ENV"
 
@@ -838,7 +840,7 @@ jobs:
           if gh release view "$VMUX_RELEASE_TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
             asset_count=$(jq '.assets | length' /tmp/r.json)
             CASK_URL=$(grep -m1 '^  url' Casks/vmux.rb | sed 's/.*"\(.*\)".*/\1/')
-            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$VMUX_DMG_URL" ]; then
+            if [ "$asset_count" -ge 6 ] && [ "$CASK_URL" = "$VMUX_DMG_URL" ]; then
               echo "Draft release ready and cask matches; release prep already complete."
               echo "PREP_DONE=1" >> "$GITHUB_ENV"
             fi
@@ -954,6 +956,14 @@ jobs:
           cd target/release
           tar czf "$APP_ARCHIVE_NAME" Vmux.app
 
+      - name: Build and sign standalone CLI release
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        env:
+          VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
+        run: vmux internal cli-release
+
       - name: Sign update artifact (minisign)
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         env:
@@ -977,6 +987,8 @@ jobs:
             "target/release/${BINARY_ARCHIVE_NAME}"
             "target/release/${APP_ARCHIVE_NAME}"
             "target/release/${APP_SIGNATURE_NAME}"
+            "target/release/${CLI_ARCHIVE_NAME}"
+            "target/release/${CLI_SIGNATURE_NAME}"
           )
           if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
             is_draft=$(jq -r .isDraft /tmp/r.json)

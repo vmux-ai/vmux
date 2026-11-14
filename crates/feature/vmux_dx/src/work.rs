@@ -50,6 +50,8 @@ pub enum Work {
     Scope(Vec<OsString>),
     Consumer(Vec<OsString>),
     Internal(String, Vec<OsString>),
+    CliCompile,
+    CliPackage(bool),
 }
 
 impl Work {
@@ -238,6 +240,26 @@ impl Work {
             "dx.framework-consumer" => steps.extend([Self::Acquire, Self::Consumer(forwarded)]),
             "dx.internal" => {
                 let task = invocation.value("task").ok_or("Missing integration task")?;
+                if task == "cli-release" {
+                    let preview = match forwarded.as_slice() {
+                        [] => false,
+                        [value] if value == "preview" => true,
+                        _ => {
+                            return Err(
+                                "cli-release accepts only an optional preview channel".into()
+                            );
+                        }
+                    };
+                    steps.extend([
+                        Self::Check,
+                        Self::Acquire,
+                        Self::Preflight,
+                        Self::CliCompile,
+                        Self::CliPackage(preview),
+                        Self::Finish("release".into()),
+                    ]);
+                    return Ok(steps);
+                }
                 if task == "cargo" {
                     steps.extend([Self::Acquire, Self::Seed]);
                 }
@@ -286,6 +308,8 @@ impl Work {
             Self::Scope(_) => "Select CI scope",
             Self::Consumer(_) => "Validate public SDK",
             Self::Internal(_, _) => "Run external integration",
+            Self::CliCompile => "Build standalone release CLI",
+            Self::CliPackage(_) => "Verify and package standalone release CLI",
         }
     }
 
@@ -396,6 +420,10 @@ impl Work {
             )?
             .run(args)?,
             Self::Internal(task, args) => native.internal(task, args)?,
+            Self::CliCompile => native.cli_compile()?,
+            Self::CliPackage(preview) => {
+                return Ok(Outcome::Artifacts(native.cli_package(*preview)?));
+            }
         }
         Ok(Outcome::Done)
     }

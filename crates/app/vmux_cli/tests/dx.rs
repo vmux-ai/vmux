@@ -160,6 +160,156 @@ fn custom_packages_preserve_product_identity_assets_and_service_namespace() {
 }
 
 #[test]
+fn cli_update_preferences_work_outside_a_checkout_and_manual_checks_use_the_selected_channel() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("updates");
+    let curl = directory.path().join("curl");
+    std::fs::write(&curl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_CURL_LOG\"\nprintf '%s' '{\"version\":\"v9.0.0\",\"cli\":{}}'\n").unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .current_dir(directory.path())
+        .env("VMUX_CLI_UPDATE_ROOT", &root)
+        .env("CURL_BIN", &curl)
+        .env("TEST_CURL_LOG", directory.path().join("curl.log"))
+        .args(["update", "-c", "preview", "--auto", "off", "--check"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("v9.0.0"));
+    let preferences: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("update.json")).unwrap()).unwrap();
+    assert_eq!(preferences["channel"], "preview");
+    assert_eq!(preferences["enabled"], false);
+    let requests = std::fs::read_to_string(directory.path().join("curl.log")).unwrap();
+    assert!(requests.contains("/nightly/updates-preview.json"));
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .current_dir(directory.path())
+        .env("VMUX_CLI_UPDATE_ROOT", &root)
+        .env("CURL_BIN", &curl)
+        .args(["update", "--auto", "on"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+    let preferences: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("update.json")).unwrap()).unwrap();
+    assert_eq!(preferences["channel"], "preview");
+    assert_eq!(preferences["enabled"], true);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("curl.log")).unwrap(),
+        requests
+    );
+}
+
+#[test]
+fn invalid_cli_update_channels_are_refused_before_storage_access() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("updates");
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .env("VMUX_CLI_UPDATE_ROOT", &root)
+        .args(["update", "--channel", "nightly"])
+        .assert()
+        .code(2);
+    assert!(!root.exists());
+}
+
+#[test]
+fn cli_update_lock_excludes_another_process_until_its_owner_releases_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(directory.path().join("update.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("vmux"))
+        .env("VMUX_CLI_UPDATE_ROOT", directory.path())
+        .args(["update", "--auto", "off"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(child.try_wait().unwrap().is_none());
+    assert!(!directory.path().join("update.json").exists());
+    lock.unlock().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("CLI update did not resume after lock release");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(directory.path().join("update.json").is_file());
+}
+
+#[test]
+fn cli_update_cancellation_terminates_its_download_and_releases_the_installation_lock() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("updates");
+    let curl = directory.path().join("curl");
+    let started = directory.path().join("started");
+    std::fs::write(
+        &curl,
+        "#!/bin/sh\nprintf '%s\\n' $$ > \"$TEST_STARTED\"\nsleep 60\nprintf '%s' '{}'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("vmux"))
+        .env("VMUX_CLI_UPDATE_ROOT", &root)
+        .env("CURL_BIN", &curl)
+        .env("TEST_STARTED", &started)
+        .args(["update", "--check"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !started.is_file() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("CLI update never started its network request");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let status = std::process::Command::new("/bin/kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(143));
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("CLI update ignored cancellation");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .env("VMUX_CLI_UPDATE_ROOT", &root)
+        .args(["update", "--auto", "off"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+}
+
+#[test]
 fn both_branch_option_forms_refuse_a_missing_branch_without_changing_checkout() {
     for option in ["-b", "--branch"] {
         Command::cargo_bin("vmux")

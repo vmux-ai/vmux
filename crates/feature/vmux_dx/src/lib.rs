@@ -33,6 +33,8 @@ mod storage;
 mod target_lock;
 mod temporary;
 mod tooling;
+mod update_io;
+pub mod updates;
 mod work;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -41,7 +43,7 @@ pub struct Plugin;
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<Feature>::default())
+        app.add_plugins((FeaturePlugin::<Feature>::default(), updates::Plugin))
             .insert_resource(Mailbox::new())
             .add_message::<Completion>()
             .add_systems(
@@ -158,6 +160,9 @@ type Finishing<'w, 's> = Query<
 
 fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
     for (entity, invocation) in &requests {
+        if invocation.is("dx.update") {
+            continue;
+        }
         if !invocation.command.starts_with("dx.") {
             continue;
         }
@@ -216,6 +221,12 @@ fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut comman
                 .entity(entity)
                 .insert(CliResult(Err(error.to_string())));
             continue;
+        }
+        if invocation.is("dx.internal") && invocation.value("task") == Some("cli-release") {
+            environment.set(
+                "CARGO_TARGET_DIR",
+                checkout.root.join(".build-tools/standalone").as_os_str(),
+            );
         }
         if invocation.value("platform") == Some("web") && !environment.present("CARGO_TARGET_DIR") {
             environment.set(

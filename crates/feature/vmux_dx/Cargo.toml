@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+runtime-cli = []
+
 [dependencies]
 plist = "1"
 bevy_app = { workspace = true }
@@ -15,6 +18,12 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 ron = { workspace = true }
 sha2 = "0.10"
+base64 = "0.22"
+flate2 = "1"
+minisign-verify = "0.2"
+semver = "1"
+tar = "0.4"
+libc = "0.2"
 
 [build-dependencies]
 sha2 = "0.10"

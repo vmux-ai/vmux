@@ -84,12 +84,21 @@ jobs:
             --password "$VMUX_UPDATE_PRIVATE_KEY_PASSWORD"
           mv "target/release/Vmux_${NIGHTLY_VERSION}_aarch64.dmg" "$dmg_asset"
 
+      - name: Build and sign standalone preview CLI
+        env:
+          VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
+        run: vmux internal cli-release -- preview
+
       - name: Create preview update manifest
         run: |
           set -euo pipefail
           app_name="Vmux-nightly-aarch64-apple-darwin.app.tar.gz"
           dmg_name="Vmux-nightly-aarch64.dmg"
           signature=$(<"target/release/${app_name}.sig")
+          cli_name="vmux-cli-nightly-aarch64-apple-darwin.tar.gz"
+          cli_signature=$(<"target/release/${cli_name}.sig")
           published=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           jq -n \
             --arg version "v${NIGHTLY_VERSION}" \
@@ -98,6 +107,8 @@ jobs:
             --arg signature "$signature" \
             --arg dmg_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/${dmg_name}" \
             --arg dmg_name "$dmg_name" \
+            --arg cli_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/${cli_name}" \
+            --arg cli_signature "$cli_signature" \
             '{
               version: $version,
               pub_date: $pub_date,
@@ -113,6 +124,12 @@ jobs:
                   url: $dmg_url,
                   filename: $dmg_name
                 }
+              },
+              cli: {
+                "macos-aarch64": {
+                  url: $cli_url,
+                  signature: $cli_signature
+                }
               }
             }' > target/release/updates-preview.json
 
@@ -127,6 +144,8 @@ jobs:
             target/release/Vmux-nightly-aarch64-apple-darwin.app.tar.gz
             target/release/Vmux-nightly-aarch64-apple-darwin.app.tar.gz.sig
             target/release/updates-preview.json
+            target/release/vmux-cli-nightly-aarch64-apple-darwin.tar.gz
+            target/release/vmux-cli-nightly-aarch64-apple-darwin.tar.gz.sig
           )
           title="Vmux Preview v${NIGHTLY_VERSION}"
           notes="Automated preview build from ${GITHUB_SHA} on ${NIGHTLY_DATE}."

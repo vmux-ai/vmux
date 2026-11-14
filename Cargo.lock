@@ -10576,13 +10576,19 @@ dependencies = [
 name = "vmux_dx"
 version = "0.0.35"
 dependencies = [
+ "base64 0.22.1",
  "bevy_app",
  "bevy_ecs",
+ "flate2",
+ "libc",
+ "minisign-verify",
  "plist",
  "ron 0.12.1",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
+ "tar",
  "tempfile",
  "toml",
  "vmux_ecs",

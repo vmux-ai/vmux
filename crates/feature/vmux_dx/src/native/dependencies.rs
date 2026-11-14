@@ -301,7 +301,18 @@ impl Native {
         self.copy(source, &binary)?;
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
         if !self.installed_with(binary.as_os_str(), version, probe) {
-            return Err("Downloaded tool version does not match the pin".into());
+            let mut command = self.command(&binary);
+            command.arg(probe);
+            let output = Execution::new(command).output_any(None)?;
+            let stdout = String::from_utf8_lossy(&output.stdout)
+                .chars()
+                .take(1024)
+                .collect::<String>();
+            let stderr = String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .take(1024)
+                .collect::<String>();
+            return Err(format!("Downloaded tool did not match pin {version}: probe {probe} exited {}; stdout={stdout:?}; stderr={stderr:?}", output.status).into());
         }
         fs::rename(binary, destination)?;
         if cfg!(target_os = "macos") {

@@ -1,5 +1,10 @@
 (
     cli: Some((commands: [
+        (id: "dx.update", name: "update", about: Some("Update the standalone CLI and select its release channel"), arguments: [
+            (id: "channel", long: Some("channel"), short: Some('c'), values: ["stable", "preview"]),
+            (id: "auto", long: Some("auto"), values: ["on", "off"]),
+            (id: "check", long: Some("check"), flag: true),
+        ]),
         (id: "dx.reset-layout", name: "reset-layout", about: Some("Reset inactive local layout files"), arguments: [
             (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
             (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
