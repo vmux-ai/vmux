@@ -523,6 +523,7 @@ Host focus retains applied surface and layout handoff state in each Window's `Wi
 The macOS child plugin keeps `KeyWindowHandoff` on that Window and releases held keys only after
 AppKit confirms its first-responder handoff. Switching windows clears the old pending acknowledgement
 and native surface focus; CEF/AppKit handles remain native adapters, without parallel focus ownership.
+Transferring the selected surface releases the obsolete Window record while preserving its native focus.
 CEF loading cancellation consumes the targeted `StopLoadingRequested` only for one synchronous
 native call. AppKit outcomes last for one first-responder call; its owning Window keeps the pending
 acknowledgement. Framework plugin installation and isolated Bevy fixtures are App-scoped adapters,
