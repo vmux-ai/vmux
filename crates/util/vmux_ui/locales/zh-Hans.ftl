@@ -1331,3 +1331,6 @@ onboarding-key-failed = 无法保存密钥。请重试或使用登录。
 onboarding-workspace-question = 我们在哪里工作？
 agent-starting = 正在启动智能体…
 browser-open-external = 在外部浏览器中打开
+onboarding-checklist-select = 选择代理
+onboarding-checklist-install = 安装代理
+onboarding-checklist-connect = 连接代理

@@ -78,6 +78,18 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
     }
     rsx! {
         div { class: "flex w-full flex-col gap-2",
+            ManagerSearchRow {
+                ManagerSearch {
+                    value: query(),
+                    placeholder: translate("onboarding-search-agents"),
+                    disabled: pending || loading,
+                    inherit_color: true,
+                    onsearch: move |value| { query.set(value); selected.set(0); },
+                    onkeydown: Some(EventHandler::new(move |event| {
+                        if !pending { searched.key(event, selected, false); }
+                    })),
+                }
+            }
             if loading {
                 for index in 0..3 {
                     Skeleton { key: "{index}", class: "h-8 w-full rounded-lg" }
@@ -91,8 +103,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     trailing: details,
                     compact: true,
                     framed: true,
-                    muted: true,
-                    viewport_class: "max-h-[min(10rem,35vh)]".to_string(),
+                    viewport_class: "max-h-[min(14rem,35vh)]".to_string(),
                     show_numbers: false,
                     show_help: false,
                     selected: cursor,
@@ -100,18 +111,6 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     on_select: move |index| { if !pending { clicked.choose(index); } },
                     on_hover: move |index| { if !pending { selected.set(index); } },
                     on_keydown: move |event| { if !pending { keyed.key(event, selected, true); } },
-                }
-            }
-            ManagerSearchRow {
-                ManagerSearch {
-                    value: query(),
-                    placeholder: translate("onboarding-search-agents"),
-                    disabled: pending || loading,
-                    inherit_color: true,
-                    onsearch: move |value| { query.set(value); selected.set(0); },
-                    onkeydown: Some(EventHandler::new(move |event| {
-                        if !pending { searched.key(event, selected, false); }
-                    })),
                 }
             }
         }

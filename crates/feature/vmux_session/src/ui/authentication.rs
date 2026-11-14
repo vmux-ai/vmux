@@ -10,6 +10,7 @@ pub(super) fn Authentication(chat: Chat) -> Element {
     }
     rsx! {
         super::setup::Turn {
+            super::setup::Checklist { phase: super::setup::Phase::Authentication }
             p { class: "text-sm leading-relaxed", {translate(if chat.key_input_requested() { "onboarding-key-question" } else { "onboarding-auth-question" })} }
             if chat.setup_prompt().is_some() {
                 p { class: "text-sm leading-relaxed", {translate("onboarding-auth-hint")} }

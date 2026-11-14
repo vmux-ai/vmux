@@ -215,6 +215,7 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
 fn ReadyIntro(chat: Chat) -> Element {
     rsx! {
         super::setup::Turn {
+            super::setup::Checklist { phase: super::setup::Phase::Authentication, completed: true }
             p { class: "text-sm leading-relaxed",
                 {translate_with("onboarding-ready", &[("agent", TranslationValue::String(&chat.header_name()))])}
             }

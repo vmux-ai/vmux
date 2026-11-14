@@ -1334,3 +1334,6 @@ onboarding-key-failed = De sleutel kon niet worden opgeslagen. Probeer het opnie
 onboarding-workspace-question = Waar zullen we werken?
 agent-starting = Agent starten…
 browser-open-external = Openen in externe browser
+onboarding-checklist-select = Agent kiezen
+onboarding-checklist-install = Agent installeren
+onboarding-checklist-connect = Agent verbinden

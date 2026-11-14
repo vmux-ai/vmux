@@ -9,10 +9,9 @@ use vmux_ui::components::composer::{
     ComposerFrame, ComposerNotice, PromptComposer, PromptComposerMode, ShortcutHint,
 };
 use vmux_ui::components::message::MessageFrame;
-use vmux_ui::components::progress::{LoadingIcon, Progress, ProgressIndicator};
+use vmux_ui::components::progress::{ChecklistItem, Progress, ProgressIndicator};
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[component]
 pub(super) fn Turn(children: Element) -> Element {
@@ -66,6 +65,7 @@ pub(super) fn Frame(
     rsx! {
         ComposerFrame {
             muted: true,
+            borderless: true,
             content_class: if compact { "h-16".to_string() } else { String::new() },
             notice: Some(rsx! { ComposerNotice { content: notice, class: "setup-notice".to_string() } }),
             {children}
@@ -221,10 +221,9 @@ pub(super) fn ProgressTurn(
         !detail.is_empty() && detail != label && detail != translate("agent-preparing");
     rsx! {
         Turn {
-            div { role: "status", aria_live: "polite", class: "flex items-center gap-2 text-sm",
-                LineIconView { icon: phase.icon(), class: "size-4 shrink-0 text-muted-foreground" }
-                span { "{label}" }
-                LoadingIcon { class: "size-3.5 text-muted-foreground".to_string() }
+            div { role: "status", aria_live: "polite",
+                span { class: "sr-only", "{label}" }
+                Checklist { phase, pending: true }
             }
             if show_detail { p { class: "text-xs text-muted-foreground", "{detail}" } }
             if phase == Phase::Installation {
@@ -233,6 +232,29 @@ pub(super) fn ProgressTurn(
                         ProgressIndicator {}
                     }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+pub(super) fn Checklist(
+    phase: Phase,
+    #[props(default)] pending: bool,
+    #[props(default)] completed: bool,
+) -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-0.5",
+            ChecklistItem { label: translate("onboarding-checklist-select"), completed: true }
+            ChecklistItem {
+                label: translate("onboarding-checklist-install"),
+                completed: completed || phase == Phase::Authentication,
+                pending: pending && phase != Phase::Authentication,
+            }
+            ChecklistItem {
+                label: translate("onboarding-checklist-connect"),
+                completed,
+                pending: pending && phase == Phase::Authentication,
             }
         }
     }
@@ -252,14 +274,6 @@ impl Phase {
             Self::Installation => "setup-installing",
             Self::Authentication => "onboarding-auth-pending",
         })
-    }
-
-    fn icon(self) -> LineIcon {
-        match self {
-            Self::Preparation => LineIcon::RefreshCw,
-            Self::Installation => LineIcon::Package,
-            Self::Authentication => LineIcon::Shield,
-        }
     }
 }
 

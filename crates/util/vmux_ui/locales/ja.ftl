@@ -1314,3 +1314,6 @@ onboarding-key-failed = キーを保存できませんでした。再試行す�
 onboarding-workspace-question = どこで作業しましょうか？
 agent-starting = エージェントを起動中…
 browser-open-external = 外部ブラウザで開く
+onboarding-checklist-select = エージェントを選択
+onboarding-checklist-install = エージェントをインストール
+onboarding-checklist-connect = エージェントに接続

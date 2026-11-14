@@ -1322,3 +1322,6 @@ onboarding-key-failed = The key could not be saved. Retry or use sign-in instead
 onboarding-workspace-question = Where should we work?
 agent-starting = Starting agent…
 browser-open-external = Open in external browser
+onboarding-checklist-select = Choose agent
+onboarding-checklist-install = Install agent
+onboarding-checklist-connect = Connect agent

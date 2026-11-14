@@ -50,7 +50,7 @@ pub struct WelcomeLayout;
 impl WelcomeLayout {
     pub const GUIDE_HEIGHT: u32 = 96;
     pub const GAP: u32 = 16;
-    pub const COMPOSER_HEIGHT: u32 = 114;
+    pub const COMPOSER_HEIGHT: u32 = 112;
     pub const HEIGHT: u32 = Self::GUIDE_HEIGHT + Self::GAP + Self::COMPOSER_HEIGHT;
 
     pub fn dock_offset() -> u32 {

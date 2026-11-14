@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::choice::ChoiceOptions;
 use vmux_ui::components::composer::{ComposerFrame, ComposerNotice, DisabledComposer};
 use vmux_ui::components::manager::ManagerPage;
 use vmux_ui::components::message::{MessageFrame, WelcomeLayout};
+use vmux_ui::components::progress::ChecklistItem;
 
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
@@ -83,23 +83,19 @@ fn SetupWelcome() -> Element {
             div { class: "h-[var(--vmux-welcome-composer-height)] shrink-0",
                 ComposerFrame {
                     muted: true,
+                    borderless: true,
                     content_class: "h-16".to_string(),
                     notice: Some(rsx! { ComposerNotice {
-                        content: Some(rsx! { ChoiceOptions {
-                            options: vec![translate("onboarding-setup")],
-                            selected: 0,
-                            compact: true,
-                            framed: true,
-                            muted: true,
-                            show_numbers: false,
-                            show_help: false,
-                            on_hover: move |_| {},
-                            on_select: move |_| {
+                        content: Some(rsx! { ChecklistItem {
+                            label: translate("onboarding-setup"),
+                            primary: true,
+                            class: "h-12".to_string(),
+                            on_select: Some(EventHandler::new(move |_| {
                                 let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest {
                                     value: "vmux://start/onboarding/agent".to_string(),
                                     open: Some(vmux_api::open_target::OpenTarget::InPlace),
                                 });
-                            },
+                            })),
                         } }),
                     } }),
                     DisabledComposer { placeholder: translate("onboarding-composer-wait") }

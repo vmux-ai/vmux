@@ -1334,3 +1334,6 @@ onboarding-key-failed = تعذّر حفظ المفتاح. أعد المحاول�
 onboarding-workspace-question = أين نعمل؟
 agent-starting = جارٍ بدء تشغيل الوكيل…
 browser-open-external = فتح في متصفح خارجي
+onboarding-checklist-select = اختيار الوكيل
+onboarding-checklist-install = تثبيت الوكيل
+onboarding-checklist-connect = الاتصال بالوكيل

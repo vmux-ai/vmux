@@ -1334,3 +1334,6 @@ onboarding-key-failed = Не удалось сохранить ключ. Пов�
 onboarding-workspace-question = Где будем работать?
 agent-starting = Запуск агента…
 browser-open-external = Открыть во внешнем браузере
+onboarding-checklist-select = Выбрать агента
+onboarding-checklist-install = Установить агента
+onboarding-checklist-connect = Подключить агента

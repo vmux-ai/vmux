@@ -338,6 +338,7 @@ pub fn ShortcutHint(shortcut: String, label: String) -> Element {
 pub fn ComposerFrame(
     #[props(default)] notice: Option<Element>,
     #[props(default)] muted: bool,
+    #[props(default)] borderless: bool,
     #[props(default)] content_class: String,
     children: Element,
 ) -> Element {
@@ -345,7 +346,7 @@ pub fn ComposerFrame(
     rsx! {
         div {
             "data-slot": "composer-frame",
-            class: if attached && muted { "rounded-[14px] bg-foreground/[0.035] p-px text-foreground/85 ring-1 ring-inset ring-foreground/10" } else if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
+            class: if attached && borderless { "relative text-foreground/85" } else if attached && muted { "rounded-[14px] bg-foreground/[0.035] p-px text-foreground/85 ring-1 ring-inset ring-foreground/10" } else if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
             if let Some(notice) = notice {
                 {notice}
             }

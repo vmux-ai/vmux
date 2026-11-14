@@ -1334,3 +1334,6 @@ onboarding-key-failed = Der Schlüssel konnte nicht gespeichert werden. Versuche
 onboarding-workspace-question = Wo sollen wir arbeiten?
 agent-starting = Agent wird gestartet…
 browser-open-external = Im externen Browser öffnen
+onboarding-checklist-select = Agent auswählen
+onboarding-checklist-install = Agent installieren
+onboarding-checklist-connect = Agent verbinden

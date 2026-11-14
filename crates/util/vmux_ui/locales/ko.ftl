@@ -1331,3 +1331,6 @@ onboarding-key-failed = 키를 저장하지 못했습니다. 다시 시도하거
 onboarding-workspace-question = 어디에서 작업할까요?
 agent-starting = 에이전트 시작 중…
 browser-open-external = 외부 브라우저에서 열기
+onboarding-checklist-select = 에이전트 선택
+onboarding-checklist-install = 에이전트 설치
+onboarding-checklist-connect = 에이전트 연결

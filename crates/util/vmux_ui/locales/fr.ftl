@@ -1334,3 +1334,6 @@ onboarding-key-failed = La clé n’a pas pu être enregistrée. Réessayez ou u
 onboarding-workspace-question = Où souhaites-tu travailler ?
 agent-starting = Démarrage de l’agent…
 browser-open-external = Ouvrir dans un navigateur externe
+onboarding-checklist-select = Choisir l’agent
+onboarding-checklist-install = Installer l’agent
+onboarding-checklist-connect = Connecter l’agent

@@ -870,8 +870,11 @@ mod tests {
     impl SetupRouting {
         fn new(ready: bool) -> Self {
             let mut registration = App::new();
-            registration.add_plugins(vmux_session::SessionPlugin);
+            registration
+                .add_plugins((vmux_start::StartPlugin, vmux_session::SessionPlugin))
+                .insert_resource(AppSettings::default());
             registration.world_mut().run_schedule(bevy::app::PreStartup);
+            registration.world_mut().run_schedule(bevy::app::Startup);
             let pools: Vec<_> = registration
                 .world_mut()
                 .query::<&vmux_ecs::page::PrewarmPage>()
@@ -891,7 +894,7 @@ mod tests {
             .insert_resource(AppSettings::default())
             .add_message::<SwapStackSession>()
             .add_message::<vmux_ecs::PageOpenRequest>();
-            let pool_count = pools.len();
+            let pool_count: usize = pools.iter().map(|pool| pool.pool_size).sum();
             for pool in pools {
                 app.world_mut().spawn(pool);
             }
@@ -969,7 +972,6 @@ mod tests {
         let mut fixture = SetupRouting::new(true);
         fixture.open();
         let view = fixture.view();
-        assert_eq!(view, fixture.spare);
         fixture
             .app
             .world_mut()

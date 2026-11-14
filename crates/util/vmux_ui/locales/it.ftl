@@ -1334,3 +1334,6 @@ onboarding-key-failed = Impossibile salvare la chiave. Riprova o accedi.
 onboarding-workspace-question = Dove lavoriamo?
 agent-starting = Avvio dell’agente…
 browser-open-external = Apri nel browser esterno
+onboarding-checklist-select = Scegli agente
+onboarding-checklist-install = Installa agente
+onboarding-checklist-connect = Connetti agente
