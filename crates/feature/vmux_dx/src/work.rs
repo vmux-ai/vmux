@@ -2,7 +2,6 @@ use std::ffi::OsString;
 use std::sync::Arc;
 
 use bevy_ecs::prelude::*;
-use vmux_ecs::cli::CliInvocation;
 
 use crate::Result;
 use crate::ci_scope::Scope;
@@ -41,6 +40,8 @@ pub enum Work {
     Css,
     FlattenWeb,
     Run(String, String),
+    LocalEntries,
+    LocalLaunch,
     Stop,
     Simulator,
     Reset,
@@ -53,232 +54,19 @@ pub enum Work {
     Internal(String, Vec<OsString>),
     CliCompile,
     CliPackage(bool),
+    WorkspaceCompile(String, String, std::path::PathBuf),
+    WorkspaceAcquire,
+    WorkspaceInvoke(Vec<OsString>),
 }
 
 impl Work {
-    pub fn plan(invocation: &CliInvocation) -> Result<Vec<Self>> {
-        let profile = invocation.value("profile").unwrap_or("dev");
-        let platform = invocation.value("platform").unwrap_or("desktop");
-        let mut forwarded = invocation
-            .arguments
-            .get("forward")
-            .cloned()
-            .unwrap_or_default();
-        let mut steps = Vec::new();
-        match invocation.command.as_str() {
-            "dx.build" => {
-                steps.extend([Self::Check, Self::Acquire, Self::Seed, Self::Preflight]);
-                match platform {
-                    "desktop" if profile == "dev" => {
-                        steps.extend([
-                            Self::Native,
-                            Self::Tailwind,
-                            Self::Codesign,
-                            Self::Helper,
-                            Self::ClearReady,
-                        ]);
-                        steps.push(Self::cargo(&["build", "-p", "vmux_cli"]));
-                        steps.push(Self::cargo(&[
-                            "build",
-                            "-p",
-                            "vmux_app",
-                            "--bin",
-                            "vmux_service",
-                            "--features",
-                            "service-daemon",
-                        ]));
-                        let mut args = if cfg!(target_os = "macos") {
-                            vec!["rustc", "-p", "vmux_desktop", "--bin", "vmux_desktop"]
-                        } else {
-                            vec!["build", "-p", "vmux_desktop"]
-                        }
-                        .into_iter()
-                        .map(OsString::from)
-                        .collect::<Vec<_>>();
-                        args.extend(["--no-default-features".into(), "--features".into()]);
-                        args.push(
-                            invocation
-                                .value_os("features")
-                                .unwrap_or(std::ffi::OsStr::new("dev,full"))
-                                .to_owned(),
-                        );
-                        args.append(&mut forwarded);
-                        if cfg!(target_os = "macos") {
-                            args.extend(
-                                ["--", "-C", "link-arg=-Wl,-headerpad,1000"].map(OsString::from),
-                            );
-                        }
-                        steps.push(Self::Cargo(args));
-                        if cfg!(target_os = "macos") {
-                            steps.extend([Self::SignDebug, Self::BundleDebug]);
-                        }
-                        steps.push(Self::PublishDebug);
-                    }
-                    "desktop" => {
-                        steps.extend([
-                            Self::Native,
-                            Self::Tailwind,
-                            Self::PackageTools,
-                            Self::Codesign,
-                            Self::Package(profile.into()),
-                        ]);
-                    }
-                    "ios" if profile == "release" => {
-                        steps.extend([Self::Dioxus("ios".into()), Self::ReleaseIos]);
-                    }
-                    "ios" | "android" => {
-                        steps.push(Self::Dioxus(platform.into()));
-                        let mut args = vec![
-                            "build".into(),
-                            format!("--{platform}").into(),
-                            "-p".into(),
-                            "vmux_mobile".into(),
-                        ];
-                        if profile != "dev" {
-                            args.push("--release".into());
-                        }
-                        args.append(&mut forwarded);
-                        steps.push(Self::Tool("dx".into(), args));
-                        if platform == "ios" {
-                            steps.extend([Self::ResourcesIos, Self::VerifyIos(false)]);
-                        }
-                    }
-                    "web" => {
-                        steps.extend([
-                            Self::Dioxus(platform.into()),
-                            Self::Binaryen,
-                            Self::Tailwind,
-                            Self::Css,
-                        ]);
-                        let mut args = vec!["build".into(), "--platform".into(), "web".into()];
-                        if profile != "dev" {
-                            args.extend(["--ssg".into(), "--release".into()]);
-                        }
-                        args.append(&mut forwarded);
-                        steps.push(Self::Tool("dx".into(), args));
-                        if profile != "dev" {
-                            steps.push(Self::FlattenWeb);
-                        }
-                    }
-                    _ => return Err("Unsupported build platform".into()),
-                }
-                steps.push(Self::Finish(profile.into()));
-            }
-            "dx.run" => {
-                steps.push(Self::Acquire);
-                if platform != "desktop" {
-                    steps.push(Self::Dioxus(platform.into()));
-                    if platform == "web" {
-                        steps.extend([Self::Binaryen, Self::Tailwind, Self::Css]);
-                    }
-                    if platform == "ios" {
-                        steps.push(Self::Simulator);
-                    }
-                }
-                steps.push(Self::Run(profile.into(), platform.into()));
-            }
-            "dx.stop" => steps.push(Self::Stop),
-            "dx.reset-layout" => steps.push(Self::Reset),
-            "dx.test" => {
-                steps.extend([Self::Acquire, Self::Seed]);
-                let mut args = vec![
-                    "test".into(),
-                    "--workspace".into(),
-                    "--exclude".into(),
-                    "bevy_cef_core".into(),
-                ];
-                if profile != "dev" {
-                    args.push("--release".into());
-                }
-                if let Some(features) = invocation.value_os("features") {
-                    args.extend(["--features".into(), features.to_owned()]);
-                }
-                args.append(&mut forwarded);
-                steps.push(Self::Cargo(args));
-            }
-            "dx.lint" => {
-                steps.extend([Self::Acquire, Self::Seed]);
-                steps.push(Self::cargo(&["fmt", "--all", "--", "--check"]));
-                let mut args = vec![
-                    "clippy".into(),
-                    "--workspace".into(),
-                    "--all-targets".into(),
-                ];
-                if profile != "dev" {
-                    args.push("--release".into());
-                }
-                if let Some(features) = invocation.value_os("features") {
-                    args.extend(["--features".into(), features.to_owned()]);
-                }
-                args.append(&mut forwarded);
-                args.extend(["--".into(), "-D".into(), "warnings".into()]);
-                steps.push(Self::Cargo(args));
-            }
-            "dx.doctor" => steps.push(Self::Doctor),
-            "dx.setup" => {
-                if platform == "desktop" {
-                    steps.extend([
-                        Self::Check,
-                        Self::Acquire,
-                        Self::Native,
-                        Self::Tailwind,
-                        Self::PackageTools,
-                        Self::Codesign,
-                        Self::Helper,
-                    ]);
-                } else {
-                    steps.push(Self::Dioxus(platform.into()));
-                    if platform == "web" {
-                        steps.extend([Self::Binaryen, Self::Tailwind]);
-                    }
-                }
-            }
-            "dx.cache.status" => steps.push(Self::Status),
-            "dx.cache.clean" => {
-                steps.extend([Self::Acquire, Self::Clean(invocation.flag("apply"))])
-            }
-            "dx.ci-scope" => steps.push(Self::Scope(forwarded)),
-            "dx.ci-native" => steps.push(Self::NativeInputs(forwarded)),
-            "dx.framework-consumer" => steps.extend([Self::Acquire, Self::Consumer(forwarded)]),
-            "dx.internal" => {
-                let task = invocation.value("task").ok_or("Missing integration task")?;
-                if task == "cli-release" {
-                    let preview = match forwarded.as_slice() {
-                        [] => false,
-                        [value] if value == "preview" => true,
-                        _ => {
-                            return Err(
-                                "cli-release accepts only an optional preview channel".into()
-                            );
-                        }
-                    };
-                    steps.extend([
-                        Self::Check,
-                        Self::Acquire,
-                        Self::Preflight,
-                        Self::CliCompile,
-                        Self::CliPackage(preview),
-                        Self::Finish("release".into()),
-                    ]);
-                    return Ok(steps);
-                }
-                if task == "cargo" {
-                    steps.extend([Self::Acquire, Self::Seed]);
-                }
-                steps.push(Self::Internal(task.into(), forwarded));
-            }
-            _ => return Err("Unknown development command".into()),
-        }
-        Ok(steps)
-    }
-
-    fn cargo(args: &[&str]) -> Self {
+    pub(crate) fn cargo(args: &[&str]) -> Self {
         Self::Cargo(args.iter().map(OsString::from).collect())
     }
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Acquire => "Acquire target lock",
+            Self::Acquire | Self::WorkspaceAcquire => "Acquire target lock",
             Self::Check | Self::Preflight => "Check build storage",
             Self::Seed => "Seed target cache",
             Self::Finish(_) => "Finish build storage",
@@ -301,6 +89,8 @@ impl Work {
             Self::Css => "Build stylesheet",
             Self::FlattenWeb => "Publish web artifact",
             Self::Run(_, _) => "Run artifact",
+            Self::LocalEntries => "Read completed local artifact entries",
+            Self::LocalLaunch => "Launch selected local artifact",
             Self::Stop => "Stop development service",
             Self::Simulator => "Prepare simulator",
             Self::Reset => "Reset layout files",
@@ -313,6 +103,8 @@ impl Work {
             Self::Internal(_, _) => "Run external integration",
             Self::CliCompile => "Build standalone release CLI",
             Self::CliPackage(_) => "Verify and package standalone release CLI",
+            Self::WorkspaceCompile(_, _, _) => "Build workspace CLI provider",
+            Self::WorkspaceInvoke(_) => "Run workspace CLI provider",
         }
     }
 
@@ -327,6 +119,18 @@ impl Work {
         let _lease = lease;
         let mut native = Native::new(checkout, environment.clone());
         match self {
+            Self::WorkspaceAcquire => {
+                storage.guard()?;
+                let lease = Arc::new(TargetLock::acquire(&checkout.root, &checkout.target)?);
+                storage.guard()?;
+                return Ok(Outcome::Lease(lease));
+            }
+            Self::WorkspaceCompile(package, binary, cargo) => {
+                return Ok(Outcome::Executable(
+                    native.workspace_compile(package, binary, cargo)?,
+                ));
+            }
+            Self::WorkspaceInvoke(arguments) => native.workspace_invoke(arguments)?,
             Self::Acquire => {
                 let owner = std::env::var("VMUX_TARGET_LOCK_OWNER_PID")
                     .ok()
@@ -404,6 +208,10 @@ impl Work {
             Self::Css => native.css()?,
             Self::FlattenWeb => native.flatten_web()?,
             Self::Run(profile, platform) => native.run(profile, platform)?,
+            Self::LocalEntries => return Ok(Outcome::LocalEntries(native.local_entries()?)),
+            Self::LocalLaunch => native.launch_local(std::path::Path::new(
+                environment.required("VMUX_DX_LOCAL_APP")?,
+            ))?,
             Self::Stop => native.stop()?,
             Self::Simulator => native.simulator()?,
             Self::Reset => native.reset_layout()?,
@@ -442,6 +250,8 @@ impl Work {
 }
 
 pub enum Outcome {
+    LocalEntries(Vec<crate::local::Entry>),
+    Executable(crate::workspace::Executable),
     Done,
     Lease(Arc<TargetLock>),
     Identity(String),

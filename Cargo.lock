@@ -10453,6 +10453,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "clap",
+ "libc",
  "plist",
  "predicates",
  "semver",

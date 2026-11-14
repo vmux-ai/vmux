@@ -7,6 +7,11 @@ use ron::value::RawValue;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CliSet {
+    Parse,
+}
+
 #[derive(Clone, Resource)]
 pub struct CliWake(thread::Thread);
 
