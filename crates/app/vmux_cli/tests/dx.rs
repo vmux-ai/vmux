@@ -1805,6 +1805,7 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
             .env("VMUX_PROFILE", "work")
             .env_remove("VMUX_TEST")
             .env("VMUX_DATA_DIR", &data)
+            .env("VMUX_TEST_ENV_KEYS", "1")
             .env("VMUX_REMOTE_RELAY_URL", "https://localhost:8787")
             .assert()
             .success();
@@ -1821,6 +1822,8 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
                 "VMUX_PROFILE=work".into(),
                 "--env".into(),
                 format!("VMUX_DATA_DIR={}", data.display()),
+                "--env".into(),
+                "VMUX_TEST_ENV_KEYS=1".into(),
                 "--env".into(),
                 "VMUX_REMOTE_RELAY_URL=https://localhost:8787".into(),
                 release
