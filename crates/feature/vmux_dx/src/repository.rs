@@ -294,8 +294,14 @@ mod tests {
         let fixture = Fixture::new();
         let worktree = fixture.worktree("fixture/topic", "different-directory");
         let checkout = Checkout::resolve(&worktree, None).unwrap();
-        assert_eq!(checkout.title("dev", "Vmux").unwrap(), "Vmux Dev (fixture/topic)");
-        assert_eq!(checkout.title("local", "Vmux").unwrap(), "Vmux (fixture/topic)");
+        assert_eq!(
+            checkout.title("dev", "Vmux").unwrap(),
+            "Vmux Dev (fixture/topic)"
+        );
+        assert_eq!(
+            checkout.title("local", "Vmux").unwrap(),
+            "Vmux (fixture/topic)"
+        );
         assert_eq!(checkout.title("release", "Vmux").unwrap(), "Vmux");
         let status = Command::new("git")
             .arg("-C")
@@ -304,7 +310,10 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
-        assert_eq!(checkout.title("dev", "Vmux").unwrap(), "Vmux Dev (fixture/renamed)");
+        assert_eq!(
+            checkout.title("dev", "Vmux").unwrap(),
+            "Vmux Dev (fixture/renamed)"
+        );
         let status = Command::new("git")
             .arg("-C")
             .arg(&worktree)
