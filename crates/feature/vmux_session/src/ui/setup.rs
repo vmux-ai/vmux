@@ -1,23 +1,23 @@
 use super::state::Chat;
+use crate::onboarding::OnboardingUiState;
 use crate::onboarding::{
     ChatAuthenticate, ChatCancelSetup, ChatSaveKey, KeyEntryUiState, OnboardingChooseAgent,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::choice::{ChoiceKey, ChoiceOptions};
 use vmux_ui::components::composer::{
-    ComposerFrame, ComposerNotice, PromptComposer, PromptComposerMode, ShortcutHint,
+    ComposerFrame, ComposerNotice, ComposerTask, PromptComposer, PromptComposerMode, ShortcutHint,
 };
 use vmux_ui::components::message::MessageFrame;
-use vmux_ui::components::progress::{ChecklistItem, Progress, ProgressIndicator};
+use vmux_ui::components::progress::{Progress, ProgressIndicator};
 use vmux_ui::hooks::{UiStateBinding, send};
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
-pub(super) fn Turn(children: Element) -> Element {
+pub(super) fn Turn(#[props(default)] agent_name: String, children: Element) -> Element {
     rsx! {
         MessageFrame {
-            name: Identity::name(),
+            name: if agent_name.is_empty() { Identity::name() } else { translate_with("onboarding-setup-agent", &[("agent", TranslationValue::String(&agent_name))]) },
             seed: "vmux-setup-agent".to_string(),
             {children}
         }
@@ -25,11 +25,14 @@ pub(super) fn Turn(children: Element) -> Element {
 }
 
 #[component]
-pub(super) fn Welcome(#[props(default = rsx! {})] children: Element) -> Element {
+pub(super) fn Welcome(
+    #[props(default)] agent_name: String,
+    #[props(default = rsx! {})] children: Element,
+) -> Element {
     rsx! {
         div { class: "onboarding-origin min-h-24",
-            Turn {
-                p { class: "text-sm leading-relaxed", {translate("onboarding-start-description")} }
+            Turn { agent_name: agent_name.clone(),
+                p { class: "text-sm leading-relaxed", {if agent_name.is_empty() { translate("onboarding-start-description") } else { translate_with("onboarding-start-agent-description", &[("agent", TranslationValue::String(&agent_name))]) }} }
                 {children}
             }
         }
@@ -38,12 +41,21 @@ pub(super) fn Welcome(#[props(default = rsx! {})] children: Element) -> Element 
 
 #[component]
 pub(super) fn Controls(chat: Chat) -> Element {
+    vmux_ui::hooks::use_ui_state::<OnboardingUiState>();
+    let onboarding = UiStateBinding::<OnboardingUiState>::use_context()
+        .state
+        .read()
+        .clone();
     let keys = UiStateBinding::<KeyEntryUiState>::use_context()
         .state
         .read()
         .clone();
-    let notice = if chat.setup_busy() && chat.status() != "authentication" {
-        None
+    let notice = if onboarding.paused || chat.status() == "errored" {
+        Some(rsx! { RecoveryControls { pending: keys.pending } })
+    } else if chat.authentication_pending() {
+        Some(rsx! { RecoveryControls { pending: keys.pending, allow_change: false } })
+    } else if chat.setup_busy() && chat.status() != "authentication" {
+        Some(rsx! { CancelControl {} })
     } else if chat.status() == "authentication" {
         if chat.key_input_requested() {
             None
@@ -53,24 +65,149 @@ pub(super) fn Controls(chat: Chat) -> Element {
     } else {
         Some(rsx! { RecoveryControls { pending: keys.pending } })
     };
-    rsx! { Frame { notice, SetupComposer { chat, keys } } }
+    rsx! { Frame { notice, chat: Some(chat), onboarding, SetupComposer { chat, keys } } }
 }
 
 #[component]
 pub(super) fn Frame(
     #[props(default)] notice: Option<Element>,
     #[props(default)] compact: bool,
+    #[props(default)] chat: Option<Chat>,
+    #[props(default)] onboarding: OnboardingUiState,
     children: Element,
 ) -> Element {
+    let task = Task::of(chat, &onboarding);
     rsx! {
         ComposerFrame {
-            muted: true,
             borderless: true,
             content_class: if compact { "h-16".to_string() } else { String::new() },
-            notice: Some(rsx! { ComposerNotice { content: notice, class: "setup-notice".to_string() } }),
+            notice: Some(rsx! { ComposerNotice {
+                content: Some(rsx! { ComposerTask {
+                    title: task.title,
+                    steps: task.steps,
+                    completed_steps: task.completed,
+                    pending_step: task.pending,
+                    message: task.message,
+                    icon: task.icon,
+                    if let Some(notice) = notice { {notice} }
+                } }),
+                class: "setup-notice".to_string(),
+            } }),
             {children}
         }
     }
+}
+
+struct Task {
+    title: String,
+    steps: Vec<String>,
+    completed: Vec<usize>,
+    pending: Option<usize>,
+    message: String,
+    icon: Option<String>,
+}
+
+impl Task {
+    fn of(chat: Option<Chat>, state: &OnboardingUiState) -> Self {
+        let agent = state.agents.iter().find(|agent| agent.id == state.agent_id);
+        let mut name = String::new();
+        if (state.starting
+            || state.paused
+            || state.failed
+            || !state.session_id.is_empty()
+            || chat.is_some())
+            && let Some(agent) = agent
+        {
+            name.clone_from(&agent.name);
+        }
+        if name.is_empty()
+            && let Some(chat) = chat
+        {
+            name = chat.header_name();
+        }
+        let title = if name.is_empty() {
+            translate("onboarding-setup")
+        } else {
+            translate_with(
+                "onboarding-setup-agent",
+                &[("agent", TranslationValue::String(&name))],
+            )
+        };
+        let mut steps = Vec::new();
+        for (generic, named) in [
+            (
+                "onboarding-checklist-select",
+                "onboarding-checklist-select-agent",
+            ),
+            (
+                "onboarding-checklist-install",
+                "onboarding-checklist-install-agent",
+            ),
+            (
+                "onboarding-checklist-connect",
+                "onboarding-checklist-connect-agent",
+            ),
+        ] {
+            steps.push(if name.is_empty() {
+                translate(generic)
+            } else {
+                translate_with(named, &[("agent", TranslationValue::String(&name))])
+            });
+        }
+        let status = chat.map(|chat| chat.status()).unwrap_or_default();
+        let mut completed = Vec::new();
+        if chat.is_some() || state.starting || state.paused || !state.session_id.is_empty() {
+            completed.push(0);
+        }
+        if agent.is_some_and(|agent| agent.installed)
+            || matches!(status.as_str(), "authentication" | "idle" | "streaming")
+        {
+            completed.push(1);
+        }
+        if chat.is_some_and(|chat| !chat.setup_pending())
+            && matches!(status.as_str(), "idle" | "streaming")
+        {
+            completed.push(2);
+        }
+        let pending = if state.paused || status == "errored" {
+            None
+        } else if chat.is_some_and(|chat| chat.authentication_pending()) {
+            Some(2)
+        } else if chat.is_some_and(|chat| chat.setup_busy()) {
+            Some(1)
+        } else if state.starting {
+            Some(0)
+        } else {
+            None
+        };
+        let message = if state.paused {
+            Self::message("onboarding-setup-paused-agent", &name)
+        } else if chat.is_some_and(|chat| chat.authentication_pending()) {
+            Self::message("onboarding-login-finish-agent", &name)
+        } else {
+            String::new()
+        };
+        Self {
+            title,
+            steps,
+            completed,
+            pending,
+            message,
+            icon: agent
+                .filter(|agent| !agent.icon.is_empty())
+                .map(|agent| agent.icon.clone()),
+        }
+    }
+    fn message(key: &str, name: &str) -> String {
+        translate_with(key, &[("agent", TranslationValue::String(name))])
+    }
+}
+
+#[component]
+fn CancelControl() -> Element {
+    rsx! { div { class: "flex items-center gap-2 px-2 pt-2",
+        Button { variant: ButtonVariant::Ghost, size: ButtonSize::Sm, style: "color:inherit;", class: "[&:hover]:bg-background/5", aria_label: translate("common-cancel"), onclick: move |_| Choice::Cancel.choose(), {translate("common-cancel")} }
+    } }
 }
 
 #[component]
@@ -82,6 +219,7 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
     rsx! {
         div { "data-slot": "composer-notice", class: "flex flex-wrap items-center gap-2 px-3 py-3",
             Button {
+                variant: ButtonVariant::Secondary,
                 size: ButtonSize::Sm,
                 aria_label: translate("onboarding-connect"),
                 disabled: pending || !available,
@@ -93,6 +231,7 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
                     size: ButtonSize::Xs,
                     variant: ButtonVariant::Ghost,
                     class: "text-inherit opacity-60",
+                    style: "color:inherit;",
                     aria_label: translate("onboarding-use-key"),
                     onclick: move |_| chat.request_key_input(true),
                     {translate("onboarding-use-key")}
@@ -145,28 +284,23 @@ impl Connection {
 }
 
 #[component]
-fn RecoveryControls(pending: bool) -> Element {
-    let mut selected = use_signal(|| 0_usize);
+fn RecoveryControls(pending: bool, #[props(default = true)] allow_change: bool) -> Element {
     let choices = [Choice::Retry, Choice::Cancel, Choice::ChangeAgent];
-    let labels = choices.iter().map(Choice::label).collect();
-    let keyboard = choices.clone();
     rsx! {
-        div { "data-slot": "composer-notice",
-            ChoiceOptions {
-                options: labels, selected: selected(), compact: true, framed: true, muted: true, disabled: pending,
-                on_hover: move |index| selected.set(index),
-                on_select: move |index: usize| { if !pending && let Some(choice) = choices.get(index) { choice.choose(); } },
-                on_keydown: move |event| {
-                    if pending { return; }
-                    let Some(key) = ChoiceKey::of(&event, true) else { return; };
-                    match key {
-                        ChoiceKey::Next => selected.set((selected() + 1).min(2)),
-                        ChoiceKey::Previous => selected.set(selected().saturating_sub(1)),
-                        ChoiceKey::Submit => keyboard[selected()].choose(),
-                        ChoiceKey::Number(index) => { if let Some(choice) = keyboard.get(index) { choice.choose(); } },
-                    }
-                    event.prevent_default(); event.stop_propagation();
-                },
+        div { "data-slot": "composer-notice", class: "flex flex-wrap items-center gap-2 px-2 pt-2",
+            for choice in choices {
+                if allow_change || !matches!(choice, Choice::ChangeAgent) {
+                Button {
+                    variant: if matches!(choice, Choice::Retry) { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                    size: ButtonSize::Sm,
+                    disabled: pending && !matches!(choice, Choice::Cancel),
+                    style: if matches!(choice, Choice::Retry) { "" } else { "color:inherit;" },
+                    class: "[&:hover]:bg-background/5",
+                    aria_label: choice.label(),
+                    onclick: move |_| choice.choose(),
+                    {choice.label()}
+                }
+                }
             }
         }
     }
@@ -212,18 +346,28 @@ fn SetupComposer(chat: Chat, keys: KeyEntryUiState) -> Element {
 #[component]
 pub(super) fn ProgressTurn(
     phase: Phase,
+    #[props(default)] agent_name: String,
     #[props(default)] detail: String,
     #[props(default)] percent: Option<u8>,
 ) -> Element {
-    let label = phase.label();
+    let label = if agent_name.is_empty() {
+        phase.label()
+    } else {
+        translate_with(
+            match phase {
+                Phase::Preparation => "onboarding-preparing-agent",
+                Phase::Installation => "onboarding-installing-agent",
+            },
+            &[("agent", TranslationValue::String(&agent_name))],
+        )
+    };
     let detail = detail.trim();
     let show_detail =
         !detail.is_empty() && detail != label && detail != translate("agent-preparing");
     rsx! {
-        Turn {
+        Turn { agent_name,
             div { role: "status", aria_live: "polite",
-                span { class: "sr-only", "{label}" }
-                Checklist { phase, pending: true }
+                span { "{label}" }
             }
             if show_detail { p { class: "text-xs text-muted-foreground", "{detail}" } }
             if phase == Phase::Installation {
@@ -237,34 +381,10 @@ pub(super) fn ProgressTurn(
     }
 }
 
-#[component]
-pub(super) fn Checklist(
-    phase: Phase,
-    #[props(default)] pending: bool,
-    #[props(default)] completed: bool,
-) -> Element {
-    rsx! {
-        div { class: "flex flex-col gap-0.5",
-            ChecklistItem { label: translate("onboarding-checklist-select"), completed: true }
-            ChecklistItem {
-                label: translate("onboarding-checklist-install"),
-                completed: completed || phase == Phase::Authentication,
-                pending: pending && phase != Phase::Authentication,
-            }
-            ChecklistItem {
-                label: translate("onboarding-checklist-connect"),
-                completed,
-                pending: pending && phase == Phase::Authentication,
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Phase {
     Preparation,
     Installation,
-    Authentication,
 }
 
 impl Phase {
@@ -272,12 +392,11 @@ impl Phase {
         translate(match self {
             Self::Preparation => "agent-preparing",
             Self::Installation => "setup-installing",
-            Self::Authentication => "onboarding-auth-pending",
         })
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 enum Choice {
     Retry,
     Cancel,
@@ -299,14 +418,10 @@ impl Choice {
                 let _ = send(&crate::event::ChatRetrySession);
             }
             Self::Cancel => {
-                if send(&ChatCancelSetup).is_ok() {
-                    vmux_ui::navigation::PageNavigation::replace("vmux://start/");
-                }
+                let _ = send(&ChatCancelSetup);
             }
             Self::ChangeAgent => {
-                if send(&OnboardingChooseAgent).is_ok() {
-                    vmux_ui::navigation::PageNavigation::replace("vmux://start/onboarding/agent");
-                }
+                let _ = send(&OnboardingChooseAgent);
             }
         }
     }
@@ -559,9 +674,18 @@ mod tests {
             let html = dioxus_ssr::render(&dom);
             assert!(html.contains(&translate("common-cancel")));
             assert!(html.contains("Esc"));
-            assert!(!initial.edits.iter().any(|edit| matches!(edit,
+            assert!(initial.edits.iter().any(|edit| matches!(edit,
                 Mutation::SetAttribute { name: "aria-label" | "title", value: AttributeValue::Text(value), .. } if value == &translate("common-cancel"))));
-            assert!(!html.contains(&translate("composer-choose-agent")));
+            if status == "authentication" {
+                assert!(html.contains(&translate("common-retry")));
+            }
+            let choose_label = format!("aria-label=\"{}\"", translate("composer-choose-agent"));
+            for button in html.split("<button").skip(1) {
+                let attributes = button.split('>').next().unwrap();
+                if attributes.contains(&choose_label) {
+                    assert!(attributes.contains("role=\"checkbox\""));
+                }
+            }
             if status != "authentication" {
                 assert!(!html.contains("role=\"listbox\""));
             }
@@ -665,7 +789,7 @@ mod tests {
         assert!(html.contains("Esc"));
         assert!(html.contains(&translate("common-cancel")));
         assert!(!html.contains("<textarea"));
-        assert!(Notice::of(&html).hidden(), "{}", Notice::of(&html).0);
+        assert!(!Notice::of(&html).hidden(), "{}", Notice::of(&html).0);
         assert!(!html.contains(&translate("onboarding-save-key")));
         assert!(host.0.borrow().is_empty());
         let label = translate("onboarding-api-key");
@@ -721,6 +845,7 @@ mod tests {
             ProgressTurn,
             ProgressTurnProps {
                 phase: Phase::Preparation,
+                agent_name: String::new(),
                 detail: label.clone(),
                 percent: None,
             },
@@ -741,6 +866,7 @@ mod tests {
                 ProgressTurn,
                 ProgressTurnProps {
                     phase: Phase::Installation,
+                    agent_name: String::new(),
                     detail: "Downloading package".into(),
                     percent,
                 },
@@ -843,15 +969,11 @@ mod tests {
     }
 
     #[test]
-    fn recovery_cancel_leaves_setup_and_change_agent_reopens_selection() {
+    fn recovery_sends_cancel_and_change_intent_without_discarding_the_owned_view() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
-        for (label, event, destination) in [
-            ("common-cancel", "cancel", "vmux://start/"),
-            (
-                "composer-choose-agent",
-                "choose-agent",
-                "vmux://start/onboarding/agent",
-            ),
+        for (label, event) in [
+            ("common-cancel", "cancel"),
+            ("composer-choose-agent", "choose-agent"),
         ] {
             let host = Rc::new(Host::default());
             let mut dom = VirtualDom::new_with_props(FailedSetup, FailedSetupProps { setup: true });
@@ -880,7 +1002,7 @@ mod tests {
                 button,
             );
             dom.render_immediate_to_vec();
-            assert_eq!(*host.0.borrow(), [event, destination]);
+            assert_eq!(*host.0.borrow(), [event]);
         }
     }
 
@@ -889,8 +1011,8 @@ mod tests {
         let mut expanded = use_signal(|| true);
         rsx! {
             button { id: String::from("toggle-notice"), onclick: move |_| expanded.set(!expanded()), "Toggle" }
-            Frame {
-                notice: expanded().then(|| rsx! { button { id: "retained-notice", "Connect" } }),
+            ComposerFrame {
+                notice: Some(rsx! { ComposerNotice { content: expanded().then(|| rsx! { button { id: "retained-notice", "Connect" } }) } }),
                 input { id: String::from("persistent-composer") }
             }
         }

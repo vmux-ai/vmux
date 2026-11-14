@@ -16,6 +16,9 @@ pub use native_bridge::{NativeBridge, NativeHistoryPhase};
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use navigation::OpenHistoryRequest;
+pub use popup::{
+    PopupBounds, PopupHideRequest, PopupPresented, PopupScriptRequest, PopupWebviewsPlugin,
+};
 pub use tool::BrowserToolPlugin;
 use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};
 use vmux_ecs::{
@@ -55,6 +58,7 @@ mod navigation;
 mod page;
 mod page_life;
 mod platform;
+mod popup;
 mod present;
 mod scroll;
 mod snapshot;

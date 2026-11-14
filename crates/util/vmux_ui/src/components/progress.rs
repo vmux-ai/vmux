@@ -9,6 +9,7 @@ pub fn ChecklistItem(
     #[props(default)] pending: bool,
     #[props(default)] primary: bool,
     #[props(default)] class: String,
+    #[props(default)] compact: bool,
     #[props(default)] on_select: Option<EventHandler<()>>,
 ) -> Element {
     let interactive = on_select.is_some();
@@ -20,7 +21,12 @@ pub fn ChecklistItem(
     let check = if completed {
         "border-transparent text-white"
     } else {
-        "border-foreground/30"
+        "border-current/30"
+    };
+    let size = if compact {
+        "min-h-6 px-2 py-1 text-xs"
+    } else {
+        "min-h-8 px-2 py-1.5 text-sm"
     };
     rsx! {
         button {
@@ -31,7 +37,7 @@ pub fn ChecklistItem(
             aria_busy: pending,
             aria_readonly: (!interactive).to_string(),
             disabled: !interactive || pending,
-            class: "flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-foreground {interaction} {class}",
+            class: "flex w-full items-center gap-2 text-left text-inherit {size} {interaction} {class}",
             onclick: move |_| { if let Some(handler) = on_select { handler.call(()); } },
             span {
                 aria_hidden: "true",
@@ -44,7 +50,7 @@ pub fn ChecklistItem(
                 style: primary.then_some("background-image:linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end));background-clip:text;-webkit-background-clip:text;color:transparent;"),
                 {label.clone()}
             }
-            if pending { LoadingIcon { class: "size-3.5 text-muted-foreground".to_string() } }
+            if pending { LoadingIcon { class: "size-3.5 opacity-60".to_string() } }
         }
     }
 }

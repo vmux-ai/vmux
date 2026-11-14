@@ -22,6 +22,7 @@ pub(super) fn Onboarding() -> Element {
 
 #[component]
 fn Conversation(state: OnboardingUiState) -> Element {
+    let retry_agent = state.agent_id.clone();
     rsx! {
         super::surface::Page { accent: Identity::COLOR.to_string(), setup: true, onboarding_entry: true,
             super::surface::Transcript { id: "setup-scroll".to_string(), at_bottom: false,
@@ -35,7 +36,19 @@ fn Conversation(state: OnboardingUiState) -> Element {
             super::surface::Dock {
                 super::setup::Frame {
                     compact: true,
-                    notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1", AgentSelector { state } } }),
+                    onboarding: state.clone(),
+                    notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1",
+                        if state.paused {
+                            vmux_ui::components::button::Button {
+                                variant: vmux_ui::components::button::ButtonVariant::Secondary,
+                                size: vmux_ui::components::button::ButtonSize::Sm,
+                                aria_label: translate("common-retry"),
+                                onclick: move |_| { let _ = send(&OnboardingConnect { agent_id: retry_agent.clone() }); },
+                                {translate("common-retry")}
+                            }
+                        }
+                        AgentSelector { state }
+                    } }),
                 DisabledComposer {
                     placeholder: translate("onboarding-composer-wait"),
                 }

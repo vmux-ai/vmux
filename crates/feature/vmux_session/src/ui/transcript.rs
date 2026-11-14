@@ -106,7 +106,7 @@ pub(super) fn ChatTranscript(
             on_resize: move |_| {
                 if *chat.transcript.initial_follow.peek() || *at_bottom.peek() { chat.transcript.follow(); }
             },
-                if setup { super::setup::Welcome {} }
+                if setup { super::setup::Welcome { agent_name: chat.header_name() } }
                 if transcript_loading {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 || has_older {
@@ -207,15 +207,14 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
         super::setup::Phase::Preparation
     };
     rsx! {
-        super::setup::ProgressTurn { phase, detail, percent: chat.install_percent() }
+        super::setup::ProgressTurn { phase, agent_name: chat.header_name(), detail, percent: chat.install_percent() }
     }
 }
 
 #[component]
 fn ReadyIntro(chat: Chat) -> Element {
     rsx! {
-        super::setup::Turn {
-            super::setup::Checklist { phase: super::setup::Phase::Authentication, completed: true }
+        super::setup::Turn { agent_name: chat.header_name(),
             p { class: "text-sm leading-relaxed",
                 {translate_with("onboarding-ready", &[("agent", TranslationValue::String(&chat.header_name()))])}
             }

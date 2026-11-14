@@ -453,6 +453,21 @@ impl PageOpener<'_, '_> {
         let stack = task.stack;
         self.retarget_handoff(transition_webview, task.id);
         let setup = Route::parse(&task.url) == Some(Route::Setup);
+        let title = if setup {
+            let config = self
+                .settings
+                .agent
+                .acp
+                .iter()
+                .find(|config| config.id == agent_id);
+            let agent = self.catalog.profile_name(agent_id, config);
+            vmux_ui::i18n::translate_with(
+                "onboarding-setup-agent",
+                &[("agent", vmux_ui::i18n::TranslationValue::String(&agent))],
+            )
+        } else {
+            name.to_string()
+        };
         let url = if setup {
             Route::Setup.url()
         } else {
@@ -482,7 +497,7 @@ impl PageOpener<'_, '_> {
         self.commands.entity(view).insert((
             PageMetadata {
                 url,
-                title: name.to_string(),
+                title,
                 bg_color: None,
                 icon: self
                     .catalog

@@ -9,6 +9,28 @@ pub struct OpenExternalBrowserRequest {
     pub url: String,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct BrowserModalState {
+    pub id: String,
+    pub title: String,
+    pub origin: String,
+    pub icon: Option<String>,
+}
+
+#[vmux_api::ui_event]
+pub struct BrowserModalBoundsRequest {
+    pub id: String,
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[vmux_api::ui_event]
+pub struct BrowserModalCloseRequest {
+    pub id: String,
+}
+
 pub struct Url(String);
 
 impl Url {

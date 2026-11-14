@@ -42,6 +42,10 @@ impl Entrance {
                 "__VMUX_DOCK_OFFSET__",
                 &WelcomeLayout::dock_offset().to_string(),
             )
+            .replace(
+                "__VMUX_NOTICE_HEIGHT__",
+                &WelcomeLayout::NOTICE_HEIGHT.to_string(),
+            )
     }
 
     const STYLE: &str = r#"
@@ -49,22 +53,23 @@ impl Entrance {
 [data-vmux-onboarding-entry] .onboarding-origin{animation:vmux-guide-dock var(--vmux-dock-ms) cubic-bezier(.22,.1,.2,1) backwards;animation-play-state:paused}
 [data-vmux-onboarding-entry] .onboarding-origin .chat-message-enter{animation:none}
 [data-vmux-onboarding-entry] .session-chat-prompt-shell{animation:vmux-composer-dock var(--vmux-dock-ms) cubic-bezier(.22,.1,.2,1) backwards;animation-play-state:paused}
-[data-vmux-onboarding-entry] .setup-notice{min-height:48px;animation:vmux-choice-open 200ms ease-out 70ms backwards;animation-play-state:paused}
+[data-vmux-onboarding-entry] .setup-notice{min-height:__VMUX_NOTICE_HEIGHT__px}
+[data-vmux-onboarding-entry] .composer-task-details{animation:vmux-choice-open 200ms ease-out 70ms backwards;animation-play-state:paused}
 [data-vmux-onboarding-entry] .onboarding-detail,
-[data-vmux-onboarding-entry] .composer-notice-content{animation:vmux-setup-detail var(--vmux-entry-ms) ease-out 100ms backwards;animation-play-state:paused}
+[data-vmux-onboarding-entry] .composer-task-details>div{animation:vmux-setup-detail var(--vmux-entry-ms) ease-out 100ms backwards;animation-play-state:paused}
 [data-vmux-onboarding-entry] .chat-message-enter{animation-play-state:paused}
 body:not([inert]) [data-vmux-onboarding-entry] .onboarding-origin,
 body:not([inert]) [data-vmux-onboarding-entry] .session-chat-prompt-shell,
-body:not([inert]) [data-vmux-onboarding-entry] .setup-notice,
+body:not([inert]) [data-vmux-onboarding-entry] .composer-task-details,
 body:not([inert]) [data-vmux-onboarding-entry] .onboarding-detail,
-body:not([inert]) [data-vmux-onboarding-entry] .composer-notice-content,
+body:not([inert]) [data-vmux-onboarding-entry] .composer-task-details>div,
 body:not([inert]) [data-vmux-onboarding-entry] .chat-message-enter{animation-play-state:running}
 [data-vmux-setup-motion] [role="option"]{transition:background-color 80ms ease-out}
 @keyframes vmux-guide-dock{from{transform:translateY(calc(50dvh - __VMUX_DOCK_OFFSET__px))}to{transform:translateY(0)}}
 @keyframes vmux-composer-dock{from{transform:translateY(calc(__VMUX_DOCK_OFFSET__px - 50dvh))}to{transform:translateY(0)}}
 @keyframes vmux-choice-open{from{grid-template-rows:0fr}to{grid-template-rows:1fr}}
 @keyframes vmux-setup-detail{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-@media(max-width:1px),(max-height:1px){.session-chat-page .onboarding-origin,.session-chat-page .chat-message-enter,.session-chat-page .session-chat-prompt-shell,.session-chat-page .setup-notice,.session-chat-page .onboarding-detail,.session-chat-page .composer-notice-content{animation-play-state:paused!important}}
+@media(max-width:1px),(max-height:1px){.session-chat-page .onboarding-origin,.session-chat-page .chat-message-enter,.session-chat-page .session-chat-prompt-shell,.session-chat-page .setup-notice,.session-chat-page .onboarding-detail,.session-chat-page .composer-task-details,.session-chat-page .composer-task-details>div{animation-play-state:paused!important}}
 @media(prefers-reduced-motion:reduce){.session-chat-page .onboarding-origin,.session-chat-page .chat-message-enter,.session-chat-page .session-chat-prompt-shell,.session-chat-page .setup-notice,.session-chat-page .onboarding-detail,.session-chat-page .composer-notice-content,.session-chat-page [role="option"]{animation:none!important;transition:none!important}}
 "#;
 }

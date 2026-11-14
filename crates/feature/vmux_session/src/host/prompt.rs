@@ -163,7 +163,11 @@ fn submit(
         (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
         With<SessionView>,
     >,
-    mut sessions: Query<(&mut RunState, Option<&AgentConversationTitle>)>,
+    mut sessions: Query<(
+        &mut RunState,
+        Option<&AgentConversationTitle>,
+        Has<vmux_session::SetupPending>,
+    )>,
     mut queues: QueuedPrompts,
     mut commands: Commands,
 ) {
@@ -190,9 +194,12 @@ fn submit(
     let Some(session) = targets.session(webview) else {
         return;
     };
-    let Ok((mut state, title)) = sessions.get_mut(session) else {
+    let Ok((mut state, title, setup)) = sessions.get_mut(session) else {
         return;
     };
+    if setup {
+        return;
+    }
     if let RunState::Errored(error) = &*state
         && vmux_session::Failure(error).in_use()
     {
@@ -898,6 +905,38 @@ mod tests {
                 .path,
             "/tmp/image.png"
         );
+    }
+
+    #[cfg(host)]
+    #[test]
+    fn unfinished_setup_refuses_work_after_cancellation_and_accepts_it_only_after_readiness() {
+        let mut fixture = InputFixture::new(RunState::Errored("ACP setup cancelled".into()));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(crate::SetupPending);
+        fixture.submit("yo");
+        assert!(fixture.queued().is_empty());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<AgentConversationTitle>(fixture.session)
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .remove::<crate::SetupPending>();
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<RunState>(fixture.session)
+            .unwrap() = RunState::Idle;
+        fixture.submit("yo");
+        assert_eq!(fixture.queued(), [(0, "yo".to_string())]);
     }
 
     #[cfg(host)]

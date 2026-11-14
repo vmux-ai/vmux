@@ -3,6 +3,7 @@ pub use vmux_api::prompt_media::PromptComposerAttachment;
 
 use crate::cn::cn;
 use crate::components::popup::Dismissal;
+use crate::components::progress::ChecklistItem;
 use crate::components::prompt_box::{PromptBox, PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
@@ -346,7 +347,7 @@ pub fn ComposerFrame(
     rsx! {
         div {
             "data-slot": "composer-frame",
-            class: if attached && borderless { "relative text-foreground/85" } else if attached && muted { "rounded-[14px] bg-foreground/[0.035] p-px text-foreground/85 ring-1 ring-inset ring-foreground/10" } else if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
+            class: if attached && borderless && !muted { "rounded-[14px] bg-foreground text-background" } else if attached && borderless { "relative text-foreground/85" } else if attached && muted { "rounded-[14px] bg-foreground/[0.035] p-px text-foreground/85 ring-1 ring-inset ring-foreground/10" } else if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
             if let Some(notice) = notice {
                 {notice}
             }
@@ -358,6 +359,37 @@ pub fn ComposerFrame(
                     format!("relative {content_class}")
                 },
                 {children}
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ComposerTask(
+    title: String,
+    steps: Vec<String>,
+    #[props(default)] completed_steps: Vec<usize>,
+    #[props(default)] pending_step: Option<usize>,
+    #[props(default)] message: String,
+    #[props(default)] icon: Option<String>,
+    #[props(default)] on_select: Option<EventHandler<()>>,
+    #[props(default = rsx! {})] children: Element,
+) -> Element {
+    let completed = !steps.is_empty() && completed_steps.len() == steps.len();
+    rsx! {
+        div { class: "p-2 text-inherit", "data-slot": "composer-task",
+            div { class: "flex h-10 items-center gap-2",
+                if let Some(icon) = icon { img { src: icon, alt: "", class: "ml-2 size-5 shrink-0 object-contain" } }
+                ChecklistItem { label: title, completed, primary: on_select.is_some(), on_select, class: "h-10 font-medium".to_string() }
+            }
+            div { class: "flex flex-col",
+                for (index, label) in steps.into_iter().enumerate() {
+                    ChecklistItem { label, compact: true, completed: completed_steps.contains(&index), pending: pending_step == Some(index) }
+                }
+            }
+            if !message.is_empty() { p { role: "status", aria_live: "polite", class: "px-2 pb-1 pt-2 text-xs leading-relaxed opacity-70", {message} } }
+            div { class: "composer-task-details grid",
+                div { class: "min-h-0 overflow-hidden", {children} }
             }
         }
     }

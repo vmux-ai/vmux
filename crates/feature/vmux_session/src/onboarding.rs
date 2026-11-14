@@ -8,13 +8,14 @@ pub struct AgentOption {
     pub key_variable: String,
 }
 
-#[vmux_api::ui_state(Default, Eq)]
+#[vmux_api::ui_state(Default, Eq, version = 1)]
 pub struct OnboardingUiState {
     pub agents: Vec<AgentOption>,
     pub agent_id: String,
     pub starting: bool,
     pub session_id: String,
     pub failed: bool,
+    pub paused: bool,
 }
 
 #[vmux_api::ui_event]

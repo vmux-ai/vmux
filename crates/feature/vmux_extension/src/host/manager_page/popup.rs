@@ -1,12 +1,11 @@
-use bevy::ecs::system::SystemState;
+use bevy::ecs::system::{Commands as EcsCommands, SystemState};
 use bevy::{prelude::*, window::WindowResized};
-use bevy_cef::prelude::{
-    Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewWindowed,
-};
+use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
 use vmux_api::extension::{
     ExtRow, ExtensionPopupAnchor, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
     ExtensionPopupEvent, ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
+use vmux_browser::PopupBounds as ExtensionPopupBounds;
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_ecs::{KeyboardOwner, UiStateWrite};
 use vmux_flex::prelude::{LayoutSystems, Visibility};
@@ -20,6 +19,9 @@ pub(super) struct PopupPlugin;
 
 impl Plugin for PopupPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_browser::PopupWebviewsPlugin>() {
+            app.add_plugins(vmux_browser::PopupWebviewsPlugin);
+        }
         app.add_message::<OpenRequest>()
             .add_message::<CloseRequest>()
             .add_plugins(UiEventPlugin::<(
@@ -41,7 +43,7 @@ impl Plugin for PopupPlugin {
             .add_systems(Update, inject_sizing.after(vmux_browser::BrowserLoadSet))
             .add_systems(
                 PostUpdate,
-                present
+                close_resized
                     .in_set(vmux_browser::BrowserOverlaySet)
                     .after(LayoutSystems::Layout),
             );
@@ -90,8 +92,7 @@ struct PopupHost<'w, 's> {
     model: Single<'w, 's, &'static ExtensionModel>,
     virtual_windows: Single<'w, 's, &'static mut ExtensionWindows>,
     events: MessageWriter<'w, ExtensionModelEvent>,
-    browsers: NonSend<'w, Browsers>,
-    commands: Commands<'w, 's>,
+    commands: EcsCommands<'w, 's>,
 }
 
 impl PopupHost<'_, '_> {
@@ -210,8 +211,10 @@ impl PopupHost<'_, '_> {
                     url,
                 });
             } else if previous_id != Some(id) {
-                self.browsers
-                    .execute_js(&entity, &format!("globalThis.__vmuxPopupWindowId = {id};"));
+                self.commands.trigger(vmux_browser::PopupScriptRequest {
+                    webview: entity,
+                    script: format!("globalThis.__vmuxPopupWindowId = {id};"),
+                });
             }
         } else {
             self.close(owner);
@@ -224,6 +227,7 @@ impl PopupHost<'_, '_> {
             entity.insert((
                 Name::new(format!("Extension popup: {}", entry.name)),
                 WindowOverlay,
+                vmux_ecs::FixedWindowOverlay,
                 ExtensionPopup {
                     owner,
                     extension_id: entry.id.clone(),
@@ -258,7 +262,8 @@ impl PopupHost<'_, '_> {
     }
 
     fn retire(&mut self, entity: Entity, id: Option<i32>) {
-        self.browsers.hide_child_window(&entity);
+        self.commands
+            .trigger(vmux_browser::PopupHideRequest { webview: entity });
         self.commands.entity(entity).try_despawn();
         if let Some(id) = id {
             for event in self.virtual_windows.dismiss_popup(id, &self.model) {
@@ -351,37 +356,6 @@ fn dispose(mut host: PopupHost) {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ExtensionPopupBounds {
-    pub(crate) left: f32,
-    pub(crate) top: f32,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-}
-
-impl ExtensionPopupBounds {
-    fn from_request(request: &ExtensionPopupBoundsRequest) -> Option<Self> {
-        if !request.left.is_finite()
-            || !request.top.is_finite()
-            || !request.width.is_finite()
-            || !request.height.is_finite()
-            || request.width <= 0.0
-            || request.height <= 0.0
-        {
-            return None;
-        }
-        Some(Self {
-            left: request.left,
-            top: request.top,
-            width: request.width,
-            height: request.height,
-        })
-    }
-}
-
-#[derive(Component)]
-pub(crate) struct ExtensionPopupPresented;
-
 #[derive(serde::Deserialize)]
 struct ExtensionPopupSizeRequest {
     channel: String,
@@ -426,9 +400,14 @@ fn open_request(trigger: On<UiInput<ExtensionPopupOpenRequest>>, mut host: Popup
 fn bounds_request(
     trigger: On<UiInput<ExtensionPopupBoundsRequest>>,
     popups: Query<(Entity, &ExtensionPopup)>,
-    mut commands: Commands,
+    mut commands: EcsCommands,
 ) {
-    let Some(bounds) = ExtensionPopupBounds::from_request(&trigger.event().payload) else {
+    let Some(bounds) = ExtensionPopupBounds::new(
+        trigger.event().payload.left,
+        trigger.event().payload.top,
+        trigger.event().payload.width,
+        trigger.event().payload.height,
+    ) else {
         return;
     };
     for (entity, popup) in &popups {
@@ -527,76 +506,25 @@ fn inject_sizing(
     }
 }
 
-fn present(
-    browsers: NonSend<Browsers>,
-    popups: Query<
-        (
-            Entity,
-            &ExtensionPopupBounds,
-            Option<&HostWindow>,
-            Option<&ExtensionWindowId>,
-            Has<ExtensionPopupPresented>,
-        ),
-        (
-            With<ExtensionPopup>,
-            With<WindowOverlay>,
-            With<WebviewWindowed>,
-        ),
-    >,
-    windows: Query<&Window>,
-    focused_window: vmux_layout::window::FocusedWindow,
+fn close_resized(
+    popups: Query<(Entity, &HostWindow, &ExtensionWindowId), With<ExtensionPopup>>,
     mut resized: MessageReader<WindowResized>,
-    mut commands: Commands,
+    mut requests: MessageWriter<CloseRequest>,
+    mut commands: EcsCommands,
 ) {
-    let resized_windows = resized.read().map(|event| event.window).collect::<Vec<_>>();
-    if !resized_windows.is_empty() {
-        for (entity, _, host, id, _) in &popups {
-            if host.is_some_and(|host| resized_windows.contains(&host.0))
-                && let Some(id) = id
-            {
-                commands.write_message(CloseRequest { window_id: id.0 });
-                browsers.hide_child_window(&entity);
-            }
+    let windows: Vec<_> = resized.read().map(|event| event.window).collect();
+    for (entity, host, id) in &popups {
+        if windows.contains(&host.0) {
+            requests.write(CloseRequest { window_id: id.0 });
+            commands.trigger(vmux_browser::PopupHideRequest { webview: entity });
         }
-        return;
-    }
-    for (entity, bounds, host_window, _, presented) in &popups {
-        let window_entity = host_window.map(|host| host.0).or(focused_window.entity());
-        let Some(window_entity) = window_entity else {
-            continue;
-        };
-        let Ok(window) = windows.get(window_entity) else {
-            continue;
-        };
-        if !browsers.has_browser(entity) {
-            continue;
-        }
-        let scale = window.resolution.scale_factor();
-        browsers.resize(&entity, Vec2::new(bounds.width, bounds.height), scale);
-        browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
-        if !browsers.host_in_child_window(
-            &entity,
-            bounds.left as f64,
-            bounds.top as f64,
-            bounds.width as f64,
-            bounds.height as f64,
-        ) {
-            continue;
-        }
-        browsers.set_windowed_hidden(&entity, false);
-        if presented {
-            continue;
-        }
-        browsers.set_windowed_focus(&entity, true);
-        browsers.nudge_windowed_repaint(&entity);
-        commands.entity(entity).insert(ExtensionPopupPresented);
     }
 }
 
 fn size(
     trigger: On<Receive<ExtensionPopupSizeRequest>>,
     popups: Query<&ExtensionPopup>,
-    mut commands: Commands,
+    mut commands: EcsCommands,
 ) {
     let request = &trigger.payload;
     if request.channel != POPUP_SIZE_CHANNEL

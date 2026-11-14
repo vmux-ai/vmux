@@ -1018,8 +1018,14 @@ mod tests {
             "vmux://start/onboarding/agent"
         );
         assert_eq!(
-            fixture.app.world().get::<PageMetadata>(view).unwrap().title,
-            "Setup Agent"
+            fixture
+                .app
+                .world()
+                .get::<PageMetadata>(view)
+                .unwrap()
+                .title
+                .replace(['\u{2068}', '\u{2069}'], ""),
+            "Setup Mistral Vibe"
         );
         assert!(
             fixture

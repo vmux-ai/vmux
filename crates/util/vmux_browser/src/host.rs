@@ -20,6 +20,7 @@ use vmux_ecs::service::ServiceRequest;
 
 mod agent;
 mod agent_pane;
+mod authentication;
 
 #[derive(Clone, Copy, Debug, Message)]
 pub struct WebviewLoadCompleted {

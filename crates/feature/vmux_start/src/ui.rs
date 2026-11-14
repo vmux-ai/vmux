@@ -1,10 +1,11 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::composer::{ComposerFrame, ComposerNotice, DisabledComposer};
+use vmux_ui::components::composer::{
+    ComposerFrame, ComposerNotice, ComposerTask, DisabledComposer,
+};
 use vmux_ui::components::manager::ManagerPage;
 use vmux_ui::components::message::{MessageFrame, WelcomeLayout};
-use vmux_ui::components::progress::ChecklistItem;
 
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
@@ -82,14 +83,12 @@ fn SetupWelcome() -> Element {
             }
             div { class: "h-[var(--vmux-welcome-composer-height)] shrink-0",
                 ComposerFrame {
-                    muted: true,
                     borderless: true,
                     content_class: "h-16".to_string(),
                     notice: Some(rsx! { ComposerNotice {
-                        content: Some(rsx! { ChecklistItem {
-                            label: translate("onboarding-setup"),
-                            primary: true,
-                            class: "h-12".to_string(),
+                        content: Some(rsx! { ComposerTask {
+                            title: translate("onboarding-setup"),
+                            steps: vec![translate("onboarding-checklist-select"), translate("onboarding-checklist-install"), translate("onboarding-checklist-connect")],
                             on_select: Some(EventHandler::new(move |_| {
                                 let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest {
                                     value: "vmux://start/onboarding/agent".to_string(),

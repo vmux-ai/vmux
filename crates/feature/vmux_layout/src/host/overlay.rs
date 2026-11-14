@@ -84,7 +84,10 @@ fn cleanup(active: Query<(Entity, &LayoutOverlayActive)>, mut commands: Commands
 }
 
 fn adopt_window_overlays(
-    overlays: Query<(Entity, Option<&HostWindow>, Option<&ChildOf>), With<WindowOverlay>>,
+    overlays: Query<
+        (Entity, Option<&HostWindow>, Option<&ChildOf>),
+        (With<WindowOverlay>, Without<vmux_ecs::FixedWindowOverlay>),
+    >,
     roots: Query<(Entity, &HostWindow), With<VmuxWindow>>,
     focused_window: crate::window::FocusedWindow,
     mut commands: Commands,
@@ -169,6 +172,37 @@ mod tests {
         assert_eq!(
             overlay_ref.get::<HostWindow>(),
             Some(&HostWindow(focused_window))
+        );
+    }
+
+    #[test]
+    fn fixed_popup_keeps_its_source_window_when_another_window_is_focused() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, LayoutOverlayPlugin));
+        let source = app.world_mut().spawn(Window::default()).id();
+        let focused = app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        let source_root = app.world_mut().spawn((VmuxWindow, HostWindow(source))).id();
+        app.world_mut().spawn((VmuxWindow, HostWindow(focused)));
+        let popup = app
+            .world_mut()
+            .spawn((
+                WindowOverlay,
+                vmux_ecs::FixedWindowOverlay,
+                HostWindow(source),
+                ChildOf(source_root),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<HostWindow>(popup),
+            Some(&HostWindow(source))
+        );
+        assert_eq!(
+            app.world().get::<ChildOf>(popup).unwrap().parent(),
+            source_root
         );
     }
 }

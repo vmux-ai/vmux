@@ -26,6 +26,7 @@ impl bevy_app::Plugin for Plugin {
             .add_observer(choose_agent)
             .add_observer(created)
             .add_observer(cancelled)
+            .add_observer(resumed)
             .add_systems(PostUpdate, (begin, providers, publish, save).chain());
     }
 }
@@ -49,7 +50,7 @@ fn sync_views(
         ),
         With<vmux_ecs::page::HostsPage>,
     >,
-    drafts: Query<&Draft>,
+    drafts: Query<(&Draft, &Catalog)>,
     sessions: Query<
         (
             Entity,
@@ -64,7 +65,8 @@ fn sync_views(
     targets: Query<(&vmux_ecs::EntityTarget<crate::Session>, Has<SetupTarget>)>,
     mut commands: Commands,
 ) {
-    let draft = drafts.single().ok();
+    let projected = drafts.single().ok();
+    let draft = projected.map(|(draft, _)| draft);
     let desired = draft.and_then(|draft| {
         if !draft.setup_started || draft.session_id.is_empty() {
             return None;
@@ -172,7 +174,20 @@ fn sync_views(
                 commands.entity(view).remove::<super::SessionView>();
             }
         }
-        let title = vmux_ui::i18n::translate("onboarding-setup");
+        let title = match projected
+            .and_then(|(draft, catalog)| catalog.0.iter().find(|agent| agent.id == draft.agent_id))
+        {
+            Some(agent) if draft.is_some_and(|draft| draft.setup_started) => {
+                vmux_ui::i18n::translate_with(
+                    "onboarding-setup-agent",
+                    &[(
+                        "agent",
+                        vmux_ui::i18n::TranslationValue::String(&agent.name),
+                    )],
+                )
+            }
+            _ => vmux_ui::i18n::translate("onboarding-setup"),
+        };
         if metadata.title != title {
             metadata.title = title;
         }
@@ -525,6 +540,27 @@ fn cancelled(
     }
 }
 
+fn resumed(
+    input: On<UiInput<crate::event::ChatRetrySession>>,
+    views: super::SessionViews,
+    sessions: Query<&crate::SessionId, With<crate::Session>>,
+    mut drafts: Query<&mut Draft>,
+) {
+    let Some(session) = views.session(input.event().webview) else {
+        return;
+    };
+    let Ok(id) = sessions.get(session) else {
+        return;
+    };
+    let Ok(mut draft) = drafts.single_mut() else {
+        return;
+    };
+    if draft.session_id == id.0 {
+        draft.paused = false;
+        draft.dirty = true;
+    }
+}
+
 fn choose_agent(
     input: On<UiInput<OnboardingChooseAgent>>,
     parents: Query<&ChildOf, (With<SetupView>, With<super::SessionView>)>,
@@ -599,6 +635,7 @@ fn publish(
         starting: draft.starting,
         session_id: draft.session_id.clone(),
         failed: draft.failed,
+        paused: draft.paused,
     };
     published.retain(|view, _| views.contains(*view));
     for (view, metadata, parent, session_view) in &views {
