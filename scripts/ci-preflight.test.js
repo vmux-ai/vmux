@@ -53,7 +53,7 @@ class Fixture {
   }
 
   git(...args) {
-    return execFileSync('git', args, { cwd: this.root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return execFileSync('git', args, { cwd: this.root, env: Preflight.gitEnvironment(), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   }
 
   commit(message) {
@@ -193,6 +193,29 @@ test('prepared checkouts compile the merged code from both branches', (t) => {
   assert.equal(fixture.git('status', '--porcelain'), '');
   assert.throws(() => Preflight.checkout({ ...env, VMUX_CI_TREE: 'a'.repeat(40) }, fixture.root), /changed/);
   assert.throws(() => Preflight.checkout({ ...env, VMUX_CI_BASE: '--help' }, fixture.root), /Invalid/);
+});
+
+test('Git hook repository variables cannot redirect an explicitly selected checkout', (t) => {
+  const fixture = new Fixture(t);
+  const other = new Fixture(t);
+  const names = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'];
+  const previous = names.map((name) => process.env[name]);
+  try {
+    process.env.GIT_DIR = path.join(other.root, '.git');
+    process.env.GIT_WORK_TREE = other.root;
+    process.env.GIT_INDEX_FILE = path.join(other.root, '.git/index');
+    new Fixture(t);
+    Preflight.checkout({ VMUX_CI_HEAD: fixture.head, VMUX_CI_BASE: fixture.base, VMUX_CI_TREE: fixture.tree }, fixture.root);
+    assert.equal(fixture.git('rev-parse', 'HEAD^{tree}'), fixture.tree);
+    assert.equal(other.git('rev-parse', 'HEAD'), other.merge);
+    assert.equal(other.git('status', '--porcelain'), '');
+    assert.equal(other.git('config', '--get', 'core.bare'), 'false');
+  } finally {
+    for (let index = 0; index < names.length; index++) {
+      if (previous[index] === undefined) delete process.env[names[index]];
+      else process.env[names[index]] = previous[index];
+    }
+  }
 });
 
 test('conflicting branch merges stop CI planning', async (t) => {

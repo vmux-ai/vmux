@@ -7,6 +7,7 @@ class Preflight {
     this.context = context;
     this.core = core;
     this.root = root;
+    this.environment = Preflight.gitEnvironment();
     this.pause = pause || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
     this.now = now || Date.now;
   }
@@ -112,7 +113,15 @@ class Preflight {
   }
 
   git(...args) {
-    return execFileSync('git', args, { cwd: this.root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return execFileSync('git', args, { cwd: this.root, env: this.environment, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  }
+
+  static gitEnvironment() {
+    const environment = { ...process.env };
+    for (const name of ['GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR']) {
+      delete environment[name];
+    }
+    return environment;
   }
 
   static candidate(run, identity) {
@@ -149,7 +158,7 @@ class Preflight {
     const date = git.git('show', '-s', '--format=%cI', env.VMUX_CI_HEAD);
     const commit = execFileSync('git', ['commit-tree', tree, '-p', env.VMUX_CI_BASE, '-p', env.VMUX_CI_HEAD], {
       cwd: root, encoding: 'utf8', input: 'CI merge validation\n',
-      env: { ...process.env, GIT_AUTHOR_NAME: 'CI', GIT_COMMITTER_NAME: 'CI', GIT_AUTHOR_EMAIL: 'ci@vmux.ai', GIT_COMMITTER_EMAIL: 'ci@vmux.ai', GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      env: { ...git.environment, GIT_AUTHOR_NAME: 'CI', GIT_COMMITTER_NAME: 'CI', GIT_AUTHOR_EMAIL: 'ci@vmux.ai', GIT_COMMITTER_EMAIL: 'ci@vmux.ai', GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
     }).trim();
     git.git('checkout', '--detach', commit);
   }
