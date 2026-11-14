@@ -37,7 +37,7 @@ impl bevy::prelude::Plugin for Plugin {
         crate::policy::add(app);
         crate::host::acp::add_registry(app);
         crate::host::acp::add(app);
-        app.add_plugins(InputPlugin)
+        app.add_message::<ServiceRequest>()
             .add_message::<AcpAgentInfo>()
             .add_message::<AcpWorkspaceChanged>()
             .add_message::<AcpSessionConfigSnapshot>()
@@ -55,21 +55,14 @@ impl bevy::prelude::Plugin for Plugin {
                 )
                     .after(ServiceMessageSet),
             )
+            .add_systems(
+                Update,
+                input
+                    .after(ServiceMessageSet)
+                    .after(crate::host::model_selection::ModelSelectionSet)
+                    .before(vmux_session::TranscriptReadySet),
+            )
             .add_observer(close_on_remove);
-    }
-}
-
-struct InputPlugin;
-
-impl bevy::prelude::Plugin for InputPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>().add_systems(
-            Update,
-            input
-                .after(ServiceMessageSet)
-                .after(crate::host::model_selection::ModelSelectionSet)
-                .before(vmux_session::TranscriptReadySet),
-        );
     }
 }
 
@@ -494,14 +487,12 @@ mod tests {
                 MinimalPlugins,
                 vmux_session::QueuePlugin,
                 vmux_session::preferences::Plugin,
-                InputPlugin,
+                super::Plugin,
             ));
             app.world_mut()
                 .write_message(vmux_session::preferences::ProfileRequested(
                     directory.path().to_path_buf(),
                 ));
-            app.world_mut()
-                .spawn(crate::policy_driver::PolicyDriver::bundled());
             let session = app
                 .world_mut()
                 .spawn((
