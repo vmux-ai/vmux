@@ -1,8 +1,6 @@
-use crate::{Account, Owner, Profile};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
-use vmux_ecs::record::Schema;
-use vmux_ecs::{JobSet, ProfileId};
+use vmux_ecs::JobSet;
 
 pub struct Plugin;
 
@@ -34,12 +32,6 @@ impl bevy_app::Plugin for Plugin {
                 )
                     .chain(),
             );
-        let mut schema = app.world_mut().resource_mut::<Schema>();
-        schema.register::<Account>("account", 1);
-        schema.register::<Profile>("profile", 1);
-        schema.register::<Name>("name", 1);
-        schema.register::<ProfileId>("directory", 1);
-        schema.register_relationship::<Owner>("account", 1);
     }
 }
 
@@ -60,8 +52,9 @@ pub enum Set {
 mod tests {
     use super::*;
     use crate::{CreateRequest, Error, Failure, MutationCompleted, RenameRequest, Root};
+    use crate::{Owner, Profile};
     use uuid::Uuid;
-    use vmux_ecs::{Ready, Revision, Uuid as Id};
+    use vmux_ecs::{ProfileId, Ready, Revision, Uuid as Id};
 
     struct Fixture {
         app: App,
@@ -264,12 +257,29 @@ mod tests {
         let rejected = fixture.rename(Uuid::new_v4(), before.0, "Blocked");
         assert!(matches!(rejected.result, Err(Failure::Storage(_))));
         assert_eq!(fixture.profile("personal"), before);
+        let rejected = fixture.create(Uuid::new_v4(), "Blocked create");
+        assert!(matches!(rejected.result, Err(Failure::Storage(_))));
+        assert!(!data.path().join("profiles/blocked-create").exists());
+        let mut profiles = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Profile>>();
+        assert_eq!(profiles.iter(fixture.app.world()).count(), 1);
         held.execute_batch("rollback").unwrap();
         fixture
             .rename(Uuid::new_v4(), before.0, "Retry")
             .result
             .unwrap();
         assert_eq!(fixture.profile("personal").1, "Retry");
+        fixture
+            .create(Uuid::new_v4(), "Blocked create")
+            .result
+            .unwrap();
+        drop(fixture);
+        assert_eq!(
+            Fixture::at(data.path()).profile("blocked-create").1,
+            "Blocked create"
+        );
     }
 
     #[test]

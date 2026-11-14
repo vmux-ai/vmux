@@ -1,70 +1,50 @@
 use bevy_ecs::prelude::*;
+use bevy_ecs::reflect::ReflectComponent;
+use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use vmux_ecs::record::{Record, StoredComponent, StoredRelationship};
+use vmux_ecs::record::{Format, Persisted, ReflectRelationship, ReflectStored, Scope};
+use vmux_ecs::{ProfileId, Revision, Uuid as Id};
 
-#[derive(Component, Serialize, Deserialize)]
+#[derive(Component, Reflect, Serialize, Deserialize)]
+#[reflect(Component, Serialize, Deserialize, Stored, @Format::new("account", 1))]
 pub struct Account;
 
 impl Account {
-    pub(crate) fn record(id: Uuid) -> Record {
-        Record {
-            scope_id: id,
-            id,
-            revision: 1,
-            deleted: false,
-            components: vec![
-                StoredComponent {
-                    key: "account".into(),
-                    version: 1,
-                    value: serde_json::Value::Null,
-                },
-                StoredComponent {
-                    key: "name".into(),
-                    version: 1,
-                    value: serde_json::json!("Local account"),
-                },
-            ],
-            relationships: Vec::new(),
-        }
+    pub(crate) fn bundle(id: Uuid) -> impl Bundle {
+        (
+            Self,
+            Id(id.to_string()),
+            Name::new("Local account"),
+            Scope(id),
+            Revision(1),
+            Persisted(0),
+        )
     }
 }
 
-#[derive(Component, Serialize, Deserialize)]
+#[derive(Component, Reflect, Serialize, Deserialize)]
+#[reflect(Component, Serialize, Deserialize, Stored, @Format::new("profile", 1))]
 pub struct Profile;
 
 impl Profile {
-    pub(crate) fn record(scope: Uuid, id: Uuid, directory: &str, name: &str) -> Record {
-        Record {
-            scope_id: scope,
-            id,
-            revision: 1,
-            deleted: false,
-            components: vec![
-                StoredComponent {
-                    key: "profile".into(),
-                    version: 1,
-                    value: serde_json::Value::Null,
-                },
-                StoredComponent {
-                    key: "directory".into(),
-                    version: 1,
-                    value: serde_json::json!(directory),
-                },
-                StoredComponent {
-                    key: "name".into(),
-                    version: 1,
-                    value: serde_json::json!(name),
-                },
-            ],
-            relationships: vec![StoredRelationship {
-                key: "account".into(),
-                version: 1,
-                target: scope,
-                position: 0,
-                owned: true,
-            }],
-        }
+    pub(crate) fn bundle(
+        scope: Uuid,
+        id: Uuid,
+        directory: &str,
+        name: &str,
+        owner: Entity,
+    ) -> impl Bundle {
+        (
+            Self,
+            Id(id.to_string()),
+            ProfileId(directory.to_string()),
+            Name::new(name.to_string()),
+            Scope(scope),
+            Revision(1),
+            Persisted(0),
+            Owner(owner),
+        )
     }
 
     pub(crate) fn name(raw: &str) -> Result<String, Failure> {
@@ -84,7 +64,8 @@ impl Profile {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component, Relationship, @Format::new("account", 1))]
 #[relationship(relationship_target = Profiles)]
 pub struct Owner(pub Entity);
 

@@ -1,5 +1,5 @@
 use crate::account::Set;
-use crate::mutations::{EnsureDirectory, Initializing, Target, Writing};
+use crate::mutations::{EnsureDirectory, Initializing, Proposal, Target, Writing};
 use crate::profile::{Account, Failure, Owner, Profile};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
@@ -119,7 +119,7 @@ type ProfileRows<'w, 's> = Query<
         &'static Revision,
         &'static Scope,
     ),
-    (With<Profile>, Without<Root>),
+    (With<Profile>, Without<Root>, Without<Proposal>),
 >;
 
 #[derive(SystemParam)]
@@ -299,8 +299,11 @@ fn seed(
         let Ok(selection) = selections.get(parent.parent()) else {
             continue;
         };
-        let account = Uuid::new_v4();
-        let mut records = vec![Account::record(account)];
+        let scope = Uuid::new_v4();
+        let account = commands
+            .spawn((Account::bundle(scope), StoreOwner(operation)))
+            .id();
+        let mut entities = vec![account];
         let mut selected = false;
         for (owner, directory, name) in &observations {
             if owner.parent() != operation {
@@ -311,27 +314,35 @@ fn seed(
                 _ => Profile::label(&directory.0),
             };
             selected |= directory.0 == selection.0;
-            records.push(Profile::record(
-                account,
-                Uuid::new_v4(),
-                &directory.0,
-                &label,
-            ));
+            entities.push(
+                commands
+                    .spawn(Profile::bundle(
+                        scope,
+                        Uuid::new_v4(),
+                        &directory.0,
+                        &label,
+                        account,
+                    ))
+                    .id(),
+            );
         }
         if !selected {
-            records.push(Profile::record(
-                account,
-                Uuid::new_v4(),
-                &selection.0,
-                &Profile::label(&selection.0),
-            ));
+            entities.push(
+                commands
+                    .spawn(Profile::bundle(
+                        scope,
+                        Uuid::new_v4(),
+                        &selection.0,
+                        &Profile::label(&selection.0),
+                        account,
+                    ))
+                    .id(),
+            );
             commands
                 .entity(operation)
                 .insert(EnsureDirectory(selection.0.clone()));
         }
-        commands
-            .entity(operation)
-            .insert(RestoreRequest(Graph(records)));
+        commands.entity(operation).insert(Restored(Ok(entities)));
     }
 }
 
@@ -394,15 +405,12 @@ fn adopt(
                 _ => Profile::label(&directory.0),
             };
             let entity = commands
-                .spawn((
-                    Profile,
-                    Id(Uuid::new_v4().to_string()),
-                    directory.clone(),
-                    Name::new(label),
-                    Scope(scope),
-                    Revision(1),
-                    Persisted(0),
-                    Owner(account),
+                .spawn(Profile::bundle(
+                    scope,
+                    Uuid::new_v4(),
+                    &directory.0,
+                    &label,
+                    account,
                 ))
                 .id();
             captured.push(entity);
@@ -414,15 +422,12 @@ fn adopt(
         }
         if !selected {
             let entity = commands
-                .spawn((
-                    Profile,
-                    Id(Uuid::new_v4().to_string()),
-                    ProfileId(selection.0.clone()),
-                    Name::new(Profile::label(&selection.0)),
-                    Scope(scope),
-                    Revision(1),
-                    Persisted(0),
-                    Owner(account),
+                .spawn(Profile::bundle(
+                    scope,
+                    Uuid::new_v4(),
+                    &selection.0,
+                    &Profile::label(&selection.0),
+                    account,
                 ))
                 .id();
             captured.push(entity);
@@ -491,7 +496,12 @@ type Seeds<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static ChildOf),
-    (With<Fresh>, Without<RestoreRequest>, Without<Restored>),
+    (
+        With<Fresh>,
+        With<Load>,
+        Without<RestoreRequest>,
+        Without<Restored>,
+    ),
 >;
 
 type Restores<'w, 's> = Query<

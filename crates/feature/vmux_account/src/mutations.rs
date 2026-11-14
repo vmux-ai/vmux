@@ -1,11 +1,12 @@
 use crate::account::Set;
 use crate::catalog::{Catalog, Error, Loading, Root};
-use crate::profile::{Account, Failure, Owner, Profile};
+use crate::profile::{Account, Failure, Profile};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::reflect::AppTypeRegistry;
 use bevy_ecs::system::SystemParam;
 use uuid::Uuid;
-use vmux_ecs::record::{CaptureRequest, Captured, Confirmed, Persisted, Receipt, Record, Scope};
+use vmux_ecs::record::{CaptureRequest, Captured, Confirmed, Receipt, Record};
 use vmux_ecs::{
     Active, Operation, OperationCompleted, Order, ProfileId, ProfileLabel, Ready, Revision,
     Uuid as Id,
@@ -89,6 +90,9 @@ pub(crate) struct Initializing;
 
 #[derive(Component)]
 struct Creation;
+
+#[derive(Component)]
+pub(crate) struct Proposal;
 
 #[derive(Component)]
 pub(crate) struct Target(pub(crate) Uuid);
@@ -280,6 +284,17 @@ fn prepare(
             };
             (target_id, directory.0.clone(), revision)
         };
+        let mut entities = catalog.entities(root);
+        if creation {
+            let proposal = commands
+                .spawn((
+                    Profile::bundle(scope, target_id, &directory, name.as_str(), account),
+                    Proposal,
+                    ChildOf(operation),
+                ))
+                .id();
+            entities.push(proposal);
+        }
         commands.entity(root).insert(Writing);
         commands.entity(operation).insert((
             Prepared,
@@ -288,7 +303,7 @@ fn prepare(
             Revision(revision),
             CaptureRequest {
                 scope_id: scope,
-                entities: catalog.entities(root),
+                entities,
             },
         ));
     }
@@ -316,10 +331,12 @@ type Captures<'w, 's> = Query<
 fn write(
     mut captures: Captures,
     generations: Query<&Revision, With<Root>>,
+    registry: Res<AppTypeRegistry>,
     mut requests: MessageWriter<WriteRequest>,
     mut replies: MessageWriter<MutationCompleted>,
     mut commands: Commands,
 ) {
+    let registry = registry.read();
     for (
         entity,
         parent,
@@ -366,27 +383,33 @@ fn write(
             serde_json::json!({"initialize": target.0}).to_string()
         } else if creation {
             let name = name.unwrap().as_str();
-            records.push(Profile::record(
-                records[0].scope_id,
-                target.0,
-                &directory.unwrap().0,
-                name,
-            ));
             serde_json::json!({"create": name}).to_string()
         } else {
-            let name = name.unwrap().as_str();
+            let name = name.unwrap();
+            let mut failed = None;
             for record in &mut records {
                 if record.id != target.0 {
                     continue;
                 }
                 record.revision = revision.unwrap().0;
-                for component in &mut record.components {
-                    if component.key == "name" {
-                        component.value = serde_json::json!(name);
-                    }
+                if let Err(error) = record.set(&registry, name) {
+                    failed = Some(error);
+                    break;
                 }
             }
-            serde_json::json!({"rename": target.0, "name": name}).to_string()
+            if let Some(error) = failed {
+                replies.write(MutationCompleted {
+                    root,
+                    operation_id: id.0.parse().unwrap(),
+                    result: Err(Failure::Storage(error)),
+                    directory_id: None,
+                    created: false,
+                });
+                commands.entity(root).remove::<Writing>();
+                commands.entity(entity).despawn();
+                continue;
+            }
+            serde_json::json!({"rename": target.0, "name": name.as_str()}).to_string()
         };
         requests.write(WriteRequest {
             entity,
@@ -413,8 +436,8 @@ type Writes<'w, 's> = Query<
     (
         &'static ChildOf,
         &'static Id,
+        &'static Target,
         Option<&'static Name>,
-        Option<&'static ProfileId>,
         Has<Creation>,
         Has<Initializing>,
     ),
@@ -425,6 +448,7 @@ fn apply(
     mut events: MessageMutator<WriteCompleted>,
     active: Writes,
     catalog: Catalog,
+    proposals: Query<(Entity, &ChildOf), With<Proposal>>,
     mut generations: Generations,
     mut commands: Commands,
     mut replies: MessageWriter<MutationCompleted>,
@@ -433,7 +457,7 @@ fn apply(
         let Some(result) = event.result.take() else {
             continue;
         };
-        let Ok((parent, id, name, directory, creation, initializing)) = active.get(event.entity)
+        let Ok((parent, id, target, name, creation, initializing)) = active.get(event.entity)
         else {
             continue;
         };
@@ -472,7 +496,11 @@ fn apply(
                 continue;
             }
         };
-        if commit.receipt.operation_id.to_string() != id.0 || commit.receipt.revision == 0 {
+        if commit.receipt.operation_id.to_string() != id.0
+            || commit.receipt.revision == 0
+            || commit.receipt.revision > i64::MAX as u64
+            || (!commit.replayed && commit.receipt.entity_id != target.0)
+        {
             if !initializing {
                 replies.write(MutationCompleted {
                     root,
@@ -491,6 +519,11 @@ fn apply(
             continue;
         }
         if commit.replayed {
+            for (entity, parent) in &proposals {
+                if parent.parent() == event.entity {
+                    commands.entity(entity).despawn();
+                }
+            }
             commands
                 .entity(event.entity)
                 .insert(AwaitReload(commit))
@@ -503,7 +536,7 @@ fn apply(
             continue;
         }
         generation.0 = generation.0.max(commit.generation);
-        let Some((account, scope)) = catalog.account(root) else {
+        let Some(_) = catalog.account(root) else {
             continue;
         };
         let mut confirmations = Vec::new();
@@ -540,19 +573,18 @@ fn apply(
                 .remove::<Sent>();
         } else {
             let target = if creation {
+                let Some((entity, _)) = proposals
+                    .iter()
+                    .find(|(_, parent)| parent.parent() == event.entity)
+                else {
+                    continue;
+                };
                 commands
-                    .spawn((
-                        Profile,
-                        ProfileLabel,
-                        Id(commit.receipt.entity_id.to_string()),
-                        directory.unwrap().clone(),
-                        Name::new(name.unwrap().as_str().to_string()),
-                        Scope(scope),
-                        Revision(commit.receipt.revision),
-                        Persisted(0),
-                        Owner(account),
-                    ))
-                    .id()
+                    .entity(entity)
+                    .remove::<Proposal>()
+                    .remove::<ChildOf>()
+                    .insert((ProfileLabel, Revision(commit.receipt.revision)));
+                entity
             } else {
                 let Some(entity) = catalog.profile(root, commit.receipt.entity_id) else {
                     continue;

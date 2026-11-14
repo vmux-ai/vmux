@@ -469,13 +469,16 @@ remain in registered catalog/mutation systems. Stateless Bevy plugin installatio
 jobs, rollback guards and Team DOM/input adapters have item-specific policy records. Test fixtures
 own isolated App/data roots rather than a second product model.
 
-Record serialization owns only immutable schema metadata, scoped JSON records, and write
-receipts. The Schema resource registers stateless component/relationship codec pointers;
-record request/result components retain received or captured values until materialization,
-confirmation, or cancellation. Bevy plugin installation and dynamic tombstone conversion are
-explicit framework boundaries. Nested serde compatibility fixtures are test-only adapters
-to that schema and do not define a product model. Cached exclusive SystemState parameters
-prove the same typed ownership as ordinary registered systems; shadowed wrappers do not.
+Record serialization uses Bevy's AppTypeRegistry as its only type registry. Reflect derives
+register component/serde TypeData and immutable storage metadata; custom type attributes declare
+stable keys and versions. Serde-decoded components are inserted as owned typed values so fields
+excluded from reflection retain their serialized contents. The shared record plugin installs
+automatic registration and the foreign Name mapping. Relationship TypeData converts typed Entity links to stable UUIDs and
+retains Bevy's linked ownership rule. Unknown, ambiguous or incompatible metadata fails closed.
+Record request/result components own received or captured values until materialization,
+confirmation or cancellation. Bevy registration and bounded JSON/relationship conversion are
+explicit framework boundaries; nested compatibility fixtures remain test-only adapters.
+Cached exclusive SystemState parameters prove the same typed ownership as registered systems.
 
 The UI stylesheet build adapter invokes Tailwind and emits Cargo dependency metadata before
 application composition. `VMUX_SKIP_DX_BUILD` omits stylesheet generation and its source watches
@@ -732,8 +735,9 @@ The native `host` bundle is explicit in Vmux consumers.
 
 The independent `records` feature exposes `vmux_ecs::record` for scoped, versioned JSON
 records and metadata-only write receipts. Its plugin reuses shared `Uuid`, `Revision`, and
-`Name` components; registered component and relationship codecs preserve nested values and
-stable target UUIDs. Restore, dirty-revision detection, capture, and receipt confirmation run
+`Name` components; automatically registered Bevy reflection metadata preserves serde's nested
+values and stable relationship target UUIDs. Features declare storage metadata alongside their
+Reflect derives without a second registry or a per-type plugin registration list. Restore, dirty-revision detection, capture, and receipt confirmation run
 in that order. Dynamic restore/capture are the only exclusive systems in this lifecycle.
 Request ownership removes restored roots and descendants; failed restore removes partial
 materialization. Confirmation checks the stable entity ID and leaves newer edits dirty.
@@ -2520,7 +2524,10 @@ Ready Git pages retry checkout-context publication when parent or slot binding a
 relationship, import and create/rename lifecycles, and durable name revisions. Its renderer-free
 core composes the shared record plugin with catalog and mutation plugins. Shared ProfileId and
 ProfileLabel remain available below host-only code: directory IDs retain their existing paths,
-while Uuid identifies durable entities. vmux_app composes the optional local adapter and a
+while Uuid identifies durable entities. Seed and create systems compose ordinary ECS bundles
+and capture their registered fields; create proposals become canonical only after acceptance.
+Failure and replay remove operation-owned proposals. Typed encoding of rename proposals keeps
+storage keys out of feature code. vmux_app composes the optional local adapter and a
 runtime binding plugin; Team emits typed intents and projects canonical labels, including
 Space labels after restoration and refresh. Signing in and uploading remain separate later
 capabilities.
