@@ -26,8 +26,17 @@ case "$PROFILE" in
 esac
 
 if [[ "${VMUX_CI_FAST_PACKAGE:-}" == "1" ]]; then
-    if [[ "$PROFILE" != "release" || "${GITHUB_EVENT_NAME:-}" != "pull_request" || "${IS_RELEASE_PR:-}" != "0" ]]; then
-        echo "Fast package mode is restricted to non-release pull requests" >&2
+    fast_event=0
+    if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+        fast_event=1
+    elif [[ "${GITHUB_EVENT_NAME:-}" == "push" && "${VMUX_CI_PREFLIGHT:-}" == "true" ]]; then
+        case "${GITHUB_REF:-}" in
+            refs/heads/main|refs/heads/master|refs/heads/release/*) ;;
+            refs/heads/*) fast_event=1 ;;
+        esac
+    fi
+    if [[ "$PROFILE" != "release" || "$fast_event" != "1" || "${IS_RELEASE_PR:-}" != "0" ]]; then
+        echo "Fast package mode requires a non-release pull request or feature-branch preflight" >&2
         exit 1
     fi
     export SKIP_NOTARIZE=1
