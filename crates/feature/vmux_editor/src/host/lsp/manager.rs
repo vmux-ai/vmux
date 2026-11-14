@@ -399,7 +399,7 @@ struct LspServerStartTask(LaunchServer);
 #[derive(Clone)]
 struct StartJob {
     spec: ServerSpec,
-    root: PathBuf,
+    launch: LaunchServer,
     diagnostics: LspDiagnosticsSender,
     inputs: ServerInputSender,
     wake: Option<std::task::Waker>,
@@ -411,7 +411,7 @@ impl Job for StartJob {
     fn run(self) -> Self::Output {
         ServerClient::spawn_with_wake(
             &self.spec,
-            &self.root,
+            self.launch.key().root(),
             self.diagnostics,
             self.inputs,
             self.wake,
@@ -1337,7 +1337,7 @@ fn launch_servers(
             LspServerStartTask(launch.clone()),
             JobRequest(StartJob {
                 spec,
-                root: key.root().to_path_buf(),
+                launch: launch.clone(),
                 diagnostics: context.diagnostics.scoped(launch.server()),
                 inputs: context.inputs.scoped(launch.server()),
                 wake: wake.as_ref().map(|wake| wake.0.clone()),

@@ -27,8 +27,8 @@ pub use model::{
     Created, DescriptionUpdateRequest, LocalTask, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind, ProviderSessionId,
     ProviderSessionKey, ProviderSessionRestoreRequest, ProviderSessionTombstone, ProviderStage,
-    ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SourceUpdatedAt, Stage,
-    StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SetupPending,
+    SourceUpdatedAt, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
 pub use queue::{
     PromptQueue, QueuePlugin, QueuedPrompt, QueuedPromptId, QueuedPromptReads, QueuedPrompts,
@@ -55,6 +55,8 @@ pub mod activity;
 pub mod event;
 #[cfg(feature = "app")]
 pub mod host;
+#[cfg(feature = "app")]
+pub mod onboarding;
 #[cfg(feature = "preferences")]
 pub mod preferences;
 #[cfg(feature = "preferences")]

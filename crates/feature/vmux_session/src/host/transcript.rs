@@ -151,7 +151,7 @@ type ChangedSession = (
     Option<Ref<'static, ImportedConversation>>,
     Option<Ref<'static, AgentConversationTitle>>,
     Has<vmux_session::TranscriptLoading>,
-    Ref<'static, Children>,
+    Option<Ref<'static, Children>>,
 );
 
 type ChangedConversationEvents<'w, 's> = Query<
@@ -201,6 +201,9 @@ struct PushWorld<'w, 's> {
     loading_started: Query<'w, 's, Entity, Added<vmux_session::TranscriptLoading>>,
     loading_finished: RemovedComponents<'w, 's, vmux_session::TranscriptLoading>,
     queued: QueuedPromptReads<'w, 's>,
+    setup: Query<'w, 's, (), With<vmux_session::SetupPending>>,
+    setup_started: Query<'w, 's, Entity, Added<vmux_session::SetupPending>>,
+    setup_finished: RemovedComponents<'w, 's, vmux_session::SetupPending>,
 }
 
 type ReadyViewFilter = (
@@ -211,6 +214,7 @@ type ReadyViewFilter = (
 
 #[derive(SystemParam)]
 struct ReadyWorld<'w, 's> {
+    setup: Query<'w, 's, (), With<vmux_session::SetupPending>>,
     targets: super::session::SessionViews<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     metadata: Query<'w, 's, &'static PageMetadata>,
@@ -252,7 +256,10 @@ fn track_turn_duration(
                         .push(time.elapsed().saturating_sub(start).as_secs() as u32);
                 }
             }
-            RunState::AwaitingApproval { .. } => {}
+            RunState::Preparing
+            | RunState::Installing { .. }
+            | RunState::AwaitingApproval { .. }
+            | RunState::AuthenticationRequired { .. } => {}
         }
     }
 }
@@ -274,6 +281,12 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
     for session in world.loading_finished.read() {
         loading_changes.insert(session);
     }
+    for session in &world.setup_started {
+        loading_changes.insert(session);
+    }
+    for session in world.setup_finished.read() {
+        loading_changes.insert(session);
+    }
     for (
         session,
         agent_id,
@@ -291,7 +304,10 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
         let Ok(mut push) = pushes.get_mut(session) else {
             continue;
         };
-        let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
+        let conversation_changed = children
+            .as_ref()
+            .is_some_and(|children| children.is_changed())
+            || changed_transcripts.contains(&session);
         let context_changed = user_moved
             || agent_id.is_changed()
             || loading_changes.contains(&session)
@@ -398,6 +414,7 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
                 &conversation.event_ids,
             )
         });
+        projection.snapshot.setup_pending = world.setup.contains(session);
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         else {
             if !push.pending {
@@ -518,7 +535,10 @@ impl ChatProjection {
         });
         let page = messages.tail_with_prompt(limit);
         let error = match state {
-            RunState::Errored(message) => message.clone(),
+            RunState::Errored(message)
+            | RunState::Installing {
+                detail: message, ..
+            } => message.clone(),
             _ => String::new(),
         };
         let approval = match state {
@@ -552,6 +572,18 @@ impl ChatProjection {
             .unwrap_or_default();
         let transcript_empty = page.items.is_empty();
         let mut snapshot = ChatSnapshot {
+            install_percent: match state {
+                RunState::Installing { percent, .. } => *percent,
+                _ => None,
+            },
+            authentication_methods: match state {
+                RunState::AuthenticationRequired { methods, .. } => methods.clone(),
+                _ => Vec::new(),
+            },
+            authentication_pending: matches!(
+                state,
+                RunState::AuthenticationRequired { pending: true, .. }
+            ),
             status: state.status().to_string(),
             error,
             approval,
@@ -663,6 +695,7 @@ fn sync_ready_views(
                 &conversation.event_ids,
             )
         });
+        projection.snapshot.setup_pending = world.setup.contains(session_entity);
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
@@ -1331,6 +1364,46 @@ mod tests {
         assert_eq!(transcript.total, 160);
         assert!(matches!(&transcript.items[0], ChatItem::User { text, .. } if text == "message 0"));
         assert!(!transcript.loading);
+    }
+
+    #[test]
+    fn setup_lifecycle_reaches_a_synced_page_without_messages_or_status_changes() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, Plugin))
+            .init_resource::<Published>()
+            .add_observer(Published::record);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("setup-lifecycle".into()),
+                AgentId("codex".into()),
+                Name::new("Setup"),
+                RunState::Errored("connection failed".into()),
+                PromptQueue::default(),
+                vmux_session::SetupPending,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((SessionView, PageReady {}, ChildOf(stack)))
+            .id();
+        app.update();
+        app.update();
+        assert!(app.world().get::<ChatSynced>(view).is_some());
+        assert!(app.world().resource::<Published>().0.snapshot.setup_pending);
+        app.world_mut()
+            .entity_mut(session)
+            .remove::<vmux_session::SetupPending>();
+        app.update();
+        let state = &app.world().resource::<Published>().0;
+        assert!(!state.snapshot.setup_pending);
+        assert_eq!(state.snapshot.status, "errored");
+        assert!(state.transcript.items.is_empty());
     }
 
     #[test]

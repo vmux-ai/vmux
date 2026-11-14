@@ -322,6 +322,7 @@ impl Dimensions for PtyDimensions {
     }
 }
 
+#[derive(bevy::prelude::Component)]
 pub struct Process {
     pub id: ProcessId,
     pub shell: String,
@@ -339,7 +340,7 @@ pub struct Process {
     run_marker: crate::run_marker::RunMarkerScanner,
     last_run_completion: Option<(String, i32)>,
     pty_writer: PtyInputWriter,
-    master: Box<dyn portable_pty::MasterPty + Send>,
+    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pty_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     #[cfg(unix)]
@@ -557,7 +558,14 @@ impl Process {
                 .rev()
                 .find(|(name, _)| name == "HOME")
                 .map(|(_, value)| value.clone())
-                .or_else(|| std::env::var("HOME").ok());
+                .or_else(|| {
+                    let paths = vmux_profile::ProfilePaths::current();
+                    if paths.isolated() {
+                        Some(paths.tool_home().to_string_lossy().into_owned())
+                    } else {
+                        std::env::var("HOME").ok()
+                    }
+                });
             let mut cmd = CommandBuilder::new("/bin/sh");
             cmd.arg("-c");
             cmd.arg(
@@ -584,6 +592,7 @@ impl Process {
             }
             cmd
         };
+        crate::LoginShellEnvironment::apply_pty_isolation(&mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("LANG", "en_US.UTF-8");
@@ -688,7 +697,7 @@ impl Process {
             run_marker: crate::run_marker::RunMarkerScanner::new(),
             last_run_completion: None,
             pty_writer: writer,
-            master: pair.master,
+            master: Mutex::new(pair.master),
             child,
             pty_rx,
             #[cfg(unix)]
@@ -1584,7 +1593,7 @@ impl Process {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
-        let _ = self.master.resize(PtySize {
+        let _ = self.master.get_mut().unwrap().resize(PtySize {
             rows,
             cols,
             pixel_width: 0,
@@ -1614,7 +1623,7 @@ impl Process {
             if self.pty_reader_in_flight.load(Ordering::Acquire) {
                 return false;
             }
-            let Some(fd) = self.master.as_raw_fd() else {
+            let Some(fd) = self.master.lock().unwrap().as_raw_fd() else {
                 return false;
             };
             let mut available: libc::c_int = 0;
@@ -2242,6 +2251,65 @@ mod tests {
         assert!(text.contains(&cwd));
         assert!(text.contains(&format!("HOME={home}")));
         assert!(!text.contains(&format!("cd {cwd}")));
+    }
+
+    #[test]
+    fn isolated_process_restores_profile_home_when_starting_in_a_workspace() {
+        let fixture_key = "VMUX_PROCESS_HOME_FIXTURE";
+        if std::env::var_os(fixture_key).is_none() {
+            let fixture = std::env::temp_dir().join(format!(
+                "vmux-process-home-{}-{}",
+                std::process::id(),
+                ProcessId::new()
+            ));
+            std::fs::create_dir_all(&fixture).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "driver::tests::isolated_process_restores_profile_home_when_starting_in_a_workspace",
+                    "--nocapture",
+                ])
+                .env(fixture_key, &fixture)
+                .env("VMUX_DATA_DIR", &fixture)
+                .env("VMUX_PROFILE", "process-home")
+                .env("VMUX_TEST", "0")
+                .env("VMUX_TEST_ENV_KEYS", "0")
+                .status()
+                .unwrap();
+            let verified = fixture.join("verified").is_file();
+            std::fs::remove_dir_all(&fixture).unwrap();
+            assert!(status.success());
+            assert!(verified, "isolated child test must run to completion");
+            return;
+        }
+        let fixture = std::path::PathBuf::from(std::env::var_os(fixture_key).unwrap());
+        let workspace = fixture.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let paths = vmux_profile::ProfilePaths::current();
+        let home = paths.tool_home();
+        std::fs::create_dir_all(&home).unwrap();
+        let cwd = workspace.to_string_lossy().into_owned();
+        let expected_home = format!("HOME={}", home.display());
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            ProcessId::new(),
+            "/bin/sh".into(),
+            Vec::new(),
+            cwd.clone(),
+            Vec::new(),
+            240,
+            24,
+            wake_tx,
+        )
+        .expect("isolated process should spawn");
+        drain_process_output(&mut process, Duration::from_millis(300));
+        process.write_input(b"printf 'HOME=%s\\n' \"$HOME\"; pwd\r");
+        let text = wait_for_snapshot_text(&mut process, &expected_home);
+        process.kill();
+        assert!(text.contains(&expected_home));
+        assert!(text.contains(&cwd));
+        assert_ne!(home, workspace);
+        std::fs::write(fixture.join("verified"), b"ok").unwrap();
     }
 
     #[test]

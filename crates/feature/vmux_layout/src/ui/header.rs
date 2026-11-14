@@ -8,6 +8,7 @@ use vmux_api::bookmark::{
 use vmux_ecs::event::team::{ProfileRow, TeamMemberRow, TeamOpenRequest, TeamProfileSwitchRequest};
 use vmux_ui::cn::cn;
 use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::browser::ExternalBrowserMenuItem;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownPopup};
 use vmux_ui::components::icon::Icon;
@@ -536,6 +537,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
+                ExternalBrowserMenuItem { url: tab.url.clone(), index: 2usize }
             }
         }
     }

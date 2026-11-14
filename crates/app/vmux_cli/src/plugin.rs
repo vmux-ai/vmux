@@ -5,6 +5,7 @@ use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
 
+use crate::browser::Open;
 use crate::command::CliRuntimePlugin;
 
 struct Feature;
@@ -24,7 +25,7 @@ impl Plugin for CliPlugin {
             vmux_app::VmuxPlugin::builder().cli().build(),
             CliRuntimePlugin,
         ))
-        .add_systems(Update, open);
+        .add_systems(Update, (open, browse));
     }
 }
 
@@ -36,6 +37,20 @@ fn open(
         if invocation.is("app.open") {
             commands.entity(entity).insert(CliResult::from(launch()));
         }
+    }
+}
+
+fn browse(
+    invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation) in &invocations {
+        if !invocation.is("browser.open") {
+            continue;
+        }
+        let result = Open::try_from(invocation)
+            .and_then(|request| request.send(&vmux_ecs::profile::ServicePaths::current().socket()));
+        commands.entity(entity).insert(CliResult(result));
     }
 }
 

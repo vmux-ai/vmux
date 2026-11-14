@@ -153,6 +153,10 @@ pub enum ClientMessage {
         cwd: String,
         path: String,
     },
+    AuthenticateAcpAgent {
+        sid: String,
+        method_id: String,
+    },
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

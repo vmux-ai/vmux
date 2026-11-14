@@ -53,6 +53,7 @@ pub struct Chat {
     pub selector: ChatValue<ChatSelectorState>,
     selection: Memo<Option<ChatListSelectionState>>,
     pub menu: ChatMenu,
+    key_input_requested: Signal<bool>,
 }
 
 pub fn use_chat(session: String) -> Chat {
@@ -100,6 +101,7 @@ pub fn use_chat(session: String) -> Chat {
         ready: always_ready,
     };
     let chat = Chat {
+        key_input_requested: use_signal(|| false),
         root,
         transcript: use_transcript(root, session),
         run: RunState { snapshot },
@@ -165,6 +167,12 @@ impl Chat {
 
     fn watch(&self) {
         let chat = *self;
+        use_effect(move || {
+            if chat.status() != "authentication" && *chat.key_input_requested.peek() {
+                let mut requested = chat.key_input_requested;
+                requested.set(false);
+            }
+        });
         use_effect(move || PromptFocus::end(PROMPT_INPUT_ID));
         use_effect(move || {
             let _ = chat.transcript.revision();
@@ -263,6 +271,32 @@ impl Chat {
         self.run.status()
     }
 
+    pub(super) fn key_input_requested(&self) -> bool {
+        (self.key_input_requested)()
+    }
+
+    pub(super) fn request_key_input(&self, requested: bool) {
+        let mut input = self.key_input_requested;
+        input.set(requested);
+    }
+
+    pub fn authentication_methods(&self) -> Vec<vmux_api::protocol::AuthenticationMethod> {
+        self.identity
+            .snapshot
+            .value
+            .read()
+            .authentication_methods
+            .clone()
+    }
+
+    pub fn authentication_pending(&self) -> bool {
+        self.identity.snapshot.value.read().authentication_pending
+    }
+
+    pub fn install_percent(&self) -> Option<u8> {
+        self.identity.snapshot.value.read().install_percent
+    }
+
     pub fn in_use(&self) -> bool {
         self.status() == "errored" && vmux_session::Failure(&self.run.error()).in_use()
     }
@@ -273,6 +307,39 @@ impl Chat {
 
     pub fn installing_splash(&self) -> bool {
         self.identity.snapshot.value.read().installing_splash
+    }
+
+    pub(super) fn setup_prompt(&self) -> Option<QueuedPromptSnapshot> {
+        if !self.setup_pending() || !self.transcript.current().items.is_empty() {
+            return None;
+        }
+        self.queue.queued().first().cloned()
+    }
+
+    pub(super) fn setup_pending(&self) -> bool {
+        if !(self.identity.snapshot.ready)() {
+            return false;
+        }
+        let status = self.status();
+        if matches!(
+            status.as_str(),
+            "authentication" | "preparing" | "installing"
+        ) || self.installing_splash()
+        {
+            return true;
+        }
+        status == "errored"
+            && self.identity.snapshot.value.read().setup_pending
+            && !matches!(
+                vmux_session::Failure(&self.run.error()).kind(),
+                crate::FailureKind::Busy | crate::FailureKind::MissingHistory
+            )
+    }
+
+    pub(super) fn setup_busy(&self) -> bool {
+        matches!(self.status().as_str(), "preparing" | "installing")
+            || self.installing_splash()
+            || self.authentication_pending()
     }
 
     pub fn transcript_loading(&self) -> bool {
@@ -482,7 +549,7 @@ impl Chat {
 
 impl Chat {
     pub fn submit(&self) {
-        if self.in_use() {
+        if self.in_use() || self.setup_pending() {
             return;
         }
         let mut at_bottom = self.transcript.at_bottom;
@@ -831,10 +898,6 @@ impl AgentIdentity {
 
     pub fn icon(self) -> String {
         self.snapshot.value.read().agent_icon.clone()
-    }
-
-    pub fn accent(self) -> String {
-        self.snapshot.value.read().accent_color.clone()
     }
 }
 

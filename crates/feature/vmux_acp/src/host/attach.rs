@@ -47,6 +47,7 @@ fn attach(
     titles: Query<(), With<AgentConversationTitle>>,
     transcripts: vmux_session::Transcripts,
     navigations: Query<&PageNavigation>,
+    open_tasks: Query<&vmux_ecs::PageOpenTask>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
     mut tabs: Query<&mut Tab>,
@@ -81,10 +82,23 @@ fn attach(
             continue;
         }
         let agent_id = agent_id.as_str();
-        let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
+        let setup = open_task
+            .and_then(|task| open_tasks.get(task.entity()).ok())
+            .is_some_and(|task| {
+                vmux_session::Route::parse(&task.url) == Some(vmux_session::Route::Setup)
+            });
+        let url = if setup {
+            vmux_session::Route::Setup.url()
+        } else {
+            vmux_session::Route::Session(SessionId(sid.clone())).url()
+        };
         let page_metadata = PageMetadata {
             url: url.clone(),
-            title: session_name.clone(),
+            title: if setup {
+                vmux_ui::i18n::translate("onboarding-setup")
+            } else {
+                session_name.clone()
+            },
             bg_color: None,
             icon: icon.clone(),
         };
@@ -147,7 +161,7 @@ fn attach(
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
             ProcessAnchor(anchor),
-            vmux_session::RunState::default(),
+            vmux_session::RunState::Preparing,
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent { sid: sid.clone() },
         ));
@@ -219,6 +233,16 @@ fn attach(
         commands
             .entity(view)
             .insert((page_metadata, anchor, vmux_session::host::SessionView));
+        if setup {
+            commands.entity(view).insert(vmux_session::host::SetupView);
+        } else {
+            commands
+                .entity(view)
+                .remove::<vmux_session::host::SetupView>();
+            commands
+                .entity(*stack)
+                .remove::<vmux_session::host::SetupTarget>();
+        }
         commands.entity(view).remove::<(
             vmux_session::host::SessionManagerView,
             vmux_session::host::SessionCatalogView,

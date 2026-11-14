@@ -168,7 +168,7 @@ impl SafeStorageContext {
         Self::for_environment(application_data, test_session)
     }
 
-    fn for_environment(application_data: PathBuf, test_session: bool) -> Self {
+    pub(crate) fn for_environment(application_data: PathBuf, test_session: bool) -> Self {
         if test_session {
             return Self {
                 directory: application_data.join("safe-storage-test"),

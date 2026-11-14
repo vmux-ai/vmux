@@ -2171,6 +2171,39 @@ mod tests {
         assert!(app.world().get::<State>(auto_save).unwrap().is_dirty());
     }
 
+    #[test]
+    fn cold_start_requests_layout_materialization_for_the_bootstrap_space() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
+        let _home = HomeEnvGuard::use_temp_home("bootstrap-layout");
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            vmux_ecs::PrimitivesPlugin,
+            crate::SpacePlugin,
+        ));
+        app.finish();
+        app.cleanup();
+        app.world_mut().run_schedule(Startup);
+
+        let space = app
+            .world_mut()
+            .query_filtered::<Entity, With<Space>>()
+            .single(app.world())
+            .expect("cold start creates a bootstrap space");
+        assert!(app.world().get::<SpaceId>(space).is_some());
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<LayoutRestoreRequest>>()
+                .drain()
+                .count(),
+            1,
+            "the bootstrap space must enter the layout materialization lifecycle"
+        );
+    }
+
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct HomeEnvGuard {

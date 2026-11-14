@@ -188,7 +188,13 @@ fn project_deltas(
 
 fn project_statuses(
     mut inbound: MessageReader<AgentRunStatusChanged>,
-    mut sessions: Query<(Entity, &SessionId, &mut RunState, &mut PromptQueue), With<Session>>,
+    mut sessions: Query<
+        (Entity, &SessionId, &mut RunState, &mut PromptQueue),
+        (
+            With<Session>,
+            Without<super::navigation_driver::RetryRequested>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
@@ -197,8 +203,28 @@ fn project_statuses(
                 continue;
             }
             match &inbound.status {
-                AgentRunStatus::Idle => *state = RunState::Idle,
-                AgentRunStatus::Streaming => *state = RunState::Streaming,
+                AgentRunStatus::Starting => *state = RunState::Preparing,
+                AgentRunStatus::Idle => {
+                    *state = RunState::Idle;
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::SetupPending>();
+                }
+                AgentRunStatus::Streaming => {
+                    *state = RunState::Streaming;
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::SetupPending>();
+                }
+                AgentRunStatus::AuthenticationRequired { methods, pending } => {
+                    *state = RunState::AuthenticationRequired {
+                        methods: methods.as_ref().clone(),
+                        pending: *pending,
+                    };
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::TranscriptLoading>();
+                }
                 AgentRunStatus::Interrupted => {
                     *state = RunState::Idle;
                     if !queue.flush_pending() {
@@ -241,9 +267,115 @@ fn project_approval_resolutions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage};
     use vmux_ecs::service::ServiceInbound;
     use vmux_team::AgentRenameProfile;
+
+    #[test]
+    fn promptless_setup_retains_recovery_until_the_agent_is_ready() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(Plugin);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("setup".into()),
+                RunState::Idle,
+                PromptQueue::default(),
+                vmux_session::SetupPending,
+            ))
+            .id();
+        for status in [
+            AgentRunStatus::Starting,
+            AgentRunStatus::AuthenticationRequired {
+                methods: Box::new(Vec::new()),
+                pending: false,
+            },
+            AgentRunStatus::Errored("setup failed".into()),
+        ] {
+            app.world_mut().write_message(AgentRunStatusChanged {
+                sid: "setup".into(),
+                status,
+            });
+            app.update();
+            assert!(
+                app.world()
+                    .get::<vmux_session::SetupPending>(session)
+                    .is_some()
+            );
+        }
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Errored(error)) if error == "setup failed"
+        ));
+        app.world_mut().write_message(AgentRunStatusChanged {
+            sid: "setup".into(),
+            status: AgentRunStatus::Idle,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Idle)
+        ));
+        assert!(
+            app.world()
+                .get::<vmux_session::SetupPending>(session)
+                .is_none()
+        );
+        assert!(
+            app.world_mut()
+                .run_system_once(move |queues: vmux_session::QueuedPrompts| queues.empty(session))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn cancelled_setup_rejects_late_status_until_explicit_reattachment() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(Plugin);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("cancelled".into()),
+                RunState::Errored("ACP setup cancelled".into()),
+                PromptQueue::default(),
+                super::super::navigation_driver::RetryRequested,
+            ))
+            .id();
+        for status in [
+            AgentRunStatus::Starting,
+            AgentRunStatus::Idle,
+            AgentRunStatus::AuthenticationRequired {
+                methods: Box::new(Vec::new()),
+                pending: false,
+            },
+        ] {
+            app.world_mut().write_message(AgentRunStatusChanged {
+                sid: "cancelled".into(),
+                status,
+            });
+            app.update();
+            assert!(
+                matches!(app.world().get::<RunState>(session), Some(RunState::Errored(error)) if error == "ACP setup cancelled")
+            );
+        }
+        app.world_mut()
+            .entity_mut(session)
+            .remove::<super::super::navigation_driver::RetryRequested>();
+        app.world_mut().write_message(AgentRunStatusChanged {
+            sid: "cancelled".into(),
+            status: AgentRunStatus::Starting,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Preparing)
+        ));
+    }
 
     #[test]
     fn routes_agent_requests_without_terminal_ownership() {

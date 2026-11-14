@@ -45,6 +45,7 @@ impl Plugin for EntityPlugin {
                     .before(crate::mutation::ReceiveSet),
             )
             .register_stored::<Session>()
+            .register_stored::<SetupPending>()
             .register_stored::<SessionId>()
             .register_stored::<AgentId>()
             .register_stored::<ProviderStage>()
@@ -160,6 +161,11 @@ impl Plugin for StagePlugin {
 #[require(Save, Cwd, Description)]
 #[type_path = "vmux_session"]
 pub struct Session;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_session"]
+pub struct SetupPending;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionDuplicate(pub Entity);
@@ -813,6 +819,9 @@ fn project_views(
             let Ok(mut page) = metadata.get_mut(entity) else {
                 continue;
             };
+            if crate::Route::parse(&page.url) == Some(crate::Route::Setup) {
+                continue;
+            }
             page.title = name.as_str().to_string();
             page.url.clone_from(&url);
         }
@@ -1904,6 +1913,7 @@ mod tests {
         let filter = vmux_ecs::store::WorkspaceStored::filter(&registry);
 
         assert!(filter.is_allowed::<Session>());
+        assert!(filter.is_allowed::<SetupPending>());
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<ProviderStage>());
@@ -1970,6 +1980,58 @@ mod tests {
         assert_eq!(
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("After".into()))
+        );
+    }
+
+    #[test]
+    fn binding_and_renaming_a_setup_session_preserves_its_topic_and_guide_title() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("setup-session".into()),
+                Name::new("New conversation"),
+                SetupPending,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                EntityTarget::<Session>::new(session),
+                PageMetadata {
+                    url: crate::Route::Setup.url(),
+                    title: "Setup Agent".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((
+                ChildOf(stack),
+                PageMetadata {
+                    url: crate::Route::Setup.url(),
+                    title: "Setup Agent".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.update();
+        app.world_mut().write_message(RenameRequest {
+            id: SessionId("setup-session".into()),
+            name: "Connected agent".into(),
+        });
+        app.update();
+        for entity in [stack, view] {
+            let page = app.world().get::<PageMetadata>(entity).unwrap();
+            assert_eq!(page.url, "vmux://start/onboarding/agent");
+            assert_eq!(page.title, "Setup Agent");
+        }
+        assert_eq!(
+            app.world().get::<Name>(session).unwrap().as_str(),
+            "Connected agent"
         );
     }
 }

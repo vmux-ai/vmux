@@ -19,6 +19,7 @@ use vmux_ui::components::code::ShellCode;
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
+use vmux_ui::components::message::MessageFrame;
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -77,25 +78,15 @@ pub fn AssistantTurn(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
-    let presentation = if compact {
-        ""
-    } else {
-        "chat-message-enter [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]"
-    };
     rsx! {
-        div { class: "{presentation} chat-assistant-turn group flex w-full gap-3 px-1 py-1", "data-vmux-scroll-layout": (!compact).then_some(""), ..attributes,
-            AgentThumbnail {
-                src: avatar_src,
-                seed: agent_id,
-                background: avatar_background,
-                alt: name.clone(),
-                class: "mt-0.5 h-6 w-6 text-[8px]".to_string(),
-            }
-            div { class: "relative min-w-0 flex-1",
-                if !compact { div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" } }
-                div { class: "flex min-w-0 flex-col gap-2.5", {children} }
-                if !compact { MessageMeta { text: copy_text, created_at_ms } }
-            }
+        MessageFrame {
+            name: name.clone(), compact, reserve_metadata: false, attributes,
+            avatar: Some(rsx! { AgentThumbnail {
+                src: avatar_src, seed: agent_id, background: avatar_background,
+                alt: name.clone(), class: "mt-0.5 h-6 w-6 text-[8px]".to_string(),
+            } }),
+            metadata: (!compact).then(|| rsx! { MessageMeta { text: copy_text, created_at_ms } }),
+            {children}
         }
     }
 }

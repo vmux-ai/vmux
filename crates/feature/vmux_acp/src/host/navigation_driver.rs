@@ -11,7 +11,7 @@ use vmux_ecs::{
 use vmux_flex::Visibility;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
-use vmux_session::host::{SessionManagerView, SessionView};
+use vmux_session::host::{SessionManagerView, SessionView, SetupTarget, SetupView};
 use vmux_session::{AgentConversationTitle, AgentId, QueuedPrompts, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
@@ -51,11 +51,14 @@ pub(super) struct PageOpener<'w, 's> {
         ),
         With<Session>,
     >,
+    setup_targets: Query<'w, 's, &'static EntityTarget<Session>, With<SetupTarget>>,
+    setup_views: Query<'w, 's, (), With<SetupView>>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, &'static mut Tab>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
+    renderer_pool: vmux_layout::warm_page::RendererPool<'w, 's>,
     queues: QueuedPrompts<'w, 's>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
@@ -153,147 +156,193 @@ impl PageOpener<'_, '_> {
                 self.open_provider(task, transition_webview);
                 Ok(PageOpenCompletion::Complete)
             }
-            Route::Session(id) => {
-                let Some((
-                    session_entity,
-                    session_name,
-                    stored_cwd,
-                    selected_agent,
-                    resume,
-                    active,
-                    provider_kind,
-                    provider_sid,
-                )) = self
-                    .sessions
-                    .iter()
-                    .find(|(_, candidate, ..)| *candidate == &id)
-                    .map(
-                        |(
-                            entity,
-                            _,
-                            name,
-                            cwd,
-                            agent,
-                            resume,
-                            active,
-                            kind,
-                            provider_sid,
-                            retry,
-                        )| {
-                            (
-                                entity,
-                                name.as_str().to_string(),
-                                cwd.0.clone(),
-                                agent.map(|agent| agent.0.clone()),
-                                resume.map(|resume| resume.0.clone()),
-                                active.filter(|_| !retry).map(|active| active.0),
-                                kind.cloned(),
-                                provider_sid.cloned(),
-                            )
-                        },
+            Route::Setup => {
+                let session = self
+                    .setup_targets
+                    .get(task.stack)
+                    .ok()
+                    .map(EntityTarget::entity);
+                if let Some(session) = session {
+                    let id = self
+                        .sessions
+                        .get(session)
+                        .ok()
+                        .map(|(_, id, ..)| id.clone());
+                    if let Some(id) = id {
+                        let view = transition_webview.or_else(|| {
+                            self.children
+                                .get(task.stack)
+                                .ok()?
+                                .iter()
+                                .find(|child| self.setup_views.contains(*child))
+                        });
+                        return self.open_session(
+                            task_entity,
+                            task,
+                            id,
+                            initial_prompt,
+                            initial_attachments,
+                            view,
+                            default_cwd,
+                        );
+                    }
+                }
+                self.commands
+                    .entity(task.stack)
+                    .remove::<(EntityTarget<Session>, SetupTarget)>();
+                let title = translate("onboarding-setup");
+                let view = self.open_surface(task, transition_webview, &Route::Setup.url(), &title);
+                self.commands.entity(view).insert(SetupView);
+                Ok(PageOpenCompletion::Complete)
+            }
+            Route::Session(id) => self.open_session(
+                task_entity,
+                task,
+                id,
+                initial_prompt,
+                initial_attachments,
+                transition_webview,
+                default_cwd,
+            ),
+        }
+    }
+
+    fn open_session(
+        &mut self,
+        task_entity: Entity,
+        task: &PageOpenTask,
+        id: SessionId,
+        initial_prompt: Option<String>,
+        initial_attachments: Vec<AgentAttachment>,
+        transition_webview: Option<Entity>,
+        default_cwd: &Path,
+    ) -> Result<PageOpenCompletion, String> {
+        let Some((
+            session_entity,
+            session_name,
+            stored_cwd,
+            selected_agent,
+            resume,
+            active,
+            provider_kind,
+            provider_sid,
+        )) = self
+            .sessions
+            .iter()
+            .find(|(_, candidate, ..)| *candidate == &id)
+            .map(
+                |(entity, _, name, cwd, agent, resume, active, kind, provider_sid, retry)| {
+                    (
+                        entity,
+                        name.as_str().to_string(),
+                        cwd.0.clone(),
+                        agent.map(|agent| agent.0.clone()),
+                        resume.map(|resume| resume.0.clone()),
+                        active.filter(|_| !retry).map(|active| active.0),
+                        kind.cloned(),
+                        provider_sid.cloned(),
                     )
-                else {
-                    return Err(format!("Session '{}' was not found", id.0));
-                };
-                let agent_id = selected_agent
-                    .or_else(|| {
-                        self.settings
-                            .agent
-                            .acp
-                            .first()
-                            .map(|config| config.id.clone())
-                    })
-                    .or_else(|| self.catalog.installed_id())
-                    .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-                let config = self
-                    .settings
+                },
+            )
+        else {
+            return Err(format!("Session '{}' was not found", id.0));
+        };
+        let agent_id = selected_agent
+            .or_else(|| {
+                self.settings
                     .agent
                     .acp
-                    .iter()
-                    .find(|config| config.id == agent_id);
-                if config.is_none() && self.catalog.agent(&agent_id).is_none() {
-                    return Err(format!("ACP agent unavailable for '{agent_id}'"));
-                }
-                let icon = self.catalog.icon(&agent_id);
-                let has_history = self
-                    .transcripts
-                    .read(session_entity, |transcript| !transcript.messages.is_empty());
-                let resume = AcpResume::for_agent(
-                    &agent_id,
-                    resume,
-                    has_history,
-                    provider_kind.as_ref().zip(provider_sid.as_ref()),
-                )
-                .0;
-                let agent_name = self.catalog.profile_name(&agent_id, config);
-                let cwd_missing = stored_cwd.as_os_str().is_empty();
-                let cwd = if cwd_missing {
-                    default_cwd.to_path_buf()
-                } else {
-                    stored_cwd
-                };
-                if let Some(anchor) = active {
-                    if cwd_missing {
-                        self.commands.queue(vmux_session::mutation::Request::local(
-                            id.clone(),
-                            vmux_session::mutation::Mutation::ChangeWorkspace(cwd.clone()),
-                        ));
-                    }
-                    self.bind_workspace(task.stack, &cwd);
-                    self.commands
-                        .entity(task.stack)
-                        .insert(EntityTarget::<Session>::new(session_entity));
-                    if resume.is_some() && !has_history {
-                        self.commands
-                            .entity(session_entity)
-                            .insert(vmux_session::TranscriptLoading);
-                    }
-                    self.enqueue_initial_prompt(
-                        session_entity,
-                        task.stack,
-                        initial_prompt,
-                        initial_attachments,
-                    );
-                    self.open_session_view(
-                        task,
-                        session_entity,
-                        &session_name,
-                        &agent_id,
-                        anchor,
-                        transition_webview,
-                    );
-                    return Ok(PageOpenCompletion::Complete);
-                }
-                let request = AcpAgentAttachment::new(
-                    session_entity,
-                    task.stack,
-                    agent_id.clone(),
-                    &session_name,
-                    agent_name,
-                    id.0.clone(),
-                    cwd,
-                    icon,
-                    resume,
-                );
-                let prompt =
-                    self.defer_initial_prompt(task.stack, initial_prompt, initial_attachments);
-                let operation = self
-                    .commands
-                    .spawn((
-                        request,
-                        PageNavigation::new(task.id),
-                        prompt,
-                        EntityTarget::<PageOpenTask>::new(task_entity),
-                    ))
-                    .id();
-                if let Some(webview) = transition_webview {
-                    self.commands
-                        .entity(operation)
-                        .insert(EntityTarget::<SessionView>::new(webview));
-                }
-                Ok(PageOpenCompletion::PendingAttachment)
-            }
+                    .first()
+                    .map(|config| config.id.clone())
+            })
+            .or_else(|| self.catalog.installed_id())
+            .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
+        let config = self
+            .settings
+            .agent
+            .acp
+            .iter()
+            .find(|config| config.id == agent_id);
+        if config.is_none() && self.catalog.agent(&agent_id).is_none() {
+            return Err(format!("ACP agent unavailable for '{agent_id}'"));
         }
+        let icon = self.catalog.icon(&agent_id);
+        let has_history = self
+            .transcripts
+            .read(session_entity, |transcript| !transcript.messages.is_empty());
+        let resume = AcpResume::for_agent(
+            &agent_id,
+            resume,
+            has_history,
+            provider_kind.as_ref().zip(provider_sid.as_ref()),
+        )
+        .0;
+        let agent_name = self.catalog.profile_name(&agent_id, config);
+        let cwd_missing = stored_cwd.as_os_str().is_empty();
+        let cwd = if cwd_missing {
+            default_cwd.to_path_buf()
+        } else {
+            stored_cwd
+        };
+        if let Some(anchor) = active {
+            if cwd_missing {
+                self.commands.queue(vmux_session::mutation::Request::local(
+                    id.clone(),
+                    vmux_session::mutation::Mutation::ChangeWorkspace(cwd.clone()),
+                ));
+            }
+            self.bind_workspace(task.stack, &cwd);
+            self.commands
+                .entity(task.stack)
+                .insert(EntityTarget::<Session>::new(session_entity));
+            if resume.is_some() && !has_history {
+                self.commands
+                    .entity(session_entity)
+                    .insert(vmux_session::TranscriptLoading);
+            }
+            self.enqueue_initial_prompt(
+                session_entity,
+                task.stack,
+                initial_prompt,
+                initial_attachments,
+            );
+            self.open_session_view(
+                task,
+                session_entity,
+                &session_name,
+                &agent_id,
+                anchor,
+                transition_webview,
+            );
+            return Ok(PageOpenCompletion::Complete);
+        }
+        let request = AcpAgentAttachment::new(
+            session_entity,
+            task.stack,
+            agent_id.clone(),
+            &session_name,
+            agent_name,
+            id.0.clone(),
+            cwd,
+            icon,
+            resume,
+        );
+        let prompt = self.defer_initial_prompt(task.stack, initial_prompt, initial_attachments);
+        let operation = self
+            .commands
+            .spawn((
+                request,
+                PageNavigation::new(task.id),
+                prompt,
+                EntityTarget::<PageOpenTask>::new(task_entity),
+            ))
+            .id();
+        if let Some(webview) = transition_webview {
+            self.commands
+                .entity(operation)
+                .insert(EntityTarget::<SessionView>::new(webview));
+        }
+        Ok(PageOpenCompletion::PendingAttachment)
     }
 
     fn defer_initial_prompt(
@@ -309,8 +358,19 @@ impl PageOpener<'_, '_> {
     }
 
     fn open_manager(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>, url: &str) {
-        let stack = task.stack;
         let title = translate("sessions-title");
+        let view = self.open_surface(task, transition_webview, url, &title);
+        self.commands.entity(view).insert(SessionManagerView);
+    }
+
+    fn open_surface(
+        &mut self,
+        task: &PageOpenTask,
+        transition_webview: Option<Entity>,
+        url: &str,
+        title: &str,
+    ) -> Entity {
+        let stack = task.stack;
         self.retarget_handoff(transition_webview, task.id);
         let view = transition_webview.unwrap_or_else(|| {
             let previous = self.previous_surfaces(stack, None);
@@ -319,25 +379,32 @@ impl PageOpener<'_, '_> {
                     .entity(*surface)
                     .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
             }
+            let handoff = self.new_handoff(previous, task.id);
+            if let Some(view) = self.renderer_pool.take(url, stack) {
+                self.commands
+                    .entity(view)
+                    .insert((handoff, ChildOf(stack), Visibility::Hidden));
+                return view;
+            }
             self.commands
                 .spawn((
-                    vmux_layout::Browser::hosted_page(url, &title),
-                    self.new_handoff(previous, task.id),
-                    SessionManagerView,
+                    vmux_layout::Browser::hosted_page(url, title),
+                    handoff,
                     ChildOf(stack),
                 ))
                 .insert(Visibility::Hidden)
                 .id()
         });
-        self.commands.entity(view).remove::<SessionView>().insert((
-            PageMetadata {
+        self.commands
+            .entity(view)
+            .remove::<(SessionView, SessionManagerView, SetupView)>()
+            .insert(PageMetadata {
                 url: url.to_string(),
-                title,
+                title: title.to_string(),
                 bg_color: None,
                 icon: default(),
-            },
-            SessionManagerView,
-        ));
+            });
+        view
     }
 
     fn open_provider(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>) {
@@ -385,11 +452,15 @@ impl PageOpener<'_, '_> {
     ) {
         let stack = task.stack;
         self.retarget_handoff(transition_webview, task.id);
-        let url = self
-            .sessions
-            .get(session)
-            .map(|(_, id, ..)| Route::Session(id.clone()).url())
-            .unwrap_or_else(|_| Route::Manager.url());
+        let setup = Route::parse(&task.url) == Some(Route::Setup);
+        let url = if setup {
+            Route::Setup.url()
+        } else {
+            self.sessions
+                .get(session)
+                .map(|(_, id, ..)| Route::Session(id.clone()).url())
+                .unwrap_or_else(|_| Route::Manager.url())
+        };
         let view = transition_webview.unwrap_or_else(|| {
             let previous = self.previous_surfaces(stack, None);
             for surface in &previous {
@@ -423,6 +494,12 @@ impl PageOpener<'_, '_> {
             anchor,
         ));
         self.commands.entity(view).remove::<SessionManagerView>();
+        if setup {
+            self.commands.entity(view).insert(SetupView);
+        } else {
+            self.commands.entity(view).remove::<SetupView>();
+            self.commands.entity(stack).remove::<SetupTarget>();
+        }
         self.commands
             .entity(stack)
             .insert(EntityTarget::<Session>::new(session));

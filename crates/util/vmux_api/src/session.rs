@@ -328,11 +328,24 @@ pub enum RemoteStatus {
     Streaming,
     Interrupted,
     Errored(String),
+    Starting,
+    AuthenticationRequired {
+        #[allow(clippy::box_collection)]
+        methods: Box<Vec<crate::protocol::AuthenticationMethod>>,
+        pending: bool,
+    },
 }
 
 impl From<&AgentRunStatus> for RemoteStatus {
     fn from(status: &AgentRunStatus) -> Self {
         match status {
+            AgentRunStatus::Starting => Self::Starting,
+            AgentRunStatus::AuthenticationRequired { methods, pending } => {
+                Self::AuthenticationRequired {
+                    methods: methods.clone(),
+                    pending: *pending,
+                }
+            }
             AgentRunStatus::Idle => Self::Idle,
             AgentRunStatus::Streaming => Self::Streaming,
             AgentRunStatus::Interrupted => Self::Interrupted,

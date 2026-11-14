@@ -521,6 +521,27 @@ impl Native {
     }
 
     pub fn run(&self, profile: &str, platform: &str) -> Result<()> {
+        if profile == "dev"
+            && platform == "desktop"
+            && self.environment.get("VMUX_ONBOARDING_FRESH") == Some(OsStr::new("1"))
+        {
+            let fresh = Temporary::create(Path::new("/tmp"), "vmux-fresh-clean")?;
+            fs::create_dir_all(fresh.path().join("profiles/fresh/home"))?;
+            fs::create_dir_all(fresh.path().join("config/projects"))?;
+            let mut environment = self.environment.clone();
+            environment.remove("VMUX_ONBOARDING_FRESH");
+            environment.set("VMUX_DATA_DIR", fresh.path().as_os_str());
+            environment.set("VMUX_PROFILE", "fresh");
+            environment.set("VMUX_TEST_ENV_KEYS", "0");
+            println!("Onboarding test data: {}", fresh.path().display());
+            let result = Self::new(&self.checkout, environment).run(profile, platform);
+            if result.is_ok() {
+                fresh
+                    .retention()
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+            return result;
+        }
         if platform == "web" {
             let mut watcher = self.command(self.get("TAILWINDCSS_BIN", "tailwindcss"));
             watcher
@@ -578,7 +599,12 @@ impl Native {
             ));
             self.verify_signature(&app)?;
             let mut command = self.command("open");
-            for key in ["VMUX_PROFILE", "VMUX_TEST", "VMUX_DATA_DIR"] {
+            for key in [
+                "VMUX_PROFILE",
+                "VMUX_TEST",
+                "VMUX_DATA_DIR",
+                "VMUX_TEST_ENV_KEYS",
+            ] {
                 if let Some(value) = self.environment.get(key) {
                     command
                         .arg("--env")
@@ -622,5 +648,176 @@ impl Drop for Watcher {
     fn drop(&mut self) {
         crate::signals::Signals::terminate_group(self.0.id());
         let _ = self.0.wait();
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::environment::Environment;
+    use crate::repository::Checkout;
+
+    struct Launch {
+        native: Native,
+        record: PathBuf,
+        persistent: PathBuf,
+        owned: Vec<PathBuf>,
+        _directory: tempfile::TempDir,
+    }
+
+    impl Launch {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../..")
+                .canonicalize()
+                .unwrap();
+            let checkout = Checkout {
+                root,
+                target: directory.path().join("target"),
+                build_target: None,
+            };
+            let bin = directory.path().join("bin");
+            let record = directory.path().join("launch.json");
+            let persistent = directory.path().join("persistent");
+            fs::create_dir_all(&persistent).unwrap();
+            fs::write(persistent.join("sentinel"), "personal state").unwrap();
+            Self::program(&bin.join("codesign"), "#!/bin/sh\nexit 0\n");
+            Self::program(
+                &bin.join("open"),
+                r#"#!/usr/bin/env python3
+import json, os, sys
+values = {}
+for index, argument in enumerate(sys.argv[1:]):
+    if argument == '--env':
+        name, value = sys.argv[index + 2].split('=', 1)
+        values[name] = value
+with open(os.environ['ONBOARDING_LAUNCH_RECORD'], 'w') as output:
+    json.dump(values, output)
+"#,
+            );
+            let mut environment = Environment::current();
+            environment.remove("VMUX_ONBOARDING_FRESH");
+            let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+            environment.set("PATH", path);
+            environment.set("ONBOARDING_LAUNCH_RECORD", record.as_os_str());
+            environment.set("VMUX_PROFILE", "personal");
+            environment.set("VMUX_DATA_DIR", persistent.as_os_str());
+            environment.set("VMUX_TEST_ENV_KEYS", "1");
+            let native = Native::new(&checkout, environment);
+            let debug = checkout.directory("debug");
+            let name = format!(
+                "{} Dev.app",
+                native.product().unwrap().value("VMUX_HOST_NAME")
+            );
+            let mut files = Vec::new();
+            for name in ["vmux", "vmux_service", "vmux_desktop"] {
+                files.push(debug.join(name));
+            }
+            files.push(debug.join(name).join("Contents/MacOS/vmux_desktop"));
+            let mut stamp = format!("{}\n", checkout.root.display());
+            for file in files {
+                Self::program(&file, "fixture");
+                stamp.push_str(&format!(
+                    "{}  {}\n",
+                    native.checksum(&file).unwrap(),
+                    file.display()
+                ));
+            }
+            fs::write(debug.join(".vmux-dev-ready"), stamp).unwrap();
+            Self {
+                native,
+                record,
+                persistent,
+                owned: Vec::new(),
+                _directory: directory,
+            }
+        }
+
+        fn program(path: &Path, contents: &str) {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+
+        fn run(&mut self, fresh: bool) -> BTreeMap<String, String> {
+            if fresh {
+                self.native.environment.set("VMUX_ONBOARDING_FRESH", "1");
+            } else {
+                self.native.environment.remove("VMUX_ONBOARDING_FRESH");
+            }
+            self.native.run("dev", "desktop").unwrap();
+            let record: BTreeMap<String, String> =
+                serde_json::from_slice(&fs::read(&self.record).unwrap()).unwrap();
+            let data = PathBuf::from(&record["VMUX_DATA_DIR"]);
+            if data != self.persistent && !self.owned.contains(&data) {
+                self.owned.push(data);
+            }
+            record
+        }
+    }
+
+    impl Drop for Launch {
+        fn drop(&mut self) {
+            for directory in &self.owned {
+                let _ = fs::remove_dir_all(directory);
+            }
+        }
+    }
+
+    #[test]
+    fn fresh_launches_isolate_setup_and_keep_persistent_profiles() {
+        let mut fixture = Launch::new();
+        let first = fixture.run(true);
+        let first_data = PathBuf::from(&first["VMUX_DATA_DIR"]);
+        assert_eq!(first["VMUX_PROFILE"], "fresh");
+        assert_eq!(first["VMUX_TEST_ENV_KEYS"], "0");
+        assert!(first_data.join("profiles/fresh/home").is_dir());
+        assert!(first_data.join("config/projects").is_dir());
+        assert!(
+            first_data.as_os_str().as_encoded_bytes().len()
+                + "/dev/services/vmux-dev-fresh.sock".len()
+                < 104
+        );
+        fs::write(first_data.join("onboarding.json"), "connected").unwrap();
+        let second = fixture.run(true);
+        let second_data = PathBuf::from(&second["VMUX_DATA_DIR"]);
+        assert_ne!(first_data, second_data);
+        assert!(!second_data.join("onboarding.json").exists());
+        assert_eq!(
+            fs::read_to_string(first_data.join("onboarding.json")).unwrap(),
+            "connected"
+        );
+        let normal = fixture.run(false);
+        assert_eq!(PathBuf::from(&normal["VMUX_DATA_DIR"]), fixture.persistent);
+        assert_eq!(normal["VMUX_PROFILE"], "personal");
+        assert_eq!(
+            fs::read_to_string(fixture.persistent.join("sentinel")).unwrap(),
+            "personal state"
+        );
+    }
+
+    #[test]
+    fn explicit_fixture_reuse_preserves_state_and_environment_key_mode() {
+        let mut fixture = Launch::new();
+        let first = fixture.run(true);
+        let data = PathBuf::from(&first["VMUX_DATA_DIR"]);
+        fs::write(data.join("onboarding.json"), "connected").unwrap();
+        fixture
+            .native
+            .environment
+            .set("VMUX_DATA_DIR", data.as_os_str());
+        fixture.native.environment.set("VMUX_PROFILE", "fresh-env");
+        fixture.native.environment.set("VMUX_TEST_ENV_KEYS", "1");
+        let reused = fixture.run(false);
+        assert_eq!(PathBuf::from(&reused["VMUX_DATA_DIR"]), data);
+        assert_eq!(reused["VMUX_TEST_ENV_KEYS"], "1");
+        assert_eq!(
+            fs::read_to_string(data.join("onboarding.json")).unwrap(),
+            "connected"
+        );
     }
 }
