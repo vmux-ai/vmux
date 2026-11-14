@@ -1,5 +1,5 @@
 use bevy::{
-    ecs::system::{Commands as EcsCommands, SystemParam},
+    ecs::system::{Commands as EcsCommands, SystemParam, SystemState},
     prelude::*,
 };
 use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
@@ -100,52 +100,64 @@ impl AuthenticationHost<'_, '_> {
     }
 }
 
-fn open(mut requests: MessageReader<Open>, mut host: AuthenticationHost) {
-    for request in requests.read() {
-        if host.views.session(request.view) != Some(request.session)
-            || !host
-                .sessions
-                .get(request.session)
-                .is_ok_and(|(pending, _)| pending)
+fn open(world: &mut World, state: &mut SystemState<(MessageReader<Open>, AuthenticationHost)>) {
+    let requests: Vec<_> = {
+        let Ok((mut requests, _)) = state.get_mut(world) else {
+            return;
+        };
+        requests.read().cloned().collect()
+    };
+    for request in requests {
         {
-            continue;
+            let Ok((_, mut host)) = state.get_mut(world) else {
+                continue;
+            };
+            if host.views.session(request.view) != Some(request.session)
+                || !host
+                    .sessions
+                    .get(request.session)
+                    .is_ok_and(|(pending, _)| pending)
+            {
+                continue;
+            }
+            let previous: Vec<_> = host
+                .popups
+                .iter()
+                .filter(|(_, _, parent, ..)| parent.parent() == request.owner)
+                .map(|(entity, ..)| entity)
+                .collect();
+            for entity in previous {
+                host.retire(entity);
+            }
+            let metadata = PageMetadata {
+                url: request.url.clone(),
+                title: request.title.clone(),
+                icon: request.icon.clone(),
+                ..Default::default()
+            };
+            let popup = AuthenticationPopup {
+                id: request.id.clone(),
+            };
+            host.commands
+                .spawn(vmux_layout::Browser::new_with_title(
+                    &request.url,
+                    &request.title,
+                ))
+                .insert((
+                    metadata,
+                    Name::new(format!("Authentication: {}", request.title)),
+                    popup,
+                    ChildOf(request.owner),
+                    HostWindow(request.window),
+                    EntityTarget::<Session>::new(request.session),
+                    EntityTarget::<SessionView>::new(request.view),
+                    vmux_ecs::WindowOverlay,
+                    vmux_ecs::FixedWindowOverlay,
+                    crate::PopupWebview,
+                    Visibility::Hidden,
+                ));
         }
-        let previous: Vec<_> = host
-            .popups
-            .iter()
-            .filter(|(_, _, parent, ..)| parent.parent() == request.owner)
-            .map(|(entity, ..)| entity)
-            .collect();
-        for entity in previous {
-            host.retire(entity);
-        }
-        let metadata = PageMetadata {
-            url: request.url.clone(),
-            title: request.title.clone(),
-            icon: request.icon.clone(),
-            ..Default::default()
-        };
-        let popup = AuthenticationPopup {
-            id: request.id.clone(),
-        };
-        host.commands
-            .spawn(vmux_layout::Browser::new_with_title(
-                &request.url,
-                &request.title,
-            ))
-            .insert((
-                metadata,
-                Name::new(format!("Authentication: {}", request.title)),
-                popup,
-                ChildOf(request.owner),
-                HostWindow(request.window),
-                EntityTarget::<Session>::new(request.session),
-                EntityTarget::<SessionView>::new(request.view),
-                vmux_ecs::WindowOverlay,
-                vmux_ecs::FixedWindowOverlay,
-                crate::PopupWebview,
-                Visibility::Hidden,
-            ));
+        state.apply(world);
     }
 }
 

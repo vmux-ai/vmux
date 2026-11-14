@@ -732,7 +732,7 @@ mod opening_tests {
             }
         }
 
-        fn open(&mut self, url: &str) -> Entity {
+        fn request(&mut self, url: &str) {
             let request_id = AgentRequestId::new();
             self.request_id = request_id.to_string();
             self.app.world_mut().write_message(AgentRequestMessage {
@@ -746,6 +746,10 @@ mod opening_tests {
                     source: Some("source".into()),
                 },
             });
+        }
+
+        fn open(&mut self, url: &str) -> Entity {
+            self.request(url);
             self.app.update();
             self.app.update();
             self.app
@@ -754,6 +758,31 @@ mod opening_tests {
                 .single(self.app.world())
                 .unwrap()
         }
+    }
+
+    #[test]
+    fn sign_in_requests_in_one_frame_keep_only_the_latest_modal() {
+        let mut fixture = ModalFixture::new();
+        fixture.request("https://example.test/auth?attempt=1");
+        let url = "https://example.test/auth?attempt=2";
+        fixture.request(url);
+        fixture.app.update();
+        fixture.app.update();
+        let popup = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::PopupWebview>>()
+            .single(fixture.app.world())
+            .unwrap();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(popup)
+                .unwrap()
+                .url,
+            url
+        );
     }
 
     #[test]
