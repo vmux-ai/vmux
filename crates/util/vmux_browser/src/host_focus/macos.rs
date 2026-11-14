@@ -35,7 +35,7 @@ fn apply_winit(
             handoff.0 = false;
             continue;
         }
-        if handoff.releases(ReclaimOutcome::of(window)) {
+        if handoff.releases(ReclaimOutcome::request(window)) {
             keys.release_all();
         }
     }
@@ -73,7 +73,7 @@ impl KeyWindowHandoff {
 }
 
 impl ReclaimOutcome {
-    fn of(window_entity: Entity) -> Self {
+    fn request(window_entity: Entity) -> Self {
         let view_ptr = WINIT_WINDOWS.with_borrow(|windows| {
             let id = windows.entity_to_winit.get(&window_entity)?;
             let wrapper = windows.windows.get(id)?;
