@@ -43,20 +43,51 @@ fn cargo_children_receive_command_specific_incremental_defaults_and_overrides() 
 }
 
 #[cfg(not(feature = "runtime"))]
+static FIXTURES: (std::sync::Mutex<u8>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+#[cfg(not(feature = "runtime"))]
+struct Permit;
+
+#[cfg(not(feature = "runtime"))]
+impl Permit {
+    fn acquire() -> Self {
+        let mut active = FIXTURES.0.lock().unwrap();
+        while *active >= 4 {
+            active = FIXTURES.1.wait(active).unwrap();
+        }
+        *active += 1;
+        Self
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+impl Drop for Permit {
+    fn drop(&mut self) {
+        let mut active = FIXTURES.0.lock().unwrap();
+        *active -= 1;
+        FIXTURES.1.notify_one();
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
 struct WorkspaceFixture {
     _directory: tempfile::TempDir,
     root: std::path::PathBuf,
+    _permit: Permit,
 }
 
 #[cfg(not(feature = "runtime"))]
 impl WorkspaceFixture {
     fn new() -> Self {
+        let permit = Permit::acquire();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("workspace with spaces");
         std::fs::create_dir_all(root.join("bin")).unwrap();
         let fixture = Self {
             _directory: directory,
             root,
+            _permit: permit,
         };
         std::fs::write(fixture.root.join("Cargo.toml"), "[workspace]\nmembers = []\n[workspace.metadata.vmux.dx]\nproviders = [{name = 'fixtures', package = 'fixture-provider', binary = 'provider-bin', manifest = 'provider.ron'}]\n").unwrap();
         fixture.manifest("fixtures", "fixture");
@@ -754,11 +785,13 @@ struct Fixture {
     directory: tempfile::TempDir,
     root: std::path::PathBuf,
     target: std::path::PathBuf,
+    _permit: Permit,
 }
 
 #[cfg(unix)]
 impl Fixture {
     fn new() -> Self {
+        let permit = Permit::acquire();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("checkout with spaces");
         let target = directory.path().join("target with spaces");
@@ -805,6 +838,7 @@ impl Fixture {
             directory,
             root,
             target,
+            _permit: permit,
         };
         let git = std::process::Command::new("git")
             .arg("-C")
@@ -1081,7 +1115,8 @@ fn resolved_launch_cancellation_drains_a_tool_that_ignores_the_signal() {
 trap '' TERM INT
 printf '%s' $$ > "$TEST_ROOT/tool-started"
 sleep 60 &
-printf '%s' "$!" > "$TEST_ROOT/tool-child"
+printf '%s' "$!" > "$TEST_ROOT/tool-child.pending"
+mv "$TEST_ROOT/tool-child.pending" "$TEST_ROOT/tool-child"
 wait
 "#,
     );
@@ -1094,6 +1129,7 @@ wait
                 format!("{}:/usr/bin:/bin", fixture.root.join("bin").display()),
             )
             .env("CARGO_TARGET_DIR", &fixture.target)
+            .env_remove("CARGO_BUILD_TARGET")
             .env("TEST_ROOT", &fixture.root)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1141,6 +1177,97 @@ wait
     assert!(!fixture.root.join("open.log").exists());
 }
 
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn workspace_capacity_is_rechecked_before_compilation() {
+    let fixture = WorkspaceFixture::new();
+    fixture.tool("df", r#"
+if [ -e "$VMUX_WORKSPACE_TEST_ROOT/capacity-first" ]; then free=0; else
+    touch "$VMUX_WORKSPACE_TEST_ROOT/capacity-first"
+    free=2097152
+fi
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 2097152 0 %s 0%% /\n' "$free"
+"#);
+    fixture
+        .run(&["fixtures", "echo"])
+        .env("VMUX_BUILD_STORAGE_MIN_GIB", "1")
+        .env("VMUX_BUILD_STORAGE_WARN_GIB", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Insufficient build space"));
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn workspace_capacity_probe_cancels_and_drains_before_exit() {
+    let fixture = WorkspaceFixture::new();
+    fixture.tool(
+        "df",
+        r#"
+trap '' TERM INT
+printf '%s' $$ > "$VMUX_WORKSPACE_TEST_ROOT/probe.pending"
+mv "$VMUX_WORKSPACE_TEST_ROOT/probe.pending" "$VMUX_WORKSPACE_TEST_ROOT/probe-started"
+exec sleep 60
+"#,
+    );
+    let mut command = fixture.command();
+    command
+        .args(["fixtures", "echo"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let mut child = WorkspaceChild(command.spawn().unwrap());
+    let marker = fixture.root.join("probe-started");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "capacity probe never started"
+        );
+        assert!(child.0.try_wait().unwrap().is_none());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let pid: i32 = std::fs::read_to_string(marker).unwrap().parse().unwrap();
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGINT) }, 0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(130));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "capacity probe did not drain"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(all(target_os = "macos", not(feature = "runtime")))]
+fn debug_fifo_inputs_are_refused_before_launching() {
+    for name in [".vmux-dev-ready", "vmux"] {
+        let fixture = Fixture::new();
+        fixture.command().args(["build"]).assert().success();
+        let path = fixture.target.join("debug").join(name);
+        std::fs::remove_file(&path).unwrap();
+        let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        fixture
+            .command()
+            .args(["run"])
+            .timeout(std::time::Duration::from_secs(10))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Debug input must be a regular file",
+            ));
+        assert!(!fixture.root.join("open.log").exists());
+    }
+}
+
 #[cfg(all(unix, not(feature = "runtime")))]
 struct OwnedGroup(i32);
 
@@ -1164,7 +1291,8 @@ case "$*" in
   'worktree list --porcelain -z')
     printf '%s' $$ > "$TEST_ROOT/git-started"
     sleep 60 &
-    printf '%s' "$!" > "$TEST_ROOT/git-descendant"
+    printf '%s' "$!" > "$TEST_ROOT/git-descendant.pending"
+    mv "$TEST_ROOT/git-descendant.pending" "$TEST_ROOT/git-descendant"
     wait
     ;;
   *)

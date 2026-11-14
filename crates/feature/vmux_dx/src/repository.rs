@@ -267,7 +267,11 @@ mod tests {
             .unwrap();
         let read = Read {
             root: fixture.root.clone(),
-            arguments: vec!["-c", "alias.wait=!echo $$ > read-started; sleep 2", "wait"],
+            arguments: vec![
+                "-c",
+                "alias.wait=!echo $$ > read-started.pending; mv read-started.pending read-started; sleep 2",
+                "wait",
+            ],
         };
         let (guard, flight) = Guard::new(
             None,

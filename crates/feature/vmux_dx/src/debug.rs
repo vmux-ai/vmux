@@ -29,8 +29,8 @@ impl bevy_app::Plugin for Plugin {
             .add_systems(
                 Update,
                 (
-                    initialize, collect, cancel, identity, clear, sign, bundle, publish, run, stop,
-                    signature, provider, wake, schedule, release, finish,
+                    initialize, collect, cancel, identity, capacity, clear, sign, bundle, publish,
+                    run, stop, signature, provider, wake, schedule, release, finish,
                 )
                     .chain()
                     .in_set(Stage),
@@ -43,6 +43,9 @@ struct Stage;
 
 #[derive(Component, Clone)]
 pub enum Request {
+    Capacity {
+        minimum: u64,
+    },
     Identity {
         print: bool,
     },
@@ -93,6 +96,8 @@ struct Owner(Entity);
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Start,
+    CapacityInspect,
+    CapacityRead,
     IdentityKeychain,
     IdentityLookup,
     IdentityProvision,
@@ -156,6 +161,7 @@ struct Optional;
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 enum Tag {
     None,
+    Capacity,
     Keychain,
     Identities,
     Temporary,
@@ -788,6 +794,98 @@ fn identity(
                 child.insert(Optional);
             }
             previous = Some(child.id());
+        }
+    }
+}
+
+fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut commands: Commands) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        let Request::Capacity { minimum } = request else {
+            continue;
+        };
+        if facts.pending(entity) {
+            continue;
+        }
+        let effect = match *phase {
+            Phase::Start => {
+                commands
+                    .entity(entity)
+                    .insert(Target(checkout.target.clone()));
+                *phase = Phase::CapacityInspect;
+                Some((Effect::Inspect(checkout.target.clone()), Tag::Path))
+            }
+            Phase::CapacityInspect => {
+                let Some(Observation::Metadata(metadata)) = facts.get(entity, Tag::Path) else {
+                    continue;
+                };
+                let Ok(target) = targets.get(entity) else {
+                    continue;
+                };
+                if metadata.is_some() {
+                    *phase = Phase::CapacityRead;
+                    Some((
+                        Effect::command(
+                            &settings.0,
+                            &checkout.root,
+                            "df".into(),
+                            vec!["-Pk".into(), target.0.clone().into_os_string()],
+                        ),
+                        Tag::Capacity,
+                    ))
+                } else if let Some(parent) = target.0.parent() {
+                    let parent = parent.to_owned();
+                    commands.entity(entity).insert(Target(parent.clone()));
+                    Some((Effect::Inspect(parent), Tag::Path))
+                } else {
+                    commands
+                        .entity(entity)
+                        .insert(Failed(Failure::message("Cannot find target filesystem")));
+                    None
+                }
+            }
+            Phase::CapacityRead => {
+                let Some(text) = facts.text(entity, Tag::Capacity) else {
+                    continue;
+                };
+                let free = match text.lines().nth(1) {
+                    Some(line) => match line.split_whitespace().nth(3) {
+                        Some(value) => match value.parse::<u64>() {
+                            Ok(value) => value.checked_mul(1024),
+                            Err(_) => None,
+                        },
+                        None => None,
+                    },
+                    None => None,
+                };
+                match free {
+                    Some(free) if free >= *minimum => {
+                        commands.entity(entity).insert(Complete(Outcome::Done));
+                    }
+                    Some(_) => {
+                        commands.entity(entity).insert(Failed(Failure::message(format!(
+                            "Insufficient build space: need {} GiB free; stop unused apps/builds and run vmux cache clean --apply",
+                            *minimum as f64 / crate::policy::GIB as f64,
+                        ))));
+                    }
+                    None => {
+                        commands
+                            .entity(entity)
+                            .insert(Failed(Failure::message("Invalid filesystem capacity")));
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+        if let Some((effect, tag)) = effect {
+            commands.spawn((
+                Operation::bundle("dx.debug.io").unwrap(),
+                effect,
+                tag,
+                Order(sequence.0),
+                ChildOf(entity),
+            ));
+            sequence.0 += 1;
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{OpenOptionsExt, symlink};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -236,10 +236,20 @@ impl Job for Effect {
                 })
             }
             Self::Read(path) => {
-                let mut bytes = Vec::new();
-                fs::File::open(path)
+                let file = fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(path)
+                    .map_err(|error| Failure::message(error.to_string()))?;
+                if !file
+                    .metadata()
                     .map_err(|error| Failure::message(error.to_string()))?
-                    .take(1024 * 1024 + 1)
+                    .is_file()
+                {
+                    return Err(Failure::message("Debug input must be a regular file"));
+                }
+                let mut bytes = Vec::new();
+                file.take(1024 * 1024 + 1)
                     .read_to_end(&mut bytes)
                     .map_err(|error| Failure::message(error.to_string()))?;
                 if bytes.len() > 1024 * 1024 {
@@ -248,8 +258,18 @@ impl Job for Effect {
                 Ok(Observation::Bytes(bytes))
             }
             Self::Hash(path) => {
-                let mut file =
-                    fs::File::open(path).map_err(|error| Failure::message(error.to_string()))?;
+                let mut file = fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(path)
+                    .map_err(|error| Failure::message(error.to_string()))?;
+                if !file
+                    .metadata()
+                    .map_err(|error| Failure::message(error.to_string()))?
+                    .is_file()
+                {
+                    return Err(Failure::message("Debug input must be a regular file"));
+                }
                 let mut hash = Sha256::new();
                 let mut bytes = [0; 65536];
                 loop {

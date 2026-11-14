@@ -17,6 +17,10 @@ pub struct Storage {
 }
 
 impl Storage {
+    pub(crate) fn minimum(&self) -> u64 {
+        self.policy.minimum
+    }
+
     pub fn new(root: PathBuf, target: PathBuf, policy: Policy) -> Result<Self> {
         let root = root.canonicalize()?;
         let target = std::path::absolute(target)?;

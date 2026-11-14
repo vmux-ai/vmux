@@ -619,12 +619,15 @@ fn plan_provider(
             continue;
         };
         for work in [
+            Work::Capacity,
             Work::WorkspaceAcquire,
+            Work::Capacity,
             Work::WorkspaceCompile(
                 provider.package.clone(),
                 provider.binary.clone(),
                 provider.cargo.clone(),
             ),
+            Work::WorkspaceSnapshot(provider.binary.clone()),
             Work::WorkspaceInvoke(dispatch.arguments.clone()),
         ] {
             plans.step(entity, &mut tail, work);
@@ -1269,15 +1272,10 @@ fn start(
         if *state != OperationState::Running {
             continue;
         }
-        if matches!(work, Work::WorkspaceAcquire)
-            && let Err(error) = storage.guard()
-        {
-            commands
-                .entity(parent.parent())
-                .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
-            continue;
-        }
         let request = match work {
+            Work::Capacity => Some(debug::Request::Capacity {
+                minimum: storage.minimum(),
+            }),
             Work::Codesign => Some(debug::Request::Identity { print: false }),
             Work::ClearReady => Some(debug::Request::Clear),
             Work::SignDebug => Some(debug::Request::Sign),
@@ -1395,18 +1393,18 @@ fn cancel(
 
 fn collect(
     mut completions: MessageReader<Completion>,
-    steps: Query<(&ChildOf, &Attempt, &Work), With<Running>>,
-    mut operations: Query<(&mut Settings, &mut OperationState, &Storage), With<Accepted>>,
+    steps: Query<(&ChildOf, &Attempt), With<Running>>,
+    mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
     mut commands: Commands,
 ) {
     for completion in completions.read() {
-        let Ok((parent, attempt, work)) = steps.get(completion.entity) else {
+        let Ok((parent, attempt)) = steps.get(completion.entity) else {
             continue;
         };
         if attempt.0 != completion.attempt {
             continue;
         }
-        let Ok((mut settings, mut state, storage)) = operations.get_mut(parent.parent()) else {
+        let Ok((mut settings, mut state)) = operations.get_mut(parent.parent()) else {
             continue;
         };
         if *state == OperationState::Canceled {
@@ -1414,20 +1412,6 @@ fn collect(
                 .entity(completion.entity)
                 .remove::<Running>()
                 .insert((Completed, OperationState::Canceled));
-            continue;
-        }
-        if matches!(work, Work::WorkspaceAcquire)
-            && completion.result.is_ok()
-            && let Err(error) = storage.guard()
-        {
-            *state = OperationState::Failed;
-            commands
-                .entity(completion.entity)
-                .remove::<Running>()
-                .insert((Completed, OperationState::Failed));
-            commands
-                .entity(parent.parent())
-                .insert(CliResult(Err(error.to_string())));
             continue;
         }
         match &completion.result {

@@ -54,6 +54,7 @@ pub enum Work {
     CliPackage(bool),
     WorkspaceCompile(String, String, std::path::PathBuf),
     WorkspaceSnapshot(String),
+    Capacity,
     WorkspaceAcquire,
     WorkspaceInvoke(Vec<OsString>),
 }
@@ -102,6 +103,7 @@ impl Work {
             Self::CliPackage(_) => "Verify and package standalone release CLI",
             Self::WorkspaceCompile(_, _, _) => "Build workspace CLI provider",
             Self::WorkspaceSnapshot(_) => "Publish workspace CLI executable snapshot",
+            Self::Capacity => "Check available build space",
             Self::WorkspaceInvoke(_) => "Run workspace CLI provider",
         }
     }
@@ -175,6 +177,7 @@ impl Work {
             Self::Tool(program, args) => native.tool(program, args)?,
             Self::Cargo(args) => native.cargo(args)?,
             Self::Codesign
+            | Self::Capacity
             | Self::ClearReady
             | Self::SignDebug
             | Self::BundleDebug
