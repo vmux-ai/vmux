@@ -1023,8 +1023,8 @@ Loading feedback includes the reload revision and page URL in its identity, so a
 cannot light up the next reload of the same stack. External-page address rows keep their origin
 pill and text; their favicon remains in the tab.
 Renderer-only `PrewarmPage` pools prepare Code and Terminal surfaces without intercepting their
-page requests. `RendererPool` leases ready surfaces once within the target window; feature plugins
-seed minimal context and still own file selection and PTY creation. Claiming a surface clears its
+page requests. `RendererPool` atomically reserves each ready surface for the current PageOpenTask
+within the target window; feature plugins seed minimal context and still own file selection and PTY creation. Claiming a surface clears its
 old presentation acknowledgements before the new page's first usable frame appears.
 Dormant stack entries keep their page icon until a visible load is requested. Keyboard commands
 from the user target the focused page; page-origin commands retain their window scope. Hosted-page
@@ -1037,6 +1037,11 @@ is ready, then commit immediately without a timed fade. Content pages use the sa
 lifecycle. Feature page-open handlers create or retarget the incoming surface;
 they never despawn the committed surface themselves. Only the page reducer retires it after
 presentation commits.
+
+Pool retry counts and deadlines live on the hidden pool node. Registration, readiness and removal
+changes reconcile its configured capacity with one new renderer per frame. Pool removal cancels its
+entity-keyed native wake, and recreating the pool starts with fresh retry state. The timer adapter
+retains opaque wake tokens; pool and presentation systems choose their deadlines and own transitions. Dropping the last timer-service owner cancels pending wakes and releases its native worker.
 
 Stack and Tab replacement uses one presentation transition. Selection changes immediately, while
 the projection keeps the outgoing branch visible until a ready presented surface exists under the

@@ -636,7 +636,7 @@ fn handle_page_open(
             vmux_layout::hosted_page::SurfaceHandoff::new(previous, task.id, 0, time.elapsed()),
             ChildOf(task.stack),
         );
-        let terminal = match renderers.take(TerminalPlugin::URL, task.stack) {
+        let terminal = match renderers.take(TerminalPlugin::URL, entity) {
             Some(terminal) => {
                 commands.entity(terminal).insert(bundle);
                 terminal
