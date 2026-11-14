@@ -41,7 +41,7 @@ runs:
     - name: Build development CLI
       shell: bash
       run: |
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS -u RUSTFLAGS cargo build --locked -p vmux_cli --no-default-features --features dx --target-dir .build-tools/cargo
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS -u RUSTFLAGS cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .build-tools/cargo
         mkdir -p .build-tools/bin
         install -m 0755 .build-tools/cargo/debug/vmux .build-tools/bin/vmux
         echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"

@@ -120,16 +120,18 @@ impl Native {
         let target = self.checkout.root.join(".build-tools/cargo");
         self.environment.set("CARGO_TARGET_DIR", target.as_os_str());
         for args in [
-            vec!["test", "-p", "vmux_dx", "--lib"],
+            vec!["test", "-p", "vmux_dx", "--features", "ci-syntax", "--lib"],
             vec![
                 "test",
                 "-p",
                 "vmux_cli",
                 "--no-default-features",
                 "--features",
-                "dx",
+                "dx,ci-syntax",
                 "--test",
                 "dx",
+                "--test",
+                "ci_native",
             ],
             vec!["fmt", "--all", "--", "--check"],
             vec![

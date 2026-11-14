@@ -9,6 +9,7 @@ publish = false
 default = ["runtime", "dx"]
 runtime = ["dep:tokio", "dep:vmux_app", "vmux_ecs/host", "vmux_dx?/runtime-cli"]
 dx = ["dep:vmux_dx"]
+ci-syntax = ["dx", "vmux_dx/ci-syntax"]
 
 [[bin]]
 name = "vmux"

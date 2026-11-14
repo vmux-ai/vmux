@@ -15,6 +15,8 @@ use storage::Storage;
 use target_lock::TargetLock;
 use work::{Outcome, Work};
 
+#[cfg(feature = "ci-syntax")]
+mod ci_native;
 mod ci_scope;
 mod consumer;
 mod environment;

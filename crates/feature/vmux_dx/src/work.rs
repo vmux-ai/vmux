@@ -48,6 +48,7 @@ pub enum Work {
     Status,
     Clean(bool),
     Scope(Vec<OsString>),
+    NativeInputs(Vec<OsString>),
     Consumer(Vec<OsString>),
     Internal(String, Vec<OsString>),
     CliCompile,
@@ -237,6 +238,7 @@ impl Work {
                 steps.extend([Self::Acquire, Self::Clean(invocation.flag("apply"))])
             }
             "dx.ci-scope" => steps.push(Self::Scope(forwarded)),
+            "dx.ci-native" => steps.push(Self::NativeInputs(forwarded)),
             "dx.framework-consumer" => steps.extend([Self::Acquire, Self::Consumer(forwarded)]),
             "dx.internal" => {
                 let task = invocation.value("task").ok_or("Missing integration task")?;
@@ -306,6 +308,7 @@ impl Work {
             Self::Status => "Report build storage",
             Self::Clean(_) => "Clean build cache",
             Self::Scope(_) => "Select CI scope",
+            Self::NativeInputs(_) => "Classify native CI inputs",
             Self::Consumer(_) => "Validate public SDK",
             Self::Internal(_, _) => "Run external integration",
             Self::CliCompile => "Build standalone release CLI",
@@ -413,6 +416,15 @@ impl Work {
                 storage.report()?;
             }
             Self::Scope(args) => Scope::new(checkout.root.clone())?.run(args)?,
+            Self::NativeInputs(args) => {
+                #[cfg(feature = "ci-syntax")]
+                crate::ci_native::Changes::new(checkout.root.clone())?.run(args)?;
+                #[cfg(not(feature = "ci-syntax"))]
+                {
+                    let _ = args;
+                    return Err("ci-native requires the ci-syntax CLI feature".into());
+                }
+            }
             Self::Consumer(args) => Consumer::new(
                 checkout.root.clone(),
                 Some(checkout.target.clone()),

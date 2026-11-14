@@ -324,7 +324,46 @@ class Workflow {
     const filter = this.jobs.changes.steps.find((step) => step.uses === 'dorny/paths-filter@v4');
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
+
+  changes(event, feature, base, native) {
+    const github = { event_name: event };
+    const needs = { plan: { outputs: { feature, base } } };
+    const steps = {
+      filter: { outputs: { macos: 'true', macos_package: 'true', ios: 'true', code: 'true' } },
+      native: { outputs: { native } },
+    };
+    const classify = this.jobs.changes.steps.find((step) => step.id === 'native');
+    if (!Function('github', 'needs', 'steps', `return (${classify.if});`)(github, needs, steps)) steps.native.outputs.native = '';
+    const result = {};
+    for (const [key, value] of Object.entries(this.jobs.changes.outputs)) {
+      result[key] = Function('github', 'steps', `return (${value.slice(3, -2)});`)(github, steps);
+    }
+    return result;
+  }
 }
+
+test('portable test changes skip native jobs while Rust checks and full validation remain required', () => {
+  const workflow = new Workflow();
+  for (const [event, feature, base] of [['push', 'true', 'base'], ['pull_request', 'false', 'base']]) {
+    const changes = workflow.changes(event, feature, base, 'false');
+    assert.equal(changes.macos, false);
+    assert.equal(changes.macos_package, false);
+    assert.equal(changes.ios, false);
+    assert.equal(changes.code, true);
+    assert.equal(workflow.selected('build-mac', event, feature, String(changes.macos), String(changes.macos_package)), false);
+    const full = workflow.changes(event, feature, base, 'true');
+    assert.equal(full.macos, true);
+    assert.equal(full.ios, true);
+  }
+  for (const [event, feature, base] of [['push', 'false', ''], ['workflow_dispatch', 'false', '']]) {
+    const changes = workflow.changes(event, feature, base, 'false');
+    assert.equal(changes.macos, true);
+    assert.equal(changes.ios, true);
+  }
+  const missing = workflow.changes('pull_request', 'false', 'base', '');
+  assert.equal(missing.macos, true);
+  assert.equal(missing.ios, true);
+});
 
 test('change detection receives a local merge object ID accepted by paths-filter', (t) => {
   const fixture = new Fixture(t);
