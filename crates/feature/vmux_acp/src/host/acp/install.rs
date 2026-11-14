@@ -9,8 +9,8 @@ pub(super) fn add(app: &mut App) {
 
 fn start(
     mut commands: Commands,
-    sessions: Query<
-        (Entity, &SessionId, &AgentId),
+    mut sessions: Query<
+        (Entity, &SessionId, &AgentId, &mut RunState),
         (
             With<Session>,
             Without<AcpLaunchStarted>,
@@ -44,7 +44,7 @@ fn start(
         .stack
         .and_then(|stack| targets.get(stack).ok())
         .map(EntityTarget::entity);
-    for (entity, session_id, agent_id) in &sessions {
+    for (entity, session_id, agent_id, mut state) in &mut sessions {
         if focused_session != Some(entity) {
             continue;
         }
@@ -94,6 +94,10 @@ fn start(
                 agent_id: agent_id.0.clone(),
             },
         ));
+        *state = RunState::Installing {
+            detail: vmux_ui::i18n::translate("agent-preparing"),
+            percent: None,
+        };
     }
 }
 
@@ -151,6 +155,20 @@ fn poll(
             .unwrap_or_default();
         if let Some(progress) = job.take_progress() {
             *install_state = progress;
+            for entity in &related_waiters {
+                if invalid_waiters.contains(entity) {
+                    continue;
+                }
+                if let Ok((_, session_id, agent_id, _, _, _, waiter, mut state)) =
+                    waiters.get_mut(*entity)
+                    && waiter.matches(session_id, agent_id)
+                {
+                    *state = RunState::Installing {
+                        detail: install_state.message.clone(),
+                        percent: install_state.pct,
+                    };
+                }
+            }
         }
         if let Some(result) = job.task.as_mut().and_then(|task| task.poll()) {
             job.task.take();
@@ -203,14 +221,14 @@ fn poll(
                         settings.as_deref(),
                     );
                     service_requests.write(ServiceRequest(message));
-                    *state = RunState::Idle;
+                    *state = RunState::Preparing;
                     commands
                         .entity(entity)
                         .insert(AcpSpawnQueued)
                         .remove::<AcpInstallWaiter>();
                 }
                 Err(message) => {
-                    *state = RunState::Errored(message.clone());
+                    *state = RunState::Errored(format!("ACP installation failed: {message}"));
                     commands.entity(entity).remove::<AcpInstallWaiter>();
                 }
             }

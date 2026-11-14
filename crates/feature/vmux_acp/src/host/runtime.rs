@@ -290,7 +290,10 @@ fn session(
     mut reader: MessageReader<AcpSessionCreated>,
     sessions: Query<(Entity, &SessionId), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
-    mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
+    mut page_meta: Query<
+        (&mut PageMetadata, Has<vmux_session::host::SetupView>),
+        With<SessionView>,
+    >,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
@@ -307,7 +310,8 @@ fn session(
                     continue;
                 }
                 for kid in kids.iter() {
-                    if let Ok(mut meta) = page_meta.get_mut(kid)
+                    if let Ok((mut meta, setup)) = page_meta.get_mut(kid)
+                        && !setup
                         && meta.url != url
                     {
                         meta.url = url.clone();

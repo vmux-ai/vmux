@@ -375,6 +375,21 @@
   transform: scale(0.98);
 }
 
+.vmux-primary-action[role="option"] {
+  transition: background-color 80ms ease-out;
+}
+
+.vmux-primary-action[role="option"]:active {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vmux-primary-action[role="option"] {
+    transition: none;
+  }
+}
+
 .vmux-primary-action::before {
   content: "";
   position: absolute;

@@ -1,5 +1,14 @@
 (
     cli: Some((
         default: Some("app.open"),
+        commands: [(
+            id: "browser.open",
+            name: "open",
+            about: Some("Open an HTTP or HTTPS URL in Vmux"),
+            arguments: [
+                (id: "url", index: Some(1), required: true, value_name: Some("URL")),
+                (id: "source", long: Some("source"), value_name: Some("SESSION_ID")),
+            ],
+        )],
     )),
 )

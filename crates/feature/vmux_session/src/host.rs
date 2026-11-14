@@ -21,6 +21,10 @@ pub use handoff::ImportedConversation;
 #[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
+#[cfg(host)]
+pub use onboarding::{ProvidersChanged, SetupTarget, SetupView};
+#[cfg(host)]
+pub use prompt::RecoverPrompt;
 pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
 #[cfg(host)]
 pub use session::{
@@ -48,6 +52,8 @@ mod key;
 #[cfg(host)]
 mod media;
 mod model;
+#[cfg(host)]
+mod onboarding;
 mod presentation;
 mod projection;
 mod prompt;
@@ -94,6 +100,7 @@ impl Plugin for SessionClientPlugin {
             session::ChatHostPlugin,
             command_bar::CommandBarPlugin,
             transcript::TranscriptPlugin,
+            onboarding::Plugin,
         ));
     }
 }
@@ -103,6 +110,11 @@ fn prewarm(mut commands: Commands) {
     commands.spawn(PrewarmPage::exact(
         vmux_api::VmuxRoute::SESSIONS_ROOT,
         vmux_ui::i18n::translate("sessions-title"),
+        1,
+    ));
+    commands.spawn(PrewarmPage::renderer(
+        crate::Route::SETUP_URL,
+        vmux_ui::i18n::translate("onboarding-setup"),
         1,
     ));
 }
@@ -124,4 +136,5 @@ fn spawn_store_validator(mut commands: Commands) {
 #[cfg(all(host, not(target_os = "android")))]
 fn register_route(mut commands: Commands) {
     commands.spawn(HostSpawnRoute::subtree(vmux_api::VmuxRoute::SESSIONS_ROOT));
+    commands.spawn(HostSpawnRoute::page(crate::Route::SETUP_URL));
 }

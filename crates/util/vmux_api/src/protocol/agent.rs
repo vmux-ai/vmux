@@ -153,6 +153,19 @@ pub enum AgentRunStatus {
     Idle,
     Interrupted,
     Errored(String),
+    Starting,
+    AuthenticationRequired {
+        #[allow(clippy::box_collection)]
+        methods: Box<Vec<AuthenticationMethod>>,
+        pending: bool,
+    },
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AuthenticationMethod {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[vmux_api::contract(Eq)]

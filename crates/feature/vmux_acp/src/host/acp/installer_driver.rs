@@ -112,9 +112,9 @@ impl AcpInstallJob {
             pending: progress_sender,
             wake: wake.clone(),
         };
-        let task =
-            workers.spawn_process(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-                resolve_acp_install(request, &sink, AgentInstaller::at(PackageStore::at(agents)))
+        let task = workers
+            .spawn_process(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+                AgentInstaller::at(PackageStore::at(agents)).resolve_launch(request, &sink)
             })?;
         Ok(Self {
             progress,
@@ -125,41 +125,51 @@ impl AcpInstallJob {
     }
 }
 
-fn resolve_acp_install(
-    request: AcpInstallRequest,
-    progress: &AcpInstallProgressSink,
-    installer: AgentInstaller,
-) -> AcpInstallOutcome {
-    let pinned_version = request
-        .fallback
-        .as_ref()
-        .and_then(|config| config.version.as_deref());
-    let resolved = installer.resolve(&request.agent_id, pinned_version, |phase, pct, message| {
-        progress.publish(InstallState::from_phase(phase, pct, message));
-    });
-    let package_added = resolved
-        .as_ref()
-        .map(|resolved| resolved.package_added)
-        .unwrap_or(false);
-    let login_env = vmux_process::LoginShellEnvironment::get(&request.shell);
-    let launch = match resolved {
-        Ok(resolved) => Ok(AcpLaunch {
-            command: resolved.command,
-            args: resolved.args,
-            env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend).into_inner(),
-        }),
-        Err(registry_error) => match request.fallback {
-            Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
-                command: config.command,
-                args: config.args,
-                env: AcpEnvironment::build(config.env, login_env, None).into_inner(),
+impl AgentInstaller {
+    fn resolve_launch(
+        self,
+        request: AcpInstallRequest,
+        progress: &AcpInstallProgressSink,
+    ) -> AcpInstallOutcome {
+        let pinned_version = request
+            .fallback
+            .as_ref()
+            .and_then(|config| config.version.as_deref());
+        let resolved = self.resolve(&request.agent_id, pinned_version, |phase, pct, message| {
+            progress.publish(InstallState::from_phase(phase, pct, message));
+        });
+        let package_added = resolved
+            .as_ref()
+            .map(|resolved| resolved.package_added)
+            .unwrap_or(false);
+        let login_env = crate::host::onboarding::AgentCredential::environment(
+            &request.agent_id,
+            vmux_process::LoginShellEnvironment::get(&request.shell),
+            self.store
+                .path()
+                .parent()
+                .unwrap_or_else(|| self.store.path()),
+        );
+        let launch = match resolved {
+            Ok(resolved) => Ok(AcpLaunch {
+                command: resolved.command,
+                args: resolved.args,
+                env: AcpEnvironment::build(resolved.env, &login_env, resolved.path_prepend)
+                    .into_inner(),
             }),
-            _ => Err(registry_error),
-        },
-    };
-    AcpInstallOutcome {
-        package_added,
-        launch,
+            Err(registry_error) => match request.fallback {
+                Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
+                    command: config.command,
+                    args: config.args,
+                    env: AcpEnvironment::build(config.env, &login_env, None).into_inner(),
+                }),
+                _ => Err(registry_error),
+            },
+        };
+        AcpInstallOutcome {
+            package_added,
+            launch,
+        }
     }
 }
 
@@ -210,12 +220,23 @@ impl AcpLaunch {
                 );
             })
             .ok();
+        let mut env = self.env.clone();
+        if !env.iter().any(|(key, _)| key == "BROWSER")
+            && let Some(mcp) = &mcp
+            && mcp.command != "cargo"
+        {
+            env.push((
+                "BROWSER".into(),
+                vmux_process::BrowserCommand::for_session(Path::new(&mcp.command), &session_id.0)
+                    .into_string(),
+            ));
+        }
         ClientMessage::SpawnAcpAgent {
             sid: session_id.0.clone(),
             agent_id: agent_id.0.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
-            env: self.env.clone(),
+            env,
             cwd: cwd.0.to_string_lossy().into_owned(),
             anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
@@ -243,7 +264,7 @@ impl InstallState {
         if matches!(phase, InstallPhase::Done) {
             Self {
                 pct: None,
-                message: "Starting agent…".to_string(),
+                message: vmux_ui::i18n::translate("agent-starting"),
             }
         } else {
             Self {
@@ -256,7 +277,7 @@ impl InstallState {
     pub(super) fn preparing() -> Self {
         Self {
             pct: None,
-            message: "Preparing agent…".to_string(),
+            message: vmux_ui::i18n::translate("agent-preparing"),
         }
     }
 }

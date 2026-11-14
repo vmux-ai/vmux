@@ -13,6 +13,9 @@ impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((super::acp::ConfigPlugin, super::runtime::RuntimePlugin));
         super::command_bar::add(app);
+        app.add_plugins(super::onboarding::Plugin);
+        #[cfg(target_os = "macos")]
+        app.add_plugins(super::credentials::Plugin);
         app.add_plugins(super::approval::ApprovalPlugin);
         app.add_plugins(super::attach::AttachPlugin);
         app.add_plugins(super::attention::AttentionPlugin);

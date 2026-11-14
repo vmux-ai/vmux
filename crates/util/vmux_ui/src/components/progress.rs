@@ -38,7 +38,7 @@ pub fn Progress(props: ProgressProps) -> Element {
 pub fn ProgressIndicator(props: ProgressIndicatorProps) -> Element {
     rsx! {
         progress::ProgressIndicator {
-            class: "h-full w-[var(--progress-value,0%)] rounded-full bg-primary transition-[width] duration-200 group-data-[state=indeterminate]:w-1/3 group-data-[state=indeterminate]:animate-[update-indeterminate_1.2s_ease-in-out_infinite]",
+            class: "h-full w-[var(--progress-value,0%)] rounded-full bg-primary transition-[width] duration-200 group-data-[state=indeterminate]:w-1/3 group-data-[state=indeterminate]:animate-[update-indeterminate_1.2s_ease-in-out_infinite] motion-reduce:animate-none motion-reduce:transition-none",
             attributes: props.attributes,
             {props.children}
         }
