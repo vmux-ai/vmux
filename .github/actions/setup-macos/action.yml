@@ -11,12 +11,17 @@ inputs:
     description: Install Dioxus and packaging tools
     required: false
     default: "true"
+  fast-rust:
+    description: Use the CI-only compile settings for type checks
+    required: false
+    default: "auto"
 runs:
   using: composite
   steps:
     - uses: ./.github/actions/setup-rust
       with:
         targets: wasm32-unknown-unknown
+        fast-rust: ${{ inputs.fast-rust }}
 
     - uses: Swatinem/rust-cache@v2
       with:

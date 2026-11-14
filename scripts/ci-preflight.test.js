@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Preflight = require('./ci-preflight.js');
+const CliArtifact = require('./ci-cli.js');
 
 class Fixture {
   constructor(t) {
@@ -85,6 +86,22 @@ test('running branch CI is joined before accepting its completed evidence', asyn
   fixture.run.conclusion = null;
   assert.equal((await fixture.preflight.plan()).reuse, '42');
   assert.equal(fixture.polls, 1);
+});
+
+test('PR planning binds stale event metadata to the captured merge parents', async (t) => {
+  for (const advance of [false, true]) {
+    const fixture = new Fixture(t);
+    fixture.context.payload.pull_request.base.sha = fixture.git('rev-parse', `${fixture.base}^`);
+    if (advance) {
+      fs.writeFileSync(path.join(fixture.root, 'later.txt'), 'later base change\n');
+      fixture.base = fixture.commit('advance base after merge capture');
+    }
+    const plan = await fixture.preflight.plan();
+    assert.equal(plan.base, fixture.identity.base);
+    assert.equal(plan.tree, fixture.tree);
+    assert.equal(plan.reuse, '42');
+    assert.equal(fixture.baseBranch, 'main');
+  }
 });
 
 test('running CI against another base is not joined and missing claims fall back', async (t) => {
@@ -201,8 +218,11 @@ test('main, schedules, and manual CI retain normal execution', async (t) => {
 
 test('unexpected PR merge trees fail instead of reusing evidence', async (t) => {
   const fixture = new Fixture(t);
-  fixture.context.sha = fixture.head;
-  await assert.rejects(fixture.preflight.plan(), /does not match/);
+  const invalid = fixture.git('commit-tree', fixture.git('rev-parse', `${fixture.head}^{tree}`), '-p', fixture.base, '-p', fixture.head, '-m', 'invalid merge tree');
+  for (const sha of [fixture.head, invalid]) {
+    fixture.context.sha = sha;
+    await assert.rejects(fixture.preflight.plan(), /does not match/);
+  }
 });
 
 test('PR merges capture an advanced target base without reusing older branch evidence', async (t) => {
@@ -228,6 +248,9 @@ test('PR merge inputs reject reversed parents and bases outside the target branc
   const base = unrelated.commit('Commit outside target branch');
   unrelated.context.sha = unrelated.synthetic(base, unrelated.head);
   await assert.rejects(unrelated.preflight.plan(), /target branch ancestry/);
+  const wrongPayload = new Fixture(t);
+  wrongPayload.context.payload.pull_request.base.sha = wrongPayload.head;
+  await assert.rejects(wrongPayload.preflight.plan(), /target branch ancestry/);
 });
 
 test('prepared checkouts compile the merged code from both branches', (t) => {
@@ -333,6 +356,8 @@ class Workflow {
   constructor() {
     const file = path.join(__dirname, '../.github/workflows/ci.yml');
     this.jobs = JSON.parse(execFileSync('ruby', ['-rjson', '-ryaml', '-e', 'puts JSON.generate(YAML.load_file(ARGV[0])["jobs"])', file], { encoding: 'utf8' }));
+    const filter = this.jobs.changes.steps.find((step) => step.id === 'filter');
+    this.filters = JSON.parse(execFileSync('ruby', ['-rjson', '-ryaml', '-e', 'puts JSON.generate(YAML.load(STDIN.read))'], { input: filter.with.filters, encoding: 'utf8' }));
   }
 
   gate(name, env) {
@@ -340,9 +365,34 @@ class Workflow {
   }
 
   selected(name, event, feature, macos, packaging, reuse = '') {
+    return this.lane(name, event, feature, { macos, macos_package: packaging }, reuse);
+  }
+
+  step(name, title, event, feature, changes) {
+    const step = this.jobs[name].steps.find((step) => step.name === title);
+    return this.lane(name, event, feature, changes, '', step.if);
+  }
+
+  lane(name, event, feature, changes, reuse = '', condition = this.jobs[name].if) {
     const github = { event_name: event };
-    const needs = { plan: { outputs: { feature, reuse } }, changes: { outputs: { macos, macos_package: packaging } } };
-    return Function('github', 'needs', `return (${this.jobs[name].if});`)(github, needs);
+    const outputs = {};
+    for (const [key, value] of Object.entries(changes)) outputs[key] = String(value);
+    const needs = { plan: { outputs: { feature, reuse } }, changes: { outputs } };
+    return Function('github', 'needs', `return (${condition});`)(github, needs);
+  }
+
+  ready(name, results) {
+    return this.jobs[name].needs.every((dependency) => results[dependency] === 'success');
+  }
+
+  paths(files) {
+    const outputs = {};
+    for (const [name, patterns] of Object.entries(this.filters)) {
+      const include = patterns.filter((pattern) => !pattern.startsWith('!'));
+      const exclude = patterns.filter((pattern) => pattern.startsWith('!'));
+      outputs[name] = String(files.some((file) => include.some((pattern) => path.matchesGlob(file, pattern)) && !exclude.some((pattern) => path.matchesGlob(file, pattern.slice(1)))));
+    }
+    return outputs;
   }
 
   name(name, event, feature) {
@@ -356,18 +406,19 @@ class Workflow {
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
 
-  changes(event, feature, base, native) {
+  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true') {
     const github = { event_name: event };
     const needs = { plan: { outputs: { feature, base } } };
     const steps = {
-      filter: { outputs: { macos: 'true', macos_package: 'true', ios: 'true', code: 'true' } },
+      filter: { outputs: filter },
       native: { outputs: { native } },
+      scope: { outputs: { lean } },
     };
     const classify = this.jobs.changes.steps.find((step) => step.id === 'native');
     if (!Function('github', 'needs', 'steps', `return (${classify.if});`)(github, needs, steps)) steps.native.outputs.native = '';
     const result = {};
     for (const [key, value] of Object.entries(this.jobs.changes.outputs)) {
-      result[key] = Function('github', 'steps', `return (${value.slice(3, -2)});`)(github, steps);
+      result[key] = Function('github', 'needs', 'steps', `return (${value.slice(3, -2)});`)(github, needs, steps);
     }
     return result;
   }
@@ -379,6 +430,7 @@ test('portable test changes skip native jobs while Rust checks and full validati
     const changes = workflow.changes(event, feature, base, 'false');
     assert.equal(changes.macos, false);
     assert.equal(changes.macos_package, false);
+    assert.equal(changes.macos_tooling, false);
     assert.equal(changes.ios, false);
     assert.equal(changes.code, true);
     assert.equal(workflow.selected('build-mac', event, feature, String(changes.macos), String(changes.macos_package)), false);
@@ -394,6 +446,155 @@ test('portable test changes skip native jobs while Rust checks and full validati
   const missing = workflow.changes('pull_request', 'false', 'base', '');
   assert.equal(missing.macos, true);
   assert.equal(missing.ios, true);
+});
+
+test('platform path routing keeps iOS tooling and CLI fixtures out of desktop packaging', () => {
+  const workflow = new Workflow();
+  for (const [file, macos, packaging, tooling, ios] of [
+    ['crates/app/vmux_mobile/src/main.rs', false, false, false, true],
+    ['crates/feature/vmux_dx/src/native/ios.rs', false, false, true, true],
+    ['crates/app/vmux_cli/tests/dx.rs', false, false, true, false],
+    ['crates/app/vmux_cli/tests/tool.rs', true, true, true, true],
+    ['crates/app/vmux_cli/tests/fixtures/mobile.rs', true, true, true, true],
+    ['crates/build_product.rs', true, true, true, true],
+    ['crates/app/vmux_desktop/src/main.rs', true, true, false, false],
+    ['crates/util/vmux_profile/src/product.rs', true, false, true, true],
+  ]) {
+    const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]), 'false');
+    assert.equal(changes.macos, macos, file);
+    assert.equal(changes.macos_package, packaging, file);
+    assert.equal(changes.macos_tooling, tooling, file);
+    assert.equal(changes.ios, ios, file);
+    for (const title of ['Test DX lifecycle and platform adapters', 'Test native CLI resource and signing contracts']) {
+      assert.equal(workflow.step('dx-macos', title, 'pull_request', 'false', changes), tooling, file);
+    }
+    assert.equal(workflow.lane('build-mac', 'pull_request', 'false', changes), macos && packaging, file);
+  }
+  const mixed = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([
+    'crates/app/vmux_cli/tests/dx.rs', 'crates/app/vmux_desktop/src/main.rs',
+  ]));
+  assert.equal(mixed.macos_package, true);
+  assert.equal(mixed.macos_tooling, true);
+  assert.equal(workflow.lane('build-mac', 'pull_request', 'false', mixed), true);
+});
+
+test('main pushes retain full macOS packaging for iOS tooling and CLI fixture edits', () => {
+  const workflow = new Workflow();
+  for (const file of ['crates/feature/vmux_dx/src/native/ios.rs', 'crates/app/vmux_cli/tests/dx.rs']) {
+    const paths = workflow.paths([file]);
+    for (const [event, feature] of [['push', 'false'], ['workflow_dispatch', 'false']]) {
+      const changes = workflow.changes(event, feature, '', 'false', paths);
+      assert.equal(changes.macos, true, file);
+      assert.equal(workflow.lane('build-mac', event, feature, changes), true, file);
+      assert.equal(workflow.lane('check-mac', event, feature, changes), false, file);
+      const gate = { PLAN: 'success', PREFLIGHT: '', CHANGES: 'success', MACOS: 'true', PACKAGE: 'true', CHECK: 'skipped', TOOLING: 'true', TOOLING_TEST: 'success' };
+      assert.equal(workflow.gate('build-macos', { ...gate, RESULT: 'success' }).status, 0);
+      assert.equal(workflow.gate('build-macos', { ...gate, RESULT: 'skipped' }).status, 1);
+    }
+    for (const [event, feature] of [['push', 'true'], ['pull_request', 'false']]) {
+      const changes = workflow.changes(event, feature, 'base', 'true', paths);
+      assert.equal(changes.macos, false, file);
+      assert.equal(workflow.lane('build-mac', event, feature, changes), false, file);
+      assert.equal(workflow.step('dx-macos', 'Test DX lifecycle and platform adapters', event, feature, changes), true, file);
+    }
+  }
+  assert.equal(workflow.changes('push', 'false', '', '', workflow.paths(['crates/app/vmux_mobile/src/main.rs'])).macos, false);
+});
+
+test('macOS tooling failures cannot hide behind an intentionally skipped desktop build', () => {
+  const workflow = new Workflow();
+  const valid = { PLAN: 'success', PREFLIGHT: '', CHANGES: 'success', MACOS: 'false', PACKAGE: 'false', CHECK: 'skipped', RESULT: 'skipped', TOOLING: 'true', TOOLING_TEST: 'success' };
+  assert.equal(workflow.gate('build-macos', valid).status, 0);
+  const expression = workflow.jobs['build-macos'].steps[0].env.TOOLING_TEST.slice(3, -2);
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    const tooling = Function('needs', `return (${expression});`)({ 'dx-macos': { result } });
+    assert.equal(workflow.gate('build-macos', { ...valid, TOOLING_TEST: tooling }).status, 1, result);
+  }
+  assert.equal(workflow.gate('build-macos', { ...valid, TOOLING: 'false', TOOLING_TEST: 'skipped' }).status, 0);
+});
+
+test('lean desktop tests can start before full tests and remain a required Test gate', () => {
+  const workflow = new Workflow();
+  const prerequisites = { plan: 'success', changes: 'success', 'cef-version': 'success', 'dx-linux': 'success', 'test-rust': 'in_progress' };
+  assert.equal(workflow.ready('test-lean', prerequisites), true);
+  assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', lean: 'true' }), true);
+  assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', lean: 'false' }), false);
+  const valid = { PLAN: 'success', PREFLIGHT: '', CHANGES: 'success', CODE: 'true', RUST_TEST: 'success', POLICY: 'success', SDK_PATH: 'success', SDK_GIT: 'success', HEADLESS: 'success', LEAN: 'true', LEAN_TEST: 'success' };
+  assert.equal(workflow.gate('test', valid).status, 0);
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    assert.equal(workflow.gate('test', { ...valid, LEAN_TEST: result }).status, 1, result);
+  }
+  assert.equal(workflow.gate('test', { ...valid, LEAN: 'false', LEAN_TEST: 'skipped' }).status, 0);
+});
+
+test('development CLI artifacts bind executable bytes to the exact run, source and platform', (t) => {
+  const fixture = new Fixture(t);
+  fs.writeFileSync(path.join(fixture.root, 'rust-toolchain.toml'), '[toolchain]\nchannel = "1.95.0"\n');
+  fixture.commit('toolchain');
+  const env = { GITHUB_RUN_ID: '123', GITHUB_REPOSITORY: 'owner/repo', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', VMUX_CI_FAST_RUST: '1' };
+  const binary = path.join(fixture.root, 'cli-input');
+  const directory = path.join(fixture.root, 'artifact');
+  fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+  CliArtifact.publish(binary, directory, env, fixture.root);
+  const manifestPath = path.join(directory, 'manifest.json');
+  const original = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const installed = path.join(fixture.root, '.build-tools/bin/vmux');
+  CliArtifact.install(directory, env, fixture.root);
+  assert.equal(fs.readFileSync(installed, 'utf8'), fs.readFileSync(binary, 'utf8'));
+  assert.equal(fs.statSync(installed).mode & 0o111, 0o111);
+  for (const [key, value] of Object.entries({ run: '124', repository: 'other/repo', tree: 'a'.repeat(40), toolchain: '1.94.0', os: 'macOS', arch: 'ARM64', features: 'runtime', compile: 'default' })) {
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...original, [key]: value }));
+    assert.throws(() => CliArtifact.install(directory, env, fixture.root), /does not match/, key);
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify(original));
+  fs.unlinkSync(installed);
+  fs.symlinkSync(binary, installed);
+  assert.throws(() => CliArtifact.install(directory, env, fixture.root), /destination/);
+  assert.equal(fs.readFileSync(binary, 'utf8'), '#!/bin/sh\nexit 0\n');
+  fs.unlinkSync(installed);
+  fs.symlinkSync(path.join(fixture.root, 'missing'), installed);
+  assert.throws(() => CliArtifact.install(directory, env, fixture.root), /destination/);
+  assert.equal(fs.existsSync(path.join(fixture.root, 'missing')), false);
+  fs.unlinkSync(installed);
+  CliArtifact.install(directory, env, fixture.root);
+  fs.appendFileSync(path.join(directory, 'vmux'), 'changed');
+  assert.throws(() => CliArtifact.install(directory, env, fixture.root), /checksum/);
+  assert.equal(fs.readFileSync(installed, 'utf8'), fs.readFileSync(binary, 'utf8'));
+  fs.unlinkSync(path.join(directory, 'vmux'));
+  fs.symlinkSync(binary, path.join(directory, 'vmux'));
+  assert.throws(() => CliArtifact.install(directory, env, fixture.root), /Invalid/);
+});
+
+test('CI-only Rust settings preserve existing flags and encoded-flag precedence', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmux-rust-settings-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const [index, encoded] of [undefined, '', '--cfg\x1fexisting'].entries()) {
+    const file = path.join(root, String(index));
+    const env = { GITHUB_ENV: file, RUSTFLAGS: '--cfg existing', CARGO_ENCODED_RUSTFLAGS: encoded };
+    CliArtifact.configureFastRust(env);
+    const output = fs.readFileSync(file, 'utf8');
+    assert.match(output, /CARGO_PROFILE_DEV_LTO=off/);
+    if (encoded !== undefined) {
+      const flags = output.split('\n').find((line) => line.startsWith('CARGO_ENCODED_RUSTFLAGS=')).slice('CARGO_ENCODED_RUSTFLAGS='.length).split('\x1f');
+      assert.deepEqual(flags, encoded === '' ? ['-C', 'opt-level=1', '-C', 'codegen-units=16'] : ['--cfg', 'existing', '-C', 'opt-level=1', '-C', 'codegen-units=16']);
+      assert.equal(output.includes('\nRUSTFLAGS='), false);
+    } else assert.ok(output.includes('RUSTFLAGS=--cfg existing -C opt-level=1 -C codegen-units=16'));
+  }
+  assert.throws(() => CliArtifact.configureFastRust({ GITHUB_ENV: path.join(root, 'invalid'), RUSTFLAGS: 'value\nINJECTED=1' }), /multiline/);
+  assert.equal(fs.existsSync(path.join(root, 'invalid')), false);
+});
+
+test('CLI consumers wait for the matching platform producer without serializing application jobs', () => {
+  const workflow = new Workflow();
+  assert.equal(workflow.ready('changes', { plan: 'success', 'dx-linux': 'in_progress' }), false);
+  assert.equal(workflow.ready('changes', { plan: 'success', 'dx-linux': 'success' }), true);
+  const ready = { plan: 'success', changes: 'success', 'cef-version': 'success', 'dx-macos': 'success' };
+  assert.equal(workflow.ready('ios-build', ready), true);
+  assert.equal(workflow.ready('build-mac', ready), true);
+  assert.equal(workflow.ready('ios-build', { ...ready, 'dx-macos': 'failure' }), false);
+  assert.equal(workflow.ready('build-mac', { ...ready, 'dx-macos': 'in_progress' }), false);
+  assert.equal(workflow.lane('dx-macos', 'pull_request', 'false', { macos: 'false', ios: 'false', macos_tooling: 'false' }), false);
+  assert.equal(workflow.lane('dx-macos', 'pull_request', 'false', { macos: 'false', ios: 'false', macos_tooling: 'true' }), true);
 });
 
 test('change detection receives a local merge object ID accepted by paths-filter', (t) => {
