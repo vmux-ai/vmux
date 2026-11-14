@@ -8,6 +8,7 @@ publish = false
 
 [features]
 default = []
+records = ["bevy_ecs/serialize"]
 cli = ["dep:ron", "dep:vmux_api"]
 jobs = []
 contracts = ["dep:rkyv", "dep:vmux_api"]

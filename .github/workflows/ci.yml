@@ -155,6 +155,9 @@ jobs:
         if: steps.scope.outputs.lean == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
+      - name: Clippy renderer-free record contracts
+        run: cargo clippy --locked -p vmux_ecs --no-default-features --features records --all-targets -- -D warnings
+
   test-rust:
     name: Test (rust)
     runs-on: ubuntu-latest
@@ -185,6 +188,9 @@ jobs:
 
       - name: Run tests
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
+
+      - name: Test record contracts alongside Workspace storage
+        run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
 
       - name: Test lean desktop features
         if: steps.scope.outputs.lean == 'true'

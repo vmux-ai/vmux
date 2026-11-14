@@ -448,6 +448,14 @@ or persistence; rendering code does not feed a normalized snapshot back as busin
 
 ### ECS ownership boundaries
 
+Record serialization owns only immutable schema metadata, scoped JSON records, and write
+receipts. The Schema resource registers stateless component/relationship codec pointers;
+record request/result components retain received or captured values until materialization,
+confirmation, or cancellation. Bevy plugin installation and dynamic tombstone conversion are
+explicit framework boundaries. Nested serde compatibility fixtures are test-only adapters
+to that schema and do not define a product model. Cached exclusive SystemState parameters
+prove the same typed ownership as ordinary registered systems; shadowed wrappers do not.
+
 The UI stylesheet build adapter invokes Tailwind and emits Cargo dependency metadata before
 application composition. `VMUX_SKIP_DX_BUILD` omits stylesheet generation and its source watches
 for headless checks; locale generation remains active. Cargo tracks the flag so normal builds
@@ -685,6 +693,18 @@ The `contracts` feature adds shared wire values; `store` adds schema registratio
 state; `jobs` adds owned blocking work. These capabilities do not require Profile or CEF.
 Blocking pools report unavailable on web targets until a web worker adapter exists.
 The native `host` bundle is explicit in Vmux consumers.
+
+The independent `records` feature exposes `vmux_ecs::record` for scoped, versioned JSON
+records and metadata-only write receipts. Its plugin reuses shared `Uuid`, `Revision`, and
+`Name` components; registered component and relationship codecs preserve nested values and
+stable target UUIDs. Restore, dirty-revision detection, capture, and receipt confirmation run
+in that order. Dynamic restore/capture are the only exclusive systems in this lifecycle.
+Request ownership removes restored roots and descendants; failed restore removes partial
+materialization. Confirmation checks the stable entity ID and leaves newer edits dirty.
+Features own mutation rules and choose a local or remote IO adapter. The contract has no
+Profile, renderer, SQL, transport, or private-repository dependency, and does not replace the
+existing reflection-based Workspace store or automatically enable synchronization.
+
 `VmuxEcsPlugin` installs only primitives and operation lifecycle. The optional `flex` selection
 installs the renderer-independent `vmux_flex::FlexPlugin`; the product runtime explicitly requires
 that core. `VmuxRuntimePlugin` installs the Vmux Profile, page runtime, and optional
