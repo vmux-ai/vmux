@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_BUNDLE="${APP_BUNDLE:-$ROOT/target/release/Vmux.app}"
-ENTITLEMENTS="$ROOT/packaging/macos/Vmux.entitlements"
+source "$ROOT/scripts/product-host.sh"
+vmux_host_read "$ROOT"
+APP_BUNDLE="${APP_BUNDLE:-$ROOT/target/release/$VMUX_HOST_NAME.app}"
+ENTITLEMENTS="$VMUX_HOST_ENTITLEMENTS"
 PROFILE="${VMUX_BUILD_PROFILE:-release}"
 
 case "$PROFILE" in
@@ -27,10 +29,9 @@ esac
 aux_identifier() {
     local name="$1"
     case "$name" in
-        "Vmux Service") printf 'ai.vmux.service%s' "$IDENT_SUFFIX" ;;
-        vmux_service) printf 'ai.vmux.service%s' "$IDENT_SUFFIX" ;;
-        vmux)         printf 'ai.vmux.cli'                         ;;
-        *)            printf 'ai.vmux.%s%s' "$name" "$IDENT_SUFFIX" ;;
+        "$VMUX_HOST_SERVICE_NAME"|vmux_service) printf '%s%s' "$VMUX_HOST_SERVICE_ID" "$IDENT_SUFFIX" ;;
+        vmux)         printf '%s' "$VMUX_HOST_CLI_ID" ;;
+        *)            printf '%s.%s%s' "$VMUX_HOST_NAMESPACE" "$name" "$IDENT_SUFFIX" ;;
     esac
 }
 
@@ -52,7 +53,7 @@ fi
 
 echo "==> Signing $APP_BUNDLE"
 
-find "$APP_BUNDLE/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm +111 \) | while read -r binary; do
+find "$APP_BUNDLE/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm -100 -o -perm -010 -o -perm -001 \) | while read -r binary; do
     file "$binary" | grep -q "Mach-O" || continue
     echo "  Signing: ${binary#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
@@ -86,7 +87,7 @@ find "${NESTED_APP_DIRS[@]}" -name "*.app" -type d | while read -r helper; do
         "$helper"
 done
 
-find "$APP_BUNDLE/Contents/MacOS" -type f -perm +111 | while read -r binary; do
+find "$APP_BUNDLE/Contents/MacOS" -type f \( -perm -100 -o -perm -010 -o -perm -001 \) | while read -r binary; do
     file "$binary" | grep -q "Mach-O" || continue
     name="$(basename "$binary")"
     [ "$name" = "vmux_desktop" ] && continue

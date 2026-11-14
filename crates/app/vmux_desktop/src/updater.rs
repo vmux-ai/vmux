@@ -9,9 +9,8 @@ use vmux_setting::{
     event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
 };
 
-const DEFAULT_STABLE_ENDPOINT: &str = "https://vmux.ai/updates.json";
-const DEFAULT_PREVIEW_ENDPOINT: &str =
-    "https://github.com/vmux-ai/vmux/releases/download/nightly/updates-preview.json";
+const DEFAULT_STABLE_ENDPOINT: &str = vmux_profile::Product::stable_endpoint();
+const DEFAULT_PREVIEW_ENDPOINT: &str = vmux_profile::Product::preview_endpoint();
 
 fn default_pubkey() -> String {
     default_pubkey_from_env(
@@ -202,6 +201,12 @@ fn poll_update_result(
     }
 
     if checker.in_flight {
+        return;
+    }
+
+    if config.endpoint(settings.update_channel).is_empty() {
+        checker.channel = Some(settings.update_channel);
+        status.0 = UpdateCheckStatus::Unavailable;
         return;
     }
 

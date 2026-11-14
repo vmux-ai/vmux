@@ -51,14 +51,3 @@ fn embedded_plist_associates_with_parent_bundle() {
         "AssociatedBundleIdentifiers must include the parent app bundle id ai.vmux.desktop"
     );
 }
-
-#[test]
-fn embed_script_creates_named_service_app_with_icon() {
-    let script = include_str!("../../../../scripts/embed-launch-agent-plist.sh");
-    assert!(script.contains("Vmux Service.app"));
-    assert!(script.contains("CFBundleDisplayName"));
-    assert!(script.contains("CFBundleIconFile"));
-    assert!(script.contains("Vmux.icns"));
-    assert!(script.contains("Contents/MacOS/Vmux Service"));
-    assert!(script.contains("Contents/Resources/Vmux.icns"));
-}

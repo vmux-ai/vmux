@@ -3,19 +3,20 @@ set -euo pipefail
 
 build_profile="${1:?build profile required}"
 checkout="${2:?checkout path required}"
+product_name="${VMUX_HOST_NAME:-Vmux}"
 case "$build_profile" in
-    release) title="Vmux" ;;
+    release) title="$product_name" ;;
     dev|local)
         source_label="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null \
             || git -C "$checkout" rev-parse --short=7 HEAD 2>/dev/null \
             || printf 'unknown')"
         if [[ "$build_profile" == dev ]]; then
-            title="Vmux Dev ($source_label)"
+            title="$product_name Dev ($source_label)"
         else
-            title="Vmux ($source_label)"
+            title="$product_name ($source_label)"
         fi
         ;;
-    *) title="Vmux ($build_profile)" ;;
+    *) title="$product_name ($build_profile)" ;;
 esac
 
 if [[ -n "${3:-}" ]]; then

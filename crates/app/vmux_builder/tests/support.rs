@@ -44,7 +44,17 @@ impl Project {
             "Cargo.lock",
             "scripts/vmux-builder",
             "scripts/cargo-target-paths.sh",
+            "scripts/product-host.sh",
+            "scripts/build-title.sh",
             "scripts/build-mac-release.sh",
+            "crates/build_product.rs",
+            "packaging/macos/Vmux.icns",
+            "packaging/macos/vmux-icon.png",
+            "packaging/macos/tray.png",
+            "packaging/macos/Vmux.entitlements",
+            "packaging/macos/VmuxDev.entitlements",
+            "packaging/macos/usage-descriptions.plist",
+            "packaging/macos/dmg-background.png",
         ] {
             let destination = project.root.join(file);
             fs::create_dir_all(destination.parent().unwrap()).unwrap();
@@ -150,6 +160,10 @@ printf 'library\n' > "$CARGO_TARGET_DIR/debug/deps/current.dylib"
             "VMUX_BUILD_STORAGE_ROOT",
             "CARGO_BUILD_TARGET",
             "RUSTC",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
         ] {
             command.env_remove(key);
         }

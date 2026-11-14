@@ -54,7 +54,10 @@ struct SplashState {
     fade_started: Option<Instant>,
 }
 
-fn show(mut state: NonSendMut<SplashState>) {
+fn show(
+    mut state: NonSendMut<SplashState>,
+    boot: Option<Single<&crate::boot_status::SplashStatus>>,
+) {
     if state.shown {
         return;
     }
@@ -126,7 +129,8 @@ fn show(mut state: NonSendMut<SplashState>) {
     }
 
     const TITLE_H: f64 = 40.0;
-    let title = NSTextField::labelWithString(&NSString::from_str("Vmux"), mtm);
+    let title =
+        NSTextField::labelWithString(&NSString::from_str(vmux_profile::Product::name()), mtm);
     title.setFrame(NSRect::new(
         NSPoint::new(0.0, (H - TITLE_H) / 2.0 + 40.0),
         NSSize::new(W, TITLE_H),
@@ -150,7 +154,11 @@ fn show(mut state: NonSendMut<SplashState>) {
     container.addSubview(&spinner);
 
     const STATUS_H: f64 = 20.0;
-    let status = NSTextField::labelWithString(&NSString::from_str("Starting..."), mtm);
+    let text = boot
+        .as_ref()
+        .map(|boot| boot.phase.display())
+        .unwrap_or_default();
+    let status = NSTextField::labelWithString(&NSString::from_str(&text), mtm);
     status.setFrame(NSRect::new(
         NSPoint::new(0.0, (H - STATUS_H) / 2.0 - 96.0),
         NSSize::new(W, STATUS_H),

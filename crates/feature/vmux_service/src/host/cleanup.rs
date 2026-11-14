@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-const LABEL_PREFIX: &str = "ai.vmux.service";
-
 #[derive(Debug)]
 pub struct LegacyRegistrations(Vec<PathBuf>);
 
@@ -33,7 +31,8 @@ impl LegacyRegistrations {
 
     pub fn label(name: &str) -> Option<&str> {
         let stem = name.strip_suffix(".plist")?;
-        if stem == LABEL_PREFIX || stem.starts_with(&format!("{LABEL_PREFIX}.")) {
+        let prefix = vmux_profile::Product::service_id();
+        if stem == prefix || stem.starts_with(&format!("{prefix}.")) {
             Some(stem)
         } else {
             None

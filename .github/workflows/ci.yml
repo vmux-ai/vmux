@@ -241,6 +241,8 @@ jobs:
           cache-key: sdk-path
           cef-version: ${{ needs.cef-version.outputs.version }}
       - run: bash scripts/test-framework-consumer.sh
+      - name: Test isolated product hosts without a renderer
+        run: bash scripts/test-framework-consumer.sh --host
 
   test-sdk-git:
     name: Test SDK from immutable Git dependencies
@@ -263,6 +265,8 @@ jobs:
           cache-key: sdk-git
           cef-version: ${{ needs.cef-version.outputs.version }}
       - run: bash scripts/test-framework-consumer.sh --git
+      - name: Test product hosts from immutable Git dependencies
+        run: bash scripts/test-framework-consumer.sh --host --git
 
   test-headless:
     name: Test headless application profiles
@@ -321,6 +325,7 @@ jobs:
               - 'ecs-policy.ron'
               - 'crates/**'
               - 'examples/framework-consumer/**'
+              - 'examples/host-consumer/**'
               - 'cef/**'
               - 'patches/**'
               - 'Cargo.toml'

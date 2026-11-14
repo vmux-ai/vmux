@@ -858,7 +858,7 @@ command-group-open = Abrir
 command-group-view = Ver
 command-group-bar = Barra
 
-menu-close-vmux = Cerrar Vmux
+menu-close-product = Cerrar { $product }
 
 agents-terminal-coding-agent = Agente de programación basado en terminal
 knowledge-search = Buscar conocimiento
@@ -1149,3 +1149,18 @@ agent-incoming-message = Mensaje del agente
 schema-focus-follows-mouse = El foco sigue al ratón
 
 terminal-directory-input-pending = Finaliza o cancela el comando o la entrada actual antes de cambiar de directorio.
+
+media-permission-title = ¿Permitir que { $host } use { $devices }?
+media-permission-remember = { $product } recordará tu elección para este sitio.
+media-permission-allow = Permitir
+media-permission-block = Bloquear
+media-permission-devices = { $kind ->
+   *[0] los medios
+    [1] la cámara
+    [2] el micrófono
+    [3] la cámara y el micrófono
+    [4] la pantalla
+    [5] la cámara y la pantalla
+    [6] el micrófono y la pantalla
+    [7] la cámara, el micrófono y la pantalla
+    }

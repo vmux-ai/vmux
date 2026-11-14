@@ -3,7 +3,7 @@ use std::time::UNIX_EPOCH;
 
 use bevy::prelude::Component;
 
-use vmux_profile::ServicePaths;
+use vmux_profile::{Product, ServicePaths};
 
 use std::os::unix::process::CommandExt;
 
@@ -16,10 +16,8 @@ impl DaemonBinary {
     }
 
     pub fn beside(exe: &Path) -> Self {
-        if matches!(
-            exe.file_name().and_then(|n| n.to_str()),
-            Some("vmux_service" | "Vmux Service")
-        ) {
+        let filename = exe.file_name().and_then(|name| name.to_str());
+        if filename == Some("vmux_service") || filename == Some(Product::service_name()) {
             return Self(exe.to_path_buf());
         }
 
@@ -30,10 +28,10 @@ impl DaemonBinary {
                     .join("Contents")
                     .join("Library")
                     .join("LoginItems")
-                    .join("Vmux Service.app")
+                    .join(Product::service_bundle())
                     .join("Contents")
                     .join("MacOS")
-                    .join("Vmux Service"),
+                    .join(Product::service_name()),
             );
         }
 

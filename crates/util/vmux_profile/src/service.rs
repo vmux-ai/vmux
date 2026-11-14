@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{Profile, ProfilePaths, build_profile};
+use crate::{Product, Profile, ProfilePaths, build_profile};
 
 #[derive(Clone, Debug)]
 pub struct ServicePaths {
@@ -66,10 +66,11 @@ impl ServicePaths {
     }
 
     fn stem(&self) -> String {
+        let product = Product::runtime_stem();
         if self.profile == "personal" {
-            format!("vmux-{}", self.build)
+            format!("{product}-{}", self.build)
         } else {
-            format!("vmux-{}-{}", self.build, self.profile)
+            format!("{product}-{}-{}", self.build, self.profile)
         }
     }
 

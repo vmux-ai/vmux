@@ -96,10 +96,16 @@ fn setup(settings: Res<AppSettings>, mut runtime: NonSendMut<TrayRuntime>, mut c
         return;
     }
 
-    let icon = load_tray_icon();
+    let icon = match TrayHandle::icon() {
+        Ok(icon) => icon,
+        Err(error) => {
+            tracing::error!(%error, "failed to decode product tray icon");
+            return;
+        }
+    };
     let tray = match TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip("Vmux")
+        .with_tooltip(vmux_profile::Product::name())
         .with_icon(icon)
         .with_icon_as_template(true)
         .build()
@@ -249,40 +255,48 @@ fn sync_menu_state(
     }
 }
 
-#[cfg(feature = "recording")]
-fn sync_recording(status: Query<&RecordingStatus>, mut runtime: NonSendMut<TrayRuntime>) {
-    let Ok(status) = status.single() else {
-        return;
-    };
-    let Some(handle) = runtime.0.as_mut() else {
-        return;
-    };
-    if handle.last_status == Some(*status) {
-        return;
+fn sync_recording(
+    #[cfg(feature = "recording")] status: Query<&RecordingStatus>,
+    #[cfg(feature = "recording")] mut runtime: NonSendMut<TrayRuntime>,
+) {
+    #[cfg(feature = "recording")]
+    {
+        let Ok(status) = status.single() else {
+            return;
+        };
+        let Some(handle) = runtime.0.as_mut() else {
+            return;
+        };
+        if handle.last_status == Some(*status) {
+            return;
+        }
+        handle.last_status = Some(*status);
+
+        let recording = !matches!(*status, RecordingStatus::Idle);
+        let icon = if recording {
+            TrayHandle::recording_icon()
+        } else {
+            match TrayHandle::icon() {
+                Ok(icon) => icon,
+                Err(error) => {
+                    tracing::error!(%error, "failed to decode product tray icon");
+                    return;
+                }
+            }
+        };
+        let _ = handle
+            ._tray
+            .set_icon_with_as_template(Some(icon), !recording);
+
+        handle
+            .pause
+            .set_enabled(matches!(*status, RecordingStatus::Recording));
+        handle
+            .resume
+            .set_enabled(matches!(*status, RecordingStatus::Paused));
+        handle.done.set_enabled(recording);
     }
-    handle.last_status = Some(*status);
-
-    let recording = !matches!(*status, RecordingStatus::Idle);
-    let icon = if recording {
-        load_tray_icon_recording()
-    } else {
-        load_tray_icon()
-    };
-    let _ = handle
-        ._tray
-        .set_icon_with_as_template(Some(icon), !recording);
-
-    handle
-        .pause
-        .set_enabled(matches!(*status, RecordingStatus::Recording));
-    handle
-        .resume
-        .set_enabled(matches!(*status, RecordingStatus::Paused));
-    handle.done.set_enabled(recording);
 }
-
-#[cfg(not(feature = "recording"))]
-fn sync_recording() {}
 
 fn toggle_label(any_visible: bool, locale: &Locale) -> String {
     if any_visible {
@@ -307,50 +321,36 @@ fn tray_locale(settings: &AppSettings) -> Locale {
     locale
 }
 
-fn load_tray_icon() -> tray_icon::Icon {
-    let rgba = tray_icon_rgba();
-    tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid placeholder rgba")
-}
+impl TrayHandle {
+    fn icon() -> Result<tray_icon::Icon, String> {
+        let image = image::load_from_memory_with_format(
+            vmux_profile::Product::tray_icon(),
+            image::ImageFormat::Png,
+        )
+        .map_err(|error| error.to_string())?;
+        let rgba = image
+            .resize_exact(16, 16, image::imageops::FilterType::Lanczos3)
+            .into_rgba8();
+        tray_icon::Icon::from_rgba(rgba.into_raw(), 16, 16).map_err(|error| error.to_string())
+    }
 
-#[cfg(feature = "recording")]
-fn load_tray_icon_recording() -> tray_icon::Icon {
-    let rgba = tray_icon_recording_rgba();
-    tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid recording rgba")
-}
-
-#[cfg(feature = "recording")]
-fn tray_icon_recording_rgba() -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(16 * 16 * 4);
-    let (cx, cy, r) = (7.5_f32, 7.5_f32, 5.5_f32);
-    for y in 0..16 {
-        for x in 0..16 {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            if dx * dx + dy * dy <= r * r {
-                rgba.extend_from_slice(&[224, 38, 38, 255]);
-            } else {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
+    #[cfg(feature = "recording")]
+    fn recording_icon() -> tray_icon::Icon {
+        let mut rgba = Vec::with_capacity(16 * 16 * 4);
+        let (cx, cy, r) = (7.5_f32, 7.5_f32, 5.5_f32);
+        for y in 0..16 {
+            for x in 0..16 {
+                let dx = x as f32 - cx;
+                let dy = y as f32 - cy;
+                if dx * dx + dy * dy <= r * r {
+                    rgba.extend_from_slice(&[224, 38, 38, 255]);
+                } else {
+                    rgba.extend_from_slice(&[0, 0, 0, 0]);
+                }
             }
         }
+        tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid recording rgba")
     }
-    rgba
-}
-
-fn tray_icon_rgba() -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(16 * 16 * 4);
-    for y in 0_i32..16 {
-        for x in 0_i32..16 {
-            let dy = y - 3;
-            let visible = (0..=10).contains(&dy)
-                && ((x - (3 + dy / 2)).abs() <= 1 || (x - (12 - dy / 2)).abs() <= 1);
-            if visible {
-                rgba.extend_from_slice(&[0, 0, 0, 255]);
-            } else {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
-            }
-        }
-    }
-    rgba
 }
 
 #[cfg(test)]
@@ -370,17 +370,6 @@ mod tests {
         assert_eq!(
             super::toggle_label(false, &Locale::from("ja")),
             "ウインドウを開く"
-        );
-    }
-
-    #[test]
-    fn tray_icon_has_visible_pixels() {
-        let rgba = super::tray_icon_rgba();
-
-        assert_eq!(rgba.len(), 16 * 16 * 4);
-        assert!(
-            rgba.chunks_exact(4).any(|pixel| pixel[3] != 0),
-            "tray icon must not be fully transparent"
         );
     }
 }

@@ -8,9 +8,9 @@ use zeroize::Zeroizing;
 use super::root::RootKeyStore;
 use super::{SafeStorageContext, SafeStorageError};
 
-const ROOT_SERVICE: &str = "ai.vmux.safe-storage";
+const ROOT_SERVICE: &str = crate::Product::keychain_service();
 const ROOT_ACCOUNT: &str = "root";
-const ROOT_LABEL: &str = "Vmux Safe Storage";
+const ROOT_LABEL: &str = crate::Product::keychain_label();
 
 impl RootKeyStore {
     pub(super) fn read(

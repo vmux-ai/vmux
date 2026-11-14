@@ -855,7 +855,7 @@ command-group-open = 열기
 command-group-view = 보기
 command-group-bar = 막대
 
-menu-close-vmux = Vmux 닫기
+menu-close-product = { $product } 닫기
 
 agents-terminal-coding-agent = 터미널 기반 코딩 에이전트
 knowledge-search = 지식 검색
@@ -1146,3 +1146,18 @@ agent-incoming-message = 에이전트 메시지
 schema-focus-follows-mouse = 마우스 위치에 따라 패널 선택
 
 terminal-directory-input-pending = 디렉터리를 변경하려면 현재 명령이나 입력을 완료하거나 취소하세요.
+
+media-permission-title = { $host }에서 { $devices } 사용을 허용하시겠습니까?
+media-permission-remember = { $product }에서 이 사이트에 대한 선택을 기억합니다.
+media-permission-allow = 허용
+media-permission-block = 차단
+media-permission-devices = { $kind ->
+   *[0] 미디어
+    [1] 카메라
+    [2] 마이크
+    [3] 카메라와 마이크
+    [4] 화면
+    [5] 카메라와 화면
+    [6] 마이크와 화면
+    [7] 카메라, 마이크 및 화면
+    }

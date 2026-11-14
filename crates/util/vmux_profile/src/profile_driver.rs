@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{Profile, ProfilePaths, SessionEnvironment};
+use crate::{Product, Profile, ProfilePaths, SessionEnvironment};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProfileRecord {
@@ -49,7 +49,7 @@ impl ProfileMigration {
     }
 
     fn migrate_legacy_layout(&self) {
-        let config = self.home.join(".vmux");
+        let config = self.home.join(Product::config_name());
         Self::migrate_directory(&config.join("profiles/personal/spaces"), &self.spaces());
         Self::migrate_directory(&config.join("spaces"), &self.spaces());
         Self::migrate_directory(&config.join("recording"), &self.recording("personal"));

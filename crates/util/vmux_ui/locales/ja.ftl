@@ -903,7 +903,7 @@ command-group-open = 開く
 command-group-view = 表示
 command-group-bar = バー
 
-menu-close-vmux = Vmuxを閉じる
+menu-close-product = { $product }を閉じる
 
 agents-terminal-coding-agent = ターミナルベースのコーディングエージェント
 knowledge-search = 知識の検索
@@ -1129,3 +1129,18 @@ agent-incoming-message = エージェントからのメッセージ
 schema-focus-follows-mouse = マウス位置に合わせてペインを選択
 
 terminal-directory-input-pending = ディレクトリを変更するには、コマンドや入力を完了するか、Ctrl+Cで中止してください。
+
+media-permission-title = { $host } に{ $devices }の使用を許可しますか？
+media-permission-remember = { $product } はこのサイトの選択を記憶します。
+media-permission-allow = 許可
+media-permission-block = ブロック
+media-permission-devices = { $kind ->
+   *[0] メディア
+    [1] カメラ
+    [2] マイク
+    [3] カメラとマイク
+    [4] 画面
+    [5] カメラと画面
+    [6] マイクと画面
+    [7] カメラ、マイク、画面
+    }

@@ -25,6 +25,10 @@ impl MacPackage {
     }
 
     pub fn prepare(&mut self, profile: &str) -> Result<()> {
+        self.environment.load(&self.root)?;
+        self.environment.set("VMUX_BUILD_PROFILE", profile);
+        let product = self.environment.product(&self.root)?;
+        let product_name = product.value("VMUX_HOST_NAME");
         if profile == "local" {
             if !self.environment.present("SKIP_NOTARIZE") {
                 self.environment.set("SKIP_NOTARIZE", "1");
@@ -59,9 +63,9 @@ impl MacPackage {
             let mut command = self.environment.command("git", &self.root);
             command.args(["rev-parse", "--short=7", "HEAD"]);
             let hash = String::from_utf8(Execution::new(command).output(None)?.stdout)?;
-            format!("Vmux ({}).app", hash.trim())
+            format!("{product_name} ({}).app", hash.trim())
         } else {
-            String::from("Vmux.app")
+            format!("{product_name}.app")
         };
         self.verify(&directory.join(name))
     }

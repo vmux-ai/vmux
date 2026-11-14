@@ -390,10 +390,11 @@ class Package {
     this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmux-ci-package-'));
     t.after(() => fs.rmSync(this.root, { recursive: true, force: true }));
     for (const directory of ['scripts', 'bin', 'crates/app/vmux_desktop', 'packaging/macos']) fs.mkdirSync(path.join(this.root, directory), { recursive: true });
-    for (const name of ['package.sh', 'cargo-target-paths.sh']) fs.copyFileSync(path.join(__dirname, name), path.join(this.root, 'scripts', name));
-    fs.writeFileSync(path.join(this.root, 'crates/app/vmux_desktop/Cargo.toml'), 'fixture manifest\n');
-    fs.writeFileSync(path.join(this.root, 'packaging/macos/Info.plist'), 'fixture plist\n');
-    this.script('bin/sed', '#!/bin/sh\nexit 0\n');
+    for (const name of ['package.sh', 'cargo-target-paths.sh', 'product-host.sh']) fs.copyFileSync(path.join(__dirname, name), path.join(this.root, 'scripts', name));
+    for (const name of ['crates/app/vmux_desktop/Cargo.toml', 'packaging/macos/Info.plist']) fs.copyFileSync(path.join(__dirname, '..', name), path.join(this.root, name));
+    const metadata = execFileSync('bash', [path.join(__dirname, 'vmux-builder'), 'host-config'], { encoding: 'utf8' });
+    fs.writeFileSync(path.join(this.root, 'host.json'), metadata);
+    this.script('scripts/vmux-builder', '#!/bin/sh\ncat "$(dirname "$0")/../host.json"\n');
     this.script('scripts/cargo-with-cef-cache.sh', '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_LOG"\nmkdir -p "$VMUX_APP_BUNDLE"\n');
     for (const name of ['inject-cef.sh', 'embed-launch-agent-plist.sh', 'sign-and-notarize.sh']) {
       this.script(`scripts/${name}`, `#!/bin/sh\nprintf '${name}\\n' >> "$TEST_LOG"\n`);

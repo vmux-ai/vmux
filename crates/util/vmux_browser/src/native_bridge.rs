@@ -25,7 +25,7 @@ impl NativeBridge {
             && point.y <= frame.bottom()
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(test)]
     pub(crate) fn crosses_frames(frames: &[WindowedFrameRect], from: Vec2, to: Vec2) -> bool {
         let previous = frames
             .iter()

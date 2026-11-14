@@ -40,11 +40,26 @@ impl LaunchAgent {
 </dict>
 </plist>
 "#,
-            label = self.label(),
-            binary = binary_path.display(),
-            log = log_path.display(),
-            profile = self.profile(),
+            label = Self::plist_string(&self.label()),
+            binary = Self::plist_string(&binary_path.to_string_lossy()),
+            log = Self::plist_string(&log_path.to_string_lossy()),
+            profile = Self::plist_string(self.profile()),
         )
+    }
+
+    fn plist_string(value: &str) -> String {
+        let mut escaped = String::with_capacity(value.len());
+        for character in value.chars() {
+            match character {
+                '&' => escaped.push_str("&amp;"),
+                '<' => escaped.push_str("&lt;"),
+                '>' => escaped.push_str("&gt;"),
+                '"' => escaped.push_str("&quot;"),
+                '\'' => escaped.push_str("&apos;"),
+                other => escaped.push(other),
+            }
+        }
+        escaped
     }
 
     pub fn install(&self, binary_path: &Path) -> std::io::Result<PathBuf> {
@@ -146,17 +161,32 @@ impl LaunchAgent {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_plist(tag: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "vmux-launchd-test-{}-{nanos}-{tag}.plist",
-            std::process::id(),
-        ))
+    #[test]
+    fn launchd_parses_paths_with_xml_metacharacters_without_changing_arguments() {
+        let directory = tempfile::tempdir().unwrap();
+        let plist = directory.path().join("service.plist");
+        let binary =
+            PathBuf::from("/Applications/Atlas & \"Lab\" <dev>.app/Contents/MacOS/Atlas Service");
+        let log = PathBuf::from("/tmp/Atlas & \"Lab\" <dev>.log");
+        std::fs::write(
+            &plist,
+            LaunchAgent::for_profile("dev").plist_xml(&binary, &log),
+        )
+        .unwrap();
+        let output = Command::new("python3")
+            .arg("-c")
+            .arg("import plistlib,sys; p=plistlib.load(open(sys.argv[1],'rb')); assert p['ProgramArguments']==[sys.argv[2]]; assert p['StandardOutPath']==sys.argv[3]; assert p['StandardErrorPath']==sys.argv[3]; assert p['EnvironmentVariables']=={'VMUX_BUILD_PROFILE':'dev'}; assert p['KeepAlive']=={'Crashed':True,'SuccessfulExit':False}; assert p['RunAtLoad'] is False")
+            .arg(plist)
+            .arg(binary)
+            .arg(log)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -178,7 +208,8 @@ mod tests {
     #[test]
     fn reconcile_plist_at_writes_when_missing() {
         let agent = LaunchAgent::for_profile("dev");
-        let plist = temp_plist("missing");
+        let directory = tempfile::tempdir().unwrap();
+        let plist = directory.path().join("service.plist");
         let _ = std::fs::remove_file(&plist);
         let bin = PathBuf::from("/usr/local/bin/vmux_service");
         let log = PathBuf::from("/tmp/vmux-dev.log");
@@ -196,7 +227,8 @@ mod tests {
     #[test]
     fn reconcile_plist_at_rewrites_when_binary_path_drifts() {
         let agent = LaunchAgent::for_profile("dev");
-        let plist = temp_plist("binary-drift");
+        let directory = tempfile::tempdir().unwrap();
+        let plist = directory.path().join("service.plist");
         let log = PathBuf::from("/tmp/vmux-dev.log");
         let old_bin = PathBuf::from("/old/worktree/target/debug/vmux_service");
         let new_bin = PathBuf::from("/new/worktree/target/debug/vmux_service");
@@ -222,7 +254,8 @@ mod tests {
     #[test]
     fn reconcile_plist_at_rewrites_when_env_var_key_drifts() {
         let agent = LaunchAgent::for_profile("dev");
-        let plist = temp_plist("env-drift");
+        let directory = tempfile::tempdir().unwrap();
+        let plist = directory.path().join("service.plist");
         let bin = PathBuf::from("/usr/local/bin/vmux_service");
         let log = PathBuf::from("/tmp/vmux-dev.log");
         let legacy_xml = agent
@@ -253,7 +286,8 @@ mod tests {
     #[test]
     fn reconcile_plist_at_no_op_when_matching() {
         let agent = LaunchAgent::for_profile("dev");
-        let plist = temp_plist("match");
+        let directory = tempfile::tempdir().unwrap();
+        let plist = directory.path().join("service.plist");
         let bin = PathBuf::from("/usr/local/bin/vmux_service");
         let log = PathBuf::from("/tmp/vmux-dev.log");
         let xml = agent.plist_xml(&bin, &log);

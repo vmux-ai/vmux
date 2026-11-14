@@ -5,12 +5,30 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::Result;
+use crate::product::ProductMetadata;
 
 pub struct Environment {
     values: BTreeMap<OsString, OsString>,
 }
 
 impl Environment {
+    pub fn product(&self, root: &Path) -> Result<ProductMetadata> {
+        let mut input = BTreeMap::new();
+        for (key, value) in &self.values {
+            let Some(name) = key.to_str() else {
+                continue;
+            };
+            if !name.starts_with("VMUX_HOST_") {
+                continue;
+            }
+            let value = value
+                .to_str()
+                .ok_or_else(|| format!("{name} must be UTF-8"))?;
+            input.insert(name.into(), value.into());
+        }
+        Ok(ProductMetadata::parse(root, &input)?)
+    }
+
     pub fn current() -> Self {
         Self {
             values: std::env::vars_os().collect(),

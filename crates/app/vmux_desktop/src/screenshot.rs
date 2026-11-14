@@ -69,6 +69,13 @@ fn start_screenshots(
     };
     let base_dir = CaptureOutput::directory(&settings);
     for req in reader.read() {
+        if !vmux_profile::Product::screen() {
+            let _ = bridge.tx.send(err_response(
+                req.request_id,
+                "Screen capture is disabled by this application.",
+            ));
+            continue;
+        }
         let capture = match source.resolve(req.pane.as_deref()) {
             Ok(capture) => capture,
             Err(message) => {

@@ -25,5 +25,9 @@ path = "tests/mac_package.rs"
 name = "ci_scope"
 path = "tests/ci_scope.rs"
 
+[[test]]
+name = "host_config"
+path = "tests/host_config.rs"
+
 [lints]
 workspace = true

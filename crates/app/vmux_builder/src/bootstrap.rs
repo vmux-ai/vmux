@@ -12,6 +12,10 @@ use crate::target_lock::TargetLock;
 
 const COMPILER: Option<&str> = option_env!("VMUX_BUILDER_COMPILER");
 const SOURCES: &[(&str, &[u8])] = &[
+    (
+        "../../../build_product.rs",
+        include_bytes!("../../../build_product.rs"),
+    ),
     ("main.rs", include_bytes!("main.rs")),
     ("bootstrap.rs", include_bytes!("bootstrap.rs")),
     ("ci_scope.rs", include_bytes!("ci_scope.rs")),

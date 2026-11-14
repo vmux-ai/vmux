@@ -1,8 +1,11 @@
+use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, MediaPermissionReceiver, resolve_media_permission};
+use bevy_cef::prelude::{MediaPermissionReceiver, resolve_media_permission};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use vmux_setting::AppSettings;
+use vmux_ui::i18n::{Locale, TranslationValue};
 
 #[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
@@ -111,6 +114,12 @@ struct RequestCategories {
 }
 
 impl RequestCategories {
+    fn host_allowed(&self) -> bool {
+        (!self.camera || vmux_profile::Product::camera())
+            && (!self.microphone || vmux_profile::Product::microphone())
+            && (!self.screen || vmux_profile::Product::screen())
+    }
+
     fn state(&self, requested: bool, stored: Option<PermissionDecision>) -> CategoryState {
         if !requested {
             CategoryState::NotRequested
@@ -124,23 +133,13 @@ impl RequestCategories {
     }
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    fn phrase(&self) -> String {
-        let mut parts = Vec::new();
-        if self.camera {
-            parts.push("camera");
-        }
-        if self.microphone {
-            parts.push("microphone");
-        }
-        if self.screen {
-            parts.push("screen");
-        }
-        match parts.as_slice() {
-            [] => "media".to_string(),
-            [one] => one.to_string(),
-            [first, second] => format!("{first} and {second}"),
-            [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
-        }
+    fn phrase(&self, locale: &Locale) -> String {
+        let kind =
+            i64::from(self.camera) + 2 * i64::from(self.microphone) + 4 * i64::from(self.screen);
+        locale.translate_with(
+            "media-permission-devices",
+            &[("kind", TranslationValue::Number(kind))],
+        )
     }
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -172,7 +171,8 @@ fn drain_media_requests(
     receiver: Res<MediaPermissionReceiver>,
     mut store: Single<(Entity, &mut MediaPermissionStore)>,
     mut commands: Commands,
-    _main_thread: NonSend<Browsers>,
+    _main_thread: NonSendMarker,
+    settings: Res<AppSettings>,
 ) {
     let (entity, store) = &mut *store;
     while let Ok(request) = receiver.0.try_recv() {
@@ -181,10 +181,15 @@ fn drain_media_requests(
             microphone: request.wants_microphone,
             screen: request.wants_screen,
         };
-        let allow = match store.decision_for(&request.origin, categories) {
+        let resolution = if categories.host_allowed() {
+            store.decision_for(&request.origin, categories)
+        } else {
+            Resolution::Deny
+        };
+        let allow = match resolution {
             Resolution::Grant => true,
             Resolution::Deny => false,
-            Resolution::Prompt => match prompt_native(&request.origin, categories) {
+            Resolution::Prompt => match prompt_native(&request.origin, categories, &settings) {
                 Some(decision) => {
                     store.record(&request.origin, categories, decision);
                     commands.entity(*entity).insert(MediaPermissionDirty);
@@ -228,31 +233,51 @@ fn permission_host(origin: &str) -> &str {
 }
 
 #[cfg(target_os = "macos")]
-fn prompt_native(origin: &str, categories: RequestCategories) -> Option<bool> {
+fn prompt_native(
+    origin: &str,
+    categories: RequestCategories,
+    settings: &AppSettings,
+) -> Option<bool> {
     let mtm = MainThreadMarker::new()?;
+    let locale = Locale::requested(Some(&settings.appearance.locale));
+    let devices = categories.phrase(&locale);
     let alert = NSAlert::new(mtm);
     alert.setAlertStyle(NSAlertStyle::Informational);
-    alert.setMessageText(&NSString::from_str(&format!(
-        "Allow {} to use your {}?",
-        permission_host(origin),
-        categories.phrase()
+    alert.setMessageText(&NSString::from_str(&locale.translate_with(
+        "media-permission-title",
+        &[
+            ("host", TranslationValue::String(permission_host(origin))),
+            ("devices", TranslationValue::String(&devices)),
+        ],
     )));
-    alert.setInformativeText(&NSString::from_str(
-        "vmux will remember your choice for this site.",
-    ));
+    alert.setInformativeText(&NSString::from_str(&locale.translate_with(
+        "media-permission-remember",
+        &[(
+            "product",
+            TranslationValue::String(vmux_profile::Product::name()),
+        )],
+    )));
     if let Some(icon) = NSImage::imageWithSystemSymbolName_accessibilityDescription(
         &NSString::from_str(categories.symbol()),
         None,
     ) {
         unsafe { alert.setIcon(Some(&icon)) };
     }
-    alert.addButtonWithTitle(&NSString::from_str("Allow"));
-    alert.addButtonWithTitle(&NSString::from_str("Block"));
+    alert.addButtonWithTitle(&NSString::from_str(
+        &locale.translate("media-permission-allow"),
+    ));
+    alert.addButtonWithTitle(&NSString::from_str(
+        &locale.translate("media-permission-block"),
+    ));
     Some(alert.runModal() == NSAlertFirstButtonReturn)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn prompt_native(_origin: &str, _categories: RequestCategories) -> Option<bool> {
+fn prompt_native(
+    _origin: &str,
+    _categories: RequestCategories,
+    _settings: &AppSettings,
+) -> Option<bool> {
     None
 }
 
