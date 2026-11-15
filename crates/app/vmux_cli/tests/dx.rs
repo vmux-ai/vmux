@@ -1795,6 +1795,10 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
     let data = fixture.directory.path().join("copied store");
     std::fs::write(fixture.root.join(".env"), "VMUX_PROFILE=from-file\nVMUX_DATA_DIR=/file-data-must-not-win\nVMUX_REMOTE_RELAY_URL=https://production.invalid:443\n").unwrap();
     for command in ["run", "desktop"] {
+        let open_log = fixture.root.join("open.log");
+        if open_log.exists() {
+            std::fs::remove_file(&open_log).unwrap();
+        }
         fixture
             .command()
             .args([command, "main", "-p", "local"])
