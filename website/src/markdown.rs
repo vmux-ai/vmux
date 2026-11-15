@@ -239,119 +239,42 @@ fn slugify(s: &str) -> String {
     out.trim_end_matches('-').to_string()
 }
 
-fn render_nodes(nodes: &[Node]) -> Element {
+#[component]
+fn Nodes(nodes: Vec<Node>) -> Element {
     rsx! {
-        for n in nodes.iter() {
-            {render_node(n)}
+        for node in nodes {
+            NodeView { node }
         }
     }
 }
 
-fn render_node(n: &Node) -> Element {
-    match n {
-        Node::Heading(level, ch) => {
-            let id = slugify(&node_text(ch));
-            match level {
-                1 => {
-                    rsx! { h1 { id: "{id}", class: "scroll-mt-6 text-3xl sm:text-4xl font-bold tracking-tight mt-10 mb-4", {render_nodes(ch)} } }
-                }
-                2 => {
-                    rsx! { h2 { id: "{id}", class: "group scroll-mt-6 text-2xl font-semibold tracking-tight mt-10 mb-3 pb-2 border-b border-border", {render_nodes(ch)} CopyLink { id: id.clone() } } }
-                }
-                3 => {
-                    rsx! { h3 { id: "{id}", class: "group scroll-mt-6 text-lg font-semibold mt-6 mb-2 text-accent", {render_nodes(ch)} CopyLink { id: id.clone() } } }
-                }
-                4 => {
-                    rsx! { h4 { id: "{id}", class: "scroll-mt-6 text-base font-semibold mt-5 mb-2", {render_nodes(ch)} } }
-                }
-                5 => {
-                    rsx! { h5 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold uppercase tracking-wide text-text-muted mt-4 mb-1", {render_nodes(ch)} } }
-                }
-                _ => {
-                    rsx! { h6 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold text-text-muted mt-4 mb-1", {render_nodes(ch)} } }
-                }
-            }
-        }
-        Node::Paragraph(ch) => rsx! { p { class: "my-4 leading-relaxed", {render_nodes(ch)} } },
-        Node::BlockQuote(ch) => rsx! {
+#[component]
+fn NodeView(node: Node) -> Element {
+    match node {
+        Node::Heading(level, nodes) => rsx! { HeadingBlock { level, nodes } },
+        Node::Paragraph(nodes) => rsx! { p { class: "my-4 leading-relaxed", Nodes { nodes } } },
+        Node::BlockQuote(nodes) => rsx! {
             blockquote { class: "border-l-4 border-accent bg-surface rounded-r-lg px-4 py-2 my-5 text-text-muted",
-                {render_nodes(ch)}
+                Nodes { nodes }
             }
         },
-        Node::CodeBlock(lang, code) => {
-            if lang == "mermaid"
-                && let Some(svg) = Diagram::svg(code)
-            {
-                return rsx! {
-                    DiagramFigure { svg: svg.to_string() }
-                };
-            }
-            let html = highlight_code(lang, code);
-            rsx! {
-                pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
-                    code { class: "font-mono text-sm leading-relaxed", dangerous_inner_html: "{html}" }
-                }
-            }
-        }
-        Node::List(start, items) => {
-            if start.is_some() {
-                rsx! {
-                    ol { class: "list-decimal pl-6 my-4 space-y-1.5",
-                        for it in items.iter() {
-                            li { class: "leading-relaxed", {render_nodes(it)} }
-                        }
-                    }
-                }
-            } else {
-                rsx! {
-                    ul { class: "list-disc pl-6 my-4 space-y-1.5",
-                        for it in items.iter() {
-                            li { class: "leading-relaxed", {render_nodes(it)} }
-                        }
-                    }
-                }
-            }
-        }
+        Node::CodeBlock(language, code) => rsx! { CodeBlock { language, code } },
+        Node::List(start, items) => rsx! { ListBlock { start, items } },
         Node::Rule => rsx! { hr { class: "border-0 border-t border-border my-8" } },
-        Node::Table(header, rows) => rsx! {
-            div { class: "my-6 overflow-x-auto",
-                table { class: "w-full text-sm border-collapse",
-                    thead {
-                        tr {
-                            for c in header.iter() {
-                                th { class: "text-left font-semibold text-text border-b border-border px-3 py-2",
-                                    {render_nodes(c)}
-                                }
-                            }
-                        }
-                    }
-                    tbody {
-                        for row in rows.iter() {
-                            tr {
-                                for c in row.iter() {
-                                    td { class: "align-top border-b border-border px-3 py-2 text-text-muted",
-                                        {render_nodes(c)}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        Node::Table(header, rows) => rsx! { TableBlock { header, rows } },
+        Node::Text(text) => rsx! { "{text}" },
+        Node::Code(text) => rsx! {
+            code { class: "font-mono text-[0.85em] bg-code-bg text-accent rounded-md border border-border px-1.5 py-0.5", "{text}" }
         },
-        Node::Text(t) => rsx! { "{t}" },
-        Node::Code(t) => rsx! {
-            code { class: "font-mono text-[0.85em] bg-code-bg text-accent rounded-md border border-border px-1.5 py-0.5", "{t}" }
-        },
-        Node::Strong(ch) => {
-            rsx! { strong { class: "font-semibold text-text", {render_nodes(ch)} } }
+        Node::Strong(nodes) => {
+            rsx! { strong { class: "font-semibold text-text", Nodes { nodes } } }
         }
-        Node::Emphasis(ch) => rsx! { em { class: "italic", {render_nodes(ch)} } },
-        Node::Strikethrough(ch) => {
-            rsx! { s { class: "line-through opacity-70", {render_nodes(ch)} } }
+        Node::Emphasis(nodes) => rsx! { em { class: "italic", Nodes { nodes } } },
+        Node::Strikethrough(nodes) => {
+            rsx! { s { class: "line-through opacity-70", Nodes { nodes } } }
         }
-        Node::Link(href, ch) => {
-            let resolved = crate::docs::Doc::target(href);
+        Node::Link(href, nodes) => {
+            let resolved = crate::docs::Doc::target(&href);
             let external = resolved.starts_with("http");
             rsx! {
                 a {
@@ -359,12 +282,99 @@ fn render_node(n: &Node) -> Element {
                     href: "{resolved}",
                     target: if external { "_blank" },
                     rel: if external { "noopener noreferrer" },
-                    {render_nodes(ch)}
+                    Nodes { nodes }
                 }
             }
         }
         Node::SoftBreak => rsx! { " " },
         Node::HardBreak => rsx! { br {} },
+    }
+}
+
+#[component]
+fn HeadingBlock(level: u8, nodes: Vec<Node>) -> Element {
+    let id = slugify(&node_text(&nodes));
+    match level {
+        1 => {
+            rsx! { h1 { id: "{id}", class: "scroll-mt-6 text-3xl sm:text-4xl font-bold tracking-tight mt-10 mb-4", Nodes { nodes } } }
+        }
+        2 => {
+            rsx! { h2 { id: "{id}", class: "group scroll-mt-6 text-2xl font-semibold tracking-tight mt-10 mb-3 pb-2 border-b border-border", Nodes { nodes } CopyLink { id: id.clone() } } }
+        }
+        3 => {
+            rsx! { h3 { id: "{id}", class: "group scroll-mt-6 text-lg font-semibold mt-6 mb-2 text-accent", Nodes { nodes } CopyLink { id: id.clone() } } }
+        }
+        4 => {
+            rsx! { h4 { id: "{id}", class: "scroll-mt-6 text-base font-semibold mt-5 mb-2", Nodes { nodes } } }
+        }
+        5 => {
+            rsx! { h5 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold uppercase tracking-wide text-text-muted mt-4 mb-1", Nodes { nodes } } }
+        }
+        _ => {
+            rsx! { h6 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold text-text-muted mt-4 mb-1", Nodes { nodes } } }
+        }
+    }
+}
+
+#[component]
+fn CodeBlock(language: String, code: String) -> Element {
+    if language == "mermaid"
+        && let Some(svg) = Diagram::svg(&code)
+    {
+        return rsx! { DiagramFigure { svg: svg.to_string() } };
+    }
+    let html = highlight_code(&language, &code);
+    rsx! {
+        pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
+            code { class: "font-mono text-sm leading-relaxed", dangerous_inner_html: "{html}" }
+        }
+    }
+}
+
+#[component]
+fn ListBlock(start: Option<u64>, items: Vec<Vec<Node>>) -> Element {
+    if start.is_some() {
+        rsx! {
+            ol { class: "list-decimal pl-6 my-4 space-y-1.5",
+                for nodes in items {
+                    li { class: "leading-relaxed", Nodes { nodes } }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            ul { class: "list-disc pl-6 my-4 space-y-1.5",
+                for nodes in items {
+                    li { class: "leading-relaxed", Nodes { nodes } }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TableBlock(header: Vec<Vec<Node>>, rows: Vec<Vec<Vec<Node>>>) -> Element {
+    rsx! {
+        div { class: "my-6 overflow-x-auto",
+            table { class: "w-full text-sm border-collapse",
+                thead {
+                    tr {
+                        for nodes in header {
+                            th { class: "text-left font-semibold text-text border-b border-border px-3 py-2", Nodes { nodes } }
+                        }
+                    }
+                }
+                tbody {
+                    for row in rows {
+                        tr {
+                            for nodes in row {
+                                td { class: "align-top border-b border-border px-3 py-2 text-text-muted", Nodes { nodes } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -434,13 +444,53 @@ fn DiagramFigure(svg: String) -> Element {
 pub fn Markdown(content: String) -> Element {
     let nodes = parse(&content);
     rsx! {
-        div { class: "text-text text-[15px]", {render_nodes(&nodes)} }
+        div { class: "text-text text-[15px]", Nodes { nodes } }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mounted_markdown_preserves_anchors_structure_links_and_escaped_code() {
+        let content = "## **Nested** `heading`\n\n[Guide](dx/getting-started.md) and [Outside](https://example.com)\n\n- One\n- *Two*\n\n1. Ordered\n2. Next\n\n| Name | Value |\n| --- | --- |\n| Row | **Cell** |\n\n```unknown\n<tag>\n```\n".to_string();
+        let sections = headings(&content);
+        assert_eq!(sections[0].id, "nested-heading");
+        assert_eq!(sections[0].text, "Nested heading");
+        let mut dom = VirtualDom::new_with_props(Markdown, MarkdownProps { content });
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        for expected in [
+            "id=\"nested-heading\"",
+            "<strong",
+            "<code",
+            "<ul",
+            "<ol",
+            "<li",
+            "<table",
+            "<th ",
+            "<td ",
+            "Name",
+            "Value",
+            "Row",
+            "Cell",
+            "One",
+            "Two",
+            "Ordered",
+            "Next",
+            "href=\"/docs/getting-started\"",
+            "href=\"https://example.com\"",
+            "target=\"_blank\"",
+            "rel=\"noopener noreferrer\"",
+            "&lt;tag&gt;",
+        ] {
+            assert!(
+                html.contains(expected),
+                "missing rendered {expected}: {html}"
+            );
+        }
+    }
 
     #[test]
     fn highlight_rust_returns_markup() {

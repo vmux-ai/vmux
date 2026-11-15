@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_simulator/src/event.rs||impl:HardwareButton", fingerprint: "928b6147a73eb91d", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/event.rs||impl:SimulatorKeyModifiers", fingerprint: "4ad41e99b4abee58", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||alias:SimulatorAttachmentCandidates", fingerprint: "bb0111da2c21d6f7", issue: "VMX-253"),
@@ -171,4 +172,21 @@
     (key: "crates/feature/vmux_simulator/src/url.rs||impl:std :: fmt :: Display for IosVersion", fingerprint: "4a3aff5ddbb35cbd", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/url.rs||struct:InvalidSimulatorRoute", fingerprint: "c94b3acb75d856d5", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/url.rs||struct:IosVersion", fingerprint: "d7dd669b4e300381", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_simulator/src/event.rs||enum:HardwareButton", fingerprint: "80449fdf12f6285c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/event.rs||enum:SimulatorTouchPhase", fingerprint: "aeb529c7c5e351f5", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host/hid.rs||enum:HidKind", fingerprint: "abbd4a51b6637b6d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host.rs||enum:AttachmentPhase", fingerprint: "7921082c22bacc14", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/url.rs||enum:SimulatorRoute", fingerprint: "230b0cc9fc6b3284", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host/input.rs||enum:SimulatorClipboardInput", fingerprint: "4ba2ddd54fec1b7d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/ui.rs||enum:PointerRelease", fingerprint: "562f80bdf56e0a5c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host/input.rs||enum:SimulatorKeyboardInput", fingerprint: "c6114a61ab202937", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host/stream.rs||enum:StreamRequest", fingerprint: "c6c5fe6d55e39e58", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host.rs||enum:SimulatorButton", fingerprint: "8b047fe19da2d478", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/host/tool.rs||enum:ButtonArg", fingerprint: "1bf4ba612b0c4868", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_simulator/src/event.rs||enum:SimulatorClipboardOperation", fingerprint: "a3c5a2f11e5bf443", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

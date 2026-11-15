@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_project/src/contract.rs||impl:ProjectEntry#2", fingerprint: "e418b800aa2e3003", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/filesystem.rs|tests|impl:Signal", fingerprint: "0271e3ac044d04b4", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/filesystem.rs|tests|impl:Store", fingerprint: "80655bd43cfa1c61", issue: "VMX-253"),
@@ -25,7 +26,8 @@
     (key: "crates/feature/vmux_project/src/registration.rs||struct:WriteResult", fingerprint: "fee2999a213dbddc", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/route.rs||impl:ProjectRoute#2", fingerprint: "ad3a0c1d8b18fb6d", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/route.rs||struct:ProjectRoute", fingerprint: "aaac9891e2260560", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_project/src/route.rs||impl:ProjectRoute", fingerprint: "2f417298741cdb4a", interface: "Filesystem Project-route alias creation and native IO error translation", input: "external: root-scoped directory/alias path request", output: "ECS: crates/feature/vmux_project/src/registration.rs||enum:Error", lifetime: "One root-scoped alias IO invocation", bounds: "Finite path validation, symlink metadata/creation and typed IO error only; canonical registration owns identity and membership", teardown: "Filesystem handles and path scratch drop on return; the owning operation accepts or rejects the result", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_project/src/contract.rs||impl:ProjectEntry", fingerprint: "89fc87d4c5417854", interface: "Immutable ProjectEntry wire or UI projection values and rendered references", input: "ECS: crates/feature/vmux_project/src/contract.rs||struct:ProjectEntry", output: "external: serialized view properties, stable DOM identity or nonexecuting tool argument presentation", lifetime: "one read-only protocol or UI projection invocation", bounds: "current typed payload only; no canonical state mutation, workflow registry or command execution", teardown: "derived strings and projected values drop after serialization or rendering", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_project/src/contract.rs||impl:ProjectUiState", fingerprint: "38f706e2491fab88", interface: "Immutable ProjectUiState wire or UI projection values and rendered references", input: "ECS: crates/feature/vmux_project/src/contract.rs||struct:ProjectUiState", output: "external: serialized view properties, stable DOM identity or nonexecuting tool argument presentation", lifetime: "one read-only protocol or UI projection invocation", bounds: "current typed payload only; no canonical state mutation, workflow registry or command execution", teardown: "derived strings and projected values drop after serialization or rendering", architecture: "ECS ownership boundaries"),
@@ -42,7 +44,8 @@
     (key: "crates/feature/vmux_project/src/registration.rs||impl:Plugin for ProjectPlugin", fingerprint: "9d14d83683f8dde0", interface: "Bevy Plugin registration of Project core or filesystem task systems", input: "external: Bevy App plugin composition", output: "ECS: crates/feature/vmux_project/src/registration.rs||struct:AliasRequest", lifetime: "one App plugin installation; registered systems follow world lifetime", bounds: "one core/adapter graph with root-owned operations and ticket-bound messages", teardown: "App/world drop releases registered systems and resources; finite IO tasks own completion", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_project/src/filesystem.rs||struct:FilesystemPlugin", fingerprint: "b92c6231c10064ae", interface: "Bevy Plugin registration of Project core or filesystem task systems", input: "external: Bevy App plugin composition", output: "ECS: crates/feature/vmux_project/src/registration.rs||struct:AliasCompleted", lifetime: "one App plugin installation; registered systems follow world lifetime", bounds: "one core/adapter graph with root-owned operations and ticket-bound messages", teardown: "App/world drop releases registered systems and resources; finite IO tasks own completion", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_project/src/filesystem.rs||impl:Plugin for FilesystemPlugin", fingerprint: "753116474f02ba59", interface: "Bevy Plugin registration of Project core or filesystem task systems", input: "external: Bevy App plugin composition", output: "ECS: crates/feature/vmux_project/src/registration.rs||struct:AliasCompleted", lifetime: "one App plugin installation; registered systems follow world lifetime", bounds: "one core/adapter graph with root-owned operations and ticket-bound messages", teardown: "App/world drop releases registered systems and resources; finite IO tasks own completion", architecture: "ECS ownership boundaries"),
-], values: [
+],
+values: [
     (key: "crates/feature/vmux_project/src/registration.rs||alias:ChangedRoots", owner: "crates/feature/vmux_project/src/registration.rs||struct:LifecycleRoots", lifetime: "root change query of the registered store lifecycle for one update"),
     (key: "crates/feature/vmux_project/src/registration.rs||alias:UnloadedRoots", owner: "crates/feature/vmux_project/src/registration.rs||struct:LifecycleRoots", lifetime: "root load eligibility filter of the registered store lifecycle for one update"),
     (key: "crates/feature/vmux_project/src/registration.rs||alias:UnusedProjects", owner: "crates/feature/vmux_project/src/registration.rs||struct:Registrations", lifetime: "unregistered Project lifecycle query of the canonical registration capability"),
@@ -52,4 +55,16 @@
     (key: "crates/feature/vmux_project/src/registration.rs||enum:Mutation", owner: "crates/feature/vmux_project/src/registration.rs||struct:WriteRequest", lifetime: "typed intent on one requesting entity before canonical acceptance"),
     (key: "crates/feature/vmux_project/src/registration.rs||alias:Records", owner: "crates/feature/vmux_project/src/registration.rs||struct:Registrations", lifetime: "query projection borrowed by the registered Project capability for one system invocation"),
     (key: "crates/feature/vmux_project/src/registration.rs||alias:RootStatus", owner: "crates/feature/vmux_project/src/registration.rs||struct:Registrations", lifetime: "root readiness query borrowed by the registered Project capability for one system invocation"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_project/src/registration.rs||enum:Mutation", fingerprint: "5bef72928173b3e1", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_project/src/registration.rs||fn:finish", fingerprint: "c3dc7be08bf11b86", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_project/src/registration.rs||fn:write", fingerprint: "7e7cd37a2f74f08e", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_project/src/registration.rs||enum:StoreSet", fingerprint: "eba5d5607878ae7b", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_project/src/contract.rs||enum:ProjectSource", fingerprint: "932d456f972efae0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_project/src/registration.rs||enum:Error", fingerprint: "c4a0361c45e37f65", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_project/src/contract.rs||enum:ProjectView", fingerprint: "42fc9f815811cc09", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

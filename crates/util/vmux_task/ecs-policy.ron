@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_task/src/lib.rs|tests|impl:Command for Append", fingerprint: "e20897988583217a", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs|tests|impl:Drop for DropNotice", fingerprint: "828eef88c0b2ea14", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs|tests|impl:Fixture", fingerprint: "394916f6260d323b", issue: "VMX-253"),
@@ -36,4 +37,10 @@
     (key: "crates/util/vmux_task/src/lib.rs||struct:TaskResult", fingerprint: "9d7b17ea62a061e6", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||struct:TaskSet", fingerprint: "1c852034e9e2997b", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||struct:TaskToken", fingerprint: "58f0348f940c1c16", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_task/src/lib.rs||enum:TaskFailure", fingerprint: "3bf97454b4bea01c", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

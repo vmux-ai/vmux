@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_terminal/src/host/agent.rs||fn:open_tab", fingerprint: "82880f659a5f7a40", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/agent.rs||fn:respond_process_stack_spawn", fingerprint: "d1201cc95475aa81", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/agent.rs||fn:run_shell", fingerprint: "3bd8008f9b160f32", issue: "VMX-253"),
@@ -347,7 +348,8 @@
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||fn:trigger_button_id", fingerprint: "b4539ead7637b97d", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||struct:TerminalPage", fingerprint: "63e3cff243a98b2f", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||struct:Viewport", fingerprint: "3d3477d4878bc9a9", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||impl:Viewport", fingerprint: "558d16686812c89d", interface: "DOM terminal viewport/cell measurement and typed resize transport", input: "ECS: crates/util/vmux_ecs/src/event/terminal.rs||struct:TermResizeEvent", output: "external: scoped projection, native IO or framework registration output", lifetime: "One mounted terminal surface", bounds: "DOM geometry, measurement revision and resize messages only; PTY sizing is authorized by the host", teardown: "Unmount removes measured geometry and pending DOM resize effects", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs|tests|struct:SizingHost", fingerprint: "5945f253f40e6ef8", interface: "Dioxus serialized UI-frame, event-decoder and DOM observation fixture", input: "ECS: crates/util/vmux_ecs/src/event/terminal.rs||struct:TermResizeEvent", output: "external: isolated fixture observations or mounted rendering output", lifetime: "One isolated UI transport fixture invocation", bounds: "Typed UI frames, listener handles, focus/resize observations and selected display rows only; product hosts own domain transitions", teardown: "Fixture drop releases listeners, serialized frames and recorded DOM observations", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs|tests|impl:SizingHost", fingerprint: "fadf6e7c45f7f53a", interface: "Dioxus serialized UI-frame, event-decoder and DOM observation fixture", input: "ECS: crates/util/vmux_ecs/src/event/terminal.rs||struct:TermResizeEvent", output: "external: isolated fixture observations or mounted rendering output", lifetime: "One isolated UI transport fixture invocation", bounds: "Typed UI frames, listener handles, focus/resize observations and selected display rows only; product hosts own domain transitions", teardown: "Fixture drop releases listeners, serialized frames and recorded DOM observations", architecture: "ECS ownership boundaries"),
@@ -360,8 +362,29 @@
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||fn:ViewportSizing", fingerprint: "666b0b107e3b16bc", interface: "Dioxus ViewportSizing component props, DOM presentation and typed UI intent", input: "ECS: crates/util/vmux_ecs/src/event/terminal.rs||struct:TermScrollEvent", output: "external: mounted Dioxus DOM and user interaction output", lifetime: "one mounted ViewportSizing component scope and its immutable projected props", bounds: "rendering and DOM interaction for current props; no canonical catalog, conversation or operation mutation authority", teardown: "props, listeners, geometry and disclosure state drop with component unmount", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_terminal/src/ui/surface.rs||fn:Page")),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs|tests|struct:PageOpenFixture", fingerprint: "0eef477a778a02f1", interface: "Bevy World fixture construction and production typed request observations", input: "ECS: crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenTask", output: "external: isolated test World, emitted contracts and bootstrap subprocess observations", lifetime: "one headless fixture invocation", bounds: "fixture App, entity handles and observed canonical values only; Space fixtures install the production plugin and native handles stay empty; bootstrap storage is isolated in a temporary child process", teardown: "fixture World and child process drop after the oracle; no live application data or retained catalog", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs|tests|impl:PageOpenFixture", fingerprint: "dbac2d8a554c25ba", interface: "Bevy World fixture construction and production typed request observations", input: "ECS: crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenTask", output: "external: isolated test World, emitted contracts and bootstrap subprocess observations", lifetime: "one headless fixture invocation", bounds: "fixture App, entity handles and observed canonical values only; Space fixtures install the production plugin and native handles stay empty; bootstrap storage is isolated in a temporary child process", teardown: "fixture World and child process drop after the oracle; no live application data or retained catalog", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_terminal/src/host/plugin.rs|tests|struct:PageOpenFixture")),
-], values: [
+],
+values: [
     (key: "crates/feature/vmux_terminal/src/host/process_sampler.rs||const:SAMPLE_INTERVAL", owner: "crates/feature/vmux_terminal/src/host/process_sampler.rs||struct:ProcessSampler", lifetime: "Immutable native sampling interval used by the ProcessMonitor-owned sampler; no independent state"),
     (key: "crates/feature/vmux_terminal/src/host/process_sampler.rs||const:CPU_WARMUP_INTERVAL", owner: "crates/feature/vmux_terminal/src/host/process_sampler.rs||struct:ProcessSampler", lifetime: "Immutable native sampling interval used by the ProcessMonitor-owned sampler; no independent state"),
     (key: "crates/feature/vmux_terminal/src/host/process_sampler.rs||struct:ProcessSampler", owner: "crates/feature/vmux_terminal/src/host/process_monitor.rs||struct:ProcessMonitor", lifetime: "Native process sampling handles, counters and poll state owned by the canonical ProcessMonitor component"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_terminal/src/host/theme.rs||enum:TerminalFontSizeCommand", fingerprint: "3218dace53516c83", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/mouse.rs||enum:MouseTerminalEffect", fingerprint: "5bc29bfb2053c9dd", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/ui/surface.rs||fn:Page", fingerprint: "628275762cc87398", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_terminal/src/host/tool.rs||enum:PaneDirection", fingerprint: "1eb4185008a6cfb9", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/state.rs||enum:CopyModePendingKey", fingerprint: "12c7537a5f3067cb", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||enum:TerminalWebShortcutResolution", fingerprint: "7ad107b00cc13855", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||fn:broadcast_to_monitors", fingerprint: "3b69bf73cbf74832", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_terminal/src/host/agent_run.rs||fn:run_agent_commands", fingerprint: "f2f7b241410f89ae", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_terminal/src/host/tool.rs||enum:RunMode", fingerprint: "4dde65fbc755657a", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/agent_run.rs||enum:PagerEnv", fingerprint: "c15dcfbabaf079ff", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/request.rs||enum:ShellMode", fingerprint: "5670a4d05b8dea5e", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/mouse.rs||impl:TerminalMouseState::apply", fingerprint: "b8c363b735621181", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_terminal/src/host/agent.rs||enum:AgentShellMode", fingerprint: "0f304bf3bf480e44", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/agent_run.rs||enum:PlacementMode", fingerprint: "d4970af0e0b059ee", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:handle_page_open", fingerprint: "bf479d11a6c6a031", issue: "VMX-253", finding: "AU-14"),
+  ],
+),
+)

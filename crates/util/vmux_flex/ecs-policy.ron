@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_flex/src/computed.rs|tests|impl:ComputedNode", fingerprint: "849d1cf169c393be", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/src/computed.rs||impl:ComputedNode", fingerprint: "9bf727252bc2f4e5", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/src/computed.rs||impl:Default for ComputedNode", fingerprint: "ee4aa1a70eef83be", issue: "VMX-253"),
@@ -65,6 +66,20 @@
     (key: "crates/util/vmux_flex/tests/layout.rs||struct:MutationGolden", fingerprint: "80a057bd6addaf2d", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/tests/layout.rs||struct:Step", fingerprint: "620d9e8cf6dff212", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/tests/layout.rs||struct:TreeSpec", fingerprint: "2c888da51c375359", issue: "VMX-253"),
-], values: [
+],
+values: [
     (key: "crates/util/vmux_flex/src/computed.rs||struct:Insets", owner: "crates/util/vmux_flex/src/computed.rs||struct:ComputedNode", lifetime: "immutable padding vectors of one canonical computed geometry component"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_flex/src/node.rs||enum:FlexDirection", fingerprint: "6a2989c1b6df6033", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/node.rs||enum:Display", fingerprint: "f3bf9c5c2b5f0634", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/node.rs||enum:AlignItems", fingerprint: "1c6255beac9f1b74", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/lib.rs||enum:LayoutSystems", fingerprint: "8305f28ecbcbfdcf", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/node.rs||enum:PositionType", fingerprint: "1d50e556765c689d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/node.rs||enum:Val", fingerprint: "bce4b0f24ba72bba", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/visibility.rs||enum:Visibility", fingerprint: "385d3aba82438964", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_flex/src/node.rs||enum:JustifyContent", fingerprint: "fdad48c1415982f2", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

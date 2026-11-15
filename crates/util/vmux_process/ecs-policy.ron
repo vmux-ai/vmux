@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_process/src/driver.rs|tests::fn capturing_process|impl:Write for CapturingWriter", fingerprint: "ed77eaca15f35902", issue: "VMX-253"),
     (key: "crates/util/vmux_process/src/driver.rs|tests::fn capturing_process|struct:CapturingWriter", fingerprint: "e8f9674e1fbb3790", issue: "VMX-253"),
     (key: "crates/util/vmux_process/src/driver.rs|tests::fn copy_mode_up_at_alt_screen_top_uses_mouse_wheel_scroll|impl:Write for CapturingWriter", fingerprint: "ed77eaca15f35902", issue: "VMX-253"),
@@ -161,11 +162,28 @@
     (key: "crates/util/vmux_process/src/shell_integration.rs||const:ZSH_ZSHRC", fingerprint: "e87a486aa3c594e7", issue: "VMX-253"),
     (key: "crates/util/vmux_process/src/shell_integration.rs||enum:Shell", fingerprint: "e06d9815b56e606d", issue: "VMX-253"),
     (key: "crates/util/vmux_process/src/shell_integration.rs||impl:Shell", fingerprint: "ae508bc7264a0a42", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/util/vmux_process/src/shell_integration.rs||alias:ShellIntegration", fingerprint: "927a2889f247a0db", interface: "Native shell codec API alias to canonical ProcessShell behavior", input: "ECS: crates/util/vmux_process/src/plugin.rs||struct:ProcessShell", output: "external: native shell integration API compatibility name", lifetime: "One compiled process-shell IO interface", bounds: "Stateless type alias only; no wrapper object, process registry or independent state", teardown: "Alias retains no runtime state; process/input owner handles teardown", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_process/src/shell_integration.rs||const:NU_HOOKS", fingerprint: "18f767d248949f8b", interface: "Native Nushell startup-script and OSC133 hook source", input: "ECS: crates/util/vmux_process/src/plugin.rs||struct:ProcessShell", output: "external: bounded native shell initialization script", lifetime: "One canonical ProcessShell spawn and its PTY generation", bounds: "Fixed shell hook source only; accepted input and directory changes remain in canonical process request handlers", teardown: "Script construction scratch and native input handles drop with the process generation", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_process/src/plugin.rs||struct:ProcessShell")),
     (key: "crates/util/vmux_process/src/driver.rs||struct:PtyInputWriter", fingerprint: "165f4f492fe68c42", interface: "Native PTY input writer and byte-delivery coordination", input: "ECS: crates/util/vmux_process/src/plugin.rs||struct:ProcessInput", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One canonical ProcessInput handle and its native PTY generation", bounds: "One locked native writer, pending-input bit and bounded raw shell-input sequencing; no independent process registry or vmux command policy", teardown: "ProcessInput removal/PTY closure releases the writer and shared raw input state", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_process/src/plugin.rs||struct:ProcessInput")),
     (key: "crates/util/vmux_process/src/driver.rs||impl:PtyInputWriter", fingerprint: "fd14da048a11f426", interface: "Native PTY input writer and byte-delivery coordination", input: "ECS: crates/util/vmux_process/src/plugin.rs||struct:ProcessInput", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One canonical ProcessInput handle and its native PTY generation", bounds: "One locked native writer, pending-input bit and bounded raw shell-input sequencing; no independent process registry or vmux command policy", teardown: "ProcessInput removal/PTY closure releases the writer and shared raw input state", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_process/src/plugin.rs||struct:ProcessInput")),
     (key: "crates/util/vmux_process/src/shell_integration.rs||struct:ShellInput", fingerprint: "2d58df9bc27cbc58", interface: "Native shell OSC133/input byte sequence correlation", input: "ECS: crates/util/vmux_process/src/plugin.rs||struct:ProcessInput", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One PTY input handle and its shell prompt generation", bounds: "At most 256 submitted revisions plus current/interrupted revision and observed prompt flags; canonical request handlers retain directory-change authority", teardown: "PTY/input-handle drop releases raw correlation state", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_process/src/driver.rs||struct:PtyInputWriter")),
     (key: "crates/util/vmux_process/src/shell_integration.rs||impl:ShellInput", fingerprint: "1dd2e33437f033f7", interface: "Native shell OSC133/input byte sequence correlation", input: "ECS: crates/util/vmux_process/src/plugin.rs||struct:ProcessInput", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One PTY input handle and its shell prompt generation", bounds: "At most 256 submitted revisions plus current/interrupted revision and observed prompt flags; canonical request handlers retain directory-change authority", teardown: "PTY/input-handle drop releases raw correlation state", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_process/src/driver.rs||struct:PtyInputWriter")),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_process/src/driver.rs||impl:Process::copy_mode_key", fingerprint: "dec7f1f6ce4868e0", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_process/src/driver.rs||impl:Process::new_with_wake_and_reader_delay", fingerprint: "3edbd159ea6a406e", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_process/src/driver.rs||enum:CopyModeFindDirection", fingerprint: "12e3d73a6fcb8620", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_process/src/driver.rs||enum:ProcessCommandLifecycle", fingerprint: "eba16d86ef736288", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_process/src/shell_events.rs||enum:ShellEvent", fingerprint: "eb7acbc4096e3a09", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_process/src/driver.rs||enum:CopyModeVisualMode", fingerprint: "5c8c9ba4d6c2ccc1", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_process/src/driver.rs||impl:Process::poll", fingerprint: "a7efb6e971771ddc", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_process/src/driver.rs||enum:ProcessUpdate", fingerprint: "e4118838865cf687", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_process/src/service_driver.rs||impl:ProcessConnection::dispatch", fingerprint: "ba16e6e6cdce2c8d", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_process/src/driver.rs||enum:CopyModeCharClass", fingerprint: "7f8db32a3de2cd08", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_process/src/shell_integration.rs||enum:Shell", fingerprint: "e06d9815b56e606d", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

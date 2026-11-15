@@ -3759,6 +3759,7 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "dioxus-primitives",
+ "dioxus-ssr",
  "gloo-net",
  "mermaid-rs-renderer",
  "pulldown-cmark",

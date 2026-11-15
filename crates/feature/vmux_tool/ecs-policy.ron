@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_tool/src/catalog.rs|tests|fn:publish", fingerprint: "0d78bfe507fb78f2", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/catalog.rs|tests|impl:Fixture", fingerprint: "7d391eae8351f1f2", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/catalog.rs|tests|impl:bevy :: prelude :: Plugin for FixturePlugin", fingerprint: "8e34ff0b87beeda2", issue: "VMX-253"),
@@ -362,4 +363,17 @@
     (key: "crates/feature/vmux_tool/src/ui.rs||struct:ToolRouteOption", fingerprint: "c58ddc2ef4cb44d2", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||struct:ToolSelection", fingerprint: "becb0591b879f227", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||struct:ToolsPage", fingerprint: "bd2c7bc0f997d330", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_tool/src/dotfiles.rs||enum:DotfileLinkState", fingerprint: "d9babfda1476d363", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_tool/src/registry.rs||enum:ToolStartupSet", fingerprint: "57a672a14f2dbe5c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolManager", fingerprint: "77aa2a324b75b05e", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_tool/src/homebrew.rs||enum:HomebrewPackage", fingerprint: "b12ea324d85805ad", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_tool/src/state.rs||enum:ToolOperationKind", fingerprint: "04bda2d312310444", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_tool/src/lib.rs||enum:ToolTaskSet", fingerprint: "cc46e1b37571e65c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_tool/src/state.rs||enum:ToolStatus", fingerprint: "f0a0647798ac4b0f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_tool/src/mcp.rs||enum:McpTransport", fingerprint: "1788fae848f2e923", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

@@ -4,6 +4,7 @@ use std::thread;
 
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
 use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState};
@@ -77,10 +78,51 @@ impl bevy_app::Plugin for Plugin {
         .add_systems(
             Update,
             (
-                accept,
-                plan,
-                receive,
+                (
+                    accept,
+                    load_settings,
+                    configure_target,
+                    ensure_tooling,
+                    configure_settings,
+                    prepare_storage,
+                    admit,
+                )
+                    .chain(),
                 cancel,
+                (
+                    (
+                        plan_provider,
+                        prepare_build,
+                        plan_desktop_dev,
+                        plan_desktop_package,
+                        plan_mobile_release,
+                        plan_mobile,
+                        plan_web,
+                        refuse_build,
+                        finish_build_plan,
+                    )
+                        .chain(),
+                    (
+                        plan_run,
+                        plan_stop,
+                        plan_reset_layout,
+                        plan_test,
+                        plan_lint,
+                        plan_doctor,
+                        plan_setup,
+                        plan_cache_status,
+                        plan_cache_clean,
+                        plan_ci_scope,
+                        plan_ci_native,
+                        plan_checks,
+                        plan_sdk,
+                        plan_internal,
+                    )
+                        .chain(),
+                )
+                    .chain(),
+                refuse_plan,
+                receive,
                 collect,
                 select_local,
                 start,
@@ -105,7 +147,26 @@ impl FeatureManifestSource for Feature {
 }
 
 #[derive(Component)]
+#[require(Tail)]
 struct Accepted;
+
+#[derive(Component, Default)]
+struct Tail(Option<Entity>);
+
+#[derive(Component)]
+#[require(AdmissionPhase)]
+struct Admission;
+
+#[derive(Component, Default, PartialEq, Eq)]
+enum AdmissionPhase {
+    #[default]
+    Load,
+    Target,
+    Tooling,
+    Configure,
+    Storage,
+    Ready,
+}
 
 #[derive(Component)]
 struct Settings(Environment);
@@ -162,7 +223,7 @@ type Incoming<'w, 's> = Query<
         Option<&'static workspace::Dispatch>,
         Option<&'static Checkout>,
     ),
-    (Without<Accepted>, Without<CliResult>),
+    (Without<Admission>, Without<Accepted>, Without<CliResult>),
 >;
 type Pending<'w, 's> = Query<
     'w,
@@ -188,15 +249,33 @@ type Inputs<'w, 's> = Query<
         Option<&'static local::Target>,
         &'static OperationState,
     ),
-    Without<CliResult>,
+    (With<Planned>, Without<CliResult>),
 >;
-type Cancellations<'w, 's> =
-    Query<'w, 's, (Entity, &'static mut OperationState), (With<Accepted>, Without<CliResult>)>;
+type Cancellations<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static mut OperationState),
+    (Or<(With<Accepted>, With<Admission>)>, Without<CliResult>),
+>;
 type Finishing<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static Children, &'static OperationState),
-    (With<Accepted>, Without<CliResult>),
+    (With<Accepted>, With<Planned>, Without<CliResult>),
+>;
+type Preparing<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CliInvocation,
+        Option<&'static workspace::Dispatch>,
+        &'static mut Checkout,
+        &'static mut Settings,
+        &'static mut AdmissionPhase,
+        &'static OperationState,
+    ),
+    (With<Admission>, Without<Accepted>, Without<CliResult>),
 >;
 
 fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
@@ -230,6 +309,13 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
             continue;
         }
         let provider = dispatch.and_then(|dispatch| providers.get(dispatch.provider).ok());
+        if dispatch.is_some() && provider.is_none() {
+            commands.entity(entity).insert((
+                OperationState::Failed,
+                CliResult(Err("Workspace provider is unavailable".into())),
+            ));
+            continue;
+        }
         if !invocation.command.starts_with("dx.") && provider.is_none() {
             continue;
         }
@@ -259,23 +345,111 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
                 None => continue,
             },
         };
-        let mut checkout = match resolved {
-            Ok(checkout) => checkout,
+        match resolved {
+            Ok(checkout) => {
+                commands.entity(entity).insert((
+                    Admission,
+                    Operation::bundle(&invocation.command).unwrap().running(),
+                    checkout,
+                    Settings(Environment::current()),
+                ));
+            }
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-                continue;
+                    .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
             }
-        };
-        let mut environment = Environment::current();
-        if provider.is_none()
-            && let Err(error) = environment.load(&checkout.root)
+        }
+    }
+}
+
+fn load_settings(mut requests: Preparing, mut commands: Commands) {
+    for (entity, invocation, dispatch, checkout, mut settings, mut phase, state) in &mut requests {
+        if *state != OperationState::Running || *phase != AdmissionPhase::Load {
+            continue;
+        }
+        if dispatch.is_none()
+            && let Err(error) = settings.0.load(&checkout.root)
         {
             commands
                 .entity(entity)
-                .insert(CliResult(Err(error.to_string())));
+                .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
             continue;
+        }
+        if (invocation.is("dx.build") || invocation.is("dx.run"))
+            && let Err(error) = settings.0.product(&checkout.root)
+        {
+            commands
+                .entity(entity)
+                .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
+            continue;
+        }
+        *phase = AdmissionPhase::Target;
+    }
+}
+
+fn configure_target(mut requests: Preparing, mut commands: Commands) {
+    for (entity, invocation, dispatch, mut checkout, mut settings, mut phase, state) in
+        &mut requests
+    {
+        if *state != OperationState::Running || *phase != AdmissionPhase::Target {
+            continue;
+        }
+        if invocation.is("dx.internal") && invocation.value("task") == Some("cli-release") {
+            settings.0.remove("CARGO_BUILD_TARGET");
+            settings.0.set(
+                "CARGO_TARGET_DIR",
+                checkout.root.join(".build-tools/standalone").as_os_str(),
+            );
+        }
+        let web = invocation.is("dx.serve") || invocation.value("platform") == Some("web");
+        if web && !settings.0.present("CARGO_TARGET_DIR") {
+            settings.0.set(
+                "CARGO_TARGET_DIR",
+                checkout.root.join("website/target").as_os_str(),
+            );
+        }
+        if dispatch.is_none()
+            && let Err(error) = checkout.configure(
+                settings.0.get("CARGO_TARGET_DIR"),
+                settings.0.get("CARGO_BUILD_TARGET"),
+            )
+        {
+            commands
+                .entity(entity)
+                .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
+            continue;
+        }
+        *phase = AdmissionPhase::Tooling;
+    }
+}
+
+fn ensure_tooling(mut requests: Preparing, mut commands: Commands) {
+    for (entity, _, dispatch, checkout, settings, mut phase, state) in &mut requests {
+        if *state != OperationState::Running || *phase != AdmissionPhase::Tooling {
+            continue;
+        }
+        if dispatch.is_none()
+            && let Err(error) = tooling::Tooling::ensure(&checkout, &settings.0)
+        {
+            commands
+                .entity(entity)
+                .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
+            continue;
+        }
+        *phase = AdmissionPhase::Configure;
+    }
+}
+
+fn configure_settings(mut requests: Preparing) {
+    for (_, invocation, dispatch, checkout, mut settings, mut phase, state) in &mut requests {
+        if *state != OperationState::Running || *phase != AdmissionPhase::Configure {
+            continue;
+        }
+        if dispatch.is_none() {
+            settings
+                .0
+                .set("CARGO_TARGET_DIR", checkout.target.as_os_str());
         }
         let profile = if invocation.is("dx.serve") {
             Some("dev")
@@ -287,73 +461,42 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
         } else {
             invocation.value("platform")
         };
-        if (invocation.is("dx.build") || invocation.is("dx.run"))
-            && let Err(error) = environment.product(&checkout.root)
-        {
-            commands
-                .entity(entity)
-                .insert(CliResult(Err(error.to_string())));
-            continue;
-        }
-        if invocation.is("dx.internal") && invocation.value("task") == Some("cli-release") {
-            environment.remove("CARGO_BUILD_TARGET");
-            environment.set(
-                "CARGO_TARGET_DIR",
-                checkout.root.join(".build-tools/standalone").as_os_str(),
-            );
-        }
-        if platform == Some("web") && !environment.present("CARGO_TARGET_DIR") {
-            environment.set(
-                "CARGO_TARGET_DIR",
-                checkout.root.join("website/target").as_os_str(),
-            );
-        }
-        if provider.is_none()
-            && let Err(error) = checkout.configure(
-                environment.get("CARGO_TARGET_DIR"),
-                environment.get("CARGO_BUILD_TARGET"),
-            )
-        {
-            commands
-                .entity(entity)
-                .insert(CliResult(Err(error.to_string())));
-            continue;
-        }
-        if provider.is_none()
-            && let Err(error) = tooling::Tooling::ensure(&checkout, &environment)
-        {
-            commands
-                .entity(entity)
-                .insert(CliResult(Err(error.to_string())));
-            continue;
-        }
-        if provider.is_none() {
-            environment.set("CARGO_TARGET_DIR", checkout.target.as_os_str());
-        }
         if let Some(profile) = profile {
-            environment.set("VMUX_BUILD_PROFILE", profile);
-        } else if !environment.present("VMUX_BUILD_PROFILE") {
-            environment.set("VMUX_BUILD_PROFILE", "dev");
+            settings.0.set("VMUX_BUILD_PROFILE", profile);
+        } else if !settings.0.present("VMUX_BUILD_PROFILE") {
+            settings.0.set("VMUX_BUILD_PROFILE", "dev");
         }
         if let Some(platform) = platform {
-            environment.set("VMUX_DX_PLATFORM", platform);
+            settings.0.set("VMUX_DX_PLATFORM", platform);
         }
         if let Some(features) = invocation.value_os("features") {
-            environment.set("VMUX_DESKTOP_FEATURE_SET", features.to_owned());
+            settings.0.set("VMUX_DESKTOP_FEATURE_SET", features);
         }
         if let Some(profile) = invocation.value_os("user-profile") {
-            environment.set("VMUX_PROFILE", profile);
-        } else if !environment.present("VMUX_PROFILE") {
-            environment.set("VMUX_PROFILE", "personal");
+            settings.0.set("VMUX_PROFILE", profile);
+        } else if !settings.0.present("VMUX_PROFILE") {
+            settings.0.set("VMUX_PROFILE", "personal");
         }
-        let storage = match policy::Policy::configured(&environment)
-            .and_then(|policy| Storage::new(checkout.root.clone(), checkout.target.clone(), policy))
-        {
+        *phase = AdmissionPhase::Storage;
+    }
+}
+
+fn prepare_storage(mut requests: Preparing, mut commands: Commands) {
+    for (entity, invocation, _, checkout, settings, mut phase, state) in &mut requests {
+        if *state != OperationState::Running || *phase != AdmissionPhase::Storage {
+            continue;
+        }
+        let configured = policy::Policy::configured(&settings.0);
+        let storage = match configured {
+            Ok(policy) => Storage::new(checkout.root.clone(), checkout.target.clone(), policy),
+            Err(error) => Err(error),
+        };
+        let storage = match storage {
             Ok(storage) => storage,
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
+                    .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
                 continue;
             }
         };
@@ -361,27 +504,58 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
             && invocation.value("platform").unwrap_or("desktop") == "desktop"
             && invocation.value("profile") == Some("local")
         {
-            let product = match environment.product(&checkout.root) {
+            let product = match settings.0.product(&checkout.root) {
                 Ok(product) => product.value("VMUX_HOST_NAME").to_owned(),
                 Err(error) => {
                     commands
                         .entity(entity)
-                        .insert(CliResult(Err(error.to_string())));
+                        .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
                     continue;
                 }
             };
             commands.entity(entity).insert(local::Selection { product });
         }
+        commands.entity(entity).insert(storage);
+        *phase = AdmissionPhase::Ready;
+    }
+}
+
+fn admit(mut requests: Preparing, storage: Query<(), With<Storage>>, mut commands: Commands) {
+    for (entity, invocation, _, checkout, _, phase, state) in &mut requests {
+        if *state != OperationState::Running
+            || *phase != AdmissionPhase::Ready
+            || !storage.contains(entity)
+        {
+            continue;
+        }
         commands.entity(entity).insert((
             Accepted,
-            Operation::bundle(&invocation.command).unwrap().running(),
             Name::new(invocation.command.clone()),
             CreatedAt::now(),
             Cwd(checkout.root.clone()),
-            checkout,
-            storage,
-            Settings(environment),
         ));
+    }
+}
+
+#[derive(SystemParam)]
+struct Plans<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl Plans<'_, '_> {
+    fn step(&mut self, owner: Entity, tail: &mut Tail, work: Work) {
+        let mut step = self.commands.spawn((
+            Name::new(work.name()),
+            OperationState::Pending,
+            CreatedAt::now(),
+            ChildOf(owner),
+            Attempt(1),
+            work,
+        ));
+        if let Some(previous) = tail.0 {
+            step.insert(Predecessor(previous));
+        }
+        tail.0 = Some(step.id());
     }
 }
 
@@ -395,12 +569,55 @@ type Planning<'w, 's> = Query<
         Entity,
         &'static CliInvocation,
         Option<&'static workspace::Dispatch>,
+        &'static mut Tail,
     ),
     (With<Accepted>, Without<Planned>, Without<CliResult>),
 >;
 
-fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut commands: Commands) {
-    for (entity, invocation, dispatch) in &operations {
+fn plan_provider(
+    mut operations: Planning,
+    providers: Query<&workspace::Provider>,
+    mut plans: Plans,
+) {
+    for (entity, _, dispatch, mut tail) in &mut operations {
+        let Some(dispatch) = dispatch else {
+            continue;
+        };
+        let Ok(provider) = providers.get(dispatch.provider) else {
+            plans.commands.entity(entity).insert((
+                OperationState::Failed,
+                CliResult(Err("Workspace provider is unavailable".into())),
+            ));
+            continue;
+        };
+        for work in [
+            Work::WorkspaceAcquire,
+            Work::WorkspaceCompile(
+                provider.package.clone(),
+                provider.binary.clone(),
+                provider.cargo.clone(),
+            ),
+            Work::WorkspaceInvoke(dispatch.arguments.clone()),
+        ] {
+            plans.step(entity, &mut tail, work);
+        }
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+fn prepare_build(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.build")) {
+            continue;
+        }
+
+        for work in [Work::Check, Work::Acquire, Work::Seed, Work::Preflight] {
+            plans.step(entity, &mut tail, work);
+        }
+    }
+}
+
+fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
         let profile = if invocation.is("dx.serve") {
             "dev"
         } else {
@@ -416,280 +633,579 @@ fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut comman
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        let mut steps = Vec::new();
-        if let Some(dispatch) = dispatch {
-            let Ok(provider) = providers.get(dispatch.provider) else {
-                continue;
-            };
-            steps.extend([
-                Work::WorkspaceAcquire,
-                Work::WorkspaceCompile(
-                    provider.package.clone(),
-                    provider.binary.clone(),
-                    provider.cargo.clone(),
-                ),
-                Work::WorkspaceInvoke(dispatch.arguments.clone()),
-            ]);
+        if dispatch.is_some()
+            || !(invocation.is("dx.build") && (platform == "desktop" && profile == "dev"))
+        {
+            continue;
+        }
+
+        for work in [
+            Work::Native,
+            Work::Tailwind,
+            Work::Codesign,
+            Work::Helper,
+            Work::ClearReady,
+        ] {
+            plans.step(entity, &mut tail, work);
+        }
+        plans.step(entity, &mut tail, Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]));
+        plans.step(
+            entity,
+            &mut tail,
+            Work::cargo(&[
+                "build",
+                "-p",
+                "vmux_app",
+                "--bin",
+                "vmux_service",
+                "--features",
+                "service-daemon",
+            ]),
+        );
+        let mut args = if cfg!(target_os = "macos") {
+            vec!["rustc", "-p", "vmux_desktop", "--bin", "vmux_desktop"]
         } else {
-            match invocation.command.as_str() {
-                "dx.build" => {
-                    steps.extend([Work::Check, Work::Acquire, Work::Seed, Work::Preflight]);
-                    match platform {
-                        "desktop" if profile == "dev" => {
-                            steps.extend([
-                                Work::Native,
-                                Work::Tailwind,
-                                Work::Codesign,
-                                Work::Helper,
-                                Work::ClearReady,
-                            ]);
-                            steps.push(Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]));
-                            steps.push(Work::cargo(&[
-                                "build",
-                                "-p",
-                                "vmux_app",
-                                "--bin",
-                                "vmux_service",
-                                "--features",
-                                "service-daemon",
-                            ]));
-                            let mut args = if cfg!(target_os = "macos") {
-                                vec!["rustc", "-p", "vmux_desktop", "--bin", "vmux_desktop"]
-                            } else {
-                                vec!["build", "-p", "vmux_desktop"]
-                            }
-                            .into_iter()
-                            .map(OsString::from)
-                            .collect::<Vec<_>>();
-                            args.extend(["--no-default-features".into(), "--features".into()]);
-                            args.push(
-                                invocation
-                                    .value_os("features")
-                                    .unwrap_or(std::ffi::OsStr::new("dev,full"))
-                                    .to_owned(),
-                            );
-                            args.append(&mut forwarded);
-                            if cfg!(target_os = "macos") {
-                                args.extend(
-                                    ["--", "-C", "link-arg=-Wl,-headerpad,1000"]
-                                        .map(OsString::from),
-                                );
-                            }
-                            steps.push(Work::Cargo(args));
-                            if cfg!(target_os = "macos") {
-                                steps.extend([Work::SignDebug, Work::BundleDebug]);
-                            }
-                            steps.push(Work::PublishDebug);
-                        }
-                        "desktop" => {
-                            steps.extend([
-                                Work::Native,
-                                Work::Tailwind,
-                                Work::PackageTools,
-                                Work::Codesign,
-                                Work::Package(profile.into()),
-                            ]);
-                        }
-                        "ios" if profile == "release" => {
-                            steps.extend([Work::Dioxus("ios".into()), Work::ReleaseIos]);
-                        }
-                        "ios" | "android" => {
-                            steps.push(Work::Dioxus(platform.into()));
-                            let mut args = vec![
-                                "build".into(),
-                                format!("--{platform}").into(),
-                                "-p".into(),
-                                "vmux_mobile".into(),
-                            ];
-                            if profile != "dev" {
-                                args.push("--release".into());
-                            }
-                            args.append(&mut forwarded);
-                            steps.push(Work::Tool("dx".into(), args));
-                            if platform == "ios" {
-                                steps.extend([Work::ResourcesIos, Work::VerifyIos(false)]);
-                            }
-                        }
-                        "web" => {
-                            steps.extend([
-                                Work::Dioxus(platform.into()),
-                                Work::Binaryen,
-                                Work::Tailwind,
-                                Work::Css,
-                            ]);
-                            let mut args = vec!["build".into(), "--platform".into(), "web".into()];
-                            if profile != "dev" {
-                                args.extend(["--ssg".into(), "--release".into()]);
-                            }
-                            args.append(&mut forwarded);
-                            steps.push(Work::Tool("dx".into(), args));
-                            if profile != "dev" {
-                                steps.push(Work::FlattenWeb);
-                            }
-                        }
-                        _ => {
-                            commands.entity(entity).insert((
-                                OperationState::Failed,
-                                CliResult(Err("Unsupported build platform".into())),
-                            ));
-                            continue;
-                        }
-                    }
-                    steps.push(Work::Finish(profile.into()));
+            vec!["build", "-p", "vmux_desktop"]
+        }
+        .into_iter()
+        .map(OsString::from)
+        .collect::<Vec<_>>();
+        args.extend(["--no-default-features".into(), "--features".into()]);
+        args.push(
+            invocation
+                .value_os("features")
+                .unwrap_or(std::ffi::OsStr::new("dev,full"))
+                .to_owned(),
+        );
+        args.append(&mut forwarded);
+        if cfg!(target_os = "macos") {
+            args.extend(["--", "-C", "link-arg=-Wl,-headerpad,1000"].map(OsString::from));
+        }
+        plans.step(entity, &mut tail, Work::Cargo(args));
+        if cfg!(target_os = "macos") {
+            for work in [Work::SignDebug, Work::BundleDebug] {
+                plans.step(entity, &mut tail, work);
+            }
+        }
+        plans.step(entity, &mut tail, Work::PublishDebug);
+    }
+}
+
+fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        if dispatch.is_some()
+            || !(invocation.is("dx.build") && (platform == "desktop" && profile != "dev"))
+        {
+            continue;
+        }
+
+        for work in [
+            Work::Native,
+            Work::Tailwind,
+            Work::PackageTools,
+            Work::Codesign,
+            Work::Package(profile.into()),
+        ] {
+            plans.step(entity, &mut tail, work);
+        }
+    }
+}
+
+fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        if dispatch.is_some()
+            || !(invocation.is("dx.build") && (platform == "ios" && profile == "release"))
+        {
+            continue;
+        }
+
+        for work in [Work::Dioxus("ios".into()), Work::ReleaseIos] {
+            plans.step(entity, &mut tail, work);
+        }
+    }
+}
+
+fn plan_mobile(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        let mut forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some()
+            || !(invocation.is("dx.build")
+                && ((platform == "ios" && profile != "release") || platform == "android"))
+        {
+            continue;
+        }
+
+        plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+        let mut args = vec![
+            "build".into(),
+            format!("--{platform}").into(),
+            "-p".into(),
+            "vmux_mobile".into(),
+        ];
+        if profile != "dev" {
+            args.push("--release".into());
+        }
+        args.append(&mut forwarded);
+        plans.step(entity, &mut tail, Work::Tool("dx".into(), args));
+        if platform == "ios" {
+            for work in [Work::ResourcesIos, Work::VerifyIos(false)] {
+                plans.step(entity, &mut tail, work);
+            }
+        }
+    }
+}
+
+fn plan_web(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        let mut forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some() || !(invocation.is("dx.build") && (platform == "web")) {
+            continue;
+        }
+
+        for work in [
+            Work::Dioxus(platform.into()),
+            Work::Binaryen,
+            Work::Tailwind,
+            Work::Css,
+        ] {
+            plans.step(entity, &mut tail, work);
+        }
+        let mut args = vec!["build".into(), "--platform".into(), "web".into()];
+        if profile != "dev" {
+            args.extend(["--ssg".into(), "--release".into()]);
+        }
+        args.append(&mut forwarded);
+        plans.step(entity, &mut tail, Work::Tool("dx".into(), args));
+        if profile != "dev" {
+            plans.step(entity, &mut tail, Work::FlattenWeb);
+        }
+    }
+}
+
+fn refuse_build(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, _tail) in &mut operations {
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        if dispatch.is_some()
+            || !invocation.is("dx.build")
+            || matches!(platform, "desktop" | "ios" | "android" | "web")
+        {
+            continue;
+        }
+        plans.commands.entity(entity).insert((
+            OperationState::Failed,
+            CliResult(Err("Unsupported build platform".into())),
+        ));
+    }
+}
+
+fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        if dispatch.is_some() || !(invocation.is("dx.build")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::Finish(profile.into()));
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_run(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        if dispatch.is_some() || !(invocation.is("dx.run") || invocation.is("dx.serve")) {
+            continue;
+        }
+
+        plans.step(entity, &mut tail, Work::Acquire);
+        if platform != "desktop" {
+            plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+            if platform == "web" {
+                for work in [Work::Binaryen, Work::Tailwind, Work::Css] {
+                    plans.step(entity, &mut tail, work);
                 }
-                "dx.run" | "dx.serve" => {
-                    steps.push(Work::Acquire);
-                    if platform != "desktop" {
-                        steps.push(Work::Dioxus(platform.into()));
-                        if platform == "web" {
-                            steps.extend([Work::Binaryen, Work::Tailwind, Work::Css]);
-                        }
-                        if platform == "ios" {
-                            steps.push(Work::Simulator);
-                        }
-                    }
-                    if platform == "desktop" && profile == "local" {
-                        steps.extend([Work::LocalEntries, Work::LocalLaunch]);
-                    } else {
-                        steps.push(Work::Run(profile.into(), platform.into()));
-                    }
+            }
+            if platform == "ios" {
+                plans.step(entity, &mut tail, Work::Simulator);
+            }
+        }
+        if platform == "desktop" && profile == "local" {
+            for work in [Work::LocalEntries, Work::LocalLaunch] {
+                plans.step(entity, &mut tail, work);
+            }
+        } else {
+            plans.step(
+                entity,
+                &mut tail,
+                Work::Run(profile.into(), platform.into()),
+            );
+        }
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_stop(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.stop")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::Stop);
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.reset-layout")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::Reset);
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_test(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let mut forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some() || !(invocation.is("dx.test")) {
+            continue;
+        }
+
+        for work in [Work::Acquire, Work::Seed] {
+            plans.step(entity, &mut tail, work);
+        }
+        let mut args = vec![
+            "test".into(),
+            "--workspace".into(),
+            "--exclude".into(),
+            "bevy_cef_core".into(),
+        ];
+        if profile != "dev" {
+            args.push("--release".into());
+        }
+        if let Some(features) = invocation.value_os("features") {
+            args.extend(["--features".into(), features.to_owned()]);
+        }
+        args.append(&mut forwarded);
+        plans.step(entity, &mut tail, Work::Cargo(args));
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_lint(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let mut forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some() || !(invocation.is("dx.lint")) {
+            continue;
+        }
+
+        for work in [Work::Acquire, Work::Seed] {
+            plans.step(entity, &mut tail, work);
+        }
+        plans.step(
+            entity,
+            &mut tail,
+            Work::cargo(&["fmt", "--all", "--", "--check"]),
+        );
+        let mut args = vec![
+            "clippy".into(),
+            "--workspace".into(),
+            "--all-targets".into(),
+        ];
+        if profile != "dev" {
+            args.push("--release".into());
+        }
+        if let Some(features) = invocation.value_os("features") {
+            args.extend(["--features".into(), features.to_owned()]);
+        }
+        args.append(&mut forwarded);
+        args.extend(["--".into(), "-D".into(), "warnings".into()]);
+        plans.step(entity, &mut tail, Work::Cargo(args));
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_doctor(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.doctor")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::Doctor);
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_setup(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
+        if dispatch.is_some() || !(invocation.is("dx.setup")) {
+            continue;
+        }
+
+        if platform == "desktop" {
+            for work in [
+                Work::Check,
+                Work::Acquire,
+                Work::Native,
+                Work::Tailwind,
+                Work::PackageTools,
+                Work::Codesign,
+                Work::Helper,
+            ] {
+                plans.step(entity, &mut tail, work);
+            }
+        } else {
+            plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+            if platform == "web" {
+                for work in [Work::Binaryen, Work::Tailwind] {
+                    plans.step(entity, &mut tail, work);
                 }
-                "dx.stop" => steps.push(Work::Stop),
-                "dx.reset-layout" => steps.push(Work::Reset),
-                "dx.test" => {
-                    steps.extend([Work::Acquire, Work::Seed]);
-                    let mut args = vec![
-                        "test".into(),
-                        "--workspace".into(),
-                        "--exclude".into(),
-                        "bevy_cef_core".into(),
-                    ];
-                    if profile != "dev" {
-                        args.push("--release".into());
-                    }
-                    if let Some(features) = invocation.value_os("features") {
-                        args.extend(["--features".into(), features.to_owned()]);
-                    }
-                    args.append(&mut forwarded);
-                    steps.push(Work::Cargo(args));
-                }
-                "dx.lint" => {
-                    steps.extend([Work::Acquire, Work::Seed]);
-                    steps.push(Work::cargo(&["fmt", "--all", "--", "--check"]));
-                    let mut args = vec![
-                        "clippy".into(),
-                        "--workspace".into(),
-                        "--all-targets".into(),
-                    ];
-                    if profile != "dev" {
-                        args.push("--release".into());
-                    }
-                    if let Some(features) = invocation.value_os("features") {
-                        args.extend(["--features".into(), features.to_owned()]);
-                    }
-                    args.append(&mut forwarded);
-                    args.extend(["--".into(), "-D".into(), "warnings".into()]);
-                    steps.push(Work::Cargo(args));
-                }
-                "dx.doctor" => steps.push(Work::Doctor),
-                "dx.setup" => {
-                    if platform == "desktop" {
-                        steps.extend([
-                            Work::Check,
-                            Work::Acquire,
-                            Work::Native,
-                            Work::Tailwind,
-                            Work::PackageTools,
-                            Work::Codesign,
-                            Work::Helper,
-                        ]);
-                    } else {
-                        steps.push(Work::Dioxus(platform.into()));
-                        if platform == "web" {
-                            steps.extend([Work::Binaryen, Work::Tailwind]);
-                        }
-                    }
-                }
-                "dx.cache.status" => steps.push(Work::Status),
-                "dx.cache.clean" => {
-                    steps.extend([Work::Acquire, Work::Clean(invocation.flag("apply"))])
-                }
-                "dx.ci-scope" => steps.push(Work::Scope(forwarded)),
-                "dx.ci-native" => steps.push(Work::NativeInputs(forwarded)),
-                "dx.checks.test" => steps.push(Work::Internal("pre-push".into(), Vec::new())),
-                "dx.checks.sdk" => {
-                    let mut arguments = Vec::new();
-                    if invocation.flag("host") {
-                        arguments.push("--host".into());
-                    }
-                    if invocation.flag("git") {
-                        arguments.push("--git".into());
-                    }
-                    steps.extend([Work::Acquire, Work::Consumer(arguments)]);
-                }
-                "dx.internal" => {
-                    let Some(task) = invocation.value("task") else {
-                        commands.entity(entity).insert((
-                            OperationState::Failed,
-                            CliResult(Err("Missing integration task".into())),
-                        ));
-                        continue;
-                    };
-                    if task == "cli-release" {
-                        let preview = match forwarded.as_slice() {
-                            [] => false,
-                            [value] if value == "preview" => true,
-                            _ => {
-                                commands.entity(entity).insert((
-                                    OperationState::Failed,
-                                    CliResult(Err(
-                                        "cli-release accepts only an optional preview channel"
-                                            .into(),
-                                    )),
-                                ));
-                                continue;
-                            }
-                        };
-                        steps.extend([
-                            Work::Check,
-                            Work::Acquire,
-                            Work::Preflight,
-                            Work::CliCompile,
-                            Work::CliPackage(preview),
-                            Work::Finish("release".into()),
-                        ]);
-                    } else {
-                        if task == "cargo" {
-                            steps.extend([Work::Acquire, Work::Seed]);
-                        }
-                        steps.push(Work::Internal(task.into(), forwarded));
-                    }
-                }
+            }
+        }
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.cache.status")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::Status);
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.cache.clean")) {
+            continue;
+        }
+
+        for work in [Work::Acquire, Work::Clean(invocation.flag("apply"))] {
+            plans.step(entity, &mut tail, work);
+        }
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some() || !(invocation.is("dx.ci-scope")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::Scope(forwarded));
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some() || !(invocation.is("dx.ci-native")) {
+            continue;
+        }
+        plans.step(entity, &mut tail, Work::NativeInputs(forwarded));
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_checks(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.checks.test")) {
+            continue;
+        }
+        plans.step(
+            entity,
+            &mut tail,
+            Work::Internal("pre-push".into(), Vec::new()),
+        );
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_sdk(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        if dispatch.is_some() || !(invocation.is("dx.checks.sdk")) {
+            continue;
+        }
+
+        let mut arguments = Vec::new();
+        if invocation.flag("host") {
+            arguments.push("--host".into());
+        }
+        if invocation.flag("git") {
+            arguments.push("--git".into());
+        }
+        for work in [Work::Acquire, Work::Consumer(arguments)] {
+            plans.step(entity, &mut tail, work);
+        }
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn plan_internal(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, mut tail) in &mut operations {
+        let forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        if dispatch.is_some() || !(invocation.is("dx.internal")) {
+            continue;
+        }
+
+        let Some(task) = invocation.value("task") else {
+            plans.commands.entity(entity).insert((
+                OperationState::Failed,
+                CliResult(Err("Missing integration task".into())),
+            ));
+            continue;
+        };
+        if task == "cli-release" {
+            let preview = match forwarded.as_slice() {
+                [] => false,
+                [value] if value == "preview" => true,
                 _ => {
-                    commands.entity(entity).insert((
+                    plans.commands.entity(entity).insert((
                         OperationState::Failed,
-                        CliResult(Err("Unknown development command".into())),
+                        CliResult(Err(
+                            "cli-release accepts only an optional preview channel".into()
+                        )),
                     ));
                     continue;
                 }
+            };
+            for work in [
+                Work::Check,
+                Work::Acquire,
+                Work::Preflight,
+                Work::CliCompile,
+                Work::CliPackage(preview),
+                Work::Finish("release".into()),
+            ] {
+                plans.step(entity, &mut tail, work);
             }
-        }
-        commands.entity(entity).insert(Planned);
-        let mut previous = None;
-        for work in steps {
-            let mut step = commands.spawn((
-                Name::new(work.name()),
-                OperationState::Pending,
-                CreatedAt::now(),
-                ChildOf(entity),
-                Attempt(1),
-                work,
-            ));
-            if let Some(previous) = previous {
-                step.insert(Predecessor(previous));
+        } else {
+            if task == "cargo" {
+                for work in [Work::Acquire, Work::Seed] {
+                    plans.step(entity, &mut tail, work);
+                }
             }
-            previous = Some(step.id());
+            plans.step(entity, &mut tail, Work::Internal(task.into(), forwarded));
         }
+
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+fn refuse_plan(operations: Planning, mut plans: Plans) {
+    for (entity, _, _, _) in &operations {
+        plans.commands.entity(entity).insert((
+            OperationState::Failed,
+            CliResult(Err("Unknown development command".into())),
+        ));
     }
 }
 
@@ -713,7 +1229,7 @@ fn start(
         else {
             continue;
         };
-        if *state == OperationState::Canceled {
+        if *state != OperationState::Running {
             continue;
         }
         if matches!(work, Work::LocalLaunch) && local.is_none() {
@@ -976,6 +1492,7 @@ mod tests {
                 .world_mut()
                 .spawn((
                     Accepted,
+                    Planned,
                     Operation::bundle("dx.fixture").unwrap().running(),
                     Name::new("DX fixture"),
                     checkout,
@@ -1039,6 +1556,68 @@ mod tests {
             std::fs::read_to_string(fixture.directory.path().join("order")).unwrap(),
             "firstsecond"
         );
+    }
+
+    #[test]
+    fn unplanned_and_failed_operations_cannot_start_their_materialized_children() {
+        for planned in [false, true] {
+            let mut fixture = Fixture::new();
+            let step = fixture.step("printf unexpected > unexpected");
+            if planned {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.operation)
+                    .insert(OperationState::Failed);
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.operation)
+                    .remove::<Planned>();
+            }
+            fixture.app.update();
+            assert!(fixture.app.world().get::<Running>(step).is_none());
+            assert!(!fixture.directory.path().join("unexpected").exists());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<CliResult>(fixture.operation)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn a_removed_provider_is_refused_before_admission() {
+        let mut app = App::new();
+        app.add_plugins(Plugin);
+        let provider = app.world_mut().spawn_empty().id();
+        app.world_mut().despawn(provider);
+        let operation = app
+            .world_mut()
+            .spawn((
+                CliInvocation {
+                    command: "fixture.run".into(),
+                    arguments: Default::default(),
+                },
+                workspace::Dispatch {
+                    provider,
+                    arguments: Vec::new(),
+                },
+            ))
+            .id();
+        app.update();
+        let result = app
+            .world()
+            .get::<CliResult>(operation)
+            .expect("removed provider must not wait indefinitely");
+        assert_eq!(
+            result.0.as_ref().unwrap_err(),
+            "Workspace provider is unavailable"
+        );
+        assert!(app.world().get::<Admission>(operation).is_none());
     }
 
     #[test]

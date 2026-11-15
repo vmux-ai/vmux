@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_syntax/src/lib.rs||const:GITHUB_DARK", fingerprint: "0312cf99300ce684", issue: "VMX-253"),
     (key: "crates/util/vmux_syntax/src/lib.rs||const:GITHUB_LIGHT", fingerprint: "6ed079aaf4763e7b", issue: "VMX-253"),
     (key: "crates/util/vmux_syntax/src/lib.rs||enum:TokenStyle", fingerprint: "87a96cf7369f07aa", issue: "VMX-253"),
@@ -11,4 +12,10 @@
     (key: "crates/util/vmux_syntax/src/lib.rs||struct:PaletteColour", fingerprint: "b13b76c05bd3dca8", issue: "VMX-253"),
     (key: "crates/util/vmux_syntax/src/lib.rs||struct:Token", fingerprint: "e3fad10e8656b649", issue: "VMX-253"),
     (key: "crates/util/vmux_syntax/src/lib.rs||struct:TokenScope", fingerprint: "5b62c1dbdb431f58", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_syntax/src/lib.rs||enum:TokenStyle", fingerprint: "87a96cf7369f07aa", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

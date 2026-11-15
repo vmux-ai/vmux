@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_mcp/src/cli.rs||enum:McpStdin", fingerprint: "19d54ee6f989304e", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/cli.rs||fn:finish_stdio", fingerprint: "338f0c20f44e80f5", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/cli.rs||fn:receive_stdio", fingerprint: "f02c3935dade66c8", issue: "VMX-253"),
@@ -35,4 +36,12 @@
     (key: "crates/util/vmux_mcp/src/protocol.rs||struct:McpPlugin", fingerprint: "65141b28be58c87f", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||struct:McpResponse", fingerprint: "f4d6dc71c5f91343", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||struct:McpTask", fingerprint: "35ee3422d539cf0a", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_mcp/src/protocol.rs||enum:McpReply", fingerprint: "78c5c33c37fd1089", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_mcp/src/cli.rs||enum:McpStdin", fingerprint: "19d54ee6f989304e", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_mcp/src/protocol.rs||enum:McpSet", fingerprint: "e3e005e123cce0c5", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

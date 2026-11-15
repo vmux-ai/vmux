@@ -441,6 +441,144 @@ fn policy_fragments_refuse_symlinks_instead_of_reading_another_location() {
 }
 
 #[test]
+fn shape_fragments_compare_debt_with_the_fetched_tree_instead_of_local_files() {
+    let repository = Repository::new();
+    repository.write(
+        "ecs-policy.ron",
+        &format!(
+            "(revision: \"{FROZEN_REVISION}\", shape: (revision: \"{FROZEN_SHAPE_REVISION}\"))"
+        ),
+    );
+    let path = "crates/util/alpha/src/lib.rs";
+    let mut inventory = Inventory::default();
+    inventory.source(path, "enum A { One, Two } enum B { One, Two }");
+    let a = inventory.key("enum:A");
+    let b = inventory.key("enum:B");
+    let mut fragment = Policy {
+        shape: ShapePolicy {
+            debt: vec![ShapeDebt {
+                key: a.clone(),
+                fingerprint: inventory.entries[&a].fingerprint.clone(),
+                issue: "VMX-253".into(),
+                finding: "AU-13".into(),
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    repository.write(
+        "crates/util/alpha/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    repository.snapshot();
+    let unchanged = Policy::load(repository.0.path()).unwrap();
+    assert!(
+        unchanged
+            .shape
+            .monotonic_from(&Policy::fetched(repository.0.path()).shape)
+    );
+    fragment.shape.debt.push(ShapeDebt {
+        key: b.clone(),
+        fingerprint: inventory.entries[&b].fingerprint.clone(),
+        issue: "VMX-253".into(),
+        finding: "AU-13".into(),
+    });
+    repository.write(
+        "crates/util/alpha/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    let restored = Policy::load(repository.0.path()).unwrap();
+    let panic = std::panic::catch_unwind(|| restored.shape.prove(repository.0.path()))
+        .expect_err("restored debt must be refused before historical lookup");
+    let message = if let Some(message) = panic.downcast_ref::<String>() {
+        message.as_str()
+    } else {
+        panic.downcast_ref::<&str>().unwrap()
+    };
+    assert!(message.contains("retired shape debt"), "{message}");
+    fragment.shape.debt.pop();
+    fragment.shape.debt.push(ShapeDebt {
+        key: a.clone(),
+        fingerprint: inventory.entries[&a].fingerprint.clone(),
+        issue: "VMX-253".into(),
+        finding: "AU-13".into(),
+    });
+    repository.write(
+        "crates/util/alpha/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    let duplicate = Policy::load(repository.0.path()).unwrap();
+    assert!(
+        duplicate
+            .shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("stale/invalid shape debt"))
+    );
+}
+
+#[test]
+fn shape_fragments_refuse_foreign_records_and_fragment_provenance() {
+    let debt = "debt: [(key: \"crates/util/alpha/src/lib.rs||enum:State\", fingerprint: \"fixed\", issue: \"VMX-253\", finding: \"AU-13\")]";
+    let purpose = "enums: [(key: \"crates/util/alpha/src/lib.rs||enum:State\", fingerprint: \"fixed\", role: Scalar, owner: \"crates/util/alpha/src/lib.rs||struct:Owner\", reason: \"canonical scalar\")]";
+    let body = "bodies: [(key: \"crates/util/alpha/src/lib.rs||impl:Reader::read\", fingerprint: \"fixed\", boundary: \"crates/util/alpha/src/lib.rs||impl:Reader\", reason: \"bounded input\")]";
+    for records in [debt, purpose, body] {
+        let repository = Repository::new();
+        repository.write("website/ecs-policy.ron", &format!("(shape: ({records}))"));
+        let error = Policy::load(repository.0.path()).err().unwrap();
+        assert!(error.contains("Foreign policy record"), "{error}");
+        repository.snapshot();
+        let error = Policy::from_git(repository.0.path(), "origin/main")
+            .err()
+            .unwrap();
+        assert!(error.contains("Foreign policy record"), "{error}");
+        std::fs::remove_file(repository.0.path().join("website/ecs-policy.ron")).unwrap();
+        repository.write("ecs-policy.ron", &format!("(shape: ({records}))"));
+        let error = Policy::load(repository.0.path()).err().unwrap();
+        assert!(error.contains("Root policy holds only"), "{error}");
+    }
+    let repository = Repository::new();
+    repository.write("website/ecs-policy.ron", "(shape: (revision: \"changed\"))");
+    let error = Policy::load(repository.0.path()).err().unwrap();
+    assert!(error.contains("Global provenance"), "{error}");
+    repository.snapshot();
+    let error = Policy::from_git(repository.0.path(), "origin/main")
+        .err()
+        .unwrap();
+    assert!(error.contains("Global provenance"), "{error}");
+}
+
+#[test]
+#[cfg(unix)]
+fn fetched_policy_refuses_symlink_fragments_in_its_own_tree() {
+    let repository = Repository::new();
+    repository.write("website/source.ron", "()");
+    std::os::unix::fs::symlink(
+        "source.ron",
+        repository.0.path().join("website/ecs-policy.ron"),
+    )
+    .unwrap();
+    repository.snapshot();
+    let error = Policy::from_git(repository.0.path(), "origin/main")
+        .err()
+        .expect("Git tree symlinks must not be decoded as policy");
+    assert!(error.contains("regular file"), "{error}");
+}
+
+#[test]
+fn fetched_policy_refuses_the_same_misplaced_fragments_as_the_filesystem() {
+    let repository = Repository::new();
+    repository.write("crates/misc/ecs-policy.ron", "()");
+    let error = Policy::load(repository.0.path()).err().unwrap();
+    assert!(error.contains("Misplaced policy fragment"), "{error}");
+    repository.snapshot();
+    let error = Policy::from_git(repository.0.path(), "origin/main")
+        .err()
+        .unwrap();
+    assert!(error.contains("Misplaced policy fragment"), "{error}");
+}
+
+#[test]
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
     let policy = Policy::load(&root.0).expect("valid ownership policy");
@@ -2769,6 +2907,40 @@ impl Repository {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, source).unwrap();
     }
+
+    fn snapshot(&self) {
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["add", "."],
+            vec![
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                "Policy fixture",
+            ],
+            vec!["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(self.0.path())
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_AUTHOR_NAME", "Policy fixture")
+                .env("GIT_AUTHOR_EMAIL", "policy@example.invalid")
+                .env("GIT_COMMITTER_NAME", "Policy fixture")
+                .env("GIT_COMMITTER_EMAIL", "policy@example.invalid")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
 
 impl Workspace {
@@ -2798,11 +2970,7 @@ struct Policy {
 impl Policy {
     fn load(root: &Path) -> Result<Self, String> {
         let mut policy = Self::read(&root.join("ecs-policy.ron"))?;
-        if !policy.legacy.is_empty() || !policy.boundaries.is_empty() || !policy.values.is_empty() {
-            return Err(
-                "Root policy holds only historical revision and upstream references".into(),
-            );
-        }
+        policy.check_root()?;
         let mut files = Vec::new();
         for directory in ["crates", "examples", "website", "patches", "scripts"] {
             Self::paths(&root.join(directory), &mut files)?;
@@ -2810,33 +2978,67 @@ impl Policy {
         files.sort();
         for path in files {
             let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-            let directory = relative
-                .parent()
-                .ok_or("Policy fragment needs a directory")?;
-            if Self::directory(relative).as_deref() != Some(directory) {
-                return Err(format!("Misplaced policy fragment {}", relative.display()));
-            }
-            let fragment = Self::read(&path)?;
-            if !fragment.revision.is_empty() || !fragment.upstream.is_empty() {
-                return Err(format!(
-                    "Global provenance belongs in root policy: {}",
-                    relative.display()
-                ));
-            }
-            for record in &fragment.legacy {
-                Self::check_record(directory, &record.key)?;
-            }
-            for record in &fragment.boundaries {
-                Self::check_record(directory, &record.key)?;
-            }
-            for record in &fragment.values {
-                Self::check_record(directory, &record.key)?;
-            }
-            policy.legacy.extend(fragment.legacy);
-            policy.boundaries.extend(fragment.boundaries);
-            policy.values.extend(fragment.values);
+            policy.append(relative, Self::read(&path)?)?;
         }
         Ok(policy)
+    }
+
+    fn check_root(&self) -> Result<(), String> {
+        if !self.legacy.is_empty()
+            || !self.boundaries.is_empty()
+            || !self.values.is_empty()
+            || !self.shape.debt.is_empty()
+            || !self.shape.enums.is_empty()
+            || !self.shape.bodies.is_empty()
+        {
+            return Err(
+                "Root policy holds only historical revisions and upstream references".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn append(&mut self, relative: &Path, fragment: Self) -> Result<(), String> {
+        let directory = relative
+            .parent()
+            .ok_or("Policy fragment needs a directory")?;
+        if Self::directory(relative).as_deref() != Some(directory) {
+            return Err(format!("Misplaced policy fragment {}", relative.display()));
+        }
+        if !fragment.revision.is_empty()
+            || !fragment.upstream.is_empty()
+            || !fragment.shape.revision.is_empty()
+        {
+            return Err(format!(
+                "Global provenance belongs in root policy: {}",
+                relative.display()
+            ));
+        }
+        for record in &fragment.legacy {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.boundaries {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.values {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.shape.debt {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.shape.enums {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.shape.bodies {
+            Self::check_record(directory, &record.key)?;
+        }
+        self.legacy.extend(fragment.legacy);
+        self.boundaries.extend(fragment.boundaries);
+        self.values.extend(fragment.values);
+        self.shape.debt.extend(fragment.shape.debt);
+        self.shape.enums.extend(fragment.shape.enums);
+        self.shape.bodies.extend(fragment.shape.bodies);
+        Ok(())
     }
 
     fn check_record(directory: &Path, key: &str) -> Result<(), String> {
@@ -3019,17 +3221,94 @@ impl Policy {
     }
 
     fn fetched(root: &Path) -> Self {
+        Self::from_git(root, "origin/main")
+            .expect("fetch valid origin main before policy validation")
+    }
+
+    fn from_git(root: &Path, revision: &str) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["show", "origin/main:ecs-policy.ron"])
+            .args(["rev-parse", "--verify", &format!("{revision}^{{commit}}")])
             .current_dir(root)
             .output()
-            .expect("fetched main policy must be available");
-        assert!(
-            output.status.success(),
-            "fetch origin main before policy validation"
-        );
-        ron::from_str(&String::from_utf8(output.stdout).expect("UTF-8 main policy"))
-            .expect("valid fetched main policy")
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!("Cannot resolve policy revision {revision}"));
+        }
+        let captured = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        let revision = captured.trim();
+        let output = Command::new("git")
+            .args(["ls-tree", "-r", "-z", revision])
+            .current_dir(root)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!("Cannot read policy tree {revision}"));
+        }
+        let source = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        let mut paths = BTreeSet::new();
+        for entry in source.split('\0') {
+            if entry.is_empty() {
+                continue;
+            }
+            let (header, path) = entry.split_once('\t').ok_or("Invalid Git tree entry")?;
+            let path = Path::new(path);
+            if path.file_name().is_none_or(|name| name != "ecs-policy.ron") {
+                continue;
+            }
+            if path != Path::new("ecs-policy.ron")
+                && (!["crates", "examples", "website", "patches", "scripts"]
+                    .iter()
+                    .any(|directory| path.starts_with(directory))
+                    || path.components().any(|part| {
+                        matches!(
+                            part.as_os_str().to_str(),
+                            Some(
+                                "target"
+                                    | "node_modules"
+                                    | ".git"
+                                    | ".worktrees"
+                                    | "dist"
+                                    | ".build-tools"
+                            )
+                        )
+                    }))
+            {
+                continue;
+            }
+            if header
+                .split_whitespace()
+                .next()
+                .is_none_or(|mode| !matches!(mode, "100644" | "100755"))
+            {
+                return Err(format!("Policy must be a regular file: {}", path.display()));
+            }
+            paths.insert(path.to_path_buf());
+        }
+        if !paths.remove(Path::new("ecs-policy.ron")) {
+            return Err("Missing root policy in Git tree".into());
+        }
+        let mut policy = Self::read_git(root, revision, Path::new("ecs-policy.ron"))?;
+        policy.check_root()?;
+        for path in paths {
+            policy.append(&path, Self::read_git(root, revision, &path)?)?;
+        }
+        Ok(policy)
+    }
+
+    fn read_git(root: &Path, revision: &str, path: &Path) -> Result<Self, String> {
+        let output = Command::new("git")
+            .args(["show", &format!("{revision}:{}", path.display())])
+            .current_dir(root)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!(
+                "Cannot read policy {} at {revision}",
+                path.display()
+            ));
+        }
+        ron::from_str(&String::from_utf8(output.stdout).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("{}: {error}", path.display()))
     }
 
     fn prove_legacy(&self, root: &Path) {
@@ -3538,7 +3817,7 @@ fn io_component_multiplexers_cannot_claim_a_foreign_format_boundary_without_form
 const FROZEN_SHAPE_REVISION: &str = "963f3f40e33c78f61bc55ead5e9a6a9f01b65081";
 
 #[derive(Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 struct ShapePolicy {
     revision: String,
     debt: Vec<ShapeDebt>,

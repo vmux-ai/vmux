@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "patches/bevy_cef-0.5.2/src/cef_state.rs||impl:Plugin for WebviewCefStatePlugin", fingerprint: "42427c9fcba6b3cf", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/cef_state.rs||struct:MediaPermissionReceiver", fingerprint: "6ab803dc5662e671", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/cef_state.rs||struct:MediaPermissionSender", fingerprint: "1e509926c73f4d39", issue: "VMX-253"),
@@ -182,4 +183,12 @@
     (key: "patches/bevy_cef-0.5.2/src/webview.rs||fn:sync_windowless_frame_rate", fingerprint: "dc2ce1138a280baa", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/webview.rs||impl:Plugin for WebviewPlugin", fingerprint: "95ae9225b556888c", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/webview.rs||struct:TextureWakeCallback", fingerprint: "dff26c853de75cda", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "patches/bevy_cef-0.5.2/src/webview.rs||fn:create_webview", fingerprint: "d036b48eb55a6907", issue: "VMX-253", finding: "AU-14"),
+    (key: "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs||enum:UiEventSystems", fingerprint: "63695436d7fc80f3", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef-0.5.2/src/webview.rs||enum:CefSystems", fingerprint: "a4fee7ff39c1a8c5", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

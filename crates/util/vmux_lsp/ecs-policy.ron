@@ -1,4 +1,5 @@
-(boundaries: [
+(
+boundaries: [
     (key: "crates/util/vmux_lsp/src/lib.rs|tests|impl:Harness", fingerprint: "49050523e85dcb74", interface: "Bevy App fixture with production LSP/Editor plugins and controllable protocol IO", input: "ECS: crates/util/vmux_lsp/src/lib.rs||struct:Transport", output: "external: controlled wire input and isolated lifecycle assertions", lifetime: "one isolated test invocation; no native app is launched", bounds: "one fixture World and explicitly controlled transports/process recorder", teardown: "App/fixture drop releases graph entities, channels and recorder processes", architecture: "ECS ownership boundaries"),
     (owner: Some("crates/util/vmux_lsp/src/lib.rs|tests|struct:Harness"), key: "crates/util/vmux_lsp/src/lib.rs|tests|impl:Probe", fingerprint: "8c48109a25908b7e", interface: "Bevy App fixture with production LSP/Editor plugins and controllable protocol IO", input: "ECS: crates/util/vmux_lsp/src/lib.rs||struct:Transport", output: "external: controlled wire input and isolated lifecycle assertions", lifetime: "one isolated test invocation; no native app is launched", bounds: "one fixture World and explicitly controlled transports/process recorder", teardown: "App/fixture drop releases graph entities, channels and recorder processes", architecture: "ECS ownership boundaries"),
     (owner: Some("crates/util/vmux_lsp/src/lib.rs|tests|struct:Harness"), key: "crates/util/vmux_lsp/src/lib.rs|tests|impl:TransportIo for Probe", fingerprint: "4c40e873c4b81361", interface: "Bevy App fixture with production LSP/Editor plugins and controllable protocol IO", input: "ECS: crates/util/vmux_lsp/src/lib.rs||struct:Transport", output: "external: controlled wire input and isolated lifecycle assertions", lifetime: "one isolated test invocation; no native app is launched", bounds: "one fixture World and explicitly controlled transports/process recorder", teardown: "App/fixture drop releases graph entities, channels and recorder processes", architecture: "ECS ownership boundaries"),
@@ -23,7 +24,15 @@
     (key: "crates/util/vmux_lsp/src/document.rs||impl:Plugin for DocumentsPlugin", owner: Some("crates/util/vmux_lsp/src/lib.rs||impl:Plugin for LspPlugin"), fingerprint: "b9860ec046e88a07", interface: "Bevy typed document/diagnostics lifecycle installation", input: "external: explicit LspPlugin composition", output: "ECS: crates/util/vmux_lsp/src/lib.rs||struct:RequestPolicy", lifetime: "one plugin installation for an App", bounds: "real child plugin composition and private registered systems only; no runtime registry", teardown: "owner/entity or transport shutdown drops mailbox handles, transient tickets and immutable registration inputs", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_lsp/src/document.rs||struct:DocumentsPlugin", owner: Some("crates/util/vmux_lsp/src/lib.rs||impl:Plugin for LspPlugin"), fingerprint: "9f35021b297936a3", interface: "Bevy typed document/diagnostics lifecycle installation", input: "external: explicit LspPlugin composition", output: "ECS: crates/util/vmux_lsp/src/lib.rs||struct:RequestPolicy", lifetime: "one plugin installation for an App", bounds: "real child plugin composition and private registered systems only; no runtime registry", teardown: "owner/entity or transport shutdown drops mailbox handles, transient tickets and immutable registration inputs", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_lsp/src/lib.rs|tests|impl:DiagnosticsSender", fingerprint: "719f4ead2579abda", interface: "Controlled LSP protocol diagnostic publication fixture", input: "ECS: crates/util/vmux_lsp/src/diagnostics.rs||struct:DiagnosticsInbox", output: "external: raw protocol fixture input for the production inbox", lifetime: "one isolated production-plugin fixture", bounds: "raw wire payload only; production systems own diagnostic reconciliation", teardown: "fixture drop releases channel handles", architecture: "ECS ownership boundaries"),
-], values: [
+],
+values: [
     (key: "crates/util/vmux_lsp/src/lib.rs||struct:WireReply", owner: "crates/util/vmux_lsp/src/lib.rs||struct:Request", lifetime: "one bounded wire response receiver owned by its canonical request Component"),
     (key: "crates/util/vmux_lsp/src/diagnostics.rs||struct:ReceivedDiagnostics", owner: "crates/util/vmux_lsp/src/diagnostics.rs||struct:DiagnosticsInbox", lifetime: "one raw LSP wire envelope in the scoped IO mailbox"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_lsp/src/document.rs||fn:open", fingerprint: "d011c52f06db9ca4", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_lsp/src/lib.rs||enum:Set", fingerprint: "b67be15bc9032997", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)
