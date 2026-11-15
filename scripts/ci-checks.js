@@ -127,7 +127,7 @@ class Checks {
     Preflight.sha(env.VMUX_CHECK_TREE);
     const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: root, env: Preflight.gitEnvironment(), encoding: 'utf8' }).trim();
     if (tree !== env.VMUX_CHECK_TREE) throw new Error('Check checkout differs from its planned inputs');
-    const file = path.join(root, '.ci-check-inputs.json');
+    const file = path.join(root, 'ci-check-inputs.json');
     if (fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error('Check claim path must not be a symbolic link');
     const descriptor = fs.openSync(file, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
     try {

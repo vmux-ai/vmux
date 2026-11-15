@@ -241,7 +241,7 @@ jobs:
             const profiles = [
               { key: 'lint', name: 'Lint', paths: [...rust, 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope(process.env.VMUX_LINT_SCOPE) },
               { key: 'test-rust', name: 'Rust tests', paths: rust, scope: scope(process.env.VMUX_TEST_SCOPE) },
-              { key: 'test-sdk', name: 'SDK compatibility', paths: rust, scope: scope('sdk-path+host') },
+              { key: 'test-sdk', name: 'ECS framework tests', paths: rust, scope: scope('sdk-path+host') },
               { key: 'test-lean', name: 'Lean desktop tests', paths: rust, scope: scope('desktop-lean') },
               { key: 'test-headless', name: 'Headless tests', paths: rust, scope: scope('daemon+mcp') },
               { key: 'website', name: 'Website Build', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
@@ -305,7 +305,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.changes.outputs.check_lint }}-${{ github.run_attempt }}
-          path: .ci-check-inputs.json
+          path: ci-check-inputs.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -425,7 +425,7 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
-      - name: Test build tooling and repository policy
+      - name: Validate ECS ownership and build tooling
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: |
           node --test scripts/ci-preflight.test.js
@@ -461,7 +461,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.changes.outputs.check_test_rust }}-${{ github.run_attempt }}
-          path: .ci-check-inputs.json
+          path: ci-check-inputs.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -485,7 +485,7 @@ jobs:
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
 
   test-sdk:
-    name: SDK compatibility
+    name: ECS framework tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_sdk
@@ -511,7 +511,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.changes.outputs.check_test_sdk }}-${{ github.run_attempt }}
-          path: .ci-check-inputs.json
+          path: ci-check-inputs.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -562,7 +562,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.changes.outputs.check_test_lean }}-${{ github.run_attempt }}
-          path: .ci-check-inputs.json
+          path: ci-check-inputs.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -603,7 +603,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.changes.outputs.check_test_headless }}-${{ github.run_attempt }}
-          path: .ci-check-inputs.json
+          path: ci-check-inputs.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -679,7 +679,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.changes.outputs.check_website }}-${{ github.run_attempt }}
-          path: .ci-check-inputs.json
+          path: ci-check-inputs.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

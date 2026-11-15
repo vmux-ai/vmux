@@ -997,12 +997,30 @@ test('symbolic-link inputs refuse reuse and claim writing preserves external tar
   Checks.record(env, valid.git.root);
   const target = path.join(valid.git.root, 'external.json');
   fs.writeFileSync(target, 'preserve');
-  const record = path.join(valid.git.root, '.ci-check-inputs.json');
+  const record = path.join(valid.git.root, 'ci-check-inputs.json');
   fs.unlinkSync(record);
   fs.symlinkSync(target, record);
   assert.throws(() => Checks.record(env, valid.git.root), /symbolic link/);
   assert.equal(fs.readFileSync(target, 'utf8'), 'preserve');
   assert.throws(() => Checks.record({ ...env, VMUX_CHECK_TREE: 'a'.repeat(40) }, valid.git.root), /differs/);
+});
+
+test('every validation artifact discovers its recorded claim with the default hidden-file exclusion', async (t) => {
+  const fixture = new CheckFixture(t);
+  const claim = (await fixture.plan())['test-rust'].claim;
+  Preflight.checkout({ VMUX_CI_HEAD: fixture.git.head, VMUX_CI_BASE: fixture.identity.base, VMUX_CI_TREE: fixture.identity.tree }, fixture.git.root);
+  Checks.record({ VMUX_CHECK_NAME: claim, VMUX_CHECK_TREE: fixture.identity.tree, GITHUB_RUN_ID: '99', GITHUB_RUN_ATTEMPT: '1' }, fixture.git.root);
+  const workflow = new Workflow();
+  for (const key of ['lint', 'test-rust', 'test-sdk', 'test-lean', 'test-headless', 'website']) {
+    const upload = workflow.jobs[key].steps.find((step) => step.name === 'Publish validation inputs');
+    const files = [];
+    for (const file of fs.globSync(upload.with.path, { cwd: fixture.git.root })) {
+      if (upload.with['include-hidden-files'] !== true && file.split(path.sep).some((part) => part.startsWith('.'))) continue;
+      files.push(file);
+    }
+    assert.equal(files.length, 1, key);
+    assert.equal(fs.statSync(path.join(fixture.git.root, files[0])).isFile(), true, key);
+  }
 });
 
 test('Test accepts verified reused children but still rejects fresh failures and failed preparation', () => {
