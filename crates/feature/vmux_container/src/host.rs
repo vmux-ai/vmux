@@ -120,7 +120,28 @@ struct InspectTask {
 struct Logs(String);
 
 #[derive(Component, Default)]
-struct LastError(String);
+struct LastError {
+    message: String,
+    completion: Option<std::any::TypeId>,
+}
+
+impl LastError {
+    fn clear(&mut self) {
+        self.message.clear();
+        self.completion = None;
+    }
+
+    fn failed<R: 'static>(&mut self, error: &str) {
+        self.message = error.into();
+        self.completion = Some(std::any::TypeId::of::<R>());
+    }
+
+    fn resolved<R: 'static>(&mut self) {
+        if self.completion == Some(std::any::TypeId::of::<R>()) {
+            self.clear();
+        }
+    }
+}
 
 #[derive(Component, Default)]
 struct ConfigurationRevision(u64);
@@ -176,7 +197,10 @@ fn spawn(source: Res<Source>, mut commands: Commands) {
         Observed(status),
         NextInspection(Instant::now()),
         Logs::default(),
-        LastError(error),
+        LastError {
+            message: error,
+            completion: None,
+        },
         ConfigurationRevision::default(),
         Revision::default(),
     ));
@@ -369,15 +393,15 @@ impl Completion<'_, '_> {
             *revision = revision.saturating_next();
         }
         if let Err(value) = &event.result {
-            error.0 = value.clone();
+            error.failed::<R>(value);
         }
         if let Ok((mut completed, mut page_error)) = self.pages.get_mut(event.requester) {
             if event.mutates {
                 completed.0 = completed.0.wrapping_add(1);
             }
             match &event.result {
-                Ok(_) => page_error.0.clear(),
-                Err(error) => page_error.0 = error.clone(),
+                Ok(_) => page_error.clear(),
+                Err(error) => page_error.failed::<R>(error),
             }
         }
         self.commands
@@ -398,7 +422,7 @@ fn started(trigger: On<Finished<Started>>, mut completion: Completion) {
     };
     let (mut observed, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
     observed.0 = value.0.clone();
-    error.0.clear();
+    error.clear();
 }
 
 fn stopped(trigger: On<Finished<Stopped>>, mut completion: Completion) {
@@ -411,7 +435,7 @@ fn stopped(trigger: On<Finished<Stopped>>, mut completion: Completion) {
     };
     let (mut observed, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
     observed.0 = value.0.clone();
-    error.0.clear();
+    error.clear();
 }
 
 fn inspected(trigger: On<Finished<StatusRead>>, mut completion: Completion) {
@@ -424,7 +448,7 @@ fn inspected(trigger: On<Finished<StatusRead>>, mut completion: Completion) {
     };
     let (mut observed, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
     observed.0 = value.0.clone();
-    error.0.clear();
+    error.clear();
 }
 
 fn logged(trigger: On<Finished<LogText>>, mut completion: Completion) {
@@ -435,8 +459,9 @@ fn logged(trigger: On<Finished<LogText>>, mut completion: Completion) {
     let Ok(value) = &event.result else {
         return;
     };
-    let (_, mut logs, _, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
+    let (_, mut logs, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
     logs.0 = value.0.clone();
+    error.resolved::<LogText>();
 }
 
 fn configured(trigger: On<Finished<Configured>>, mut completion: Completion) {
@@ -453,7 +478,7 @@ fn configured(trigger: On<Finished<Configured>>, mut completion: Completion) {
     revision.0 += 1;
     observed.0.socket = settings.socket();
     observed.0.log = settings.log();
-    error.0.clear();
+    error.clear();
 }
 
 fn changed(trigger: On<Finished<Changed>>, mut completion: Completion) {
@@ -465,7 +490,7 @@ fn changed(trigger: On<Finished<Changed>>, mut completion: Completion) {
         return;
     };
     let (_, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
-    error.0.clear();
+    error.clear();
 }
 
 type InspectedEngines<'w, 's> = Query<
@@ -630,10 +655,10 @@ fn project(
         cpus: settings.map_or(0, |settings| settings.cpus),
         memory_mib: settings.map_or(0, |settings| settings.memory_mib),
         socket: observed.0.socket.to_string_lossy().into_owned(),
-        error: if error.0.is_empty() {
+        error: if error.message.is_empty() {
             observed.0.failure.clone().unwrap_or_default()
         } else {
-            error.0.clone()
+            error.message.clone()
         },
         logs: logs.0.clone(),
         inventory_ready: inventory.is_some_and(|inventory| inventory.ready),
@@ -656,9 +681,9 @@ fn project(
     for (page, output, completed, page_error, published) in &pages {
         let mut snapshot = snapshot.clone();
         snapshot.control_revision = completed.0;
-        snapshot.control_error = page_error.0.clone();
-        if !page_error.0.is_empty() {
-            snapshot.error = page_error.0.clone();
+        snapshot.control_error = page_error.message.clone();
+        if !page_error.message.is_empty() {
+            snapshot.error = page_error.message.clone();
         }
         if let Some(output) = output {
             snapshot.log_id = output.id.clone();
@@ -801,7 +826,13 @@ mod tests {
         assert_eq!(persisted.memory_mib, 2048);
         assert_eq!(app.world().get::<Settings>(engine).unwrap(), &persisted);
         assert_eq!(app.world().get::<Revision>(page).unwrap().0, 1);
-        assert!(app.world().get::<LastError>(page).unwrap().0.is_empty());
+        assert!(
+            app.world()
+                .get::<LastError>(page)
+                .unwrap()
+                .message
+                .is_empty()
+        );
         assert_eq!(
             app.world_mut()
                 .query::<&Configured>()
@@ -809,6 +840,68 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn log_retry_clears_its_failure_and_preserves_other_completion_errors() {
+        for interrupted in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let settings = Settings::new(directory.path(), directory.path());
+            let mut app = App::new();
+            app.add_plugins(ContainerPlugin);
+            let engine = app
+                .world_mut()
+                .spawn((
+                    EngineView,
+                    Observed(EngineClient::new(settings.clone()).status()),
+                    settings,
+                    Logs::default(),
+                    LastError::default(),
+                    ConfigurationRevision::default(),
+                    Revision::default(),
+                ))
+                .id();
+            let page = app
+                .world_mut()
+                .spawn((PageView, Revision::default(), LastError::default()))
+                .id();
+            app.world_mut().trigger(Finished::<LogText> {
+                entity: engine,
+                requester: page,
+                result: Err("read failed".into()),
+                mutates: false,
+            });
+            assert_eq!(
+                app.world().get::<LastError>(engine).unwrap().message,
+                "read failed"
+            );
+            if interrupted {
+                app.world_mut().trigger(Finished::<Started> {
+                    entity: engine,
+                    requester: page,
+                    result: Err("read failed".into()),
+                    mutates: false,
+                });
+            }
+            app.world_mut().trigger(Finished::<LogText> {
+                entity: engine,
+                requester: page,
+                result: Ok(LogText("current logs".into())),
+                mutates: false,
+            });
+            assert_eq!(app.world().get::<Logs>(engine).unwrap().0, "current logs");
+            assert_eq!(
+                app.world().get::<LastError>(engine).unwrap().message,
+                if interrupted { "read failed" } else { "" }
+            );
+            assert!(
+                app.world()
+                    .get::<LastError>(page)
+                    .unwrap()
+                    .message
+                    .is_empty()
+            );
+        }
     }
 
     #[derive(Resource, Default)]
@@ -905,7 +998,7 @@ mod tests {
         app.world_mut().run_schedule(Last);
         assert_eq!(app.world().resource::<Delivery>().writes, 2);
         assert_eq!(app.world().resource::<Delivery>().frames[1].phase, "docker");
-        app.world_mut().get_mut::<LastError>(page).unwrap().0 = "start refused".into();
+        app.world_mut().get_mut::<LastError>(page).unwrap().message = "start refused".into();
         app.world_mut().run_schedule(Update);
         app.world_mut().run_schedule(Last);
         assert_eq!(app.world().resource::<Delivery>().writes, 3);

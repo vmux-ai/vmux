@@ -561,6 +561,9 @@ fn seed_folders(
         existing.insert(BookmarkSeed::key(name.as_str()), (folder, smart.copied()));
     }
     let mut changed = !seed.offered.folder_bookmarks.is_empty();
+    for order in &seed.orders {
+        next.0 = next.0.max(order.0.saturating_add(1));
+    }
     seed.offered.folder_bookmarks.clear();
     for setting in &state.settings.folders {
         let key = BookmarkSeed::key(&setting.name);
@@ -1117,6 +1120,69 @@ mod tests {
                 .count(),
             3
         );
+    }
+
+    #[test]
+    fn new_folders_follow_root_bookmarks_after_vm_pin_migration() {
+        let mut settings = AppSettings::default();
+        settings.browser.bookmarks = vec!["vmux://simulator/".into(), "vmux://vm/".into()];
+        settings.browser.bookmark_folders = vec![vmux_setting::BookmarkFolderSettings {
+            name: "Notes".into(),
+            smart: None,
+        }];
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            vmux_ecs::PrimitivesPlugin,
+            BookmarkStorePlugin,
+        ))
+        .insert_resource(BookmarkDefaults::from(&settings))
+        .insert_resource(settings)
+        .insert_resource(OfferedBookmarkDefaults {
+            urls: vec!["vmux://simulator/".into()],
+            pin_order_revision: 4,
+            ..default()
+        });
+        app.world_mut().spawn(BookmarkAutoSave);
+        app.world_mut().spawn((
+            Pin,
+            Uuid("simulator".into()),
+            BookmarkOrder(0),
+            PageMetadata {
+                url: "vmux://simulator/".into(),
+                ..default()
+            },
+        ));
+        let bookmark = app
+            .world_mut()
+            .spawn((
+                Pin,
+                Bookmark,
+                Uuid("custom".into()),
+                BookmarkOrder(1),
+                PageMetadata {
+                    url: "https://example.test/".into(),
+                    ..default()
+                },
+            ))
+            .id();
+        app.world_mut().trigger(SeedBookmarkDefaults);
+        app.world_mut().flush();
+        let mut folders = app
+            .world_mut()
+            .query_filtered::<(Entity, &BookmarkOrder), With<Folder>>();
+        let (folder, order) = folders.single(app.world()).unwrap();
+        let order = order.0;
+        assert!(order > app.world().get::<BookmarkOrder>(bookmark).unwrap().0);
+        assert_eq!(
+            app.world().get::<PageMetadata>(bookmark).unwrap().url,
+            "https://example.test/"
+        );
+        app.world_mut().trigger(SeedBookmarkDefaults);
+        app.world_mut().flush();
+        assert_eq!(folders.iter(app.world()).count(), 1);
+        assert_eq!(app.world().get::<BookmarkOrder>(folder).unwrap().0, order);
     }
 
     #[test]

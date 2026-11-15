@@ -3541,6 +3541,90 @@ fn body_budget_counts_code_tokens_and_excludes_comments_and_test_only_blocks() {
 }
 
 #[test]
+fn body_budget_preserves_production_tokens_on_test_only_shared_lines() {
+    let statements = "let production = 1; #[cfg(test)] { let testing = 2; }\n".repeat(101);
+    let inventory = Inventory::fixture(&format!("fn read() {{\n{statements}}}"));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    assert!(
+        shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("fn:read: body"))
+    );
+}
+
+#[test]
+fn trait_default_bodies_share_the_budget_without_counting_test_only_defaults() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "trait Behavior {{ fn required(); fn dispatch(&self) {{\n{statements}}} #[cfg(test)] fn fixture(&self) {{\n{statements}}} }} struct Owner; impl Behavior for Owner {{ fn dispatch(&self) {{\n{statements}}} }}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("trait:Behavior::dispatch: body"))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("impl:Behavior for Owner::dispatch: body"))
+    );
+    assert!(!errors.iter().any(|error| error.contains("::fixture: body")));
+}
+
+#[test]
+fn a_trait_body_waiver_cannot_cover_another_platforms_same_named_default() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "trait Behavior {{ #[cfg(unix)] fn dispatch(&self) {{\n{statements}}} #[cfg(windows)] fn dispatch(&self) {{\n{statements}}} }}"
+    ));
+    let entry = &inventory.entries[&inventory.key("trait:Behavior")];
+    let first = &entry.bodies[0];
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![ShapeDebt {
+            key: first.key.clone(),
+            fingerprint: first.fingerprint.clone(),
+            issue: "VMX-253".into(),
+            finding: "AU-14".into(),
+        }],
+        ..Default::default()
+    };
+    assert!(
+        shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("trait:Behavior::dispatch#2: body"))
+    );
+}
+
+#[test]
+fn installation_arguments_cannot_hide_oversized_computation() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "use bevy_app::Plugin; struct Root; struct State; impl Plugin for Root {{ fn build(&self,app:&mut bevy_app::App) {{ app.insert_resource({{\n{statements}State }}); }} }}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    assert!(
+        shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("::build: body"))
+    );
+}
+
+#[test]
 fn body_budget_rejects_oversized_registered_systems_and_associated_dispatchers() {
     let statements = " let value = 1;\n".repeat(101);
     let inventory = Inventory::fixture(&format!(
@@ -4206,6 +4290,29 @@ impl BodyShape {
                     ));
                 }
             }
+            Some(Item::Trait(value)) => {
+                for item in &value.items {
+                    let syn::TraitItem::Fn(method) = item else {
+                        continue;
+                    };
+                    let Some(block) = &method.default else {
+                        continue;
+                    };
+                    let mut body_key = format!("{key}::{}", method.sig.ident);
+                    let mut ordinal = 2;
+                    while bodies.iter().any(|body| body.key == body_key) {
+                        body_key = format!("{key}::{}#{ordinal}", method.sig.ident);
+                        ordinal += 1;
+                    }
+                    bodies.push(Self::of(
+                        body_key,
+                        method.sig.ident.to_string(),
+                        method,
+                        block,
+                        &method.attrs,
+                    ));
+                }
+            }
             _ => {}
         }
         bodies
@@ -4248,10 +4355,42 @@ impl BodyShape {
                 ) {
                     return false;
                 }
-                match value.receiver.as_ref() {
-                    syn::Expr::Path(path) => path.path.is_ident(argument),
-                    other => Self::installation(other, argument),
-                }
+                value.args.iter().all(Self::installation_argument)
+                    && match value.receiver.as_ref() {
+                        syn::Expr::Path(path) => path.path.is_ident(argument),
+                        other => Self::installation(other, argument),
+                    }
+            }
+            _ => false,
+        }
+    }
+
+    fn installation_argument(expression: &syn::Expr) -> bool {
+        match expression {
+            syn::Expr::Path(_) | syn::Expr::Lit(_) => true,
+            syn::Expr::Reference(value) => Self::installation_argument(&value.expr),
+            syn::Expr::Field(value) => Self::installation_argument(&value.base),
+            syn::Expr::Paren(value) => Self::installation_argument(&value.expr),
+            syn::Expr::Group(value) => Self::installation_argument(&value.expr),
+            syn::Expr::Tuple(value) => value.elems.iter().all(Self::installation_argument),
+            syn::Expr::Array(value) => value.elems.iter().all(Self::installation_argument),
+            syn::Expr::Struct(value) => {
+                value
+                    .fields
+                    .iter()
+                    .all(|field| Self::installation_argument(&field.expr))
+                    && value
+                        .rest
+                        .as_ref()
+                        .is_none_or(|rest| Self::installation_argument(rest))
+            }
+            syn::Expr::Call(value) => {
+                Self::installation_argument(&value.func)
+                    && value.args.iter().all(Self::installation_argument)
+            }
+            syn::Expr::MethodCall(value) => {
+                Self::installation_argument(&value.receiver)
+                    && value.args.iter().all(Self::installation_argument)
             }
             _ => false,
         }
@@ -4282,11 +4421,8 @@ impl BodyShape {
         attributes: &[Attribute],
     ) -> Self {
         let mut footprint = Footprint::default();
-        footprint.tokens(block.to_token_stream());
         footprint.visit_block(block);
-        footprint
-            .lines
-            .retain(|line| !footprint.test_lines.contains(line));
+        footprint.tokens(block.to_token_stream());
         let tokens = item.to_token_stream();
         let method = syn::parse2::<syn::ImplItemFn>(tokens.clone()).ok();
         let argument = method.as_ref().and_then(|method| {
@@ -4317,7 +4453,7 @@ impl BodyShape {
 #[derive(Default)]
 struct Footprint {
     lines: BTreeSet<usize>,
-    test_lines: BTreeSet<usize>,
+    test_spans: Vec<((usize, usize), (usize, usize))>,
     closure: bool,
 }
 
@@ -4326,21 +4462,38 @@ impl Footprint {
         for token in tokens {
             match token {
                 proc_macro2::TokenTree::Group(group) => {
-                    self.lines.insert(group.span_open().start().line);
-                    self.lines.insert(group.span_close().start().line);
+                    if self.excluded(group.span()) {
+                        continue;
+                    }
+                    self.record(group.span_open());
+                    self.record(group.span_close());
                     self.tokens(group.stream());
                 }
-                other => {
-                    self.lines
-                        .extend(other.span().start().line..=other.span().end().line);
-                }
+                other => self.record(other.span()),
             }
         }
     }
 
+    fn excluded(&self, span: proc_macro2::Span) -> bool {
+        let start = span.start();
+        let end = span.end();
+        self.test_spans.iter().any(|(first, last)| {
+            (start.line, start.column) >= *first && (end.line, end.column) <= *last
+        })
+    }
+
+    fn record(&mut self, span: proc_macro2::Span) {
+        if !self.excluded(span) {
+            self.lines.extend(span.start().line..=span.end().line);
+        }
+    }
+
     fn ignore(&mut self, value: &impl syn::spanned::Spanned) {
-        self.test_lines
-            .extend(value.span().start().line..=value.span().end().line);
+        let span = value.span();
+        let start = span.start();
+        let end = span.end();
+        self.test_spans
+            .push(((start.line, start.column), (end.line, end.column)));
     }
 }
 
