@@ -666,7 +666,12 @@ fn plan_provider(
                 minimum: storage.minimum(),
             },
         );
-        plans.native(entity, &mut tail, Work::WorkspaceAcquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: false },
+        );
         plans.request(
             entity,
             &mut tail,
@@ -712,7 +717,12 @@ fn prepare_build(mut operations: Planning, mut plans: Plans) {
             continue;
         }
         plans.native(entity, &mut tail, Work::Check);
-        plans.native(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         plans.native(entity, &mut tail, Work::Seed);
         plans.native(entity, &mut tail, Work::Preflight);
     }
@@ -940,7 +950,12 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         if platform != "desktop" {
             plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
             if platform == "web" {
@@ -998,7 +1013,12 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         plans.native(entity, &mut tail, Work::Seed);
         let mut args = vec![
             "test".into(),
@@ -1031,7 +1051,12 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         plans.native(entity, &mut tail, Work::Seed);
         plans.native(
             entity,
@@ -1076,7 +1101,12 @@ fn plan_setup(mut operations: Planning, mut plans: Plans) {
 
         if platform == "desktop" {
             plans.native(entity, &mut tail, Work::Check);
-            plans.native(entity, &mut tail, Work::Acquire);
+            plans.request(
+                entity,
+                &mut tail,
+                "Acquire target lock",
+                debug::Acquire { inherit: true },
+            );
             plans.native(entity, &mut tail, Work::Native);
             plans.native(entity, &mut tail, Work::Tailwind);
             plans.native(entity, &mut tail, Work::PackageTools);
@@ -1115,7 +1145,12 @@ fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         plans.native(entity, &mut tail, Work::Clean(invocation.flag("apply")));
 
         plans.commands.entity(entity).insert(Planned);
@@ -1178,7 +1213,12 @@ fn plan_sdk(mut operations: Planning, mut plans: Plans) {
         if invocation.flag("git") {
             arguments.push("--git".into());
         }
-        plans.native(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         plans.native(entity, &mut tail, Work::Consumer(arguments));
         plans.commands.entity(entity).insert(Planned);
     }
@@ -1217,14 +1257,24 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
                 }
             };
             plans.native(entity, &mut tail, Work::Check);
-            plans.native(entity, &mut tail, Work::Acquire);
+            plans.request(
+                entity,
+                &mut tail,
+                "Acquire target lock",
+                debug::Acquire { inherit: true },
+            );
             plans.native(entity, &mut tail, Work::Preflight);
             plans.native(entity, &mut tail, Work::CliCompile);
             plans.native(entity, &mut tail, Work::CliPackage(preview));
             plans.native(entity, &mut tail, Work::Finish("release".into()));
         } else {
             if task == "cargo" {
-                plans.native(entity, &mut tail, Work::Acquire);
+                plans.request(
+                    entity,
+                    &mut tail,
+                    "Acquire target lock",
+                    debug::Acquire { inherit: true },
+                );
                 plans.native(entity, &mut tail, Work::Seed);
             }
             match task {
@@ -1427,6 +1477,7 @@ fn collect(
     mut completions: ResMut<Messages<Completion>>,
     steps: Receiving,
     mut operations: Adopting,
+    leases: Query<&Lease>,
     mut commands: Commands,
 ) {
     for completion in completions.drain() {
@@ -1461,7 +1512,7 @@ fn collect(
         if *state == OperationState::Canceled {
             commands
                 .entity(completion.entity)
-                .remove::<Running>()
+                .remove::<(Running, Lease)>()
                 .insert((Completed, OperationState::Canceled));
             continue;
         }
@@ -1475,9 +1526,6 @@ fn collect(
                             .remove::<Lease>();
                     }
                     Outcome::Done => {}
-                    Outcome::Lease(lease) => {
-                        commands.entity(completion.root).insert(Lease(lease));
-                    }
                     Outcome::Identity(identity) => {
                         settings.0.set("APPLE_SIGNING_IDENTITY", &identity);
                     }
@@ -1498,9 +1546,14 @@ fn collect(
                         settings.0.set(key, &path);
                     }
                 }
+                if let Ok(lease) = leases.get(completion.entity) {
+                    commands
+                        .entity(completion.root)
+                        .insert(Lease(lease.0.clone()));
+                }
                 commands
                     .entity(completion.entity)
-                    .remove::<Running>()
+                    .remove::<(Running, Lease)>()
                     .insert((Completed, OperationState::Succeeded));
             }
             Err(error) => {
@@ -1512,7 +1565,7 @@ fn collect(
                 eprintln!("vmux: {error}");
                 commands
                     .entity(completion.entity)
-                    .remove::<Running>()
+                    .remove::<(Running, Lease)>()
                     .insert((Completed, OperationState::Failed));
                 commands
                     .entity(completion.root)
@@ -1862,5 +1915,269 @@ mod tests {
                 "recovered"
             );
         }
+    }
+
+    #[test]
+    fn acquired_lease_transfers_to_the_root_without_losing_exclusion() {
+        let mut fixture = Fixture::new();
+        fixture.app.world_mut().spawn((
+            debug::Acquire { inherit: false },
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        assert_eq!(fixture.result(), 0);
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .remove::<Lease>();
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn discarded_acquired_lease_releases_exclusion_after_the_request_drains() {
+        for disposition in [
+            OperationState::Canceled,
+            OperationState::Failed,
+            OperationState::Running,
+        ] {
+            let mut fixture = Fixture::new();
+            let step = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    debug::Acquire { inherit: false },
+                    OperationState::Pending,
+                    ChildOf(fixture.operation),
+                    Attempt(1),
+                ))
+                .id();
+            let checkout = fixture
+                .app
+                .world()
+                .get::<Checkout>(fixture.operation)
+                .unwrap()
+                .clone();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while fixture.app.world().get::<Lease>(step).is_none() {
+                fixture.app.update();
+                assert!(Instant::now() < deadline, "lease candidate did not arrive");
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            if disposition == OperationState::Running {
+                let other = fixture.app.world_mut().spawn_empty().id();
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(step)
+                    .insert(ChildOf(other));
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.operation)
+                    .insert(disposition);
+            }
+            loop {
+                fixture.app.update();
+                if fixture.app.world().get::<Completed>(step).is_some()
+                    || fixture.app.world().get_entity(step).is_err()
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "discarded lease did not drain");
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Lease>(fixture.operation)
+                    .is_none()
+            );
+            assert!(
+                TargetLock::try_acquire(&checkout.root, &checkout.target)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn discarded_unconsumed_lock_receipts_release_exclusion_after_completion() {
+        for disposition in [OperationState::Canceled, OperationState::Failed] {
+            let mut fixture = Fixture::new();
+            fixture.app.add_observer(
+                move |receipt: On<Add, debug_io::AcquiredLock>,
+                      parents: Query<&ChildOf>,
+                      mut roots: Query<&mut OperationState, With<Accepted>>| {
+                    let request = parents.get(receipt.entity).unwrap().parent();
+                    let root = parents.get(request).unwrap().parent();
+                    *roots.get_mut(root).unwrap() = disposition.clone();
+                },
+            );
+            let step = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    debug::Acquire { inherit: false },
+                    OperationState::Pending,
+                    ChildOf(fixture.operation),
+                    Attempt(1),
+                ))
+                .id();
+            let checkout = fixture
+                .app
+                .world()
+                .get::<Checkout>(fixture.operation)
+                .unwrap()
+                .clone();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                fixture.app.update();
+                if fixture.app.world().get::<Completed>(step).is_some() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "unconsumed lock did not complete"
+                );
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Lease>(fixture.operation)
+                    .is_none()
+            );
+            assert!(
+                TargetLock::try_acquire(&checkout.root, &checkout.target)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn lock_inheritance_uses_the_process_contract_and_rejects_configuration_overrides() {
+        let mut fixture = Fixture::new();
+        if std::env::var_os("VMUX_LOCK_BORROWER_TEST").is_some() {
+            let root =
+                std::path::PathBuf::from(std::env::var_os("VMUX_BUILD_STORAGE_ROOT").unwrap());
+            let target =
+                std::path::PathBuf::from(std::env::var_os("VMUX_TARGET_LOCK_TARGET").unwrap());
+            let storage = Storage::new(
+                root.clone(),
+                target.clone(),
+                policy::Policy::environment().unwrap(),
+            )
+            .unwrap();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(fixture.operation)
+                .insert((
+                    Checkout {
+                        root,
+                        target,
+                        build_target: None,
+                    },
+                    storage,
+                ));
+            fixture.app.world_mut().spawn((
+                debug::Acquire { inherit: true },
+                OperationState::Pending,
+                ChildOf(fixture.operation),
+                Attempt(1),
+            ));
+            assert_eq!(fixture.result(), 0);
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Lease>(fixture.operation)
+                    .is_none()
+            );
+            return;
+        }
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        let held = TargetLock::acquire(&checkout.root, &checkout.target).unwrap();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::lock_inheritance_uses_the_process_contract_and_rejects_configuration_overrides",
+                "--nocapture",
+            ])
+            .env("VMUX_LOCK_BORROWER_TEST", "1")
+            .env("VMUX_TARGET_LOCK_OWNER_PID", std::process::id().to_string())
+            .env("VMUX_BUILD_STORAGE_ROOT", &checkout.root)
+            .env("VMUX_TARGET_LOCK_TARGET", &checkout.target)
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_none()
+        );
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set(
+            "VMUX_TARGET_LOCK_OWNER_PID",
+            unsafe { libc::getppid() }.to_string(),
+        );
+        settings
+            .0
+            .set("VMUX_BUILD_STORAGE_ROOT", checkout.root.as_os_str());
+        settings
+            .0
+            .set("VMUX_TARGET_LOCK_TARGET", checkout.target.as_os_str());
+        fixture.app.world_mut().spawn((
+            debug::Acquire { inherit: true },
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        for _ in 0..4 {
+            fixture.app.update();
+        }
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<CliResult>(fixture.operation)
+                .is_none()
+        );
+        drop(held);
+        assert_eq!(fixture.result(), 0);
     }
 }

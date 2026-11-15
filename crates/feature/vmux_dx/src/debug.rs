@@ -11,10 +11,11 @@ use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake
 use vmux_ecs::{Operation, OperationState, Order};
 
 use crate::debug_io::{
-    CaptureOutput, CleanupFlight, CleanupQueue, CopyFile, CreateDirectory, CreateTemporary,
-    DirectoryEntries, Done, FileBytes, FileDigest, Flight, HashFile, InspectPath, IoJob, IoValue,
-    LinkPath, PathMetadata, PendingValue, ProcessValue, ReadDirectory, ReadFile, ReapRequest,
-    RemoveFile, RenamePath, RunProcess, SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
+    AcquireTarget, AcquiredLock, CaptureOutput, CleanupFlight, CleanupQueue, CopyFile,
+    CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes, FileDigest, Flight,
+    HashFile, InspectPath, IoJob, IoValue, LinkPath, PathMetadata, PendingValue, ProcessValue,
+    ReadDirectory, ReadFile, ReapRequest, RemoveFile, RenamePath, RunProcess, SpawnProcess, Task,
+    TemporaryValue, ToolOutput, WriteFile,
 };
 use crate::execution::Failure;
 use crate::repository::Checkout;
@@ -27,6 +28,7 @@ pub struct Plugin;
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CleanupQueue>()
+            .init_resource::<Inheritance>()
             .add_plugins((
                 IoPlugin::<CaptureOutput>::default(),
                 IoPlugin::<SpawnProcess>::default(),
@@ -42,6 +44,7 @@ impl bevy_app::Plugin for Plugin {
                 IoPlugin::<WriteFile>::default(),
                 IoPlugin::<RenamePath>::default(),
                 IoPlugin::<CreateTemporary>::default(),
+                IoPlugin::<AcquireTarget>::default(),
             ))
             .configure_sets(
                 Update,
@@ -57,6 +60,7 @@ impl bevy_app::Plugin for Plugin {
                     .after(crate::Stage::Execute),
             )
             .add_observer(accept::<Capacity>)
+            .add_observer(accept::<Acquire>)
             .add_observer(accept::<IdentityRequest>)
             .add_observer(accept::<Clear>)
             .add_observer(accept::<Sign>)
@@ -74,6 +78,7 @@ impl bevy_app::Plugin for Plugin {
                 (
                     initialize,
                     cancel,
+                    acquire,
                     (
                         identity_start,
                         identity_keychain,
@@ -199,6 +204,53 @@ pub(crate) struct Request;
 pub struct Requested<T: Component> {
     pub entity: Entity,
     pub request: T,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, AcquirePhase)]
+pub struct Acquire {
+    pub inherit: bool,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum AcquirePhase {
+    #[default]
+    Start,
+    Wait,
+    Done,
+}
+
+#[derive(Resource)]
+struct Inheritance {
+    owner: Option<u32>,
+    root: Option<OsString>,
+    target: Option<OsString>,
+}
+
+impl Default for Inheritance {
+    fn default() -> Self {
+        let owner = match std::env::var("VMUX_TARGET_LOCK_OWNER_PID") {
+            Ok(value) => value.parse().ok(),
+            Err(_) => None,
+        };
+        Self {
+            owner,
+            root: std::env::var_os("VMUX_BUILD_STORAGE_ROOT"),
+            target: std::env::var_os("VMUX_TARGET_LOCK_TARGET"),
+        }
+    }
+}
+
+impl Inheritance {
+    fn matches(&self, checkout: &Checkout) -> bool {
+        let Some(owner) = self.owner else {
+            return false;
+        };
+        owner != std::process::id()
+            && self.root.as_deref() == Some(checkout.root.as_os_str())
+            && self.target.as_deref() == Some(checkout.target.as_os_str())
+            && Signals::alive(owner)
+    }
 }
 
 #[derive(Component, Clone)]
@@ -1006,6 +1058,74 @@ fn initialize(requests: Initializing, mut commands: Commands) {
         commands
             .entity(entity)
             .insert((Root(captured.root), Owner(captured.root), Sequence(0)));
+    }
+}
+
+type Acquisitions<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Acquire,
+        &'static Checkout,
+        &'static mut AcquirePhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+fn acquire(
+    mut requests: Acquisitions,
+    inheritance: Res<Inheritance>,
+    facts: Facts,
+    locks: Query<(Entity, &AcquiredLock, &ChildOf)>,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, mut phase, mut sequence) in &mut requests {
+        let previous = *phase;
+        match *phase {
+            AcquirePhase::Start => {
+                if request.inherit && inheritance.matches(checkout) {
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
+                    continue;
+                }
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut None,
+                    AcquireTarget {
+                        root: checkout.root.clone(),
+                        target: checkout.target.clone(),
+                    },
+                    (),
+                    false,
+                );
+                *phase = AcquirePhase::Wait;
+            }
+            AcquirePhase::Wait => {
+                if facts.pending(entity) {
+                    continue;
+                }
+                for (receipt, lock, parent) in &locks {
+                    if parent.parent() != entity {
+                        continue;
+                    }
+                    io.commands
+                        .entity(entity)
+                        .insert(crate::Lease(lock.0.clone()));
+                    io.commands.entity(receipt).remove::<AcquiredLock>();
+                    *phase = AcquirePhase::Done;
+                    break;
+                }
+            }
+            AcquirePhase::Done => {
+                io.commands.entity(entity).insert(Complete(Outcome::Done));
+            }
+        }
+        if *phase != previous {
+            wake.0.wake_by_ref();
+        }
     }
 }
 
@@ -4731,6 +4851,7 @@ type Pending<'w, 's> = Query<
         Without<Admitted>,
         Or<(
             With<CaptureOutput>,
+            With<AcquireTarget>,
             With<RunProcess>,
             With<SpawnProcess>,
             With<ReadFile>,
@@ -4881,7 +5002,7 @@ fn release(
         if requests.contains(parent.parent()) && !dropped.contains(parent.parent()) {
             commands
                 .entity(entity)
-                .remove::<(TemporaryValue, ProcessValue, PendingValue)>();
+                .remove::<(TemporaryValue, ProcessValue, PendingValue, AcquiredLock)>();
         }
     }
     for entity in &requests {

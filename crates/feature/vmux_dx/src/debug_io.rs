@@ -347,6 +347,37 @@ impl IoValue for PendingValue {}
 impl IoValue for Done {}
 
 #[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct AcquiredLock(pub Arc<TargetLock>);
+
+impl IoValue for AcquiredLock {}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct AcquireTarget {
+    pub root: PathBuf,
+    pub target: PathBuf,
+}
+
+impl IoJob for AcquireTarget {
+    type Data = AcquiredLock;
+}
+
+impl Job for AcquireTarget {
+    type Output = Result<AcquiredLock, Failure>;
+
+    fn run(self) -> Self::Output {
+        let lease = TargetLock::acquire(&self.root, &self.target).map_err(Failure::from_error)?;
+        Ok(AcquiredLock(Arc::new(lease)))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
 #[component(immutable)]
 #[require(crate::debug::Io)]
 pub struct CaptureOutput {
@@ -912,6 +943,48 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn canceling_a_running_lock_job_drains_while_the_native_holder_remains_locked() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let target = root.join("target");
+        let held = TargetLock::acquire(&root, &target).unwrap();
+        assert!(TargetLock::try_acquire(&root, &target).unwrap().is_none());
+        let pool = vmux_ecs::blocking::BlockingPool::new("lock-cancellation", 1, 1);
+        let (job, flight) = Task::new(
+            AcquireTarget {
+                root: root.clone(),
+                target: target.clone(),
+            },
+            None,
+            Vec::new(),
+            std::task::Waker::noop().clone(),
+        );
+        let (started, ready) = mpsc::channel();
+        let running = pool
+            .try_spawn(None, move || {
+                started.send(()).unwrap();
+                job.run()
+            })
+            .unwrap();
+        ready
+            .recv_timeout(Duration::from_secs(1))
+            .expect("lock worker did not start");
+        drop(running);
+        let (completed, drained) = mpsc::channel();
+        let sentinel = pool
+            .try_spawn(None, move || completed.send(()).unwrap())
+            .unwrap();
+        drained
+            .recv_timeout(Duration::from_secs(1))
+            .expect("canceled lock worker still blocks its lane");
+        assert!(!flight.pending());
+        assert!(TargetLock::try_acquire(&root, &target).unwrap().is_none());
+        drop(held);
+        assert!(TargetLock::try_acquire(&root, &target).unwrap().is_some());
+        drop(sentinel);
+    }
 
     #[test]
     fn staging_rejects_existing_files_and_links_without_changing_them() {

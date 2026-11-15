@@ -16,7 +16,6 @@ use crate::target_lock::TargetLock;
 #[derive(Component, Clone)]
 #[require(crate::Step)]
 pub enum Work {
-    Acquire,
     Check,
     Seed,
     Preflight,
@@ -46,7 +45,6 @@ pub enum Work {
     Internal(String, Vec<OsString>),
     CliCompile,
     CliPackage(bool),
-    WorkspaceAcquire,
 }
 
 impl Work {
@@ -56,7 +54,6 @@ impl Work {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Acquire | Self::WorkspaceAcquire => "Acquire target lock",
             Self::Check | Self::Preflight => "Check build storage",
             Self::Seed => "Seed target cache",
             Self::Finish(_) => "Finish build storage",
@@ -98,29 +95,6 @@ impl Work {
         let _lease = lease;
         let mut native = Native::new(checkout, environment.clone());
         match self {
-            Self::WorkspaceAcquire => {
-                let lease = Arc::new(TargetLock::acquire(&checkout.root, &checkout.target)?);
-                return Ok(Outcome::Lease(lease));
-            }
-            Self::Acquire => {
-                let owner = std::env::var("VMUX_TARGET_LOCK_OWNER_PID")
-                    .ok()
-                    .and_then(|value| value.parse::<u32>().ok());
-                let inherited = std::env::var_os("VMUX_TARGET_LOCK_TARGET").as_deref()
-                    == Some(checkout.target.as_os_str())
-                    && std::env::var_os("VMUX_BUILD_STORAGE_ROOT").as_deref()
-                        == Some(checkout.root.as_os_str())
-                    && owner.is_some_and(|owner| {
-                        owner != std::process::id() && crate::signals::Signals::alive(owner)
-                    });
-                if inherited {
-                    return Ok(Outcome::Done);
-                }
-                return Ok(Outcome::Lease(Arc::new(TargetLock::acquire(
-                    &checkout.root,
-                    &checkout.target,
-                )?)));
-            }
             Self::Check => storage.check()?,
             Self::Seed => native.seed()?,
             Self::Preflight => storage.preflight()?,
@@ -203,7 +177,6 @@ impl Work {
 pub enum Outcome {
     Executable(crate::workspace::Executable),
     Done,
-    Lease(Arc<TargetLock>),
     Identity(String),
     Artifacts(Vec<std::path::PathBuf>),
     ToolPath(OsString, OsString),
