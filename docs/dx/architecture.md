@@ -56,6 +56,8 @@ The desktop displays pages and handles native integration. The background servic
 
 Filesystem, network, process, and native API calls sit behind adapters. Handlers decide what should happen; an adapter performs the outside operation and returns its result. Before applying a delayed result, the handler checks that it still belongs to the current task or page.
 
+Development commands use the same model. Signing, bundle preparation, artifact checks, and provider execution advance through scoped systems. Each operation owns its accepted inputs, job order, and IO lifetime in Bevy. Canceling or retiring work waits for process and file cleanup before the CLI returns. Results from a replaced input, attempt, or owner are discarded, and independent operations can continue after that cleanup.
+
 The repository's policy checks test these relationships. Ownership is inferred from the code; local `ecs-policy.ron` files carry migration debt and the exceptions the checker cannot infer. Read the feature's types, handlers, and tests first, and use a policy file when a check points to one.
 
 Give independent operations separate typed requests and phases, and keep handlers focused on one stage. This makes ownership and failure paths visible when a feature grows. An adapter's exception describes its actual outside interface; it does not move the feature's decisions out of Bevy.
