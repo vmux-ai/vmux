@@ -70,8 +70,30 @@ impl bevy_app::Plugin for Plugin {
         .add_systems(
             Update,
             (
-                initialize, cancel, identity, capacity, clear, sign, bundle, publish, run, stop,
-                signature, compile, snapshot, invoke, wake,
+                initialize,
+                cancel,
+                (
+                    identity_start,
+                    identity_keychain,
+                    identity_lookup,
+                    create_certificate,
+                    import_identity,
+                    trust_identity,
+                    identity_confirm,
+                )
+                    .chain(),
+                capacity,
+                clear,
+                sign,
+                bundle,
+                publish,
+                run,
+                stop,
+                signature,
+                compile,
+                snapshot,
+                invoke,
+                wake,
             )
                 .chain()
                 .in_set(Stage::Decide),
@@ -148,6 +170,8 @@ enum IdentityPhase {
     Keychain,
     Lookup,
     Provision,
+    Export,
+    Trust,
     Confirm,
 }
 
@@ -874,316 +898,438 @@ fn cancel(
     }
 }
 
-fn identity(
-    mut requests: IdentityRequests,
-    facts: Facts,
-    identities: Query<&Identity>,
-    keychains: Query<&Keychain>,
-    mut io: IoWriter,
-) {
+fn identity_start(mut requests: IdentityRequests, facts: Facts, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if *phase != IdentityPhase::Start {
+            continue;
+        }
+
         let IdentityRequest { print } = request;
         if facts.pending(entity) {
             continue;
         }
         let environment = &settings.0;
         let mut previous = None;
-        match *phase {
-            IdentityPhase::Start => {
-                if environment.present("APPLE_SIGNING_IDENTITY") || !cfg!(target_os = "macos") {
-                    let identity = match environment.get("APPLE_SIGNING_IDENTITY") {
-                        Some(value) => match value.to_str() {
-                            Some(value) => value.to_owned(),
-                            None => {
-                                io.commands
-                                    .entity(entity)
-                                    .insert(Failed(Failure::message("Invalid signing identity")));
-                                continue;
-                            }
-                        },
-                        None => String::new(),
-                    };
-                    if *print {
-                        println!("{identity}");
-                    }
-                    io.commands
-                        .entity(entity)
-                        .insert(Complete(Outcome::Identity(identity)));
-                    continue;
-                }
-                let identity = environment
-                    .get("VMUX_LOCAL_SIGNING_IDENTITY")
-                    .unwrap_or(OsStr::new("Vmux Dev"));
-                let Some(identity) = identity.to_str() else {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message("Invalid signing identity")));
-                    continue;
-                };
-                if identity.contains(['\r', '\n']) {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Signing identity must be a single line",
-                    )));
-                    continue;
-                }
-                io.commands.entity(entity).insert(Identity(identity.into()));
-                if let Some(keychain) = environment.get("VMUX_LOCAL_CODESIGN_KEYCHAIN") {
-                    io.commands
-                        .entity(entity)
-                        .insert(Keychain(keychain.to_owned()));
-                } else {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            environment,
-                            &checkout.root,
-                            "security".into(),
-                            ["default-keychain", "-d", "user"]
-                                .map(OsString::from)
-                                .into(),
-                        ),
-                        Tag::Keychain,
-                        false,
-                    );
-                }
-                *phase = IdentityPhase::Keychain;
-            }
-            IdentityPhase::Keychain => {
-                let keychain = match keychains.get(entity) {
-                    Ok(keychain) => keychain.0.clone(),
-                    Err(_) => {
-                        let Some(value) = facts.text(entity, Tag::Keychain) else {
-                            continue;
-                        };
-                        let keychain = OsString::from(value.trim().trim_matches('"'));
+
+        if environment.present("APPLE_SIGNING_IDENTITY") || !cfg!(target_os = "macos") {
+            let identity = match environment.get("APPLE_SIGNING_IDENTITY") {
+                Some(value) => match value.to_str() {
+                    Some(value) => value.to_owned(),
+                    None => {
                         io.commands
                             .entity(entity)
-                            .insert(Keychain(keychain.clone()));
-                        keychain
+                            .insert(Failed(Failure::message("Invalid signing identity")));
+                        continue;
                     }
-                };
-                if keychain.is_empty() {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message("Default user keychain not found")));
-                    continue;
-                }
-                let mut arguments = ["find-identity", "-v", "-p", "codesigning"]
-                    .map(OsString::from)
-                    .to_vec();
-                arguments.push(keychain);
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-                    Tag::Identities,
-                    false,
-                );
-                *phase = IdentityPhase::Lookup;
+                },
+                None => String::new(),
+            };
+            if *print {
+                println!("{identity}");
             }
-            IdentityPhase::Lookup => {
-                let identity = identities.get(entity).unwrap();
-                let Some(found) = facts.text(entity, Tag::Identities) else {
+            io.commands
+                .entity(entity)
+                .insert(Complete(Outcome::Identity(identity)));
+            continue;
+        }
+        let identity = environment
+            .get("VMUX_LOCAL_SIGNING_IDENTITY")
+            .unwrap_or(OsStr::new("Vmux Dev"));
+        let Some(identity) = identity.to_str() else {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Invalid signing identity")));
+            continue;
+        };
+        if identity.contains(['\r', '\n']) {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "Signing identity must be a single line",
+            )));
+            continue;
+        }
+        io.commands.entity(entity).insert(Identity(identity.into()));
+        if let Some(keychain) = environment.get("VMUX_LOCAL_CODESIGN_KEYCHAIN") {
+            io.commands
+                .entity(entity)
+                .insert(Keychain(keychain.to_owned()));
+        } else {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    environment,
+                    &checkout.root,
+                    "security".into(),
+                    ["default-keychain", "-d", "user"]
+                        .map(OsString::from)
+                        .into(),
+                ),
+                Tag::Keychain,
+                false,
+            );
+        }
+        *phase = IdentityPhase::Keychain;
+    }
+}
+
+fn identity_keychain(
+    mut requests: IdentityRequests,
+    facts: Facts,
+    keychains: Query<&Keychain>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if *phase != IdentityPhase::Keychain {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let environment = &settings.0;
+        let mut previous = None;
+
+        let keychain = match keychains.get(entity) {
+            Ok(keychain) => keychain.0.clone(),
+            Err(_) => {
+                let Some(value) = facts.text(entity, Tag::Keychain) else {
                     continue;
                 };
-                if found.contains(&format!("\"{}\"", identity.0)) {
-                    if *print {
-                        println!("{}", identity.0);
-                    }
-                    io.commands
-                        .entity(entity)
-                        .insert(Complete(Outcome::Identity(identity.0.clone())));
-                    continue;
-                }
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CreateTemporary,
-                    Tag::Temporary,
-                    false,
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "uuidgen".into(), Vec::new()),
-                    Tag::Password,
-                    false,
-                );
-                *phase = IdentityPhase::Provision;
-            }
-            IdentityPhase::Provision => {
-                let identity = &identities.get(entity).unwrap().0;
-                let keychain = &keychains.get(entity).unwrap().0;
-                let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
-                    continue;
-                };
-                let Some(password) = facts.text(entity, Tag::Password) else {
-                    continue;
-                };
-                let password = password.trim();
-                let config = temporary.path().join("openssl.cnf");
-                let key = temporary.path().join("key.pem");
-                let cert = temporary.path().join("cert.pem");
-                let p12 = temporary.path().join("identity.p12");
-                let text = format!(
-                    "[req]\ndistinguished_name=req_distinguished_name\nx509_extensions=v3_codesign\nprompt=no\n[req_distinguished_name]\nCN={identity}\n[v3_codesign]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n"
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    WriteFile(config.clone(), text.into_bytes()),
-                    Tag::Config,
-                    false,
-                );
-                let mut arguments = [
-                    "req", "-new", "-newkey", "rsa:2048", "-nodes", "-x509", "-days", "3650",
-                    "-sha256", "-config",
-                ]
-                .map(OsString::from)
-                .to_vec();
-                arguments.extend([
-                    config.into_os_string(),
-                    "-keyout".into(),
-                    key.clone().into_os_string(),
-                    "-out".into(),
-                    cert.clone().into_os_string(),
-                ]);
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
-                    Tag::None,
-                    false,
-                );
-                let arguments = vec![
-                    "pkcs12".into(),
-                    "-export".into(),
-                    "-out".into(),
-                    p12.clone().into_os_string(),
-                    "-inkey".into(),
-                    key.into_os_string(),
-                    "-in".into(),
-                    cert.clone().into_os_string(),
-                    "-passout".into(),
-                    format!("pass:{password}").into(),
-                    "-keypbe".into(),
-                    "PBE-SHA1-3DES".into(),
-                    "-certpbe".into(),
-                    "PBE-SHA1-3DES".into(),
-                    "-macalg".into(),
-                    "sha1".into(),
-                ];
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
-                    Tag::None,
-                    false,
-                );
-                let arguments = vec![
-                    "import".into(),
-                    p12.into_os_string(),
-                    "-f".into(),
-                    "pkcs12".into(),
-                    "-k".into(),
-                    keychain.clone(),
-                    "-P".into(),
-                    password.into(),
-                    "-T".into(),
-                    "/usr/bin/codesign".into(),
-                ];
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-                    Tag::None,
-                    false,
-                );
-                let arguments = vec![
-                    "add-trusted-cert".into(),
-                    "-r".into(),
-                    "trustRoot".into(),
-                    "-p".into(),
-                    "codeSign".into(),
-                    "-k".into(),
-                    keychain.clone(),
-                    cert.into_os_string(),
-                ];
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-                    Tag::None,
-                    false,
-                );
-                let arguments = vec![
-                    "set-key-partition-list".into(),
-                    "-S".into(),
-                    "apple-tool:,apple:,codesign:".into(),
-                    "-s".into(),
-                    "-l".into(),
-                    identity.into(),
-                    keychain.clone(),
-                ];
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-                    Tag::Partition,
-                    true,
-                );
-                let arguments = vec![
-                    "find-identity".into(),
-                    "-v".into(),
-                    "-p".into(),
-                    "codesigning".into(),
-                    keychain.clone(),
-                ];
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-                    Tag::Identities,
-                    false,
-                );
-                *phase = IdentityPhase::Confirm;
-            }
-            IdentityPhase::Confirm => {
-                let identity = identities.get(entity).unwrap();
-                let Some(found) = facts.text(entity, Tag::Identities) else {
-                    continue;
-                };
-                if !found.contains(&format!("\"{}\"", identity.0)) {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Created identity is not valid for codesigning",
-                    )));
-                    continue;
-                }
-                if let Some(ToolOutput(output)) = facts.get(entity, Tag::Partition)
-                    && !output.status.success()
-                {
-                    eprintln!("codesign may request keychain access");
-                }
-                if *print {
-                    println!("{}", identity.0);
-                }
+                let keychain = OsString::from(value.trim().trim_matches('"'));
                 io.commands
                     .entity(entity)
-                    .insert(Complete(Outcome::Identity(identity.0.clone())));
+                    .insert(Keychain(keychain.clone()));
+                keychain
             }
+        };
+        if keychain.is_empty() {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Default user keychain not found")));
+            continue;
         }
+        let mut arguments = ["find-identity", "-v", "-p", "codesigning"]
+            .map(OsString::from)
+            .to_vec();
+        arguments.push(keychain);
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
+            Tag::Identities,
+            false,
+        );
+        *phase = IdentityPhase::Lookup;
+    }
+}
+
+fn identity_lookup(
+    mut requests: IdentityRequests,
+    facts: Facts,
+    identities: Query<&Identity>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if *phase != IdentityPhase::Lookup {
+            continue;
+        }
+
+        let IdentityRequest { print } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let environment = &settings.0;
+        let mut previous = None;
+
+        let identity = identities.get(entity).unwrap();
+        let Some(found) = facts.text(entity, Tag::Identities) else {
+            continue;
+        };
+        if found.contains(&format!("\"{}\"", identity.0)) {
+            if *print {
+                println!("{}", identity.0);
+            }
+            io.commands
+                .entity(entity)
+                .insert(Complete(Outcome::Identity(identity.0.clone())));
+            continue;
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CreateTemporary,
+            Tag::Temporary,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "uuidgen".into(), Vec::new()),
+            Tag::Password,
+            false,
+        );
+        *phase = IdentityPhase::Provision;
+    }
+}
+
+fn create_certificate(
+    mut requests: IdentityRequests,
+    facts: Facts,
+    identities: Query<&Identity>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if *phase != IdentityPhase::Provision {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let environment = &settings.0;
+        let mut previous = None;
+
+        let identity = &identities.get(entity).unwrap().0;
+        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+            continue;
+        };
+        let config = temporary.path().join("openssl.cnf");
+        let key = temporary.path().join("key.pem");
+        let cert = temporary.path().join("cert.pem");
+        let text = format!(
+            "[req]\ndistinguished_name=req_distinguished_name\nx509_extensions=v3_codesign\nprompt=no\n[req_distinguished_name]\nCN={identity}\n[v3_codesign]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n"
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            WriteFile(config.clone(), text.into_bytes()),
+            Tag::Config,
+            false,
+        );
+        let mut arguments = [
+            "req", "-new", "-newkey", "rsa:2048", "-nodes", "-x509", "-days", "3650", "-sha256",
+            "-config",
+        ]
+        .map(OsString::from)
+        .to_vec();
+        arguments.extend([
+            config.into_os_string(),
+            "-keyout".into(),
+            key.clone().into_os_string(),
+            "-out".into(),
+            cert.clone().into_os_string(),
+        ]);
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
+            Tag::None,
+            false,
+        );
+        *phase = IdentityPhase::Export;
+    }
+}
+
+fn import_identity(
+    mut requests: IdentityRequests,
+    facts: Facts,
+    keychains: Query<&Keychain>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if *phase != IdentityPhase::Export {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let environment = &settings.0;
+        let mut previous = None;
+
+        let keychain = &keychains.get(entity).unwrap().0;
+        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+            continue;
+        };
+        let Some(password) = facts.text(entity, Tag::Password) else {
+            continue;
+        };
+        let password = password.trim();
+        let key = temporary.path().join("key.pem");
+        let cert = temporary.path().join("cert.pem");
+        let p12 = temporary.path().join("identity.p12");
+        let arguments = vec![
+            "pkcs12".into(),
+            "-export".into(),
+            "-out".into(),
+            p12.clone().into_os_string(),
+            "-inkey".into(),
+            key.into_os_string(),
+            "-in".into(),
+            cert.clone().into_os_string(),
+            "-passout".into(),
+            format!("pass:{password}").into(),
+            "-keypbe".into(),
+            "PBE-SHA1-3DES".into(),
+            "-certpbe".into(),
+            "PBE-SHA1-3DES".into(),
+            "-macalg".into(),
+            "sha1".into(),
+        ];
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
+            Tag::None,
+            false,
+        );
+        let arguments = vec![
+            "import".into(),
+            p12.into_os_string(),
+            "-f".into(),
+            "pkcs12".into(),
+            "-k".into(),
+            keychain.clone(),
+            "-P".into(),
+            password.into(),
+            "-T".into(),
+            "/usr/bin/codesign".into(),
+        ];
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
+            Tag::None,
+            false,
+        );
+        *phase = IdentityPhase::Trust;
+    }
+}
+
+fn trust_identity(
+    mut requests: IdentityRequests,
+    facts: Facts,
+    identities: Query<&Identity>,
+    keychains: Query<&Keychain>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if *phase != IdentityPhase::Trust {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let environment = &settings.0;
+        let mut previous = None;
+
+        let identity = &identities.get(entity).unwrap().0;
+        let keychain = &keychains.get(entity).unwrap().0;
+        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+            continue;
+        };
+        let cert = temporary.path().join("cert.pem");
+        let arguments = vec![
+            "add-trusted-cert".into(),
+            "-r".into(),
+            "trustRoot".into(),
+            "-p".into(),
+            "codeSign".into(),
+            "-k".into(),
+            keychain.clone(),
+            cert.into_os_string(),
+        ];
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
+            Tag::None,
+            false,
+        );
+        let arguments = vec![
+            "set-key-partition-list".into(),
+            "-S".into(),
+            "apple-tool:,apple:,codesign:".into(),
+            "-s".into(),
+            "-l".into(),
+            identity.into(),
+            keychain.clone(),
+        ];
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
+            Tag::Partition,
+            true,
+        );
+        let arguments = vec![
+            "find-identity".into(),
+            "-v".into(),
+            "-p".into(),
+            "codesigning".into(),
+            keychain.clone(),
+        ];
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
+            Tag::Identities,
+            false,
+        );
+        *phase = IdentityPhase::Confirm;
+    }
+}
+
+fn identity_confirm(
+    mut requests: IdentityRequests,
+    facts: Facts,
+    identities: Query<&Identity>,
+    mut io: IoWriter,
+) {
+    for (entity, request, _checkout, settings, phase, _sequence) in &mut requests {
+        if *phase != IdentityPhase::Confirm {
+            continue;
+        }
+
+        let IdentityRequest { print } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let _environment = &settings.0;
+
+        let identity = identities.get(entity).unwrap();
+        let Some(found) = facts.text(entity, Tag::Identities) else {
+            continue;
+        };
+        if !found.contains(&format!("\"{}\"", identity.0)) {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "Created identity is not valid for codesigning",
+            )));
+            continue;
+        }
+        if let Some(ToolOutput(output)) = facts.get(entity, Tag::Partition)
+            && !output.status.success()
+        {
+            eprintln!("codesign may request keychain access");
+        }
+        if *print {
+            println!("{}", identity.0);
+        }
+        io.commands
+            .entity(entity)
+            .insert(Complete(Outcome::Identity(identity.0.clone())));
     }
 }
 
