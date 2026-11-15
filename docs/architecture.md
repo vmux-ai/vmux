@@ -2576,7 +2576,12 @@ and daemon, including the lean desktop composition and generated UI asset valida
 The required `Build macOS` gate requires full packaging and the startup smoke test for changes
 to native adapters, application composition,
 dependency manifests, lockfiles, toolchains, build scripts, and packaging. Other feature PRs
-require the macOS checks without a release build or DMG. Main pushes and manual CI runs retain
+require the macOS checks without a release build or DMG. On PRs and feature-branch pushes, iOS-only DX adapters and DX CLI fixture edits
+run macOS DX/CLI lifecycle and resource/signing fixtures instead of desktop checks or packaging.
+Their native fixture result remains required by `Build macOS`; shared build metadata, dependency
+manifests and actual desktop packaging inputs still retain full package/startup validation.
+Other CLI integration tests and unknown test paths keep the existing desktop validation.
+Main pushes and manual CI runs retain
 full packaging and startup validation; nightly and release workflows retain signing and
 notarization. Feature-branch pushes start the same affected checks before a PR exists, with the
 same packaging filter and fast non-release app bundle. Each runner checks out a temporary merge
@@ -2585,6 +2590,20 @@ its actual base branch, including stacked PRs; otherwise the default branch supp
 PR planning reads that base from the immutable synthetic merge commit and verifies its head parent.
 When the target advanced beyond the event payload, both base commits must belong to the target
 branch ancestry before the exact merged tree can supply reusable CI evidence.
+
+CI produces the minimal development CLI once per Linux/macOS runner architecture, from the
+verified checkout. Consumers install the same-run artifact only after matching repository,
+run, Git tree, pinned Rust toolchain, OS/architecture, features, compile mode and executable
+checksum. The macOS producer runs any selected DX/CLI fixtures with its compiler cache before
+publishing the artifact, avoiding a second tooling runner wait. Consumers download only the executable.
+An unavailable or mismatched producer fails its dependent validation. Other workflows retain
+their existing local CLI bootstrap.
+
+CI-only debug compilation uses optimization level 1 and sixteen codegen units, overriding
+shipping-oriented dependency settings. Existing flags and encoded-flag precedence are preserved.
+Local and release profiles remain unchanged; macOS package builds retain their existing fast-PR
+and release settings. Compilation and test-runtime durations are measured separately after
+changing these settings.
 
 Feature CI parses changed Rust files with `vmux ci-native` and the optional `ci-syntax`
 feature. The development CLI enables this feature; ordinary product builds need not link the syntax
@@ -2627,5 +2646,8 @@ production dependency traversal, preserving affected feature scope and the manda
 gate. A missing policy package or an unknown file still requires the full suite.
 Scope discovery errors fail the test gate rather than skipping tests. Builder
 fixtures and repository source conventions always run. Lean desktop checks and tests run for
-direct desktop changes and full suites. Main code changes, manual CI, and the daily CI schedule
+direct desktop changes and full suites. Lean desktop tests run on a separate Linux runner/cache,
+in parallel with normal Rust tests, and the `Test` gate requires both applicable results.
+The change job uses the same Cargo/Git scope selector before scheduling either test job.
+Main code changes, manual CI, and the daily CI schedule
 run the full suite; the schedule leaves macOS packaging to the nightly workflow.

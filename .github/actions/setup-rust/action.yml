@@ -9,6 +9,14 @@ inputs:
     description: Comma-separated rustup targets
     required: false
     default: ""
+  cli:
+    description: Build the CLI producer or consume this run's verified CLI artifact
+    required: false
+    default: "auto"
+  fast-rust:
+    description: Apply the CI-only Rust compile settings (auto, true or false)
+    required: false
+    default: "auto"
 runs:
   using: composite
   steps:
@@ -31,17 +39,42 @@ runs:
         targets: ${{ inputs.targets }}
 
     - name: Restore development CLI compiler cache
+      if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
       uses: actions/cache@v4
       with:
         path: .build-tools/cargo
-        key: dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ hashFiles('Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
+        key: dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
         restore-keys: |
-          dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-
+          dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
 
     - name: Build development CLI
+      if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
       shell: bash
       run: |
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS -u RUSTFLAGS cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .build-tools/cargo
+        cli_flags=""
+        if [ "${VMUX_CI_FAST_RUST:-}" = "1" ]; then
+          cli_flags="-C opt-level=1 -C codegen-units=16"
+        fi
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS="$cli_flags" cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .build-tools/cargo
         mkdir -p .build-tools/bin
         install -m 0755 .build-tools/cargo/debug/vmux .build-tools/bin/vmux
         echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
+
+    - name: Download this run's development CLI
+      if: inputs.cli != 'build' && env.VMUX_CI_PREBUILT_DX == '1'
+      uses: actions/download-artifact@v7
+      with:
+        name: dx-cli-${{ runner.os }}-${{ runner.arch }}
+        path: .build-tools/prebuilt
+
+    - name: Verify and install the development CLI
+      if: inputs.cli != 'build' && env.VMUX_CI_PREBUILT_DX == '1'
+      shell: bash
+      run: |
+        node scripts/ci-cli.js install .build-tools/prebuilt
+        echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
+
+    - name: Configure CI Rust compilation
+      if: inputs.fast-rust == 'true' || (inputs.fast-rust == 'auto' && env.VMUX_CI_FAST_RUST == '1')
+      shell: bash
+      run: node scripts/ci-cli.js fast-rust
