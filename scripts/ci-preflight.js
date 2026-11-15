@@ -12,7 +12,7 @@ class Preflight {
     this.now = now || Date.now;
   }
 
-  async plan() {
+  async plan({ reuseChecks = true } = {}) {
     const { payload, eventName, repo, sha, ref } = this.context;
     const pull = payload.pull_request;
     const head = pull ? pull.head.sha : sha;
@@ -42,7 +42,7 @@ class Preflight {
     const identity = { head, base, tree, branch, repository: `${repo.owner}/${repo.repo}` };
     const reusable = Boolean(base && !release && this.compatible(head, tree));
     let reuse = '';
-    if (pull && reusable && pull.head.repo?.full_name === identity.repository) {
+    if (reuseChecks && pull && reusable && pull.head.repo?.full_name === identity.repository) {
       reuse = await this.reuse(identity);
     }
     for (const [name, value] of Object.entries({ head, base, tree, feature, release, reusable, reuse, receipt: reusable ? Preflight.artifact(identity) : '' })) {

@@ -17,5 +17,5 @@ compiler fingerprints, and cache paths reject symlink parents. Each cache keeps 
 restore receipt so another target cannot lower the timestamps saved for its artifacts.
 Snapshots from the earlier format are invalidated.
 Action state retains cache inputs and the receipt until successful job teardown, which
-records the source snapshot before cache upload. A main-only macOS check warms the profile
-used by ordinary PRs without changing required checks.
+records the source snapshot before cache upload. Retained main jobs warm their compiler
+profiles; ordinary PRs do not run native builds or need a separate macOS check profile.

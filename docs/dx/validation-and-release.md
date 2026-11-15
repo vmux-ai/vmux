@@ -24,7 +24,13 @@ This runs the development-command and CLI tests, formatting, ownership policy, a
 
 fmt checks formatting. Clippy checks Rust diagnostics. The repository's policy tests check Vmux-specific ownership and source rules. If a check fails, read its file/type diagnostic and fix the code or the actual exception; do not change a frozen fingerprint just to pass.
 
-CI runs the affected tests and platform checks. A PR may reuse successful branch results only when its source and base match. Check CI on the latest commit before merging.
+CI validates each PR's captured merge with its target branch once. Feature pushes do not start another CI run. Formatting, Clippy, dependency boundaries, repository policy, and affected Rust tests remain required; compatibility checks run for SDK/framework inputs or affected lean desktop features. Immutable Git dependency checks run on main and scheduled or manual validation.
+
+A job can reuse an earlier successful check in the same PR when its target base, execution scope, tracked inputs and modes, CI definition, and tool settings match. Input claims are published before validation and accepted only with the matching completed successful job attempt. Missing evidence or a newer failed, cancelled, or incomplete job requires fresh validation; lookup errors also fall back to running checks. Fork, release, main, and manual runs do not reuse PR results. Rust fingerprints conservatively include workspace and dependency sources; this skips unaffected jobs, not individual crates or tests.
+
+The full ownership audit runs under Lint. Ordinary Rust tests exclude that same expensive audit while retaining the other tests; the required Lint status still gates it.
+
+Ordinary PRs do not build macOS/iOS apps or create signed packages. Main and manual validation build affected native products, and release PRs retain macOS release-artifact preparation. The required `Build macOS` status keeps its existing GitHub name and verifies this distribution policy; it does not claim that an ordinary PR compiled on macOS. Platform failures can therefore be detected after an ordinary PR merges. Check CI on the latest commit before merging, and request manual full validation when a change needs native packaging assurance.
 
 ## Check a complete bundle
 
