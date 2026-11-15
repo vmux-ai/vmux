@@ -460,6 +460,7 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
         errors.join("\n")
     );
     policy.prove_legacy(&root.0);
+    policy.shape.prove(&root.0);
 }
 
 #[test]
@@ -2790,6 +2791,8 @@ struct Policy {
     boundaries: Vec<Boundary>,
     values: Vec<ValueOwner>,
     upstream: Vec<Upstream>,
+    #[serde(default)]
+    shape: ShapePolicy,
 }
 
 impl Policy {
@@ -3011,7 +3014,22 @@ impl Policy {
                 ));
             }
         }
+        errors.extend(self.shape.audit(inventory, self));
         errors
+    }
+
+    fn fetched(root: &Path) -> Self {
+        let output = Command::new("git")
+            .args(["show", "origin/main:ecs-policy.ron"])
+            .current_dir(root)
+            .output()
+            .expect("fetched main policy must be available");
+        assert!(
+            output.status.success(),
+            "fetch origin main before policy validation"
+        );
+        ron::from_str(&String::from_utf8(output.stdout).expect("UTF-8 main policy"))
+            .expect("valid fetched main policy")
     }
 
     fn prove_legacy(&self, root: &Path) {
@@ -3049,6 +3067,934 @@ impl Policy {
                 legacy.key
             );
         }
+    }
+}
+
+#[test]
+fn domain_signal_enums_require_explicit_external_interface_purposes() {
+    let inventory = Inventory::fixture(
+        "#[derive(Message)] enum Commands { Build(String), Run(String) } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Commands>(); } }",
+    );
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(errors.iter().any(|error| error.contains("enum:Commands")));
+}
+
+#[test]
+fn canonical_phase_purposes_require_real_owners_and_cannot_cover_signal_enums() {
+    for signal in [false, true] {
+        let derive = if signal { "Message" } else { "Clone" };
+        let source = format!(
+            "#[derive({derive})] enum Phase {{ Pending, Complete }} #[derive(Component)] struct State {{ phase: Phase }} fn read(states: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let key = inventory.key("enum:Phase");
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::Phase,
+            owner: inventory.key("struct:State"),
+            reason: "One state owner's pending/completed lifecycle".into(),
+        };
+        let policy = Policy {
+            values: vec![ValueOwner {
+                key: key.clone(),
+                owner: inventory.key("struct:State"),
+                lifetime: "One canonical state lifecycle".into(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            purpose.valid(&inventory.entries[&key], &inventory, &policy),
+            !signal
+        );
+        let mut bogus = purpose;
+        bogus.owner = key.clone();
+        assert!(!bogus.valid(&inventory.entries[&key], &inventory, &policy));
+    }
+}
+
+#[test]
+fn scalar_vocabularies_are_owned_values_rather_than_command_payloads() {
+    let inventory = Inventory::fixture(
+        "enum Tone { Plain, Strong, Quiet } #[derive(Component)] struct State { tone: Tone } fn read(states: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    let key = inventory.key("enum:Tone");
+    let purpose = EnumPurpose {
+        key: key.clone(),
+        fingerprint: inventory.entries[&key].fingerprint.clone(),
+        role: EnumRole::Scalar,
+        owner: inventory.key("struct:State"),
+        reason: "One canonical state's display tone".into(),
+    };
+    let policy = Policy {
+        values: vec![ValueOwner {
+            key: key.clone(),
+            owner: inventory.key("struct:State"),
+            lifetime: "One canonical display tone".into(),
+        }],
+        ..Default::default()
+    };
+    assert!(purpose.valid(&inventory.entries[&key], &inventory, &policy));
+    let changed = Inventory::fixture(
+        "enum Tone { Build(String), Run(String) } #[derive(Component)] struct State { tone: Tone } fn read(states: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    assert!(!purpose.valid(&changed.entries[&key], &changed, &Policy::default()));
+}
+
+#[test]
+fn body_budget_counts_code_tokens_and_excludes_comments_and_test_only_blocks() {
+    let source = "fn read() {\n let value = 1;\n // ignored comment\n\n #[cfg(test)] {\n  let a = 2;\n  let b = 3;\n }\n let other = 4;\n}\n";
+    let inventory = Inventory::fixture(source);
+    let entry = &inventory.entries[&inventory.key("fn:read")];
+    assert_eq!(entry.bodies[0].lines, 4);
+    let changed = Inventory::fixture(
+        "fn read() {\n let value = 1;\n /* many\n comment\n lines */\n let other = 4;\n}\n",
+    );
+    assert_eq!(changed.entries[&changed.key("fn:read")].bodies[0].lines, 4);
+}
+
+#[test]
+fn body_budget_rejects_oversized_registered_systems_and_associated_dispatchers() {
+    let statements = " let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "fn read(state: Query<&State>) {{\n{statements}}}\n#[derive(Component)] struct State; struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }} impl State {{ fn dispatch(&self) {{\n{statements}}} }}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(errors.iter().any(|error| error.contains("fn:read: body")));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("::dispatch: body"))
+    );
+}
+
+#[test]
+fn plugin_and_renderer_names_do_not_bypass_body_budgets_without_framework_bindings() {
+    let statements = " let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "trait Plugin {{}} struct Root; impl Plugin for Root {{ fn build(&self) {{\n{statements}}} }} #[component] fn Screen() {{\n{statements}}}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(errors.iter().any(|error| error.contains("::build: body")));
+    assert!(errors.iter().any(|error| error.contains("fn:Screen: body")));
+}
+
+#[test]
+fn shape_debt_is_exact_and_cannot_cover_changed_or_deleted_items() {
+    let source = "enum Commands { Build, Run }";
+    let inventory = Inventory::fixture(source);
+    let key = inventory.key("enum:Commands");
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![ShapeDebt {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            issue: "VMX-253".into(),
+            finding: "AU-13".into(),
+        }],
+        ..Default::default()
+    };
+    assert!(shape.audit(&inventory, &Policy::default()).is_empty());
+    assert!(
+        shape
+            .audit(
+                &Inventory::fixture("enum Commands { Build, Run, Stop }"),
+                &Policy::default()
+            )
+            .iter()
+            .any(|error| error.contains("stale/invalid shape debt"))
+    );
+    assert!(
+        shape
+            .audit(&Inventory::fixture(""), &Policy::default())
+            .iter()
+            .any(|error| error.contains("stale/invalid shape debt"))
+    );
+}
+
+#[test]
+fn shape_debt_fingerprints_are_proven_against_the_fixed_git_snapshot() {
+    let root = Workspace::current();
+    let path = "crates/feature/vmux_dx/src/work.rs";
+    let output = Command::new("git")
+        .args(["show", &format!("{FROZEN_SHAPE_REVISION}:{path}")])
+        .current_dir(&root.0)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "required frozen Git fixture is missing"
+    );
+    let source = String::from_utf8(output.stdout).unwrap();
+    let mut inventory = Inventory::default();
+    inventory.source(path, &source);
+    let key = inventory.key("enum:Work");
+    let mut shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![ShapeDebt {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            issue: "VMX-253".into(),
+            finding: "AU-13".into(),
+        }],
+        ..Default::default()
+    };
+    shape.prove(&root.0);
+    shape.debt[0].fingerprint = "0000000000000000".into();
+    assert!(std::panic::catch_unwind(|| shape.prove(&root.0)).is_err());
+    inventory.source("new.rs", "enum NewCommand { Build, Run }");
+    let key = inventory.key("enum:NewCommand");
+    shape.debt[0].key = key.clone();
+    shape.debt[0].fingerprint = inventory.entries[&key].fingerprint.clone();
+    assert!(std::panic::catch_unwind(|| shape.prove(&root.0)).is_err());
+}
+
+#[test]
+fn real_plugin_build_only_exempts_framework_installation_statements() {
+    let installations = "app.init_resource::<State>();\n".repeat(101);
+    let business = "let value = 1;\n".repeat(101);
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    for (body, rejected) in [(installations, false), (business, true)] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::Plugin; struct Root; struct State; impl Plugin for Root {{ fn build(&self, app: &mut bevy_app::App) {{\n{body}}} }}"
+        ));
+        assert_eq!(
+            shape
+                .audit(&inventory, &Policy::default())
+                .iter()
+                .any(|error| error.contains("::build: body")),
+            rejected
+        );
+    }
+}
+
+#[test]
+fn inline_system_closures_cannot_hide_inside_large_plugin_installation_bodies() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "use bevy_app::Plugin; struct Root; impl Plugin for Root {{ fn build(&self, app: &mut bevy_app::App) {{ app.add_systems(Update, || {{\n{statements}}}); }} }}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    assert!(
+        shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("::build: body"))
+    );
+}
+
+#[test]
+fn mechanical_body_exceptions_are_exact_not_global_or_stale_waivers() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "fn read() {{\n{statements}}}\nfn other() {{\n{statements}}}"
+    ));
+    let key = inventory.key("fn:read");
+    let boundary = Boundary::fixture(&inventory, "fn:read");
+    let policy = Policy {
+        boundaries: vec![boundary],
+        ..Default::default()
+    };
+    let mut shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        bodies: vec![BodyException {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].bodies[0].fingerprint.clone(),
+            boundary: key.clone(),
+            reason: "one bounded native format operation".into(),
+        }],
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &policy);
+    assert!(!errors.iter().any(|error| error.contains("fn:read")));
+    assert!(errors.iter().any(|error| error.contains("fn:other: body")));
+    shape.bodies[0].fingerprint = "stale".into();
+    assert!(
+        shape
+            .audit(&inventory, &policy)
+            .iter()
+            .any(|error| error.contains("invalid mechanical body exception"))
+    );
+    shape.bodies[0].fingerprint = inventory.entries[&key].bodies[0].fingerprint.clone();
+    shape.bodies[0].boundary = inventory.key("fn:other");
+    assert!(
+        shape
+            .audit(&inventory, &policy)
+            .iter()
+            .any(|error| error.contains("invalid mechanical body exception"))
+    );
+}
+
+#[test]
+fn ui_encoder_purposes_require_the_real_framework_attribute_and_exact_boundary() {
+    for fake in [false, true] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/util/vmux_api/src/lib.rs",
+            "pub use vmux_macro::ui_event_variants;",
+        );
+        let local = if fake {
+            "mod vmux_api { pub use fake_macros::ui_event_variants; }"
+        } else {
+            ""
+        };
+        inventory.source(
+            "fixture.rs",
+            &format!("{local} #[vmux_api::ui_event_variants] enum Operation {{ Read, Write }}"),
+        );
+        inventory.resolve_usage();
+        let key = inventory.key("enum:Operation");
+        let boundary = Boundary::fixture(&inventory, "enum:Operation");
+        let policy = Policy {
+            boundaries: vec![boundary],
+            ..Default::default()
+        };
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::UiEncoder,
+            owner: key.clone(),
+            reason: "fixed translation to separately typed UI events".into(),
+        };
+        assert_eq!(
+            purpose.valid(&inventory.entries[&key], &inventory, &policy),
+            !fake
+        );
+    }
+}
+
+#[test]
+fn retired_shape_debt_cannot_return_even_if_the_old_declaration_still_exists() {
+    let inventory = Inventory::fixture("enum A { One, Two } enum B { One, Two }");
+    let a = inventory.key("enum:A");
+    let b = inventory.key("enum:B");
+    let make = |key: &str| ShapeDebt {
+        key: key.into(),
+        fingerprint: inventory.entries[key].fingerprint.clone(),
+        issue: "VMX-253".into(),
+        finding: "AU-13".into(),
+    };
+    let main = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![make(&a)],
+        ..Default::default()
+    };
+    let mut branch = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![make(&a)],
+        ..Default::default()
+    };
+    assert!(branch.monotonic_from(&main));
+    branch.debt.push(make(&b));
+    assert!(!branch.monotonic_from(&main));
+    branch.debt.pop();
+    branch.debt[0].fingerprint = "changed".into();
+    assert!(!branch.monotonic_from(&main));
+}
+
+#[test]
+fn io_component_multiplexers_cannot_claim_a_foreign_format_boundary_without_format_evidence() {
+    let inventory = Inventory::fixture(
+        "#[derive(Component)] enum Effect { Read(String), Copy(String, String) }",
+    );
+    let key = inventory.key("enum:Effect");
+    let boundary = Boundary::fixture(&inventory, "enum:Effect");
+    let policy = Policy {
+        boundaries: vec![boundary],
+        ..Default::default()
+    };
+    let purpose = EnumPurpose {
+        key: key.clone(),
+        fingerprint: inventory.entries[&key].fingerprint.clone(),
+        role: EnumRole::Boundary,
+        owner: key.clone(),
+        reason: "generic IO dispatcher".into(),
+    };
+    assert!(!purpose.valid(&inventory.entries[&key], &inventory, &policy));
+}
+
+const FROZEN_SHAPE_REVISION: &str = "963f3f40e33c78f61bc55ead5e9a6a9f01b65081";
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ShapePolicy {
+    revision: String,
+    debt: Vec<ShapeDebt>,
+    enums: Vec<EnumPurpose>,
+    bodies: Vec<BodyException>,
+}
+
+impl ShapePolicy {
+    fn audit(&self, inventory: &Inventory, policy: &Policy) -> Vec<String> {
+        if self.revision.is_empty() {
+            return Vec::new();
+        }
+        let mut errors = Vec::new();
+        let mut covered = BTreeSet::new();
+        for debt in &self.debt {
+            let kind_matches = match debt.finding.as_str() {
+                "AU-13" => inventory
+                    .entries
+                    .get(&debt.key)
+                    .is_some_and(|entry| entry.enum_shape.is_some()),
+                "AU-14" => inventory.body_owner(&debt.key).is_some(),
+                _ => false,
+            };
+            if !kind_matches
+                || !covered.insert(debt.key.clone())
+                || debt.issue != "VMX-253"
+                || !matches!(debt.finding.as_str(), "AU-13" | "AU-14")
+                || !inventory.shape_matches(&debt.key, &debt.fingerprint)
+            {
+                errors.push(format!("remove stale/invalid shape debt {}", debt.key));
+            }
+        }
+        for purpose in &self.enums {
+            let valid = inventory.entries.get(&purpose.key).is_some_and(|entry| {
+                entry.fingerprint == purpose.fingerprint && purpose.valid(entry, inventory, policy)
+            });
+            if !covered.insert(purpose.key.clone()) || !valid {
+                errors.push(format!("invalid enum purpose {}", purpose.key));
+            }
+        }
+        for exception in &self.bodies {
+            let valid = inventory.shape_matches(&exception.key, &exception.fingerprint)
+                && !exception.reason.trim().is_empty()
+                && policy.boundaries.iter().any(|boundary| {
+                    boundary.key == exception.boundary
+                        && boundary.valid()
+                        && inventory.matches(&boundary.key, &boundary.fingerprint)
+                        && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                        && inventory.body_owner(&exception.key).is_some_and(|entry| {
+                            entry.key == boundary.key
+                                || inventory
+                                    .entries
+                                    .get(&boundary.key)
+                                    .is_some_and(|owner| inventory.owner_references(owner, entry))
+                        })
+                });
+            if !covered.insert(exception.key.clone()) || !valid {
+                errors.push(format!(
+                    "invalid mechanical body exception {}",
+                    exception.key
+                ));
+            }
+        }
+        for entry in inventory.entries.values() {
+            if !entry.shape_source()
+                || policy
+                    .upstream
+                    .iter()
+                    .any(|upstream| upstream.entries.get(&entry.key) == Some(&entry.fingerprint))
+            {
+                continue;
+            }
+            if let Some(shape) = &entry.enum_shape
+                && !covered.contains(&entry.key)
+            {
+                errors.push(format!(
+                    "{}: declare its enum purpose ({} variants) [fingerprint: {}]",
+                    entry.key, shape.variants, entry.fingerprint
+                ));
+            }
+            if entry.renderer
+                && !inventory.registered_keys.contains(&entry.key)
+                && entry.contract_paths.iter().any(|path| {
+                    inventory
+                        .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("component")
+                })
+            {
+                continue;
+            }
+            for body in &entry.bodies {
+                if !body.production
+                    || body.lines <= 100
+                    || covered.contains(&body.key)
+                    || body.composition
+                        && body.name == "build"
+                        && entry.plugin_path.as_deref().is_some_and(|path| {
+                            inventory
+                                .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                                .as_deref()
+                                == Some("Plugin")
+                        })
+                {
+                    continue;
+                }
+                errors.push(format!(
+                    "{}: body has {} production token lines; maximum is 100 [fingerprint: {}]",
+                    body.key, body.lines, body.fingerprint
+                ));
+            }
+        }
+        errors
+    }
+
+    fn monotonic_from(&self, main: &Self) -> bool {
+        if main.revision.is_empty() {
+            return true;
+        }
+        let allowed: BTreeMap<_, _> = main
+            .debt
+            .iter()
+            .map(|debt| (&debt.key, &debt.fingerprint))
+            .collect();
+        self.debt.iter().all(|debt| {
+            allowed
+                .get(&debt.key)
+                .is_some_and(|fingerprint| *fingerprint == &debt.fingerprint)
+        })
+    }
+
+    fn prove(&self, root: &Path) {
+        assert_eq!(
+            self.revision, FROZEN_SHAPE_REVISION,
+            "shape debt revision is immutable"
+        );
+        let main = Policy::fetched(root);
+        assert!(
+            self.monotonic_from(&main.shape),
+            "retired shape debt cannot be restored or refreshed"
+        );
+        let mut paths = BTreeSet::new();
+        for debt in &self.debt {
+            paths.insert(debt.key.split('|').next().unwrap());
+        }
+        let mut historical = Inventory::default();
+        for path in paths {
+            let output = Command::new("git")
+                .args(["show", &format!("{}:{path}", self.revision)])
+                .current_dir(root)
+                .output()
+                .expect("frozen shape source must be available");
+            assert!(
+                output.status.success(),
+                "missing frozen shape source {path}"
+            );
+            historical.source(
+                path,
+                &String::from_utf8(output.stdout).expect("UTF-8 shape source"),
+            );
+        }
+        for debt in &self.debt {
+            assert!(
+                historical.shape_matches(&debt.key, &debt.fingerprint),
+                "shape debt cannot grow or be refreshed: {}",
+                debt.key
+            );
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ShapeDebt {
+    key: String,
+    fingerprint: String,
+    issue: String,
+    finding: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EnumPurpose {
+    key: String,
+    fingerprint: String,
+    role: EnumRole,
+    owner: String,
+    reason: String,
+}
+
+impl EnumPurpose {
+    fn valid(&self, entry: &Declaration, inventory: &Inventory, policy: &Policy) -> bool {
+        let Some(shape) = &entry.enum_shape else {
+            return false;
+        };
+        if self.fingerprint != entry.fingerprint
+            || self.reason.trim().is_empty()
+            || !entry.shape_source()
+        {
+            return false;
+        }
+        match self.role {
+            EnumRole::UiEncoder => {
+                entry.contract_paths.iter().any(|path| {
+                    inventory
+                        .contract_kind(&entry.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("ui_event_variants")
+                }) && policy.boundaries.iter().any(|boundary| {
+                    boundary.key == self.owner
+                        && boundary.valid()
+                        && inventory.matches(&boundary.key, &boundary.fingerprint)
+                        && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                        && inventory.entries.get(&boundary.key).is_some_and(|owner| {
+                            owner.key == entry.key || inventory.owner_references(owner, entry)
+                        })
+                })
+            }
+            EnumRole::Boundary => {
+                (!(shape.component || shape.signal || inventory.enum_job(entry))
+                    || shape.fixed_format)
+                    && policy.boundaries.iter().any(|boundary| {
+                        boundary.key == self.owner
+                            && boundary.valid()
+                            && inventory.matches(&boundary.key, &boundary.fingerprint)
+                            && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                            && inventory.entries.get(&boundary.key).is_some_and(|owner| {
+                                owner.key == entry.key || inventory.owner_references(owner, entry)
+                            })
+                    })
+            }
+            EnumRole::Phase | EnumRole::Scalar | EnumRole::Projection => {
+                if shape.signal || self.role != EnumRole::Projection && shape.payloads > 0 {
+                    return false;
+                }
+                let Some(owner) = inventory.entries.get(&self.owner) else {
+                    return false;
+                };
+                if !matches!(owner.kind, Kind::Struct)
+                    || owner.key == entry.key
+                    || !inventory.owner_references(owner, entry)
+                    || !inventory.canonical(owner, policy, &mut BTreeSet::new())
+                {
+                    return false;
+                }
+                if self.role == EnumRole::Projection {
+                    return owner.projection && !entry.ecs;
+                }
+                owner.ecs && inventory.used(owner)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+enum EnumRole {
+    Phase,
+    Scalar,
+    Projection,
+    UiEncoder,
+    Boundary,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BodyException {
+    key: String,
+    fingerprint: String,
+    boundary: String,
+    reason: String,
+}
+
+struct EnumShape {
+    variants: usize,
+    payloads: usize,
+    signal: bool,
+    component: bool,
+    fixed_format: bool,
+}
+
+impl EnumShape {
+    fn of(value: &syn::ItemEnum) -> Self {
+        let mut variants = 0;
+        let mut payloads = 0;
+        for variant in &value.variants {
+            if Usage::test_only(&variant.attrs) {
+                continue;
+            }
+            variants += 1;
+            if !matches!(variant.fields, syn::Fields::Unit) {
+                payloads += 1;
+            }
+        }
+        let mut signal = false;
+        let mut component = false;
+        let mut fixed_format = false;
+        for attribute in Declarations::metadata(&value.attrs, true) {
+            if attribute.path().segments.last().is_some_and(|part| {
+                matches!(
+                    part.ident.to_string().as_str(),
+                    "ui_event" | "service_message" | "agent"
+                )
+            }) {
+                signal = true;
+            }
+            fixed_format |= attribute.path().is_ident("repr") || attribute.path().is_ident("serde");
+            if !attribute.path().is_ident("derive") {
+                continue;
+            }
+            let syn::Meta::List(list) = attribute else {
+                continue;
+            };
+            let parser = syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated;
+            let Ok(paths) = parser.parse2(list.tokens) else {
+                continue;
+            };
+            for path in paths {
+                component |= path
+                    .segments
+                    .last()
+                    .is_some_and(|part| part.ident == "Component");
+                fixed_format |= path.segments.last().is_some_and(|part| {
+                    matches!(
+                        part.ident.to_string().as_str(),
+                        "Serialize" | "Deserialize" | "Archive"
+                    )
+                });
+                signal |= path.segments.last().is_some_and(|part| {
+                    matches!(
+                        part.ident.to_string().as_str(),
+                        "Message" | "Event" | "EntityEvent"
+                    )
+                });
+            }
+        }
+        Self {
+            variants,
+            payloads,
+            signal,
+            component,
+            fixed_format,
+        }
+    }
+}
+
+struct BodyShape {
+    key: String,
+    name: String,
+    fingerprint: String,
+    lines: usize,
+    production: bool,
+    composition: bool,
+}
+
+impl BodyShape {
+    fn items(key: &str, item: Option<&Item>) -> Vec<Self> {
+        let mut bodies = Vec::new();
+        match item {
+            Some(Item::Fn(value)) => bodies.push(Self::of(
+                key.to_string(),
+                value.sig.ident.to_string(),
+                &value,
+                &value.block,
+                &value.attrs,
+            )),
+            Some(Item::Impl(value)) => {
+                for item in &value.items {
+                    let syn::ImplItem::Fn(method) = item else {
+                        continue;
+                    };
+                    let mut body_key = format!("{key}::{}", method.sig.ident);
+                    let mut ordinal = 2;
+                    while bodies.iter().any(|body| body.key == body_key) {
+                        body_key = format!("{key}::{}#{ordinal}", method.sig.ident);
+                        ordinal += 1;
+                    }
+                    bodies.push(Self::of(
+                        body_key,
+                        method.sig.ident.to_string(),
+                        method,
+                        &method.block,
+                        &method.attrs,
+                    ));
+                }
+            }
+            _ => {}
+        }
+        bodies
+    }
+
+    fn registration(block: &syn::Block, argument: &str) -> bool {
+        let mut footprint = Footprint::default();
+        footprint.visit_block(block);
+        !footprint.closure
+            && block.stmts.iter().all(|statement| match statement {
+                syn::Stmt::Expr(expression, _) => Self::installation(expression, argument),
+                _ => false,
+            })
+    }
+
+    fn installation(expression: &syn::Expr, argument: &str) -> bool {
+        match expression {
+            syn::Expr::Block(value) => Self::registration(&value.block, argument),
+            syn::Expr::If(value) => {
+                Self::condition(&value.cond, argument)
+                    && Self::registration(&value.then_branch, argument)
+                    && value
+                        .else_branch
+                        .as_ref()
+                        .is_none_or(|(_, branch)| Self::installation(branch, argument))
+            }
+            syn::Expr::MethodCall(value) => {
+                if !matches!(
+                    value.method.to_string().as_str(),
+                    "add_plugins"
+                        | "add_systems"
+                        | "add_observer"
+                        | "add_message"
+                        | "add_event"
+                        | "init_resource"
+                        | "insert_resource"
+                        | "register_type"
+                        | "configure_sets"
+                        | "register_required_components"
+                ) {
+                    return false;
+                }
+                match value.receiver.as_ref() {
+                    syn::Expr::Path(path) => path.path.is_ident(argument),
+                    other => Self::installation(other, argument),
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn condition(expression: &syn::Expr, argument: &str) -> bool {
+        match expression {
+            syn::Expr::Lit(_) | syn::Expr::Path(_) | syn::Expr::Field(_) => true,
+            syn::Expr::Unary(value) => Self::condition(&value.expr, argument),
+            syn::Expr::Binary(value) => {
+                Self::condition(&value.left, argument) && Self::condition(&value.right, argument)
+            }
+            syn::Expr::Paren(value) => Self::condition(&value.expr, argument),
+            syn::Expr::Macro(value) => value.mac.path.is_ident("cfg"),
+            syn::Expr::MethodCall(value) => {
+                value.method == "is_plugin_added"
+                    && matches!(value.receiver.as_ref(), syn::Expr::Path(path) if path.path.is_ident(argument))
+            }
+            _ => false,
+        }
+    }
+
+    fn of(
+        key: String,
+        name: String,
+        item: &impl ToTokens,
+        block: &syn::Block,
+        attributes: &[Attribute],
+    ) -> Self {
+        let mut footprint = Footprint::default();
+        footprint.tokens(block.to_token_stream());
+        footprint.visit_block(block);
+        footprint
+            .lines
+            .retain(|line| !footprint.test_lines.contains(line));
+        let tokens = item.to_token_stream();
+        let method = syn::parse2::<syn::ImplItemFn>(tokens.clone()).ok();
+        let argument = method.as_ref().and_then(|method| {
+            method.sig.inputs.iter().find_map(|input| {
+                let syn::FnArg::Typed(input) = input else {
+                    return None;
+                };
+                let syn::Pat::Ident(pattern) = input.pat.as_ref() else {
+                    return None;
+                };
+                Some(pattern.ident.to_string())
+            })
+        });
+        Self {
+            key,
+            name,
+            composition: argument.is_some_and(|argument| Self::registration(block, &argument)),
+            fingerprint: Declaration::fingerprint(&tokens.to_string()),
+            lines: footprint.lines.len(),
+            production: !Usage::test_only(attributes)
+                && !Declarations::metadata(attributes, false)
+                    .iter()
+                    .any(|meta| meta.path().is_ident("test")),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Footprint {
+    lines: BTreeSet<usize>,
+    test_lines: BTreeSet<usize>,
+    closure: bool,
+}
+
+impl Footprint {
+    fn tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        for token in tokens {
+            match token {
+                proc_macro2::TokenTree::Group(group) => {
+                    self.lines.insert(group.span_open().start().line);
+                    self.lines.insert(group.span_close().start().line);
+                    self.tokens(group.stream());
+                }
+                other => {
+                    self.lines
+                        .extend(other.span().start().line..=other.span().end().line);
+                }
+            }
+        }
+    }
+
+    fn ignore(&mut self, value: &impl syn::spanned::Spanned) {
+        self.test_lines
+            .extend(value.span().start().line..=value.span().end().line);
+    }
+}
+
+impl<'ast> Visit<'ast> for Footprint {
+    fn visit_expr_closure(&mut self, value: &'ast syn::ExprClosure) {
+        self.closure = true;
+        visit::visit_expr_closure(self, value);
+    }
+
+    fn visit_item(&mut self, value: &'ast Item) {
+        if Usage::test_only(Usage::item_attributes(value)) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_item(self, value);
+    }
+
+    fn visit_expr(&mut self, value: &'ast syn::Expr) {
+        if Usage::test_only(Usage::expression_attributes(value)) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_expr(self, value);
+    }
+
+    fn visit_local(&mut self, value: &'ast syn::Local) {
+        if Usage::test_only(&value.attrs) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_local(self, value);
+    }
+
+    fn visit_arm(&mut self, value: &'ast syn::Arm) {
+        if Usage::test_only(&value.attrs) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_arm(self, value);
     }
 }
 
@@ -3378,6 +4324,8 @@ struct Declaration {
     name: String,
     kind: Kind,
     fingerprint: String,
+    enum_shape: Option<EnumShape>,
+    bodies: Vec<BodyShape>,
     ecs: bool,
     parameter: bool,
     plugin: bool,
@@ -3414,6 +4362,10 @@ struct Declaration {
 }
 
 impl Declaration {
+    fn shape_source(&self) -> bool {
+        self.production && !self.test && !self.path.contains("/tests/")
+    }
+
     fn unit_mutex(value: &Type) -> bool {
         let Type::Path(value) = value else {
             return false;
@@ -3464,6 +4416,51 @@ struct Inventory {
 }
 
 impl Inventory {
+    fn enum_job(&self, entry: &Declaration) -> bool {
+        self.entries.values().any(|implementation| {
+            matches!(implementation.kind, Kind::Impl)
+                && implementation
+                    .owner
+                    .as_deref()
+                    .and_then(|owner| {
+                        self.resolve(&implementation.namespace, owner, &mut BTreeSet::new())
+                    })
+                    .is_some_and(|owner| owner.key == entry.key)
+                && implementation.reference_paths.iter().any(|path| {
+                    self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|target| {
+                            target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                        })
+                })
+        })
+    }
+
+    fn body_owner(&self, key: &str) -> Option<&Declaration> {
+        if let Some(entry) = self.entries.get(key)
+            && entry.bodies.iter().any(|body| body.key == key)
+        {
+            return Some(entry);
+        }
+        let (owner, _) = key.rsplit_once("::")?;
+        self.entries
+            .get(owner)
+            .filter(|entry| entry.bodies.iter().any(|body| body.key == key))
+    }
+
+    fn shape_matches(&self, key: &str, fingerprint: &str) -> bool {
+        if let Some(entry) = self.entries.get(key)
+            && entry.enum_shape.is_some()
+        {
+            return entry.fingerprint == fingerprint;
+        }
+        self.body_owner(key).is_some_and(|entry| {
+            entry
+                .bodies
+                .iter()
+                .any(|body| body.key == key && body.fingerprint == fingerprint)
+        })
+    }
+
     fn workspace(root: &Path) -> Self {
         let mut inventory = Self::default();
         for directory in ["crates", "examples", "website", "patches", "scripts"] {
@@ -3578,6 +4575,8 @@ impl Inventory {
                 name: path.into(),
                 kind: Kind::Script,
                 fingerprint: Declaration::fingerprint(source),
+                enum_shape: None,
+                bodies: Vec::new(),
                 ecs: false,
                 parameter: false,
                 plugin: false,
@@ -4248,6 +5247,7 @@ impl Inventory {
             let canonical = format!("{root}::{suffix}");
             let (prefix, name) = canonical.rsplit_once("::")?;
             let valid = match name {
+                "component" => matches!(prefix, "dioxus" | "dioxus::prelude" | "dioxus_core_macro"),
                 "App" | "Plugin" => matches!(
                     prefix,
                     "bevy_app" | "bevy_app::prelude" | "bevy::app" | "bevy::prelude"
@@ -4601,6 +5601,7 @@ impl Inventory {
                     | "string_id"
                     | "app_plugin"
                     | "service_message"
+                    | "ui_event_variants"
             )
         {
             return None;
@@ -5722,6 +6723,7 @@ impl Declarations<'_> {
             key = format!("{base}#{ordinal}");
             ordinal += 1;
         }
+        let parsed_item = syn::parse2::<Item>(tokens.to_token_stream()).ok();
         let declaration = Declaration {
             key: key.clone(),
             path: self.path.into(),
@@ -5729,6 +6731,11 @@ impl Declarations<'_> {
             name,
             kind,
             fingerprint: Declaration::fingerprint(&tokens.to_string()),
+            enum_shape: match &parsed_item {
+                Some(Item::Enum(value)) => Some(EnumShape::of(value)),
+                _ => None,
+            },
+            bodies: BodyShape::items(&key, parsed_item.as_ref()),
             ecs,
             parameter,
             plugin,
@@ -5736,14 +6743,14 @@ impl Declarations<'_> {
             parameter_path,
             plugin_children: references.plugins,
             registered_systems: references.registered_systems,
-            field_types: match syn::parse2::<Item>(tokens.to_token_stream()) {
-                Ok(Item::Struct(value)) => value
+            field_types: match &parsed_item {
+                Some(Item::Struct(value)) => value
                     .fields
                     .iter()
                     .filter(|field| !Usage::test_only(&field.attrs))
                     .map(|field| field.ty.clone())
                     .collect(),
-                Ok(Item::Enum(value)) => value
+                Some(Item::Enum(value)) => value
                     .variants
                     .iter()
                     .filter(|variant| !Usage::test_only(&variant.attrs))
@@ -5751,8 +6758,8 @@ impl Declarations<'_> {
                     .filter(|field| !Usage::test_only(&field.attrs))
                     .map(|field| field.ty.clone())
                     .collect(),
-                Ok(Item::Type(value)) => vec![*value.ty],
-                Ok(Item::Fn(value)) => value
+                Some(Item::Type(value)) => vec![*value.ty.clone()],
+                Some(Item::Fn(value)) => value
                     .sig
                     .inputs
                     .iter()
