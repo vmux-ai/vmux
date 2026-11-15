@@ -704,6 +704,27 @@ test('macOS packaging preflights run lean checks in parallel and require both re
   }
 });
 
+test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
+  for (const save of ['true', 'false']) {
+    const fixture = new Fixture(t);
+    const state = path.join(fixture.root, 'action-state');
+    const snapshot = path.join(fixture.root, '.source-cache.json');
+    Sources.run({ GITHUB_WORKSPACE: fixture.root, GITHUB_STATE: state, INPUT_SNAPSHOT: '.source-cache.json', INPUT_TARGET: 'target', INPUT_SAVE: save });
+    fs.writeFileSync(path.join(fixture.root, 'feature.txt'), 'final job contents\n');
+    const post = { GITHUB_WORKSPACE: fixture.root, INPUT_SNAPSHOT: '', INPUT_TARGET: '', INPUT_SAVE: '' };
+    for (const line of fs.readFileSync(state, 'utf8').trim().split('\n')) {
+      const separator = line.indexOf('=');
+      post[`STATE_${line.slice(0, separator)}`] = line.slice(separator + 1);
+    }
+    Sources.run(post);
+    assert.equal(fs.existsSync(snapshot), save === 'true');
+    if (save === 'true') {
+      const record = JSON.parse(fs.readFileSync(snapshot, 'utf8'));
+      assert.equal(record.files['feature.txt'].hash, require('node:crypto').createHash('sha256').update('final job contents\n').digest('hex'));
+    }
+  }
+});
+
 test('identical sources restored from a compiler snapshot remain fresh to Cargo', (t) => {
   const fixture = new Fixture(t);
   const sources = fixture.compilerCache();

@@ -256,12 +256,18 @@ class Sources {
   }
 
   static run(env = process.env) {
-    const sources = new Sources(env.GITHUB_WORKSPACE || process.cwd(), env.INPUT_SNAPSHOT, env.INPUT_TARGET);
-    if (env.STATE_cache_sources_post === 'true') {
-      if (env.INPUT_SAVE === 'true') sources.save();
+    const post = env.STATE_cache_sources_post === 'true';
+    const inputs = post ? JSON.parse(env.STATE_cache_sources_inputs) : {
+      snapshot: env.INPUT_SNAPSHOT,
+      target: env.INPUT_TARGET,
+      save: env.INPUT_SAVE === 'true',
+    };
+    const sources = new Sources(env.GITHUB_WORKSPACE || process.cwd(), inputs.snapshot, inputs.target);
+    if (post) {
+      if (inputs.save) sources.save();
       return;
     }
-    fs.appendFileSync(env.GITHUB_STATE, 'cache_sources_post=true\n');
+    fs.appendFileSync(env.GITHUB_STATE, `cache_sources_post=true\ncache_sources_inputs=${JSON.stringify(inputs)}\n`);
     const result = sources.restore();
     process.stdout.write(`Cargo source cache: ${result.restored} unchanged, ${result.changed} invalidated\n`);
   }
