@@ -230,7 +230,7 @@ impl EngineClient {
                     "stop the running VM before changing its resources or shared directory",
                 ));
             }
-            return self.wait_ready(None, owner);
+            return self.wait_ready(None, &preparation);
         }
         self.wait_retired()?;
         self.prepare_for(&preparation)?;
@@ -254,7 +254,7 @@ impl EngineClient {
         vmux_spawn::Descriptors::isolate(&mut command)?;
         preparation.check()?;
         let mut child = command.spawn()?;
-        let result = self.wait_ready(Some(&mut child), owner);
+        let result = self.wait_ready(Some(&mut child), &preparation);
         if result.is_err() {
             let _ = self.request_stop();
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -418,13 +418,11 @@ impl EngineClient {
     fn wait_ready(
         &self,
         mut child: Option<&mut Child>,
-        owner: Option<&Owner>,
+        preparation: &Preparation<'_>,
     ) -> io::Result<Status> {
         let deadline = Instant::now() + Duration::from_secs(240);
         loop {
-            if let Some(owner) = owner {
-                owner.check()?;
-            }
+            preparation.check()?;
             let status = self.status();
             if (child.is_none() && !status.running)
                 || (status.running
@@ -545,7 +543,7 @@ mod tests {
             interrupt.cancel();
         });
         let error = EngineClient::new(settings)
-            .wait_ready(None, Some(&owner))
+            .wait_ready(None, &Preparation::new(Some(&owner)))
             .unwrap_err();
         assert_ne!(error.kind(), io::ErrorKind::Interrupted);
         assert!(error.to_string().contains("stopped during startup"));
@@ -682,6 +680,44 @@ mod tests {
             retry.check().unwrap_err().kind(),
             io::ErrorKind::Interrupted
         );
+    }
+
+    #[test]
+    fn independent_stop_cancels_readiness_before_the_control_socket_is_published() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        let client = EngineClient::new(settings.clone());
+        let start = client.lock_named("start.lock").unwrap();
+        let engine = client.lock().unwrap();
+        let preparation = Preparation::new(None).watch(&settings.directory).unwrap();
+        let state_path = settings.directory.join("engine-state.json");
+        let fallback = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(1));
+            std::fs::write(
+                state_path,
+                serde_json::to_vec(&State {
+                    phase: Phase::Stopping,
+                    failure: None,
+                    owner: None,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        });
+        let (ready, waiting) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ready.send(()).unwrap();
+            let result = EngineClient::new(settings).wait_ready(None, &preparation);
+            drop(engine);
+            drop(start);
+            result
+        });
+        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+        client.stop().unwrap();
+        let result = worker.join().unwrap();
+        fallback.join().unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
     }
 
     #[test]
