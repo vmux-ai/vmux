@@ -464,6 +464,9 @@ Every production enum has an exact reviewed purpose: canonical scalar/phase, rea
 typed UI encoder or actual foreign boundary. A Message derive alone does not establish this shape.
 UI encoding facades may generate separately typed events; fixed protocol vocabularies retain their
 wire compatibility. These cases still need concrete owner/interface and lifetime evidence.
+A used Bevy Component input can own its separately queried phase through production `#[require]`
+metadata. Both endpoints need actual framework derives and ECS use; shadowed derives, unused
+endpoints, unrelated requirements and test-only attributes cannot establish that relationship.
 General process/filesystem job and result unions are not foreign protocols: concrete jobs carry
 their own result types. A signal, Component or Job enum needs actual foreign-format evidence before
 boundary review; serializer or ABI metadata alone does not approve an operation dispatcher.

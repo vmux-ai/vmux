@@ -3118,6 +3118,110 @@ fn canonical_phase_purposes_require_real_owners_and_cannot_cover_signal_enums() 
 }
 
 #[test]
+fn required_phase_purposes_follow_used_bevy_components_and_production_metadata() {
+    for (owner, attributes, phase, import, consumers, expected) in [
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            true,
+        ),
+        (
+            "Component",
+            "#[require(Phase = Phase::Start)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            true,
+        ),
+        (
+            "Component",
+            "#[require(Other)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[fake::require(Phase)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[cfg_attr(test, require(Phase))]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Resource",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Message",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "struct Component;",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&Input",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&mut Phase",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; {import} #[derive({phase}, Default)] enum Phase {{ #[default] Start, Done }} #[derive({owner})] {attributes} struct Input; fn advance(state: Query<({consumers})>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, advance); }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let key = inventory.key("enum:Phase");
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::Phase,
+            owner: inventory.key("struct:Input"),
+            reason: "One accepted input requires its own coherent lifecycle state".into(),
+        };
+        assert_eq!(
+            purpose.valid(&inventory.entries[&key], &inventory, &Policy::default()),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn scalar_vocabularies_are_owned_values_rather_than_command_payloads() {
     let inventory = Inventory::fixture(
         "enum Tone { Plain, Strong, Quiet } #[derive(Component)] struct State { tone: Tone } fn read(states: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
@@ -3675,7 +3779,9 @@ impl EnumPurpose {
                 };
                 if !matches!(owner.kind, Kind::Struct)
                     || owner.key == entry.key
-                    || !inventory.owner_references(owner, entry)
+                    || !(inventory.owner_references(owner, entry)
+                        || self.role == EnumRole::Phase
+                            && inventory.required_component(owner, entry))
                     || !inventory.canonical(owner, policy, &mut BTreeSet::new())
                 {
                     return false;
@@ -4337,6 +4443,8 @@ struct Declaration {
     relation_target: Option<String>,
     relation_source: Option<String>,
     component_hooks: BTreeSet<String>,
+    component_path: Option<String>,
+    required_components: BTreeSet<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
     projection: bool,
@@ -4588,6 +4696,8 @@ impl Inventory {
                 relation_target: None,
                 relation_source: None,
                 component_hooks: BTreeSet::new(),
+                component_path: None,
+                required_components: BTreeSet::new(),
                 contract: false,
                 contract_paths: BTreeSet::new(),
                 projection: false,
@@ -4995,6 +5105,33 @@ impl Inventory {
         self.used_keys.contains(&entry.key)
     }
 
+    fn required_component(&self, owner: &Declaration, value: &Declaration) -> bool {
+        if !self.used(owner) || !self.used(value) {
+            return false;
+        }
+        for component in [owner, value] {
+            let Some(path) = &component.component_path else {
+                return false;
+            };
+            if self
+                .framework_handle(&component.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+                != Some("Component")
+            {
+                return false;
+            }
+        }
+        for path in &owner.required_components {
+            if self
+                .resolve(&owner.namespace, path, &mut BTreeSet::new())
+                .is_some_and(|required| required.key == value.key)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     fn owner_references(&self, owner: &Declaration, value: &Declaration) -> bool {
         let key = (owner.key.clone(), value.key.clone());
         if let Some(referenced) = self.owner_reference_cache.borrow().get(&key) {
@@ -5263,6 +5400,15 @@ impl Inventory {
                             | "bevy::prelude"
                     )
                 }
+                "Component" => matches!(
+                    prefix,
+                    "bevy_ecs::component"
+                        | "bevy_ecs::prelude"
+                        | "bevy_ecs_macros"
+                        | "bevy::ecs::component"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
                 "On" => matches!(
                     prefix,
                     "bevy_ecs::observer"
@@ -6585,6 +6731,8 @@ impl Declarations<'_> {
         let mut relation_source = None;
         let mut component = false;
         let mut component_hooks = BTreeSet::new();
+        let mut component_path = None;
+        let mut required_components = BTreeSet::new();
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
             .iter()
@@ -6595,6 +6743,28 @@ impl Declarations<'_> {
                 attribute.push(segment.ident.unraw().to_string());
             }
             contract_paths.insert(attribute.join("::"));
+            if attr.path().is_ident("require")
+                && let syn::Meta::List(list) = &attr
+            {
+                let parser =
+                    syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
+                if let Ok(inputs) = parser.parse2(list.tokens.clone()) {
+                    for input in inputs {
+                        let path = match input {
+                            syn::Expr::Path(path) => path,
+                            syn::Expr::Assign(value) => {
+                                let syn::Expr::Path(path) = *value.left else {
+                                    continue;
+                                };
+                                path
+                            }
+                            _ => continue,
+                        };
+                        required_components
+                            .insert(path.path.to_token_stream().to_string().replace(' ', ""));
+                    }
+                }
+            }
             if attr.path().is_ident("component")
                 && let syn::Meta::List(list) = &attr
             {
@@ -6663,10 +6833,14 @@ impl Declarations<'_> {
                     continue;
                 };
                 for path in paths {
-                    component |= path
+                    if path
                         .segments
                         .last()
-                        .is_some_and(|segment| segment.ident == "Component");
+                        .is_some_and(|segment| segment.ident == "Component")
+                    {
+                        component = true;
+                        component_path = Some(path.to_token_stream().to_string().replace(' ', ""));
+                    }
                     if path.segments.last().is_some_and(|segment| {
                         matches!(
                             segment.ident.to_string().as_str(),
@@ -6775,6 +6949,8 @@ impl Declarations<'_> {
             relation_target,
             relation_source,
             component_hooks,
+            component_path,
+            required_components,
             contract: false,
             contract_paths,
             projection: false,
