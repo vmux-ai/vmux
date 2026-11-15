@@ -634,6 +634,53 @@ test('CLI reuse rejects changed dependencies, modes, tool inputs, platform, flag
   assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), true);
 });
 
+test('changed embedded update keys rebuild the CLI instead of reusing an old key', (t) => {
+  const fixture = new Fixture(t);
+  const env = { ...fixture.cliCache(), VMUX_UPDATE_PUBLIC_KEY: 'key-a' };
+  const source = path.join(fixture.root, 'crates/app/vmux_cli/src/main.rs');
+  fs.writeFileSync(source, 'fn main() { println!("{}", option_env!("VMUX_UPDATE_PUBLIC_KEY").unwrap_or("unset")); }\n');
+  fs.writeFileSync(path.join(fixture.root, 'crates/app/vmux_cli/build.rs'), 'fn main() { println!("cargo:rerun-if-env-changed=VMUX_UPDATE_PUBLIC_KEY"); }\n');
+  fixture.commit('embedded CLI key fixture');
+  const directory = path.join(fixture.root, '.build-tools/cli-cache');
+  const binary = path.join(fixture.root, 'target/debug/vmux');
+  for (const key of ['key-a', 'key-b']) {
+    env.VMUX_UPDATE_PUBLIC_KEY = key;
+    CliArtifact.prepareCache(env, fixture.root);
+    if (key === 'key-b') assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false);
+    execFileSync('cargo', ['build', '--offline', '-p', 'vmux_cli', '--no-default-features', '--features', 'dx,ci-syntax'], { cwd: fixture.root, env: { ...process.env, VMUX_UPDATE_PUBLIC_KEY: key }, stdio: 'pipe' });
+    CliArtifact.installBinary(binary, fixture.root);
+    assert.equal(execFileSync(binary, { encoding: 'utf8' }), `${key}\n`);
+    CliArtifact.publishCache(directory, env, fixture.root);
+  }
+});
+
+test('deleting a compile input cannot be hidden inside another file payload', (t) => {
+  const fixture = new Fixture(t);
+  const env = fixture.cliCache();
+  const first = path.join(fixture.root, 'crates/support/a.bin');
+  const secondName = 'crates/support/b.bin';
+  const second = path.join(fixture.root, secondName);
+  fs.writeFileSync(first, 'original');
+  fs.writeFileSync(second, 'additional');
+  fs.writeFileSync(path.join(fixture.root, 'crates/app/vmux_cli/src/main.rs'), 'fn main() { println!("{}", include_bytes!("../../../support/a.bin").len()); }\n');
+  fixture.commit('binary compiler inputs');
+  CliArtifact.prepareCache(env, fixture.root);
+  execFileSync('cargo', ['build', '--offline', '-p', 'vmux_cli', '--no-default-features', '--features', 'dx,ci-syntax'], { cwd: fixture.root, stdio: 'pipe' });
+  const binary = path.join(fixture.root, 'target/debug/vmux');
+  const original = execFileSync(binary, { encoding: 'utf8' });
+  const directory = path.join(fixture.root, '.build-tools/cli-cache');
+  CliArtifact.installBinary(binary, fixture.root);
+  CliArtifact.publishCache(directory, env, fixture.root);
+  const header = Buffer.from(`${secondName}\0${fs.statSync(second).mode}\0`);
+  fs.appendFileSync(first, Buffer.concat([header, fs.readFileSync(second)]));
+  fs.unlinkSync(second);
+  fixture.commit('delete and fold compiler input');
+  CliArtifact.prepareCache(env, fixture.root);
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false);
+  execFileSync('cargo', ['build', '--offline', '-p', 'vmux_cli', '--no-default-features', '--features', 'dx,ci-syntax'], { cwd: fixture.root, stdio: 'pipe' });
+  assert.notEqual(execFileSync(binary, { encoding: 'utf8' }), original);
+});
+
 test('newly enabled local dependencies join the CLI input closure', (t) => {
   const fixture = new Fixture(t);
   const env = fixture.cliCache();

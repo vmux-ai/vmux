@@ -80,7 +80,7 @@ class CliArtifact {
     hash.update(execFileSync('cargo', ['-V'], { encoding: 'utf8' }));
     hash.update(graph.replaceAll(root, '<checkout>'));
     for (const key of Object.keys(env).sort()) {
-      if (/^(CARGO_|RUSTC|CC$|CXX$|CFLAGS$|CXXFLAGS$|AR$|VMUX_BUILD_PROFILE$|VMUX_HOST_NAME$|VMUX_TARGET_DESTINATION$|ImageOS$|ImageVersion$)/.test(key)) hash.update(`${key}=${env[key]}\0`);
+      if (/^(CARGO_|RUSTC|CC$|CXX$|CFLAGS$|CXXFLAGS$|AR$|VMUX_BUILD_PROFILE$|VMUX_HOST_NAME$|VMUX_TARGET_DESTINATION$|VMUX_UPDATE_PUBLIC_KEY$|ImageOS$|ImageVersion$)/.test(key)) hash.update(`${key}=${env[key]}\0`);
     }
     const names = execFileSync('git', ['ls-files', '-z'], { cwd: root, env: Preflight.gitEnvironment(), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }).split('\0').filter(Boolean).sort();
     const required = new Set(['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env']);
@@ -91,7 +91,7 @@ class CliArtifact {
       const stat = fs.lstatSync(file);
       if (!stat.isFile() || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) throw new Error('Invalid CLI compile input');
       hash.update(`${name}\0${stat.mode}\0`);
-      hash.update(fs.readFileSync(file));
+      hash.update(crypto.createHash('sha256').update(fs.readFileSync(file)).digest());
       required.delete(name);
     }
     if (required.size) throw new Error('Missing tracked CLI compile inputs');
