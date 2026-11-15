@@ -95,6 +95,23 @@ PR validation selects directly changed package targets, including member manifes
 
 SDK and headless checks follow their application/consumer roots, lean checks follow the desktop root, and record/renderer-free checks follow their owning code. CLI-only ECS edits do not select record checks. Cargo's Linux feature trees and historical dependencies bind each selected suite's reuse inputs. Preparation publishes one scope for all runners. DX lifecycle and repository policy tests run in Lint rather than repeating in the ordinary Rust test job.
 
+`cargo lint` delegates to DX. A private compiler plugin owns the accepted lint request,
+configuration, preparation stages and target lease. Concrete file/process jobs perform
+bounded IO; registered systems choose stages, retain cancellation ownership and stop after
+failure. Compiler systems check capacity before and after acquiring the target lease.
+CI and `vmux dx test` use this same request. Compiler tools and artifacts use dedicated
+nonsymlink caches guarded before and after lock acquisition.
+
+The Dylint library is an isolated workspace pinned to a dated nightly; product builds keep
+stable Rust. Its external rustc callbacks resolve actual Bevy registrations and module
+visibility, including aliases and configuration wrappers. Regression programs are ordinary
+Rust files under `ui/`, materialized in a temporary Cargo project with independent
+expected diagnostics. Source audits recognize input data through current content hashes and
+actual inclusion by its test-owned Cargo harness. The same proof is used for ownership and
+conventions, and inputs compiled as product modules or library/binary targets are refused.
+Current ownership checks remain active until equivalent typed checks replace them; VMX-253
+still requires zero migration debt and eventual removal of `ecs-policy.ron`.
+
 ## Native VM and Docker
 
 `vmux_container` owns the pages, typed CLI/GUI requests, configuration, selection and canonical inventory. `vmux_vm` owns the leased native lifecycle and ECS dependency batches. Docker input becomes entities before dependency decisions or UI projection; the persisted inventory is a restore input, not a second live registry.

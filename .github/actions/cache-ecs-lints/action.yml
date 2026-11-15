@@ -1,0 +1,25 @@
+name: Cache ECS compiler lints
+description: Reuse the isolated pinned compiler, Dylint tools and lint build artifacts
+runs:
+  using: composite
+  steps:
+    - name: Resolve compiler cache identity
+      id: compiler
+      shell: bash
+      run: |
+        channel="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' crates/feature/vmux_dx/lints/rust-toolchain.toml)"
+        test -n "$channel"
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          .build-tools/dylint
+          .build-tools/dylint-cargo
+          .build-tools/dylint-drivers
+          .build-tools/lints
+          ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
+        key: ecs-lints-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+        restore-keys: |
+          ecs-lints-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
+          ecs-lints-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-

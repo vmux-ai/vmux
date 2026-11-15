@@ -1,3 +1,4 @@
+use compiler_inputs::CompilerInputs;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -7,6 +8,9 @@ use syn::{
     Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemFn,
     Stmt, TraitItemFn, Type, TypePath, UseTree, Visibility,
 };
+
+#[path = "../src/compiler_inputs.rs"]
+mod compiler_inputs;
 
 struct Workspace(PathBuf);
 
@@ -555,6 +559,7 @@ fn walk(dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
             }
             walk(&path, visit);
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
+            && CompilerInputs::current().owner(&path).is_none()
             && let Ok(source) = std::fs::read_to_string(&path)
         {
             visit(&path, &source);

@@ -843,6 +843,19 @@ test('superseded PRs cancel heavy Lint while failed preparation still runs its g
   }
 });
 
+test('required lint runs compiler fixtures and source checks unless identical inputs were verified', () => {
+  const workflow = new Workflow();
+  for (const name of ['Check typed registration fixtures', 'Lint registered systems']) {
+    for (const [code, reuse_lint, selected] of [['true', '', true], ['false', '', false], ['true', '42', false]]) {
+      assert.equal(workflow.step('lint', name, 'pull_request', 'false', { code, reuse_lint, lint_args: '-p vmux_dx' }), selected, `${name}: ${code}: ${reuse_lint}`);
+    }
+    const step = workflow.jobs.lint.steps.find((step) => step.name === name);
+    assert.equal(step['continue-on-error'], undefined);
+  }
+  assert.equal(workflow.step('lint', 'Lint registered systems', 'pull_request', 'false', { code: 'true', lint_args: '' }), false);
+  assert.equal(workflow.step('lint', 'Check typed registration fixtures', 'pull_request', 'false', { code: 'true', lint_args: '' }), true);
+});
+
 test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
   for (const save of ['true', 'false']) {
     const fixture = new Fixture(t);

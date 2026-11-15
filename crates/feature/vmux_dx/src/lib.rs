@@ -22,6 +22,8 @@ mod ci_native;
 mod ci_scope;
 mod cli_package;
 mod cli_package_io;
+mod compiler_lint;
+mod compiler_lint_io;
 mod consumer;
 mod debug;
 mod debug_io;
@@ -1216,12 +1218,23 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
             args.extend(["--features".into(), features.to_owned()]);
         }
         args.append(&mut forwarded);
+        let compiler_arguments = args[1..].to_vec();
         args.extend(["--".into(), "-D".into(), "warnings".into()]);
         plans.request(
             entity,
             &mut tail,
             "Run Cargo",
             cargo::Run { arguments: args },
+        );
+
+        plans.request(
+            entity,
+            &mut tail,
+            "Run compiler ownership lints",
+            compiler_lint::Run {
+                fixtures: false,
+                arguments: Some(compiler_arguments),
+            },
         );
 
         plans.commands.entity(entity).insert(Planned);
@@ -1343,6 +1356,15 @@ fn plan_checks(mut operations: Planning, mut plans: Plans) {
             &mut tail,
             Work::Internal("pre-push".into(), Vec::new()),
         );
+        plans.request(
+            entity,
+            &mut tail,
+            "Check compiler lint fixtures and source",
+            compiler_lint::Run {
+                fixtures: true,
+                arguments: Some(Vec::new()),
+            },
+        );
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1424,6 +1446,18 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
                 plans.native(entity, &mut tail, Work::Seed);
             }
             match task {
+                "ecs-lint" => {
+                    let test = forwarded.as_slice() == [OsString::from("--test")];
+                    plans.request(
+                        entity,
+                        &mut tail,
+                        "Run compiler ownership lints",
+                        compiler_lint::Run {
+                            fixtures: test,
+                            arguments: if test { None } else { Some(forwarded) },
+                        },
+                    );
+                }
                 "cargo" => {
                     plans.request(
                         entity,
