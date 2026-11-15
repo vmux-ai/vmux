@@ -7,7 +7,10 @@ use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_vm::Settings;
 
-use crate::control::{Command, ControlPlugin, Finished, Reply, Request};
+use crate::control::{
+    ControlPlugin, Finished, Inspect, LogText, Ownership, ReadLogs, Start, Started, StatusRead,
+    Stop, Stopped, Target,
+};
 
 pub struct ContainerCliPlugin;
 
@@ -17,7 +20,11 @@ impl Plugin for ContainerCliPlugin {
         if !app.is_plugin_added::<ControlPlugin>() {
             app.add_plugins(ControlPlugin);
         }
-        app.add_observer(finish).add_systems(Update, request);
+        app.add_observer(started)
+            .add_observer(stopped)
+            .add_observer(inspected)
+            .add_observer(logged)
+            .add_systems(Update, request);
     }
 }
 
@@ -26,27 +33,37 @@ fn request(
     mut commands: Commands,
 ) {
     for (entity, invocation) in &invocations {
-        let command = match invocation.command.as_str() {
-            "container.start" => Command::Start(crate::control::Ownership::Independent),
-            "container.stop" => Command::Stop,
-            "container.status" => Command::Status,
-            "container.logs" => Command::Logs,
-            _ => continue,
-        };
-        match Configuration::of(invocation) {
-            Ok(settings) => commands.trigger(Request {
-                entity,
-                reply: entity,
-                command,
-                settings,
-                requester: entity,
-            }),
+        if !matches!(
+            invocation.command.as_str(),
+            "container.start" | "container.stop" | "container.status" | "container.logs"
+        ) {
+            continue;
+        }
+        let settings = match Configuration::of(invocation) {
+            Ok(settings) => settings,
             Err(error) => {
                 commands
                     .entity(entity)
                     .insert(CliResult::from(Err::<i32, _>(error)));
+                continue;
             }
-        }
+        };
+        let target = Target {
+            reply: entity,
+            settings,
+            requester: entity,
+        };
+        match invocation.command.as_str() {
+            "container.start" => commands.trigger(Start {
+                entity,
+                target,
+                ownership: Ownership::Independent,
+            }),
+            "container.stop" => commands.trigger(Stop { entity, target }),
+            "container.status" => commands.trigger(Inspect { entity, target }),
+            "container.logs" => commands.trigger(ReadLogs { entity, target }),
+            _ => unreachable!(),
+        };
     }
 }
 
@@ -79,8 +96,8 @@ impl Configuration {
     }
 }
 
-fn finish(
-    trigger: On<Finished>,
+fn started(
+    trigger: On<Finished<Started>>,
     invocations: Query<(), With<CliInvocation>>,
     mut commands: Commands,
 ) {
@@ -89,28 +106,78 @@ fn finish(
         return;
     }
     let result = match &event.result {
-        Ok(Reply::Started(status)) => {
-            println!("Docker ready: unix://{}", status.socket.display());
+        Ok(value) => {
+            println!("Docker ready: unix://{}", value.0.socket.display());
             println!(
                 "docker --host unix://{} compose up",
-                status.socket.display()
+                value.0.socket.display()
             );
             Ok(0)
         }
-        Ok(Reply::Stopped(_)) => Ok(0),
-        Ok(Reply::Configured(_) | Reply::Changed) => Ok(0),
-        Ok(Reply::Status(status)) => {
+        Err(error) => Err(io::Error::other(error.clone())),
+    };
+    commands
+        .entity(event.entity)
+        .insert(CliResult::from(result));
+}
+
+fn stopped(
+    trigger: On<Finished<Stopped>>,
+    invocations: Query<(), With<CliInvocation>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if !invocations.contains(event.entity) {
+        return;
+    }
+    let result = match &event.result {
+        Ok(_) => Ok(0),
+        Err(error) => Err(io::Error::other(error.clone())),
+    };
+    commands
+        .entity(event.entity)
+        .insert(CliResult::from(result));
+}
+
+fn inspected(
+    trigger: On<Finished<StatusRead>>,
+    invocations: Query<(), With<CliInvocation>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if !invocations.contains(event.entity) {
+        return;
+    }
+    let result = match &event.result {
+        Ok(value) => {
             println!(
                 "running={} docker_ready={} socket={} log={}",
-                status.running,
-                status.docker_ready,
-                status.socket.display(),
-                status.log.display()
+                value.0.running,
+                value.0.docker_ready,
+                value.0.socket.display(),
+                value.0.log.display()
             );
-            Ok(i32::from(!status.docker_ready))
+            Ok(i32::from(!value.0.docker_ready))
         }
-        Ok(Reply::Logs(logs)) => {
-            print!("{logs}");
+        Err(error) => Err(io::Error::other(error.clone())),
+    };
+    commands
+        .entity(event.entity)
+        .insert(CliResult::from(result));
+}
+
+fn logged(
+    trigger: On<Finished<LogText>>,
+    invocations: Query<(), With<CliInvocation>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if !invocations.contains(event.entity) {
+        return;
+    }
+    let result = match &event.result {
+        Ok(value) => {
+            print!("{}", value.0);
             Ok(0)
         }
         Err(error) => Err(io::Error::other(error.clone())),

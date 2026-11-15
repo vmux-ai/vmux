@@ -45,19 +45,14 @@ pub struct ContainerStopRequest;
 pub struct ContainerLogsRequest;
 
 #[vmux_api::ui_event]
-pub struct ContainerCommandRequest {
-    pub ids: Vec<String>,
-    pub operation: ContainerOperation,
-}
-
-#[vmux_api::ui_event]
 pub struct ContainerInspectRequest {
     pub id: String,
     pub logs: bool,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum ContainerOperation {
+#[vmux_api::ui_event_variants(Eq, shared(ids: Vec<String>))]
+#[derive(Copy)]
+pub enum ContainerChangeOperation {
     Start,
     Stop,
     Restart,

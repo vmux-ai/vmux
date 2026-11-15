@@ -13,9 +13,13 @@ use vmux_ecs::Revision;
 use vmux_ecs::wake::Wake;
 use vmux_vm::{Container as DockerContainer, DockerClient, DockerPort, Settings};
 
-use crate::control::{Busy, Command, Finished, Request};
+use crate::control::{
+    Changed, Finished, RemoveContainers, RestartContainers, StartContainers, StopContainers, Target,
+};
 use crate::event::{
-    ContainerCommandRequest, ContainerEntry, ContainerInspectRequest, ContainerPort,
+    ContainerChangeOperationRequests, ContainerChangeRemoveRequest, ContainerChangeRestartRequest,
+    ContainerChangeStartRequest, ContainerChangeStopRequest, ContainerEntry,
+    ContainerInspectRequest, ContainerPort,
 };
 use crate::host::{ContainerSet, EngineView, Observed, PageView};
 
@@ -23,11 +27,12 @@ pub(crate) struct InventoryPlugin;
 
 impl Plugin for InventoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            ContainerCommandRequest,
-            ContainerInspectRequest,
-        )>::default())
-            .add_observer(control)
+        app.add_plugins(UiEventPlugin::<ContainerChangeOperationRequests>::default())
+            .add_plugins(UiEventPlugin::<(ContainerInspectRequest,)>::default())
+            .add_observer(start)
+            .add_observer(stop)
+            .add_observer(restart)
+            .add_observer(remove)
             .add_observer(select)
             .add_systems(
                 Update,
@@ -416,52 +421,106 @@ fn poll_save(
     }
 }
 
-fn control(
-    trigger: On<UiInput<ContainerCommandRequest>>,
-    pages: Query<(), With<PageView>>,
-    engines: Query<(Entity, &Settings, &Observed, Option<&Busy>), With<EngineView>>,
-    catalog: Catalog,
-    mut commands: Commands,
-) {
-    let event = trigger.event();
-    if !pages.contains(event.webview) || event.payload.ids.is_empty() {
-        return;
+#[derive(SystemParam)]
+struct ControlInputs<'w, 's> {
+    pages: Query<'w, 's, (), With<PageView>>,
+    engines: Query<'w, 's, (Entity, &'static Settings, &'static Observed), With<EngineView>>,
+    catalog: Catalog<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl ControlInputs<'_, '_> {
+    fn validate(
+        &mut self,
+        page: Entity,
+        ids: &[String],
+        needs_ready: bool,
+    ) -> Option<(Entity, Target)> {
+        if !self.pages.contains(page) || ids.is_empty() {
+            return None;
+        }
+        let Ok((entity, settings, observed)) = self.engines.single() else {
+            return None;
+        };
+        if needs_ready
+            && !(observed.0.docker_ready
+                || (observed.0.running && observed.0.phase == vmux_vm::Phase::Ready))
+        {
+            self.commands.trigger(Finished::<Changed> {
+                entity,
+                result: Err("Docker is not ready".into()),
+                mutates: true,
+                requester: page,
+            });
+            return None;
+        }
+        for id in ids {
+            if !self.catalog.contains(entity, id) {
+                self.commands.trigger(Finished::<Changed> {
+                    entity,
+                    result: Err(format!("container {id} is no longer present")),
+                    mutates: true,
+                    requester: page,
+                });
+                return None;
+            }
+        }
+        Some((
+            entity,
+            Target {
+                reply: entity,
+                settings: settings.clone(),
+                requester: page,
+            },
+        ))
     }
-    let Ok((entity, settings, observed, _)) = engines.single() else {
+}
+
+fn start(trigger: On<UiInput<ContainerChangeStartRequest>>, mut inputs: ControlInputs) {
+    let event = trigger.event();
+    let Some((entity, target)) = inputs.validate(event.webview, &event.payload.ids, false) else {
         return;
     };
-    if event.payload.operation != crate::event::ContainerOperation::Start
-        && !(observed.0.docker_ready
-            || (observed.0.running && observed.0.phase == vmux_vm::Phase::Ready))
-    {
-        commands.trigger(Finished {
-            entity,
-            result: Err("Docker is not ready".into()),
-            mutates: true,
-            requester: event.webview,
-        });
-        return;
-    }
-    for id in &event.payload.ids {
-        if !catalog.contains(entity, id) {
-            commands.trigger(Finished {
-                entity,
-                result: Err(format!("container {id} is no longer present")),
-                mutates: true,
-                requester: event.webview,
-            });
-            return;
-        }
-    }
-    commands.trigger(Request {
+    inputs.commands.trigger(StartContainers {
         entity,
-        reply: entity,
-        command: Command::Containers {
-            ids: event.payload.ids.clone(),
-            operation: event.payload.operation,
-        },
-        settings: settings.clone(),
-        requester: event.webview,
+        target,
+        ids: event.payload.ids.clone(),
+    });
+}
+
+fn stop(trigger: On<UiInput<ContainerChangeStopRequest>>, mut inputs: ControlInputs) {
+    let event = trigger.event();
+    let Some((entity, target)) = inputs.validate(event.webview, &event.payload.ids, true) else {
+        return;
+    };
+    inputs.commands.trigger(StopContainers {
+        entity,
+        target,
+        ids: event.payload.ids.clone(),
+    });
+}
+
+fn restart(trigger: On<UiInput<ContainerChangeRestartRequest>>, mut inputs: ControlInputs) {
+    let event = trigger.event();
+    let Some((entity, target)) = inputs.validate(event.webview, &event.payload.ids, true) else {
+        return;
+    };
+    inputs.commands.trigger(RestartContainers {
+        entity,
+        target,
+        ids: event.payload.ids.clone(),
+    });
+}
+
+fn remove(trigger: On<UiInput<ContainerChangeRemoveRequest>>, mut inputs: ControlInputs) {
+    let event = trigger.event();
+    let Some((entity, target)) = inputs.validate(event.webview, &event.payload.ids, true) else {
+        return;
+    };
+    inputs.commands.trigger(RemoveContainers {
+        entity,
+        target,
+        ids: event.payload.ids.clone(),
     });
 }
 

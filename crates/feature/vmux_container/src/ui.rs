@@ -24,9 +24,10 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 use crate::event::{
-    ContainerCommandRequest, ContainerEntry, ContainerInspectRequest, ContainerLogsRequest,
-    ContainerOperation, ContainerPort, ContainerSettingsRequest, ContainerStartRequest,
-    ContainerStopRequest, ContainerUiState,
+    ContainerChangeOperation, ContainerChangeRemoveRequest, ContainerChangeRestartRequest,
+    ContainerChangeStartRequest, ContainerChangeStopRequest, ContainerEntry,
+    ContainerInspectRequest, ContainerLogsRequest, ContainerPort, ContainerSettingsRequest,
+    ContainerStartRequest, ContainerStopRequest, ContainerUiState,
 };
 
 #[vmux_page::page(page = "vm", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
@@ -452,7 +453,7 @@ fn Header(
                     } else {
                         "container-start-container"
                     }),
-                    move |_| controls.containers(ids.clone(), ContainerOperation::Start),
+                    move |_| controls.containers(ids.clone(), ContainerChangeOperation::Start),
                 )
                 .icon(LineIcon::Play)
                 .text()
@@ -467,7 +468,7 @@ fn Header(
                     } else {
                         "container-stop-container"
                     }),
-                    move |_| controls.containers(stop_ids.clone(), ContainerOperation::Stop),
+                    move |_| controls.containers(stop_ids.clone(), ContainerChangeOperation::Stop),
                 )
                 .icon(LineIcon::Pause)
                 .text()
@@ -475,7 +476,7 @@ fn Header(
             );
             toolbar.push(
                 ToolbarControl::button(translate("container-restart"), move |_| {
-                    controls.containers(all_ids.clone(), ContainerOperation::Restart)
+                    controls.containers(all_ids.clone(), ContainerChangeOperation::Restart)
                 })
                 .icon(LineIcon::RotateCcw)
                 .disabled(snapshot.busy),
@@ -570,9 +571,9 @@ fn ContainerGroup(
         ids.push(entry.id.clone());
     }
     let operation = if running < count {
-        ContainerOperation::Start
+        ContainerChangeOperation::Start
     } else {
-        ContainerOperation::Stop
+        ContainerChangeOperation::Stop
     };
     let label = translate(if running < count {
         "container-start-all"
@@ -656,7 +657,7 @@ fn ContainerRow(
                 div { class: "pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded-md bg-background opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
                     onkeydown: move |event| event.stop_propagation(),
                     OperationButton {
-                        ids: vec![operation_id], operation: if running { ContainerOperation::Stop } else { ContainerOperation::Start },
+                        ids: vec![operation_id], operation: if running { ContainerChangeOperation::Stop } else { ContainerChangeOperation::Start },
                         label: translate(if running { "container-stop-container" } else { "container-start-container" }),
                         description: String::new(), disabled: busy, show_label: false,
                     }
@@ -669,7 +670,7 @@ fn ContainerRow(
 #[component]
 fn OperationButton(
     ids: Vec<String>,
-    operation: ContainerOperation,
+    operation: ContainerChangeOperation,
     label: String,
     description: String,
     disabled: bool,
@@ -687,7 +688,7 @@ fn OperationButton(
             class: if show_label { "h-7 shrink-0 gap-1.5 whitespace-nowrap px-1.5 text-[10px]" } else { "shrink-0 p-0" },
             title: description.clone(), aria_label: description, disabled,
             onclick: move |event: MouseEvent| { event.stop_propagation(); controls.containers(ids.clone(), operation); },
-            LineIconView { icon: if operation == ContainerOperation::Stop { LineIcon::Pause } else { LineIcon::Play }, class: "size-3" }
+            LineIconView { icon: if operation == ContainerChangeOperation::Stop { LineIcon::Pause } else { LineIcon::Play }, class: "size-3" }
             if show_label { span { "{label}" } }
         }
     }
@@ -890,7 +891,7 @@ fn DeleteDialog(ids: Vec<String>, onclose: EventHandler<()>) -> Element {
                 DialogDescription { attributes: vec![], {translate("container-delete-description")} }
                 div { class: "flex justify-end gap-2",
                     Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, onclick: move |_| onclose.call(()), {translate("container-cancel")} }
-                    Button { size: ButtonSize::Sm, variant: ButtonVariant::Destructive, onclick: move |_| { controls.containers(ids.clone(), ContainerOperation::Remove); onclose.call(()); }, {translate("container-delete")} }
+                    Button { size: ButtonSize::Sm, variant: ButtonVariant::Destructive, onclick: move |_| { controls.containers(ids.clone(), ContainerChangeOperation::Remove); onclose.call(()); }, {translate("container-delete")} }
                 }
             }
         }
@@ -1263,14 +1264,14 @@ impl Controls {
                     pending.intent,
                     Intent::Start
                         | Intent::Containers {
-                            operation: ContainerOperation::Start,
+                            operation: ContainerChangeOperation::Start,
                             ..
                         }
                 )
             })
     }
 
-    fn containers(self, ids: Vec<String>, operation: ContainerOperation) {
+    fn containers(self, ids: Vec<String>, operation: ContainerChangeOperation) {
         if ids.is_empty() {
             return;
         }
@@ -1311,7 +1312,7 @@ enum Intent {
     Stop,
     Containers {
         ids: Vec<String>,
-        operation: ContainerOperation,
+        operation: ContainerChangeOperation,
     },
 }
 
@@ -1320,10 +1321,20 @@ impl Intent {
         match self {
             Self::Start => send(&ContainerStartRequest),
             Self::Stop => send(&ContainerStopRequest),
-            Self::Containers { ids, operation } => send(&ContainerCommandRequest {
-                ids: ids.clone(),
-                operation: *operation,
-            }),
+            Self::Containers { ids, operation } => match operation {
+                ContainerChangeOperation::Start => {
+                    send(&ContainerChangeStartRequest { ids: ids.clone() })
+                }
+                ContainerChangeOperation::Stop => {
+                    send(&ContainerChangeStopRequest { ids: ids.clone() })
+                }
+                ContainerChangeOperation::Restart => {
+                    send(&ContainerChangeRestartRequest { ids: ids.clone() })
+                }
+                ContainerChangeOperation::Remove => {
+                    send(&ContainerChangeRemoveRequest { ids: ids.clone() })
+                }
+            },
         }
     }
 
@@ -1339,10 +1350,10 @@ impl Intent {
                 snapshot.stopping = true;
             }
             Self::Containers { ids, operation } => {
-                if *operation == ContainerOperation::Start && !snapshot.available() {
+                if *operation == ContainerChangeOperation::Start && !snapshot.available() {
                     snapshot.starting = true;
                 }
-                if *operation == ContainerOperation::Remove {
+                if *operation == ContainerChangeOperation::Remove {
                     snapshot.containers.retain(|entry| !ids.contains(&entry.id));
                     return;
                 }
@@ -1350,14 +1361,14 @@ impl Intent {
                     if !ids.contains(&entry.id) {
                         continue;
                     }
-                    if *operation == ContainerOperation::Start && entry.running() {
+                    if *operation == ContainerChangeOperation::Start && entry.running() {
                         continue;
                     }
                     entry.state = match operation {
-                        ContainerOperation::Start => "starting",
-                        ContainerOperation::Stop => "stopping",
-                        ContainerOperation::Restart => "restarting",
-                        ContainerOperation::Remove => unreachable!(),
+                        ContainerChangeOperation::Start => "starting",
+                        ContainerChangeOperation::Stop => "stopping",
+                        ContainerChangeOperation::Restart => "restarting",
+                        ContainerChangeOperation::Remove => unreachable!(),
                     }
                     .into();
                     entry.status.clear();
@@ -1389,7 +1400,7 @@ mod tests {
         stops: Cell<usize>,
         addresses: RefCell<Vec<PageAddress>>,
         inspections: RefCell<Vec<ContainerInspectRequest>>,
-        commands: RefCell<Vec<ContainerCommandRequest>>,
+        commands: RefCell<Vec<(Vec<String>, ContainerChangeOperation)>>,
         opens: RefCell<Vec<OpenRequest>>,
     }
 
@@ -1411,11 +1422,34 @@ mod tests {
                 let _ =
                     rkyv::from_bytes::<ContainerStopRequest, rkyv::rancor::Error>(bytes).unwrap();
                 self.stops.set(self.stops.get() + 1);
-            } else if id == ContainerCommandRequest::id() {
-                self.commands.borrow_mut().push(
-                    rkyv::from_bytes::<ContainerCommandRequest, rkyv::rancor::Error>(bytes)
-                        .unwrap(),
-                );
+            } else if id == ContainerChangeStartRequest::id() {
+                let request =
+                    rkyv::from_bytes::<ContainerChangeStartRequest, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.commands
+                    .borrow_mut()
+                    .push((request.ids, ContainerChangeOperation::Start));
+            } else if id == ContainerChangeStopRequest::id() {
+                let request =
+                    rkyv::from_bytes::<ContainerChangeStopRequest, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.commands
+                    .borrow_mut()
+                    .push((request.ids, ContainerChangeOperation::Stop));
+            } else if id == ContainerChangeRestartRequest::id() {
+                let request =
+                    rkyv::from_bytes::<ContainerChangeRestartRequest, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.commands
+                    .borrow_mut()
+                    .push((request.ids, ContainerChangeOperation::Restart));
+            } else if id == ContainerChangeRemoveRequest::id() {
+                let request =
+                    rkyv::from_bytes::<ContainerChangeRemoveRequest, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.commands
+                    .borrow_mut()
+                    .push((request.ids, ContainerChangeOperation::Remove));
             } else if id == ContainerInspectRequest::id() {
                 self.inspections.borrow_mut().push(
                     rkyv::from_bytes::<ContainerInspectRequest, rkyv::rancor::Error>(bytes)
@@ -1840,8 +1874,8 @@ mod tests {
         assert_eq!(preview.host.starts.get(), 0);
         let commands = preview.host.commands.borrow();
         assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].ids, ["aaaaaaaaaaaa"]);
-        assert_eq!(commands[0].operation, ContainerOperation::Start);
+        assert_eq!(commands[0].0, ["aaaaaaaaaaaa"]);
+        assert_eq!(commands[0].1, ContainerChangeOperation::Start);
         drop(commands);
         let html = preview.render();
         assert!(html.contains(&translate("container-state-starting")));
@@ -2001,8 +2035,8 @@ mod tests {
         preview.click(&translate("container-stop-container"));
         let commands = preview.host.commands.borrow();
         assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].ids, ["eeeeeeeeeeee"]);
-        assert_eq!(commands[0].operation, ContainerOperation::Stop);
+        assert_eq!(commands[0].0, ["eeeeeeeeeeee"]);
+        assert_eq!(commands[0].1, ContainerChangeOperation::Stop);
         drop(commands);
         assert_eq!(preview.host.stops.get(), 0);
         let html = preview.render();
@@ -2071,8 +2105,8 @@ mod tests {
         preview.click(&start);
         let requests = preview.host.commands.borrow();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].ids, ["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
-        assert_eq!(requests[0].operation, ContainerOperation::Start);
+        assert_eq!(requests[0].0, ["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+        assert_eq!(requests[0].1, ContainerChangeOperation::Start);
         drop(requests);
         assert_eq!(preview.host.starts.get(), 0);
         assert!(

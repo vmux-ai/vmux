@@ -396,14 +396,49 @@ fn handoff_state_changed(
         || navigation_removed
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct HostedSurfaces<'w, 's> {
+    pages: Query<'w, 's, &'static HostedPage>,
+    children: Query<'w, 's, &'static Children>,
+}
+
+impl HostedSurfaces<'_, '_> {
+    fn page(&self, url: &str) -> Option<&HostedPage> {
+        let mut selected = None;
+        let mut score = (false, 0);
+        for page in &self.pages {
+            let Some(specificity) = page.specificity(url) else {
+                continue;
+            };
+            if selected.is_none() || specificity >= score {
+                selected = Some(page);
+                score = specificity;
+            }
+        }
+        selected
+    }
+
+    fn previous(&self, stack: Entity, except: Option<Entity>) -> Vec<Entity> {
+        let mut previous = Vec::new();
+        let Ok(children) = self.children.get(stack) else {
+            return previous;
+        };
+        for child in children {
+            if Some(*child) != except {
+                previous.push(*child);
+            }
+        }
+        previous
+    }
+}
+
 fn open(
-    pages: Query<&HostedPage>,
+    surfaces: HostedSurfaces,
     metadata: PageMetadataCatalog,
     placements: PagePlacementCatalog,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     navigations: Query<&PageNavigation>,
     histories: Query<(), With<HostHistory>>,
-    children: Query<&Children>,
     mut hosted_pages: ParamSet<(
         Query<(&Surface, Has<SurfaceHandoff>), (With<Browser>, With<HostsPage>)>,
         Query<&mut PageMetadata>,
@@ -421,15 +456,7 @@ fn open(
         {
             continue;
         }
-        let Some(page) = pages
-            .iter()
-            .filter_map(|page| {
-                page.specificity(&task.url)
-                    .map(|specificity| (specificity, page))
-            })
-            .max_by_key(|(specificity, _)| *specificity)
-            .map(|(_, page)| page)
-        else {
+        let Some(page) = surfaces.page(&task.url) else {
             continue;
         };
         if opened.insert(task.stack) {
@@ -439,7 +466,7 @@ fn open(
             }
             let existing = {
                 let hosted_browsers = hosted_pages.p0();
-                children.get(task.stack).ok().and_then(|children| {
+                surfaces.children.get(task.stack).ok().and_then(|children| {
                     children
                         .iter()
                         .filter_map(|child| {
@@ -452,15 +479,7 @@ fn open(
                 })
             };
             if let Some((browser, pending)) = existing {
-                let previous = children
-                    .get(task.stack)
-                    .map(|children| {
-                        children
-                            .iter()
-                            .filter(|child| *child != browser)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let previous = surfaces.previous(task.stack, Some(browser));
                 for surface in &previous {
                     commands.entity(*surface).try_insert(SurfaceBlocked);
                 }
@@ -502,10 +521,7 @@ fn open(
                     payload: PageReady {},
                 });
             } else {
-                let previous = children
-                    .get(task.stack)
-                    .map(|children| children.iter().collect::<Vec<_>>())
-                    .unwrap_or_default();
+                let previous = surfaces.previous(task.stack, None);
                 for surface in &previous {
                     commands.entity(*surface).try_insert(SurfaceBlocked);
                 }

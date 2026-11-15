@@ -648,7 +648,11 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         ] {
             plans.step(entity, &mut tail, work);
         }
-        plans.step(entity, &mut tail, Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]));
+        plans.step(
+            entity,
+            &mut tail,
+            Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]),
+        );
         plans.step(
             entity,
             &mut tail,

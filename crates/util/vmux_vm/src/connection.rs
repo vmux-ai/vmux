@@ -25,7 +25,11 @@ impl Plugin for ConnectionPlugin {
         });
         app.add_systems(
             Update,
-            (begin, poll, shutdown).chain().in_set(EngineSet::Connect),
+            (
+                initialize, expire, transport, forward, docker, ports, shutdown,
+            )
+                .chain()
+                .in_set(EngineSet::Connect),
         );
     }
 }
@@ -59,14 +63,16 @@ enum Stage {
 }
 
 #[derive(Component)]
-struct ConnectionTask(Task<Report>);
+struct TransportTask(Task<bool>);
 
-enum Report {
-    Transport(bool),
-    Forwarding(io::Result<()>),
-    Docker(bool),
-    Ports(PortForwarder, io::Result<()>),
-}
+#[derive(Component)]
+struct ForwardingTask(Task<io::Result<()>>);
+
+#[derive(Component)]
+struct DockerTask(Task<bool>);
+
+#[derive(Component)]
+struct PortsTask(Task<(PortForwarder, io::Result<()>)>);
 
 #[derive(Component)]
 struct StopWindow {
@@ -77,59 +83,122 @@ struct StopWindow {
 #[derive(Component)]
 struct StopTask(Task<io::Result<()>>);
 
-type ConnectingEngines<'w, 's> = Query<
+type NewConnections<'w, 's> =
+    Query<'w, 's, (Entity, &'static Phase), (With<Engine>, Without<Connection>)>;
+
+fn initialize(engines: NewConnections, mut commands: Commands) {
+    for (entity, phase) in &engines {
+        if phase.connecting() {
+            commands.entity(entity).insert(Connection::default());
+        }
+    }
+}
+
+fn expire(
+    mut engines: Query<(Entity, &mut Phase, &Deadline), With<Engine>>,
+    mut commands: Commands,
+) {
+    for (entity, mut phase, deadline) in &mut engines {
+        if *phase == Phase::DockerStarting && Instant::now() >= deadline.0 {
+            *phase = Phase::Stopping;
+            commands
+                .entity(entity)
+                .insert(Failure("Docker did not become ready".into()));
+        }
+        if !phase.connecting() {
+            commands
+                .entity(entity)
+                .remove::<(TransportTask, ForwardingTask, DockerTask, PortsTask)>();
+        }
+    }
+}
+
+type TransportConnections<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
         &'static Settings,
         &'static Phase,
-        Option<&'static mut Connection>,
-        Option<&'static ConnectionTask>,
+        &'static mut Connection,
+        Option<&'static mut TransportTask>,
     ),
     With<Engine>,
 >;
 
-fn begin(mut engines: ConnectingEngines, mut commands: Commands) {
-    for (entity, settings, phase, connection, task) in &mut engines {
-        if !phase.connecting() || task.is_some() {
+fn transport(mut engines: TransportConnections, mut commands: Commands) {
+    for (entity, settings, phase, mut connection, task) in &mut engines {
+        if !phase.connecting() || !matches!(connection.stage, Stage::Transport) {
             continue;
         }
-        let Some(mut connection) = connection else {
-            commands.entity(entity).insert(Connection::default());
+        if let Some(mut task) = task {
+            let Some(ready) = future::block_on(future::poll_once(&mut task.0)) else {
+                continue;
+            };
+            commands.entity(entity).remove::<TransportTask>();
+            connection.next = Instant::now() + Duration::from_millis(250);
+            if ready {
+                connection.stage = Stage::Forwarding;
+            }
             continue;
-        };
+        }
         if Instant::now() < connection.next {
             continue;
         }
         let settings = settings.clone();
-        let stage = connection.stage;
-        let ports = if matches!(stage, Stage::Ports) {
-            connection.ports.take()
-        } else {
-            None
-        };
-        let task = IoTaskPool::get().spawn(async move {
-            match stage {
-                Stage::Transport => {
-                    Report::Transport(EngineClient::ping(&settings.transport_socket()))
-                }
-                Stage::Forwarding => Report::Forwarding(Ssh::forward(&settings)),
-                Stage::Docker => Report::Docker(EngineClient::ping(&settings.socket())),
-                Stage::Ports => {
-                    let mut ports = ports.unwrap_or_else(|| {
-                        PortForwarder::new(&settings.socket(), &settings.network_api())
-                    });
-                    let result = ports.refresh();
-                    Report::Ports(ports, result)
-                }
-            }
-        });
-        commands.entity(entity).insert(ConnectionTask(task));
+        commands
+            .entity(entity)
+            .insert(TransportTask(IoTaskPool::get().spawn(async move {
+                EngineClient::ping(&settings.transport_socket())
+            })));
     }
 }
 
-type ActiveConnections<'w, 's> = Query<
+type ForwardingConnections<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Settings,
+        &'static Phase,
+        &'static mut Connection,
+        Option<&'static mut ForwardingTask>,
+    ),
+    With<Engine>,
+>;
+
+fn forward(mut engines: ForwardingConnections, mut commands: Commands) {
+    for (entity, settings, phase, mut connection, task) in &mut engines {
+        if !phase.connecting() || !matches!(connection.stage, Stage::Forwarding) {
+            continue;
+        }
+        if let Some(mut task) = task {
+            let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+                continue;
+            };
+            commands.entity(entity).remove::<ForwardingTask>();
+            connection.next = Instant::now() + Duration::from_millis(250);
+            match result {
+                Ok(()) => connection.stage = Stage::Docker,
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert(ConnectionIssue(error.to_string()));
+                }
+            }
+            continue;
+        }
+        if Instant::now() < connection.next {
+            continue;
+        }
+        let settings = settings.clone();
+        commands.entity(entity).insert(ForwardingTask(
+            IoTaskPool::get().spawn(async move { Ssh::forward(&settings) }),
+        ));
+    }
+}
+
+type DockerConnections<'w, 's> = Query<
     'w,
     's,
     (
@@ -137,41 +206,23 @@ type ActiveConnections<'w, 's> = Query<
         &'static Settings,
         &'static mut Phase,
         &'static mut Connection,
-        &'static mut ConnectionTask,
-        &'static Deadline,
+        Option<&'static mut DockerTask>,
     ),
     With<Engine>,
 >;
 
-fn poll(mut engines: ActiveConnections, mut commands: Commands) {
-    for (entity, settings, mut phase, mut connection, mut task, deadline) in &mut engines {
-        if !phase.connecting() {
-            commands.entity(entity).remove::<ConnectionTask>();
+fn docker(mut engines: DockerConnections, mut commands: Commands) {
+    for (entity, settings, mut phase, mut connection, task) in &mut engines {
+        if !phase.connecting() || !matches!(connection.stage, Stage::Docker) {
             continue;
         }
-        if *phase == Phase::DockerStarting && Instant::now() >= deadline.0 {
-            *phase = Phase::Stopping;
-            commands
-                .entity(entity)
-                .insert(Failure("Docker did not become ready".into()))
-                .remove::<ConnectionTask>();
-            continue;
-        }
-        let Some(report) = future::block_on(future::poll_once(&mut task.0)) else {
-            continue;
-        };
-        commands.entity(entity).remove::<ConnectionTask>();
-        connection.next = Instant::now() + Duration::from_millis(250);
-        match report {
-            Report::Transport(true) => connection.stage = Stage::Forwarding,
-            Report::Transport(false) => {}
-            Report::Forwarding(Ok(())) => connection.stage = Stage::Docker,
-            Report::Forwarding(Err(error)) => {
-                commands
-                    .entity(entity)
-                    .insert(ConnectionIssue(error.to_string()));
-            }
-            Report::Docker(true) => {
+        if let Some(mut task) = task {
+            let Some(ready) = future::block_on(future::poll_once(&mut task.0)) else {
+                continue;
+            };
+            commands.entity(entity).remove::<DockerTask>();
+            connection.next = Instant::now() + Duration::from_millis(250);
+            if ready {
                 *phase = Phase::Ready;
                 connection.stage = Stage::Ports;
                 connection.ports = Some(PortForwarder::new(
@@ -180,33 +231,80 @@ fn poll(mut engines: ActiveConnections, mut commands: Commands) {
                 ));
                 commands.entity(entity).remove::<ConnectionIssue>();
             }
-            Report::Docker(false) => {}
-            Report::Ports(ports, result) => {
-                connection.ports = Some(ports);
-                connection.next = Instant::now() + Duration::from_secs(1);
-                match result {
-                    Ok(()) => {
-                        commands.entity(entity).remove::<ConnectionIssue>();
-                    }
-                    Err(error)
-                        if matches!(
-                            error.kind(),
-                            io::ErrorKind::WouldBlock
-                                | io::ErrorKind::TimedOut
-                                | io::ErrorKind::Interrupted
-                                | io::ErrorKind::ConnectionReset
-                                | io::ErrorKind::ConnectionAborted
-                                | io::ErrorKind::ConnectionRefused
-                                | io::ErrorKind::UnexpectedEof
-                        ) => {}
-                    Err(error) => {
-                        commands
-                            .entity(entity)
-                            .insert(ConnectionIssue(error.to_string()));
-                    }
+            continue;
+        }
+        if Instant::now() < connection.next {
+            continue;
+        }
+        let settings = settings.clone();
+        commands.entity(entity).insert(DockerTask(
+            IoTaskPool::get().spawn(async move { EngineClient::ping(&settings.socket()) }),
+        ));
+    }
+}
+
+type PortConnections<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Settings,
+        &'static Phase,
+        &'static mut Connection,
+        Option<&'static mut PortsTask>,
+    ),
+    With<Engine>,
+>;
+
+fn ports(mut engines: PortConnections, mut commands: Commands) {
+    for (entity, settings, phase, mut connection, task) in &mut engines {
+        if !phase.connecting() || !matches!(connection.stage, Stage::Ports) {
+            continue;
+        }
+        if let Some(mut task) = task {
+            let Some((ports, result)) = future::block_on(future::poll_once(&mut task.0)) else {
+                continue;
+            };
+            commands.entity(entity).remove::<PortsTask>();
+            connection.ports = Some(ports);
+            connection.next = Instant::now() + Duration::from_secs(1);
+            match result {
+                Ok(()) => {
+                    commands.entity(entity).remove::<ConnectionIssue>();
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                            | io::ErrorKind::ConnectionReset
+                            | io::ErrorKind::ConnectionAborted
+                            | io::ErrorKind::ConnectionRefused
+                            | io::ErrorKind::UnexpectedEof
+                    ) => {}
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert(ConnectionIssue(error.to_string()));
                 }
             }
+            continue;
         }
+        if Instant::now() < connection.next {
+            continue;
+        }
+        let settings = settings.clone();
+        let mut ports = match connection.ports.take() {
+            Some(ports) => ports,
+            None => PortForwarder::new(&settings.socket(), &settings.network_api()),
+        };
+        commands
+            .entity(entity)
+            .insert(PortsTask(IoTaskPool::get().spawn(async move {
+                let result = ports.refresh();
+                (ports, result)
+            })));
     }
 }
 
@@ -234,7 +332,9 @@ fn shutdown(
         {
             continue;
         }
-        commands.entity(entity).remove::<ConnectionTask>();
+        commands
+            .entity(entity)
+            .remove::<(TransportTask, ForwardingTask, DockerTask, PortsTask)>();
         let Some(mut window) = window else {
             commands.entity(entity).insert(StopWindow {
                 deadline: Instant::now() + Duration::from_secs(60),
@@ -354,30 +454,30 @@ mod tests {
             let ports = PortForwarder::new(&settings.socket(), &settings.network_api());
             let mut app = App::new();
             app.add_plugins(EnginePlugin);
-            let entity = app
-                .world_mut()
-                .spawn((
-                    Engine,
-                    settings,
-                    Phase::Ready,
-                    Connection {
-                        stage: Stage::Ports,
-                        next: Instant::now(),
-                        ports: None,
-                    },
-                    ConnectionTask(IoTaskPool::get().spawn(async move {
-                        Report::Ports(ports, Err(io::Error::new(kind, "read failed")))
-                    })),
-                    Deadline(Instant::now() + Duration::from_secs(3)),
-                ))
-                .id();
+            let entity =
+                app.world_mut()
+                    .spawn((
+                        Engine,
+                        settings,
+                        Phase::Ready,
+                        Connection {
+                            stage: Stage::Ports,
+                            next: Instant::now(),
+                            ports: None,
+                        },
+                        PortsTask(IoTaskPool::get().spawn(async move {
+                            (ports, Err(io::Error::new(kind, "read failed")))
+                        })),
+                        Deadline(Instant::now() + Duration::from_secs(3)),
+                    ))
+                    .id();
             if let Some(previous) = previous {
                 app.world_mut()
                     .entity_mut(entity)
                     .insert(ConnectionIssue(previous.into()));
             }
             let deadline = Instant::now() + Duration::from_secs(3);
-            while app.world().get::<ConnectionTask>(entity).is_some() {
+            while app.world().get::<PortsTask>(entity).is_some() {
                 assert!(Instant::now() < deadline);
                 app.update();
                 std::thread::sleep(Duration::from_millis(1));

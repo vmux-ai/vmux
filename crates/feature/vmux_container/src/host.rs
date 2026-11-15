@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
@@ -12,7 +13,10 @@ use vmux_ecs::{KeyboardOwner, PageMetadata, Revision, UiStatePlugin, UiStateWrit
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
-use crate::control::{Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request};
+use crate::control::{
+    Busy, Changed, Configure, Configured, ControlPlugin, ControlSet, Finished, LogText, Ownership,
+    ReadLogs, Start, Started, StatusRead, Stop, Stopped, Target,
+};
 use crate::event::{
     ContainerLogsRequest, ContainerSettingsRequest, ContainerStartRequest, ContainerStopRequest,
     ContainerUiState,
@@ -65,7 +69,12 @@ impl Plugin for ContainerPlugin {
             .add_observer(configure)
             .add_observer(stop)
             .add_observer(logs)
-            .add_observer(finish)
+            .add_observer(started)
+            .add_observer(stopped)
+            .add_observer(inspected)
+            .add_observer(logged)
+            .add_observer(configured)
+            .add_observer(changed)
             .add_systems(Startup, spawn)
             .add_systems(
                 Update,
@@ -236,12 +245,14 @@ fn start(
     let Ok((entity, settings, _, _)) = engines.single() else {
         return;
     };
-    commands.trigger(Request {
+    commands.trigger(Start {
         entity,
-        reply: entity,
-        command: Command::Start(crate::control::Ownership::Application),
-        settings: settings.clone(),
-        requester: event.webview,
+        target: Target {
+            reply: entity,
+            settings: settings.clone(),
+            requester: event.webview,
+        },
+        ownership: Ownership::Application,
     });
 }
 
@@ -265,12 +276,13 @@ fn configure(
     requested.shared_directory = PathBuf::from(&event.payload.shared_directory);
     requested.cpus = event.payload.cpus;
     requested.memory_mib = event.payload.memory_mib;
-    commands.trigger(Request {
+    commands.trigger(Configure {
         entity,
-        reply: entity,
-        command: Command::Configure,
-        settings: requested,
-        requester: event.webview,
+        target: Target {
+            reply: entity,
+            settings: requested,
+            requester: event.webview,
+        },
     });
 }
 
@@ -287,12 +299,13 @@ fn stop(
     let Ok((entity, settings)) = engines.single() else {
         return;
     };
-    commands.trigger(Request {
+    commands.trigger(Stop {
         entity,
-        reply: entity,
-        command: Command::Stop,
-        settings: settings.clone(),
-        requester: page,
+        target: Target {
+            reply: entity,
+            settings: settings.clone(),
+            requester: page,
+        },
     });
 }
 
@@ -309,12 +322,13 @@ fn logs(
     let Ok((entity, settings)) = engines.single() else {
         return;
     };
-    commands.trigger(Request {
+    commands.trigger(ReadLogs {
         entity,
-        reply: entity,
-        command: Command::Logs,
-        settings: settings.clone(),
-        requester: page,
+        target: Target {
+            reply: entity,
+            settings: settings.clone(),
+            requester: page,
+        },
     });
 }
 
@@ -339,50 +353,119 @@ type CompletedPages<'w, 's> = Query<
     (With<PageView>, Without<EngineView>),
 >;
 
-fn finish(
-    trigger: On<Finished>,
-    mut engines: CompletedEngines,
-    mut pages: CompletedPages,
-    mut commands: Commands,
-) {
+#[derive(SystemParam)]
+struct Completion<'w, 's> {
+    engines: CompletedEngines<'w, 's>,
+    pages: CompletedPages<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl Completion<'_, '_> {
+    fn acknowledge<R: Send + Sync + 'static>(&mut self, event: &Finished<R>) -> bool {
+        let Ok((_, _, mut error, _, _, mut revision)) = self.engines.get_mut(event.entity) else {
+            return false;
+        };
+        if event.mutates {
+            *revision = revision.saturating_next();
+        }
+        if let Err(value) = &event.result {
+            error.0 = value.clone();
+        }
+        if let Ok((mut completed, mut page_error)) = self.pages.get_mut(event.requester) {
+            if event.mutates {
+                completed.0 = completed.0.wrapping_add(1);
+            }
+            match &event.result {
+                Ok(_) => page_error.0.clear(),
+                Err(error) => page_error.0 = error.clone(),
+            }
+        }
+        self.commands
+            .entity(event.entity)
+            .remove::<InspectTask>()
+            .insert(NextInspection(Instant::now()));
+        true
+    }
+}
+
+fn started(trigger: On<Finished<Started>>, mut completion: Completion) {
     let event = trigger.event();
-    let Ok((mut observed, mut logs, mut error, mut settings, mut revision, mut engine_revision)) =
-        engines.get_mut(event.entity)
-    else {
+    if !completion.acknowledge(event) {
+        return;
+    }
+    let Ok(value) = &event.result else {
         return;
     };
-    if event.mutates {
-        *engine_revision = engine_revision.saturating_next();
+    let (mut observed, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
+    observed.0 = value.0.clone();
+    error.0.clear();
+}
+
+fn stopped(trigger: On<Finished<Stopped>>, mut completion: Completion) {
+    let event = trigger.event();
+    if !completion.acknowledge(event) {
+        return;
     }
-    if let Ok((mut completed, mut page_error)) = pages.get_mut(event.requester) {
-        if event.mutates {
-            completed.0 = completed.0.wrapping_add(1);
-        }
-        match &event.result {
-            Ok(_) => page_error.0.clear(),
-            Err(error) => page_error.0 = error.clone(),
-        }
+    let Ok(value) = &event.result else {
+        return;
+    };
+    let (mut observed, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
+    observed.0 = value.0.clone();
+    error.0.clear();
+}
+
+fn inspected(trigger: On<Finished<StatusRead>>, mut completion: Completion) {
+    let event = trigger.event();
+    if !completion.acknowledge(event) {
+        return;
     }
-    match &event.result {
-        Ok(Reply::Started(status) | Reply::Stopped(status) | Reply::Status(status)) => {
-            observed.0 = status.clone();
-            error.0.clear();
-        }
-        Ok(Reply::Logs(value)) => logs.0 = value.clone(),
-        Ok(Reply::Configured(value)) => {
-            *settings = value.clone();
-            revision.0 += 1;
-            observed.0.socket = settings.socket();
-            observed.0.log = settings.log();
-            error.0.clear();
-        }
-        Ok(Reply::Changed) => error.0.clear(),
-        Err(value) => error.0 = value.clone(),
+    let Ok(value) = &event.result else {
+        return;
+    };
+    let (mut observed, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
+    observed.0 = value.0.clone();
+    error.0.clear();
+}
+
+fn logged(trigger: On<Finished<LogText>>, mut completion: Completion) {
+    let event = trigger.event();
+    if !completion.acknowledge(event) {
+        return;
     }
-    commands
-        .entity(event.entity)
-        .remove::<InspectTask>()
-        .insert(NextInspection(Instant::now()));
+    let Ok(value) = &event.result else {
+        return;
+    };
+    let (_, mut logs, _, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
+    logs.0 = value.0.clone();
+}
+
+fn configured(trigger: On<Finished<Configured>>, mut completion: Completion) {
+    let event = trigger.event();
+    if !completion.acknowledge(event) {
+        return;
+    }
+    let Ok(value) = &event.result else {
+        return;
+    };
+    let (mut observed, _, mut error, mut settings, mut revision, _) =
+        completion.engines.get_mut(event.entity).unwrap();
+    *settings = value.0.clone();
+    revision.0 += 1;
+    observed.0.socket = settings.socket();
+    observed.0.log = settings.log();
+    error.0.clear();
+}
+
+fn changed(trigger: On<Finished<Changed>>, mut completion: Completion) {
+    let event = trigger.event();
+    if !completion.acknowledge(event) {
+        return;
+    }
+    let Ok(_) = &event.result else {
+        return;
+    };
+    let (_, _, mut error, _, _, _) = completion.engines.get_mut(event.entity).unwrap();
+    error.0.clear();
 }
 
 type InspectedEngines<'w, 's> = Query<
@@ -463,12 +546,14 @@ fn autostart(
         if observed.0.running || observed.0.docker_ready || busy.is_some() {
             continue;
         }
-        commands.trigger(Request {
+        commands.trigger(Start {
             entity,
-            reply: entity,
-            command: Command::Start(crate::control::Ownership::Application),
-            settings: settings.clone(),
-            requester: page,
+            target: Target {
+                reply: entity,
+                settings: settings.clone(),
+                requester: page,
+            },
+            ownership: Ownership::Application,
         });
     }
 }
@@ -651,9 +736,8 @@ mod tests {
         });
         app.world_mut().trigger(UiInput {
             webview: page,
-            payload: crate::event::ContainerCommandRequest {
+            payload: crate::event::ContainerChangeStartRequest {
                 ids: vec!["aaaaaaaaaaaa".into()],
-                operation: crate::event::ContainerOperation::Start,
             },
         });
         app.world_mut().run_schedule(Update);
@@ -674,6 +758,59 @@ mod tests {
         );
         assert_eq!(std::fs::read(config).unwrap(), bytes);
     }
+    #[test]
+    fn typed_configuration_persists_and_projects_the_accepted_operation() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.cpus = 1;
+        let settings = EngineClient::new(settings).configure().unwrap();
+        let mut app = App::new();
+        app.add_plugins(ContainerPlugin);
+        let engine = app
+            .world_mut()
+            .spawn((
+                EngineView,
+                Observed(EngineClient::new(settings.clone()).status()),
+                settings.clone(),
+                Logs::default(),
+                LastError::default(),
+                ConfigurationRevision::default(),
+                Revision::default(),
+            ))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn((PageView, Revision::default(), LastError::default()))
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ContainerSettingsRequest {
+                shared_directory: directory.path().display().to_string(),
+                cpus: 2,
+                memory_mib: 2048,
+            },
+        });
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.world().get::<ConfigurationRevision>(engine).unwrap().0 == 0 {
+            assert!(Instant::now() < deadline, "configuration did not complete");
+            app.world_mut().run_schedule(Update);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let persisted = Settings::load(&settings.directory.join("settings.json")).unwrap();
+        assert_eq!(persisted.cpus, 2);
+        assert_eq!(persisted.memory_mib, 2048);
+        assert_eq!(app.world().get::<Settings>(engine).unwrap(), &persisted);
+        assert_eq!(app.world().get::<Revision>(page).unwrap().0, 1);
+        assert!(app.world().get::<LastError>(page).unwrap().0.is_empty());
+        assert_eq!(
+            app.world_mut()
+                .query::<&Configured>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
     #[derive(Resource, Default)]
     struct Delivery {
         writes: usize,

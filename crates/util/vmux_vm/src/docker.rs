@@ -3,7 +3,7 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use bevy_ecs::prelude::{Component, Message};
+use bevy_ecs::prelude::Message;
 
 use serde::{Deserialize, Serialize};
 
@@ -44,18 +44,40 @@ impl Client {
         }
     }
 
-    pub fn change(&self, id: &str, operation: Operation) -> io::Result<()> {
+    pub fn start(&self, id: &str) -> io::Result<()> {
         let id = Id::new(id)?;
         let http = self.0.clone().timeout(Duration::from_secs(30));
-        let response = match operation {
-            Operation::Start => http.post(&id.endpoint("/start"), &[])?,
-            Operation::Stop => http.post(&id.endpoint("/stop?t=10"), &[])?,
-            Operation::Restart => http.post(&id.endpoint("/restart?t=10"), &[])?,
-            Operation::Remove => http.delete(&id.endpoint("?force=false&v=false"))?,
-        };
-        if response.status == 304 && matches!(operation, Operation::Start | Operation::Stop) {
+        let response = http.post(&id.endpoint("/start"), &[])?;
+        if response.status == 304 {
             return Ok(());
         }
+        response.require_success()?;
+        Ok(())
+    }
+
+    pub fn stop(&self, id: &str) -> io::Result<()> {
+        let id = Id::new(id)?;
+        let http = self.0.clone().timeout(Duration::from_secs(30));
+        let response = http.post(&id.endpoint("/stop?t=10"), &[])?;
+        if response.status == 304 {
+            return Ok(());
+        }
+        response.require_success()?;
+        Ok(())
+    }
+
+    pub fn restart(&self, id: &str) -> io::Result<()> {
+        let id = Id::new(id)?;
+        let http = self.0.clone().timeout(Duration::from_secs(30));
+        let response = http.post(&id.endpoint("/restart?t=10"), &[])?;
+        response.require_success()?;
+        Ok(())
+    }
+
+    pub fn remove(&self, id: &str) -> io::Result<()> {
+        let id = Id::new(id)?;
+        let http = self.0.clone().timeout(Duration::from_secs(30));
+        let response = http.delete(&id.endpoint("?force=false&v=false"))?;
         response.require_success()?;
         Ok(())
     }
@@ -86,14 +108,6 @@ impl Client {
             .require_success()?;
         Output::decode(&body, inspection.config.tty)
     }
-}
-
-#[derive(Component, Clone, Copy, Debug)]
-pub enum Operation {
-    Start,
-    Stop,
-    Restart,
-    Remove,
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -681,30 +695,28 @@ mod tests {
     fn container_commands_are_idempotent_and_delete_without_removing_volumes() {
         for (operation, status, expected) in [
             (
-                Operation::Start,
+                Client::start as fn(&Client, &str) -> io::Result<()>,
                 304,
                 "POST /containers/eeeeeeeeeeee/start HTTP/1.0",
             ),
             (
-                Operation::Stop,
+                Client::stop as fn(&Client, &str) -> io::Result<()>,
                 304,
                 "POST /containers/eeeeeeeeeeee/stop?t=10 HTTP/1.0",
             ),
             (
-                Operation::Restart,
+                Client::restart as fn(&Client, &str) -> io::Result<()>,
                 204,
                 "POST /containers/eeeeeeeeeeee/restart?t=10 HTTP/1.0",
             ),
             (
-                Operation::Remove,
+                Client::remove as fn(&Client, &str) -> io::Result<()>,
                 204,
                 "DELETE /containers/eeeeeeeeeeee?force=false&v=false HTTP/1.0",
             ),
         ] {
             let daemon = Daemon::new(vec![Daemon::reply(status, "")]);
-            Client::new(&daemon.settings.socket())
-                .change("eeeeeeeeeeee", operation)
-                .unwrap();
+            operation(&Client::new(&daemon.settings.socket()), "eeeeeeeeeeee").unwrap();
             assert_eq!(daemon.request().lines().next(), Some(expected));
         }
     }
@@ -736,7 +748,7 @@ mod tests {
             "name",
         ] {
             assert_eq!(
-                client.change(id, Operation::Remove).unwrap_err().kind(),
+                client.remove(id).unwrap_err().kind(),
                 io::ErrorKind::InvalidInput
             );
         }

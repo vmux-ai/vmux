@@ -8,7 +8,7 @@ use bevy_ecs::query::QueryData;
 use bevy_ecs::system::SystemParam;
 
 use crate::Owner;
-use crate::docker::{Client, Condition, Container, Dependency, Operation, RunState};
+use crate::docker::{Client, Condition, Container, Dependency, RunState};
 
 struct BatchPlugin;
 
@@ -72,6 +72,7 @@ impl Runtime {
 }
 
 #[derive(Component)]
+#[require(Stage)]
 struct Scope;
 
 #[derive(Component)]
@@ -100,8 +101,9 @@ fn cancel(
     }
 }
 
-#[derive(Component, PartialEq, Eq)]
+#[derive(Component, Default, PartialEq, Eq)]
 enum Stage {
+    #[default]
     Ingest,
     Link,
     Select,
@@ -294,7 +296,6 @@ type Effects<'w, 's> = Query<
     (
         Entity,
         &'static Identifier,
-        &'static Operation,
         &'static ChildOf,
         Option<&'static RetryAt>,
     ),
@@ -424,9 +425,7 @@ fn select(mut roots: Roots, rows: Rows, mut commands: Commands) {
         }
     }
     for entity in selected {
-        commands
-            .entity(entity)
-            .insert((Operation::Start, Position(sequence.position)));
+        commands.entity(entity).insert(Position(sequence.position));
         sequence.position += 1;
     }
     *stage = Stage::Expand;
@@ -465,9 +464,7 @@ fn expand(mut roots: Roots, rows: Rows, mut commands: Commands) {
         for (target, _) in &links.0 {
             if !entities.contains(target) {
                 entities.push(*target);
-                commands
-                    .entity(*target)
-                    .insert((Operation::Start, Position(sequence.position)));
+                commands.entity(*target).insert(Position(sequence.position));
                 sequence.position += 1;
             }
         }
@@ -673,7 +670,7 @@ fn apply(
         return;
     }
     let cancellation = cancellations.get(root).ok();
-    for (entity, id, operation, parent, retry) in &effects {
+    for (entity, id, parent, retry) in &effects {
         if parent.parent() != root {
             continue;
         }
@@ -690,9 +687,9 @@ fn apply(
         if retry.is_some_and(|retry| Instant::now() < retry.0) {
             continue;
         }
-        if let Err(error) = endpoint.0.change(&id.0, *operation) {
+        if let Err(error) = endpoint.0.start(&id.0) {
             let error = ReadError::from(error);
-            if matches!(operation, Operation::Start) && error.retryable() {
+            if error.retryable() {
                 commands
                     .entity(entity)
                     .insert(RetryAt(Instant::now() + Duration::from_millis(200)));
@@ -771,7 +768,6 @@ mod tests {
                 Project("vmux-cloud".into()),
                 Service("account".into()),
                 SourceOrder(0),
-                Operation::Start,
                 Position(0),
                 Rank(0),
                 Links(Vec::new()),

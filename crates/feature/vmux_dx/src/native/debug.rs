@@ -333,6 +333,40 @@ impl Native {
         fs::create_dir_all(contents.join("MacOS"))?;
         fs::create_dir_all(contents.join("Resources"))?;
         fs::create_dir_all(contents.join("Frameworks"))?;
+        let plist = self.debug_metadata(&debug, &contents)?;
+        let service_stamp = self.debug_service(&debug, &contents, &plist)?;
+        let binary = contents.join("MacOS/vmux_desktop");
+        let stdlib = self.text(
+            self.get("RUSTC", "rustc"),
+            &[OsStr::new("--print"), OsStr::new("target-libdir")],
+        )?;
+        let inputs = format!(
+            "{}\n{}\n{}",
+            self.signing_inputs(&[
+                &debug.join("vmux_desktop"),
+                &contents.join("MacOS/vmux"),
+                &contents.join("MacOS/vmux_vm"),
+                &plist,
+                &contents.join("Resources/Vmux.icns"),
+                &service_stamp
+            ])?,
+            debug.join("deps").display(),
+            stdlib.trim()
+        );
+        let stamp = debug.join(".vmux-dev-desktop-signed");
+        if self.signature_current(&stamp, &inputs, &binary, &app)? {
+            return Ok(());
+        }
+        self.copy(&debug.join("vmux_desktop"), &binary)?;
+        self.relocate_debug(&debug, &binary, stdlib.trim())?;
+        self.sign(&app, None)?;
+        self.verify_signature(&app)?;
+        self.record_signature(&stamp, &inputs, &binary)?;
+        Ok(())
+    }
+
+    fn debug_metadata(&self, debug: &Path, contents: &Path) -> Result<PathBuf> {
+        let product = self.product()?;
         let plist = contents.join("Info.plist");
         self.copy(
             &self.checkout.root.join("packaging/macos/Info.plist"),
@@ -381,12 +415,17 @@ impl Native {
         )?;
         self.copy(&debug.join("vmux"), &contents.join("MacOS/vmux"))?;
         self.copy(&debug.join("vmux_vm"), &contents.join("MacOS/vmux_vm"))?;
+        Ok(plist)
+    }
+
+    fn debug_service(&self, debug: &Path, contents: &Path, plist: &Path) -> Result<PathBuf> {
+        let product = self.product()?;
         let service = contents
             .join("Library/LoginItems")
             .join(product.value("VMUX_HOST_SERVICE_BUNDLE"));
         let service_contents = service.join("Contents");
         let service_plist = service_contents.join("Info.plist");
-        self.copy(&plist, &service_plist)?;
+        self.copy(plist, &service_plist)?;
         for key in ["CFBundleExecutable", "CFBundleName", "CFBundleDisplayName"] {
             self.plist(
                 &service_plist,
@@ -414,31 +453,12 @@ impl Native {
             self.sign(&service, None)?;
             self.record_signature(&service_stamp, &service_inputs, &service_binary)?;
         }
-        let binary = contents.join("MacOS/vmux_desktop");
-        let stdlib = self.text(
-            self.get("RUSTC", "rustc"),
-            &[OsStr::new("--print"), OsStr::new("target-libdir")],
-        )?;
-        let inputs = format!(
-            "{}\n{}\n{}",
-            self.signing_inputs(&[
-                &debug.join("vmux_desktop"),
-                &contents.join("MacOS/vmux"),
-                &contents.join("MacOS/vmux_vm"),
-                &plist,
-                &contents.join("Resources/Vmux.icns"),
-                &service_stamp
-            ])?,
-            debug.join("deps").display(),
-            stdlib.trim()
-        );
-        let stamp = debug.join(".vmux-dev-desktop-signed");
-        if self.signature_current(&stamp, &inputs, &binary, &app)? {
-            return Ok(());
-        }
-        self.copy(&debug.join("vmux_desktop"), &binary)?;
+        Ok(service_stamp)
+    }
+
+    fn relocate_debug(&self, debug: &Path, binary: &Path, stdlib: &str) -> Result<()> {
         let existing = self.text("otool", &[OsStr::new("-l"), binary.as_os_str()])?;
-        for directory in [debug.join("deps"), stdlib.trim().into()] {
+        for directory in [debug.join("deps"), stdlib.into()] {
             if !existing.contains(&format!("path {} (", directory.display())) {
                 self.run_command(
                     "install_name_tool",
@@ -479,9 +499,6 @@ impl Native {
                 )?;
             }
         }
-        self.sign(&app, None)?;
-        self.verify_signature(&app)?;
-        self.record_signature(&stamp, &inputs, &binary)?;
         Ok(())
     }
 

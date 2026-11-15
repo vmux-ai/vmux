@@ -60,9 +60,13 @@ The repository's policy checks test these relationships. Ownership is inferred f
 
 Give independent operations separate typed requests and phases, and keep handlers focused on one stage. This makes ownership and failure paths visible when a feature grows. An adapter's exception describes its actual outside interface; it does not move the feature's decisions out of Bevy.
 
+Startup migrations retain their accepted configuration and revision on the owning store until completion. Bookmark default seeding materializes pending pins as entities before ordering and publication, preserves custom pins and folders, and advances autosave when the same deferred-command drain completes.
+
 ## Native VM and Docker
 
 `vmux_container` owns the pages, typed CLI/GUI requests, configuration, selection and canonical inventory. `vmux_vm` owns the leased native lifecycle and ECS dependency batches. Docker input becomes entities before dependency decisions or UI projection; the persisted inventory is a restore input, not a second live registry.
+
+Container control uses separate start, stop, inspection, logs, configuration and container-change requests with concrete task results. The accepted operation owns its reply target, requester and cancellation handle; the engine's busy relationship decides which completion is current. UI operation choices only encode typed intent and a bounded display echo. Native connection systems own transport probing, forwarding, Docker readiness and port refresh in order, each with its own IO result. Docker methods issue one fixed HTTP operation; dependency batches request starts directly.
 
 Startup and shutdown use exclusive process and guest-file leases. Operations own cancellation, so Stop can supersede startup and dependency work without an older completion replacing a newer request. The same stop receipt remains observed during preparation and readiness, including before the supervisor publishes its control socket. Bounded retirement cleans up helpers and forwarding while preserving guest disks. GUI Quit respects engine ownership; independent CLI engines and other profiles survive it.
 

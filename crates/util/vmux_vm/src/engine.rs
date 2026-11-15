@@ -40,6 +40,7 @@ impl Plugin for EnginePlugin {
 }
 
 #[derive(Component)]
+#[require(Phase)]
 pub struct Engine;
 
 impl Engine {
@@ -55,9 +56,10 @@ impl Engine {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
+    #[default]
     Created,
     NetworkStarting,
     DockerStarting,

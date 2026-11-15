@@ -1,5 +1,6 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{App, Plugin};
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
 use vmux_api::PageIcon;
@@ -25,6 +26,14 @@ impl Plugin for BookmarkStorePlugin {
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
             .add_observer(insert_defaults)
+            .add_observer(migrate_vm)
+            .add_observer(retire_defaults)
+            .add_observer(claim_pins)
+            .add_observer(order_legacy)
+            .add_observer(order_vm)
+            .add_observer(publish_pins)
+            .add_observer(seed_folders)
+            .add_observer(finish_defaults)
             .add_systems(
                 Startup,
                 (spawn, ApplyDeferred, load_bookmarks_on_startup)
@@ -161,27 +170,116 @@ struct BookmarkSeed<'w, 's> {
         Query<'w, 's, (Entity, &'static Name, Option<&'static SmartBookmarkFolder>), With<Folder>>,
     orders: Query<'w, 's, &'static BookmarkOrder, BookmarkFilter>,
     offered: ResMut<'w, OfferedBookmarkDefaults>,
-    auto: Single<'w, 's, &'static mut State, With<BookmarkAutoSave>>,
+    auto: Single<'w, 's, (Entity, &'static mut State), With<BookmarkAutoSave>>,
     commands: Commands<'w, 's>,
+}
+
+#[derive(Component)]
+struct Seeding {
+    settings: BookmarkDefaults,
+    pin_revision: u32,
+    changed: bool,
+}
+
+#[derive(Component)]
+struct NextOrder(u32);
+
+#[derive(Component)]
+struct ClaimedPin(Entity);
+
+#[derive(EntityEvent)]
+struct MigrateVm {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct RetireDefaults {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct ClaimPins {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct OrderLegacy {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct OrderVm {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct PublishPins {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct SeedFolders {
+    #[event_target]
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct FinishDefaults {
+    #[event_target]
+    entity: Entity,
 }
 
 fn insert_defaults(
     _trigger: On<SeedBookmarkDefaults>,
     settings: Res<BookmarkDefaults>,
+    running: Query<(), With<Seeding>>,
     mut seed: BookmarkSeed,
 ) {
-    let urls = &settings.urls;
-    let folders = &settings.folders;
-    let pin_revision = seed.offered.pin_order_revision;
-    let vm_revision = seed.offered.vm_root_revision;
-    let mut migrated = HashSet::new();
+    let entity = seed.auto.0;
+    if running.contains(entity) {
+        return;
+    }
+    let next = seed
+        .orders
+        .iter()
+        .map(|order| order.0)
+        .max()
+        .map_or(0, |order| order.saturating_add(1));
+    seed.commands.entity(entity).insert((
+        Seeding {
+            settings: settings.clone(),
+            pin_revision: seed.offered.pin_order_revision,
+            changed: false,
+        },
+        NextOrder(next),
+    ));
+    seed.commands.trigger(MigrateVm { entity });
+}
+
+fn migrate_vm(trigger: On<MigrateVm>, mut roots: Query<&mut Seeding>, mut seed: BookmarkSeed) {
+    let entity = trigger.event().entity;
+    let Ok(mut state) = roots.get_mut(entity) else {
+        return;
+    };
     let vm = BookmarkSeed::key("vmux://vm/");
-    if vm_revision == 0 && urls.iter().any(|url| BookmarkSeed::key(url) == vm) {
-        let existing_vm = seed
+    if seed.offered.vm_root_revision == 0
+        && state
+            .settings
+            .urls
+            .iter()
+            .any(|url| BookmarkSeed::key(url) == vm)
+    {
+        let existing = seed
             .pins
             .iter()
             .any(|(_, metadata, _)| BookmarkSeed::key(&metadata.url) == vm);
-        if !existing_vm {
+        if !existing {
             let containers = BookmarkSeed::key("vmux://vm/docker/containers");
             for url in &mut seed.offered.urls {
                 if BookmarkSeed::key(url) == containers {
@@ -197,240 +295,322 @@ fn insert_defaults(
                 metadata.title = "VM".into();
                 metadata.icon = PageIcon::Builtin(vmux_api::BuiltinIcon::Computer);
                 seed.commands.entity(entity).insert(metadata);
-                migrated.insert(entity);
             }
         }
         seed.offered.vm_root_revision = 1;
+        state.changed = true;
     }
-    let retired_keys = RETIRED_DEFAULT_BOOKMARKS
-        .iter()
-        .map(|url| BookmarkSeed::key(url))
-        .collect::<HashSet<_>>();
-    let offered_before = seed
-        .offered
-        .urls
-        .iter()
-        .map(|url| BookmarkSeed::key(url))
-        .collect::<HashSet<_>>();
-    let mut retired_entities = HashSet::new();
-    if pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
-        for (entity, metadata, _) in &seed.pins {
+    seed.commands.trigger(RetireDefaults { entity });
+}
+
+fn retire_defaults(
+    trigger: On<RetireDefaults>,
+    mut roots: Query<&mut Seeding>,
+    mut seed: BookmarkSeed,
+) {
+    let entity = trigger.event().entity;
+    let Ok(mut state) = roots.get_mut(entity) else {
+        return;
+    };
+    if state.pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
+        let mut retired = HashSet::new();
+        for url in RETIRED_DEFAULT_BOOKMARKS {
+            retired.insert(BookmarkSeed::key(url));
+        }
+        let mut offered = HashSet::new();
+        for url in &seed.offered.urls {
+            offered.insert(BookmarkSeed::key(url));
+        }
+        for (pin, metadata, _) in &seed.pins {
             let key = BookmarkSeed::key(&metadata.url);
-            if retired_keys.contains(&key) && offered_before.contains(&key) {
-                seed.commands.entity(entity).despawn();
-                retired_entities.insert(entity);
+            if retired.contains(&key) && offered.contains(&key) {
+                seed.commands.entity(pin).despawn();
+                state.changed = true;
             }
         }
         seed.offered
             .urls
-            .retain(|url| !retired_keys.contains(&BookmarkSeed::key(url)));
+            .retain(|url| !retired.contains(&BookmarkSeed::key(url)));
     }
-    let mut offered_urls = seed
-        .offered
-        .urls
-        .iter()
-        .map(|url| BookmarkSeed::key(url))
-        .collect::<HashSet<_>>();
-    let mut claimed_urls = Vec::new();
-    for url in urls {
+    seed.commands.trigger(ClaimPins { entity });
+}
+
+fn claim_pins(
+    trigger: On<ClaimPins>,
+    mut roots: Query<(&mut Seeding, &NextOrder)>,
+    mut seed: BookmarkSeed,
+) {
+    let entity = trigger.event().entity;
+    let Ok((mut state, next)) = roots.get_mut(entity) else {
+        return;
+    };
+    let mut offered = HashSet::new();
+    for url in &seed.offered.urls {
+        offered.insert(BookmarkSeed::key(url));
+    }
+    let mut pinned = HashSet::new();
+    for (_, metadata, _) in &seed.pins {
+        pinned.insert(BookmarkSeed::key(&metadata.url));
+    }
+    let mut order = next.0;
+    let mut changed = false;
+    for url in &state.settings.urls {
         let key = BookmarkSeed::key(url);
-        if key.is_empty() || !offered_urls.insert(key) {
+        if key.is_empty() || !offered.insert(key.clone()) {
             continue;
         }
         seed.offered.urls.push(url.clone());
-        claimed_urls.push(url.clone());
-    }
-    let mut offered_folders = seed
-        .offered
-        .folders
-        .iter()
-        .map(|name| BookmarkSeed::key(name))
-        .collect::<HashSet<_>>();
-    let mut claimed_folders = Vec::new();
-    for folder in folders {
-        let key = BookmarkSeed::key(&folder.name);
-        if key.is_empty() || !offered_folders.insert(key) {
+        changed = true;
+        if !pinned.insert(key) {
             continue;
         }
-        seed.offered.folders.push(folder.name.clone());
-        claimed_folders.push(folder.name.clone());
-    }
-    let legacy_folder_bookmarks = !seed.offered.folder_bookmarks.is_empty();
-    seed.offered.folder_bookmarks.clear();
-    let mut changed = !claimed_urls.is_empty()
-        || !claimed_folders.is_empty()
-        || legacy_folder_bookmarks
-        || vm_revision != seed.offered.vm_root_revision
-        || !retired_entities.is_empty();
-    let existing_pins = seed
-        .pins
-        .iter()
-        .filter(|(entity, _, _)| !retired_entities.contains(entity))
-        .map(|(entity, metadata, order)| {
-            let key = if migrated.contains(&entity) {
-                BookmarkSeed::key("vmux://vm/")
-            } else {
-                BookmarkSeed::key(&metadata.url)
-            };
-            (entity, key, order.0)
-        })
-        .collect::<Vec<_>>();
-    let mut pinned = existing_pins
-        .iter()
-        .map(|(_, key, _)| key.clone())
-        .collect::<HashSet<_>>();
-    let mut next_order = seed
-        .orders
-        .iter()
-        .map(|order| order.0)
-        .max()
-        .map_or(0, |order| order.saturating_add(1));
-    let mut claimed_orders = HashMap::new();
-    if pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
-        let claimed = claimed_urls
-            .iter()
-            .map(|url| BookmarkSeed::key(url))
-            .collect::<HashSet<_>>();
-        let mut default_keys = Vec::new();
-        let mut seen = HashSet::new();
-        for url in urls {
-            let key = BookmarkSeed::key(url);
-            if seen.insert(key.clone()) && (pinned.contains(&key) || claimed.contains(&key)) {
-                default_keys.push(key);
-            }
-        }
-        let default_orders = default_keys
-            .iter()
-            .enumerate()
-            .map(|(order, key)| (key.clone(), order as u32))
-            .collect::<HashMap<_, _>>();
-        for (entity, key, _) in &existing_pins {
-            if let Some(order) = default_orders.get(key) {
-                seed.commands.entity(*entity).insert(BookmarkOrder(*order));
-            }
-        }
-        for url in &claimed_urls {
-            let key = BookmarkSeed::key(url);
-            if let Some(order) = default_orders.get(&key) {
-                claimed_orders.insert(key, *order);
-            }
-        }
-        let mut custom_pins = existing_pins
-            .iter()
-            .filter(|(_, key, _)| !default_orders.contains_key(key))
-            .collect::<Vec<_>>();
-        custom_pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
-        let mut order = default_orders.len() as u32;
-        for (entity, _, _) in custom_pins {
-            seed.commands.entity(*entity).insert(BookmarkOrder(order));
-            order = order.saturating_add(1);
-        }
-        changed = true;
-    }
-    if pin_revision < BookmarkSeed::PIN_ORDER_REVISION {
-        if pin_revision >= BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
-            let mut pins = existing_pins.clone();
-            let mut order = next_order;
-            for url in &claimed_urls {
-                let key = BookmarkSeed::key(url);
-                if pins.iter().any(|(_, existing, _)| *existing == key) {
-                    continue;
-                }
-                pins.push((Entity::PLACEHOLDER, key, order));
-                order = order.saturating_add(1);
-            }
-            pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
-            let simulator = BookmarkSeed::key("vmux://simulator/");
-            if let (Some(container), Some(simulator)) = (
-                pins.iter().position(|(_, key, _)| *key == vm),
-                pins.iter().position(|(_, key, _)| *key == simulator),
-            ) && container != simulator + 1
-            {
-                let pin = pins.remove(container);
-                let simulator = if container < simulator {
-                    simulator - 1
-                } else {
-                    simulator
-                };
-                pins.insert(simulator + 1, pin);
-                for (order, (entity, key, previous)) in pins.into_iter().enumerate() {
-                    let order = order as u32;
-                    if entity == Entity::PLACEHOLDER {
-                        claimed_orders.insert(key, order);
-                    } else if previous != order {
-                        seed.commands.entity(entity).insert(BookmarkOrder(order));
-                    }
-                }
-            }
-        }
-        seed.offered.pin_order_revision = BookmarkSeed::PIN_ORDER_REVISION;
-        changed = true;
-    }
-    for url in claimed_urls {
-        if !pinned.insert(BookmarkSeed::key(&url)) {
-            continue;
-        }
-        let order = claimed_orders
-            .get(&BookmarkSeed::key(&url))
-            .copied()
-            .unwrap_or(next_order);
         seed.commands.spawn((
-            Pin,
+            ClaimedPin(entity),
             Uuid(uuid::Uuid::new_v4().to_string()),
             PageMetadata {
                 title: url.clone(),
-                url,
+                url: url.clone(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
             BookmarkOrder(order),
         ));
-        if order == next_order {
-            next_order = next_order.saturating_add(1);
+        order = order.saturating_add(1);
+    }
+    state.changed |= changed;
+    seed.commands.trigger(OrderLegacy { entity });
+}
+
+fn order_legacy(
+    trigger: On<OrderLegacy>,
+    mut roots: Query<&mut Seeding>,
+    claims: Query<(Entity, &PageMetadata, &ClaimedPin)>,
+    mut seed: BookmarkSeed,
+) {
+    let entity = trigger.event().entity;
+    let Ok(mut state) = roots.get_mut(entity) else {
+        return;
+    };
+    if state.pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
+        let mut pinned = HashSet::new();
+        for (_, metadata, _) in &seed.pins {
+            pinned.insert(BookmarkSeed::key(&metadata.url));
+        }
+        for (_, metadata, claim) in &claims {
+            if claim.0 == entity {
+                pinned.insert(BookmarkSeed::key(&metadata.url));
+            }
+        }
+        let mut default_orders = HashMap::new();
+        for url in &state.settings.urls {
+            let key = BookmarkSeed::key(url);
+            if pinned.contains(&key) && !default_orders.contains_key(&key) {
+                default_orders.insert(key, default_orders.len() as u32);
+            }
+        }
+        let mut custom = Vec::new();
+        for (pin, metadata, order) in &seed.pins {
+            let key = BookmarkSeed::key(&metadata.url);
+            match default_orders.get(&key) {
+                Some(order) => {
+                    seed.commands.entity(pin).insert(BookmarkOrder(*order));
+                }
+                None => custom.push((pin, order.0)),
+            }
+        }
+        for (pin, metadata, claim) in &claims {
+            if claim.0 != entity {
+                continue;
+            }
+            if let Some(order) = default_orders.get(&BookmarkSeed::key(&metadata.url)) {
+                seed.commands.entity(pin).insert(BookmarkOrder(*order));
+            }
+        }
+        custom.sort_by_key(|(pin, order)| (*order, pin.to_bits()));
+        let mut order = default_orders.len() as u32;
+        for (pin, _) in custom {
+            seed.commands.entity(pin).insert(BookmarkOrder(order));
+            order = order.saturating_add(1);
+        }
+        state.changed = true;
+    }
+    seed.commands.trigger(OrderVm { entity });
+}
+
+fn order_vm(
+    trigger: On<OrderVm>,
+    mut roots: Query<&mut Seeding>,
+    claims: Query<(Entity, &PageMetadata, &BookmarkOrder, &ClaimedPin)>,
+    mut seed: BookmarkSeed,
+) {
+    let entity = trigger.event().entity;
+    let Ok(mut state) = roots.get_mut(entity) else {
+        return;
+    };
+    if state.pin_revision < BookmarkSeed::PIN_ORDER_REVISION {
+        if state.pin_revision >= BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
+            let mut pins = Vec::new();
+            for (pin, metadata, order) in &seed.pins {
+                pins.push((pin, BookmarkSeed::key(&metadata.url), order.0, false));
+            }
+            let mut claimed = HashMap::new();
+            for (pin, metadata, order, claim) in &claims {
+                if claim.0 == entity {
+                    claimed.insert(BookmarkSeed::key(&metadata.url), (pin, order.0));
+                }
+            }
+            let mut seen = HashSet::new();
+            for url in &state.settings.urls {
+                let key = BookmarkSeed::key(url);
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
+                if let Some((pin, order)) = claimed.get(&key) {
+                    pins.push((*pin, key, *order, true));
+                }
+            }
+            pins.sort_by_key(|(pin, _, order, claimed)| {
+                (
+                    *order,
+                    if *claimed {
+                        Entity::PLACEHOLDER.to_bits()
+                    } else {
+                        pin.to_bits()
+                    },
+                )
+            });
+            let vm = BookmarkSeed::key("vmux://vm/");
+            let simulator = BookmarkSeed::key("vmux://simulator/");
+            if let (Some(vm), Some(simulator)) = (
+                pins.iter().position(|(_, key, _, _)| *key == vm),
+                pins.iter().position(|(_, key, _, _)| *key == simulator),
+            ) && vm != simulator + 1
+            {
+                let pin = pins.remove(vm);
+                let simulator = if vm < simulator {
+                    simulator - 1
+                } else {
+                    simulator
+                };
+                pins.insert(simulator + 1, pin);
+                for (order, (pin, _, previous, claimed)) in pins.into_iter().enumerate() {
+                    let order = order as u32;
+                    if claimed || previous != order {
+                        seed.commands.entity(pin).insert(BookmarkOrder(order));
+                    }
+                }
+            }
+        }
+        seed.offered.pin_order_revision = BookmarkSeed::PIN_ORDER_REVISION;
+        state.changed = true;
+    }
+    seed.commands.trigger(PublishPins { entity });
+}
+
+fn publish_pins(
+    trigger: On<PublishPins>,
+    mut roots: Query<(&Seeding, &mut NextOrder)>,
+    claims: Query<(Entity, &PageMetadata, &BookmarkOrder, &ClaimedPin)>,
+    mut seed: BookmarkSeed,
+) {
+    let entity = trigger.event().entity;
+    let Ok((state, mut next)) = roots.get_mut(entity) else {
+        return;
+    };
+    let mut claimed = HashMap::new();
+    for (pin, metadata, order, claim) in &claims {
+        if claim.0 == entity {
+            claimed.insert(BookmarkSeed::key(&metadata.url), (pin, order.0));
         }
     }
-    let mut existing_folders = seed
-        .folders
-        .iter()
-        .map(|(entity, name, smart)| (BookmarkSeed::key(name.as_str()), (entity, smart.copied())))
-        .collect::<HashMap<_, _>>();
-    for name in claimed_folders {
-        let key = BookmarkSeed::key(&name);
-        if existing_folders.contains_key(&key) {
+    let mut seen = HashSet::new();
+    for url in &state.settings.urls {
+        let key = BookmarkSeed::key(url);
+        if !seen.insert(key.clone()) {
             continue;
         }
-        let setting = folders
-            .iter()
-            .find(|folder| BookmarkSeed::key(&folder.name) == key);
-        let mut entity = seed.commands.spawn((
+        let Some((pin, order)) = claimed.get(&key) else {
+            continue;
+        };
+        seed.commands
+            .entity(*pin)
+            .remove::<ClaimedPin>()
+            .insert(Pin);
+        if *order == next.0 {
+            next.0 = next.0.saturating_add(1);
+        }
+    }
+    seed.commands.trigger(SeedFolders { entity });
+}
+
+fn seed_folders(
+    trigger: On<SeedFolders>,
+    mut roots: Query<(&mut Seeding, &mut NextOrder)>,
+    mut seed: BookmarkSeed,
+) {
+    let entity = trigger.event().entity;
+    let Ok((mut state, mut next)) = roots.get_mut(entity) else {
+        return;
+    };
+    let mut offered = HashSet::new();
+    for name in &seed.offered.folders {
+        offered.insert(BookmarkSeed::key(name));
+    }
+    let mut existing = HashMap::new();
+    for (folder, name, smart) in &seed.folders {
+        existing.insert(BookmarkSeed::key(name.as_str()), (folder, smart.copied()));
+    }
+    let mut changed = !seed.offered.folder_bookmarks.is_empty();
+    seed.offered.folder_bookmarks.clear();
+    for setting in &state.settings.folders {
+        let key = BookmarkSeed::key(&setting.name);
+        if key.is_empty() || !offered.insert(key.clone()) {
+            continue;
+        }
+        seed.offered.folders.push(setting.name.clone());
+        changed = true;
+        if existing.contains_key(&key) {
+            continue;
+        }
+        let mut folder = seed.commands.spawn((
             Folder,
             Uuid(uuid::Uuid::new_v4().to_string()),
-            Name::new(name),
-            BookmarkOrder(next_order),
+            Name::new(setting.name.clone()),
+            BookmarkOrder(next.0),
         ));
-        if let Some(smart) = setting.and_then(|folder| folder.smart) {
-            entity.insert(smart);
+        if let Some(smart) = setting.smart {
+            folder.insert(smart);
         }
-        let entity = entity.id();
-        existing_folders.insert(key, (entity, setting.and_then(|folder| folder.smart)));
-        next_order = next_order.saturating_add(1);
+        existing.insert(key, (folder.id(), setting.smart));
+        next.0 = next.0.saturating_add(1);
     }
-    for setting in folders {
+    for setting in &state.settings.folders {
         let Some(smart) = setting.smart else {
             continue;
         };
-        let Some((entity, current)) = existing_folders.get(&BookmarkSeed::key(&setting.name))
-        else {
+        let Some((folder, current)) = existing.get(&BookmarkSeed::key(&setting.name)) else {
             continue;
         };
         if *current != Some(smart) {
-            seed.commands.entity(*entity).insert(smart);
+            seed.commands.entity(*folder).insert(smart);
             changed = true;
         }
     }
-    if changed {
-        seed.auto.advance();
+    state.changed |= changed;
+    seed.commands.trigger(FinishDefaults { entity });
+}
+
+fn finish_defaults(trigger: On<FinishDefaults>, roots: Query<&Seeding>, mut seed: BookmarkSeed) {
+    let entity = trigger.event().entity;
+    let Ok(state) = roots.get(entity) else {
+        return;
+    };
+    if state.changed {
+        seed.auto.1.advance();
     }
+    seed.commands
+        .entity(entity)
+        .remove::<(Seeding, NextOrder)>();
 }
 
 #[derive(Component, Default)]
@@ -997,7 +1177,15 @@ mod tests {
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
-            .add_observer(insert_defaults);
+            .add_observer(insert_defaults)
+            .add_observer(migrate_vm)
+            .add_observer(retire_defaults)
+            .add_observer(claim_pins)
+            .add_observer(order_legacy)
+            .add_observer(order_vm)
+            .add_observer(publish_pins)
+            .add_observer(seed_folders)
+            .add_observer(finish_defaults);
         load_app
             .world_mut()
             .commands()
