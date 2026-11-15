@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, symlink};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -810,6 +810,95 @@ impl Job for CreateDirectory {
 #[require(crate::debug::Io)]
 pub struct CopyFile(pub PathBuf, pub PathBuf);
 
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct CloneExecutable(pub PathBuf, pub PathBuf);
+
+impl IoJob for CloneExecutable {
+    type Data = Done;
+}
+
+impl Job for CloneExecutable {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Executable snapshot canceled"));
+        }
+        let mut source = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(self.0)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        let metadata = source
+            .metadata()
+            .map_err(|error| Failure::message(error.to_string()))?;
+        if !metadata.is_file()
+            || metadata.len() > 64 * 1024 * 1024
+            || metadata.permissions().mode() & 0o111 == 0
+        {
+            return Err(Failure::message(
+                "Workspace snapshot source must be a bounded regular executable",
+            ));
+        }
+        let parent = self
+            .1
+            .parent()
+            .ok_or_else(|| Failure::message("Executable snapshot destination has no parent"))?;
+        let temporary =
+            Temporary::create(parent, "vmux-executable-snapshot").map_err(Failure::from_error)?;
+        let staging = temporary.path().join("executable");
+        let mut destination = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&staging)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        Self::copy(&mut source, &mut destination)?;
+        destination
+            .set_permissions(metadata.permissions())
+            .map_err(|error| Failure::message(error.to_string()))?;
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Executable snapshot canceled"));
+        }
+        fs::hard_link(staging, self.1).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+impl CloneExecutable {
+    fn copy(source: &mut impl Read, destination: &mut impl Write) -> Result<(), Failure> {
+        let mut bytes = [0; 65536];
+        let mut size = 0u64;
+        loop {
+            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+                return Err(Failure::message("Executable snapshot canceled"));
+            }
+            let count = source
+                .read(&mut bytes)
+                .map_err(|error| Failure::message(error.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            size += count as u64;
+            if size > 64 * 1024 * 1024 {
+                return Err(Failure::message(
+                    "Workspace executable snapshot exceeds 64 MiB",
+                ));
+            }
+            destination
+                .write_all(&bytes[..count])
+                .map_err(|error| Failure::message(error.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
 impl IoJob for CopyFile {
     type Data = Done;
 }
@@ -1050,11 +1139,26 @@ impl Drop for Pending {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::sync::mpsc;
     use std::task::Wake;
     use std::time::Duration;
 
-    use super::*;
+    #[test]
+    fn executable_copy_enforces_the_limit_while_reading_instead_of_trusting_metadata() {
+        for (size, allowed) in [
+            (0, true),
+            (64 * 1024 * 1024, true),
+            (64 * 1024 * 1024 + 1, false),
+        ] {
+            let mut source = std::io::repeat(0).take(size);
+            let mut destination = std::io::sink();
+            assert_eq!(
+                CloneExecutable::copy(&mut source, &mut destination).is_ok(),
+                allowed
+            );
+        }
+    }
 
     #[test]
     fn canceling_a_running_lock_job_drains_while_the_native_holder_remains_locked() {
@@ -1157,9 +1261,17 @@ mod tests {
                     .is_err()
             );
             assert!(!path.exists());
+            let source = path.with_extension("source");
+            assert!(CloneExecutable(source.clone(), path.clone()).run().is_err());
+            assert!(!path.exists());
+            assert_eq!(fs::read(&source).unwrap(), b"original executable");
+            assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
             return;
         }
         let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("staging.source");
+        fs::write(&source, b"original executable").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",

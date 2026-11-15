@@ -1127,6 +1127,7 @@ wait
             .env("CARGO_TARGET_DIR", &fixture.target)
             .env_remove("CARGO_BUILD_TARGET")
             .env("TEST_ROOT", &fixture.root)
+            .env("TEST_OPEN_LOG", fixture.root.join("open.log"))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()

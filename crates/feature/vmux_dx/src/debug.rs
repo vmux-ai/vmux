@@ -11,9 +11,9 @@ use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake
 use vmux_ecs::{Operation, OperationState, Order};
 
 use crate::debug_io::{
-    AcquireTarget, AcquiredLock, CaptureOutput, CleanupFlight, CleanupQueue, CopyFile,
-    CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes, FileDigest, Flight,
-    HashFile, HashInput, InspectPath, IoJob, IoValue, LinkPath, PathMetadata, PendingValue,
+    AcquireTarget, AcquiredLock, CaptureOutput, CleanupFlight, CleanupQueue, CloneExecutable,
+    CopyFile, CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes, FileDigest,
+    Flight, HashFile, HashInput, InspectPath, IoJob, IoValue, LinkPath, PathMetadata, PendingValue,
     ProbeOutput, ProbeProcess, ProcessValue, ReadDirectory, ReadFile, ReapRequest, RemoveDirectory,
     RemoveFile, RenamePath, RunProcess, SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
 };
@@ -37,6 +37,7 @@ impl bevy_app::Plugin for Plugin {
                     IoPlugin::<ProbeProcess>::default(),
                     IoPlugin::<HashInput>::default(),
                     IoPlugin::<RemoveDirectory>::default(),
+                    IoPlugin::<CloneExecutable>::default(),
                 ),
                 IoPlugin::<SpawnProcess>::default(),
                 IoPlugin::<RunProcess>::default(),
@@ -4875,7 +4876,7 @@ fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mu
                     &mut sequence,
                     entity,
                     &mut previous,
-                    CopyFile(source, path.clone()),
+                    CloneExecutable(source, path.clone()),
                     (),
                     false,
                 );
@@ -4978,6 +4979,7 @@ type Pending<'w, 's> = Query<
                 With<HashInput>,
                 With<RemoveDirectory>,
                 With<CaptureOutput>,
+                With<CloneExecutable>,
             )>,
             With<AcquireTarget>,
             With<RunProcess>,
@@ -5880,6 +5882,56 @@ exit 0
                 & 0o111,
             0
         );
+    }
+
+    #[test]
+    fn executable_snapshot_revalidates_the_opened_source_after_inspection() {
+        for replacement in ["fifo", "oversized", "non-executable"] {
+            let mut fixture = Fixture::new();
+            let source = fixture.target.join("debug/provider");
+            fixture.executable(&source, b"valid initial executable");
+            let path = source.clone();
+            fixture
+                .app
+                .add_observer(move |request: On<Add, CloneExecutable>| {
+                    let _ = request;
+                    match replacement {
+                        "fifo" => {
+                            fs::remove_file(&path).unwrap();
+                            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+                                .unwrap();
+                            assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o755) }, 0);
+                        }
+                        "oversized" => {
+                            fs::OpenOptions::new()
+                                .write(true)
+                                .open(&path)
+                                .unwrap()
+                                .set_len(65 * 1024 * 1024)
+                                .unwrap();
+                        }
+                        "non-executable" => {
+                            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+                        }
+                        _ => unreachable!(),
+                    }
+                });
+            let deadline = Instant::now();
+            assert_ne!(
+                fixture.run(Snapshot {
+                    binary: "provider".into()
+                }),
+                0
+            );
+            assert!(deadline.elapsed() < Duration::from_secs(3));
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<crate::workspace_io::Executable>(fixture.operation)
+                    .is_none()
+            );
+        }
     }
 
     #[test]
