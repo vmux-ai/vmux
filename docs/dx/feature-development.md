@@ -41,6 +41,6 @@ Try the original behavior and a nearby normal case. For a behavior change, add a
 vmux internal cargo -- test --locked -p vmux_layout --lib
 ```
 
-For a visual change, check the rendered screen rather than testing a literal CSS class. Before pushing, run `vmux dx test`. [Test and share a build](validation-and-release.md) covers the remaining checks and packaging.
+For a visual change, check the rendered screen rather than testing a literal CSS class. The push hook checks formatting; CI runs the heavier checks. [Test and share a build](validation-and-release.md) covers explicit diagnostics and packaging.
 
 You can keep the result locally, open a PR in your fork, or propose it upstream. Update a guide when the way someone uses or understands the feature changes.

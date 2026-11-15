@@ -58,6 +58,11 @@ Filesystem, network, process, and native API calls sit behind adapters. Handlers
 
 The repository's policy checks test these relationships. Ownership is inferred from the code; local `ecs-policy.ron` files carry migration debt and the exceptions the checker cannot infer. Read the feature's types, handlers, and tests first, and use a policy file when a check points to one.
 
+The Git push hook invokes Rust formatting directly, without compiling the development CLI
+or running repository tests. CI owns the heavier compiler, DX/CLI lifecycle, ownership,
+conventions, and platform checks. Targeted local tests cover the changed behavior;
+`vmux dx test` remains available for explicit diagnostics.
+
 Give independent operations separate typed requests and phases, and keep handlers focused on one stage. This makes ownership and failure paths visible when a feature grows. An adapter's exception describes its actual outside interface; it does not move the feature's decisions out of Bevy.
 
 Startup migrations retain their accepted configuration and revision on the owning store until completion. Bookmark default seeding materializes pending pins as entities before ordering and publication, preserves custom pins and folders, and advances autosave when the same deferred-command drain completes.
