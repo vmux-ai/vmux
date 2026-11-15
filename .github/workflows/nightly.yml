@@ -162,3 +162,8 @@ jobs:
               --prerelease \
               "${assets[@]}"
           fi
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: nightly-mac

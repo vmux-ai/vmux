@@ -40,7 +40,7 @@ The CI names describe the validation target:
 
 | Job or step | What it validates |
 |---|---|
-| Build CI tool & select checks | Builds the development CLI used by later jobs and selects affected checks. |
+| Build CI tool & select checks | Reuses a verified development CLI when its compile inputs match, otherwise builds it, then selects affected checks. |
 | Rust unit & integration tests | Runs the selected Rust packages' unit, integration, and documentation tests. |
 | Public API compatibility tests | Uses the public framework and host APIs from independent workspaces. |
 | Desktop feature availability tests | Checks screenshot, recording, and update responses when those features are unavailable. |

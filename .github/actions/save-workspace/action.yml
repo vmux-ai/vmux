@@ -1,0 +1,21 @@
+name: Save workspace compiler artifacts
+description: Snapshot validated source timestamps and upload before dependency-cache cleanup
+inputs:
+  cache-key:
+    description: Restored compiler profile partition
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Snapshot compiler inputs
+      id: snapshot
+      shell: bash
+      env:
+        VMUX_CACHE_PARTITION: ${{ inputs.cache-key }}
+      run: node scripts/ci-cache.js checkpoint
+    - name: Save workspace artifacts and source snapshot
+      if: steps.snapshot.outputs.save == 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ steps.snapshot.outputs.paths }}
+        key: ${{ steps.snapshot.outputs.key }}
