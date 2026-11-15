@@ -63,8 +63,12 @@ struct MobilePlugin;
 
 impl Plugin for MobilePlugin {
     fn build(&self, app: &mut BevyApp) {
-        app.add_plugins((runtime::Plugin, pairing::Plugin, session::Plugin))
-            .set_runner(MobileRunner::run);
+        app.add_plugins((
+            runtime::RuntimePlugin,
+            pairing::PairingPlugin,
+            session::SessionPlugin,
+        ))
+        .set_runner(MobileRunner::run);
     }
 }
 

@@ -8,9 +8,9 @@ use super::editing::ExLineSubmitted;
 #[derive(Component)]
 struct EditorContribution(String);
 
-pub(super) struct Plugin;
+pub(super) struct CommandBarPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(contribute)
             .add_observer(open_path)

@@ -18,9 +18,9 @@ use crate::target_lock::TargetLock;
 use crate::tooling_io::{Acquire, CreateDirectory, Fingerprint, Handoff, Lock, Scoped, SourceKey};
 use crate::{Completion, Settings};
 
-pub(crate) struct Plugin;
+pub(crate) struct ToolingPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for ToolingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             IoPlugin::<Inspect>::default(),

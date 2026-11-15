@@ -6,9 +6,9 @@ pub(super) use vmux_session::preferences::{
     RememberModels, RememberModes,
 };
 
-pub(super) struct Plugin;
+pub(super) struct ModelSelectionPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for ModelSelectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProfileRequested>()
             .add_systems(

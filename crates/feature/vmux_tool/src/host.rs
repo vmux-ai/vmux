@@ -32,7 +32,7 @@ pub(crate) struct ToolHostPlugin;
 impl Plugin for ToolHostPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            crate::catalog::Plugin,
+            crate::catalog::CatalogPlugin,
             crate::McpConnectionPlugin,
             TaskPlugin::<Result<String, String>>::default(),
             UiStatePlugin::<ToolsUiState>::default(),

@@ -25,9 +25,9 @@ use crate::tooling_io::CreateDirectory;
 use crate::work::Outcome;
 use crate::{Attempt, Completion, Lease, Settings};
 
-pub(crate) struct Plugin;
+pub(crate) struct PackagePlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for PackagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             IoPlugin::<Capture>::default(),
@@ -4893,7 +4893,7 @@ mod tests {
         );
         environment.set("TEST_ROOT", root.as_os_str());
         let mut app = App::new();
-        app.add_plugins(crate::Plugin);
+        app.add_plugins(crate::DxPlugin);
         let context = app
             .world_mut()
             .spawn((

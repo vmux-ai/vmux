@@ -53,17 +53,17 @@ mod codex;
 mod conversation;
 mod vibe;
 
-pub(super) struct Plugin;
+pub(super) struct ExternalPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for ExternalPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_session::provider::Plugin>() {
-            app.add_plugins(vmux_session::provider::Plugin);
+        if !app.is_plugin_added::<vmux_session::provider::ProviderPlugin>() {
+            app.add_plugins(vmux_session::provider::ProviderPlugin);
         }
         app.add_plugins((
             CatalogPlugin,
             ImportPlugin,
-            archive::Plugin,
+            archive::ArchivePlugin,
             HistoryReadPlugin,
         ))
         .init_resource::<NativeReaders>()
@@ -103,8 +103,8 @@ struct ImportPlugin;
 
 impl bevy::prelude::Plugin for ImportPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_session::provider::Plugin>() {
-            app.add_plugins(vmux_session::provider::Plugin);
+        if !app.is_plugin_added::<vmux_session::provider::ProviderPlugin>() {
+            app.add_plugins(vmux_session::provider::ProviderPlugin);
         }
         app.init_resource::<AppSettings>()
             .add_message::<PageOpenRequest>()
@@ -125,8 +125,8 @@ struct CatalogPlugin;
 
 impl bevy::prelude::Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_session::provider::Plugin>() {
-            app.add_plugins(vmux_session::provider::Plugin);
+        if !app.is_plugin_added::<vmux_session::provider::ProviderPlugin>() {
+            app.add_plugins(vmux_session::provider::ProviderPlugin);
         }
         app.add_message::<AcpPackageChanged>()
             .add_message::<ToolInventoryChanged>()
@@ -151,8 +151,8 @@ struct HistoryReadPlugin;
 
 impl bevy::prelude::Plugin for HistoryReadPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_session::history::Plugin>() {
-            app.add_plugins(vmux_session::history::Plugin);
+        if !app.is_plugin_added::<vmux_session::history::HistoryPlugin>() {
+            app.add_plugins(vmux_session::history::HistoryPlugin);
         }
         app.init_resource::<BlockingRuntime>()
             .add_message::<SnapshotReceived>()
@@ -3180,7 +3180,7 @@ mod tests {
             app.add_plugins(MinimalPlugins)
                 .add_message::<ArchiveRequest>()
                 .init_resource::<ProviderSessionTombstones>()
-                .add_plugins(Plugin);
+                .add_plugins(ExternalPlugin);
             Self { app }
         }
 
@@ -3665,7 +3665,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .insert_resource(workers)
-                .add_plugins((vmux_session::history::Plugin, HistoryReadPlugin));
+                .add_plugins((vmux_session::history::HistoryPlugin, HistoryReadPlugin));
             app.world_mut().spawn(SourcePaths {
                 codex: directory.path().to_path_buf(),
                 claude: directory.path().join("claude"),
@@ -4711,7 +4711,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<TabLayoutSpawnRequest>()
             .add_message::<CreateRequest>()
-            .add_plugins(Plugin);
+            .add_plugins(ExternalPlugin);
         let (_send, changes) = mpsc::channel();
         app.world_mut().spawn((
             SourcePaths {

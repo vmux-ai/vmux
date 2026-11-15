@@ -10,9 +10,9 @@ use vmux_app::ecs::{
     OperationCompleted, OperationError, OperationState, OperationTarget,
 };
 
-struct Feature;
+struct RenamePlugin;
 
-impl Plugin for Feature {
+impl Plugin for RenamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             VmuxPlugin::builder().jobs(true).build(),
@@ -101,7 +101,7 @@ struct Consumer {
 impl Consumer {
     fn new() -> Self {
         let mut app = App::new();
-        app.add_plugins(Feature);
+        app.add_plugins(RenamePlugin);
         let owner = app.world_mut().spawn(Name::new("Original")).id();
         Self { app, owner }
     }

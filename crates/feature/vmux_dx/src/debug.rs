@@ -24,15 +24,15 @@ use crate::signals::Signals;
 use crate::work::Outcome;
 use crate::{Completion, Settings};
 
-pub struct Plugin;
+pub struct DebugPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CleanupQueue>()
             .init_resource::<Inheritance>()
             .add_plugins((
                 (
-                    crate::cargo::Plugin,
+                    crate::cargo::CargoPlugin,
                     IoPlugin::<CaptureOutput>::default(),
                     IoPlugin::<ProbeProcess>::default(),
                     IoPlugin::<HashInput>::default(),
@@ -5335,7 +5335,7 @@ mod tests {
             environment.set("TEST_ROOT", root.as_os_str());
             let storage = Storage::new(Policy::configured(&environment).unwrap());
             let mut app = App::new();
-            app.add_plugins(crate::Plugin);
+            app.add_plugins(crate::DxPlugin);
             let operation = app
                 .world_mut()
                 .spawn((

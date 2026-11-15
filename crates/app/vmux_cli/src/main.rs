@@ -6,7 +6,7 @@ mod plugin;
 
 fn main() -> AppExit {
     #[cfg(feature = "dx")]
-    if let Some(code) = vmux_dx::updates::Plugin::automatic() {
+    if let Some(code) = vmux_dx::updates::UpdatesPlugin::automatic() {
         return if code == 0 {
             AppExit::Success
         } else {
@@ -14,9 +14,9 @@ fn main() -> AppExit {
         };
     }
     #[cfg(feature = "dx")]
-    if vmux_dx::Plugin::selected(std::env::args_os().skip(1)) {
+    if vmux_dx::DxPlugin::selected(std::env::args_os().skip(1)) {
         let mut app = App::new();
-        app.add_plugins((vmux_dx::Plugin, command::CliRuntimePlugin));
+        app.add_plugins((vmux_dx::DxPlugin, command::CliRuntimePlugin));
         return app.run();
     }
     run()
@@ -33,6 +33,6 @@ async fn run() -> AppExit {
 #[cfg(not(feature = "runtime"))]
 fn run() -> AppExit {
     let mut app = App::new();
-    app.add_plugins((vmux_dx::Plugin, command::CliRuntimePlugin));
+    app.add_plugins((vmux_dx::DxPlugin, command::CliRuntimePlugin));
     app.run()
 }

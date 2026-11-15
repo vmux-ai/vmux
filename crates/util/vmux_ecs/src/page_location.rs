@@ -3,9 +3,9 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::page_location::{PageLocationRequest, PageLocationUiState};
 use vmux_api::{BinEvent, PageMetadata, PageReady, UiEventPermissions};
 
-pub struct Plugin;
+pub struct PageLocationPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for PageLocationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             UiEventPlugin::<(PageLocationRequest,)>::default(),
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn a_location_request_updates_only_its_originating_page() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(PageLocationPlugin);
         let first = app
             .world_mut()
             .spawn(PageMetadata {

@@ -14,9 +14,9 @@ use super::input_queue::TerminalProcessIndex;
 use super::launch::TerminalLaunch;
 use crate::Terminal;
 
-pub(super) struct Plugin;
+pub(super) struct DirectoryPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for DirectoryPlugin {
     fn build(&self, app: &mut App) {
         app.add_service_message::<Received>()
             .add_service_message::<Entries>()
@@ -277,7 +277,7 @@ mod tests {
             app.add_plugins((
                 MinimalPlugins,
                 super::super::input_queue::InputQueuePlugin,
-                Plugin,
+                DirectoryPlugin,
             ))
             .add_message::<ServiceInbound>();
             let process_id = ProcessId::new();

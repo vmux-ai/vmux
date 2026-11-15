@@ -14,11 +14,11 @@ pub(crate) enum CommandSet {
     Commands,
 }
 
-pub(super) struct Plugin;
+pub(super) struct CommandPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((operation::Plugin, tool_call::Plugin))
+        app.add_plugins((operation::OperationPlugin, tool_call::ToolCallPlugin))
             .add_message::<AgentCommandResponse>()
             .configure_sets(
                 Update,

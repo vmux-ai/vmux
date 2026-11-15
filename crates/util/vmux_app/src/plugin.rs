@@ -7,11 +7,11 @@ pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop, daemon, cli, mcp)]
     Ecs(VmuxEcsPlugin),
     #[plugin(feature = "account", desktop, requires(ecs))]
-    Account(vmux_account::Plugin),
+    Account(vmux_account::AccountPlugin),
     #[plugin(feature = "account-local", desktop, requires(account))]
-    AccountLocal(vmux_account::local::Plugin),
+    AccountLocal(vmux_account::local::LocalPlugin),
     #[plugin(feature = "profile-account", desktop, requires(account_local, runtime))]
-    ProfileAccount(crate::profile_account::Plugin),
+    ProfileAccount(crate::profile_account::ProfileAccountPlugin),
     #[plugin(feature = "cli", cli, mcp, requires(ecs))]
     CliTools(crate::VmuxToolPlugin),
     #[plugin(feature = "daemon", daemon, requires(ecs))]

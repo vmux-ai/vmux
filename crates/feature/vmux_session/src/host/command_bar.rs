@@ -7,9 +7,9 @@ use vmux_ecs::UiStateWrite;
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-pub(super) struct Plugin;
+pub(super) struct CommandBarPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(query)
             .add_observer(receive)
@@ -539,7 +539,7 @@ mod tests {
     impl ResumePicker {
         fn loaded() -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(CommandBarPlugin);
             let view = app.world_mut().spawn_empty().id();
             let mut picker = Self { app, view };
             picker.query("/resume");

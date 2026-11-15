@@ -9,11 +9,11 @@ use vmux_api::protocol::AcpModeOption;
 use vmux_api::session::ModelOptionEntry;
 use vmux_ecs::{Active, BaseRevision, Cwd, Description, Order, Revision};
 
-use crate::preferences_io::{Content, Plugin as IoPlugin};
+use crate::preferences_io::{Content, PreferencesIoPlugin as IoPlugin};
 
-pub struct Plugin;
+pub struct PreferencesPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for PreferencesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(IoPlugin)
             .add_message::<ProfileRequested>()
@@ -946,7 +946,7 @@ mod tests {
                 }
             }
             let mut app = App::new();
-            app.add_plugins(super::Plugin);
+            app.add_plugins(super::PreferencesPlugin);
             app.world_mut()
                 .write_message(ProfileRequested(directory.path().to_path_buf()));
             Self { app, directory }

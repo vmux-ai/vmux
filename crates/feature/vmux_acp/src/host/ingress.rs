@@ -28,9 +28,9 @@ struct InboundAgentAwaitingApproval {
     args: JsonValue,
 }
 
-pub(super) struct Plugin;
+pub(super) struct IngressPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for IngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_message::<AgentCommandResponse>()
@@ -249,7 +249,7 @@ mod tests {
     fn routes_agent_requests_without_terminal_ownership() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::IngressPlugin);
         let request_id = AgentRequestId([7; 16]);
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::AgentRequest {
@@ -275,7 +275,7 @@ mod tests {
     fn message_snapshot_finishes_transcript_loading() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::IngressPlugin);
         let session = app
             .world_mut()
             .spawn((
@@ -311,7 +311,7 @@ mod tests {
     fn empty_snapshot_preserves_persisted_transcript() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::IngressPlugin);
         let session_id = SessionId("session-1".into());
         let session = app
             .world_mut()
@@ -356,7 +356,7 @@ mod tests {
     fn failed_resume_releases_loading_and_reports_the_error() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::IngressPlugin);
         let session = app
             .world_mut()
             .spawn((

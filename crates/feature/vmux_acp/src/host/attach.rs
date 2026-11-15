@@ -16,9 +16,9 @@ use super::attach_driver::{
 use super::navigation::{InlineTransitionSnapshot, PreparingAgentChatView};
 use crate::AcpSessionId;
 
-pub(super) struct Plugin;
+pub(super) struct AttachPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, attach.after(vmux_ecs::PageOpenSet::ResolveTarget));
     }
@@ -260,7 +260,7 @@ mod tests {
     fn acp_attach_gives_profile_agent_and_icon() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin));
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::AttachPlugin);
         let session = app.world_mut().spawn(vmux_session::Session).id();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(AcpAgentAttachment::new(
@@ -303,7 +303,7 @@ mod tests {
     fn acp_attach_preserves_queued_prompts() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin));
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::AttachPlugin);
         app.add_systems(Update, queue_prompt.before(attach));
         let session = app.world_mut().spawn(vmux_session::Session).id();
         app.insert_resource(DeferredPrompt(session));
@@ -332,7 +332,7 @@ mod tests {
     fn resumed_attachment_keeps_the_prompt_derived_title() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin));
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::AttachPlugin);
         let session = app.world_mut().spawn(vmux_session::Session).id();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((
@@ -367,7 +367,7 @@ mod tests {
     fn page_open_finishes_only_after_attachment_succeeds() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin));
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::AttachPlugin);
         let session = app.world_mut().spawn(vmux_session::Session).id();
         let stack = app.world_mut().spawn_empty().id();
         let task = app
@@ -411,7 +411,7 @@ mod tests {
     fn non_inline_attachment_retains_the_previous_surface_until_paint() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin));
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::AttachPlugin);
         let session = app.world_mut().spawn(vmux_session::Session).id();
         let navigation = vmux_ecs::PageOpenId::new();
         let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
@@ -472,7 +472,7 @@ mod tests {
     fn superseded_page_navigation_discards_pending_attachment() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin));
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::AttachPlugin);
         let session = app.world_mut().spawn(vmux_session::Session).id();
         let current = vmux_ecs::PageOpenId::new();
         let stale = vmux_ecs::PageOpenId::new();

@@ -16,9 +16,9 @@ use vmux_session::{
 
 use super::{SourceKind, SourcePaths, codex};
 
-pub(super) struct Plugin;
+pub(super) struct ArchivePlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProviderArchiveWriteRequest>()
             .add_message::<ProviderArchiveCompleted>()
@@ -344,7 +344,11 @@ mod tests {
             (vmux_ecs::OperationState::Succeeded, 0),
         ] {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_session::provider::Plugin, Plugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_session::provider::ProviderPlugin,
+                ArchivePlugin,
+            ));
             let source = app.world_mut().spawn(SourceKind::Codex.bundle()).id();
             app.world_mut().spawn((
                 ArchiveWrite {

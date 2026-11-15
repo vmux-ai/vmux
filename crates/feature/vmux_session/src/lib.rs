@@ -91,22 +91,22 @@ pub struct DomainPlugin;
 #[cfg(host)]
 impl Plugin for DomainPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<provider::Plugin>() {
-            app.add_plugins(provider::Plugin);
+        if !app.is_plugin_added::<provider::ProviderPlugin>() {
+            app.add_plugins(provider::ProviderPlugin);
         }
         if !app.is_plugin_added::<QueuePlugin>() {
             app.add_plugins(QueuePlugin);
         }
         #[cfg(feature = "preferences")]
-        app.add_plugins(preferences::Plugin);
+        app.add_plugins(preferences::PreferencesPlugin);
         app.add_plugins((
             model::EntityPlugin,
             model::MetadataPlugin,
             model::StagePlugin,
             catalog::CatalogPlugin,
         ));
-        if !app.is_plugin_added::<history::Plugin>() {
-            app.add_plugins(history::Plugin);
+        if !app.is_plugin_added::<history::HistoryPlugin>() {
+            app.add_plugins(history::HistoryPlugin);
         }
     }
 }

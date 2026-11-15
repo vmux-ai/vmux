@@ -1230,10 +1230,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             bevy::prelude::MinimalPlugins,
-            crate::history::Plugin,
+            crate::history::HistoryPlugin,
             crate::QueuePlugin,
             vmux_ecs::OperationPlugin,
-            crate::host::transcript::Plugin,
+            crate::host::transcript::TranscriptPlugin,
             vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
         ))
         .init_resource::<Published>()

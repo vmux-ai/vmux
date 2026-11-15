@@ -13,9 +13,9 @@ use vmux_ecs::{Active, BaseRevision, Cwd, EntityTarget, Operation, OperationStat
 
 use crate::approval::{File, Loaded, Reconcile, Records, Saved, ScopeRequest, Scoped};
 
-pub(super) struct Plugin;
+pub(super) struct ApprovalIoPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for ApprovalIoPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             JobPlugin::<FileJob>::default(),

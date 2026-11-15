@@ -26,9 +26,9 @@ use vmux_session::{
 };
 use vmux_session::{AgentTurnMeta, RunState};
 
-pub(super) struct Plugin;
+pub(super) struct TranscriptPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for TranscriptPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             ChatHistoryMoreRequest,
@@ -957,7 +957,7 @@ mod tests {
     #[test]
     fn queue_only_updates_publish_without_mutating_the_current_transcript() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin, Plugin))
+        app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin, TranscriptPlugin))
             .init_resource::<Published>()
             .add_observer(Published::record);
         let session = app
@@ -1109,7 +1109,7 @@ mod tests {
     #[test]
     fn tool_file_placement_is_selected_by_the_host_and_keeps_explicit_destinations() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .init_resource::<Opened>()
             .add_observer(Opened::record);
         let view = app
@@ -1167,7 +1167,7 @@ mod tests {
     #[test]
     fn first_snapshot_binds_the_session_before_page_ready() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .init_resource::<Published>()
             .add_observer(Published::record);
         let session = app
@@ -1200,7 +1200,7 @@ mod tests {
     #[test]
     fn first_snapshot_restores_the_history_window_before_page_ready() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .init_resource::<Published>()
             .add_observer(Published::record);
         let viewport = ChatViewport {
@@ -1248,7 +1248,7 @@ mod tests {
     #[test]
     fn retained_history_pages_load_without_a_runtime_stack_binding() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .add_message::<vmux_session::ConversationHistoryMoreRequest>()
             .init_resource::<Published>()
             .add_observer(Published::record);
@@ -1336,7 +1336,7 @@ mod tests {
     #[test]
     fn history_loading_transitions_reach_a_synced_page_without_new_messages() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .init_resource::<Published>()
             .add_observer(Published::record);
         let session = app
@@ -1383,7 +1383,7 @@ mod tests {
     #[test]
     fn viewport_is_session_scoped_and_restores_the_loaded_history_window_on_revisit() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .init_resource::<Published>()
             .add_observer(Published::record);
         let session = app

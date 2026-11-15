@@ -122,7 +122,7 @@ impl Plugin for TerminalPlugin {
             TerminalInputPlugin,
             crate::process_monitor::ProcessMonitorPlugin,
             super::loading::LoadingPlugin,
-            crate::snapshot::Plugin,
+            crate::snapshot::SnapshotPlugin,
             crate::theme::TerminalThemePlugin,
         ));
     }
@@ -385,7 +385,7 @@ impl Plugin for TerminalUpdatePlugin {
         app.add_plugins((
             crate::contract::TerminalContractPlugin,
             ServiceIngressPlugin,
-            super::directory::Plugin,
+            super::directory::DirectoryPlugin,
         ))
         .add_message::<ProcessExitedEvent>()
         .add_message::<CommandLifecycleEvent>()

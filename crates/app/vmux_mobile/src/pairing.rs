@@ -21,9 +21,9 @@ use crate::runtime::RuntimeHandle;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
-pub struct Plugin;
+pub struct PairingPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for PairingPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()

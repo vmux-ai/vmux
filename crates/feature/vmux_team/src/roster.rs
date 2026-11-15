@@ -5,9 +5,9 @@ use vmux_api::team::{TeamMemberRow, TeamUiState};
 
 use crate::projection::TeamStateProjection;
 
-pub struct Plugin;
+pub struct RosterPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for RosterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Members>()
             .add_message::<RepublishTeam>()
@@ -88,7 +88,7 @@ mod tests {
     impl Started {
         fn with(members: Vec<TeamMemberRow>) -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(RosterPlugin);
             app.update();
             let mut started = Self(app);
             started.reroster(members);

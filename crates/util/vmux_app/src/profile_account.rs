@@ -3,9 +3,9 @@ use bevy_ecs::prelude::*;
 use vmux_ecs::profile::{ActiveProfile, ProfileDirectories};
 use vmux_ecs::{Active, ProfileId, Ready};
 
-pub(crate) struct Plugin;
+pub(crate) struct ProfileAccountPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for ProfileAccountPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, configure)
             .add_systems(Update, bind.in_set(vmux_account::Set::Publish));

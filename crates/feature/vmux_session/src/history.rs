@@ -14,9 +14,9 @@ use crate::{
     ProviderSessionKey, Session, SessionId, TranscriptReadySet,
 };
 
-pub struct Plugin;
+pub struct HistoryPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::conversation::ConversationPlugin)
             .configure_sets(Update, (Prepare, Ready, TranscriptReadySet).chain())
@@ -464,7 +464,7 @@ mod tests {
     impl Fixture {
         fn new(messages: Vec<Message>) -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(HistoryPlugin);
             let session = app
                 .world_mut()
                 .spawn((
@@ -606,7 +606,7 @@ mod tests {
                     TaskPoolPlugin::default(),
                     AssetPlugin::default(),
                     vmux_ecs::PrimitivesPlugin,
-                    Plugin,
+                    HistoryPlugin,
                 ))
                 .register_stored::<Session>()
                 .register_stored::<SessionId>()

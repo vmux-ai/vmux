@@ -2,36 +2,39 @@ use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::JobSet;
 
-pub struct Plugin;
+pub struct AccountPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for AccountPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_ecs::record::Plugin>() {
-            app.add_plugins(vmux_ecs::record::Plugin);
+        if !app.is_plugin_added::<vmux_ecs::record::RecordPlugin>() {
+            app.add_plugins(vmux_ecs::record::RecordPlugin);
         }
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
         }
-        app.add_plugins((crate::catalog::Plugin, crate::mutations::Plugin))
-            .configure_sets(
-                Update,
-                (
-                    Set::Receive.after(JobSet::Apply),
-                    Set::Seed,
-                    vmux_ecs::record::Set::Restore,
-                    Set::Adopt,
-                    Set::Prepare,
-                    vmux_ecs::record::Set::Detect,
-                    vmux_ecs::record::Set::Capture,
-                    Set::Write,
-                    Set::Dispatch,
-                    Set::Apply,
-                    vmux_ecs::record::Set::Confirm,
-                    Set::Reply,
-                    Set::Publish,
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            crate::catalog::CatalogPlugin,
+            crate::mutations::MutationsPlugin,
+        ))
+        .configure_sets(
+            Update,
+            (
+                Set::Receive.after(JobSet::Apply),
+                Set::Seed,
+                vmux_ecs::record::Set::Restore,
+                Set::Adopt,
+                Set::Prepare,
+                vmux_ecs::record::Set::Detect,
+                vmux_ecs::record::Set::Capture,
+                Set::Write,
+                Set::Dispatch,
+                Set::Apply,
+                vmux_ecs::record::Set::Confirm,
+                Set::Reply,
+                Set::Publish,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -64,7 +67,7 @@ mod tests {
     impl Fixture {
         fn at(data: &std::path::Path) -> Self {
             let mut app = App::new();
-            app.add_plugins((Plugin, crate::local::Plugin));
+            app.add_plugins((AccountPlugin, crate::local::LocalPlugin));
             let root = app.world_mut().spawn(Root::at(data, "personal")).id();
             let mut fixture = Self { app, root };
             fixture.ready();

@@ -29,9 +29,9 @@ use vmux_session::{AgentId, QueuedPrompts, Route, RunState, Session, SessionId, 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AcpSessionConfigSet;
 
-pub(super) struct Plugin;
+pub(super) struct RuntimePlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         crate::policy::add(app);
@@ -486,8 +486,8 @@ mod tests {
             app.add_plugins((
                 MinimalPlugins,
                 vmux_session::QueuePlugin,
-                vmux_session::preferences::Plugin,
-                super::Plugin,
+                vmux_session::preferences::PreferencesPlugin,
+                super::RuntimePlugin,
             ));
             app.world_mut()
                 .write_message(vmux_session::preferences::ProfileRequested(
@@ -700,9 +700,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             bevy::app::TaskPoolPlugin::default(),
-            vmux_session::preferences::Plugin,
+            vmux_session::preferences::PreferencesPlugin,
             vmux_session::QueuePlugin,
-            super::Plugin,
+            super::RuntimePlugin,
         ));
         app.world_mut()
             .write_message(vmux_session::preferences::ProfileRequested(
@@ -1077,7 +1077,7 @@ mod tests {
     fn live_acp_identity_updates_only_matching_profile() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::RuntimePlugin);
         let matching = app
             .world_mut()
             .spawn((
@@ -1133,7 +1133,7 @@ mod tests {
     fn live_acp_config_state_updates_only_matching_session() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::RuntimePlugin);
         let matching = app
             .world_mut()
             .spawn(TestSession::bundle("claude", "s1", "/tmp"))
@@ -1294,7 +1294,7 @@ mod tests {
     fn plugin_builds_and_runs_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::RuntimePlugin);
         app.world_mut()
             .spawn(TestSession::bundle("vibe-acp", "s1", "/tmp"));
         app.update();
@@ -1308,8 +1308,8 @@ mod tests {
         app.add_plugins((
             bevy::app::TaskPoolPlugin::default(),
             vmux_session::QueuePlugin,
-            vmux_session::preferences::Plugin,
-            super::Plugin,
+            vmux_session::preferences::PreferencesPlugin,
+            super::RuntimePlugin,
         ));
         app.world_mut()
             .write_message(vmux_session::preferences::ProfileRequested(

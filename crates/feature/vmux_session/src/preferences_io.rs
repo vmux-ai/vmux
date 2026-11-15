@@ -20,9 +20,9 @@ use crate::preferences::{
 use vmux_api::protocol::AcpModeOption;
 use vmux_api::session::ModelOptionEntry;
 
-pub(crate) struct Plugin;
+pub(crate) struct PreferencesIoPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for PreferencesIoPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JobPlugin::<FileJob>::default())
             .configure_sets(Update, SubmitSet.before(JobSet::Submit))

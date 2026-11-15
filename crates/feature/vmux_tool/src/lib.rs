@@ -97,7 +97,7 @@ impl Plugin for ToolPlugin {
         ));
 
         #[cfg(all(host, not(target_os = "ios")))]
-        app.add_plugins(command_bar::Plugin);
+        app.add_plugins(command_bar::CommandBarPlugin);
 
         #[cfg(all(host, ui))]
         app.add_plugins(host::ToolHostPlugin);

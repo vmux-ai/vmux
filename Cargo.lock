@@ -10775,6 +10775,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_feature"
+version = "0.0.35"
+dependencies = [
+ "async-io",
+ "bevy_app",
+ "bevy_ecs",
+ "getrandom 0.4.2",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha2",
+ "vmux_ecs",
+]
+
+[[package]]
 name = "vmux_flex"
 version = "0.0.35"
 dependencies = [

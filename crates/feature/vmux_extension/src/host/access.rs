@@ -10,9 +10,9 @@ use super::load::PreparedExtensions;
 use super::{Binding, RuntimeBinding, RuntimeGeneration};
 use crate::{Catalog, ExtensionSet, ProfileId};
 
-pub(super) struct Plugin;
+pub(super) struct AccessPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for AccessPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, project.in_set(AccessSet).after(ExtensionSet::Step));
     }
@@ -134,7 +134,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins((CorePlugin, Plugin));
+            app.add_plugins((CorePlugin, AccessPlugin));
             let mut entry = ExtEntry {
                 id: ID.into(),
                 name: "Example".into(),

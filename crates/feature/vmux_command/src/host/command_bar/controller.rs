@@ -29,12 +29,12 @@ use crate::ResolvedLocale;
 use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
 
-pub(super) struct Plugin;
+pub(super) struct ControllerPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for ControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandBarToggleRequest>()
-            .add_plugins(super::work_snapshot::Plugin)
+            .add_plugins(super::work_snapshot::WorkSnapshotPlugin)
             .add_message::<CommandBarEditPageRequest>()
             .add_message::<CommandBarPathRequest>()
             .add_message::<CommandBarCommandsRequest>()
@@ -1421,7 +1421,7 @@ mod tests {
     #[test]
     fn deactivation_closes_the_panel_and_modal_without_restoring_keyboard_focus() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, Plugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, ControllerPlugin))
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit);
@@ -1473,7 +1473,7 @@ mod tests {
     fn dismiss_action_closes_command_bar_modal_in_one_pass() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(Plugin)
+            .add_plugins(ControllerPlugin)
             .add_message::<RestoreKeyboardToStack>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
         app.world_mut()
@@ -1570,7 +1570,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(Plugin);
+            .add_plugins(ControllerPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();

@@ -17,9 +17,9 @@ use super::editor::{Editor, FileView};
 use super::file_lifecycle::EditorFileLoadedSet;
 use super::viewport::{CursorRenderRequest, FoldsDirty, ViewportRenderRequest};
 
-pub(super) struct Plugin;
+pub(super) struct FoldStorePlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for FoldStorePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((FoldPlugin, FilesystemPlugin))
             .add_systems(Update, (bind, forward).chain().before(FoldSet::Restore))
@@ -256,7 +256,7 @@ mod tests {
                 },
             )
             .unwrap();
-            app.add_plugins(Plugin).add_systems(
+            app.add_plugins(FoldStorePlugin).add_systems(
                 Update,
                 PendingEditor::finish
                     .after(FoldSet::Restore)

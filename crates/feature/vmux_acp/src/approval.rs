@@ -9,9 +9,9 @@ use vmux_ecs::{
 };
 use vmux_session::{AgentId, Session};
 
-pub(crate) struct Plugin;
+pub(crate) struct ApprovalPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for ApprovalPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
@@ -794,7 +794,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(ApprovalPlugin);
             app.update();
             let file = app
                 .world_mut()

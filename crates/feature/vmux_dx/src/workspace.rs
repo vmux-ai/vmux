@@ -14,9 +14,9 @@ use vmux_ecs::{Active, Order};
 pub use crate::workspace_io::Executable;
 use crate::workspace_io::MetadataFile;
 
-pub struct Plugin;
+pub struct WorkspacePlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<Input>() {
             app.insert_resource(Input(std::env::args_os().skip(1).collect()));
@@ -49,7 +49,7 @@ impl Host {
         let mut app = App::new();
         app.insert_resource(Input(arguments))
             .insert_resource(Probe)
-            .add_plugins(Plugin);
+            .add_plugins(WorkspacePlugin);
         app.world_mut()
             .spawn(FeatureManifest::of::<crate::Feature>());
         app.update();
@@ -689,7 +689,7 @@ mod tests {
             "--root".into(),
             directory.path().as_os_str().into(),
         ]))
-        .add_plugins(Plugin);
+        .add_plugins(WorkspacePlugin);
         app.update();
         {
             let mut arguments = app.world_mut().query::<&mut Argument>();

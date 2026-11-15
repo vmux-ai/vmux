@@ -8,9 +8,9 @@ use vmux_api::page::UiStateEmit;
 use vmux_api::icon::PageIcon;
 use vmux_api::session::{RemoteAgent, RemoteSession};
 
-pub struct Plugin;
+pub struct RosterPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for RosterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Roster>()
             .add_message::<RepublishLauncher>()
@@ -183,7 +183,7 @@ mod tests {
     impl Started {
         fn with(roster: Roster) -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(RosterPlugin);
             app.update();
             let mut started = Self(app);
             started.reroster(roster);

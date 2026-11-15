@@ -47,10 +47,13 @@ impl Plugin for StartPlugin {
             )
                 .chain(),
         );
-        app.add_plugins((crate::workspace::Plugin, crate::branches::Plugin))
-            .add_observer(focus_command_bar)
-            .add_observer(focus_ready)
-            .add_systems(PostUpdate, focus_presented);
+        app.add_plugins((
+            crate::workspace::WorkspacePlugin,
+            crate::branches::BranchesPlugin,
+        ))
+        .add_observer(focus_command_bar)
+        .add_observer(focus_ready)
+        .add_systems(PostUpdate, focus_presented);
     }
 }
 

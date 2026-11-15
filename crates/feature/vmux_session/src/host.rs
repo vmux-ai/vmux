@@ -82,10 +82,10 @@ impl Plugin for SessionPlugin {
             FeaturePlugin::<crate::Feature>::default(),
             Self::MANIFEST.plugin(),
             catalog::CatalogPlugin,
-            resume::Plugin,
+            resume::ResumePlugin,
             session::ChatHostPlugin,
-            command_bar::Plugin,
-            transcript::Plugin,
+            command_bar::CommandBarPlugin,
+            transcript::TranscriptPlugin,
         ));
     }
 }

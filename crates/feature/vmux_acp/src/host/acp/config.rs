@@ -24,11 +24,11 @@ use vmux_session::{AgentId, Session, SessionId};
 use super::config_driver::AcpConfigProjection;
 use vmux_session::Route as SessionRoute;
 
-pub(in crate::host) struct Plugin;
+pub(in crate::host) struct ConfigPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for ConfigPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::host::model_selection::Plugin);
+        app.add_plugins(crate::host::model_selection::ModelSelectionPlugin);
         app.add_message::<AgentRequestInput>()
             .add_message::<ServiceRequest>()
             .add_message::<SessionConfigSelectRequest>()
@@ -809,7 +809,10 @@ mod tests {
             directory.path().join("agent-models.json"),
             r#"{"claude":{"url":"vmux://sessions/inbox?agent=claude","selected":"fable","models":[{"id":"fable","name":"Fable","description":""}]}}"#,
         ).unwrap();
-        app.add_plugins((vmux_session::preferences::Plugin, super::Plugin));
+        app.add_plugins((
+            vmux_session::preferences::PreferencesPlugin,
+            super::ConfigPlugin,
+        ));
         app.world_mut()
             .write_message(vmux_session::preferences::ProfileRequested(
                 directory.path().to_path_buf(),
