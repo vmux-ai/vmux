@@ -110,3 +110,8 @@ See [VM and Docker](../ux/containers.md) for controls, automatic discovery and t
 ## What to read next
 
 [Make a change](feature-development.md) walks through a feature edit. [Test and share a build](validation-and-release.md) gives the test and build commands. [Vmux Framework](framework.md) is optional reading if you want to build a different application from the same pieces.
+
+The desktop CLI spelling resolves to the existing launch intent. Command parsing supplies
+no branch when it is omitted, so repository selection retains the current checkout instead
+of silently choosing main. Desktop has no platform override; generic run retains explicit
+platform selection. Both spellings share artifact readiness, ownership and launch cleanup.

@@ -135,3 +135,78 @@ fn exit_with_result(
         commands.entity(entity).despawn();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Parsed {
+        app: App,
+        entity: Entity,
+    }
+
+    impl Parsed {
+        fn new(arguments: &[&str]) -> Self {
+            let mut app = App::new();
+            app.add_plugins(CliRuntimePlugin);
+            app.world_mut().spawn(FeatureManifest::parse(include_str!(
+                "../../../feature/vmux_dx/src/feature.ron"
+            )));
+            let entity = app
+                .world_mut()
+                .spawn(CliArguments(arguments.iter().map(OsString::from).collect()))
+                .id();
+            app.update();
+            Self { app, entity }
+        }
+
+        fn invocation(&self) -> &CliInvocation {
+            self.app
+                .world()
+                .get::<CliInvocation>(self.entity)
+                .expect("valid CLI input must become canonical intent")
+        }
+    }
+
+    #[test]
+    fn desktop_spelling_preserves_the_positional_branch_and_launch_options() {
+        let parsed = Parsed::new(&[
+            "vmux",
+            "desktop",
+            "onboarding",
+            "--user-profile",
+            "fresh",
+            "-p",
+            "local",
+        ]);
+        let invocation = parsed.invocation();
+        assert_eq!(invocation.command, "dx.desktop");
+        assert_eq!(invocation.value("branch"), Some("onboarding"));
+        assert_eq!(invocation.value("profile"), Some("local"));
+        assert_eq!(invocation.value("user-profile"), Some("fresh"));
+        assert_eq!(invocation.value("platform"), None);
+    }
+
+    #[test]
+    fn desktop_omits_a_branch_instead_of_implicitly_selecting_main() {
+        let current = Parsed::new(&["vmux", "desktop"]);
+        let explicit = Parsed::new(&["vmux", "desktop", "main"]);
+        assert_eq!(current.invocation().value("branch"), None);
+        assert_eq!(explicit.invocation().value("branch"), Some("main"));
+        assert_eq!(current.invocation().command, explicit.invocation().command);
+    }
+
+    #[test]
+    fn desktop_does_not_accept_a_different_platform() {
+        let parsed = Parsed::new(&["vmux", "desktop", "--platform", "ios"]);
+        assert!(
+            parsed
+                .app
+                .world()
+                .get::<CliInvocation>(parsed.entity)
+                .is_none()
+        );
+        let existing = Parsed::new(&["vmux", "run", "--platform", "ios"]);
+        assert_eq!(existing.invocation().value("platform"), Some("ios"));
+    }
+}

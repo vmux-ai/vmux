@@ -28,7 +28,7 @@ Build your branch and open it:
 
 ```sh
 vmux build my-vmux
-vmux run my-vmux
+vmux desktop my-vmux
 ```
 
 `build` prepares the app; `run` opens the finished build. After an edit, repeat those two commands. If the build reports an error, fix it before running the app.
@@ -54,3 +54,8 @@ investigating a failure; it is not required before every push.
 [How Vmux works](architecture.md) explains where shared state lives and how a UI request reaches its handler. [Keep your own version](customization.md) covers a personal fork and sharing. You can read those as you need them.
 
 You can use Vmux itself as the editor: open this checkout as a Project, select the worktree in its Space, and keep Code, Terminal, and a Session together. The same build and test commands work whether you edit manually or ask an agent to make the change.
+
+`vmux desktop <branch>` opens the prepared desktop app for that branch. `vmux desktop`
+uses the current checkout; select `vmux desktop main` when you intend main. Build an
+unprepared checkout first with `vmux build <branch>`. `vmux run` remains available for
+explicit platform selection, including mobile and web.
