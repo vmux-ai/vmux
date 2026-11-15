@@ -2,8 +2,9 @@ use dioxus::prelude::*;
 pub use vmux_api::prompt_media::PromptComposerAttachment;
 
 use crate::cn::cn;
+use crate::components::avatar::AgentThumbnail;
 use crate::components::popup::Dismissal;
-use crate::components::progress::ChecklistItem;
+use crate::components::progress::TaskStep;
 use crate::components::prompt_box::{PromptBox, PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
@@ -376,15 +377,26 @@ pub fn ComposerTask(
     #[props(default = rsx! {})] children: Element,
 ) -> Element {
     let completed = !steps.is_empty() && completed_steps.len() == steps.len();
+    let label = title.clone();
+    let heading = rsx! {
+        AgentThumbnail { src: icon, seed: "vmux-setup-agent".to_string(), background: String::new(), inverted: true, class: "size-5".to_string() }
+        span {
+            class: "min-w-0 flex-1",
+            style: on_select.is_some().then_some("background-image:linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end));background-clip:text;-webkit-background-clip:text;color:transparent;"),
+            {title}
+        }
+        if completed { LineIconView { icon: LineIcon::Check, class: "size-4".to_string() } }
+    };
     rsx! {
         div { class: "p-2 text-inherit", "data-slot": "composer-task",
-            div { class: "flex h-10 items-center gap-2",
-                if let Some(icon) = icon { img { src: icon, alt: "", class: "ml-2 size-5 shrink-0 object-contain" } }
-                ChecklistItem { label: title, completed, primary: on_select.is_some(), on_select, class: "h-10 font-medium".to_string() }
+            if let Some(on_select) = on_select {
+                button { r#type: "button", aria_label: label.clone(), class: "flex h-10 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-inherit transition-colors hover:bg-background/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none", onclick: move |_| on_select.call(()), {heading} }
+            } else {
+                h3 { class: "flex h-10 items-center gap-2 px-2 text-sm font-medium", {heading} }
             }
-            div { class: "flex flex-col",
+            ol { role: "list", class: "ml-8 list-none",
                 for (index, label) in steps.into_iter().enumerate() {
-                    ChecklistItem { label, compact: true, completed: completed_steps.contains(&index), pending: pending_step == Some(index) }
+                    TaskStep { number: index + 1, label, completed: completed_steps.contains(&index), pending: pending_step == Some(index) }
                 }
             }
             if !message.is_empty() { p { role: "status", aria_live: "polite", class: "px-2 pb-1 pt-2 text-xs leading-relaxed opacity-70", {message} } }
@@ -459,6 +471,44 @@ mod tests {
     use crate::components::composer_bar::{ComposerBar, ComposerChip, ComposerMenuKind};
     use std::io::Write;
     use std::process::{Command, Stdio};
+
+    #[component]
+    fn TaskFixture() -> Element {
+        rsx! {
+            ComposerTask {
+                title: "Setup Agent".to_string(),
+                steps: vec!["Choose ACP".to_string(), "Install ACP".to_string(), "Connect ACP".to_string()],
+                completed_steps: vec![0],
+                pending_step: Some(1),
+                on_select: Some(EventHandler::new(move |_| {})),
+            }
+        }
+    }
+
+    #[test]
+    fn setup_task_exposes_one_entry_and_an_ordered_readonly_progress_list() {
+        let mut dom = VirtualDom::new(TaskFixture);
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert_eq!(html.matches("<button").count(), 1);
+        assert!(!html.contains("role=\"checkbox\""));
+        let list = html.split("<ol ").nth(1).expect("ordered setup steps");
+        let list = list.split("</ol>").next().unwrap();
+        assert_eq!(list.matches("<li ").count(), 3);
+        assert_eq!(list.matches("aria-current=\"step\"").count(), 1);
+        assert_eq!(
+            list.matches(&format!("aria-label=\"{}\"", translate("common-done")))
+                .count(),
+            1
+        );
+        for (index, row) in list.split("<li ").skip(1).enumerate() {
+            let number = row.split("<span ").nth(1).unwrap();
+            let (_, content) = number.split_once('>').unwrap();
+            let number = content.split('<').next().unwrap();
+            assert_eq!(number, format!("{}.", index + 1));
+        }
+        assert!(!list.contains("disabled"));
+    }
 
     #[component]
     fn ComposerFixture(disabled: bool, #[props(default)] attached: bool) -> Element {

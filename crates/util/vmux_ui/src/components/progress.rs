@@ -1,56 +1,32 @@
+use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
 use dioxus::prelude::*;
 use dioxus_primitives::progress::{self, ProgressIndicatorProps, ProgressProps};
 
 #[component]
-pub fn ChecklistItem(
+pub fn TaskStep(
+    number: usize,
     label: String,
     #[props(default)] completed: bool,
     #[props(default)] pending: bool,
-    #[props(default)] primary: bool,
-    #[props(default)] class: String,
-    #[props(default)] compact: bool,
-    #[props(default)] on_select: Option<EventHandler<()>>,
 ) -> Element {
-    let interactive = on_select.is_some();
-    let interaction = if interactive {
-        "cursor-pointer rounded-md transition-colors duration-100 hover:bg-foreground/[0.04] active:bg-foreground/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none"
-    } else {
-        "cursor-default"
-    };
-    let check = if completed {
-        "border-transparent text-white"
-    } else {
-        "border-current/30"
-    };
-    let size = if compact {
-        "min-h-6 px-2 py-1 text-xs"
-    } else {
-        "min-h-8 px-2 py-1.5 text-sm"
-    };
     rsx! {
-        button {
-            r#type: "button",
-            role: "checkbox",
-            aria_label: label.clone(),
-            aria_checked: completed,
+        li {
+            class: "flex min-h-6 items-center gap-2 px-2 py-1 text-xs text-inherit",
+            aria_current: pending.then_some("step"),
             aria_busy: pending,
-            aria_readonly: (!interactive).to_string(),
-            disabled: !interactive || pending,
-            class: "flex w-full items-center gap-2 text-left text-inherit {size} {interaction} {class}",
-            onclick: move |_| { if let Some(handler) = on_select { handler.call(()); } },
-            span {
-                aria_hidden: "true",
-                class: "flex size-4 shrink-0 items-center justify-center rounded-[4px] border {check}",
-                style: completed.then_some("background:linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end));"),
-                if completed { LineIconView { icon: LineIcon::Check, class: "size-3".to_string() } }
+            span { aria_hidden: "true", class: "w-4 shrink-0 font-semibold tabular-nums opacity-75", "{number}." }
+            span { class: if pending { "min-w-0 font-medium" } else { "min-w-0 opacity-85" }, {label} }
+            if completed {
+                span {
+                    role: "img",
+                    aria_label: translate("common-done"),
+                    class: "flex size-4 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end))] text-white",
+                    LineIconView { icon: LineIcon::Check, class: "size-3 [stroke-width:2.5]".to_string() }
+                }
+            } else if pending {
+                LoadingIcon { class: "size-3.5 shrink-0 opacity-75".to_string() }
             }
-            span {
-                class: "min-w-0 flex-1",
-                style: primary.then_some("background-image:linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end));background-clip:text;-webkit-background-clip:text;color:transparent;"),
-                {label.clone()}
-            }
-            if pending { LoadingIcon { class: "size-3.5 opacity-60".to_string() } }
         }
     }
 }
