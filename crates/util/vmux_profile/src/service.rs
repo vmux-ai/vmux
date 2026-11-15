@@ -221,19 +221,29 @@ mod tests {
     }
 
     #[test]
-    fn current_log_file_lives_in_log_dir_with_profile_and_date() {
-        let path = ServicePaths::current().current_log();
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        assert!(
-            name.starts_with(&format!("vmux-{}.", ServicePaths::build_profile())),
-            "got {name}"
-        );
-        assert!(name.ends_with(".log"), "got {name}");
-        assert_eq!(path.parent().unwrap(), ServicePaths::log_dir());
-        assert!(
-            ServicePaths::log_dir().ends_with("logs"),
-            "got {}",
-            ServicePaths::log_dir().display()
-        );
+    fn dated_log_files_keep_personal_and_named_profile_identity() {
+        for (profile, suffix) in [("personal", ""), ("test-x", "-test-x")] {
+            let paths = ServicePaths {
+                build: "dev",
+                profile: profile.to_string(),
+            };
+            let before = chrono::Utc::now().date_naive();
+            let path = paths.current_log();
+            let after = chrono::Utc::now().date_naive();
+            let name = path.file_name().unwrap().to_str().unwrap();
+            let prefix = format!("{}-dev{suffix}.", Product::runtime_stem());
+            let date = name
+                .strip_prefix(&prefix)
+                .unwrap()
+                .strip_suffix(".log")
+                .unwrap();
+            let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap();
+            assert!(date == before || date == after, "got {name}");
+            assert!(
+                path.parent().unwrap().ends_with("logs"),
+                "got {}",
+                path.display()
+            );
+        }
     }
 }
