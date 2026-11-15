@@ -18,6 +18,7 @@ mod agent;
 mod agent_workspace;
 mod composer;
 mod cwd;
+mod identity;
 mod key;
 mod plugin;
 mod project;

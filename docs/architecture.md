@@ -983,6 +983,13 @@ Space IDs are global identities. Every window may attach its own `Space` view fo
 selecting a space that is not attached creates a fresh local tab and pane tree. Names, project
 settings, and history are shared by ID, while tabs, panes, focus, expansion, side sheets, and
 other layout state remain local to each window. Only the primary window's views persist.
+`Space`, `SpaceId`, shared `Name`, and `Profile` components are the persistent identity authority.
+`SpacePlugin` creates bootstrap and requested spaces through its registered systems and observers;
+its query-only `SpaceIdentity` capability selects unused IDs and suggested names from current
+entities, including views in other windows. `SpaceId::normalized` preserves slash-separated
+namespaces and the existing numeric suffix rules. Bootstrap retains `space-1`, waits for workspace
+restore, and uses the current profile label. Form regeneration excludes both the committed names
+and that form's current draft/suggestion; its typed UI projection does not own the space catalog.
 Bookmark cards start expanded. Their explicit open or closed choice is stored on the Space view,
 shared across its panes and tabs, and restored with the primary window's workspace.
 The side-sheet project selector opens on right-click as well as hover and offers the Projects
