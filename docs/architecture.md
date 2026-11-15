@@ -541,6 +541,9 @@ Every plain adapter names its external interface, canonical input/output, scope/
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.
 Their `ecs-policy.ron` records are executable review metadata, not a second design document.
+Records live beside their owning crate or subsystem; the root file keeps only the immutable
+historical revision and pinned upstream references. DX combines these files for the same
+global ownership, duplicate, and provenance audit.
 
 Pointer selection enters the shared layout core through `SelectRequest`, including nested panes.
 Window-owned pointer and capture components retain consumed input; native callbacks retain only
@@ -2033,9 +2036,9 @@ signed CLI archive publication are predecessor-linked DX `Work` entities, with
 staged filesystem publication shared with the packaging adapter.
 
 ```text
-agent: vmux build -b navigation -> signed Vmux Dev.app -> user: vmux run -b navigation
-local package: vmux build -b navigation -p local
-mobile: vmux build -b navigation -P ios
+agent: vmux build navigation -> signed Vmux Dev.app -> user: vmux run navigation
+local package: vmux build navigation -p local
+mobile: vmux build navigation -P ios
 ```
 
 `vmux_cli` selects the DX-only composition before installing product plugins.

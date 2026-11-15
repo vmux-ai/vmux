@@ -11,6 +11,31 @@ pub struct Scope {
 }
 
 impl Scope {
+    pub(crate) fn policy(path: &Path) -> bool {
+        if path.file_name().is_none_or(|name| name != "ecs-policy.ron") {
+            return false;
+        }
+        if path == Path::new("ecs-policy.ron") {
+            return true;
+        }
+        let Some(directory) = path.parent() else {
+            return false;
+        };
+        if directory
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return false;
+        }
+        if matches!(directory.to_str(), Some("crates" | "website" | "scripts")) {
+            return true;
+        }
+        matches!(
+            directory.parent().and_then(Path::to_str),
+            Some("crates/app" | "crates/feature" | "crates/util" | "patches" | "examples")
+        )
+    }
+
     pub fn new(root: PathBuf) -> Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
@@ -170,7 +195,7 @@ impl Workspace {
         let mut lean = false;
         let mut policy = false;
         for file in files {
-            if file == Path::new("ecs-policy.ron") {
+            if Scope::policy(file) {
                 if !self.packages.iter().any(|package| {
                     package.name == "vmux_dx"
                         && package.directory == Path::new("crates/feature/vmux_dx")
@@ -337,6 +362,34 @@ mod tests {
             if package.name == "unrelated" {
                 package.dependencies.insert("vmux_dx".into());
             }
+        }
+        for path in [
+            "ecs-policy.ron",
+            "crates/ecs-policy.ron",
+            "crates/feature/leaf/ecs-policy.ron",
+            "crates/feature/vmux_dx/ecs-policy.ron",
+            "crates/util/vmux_macro/ecs-policy.ron",
+            "crates/app/vmux_desktop/ecs-policy.ron",
+            "patches/bevy_window-0.19.0/ecs-policy.ron",
+            "examples/framework-consumer/ecs-policy.ron",
+            "website/ecs-policy.ron",
+            "scripts/ecs-policy.ron",
+        ] {
+            let policy = workspace.select(&[path.into()]);
+            assert_eq!(
+                policy.packages,
+                BTreeSet::from(["vmux_dx".into()]),
+                "{path}"
+            );
+            assert!(!policy.workspace, "{path}");
+            assert!(!policy.lean, "{path}");
+        }
+        for path in [
+            "other/ecs-policy.ron",
+            "crates/feature/leaf/src/ecs-policy.ron",
+            "website/nested/ecs-policy.ron",
+        ] {
+            assert!(!Scope::policy(Path::new(path)), "{path}");
         }
         let policy = workspace.select(&["ecs-policy.ron".into()]);
         assert_eq!(policy.packages, BTreeSet::from(["vmux_dx".into()]));

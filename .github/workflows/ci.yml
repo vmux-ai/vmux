@@ -336,9 +336,9 @@ jobs:
         with:
           cache-key: sdk-path
           cef-version: ${{ needs.cef-version.outputs.version }}
-      - run: vmux framework-consumer
+      - run: vmux dx test sdk
       - name: Test isolated product hosts without a renderer
-        run: vmux framework-consumer -- --host
+        run: vmux dx test sdk --host
 
   test-sdk-git:
     name: Test SDK from immutable Git dependencies
@@ -360,9 +360,9 @@ jobs:
         with:
           cache-key: sdk-git
           cef-version: ${{ needs.cef-version.outputs.version }}
-      - run: vmux framework-consumer -- --git
+      - run: vmux dx test sdk --git
       - name: Test product hosts from immutable Git dependencies
-        run: vmux framework-consumer -- --host --git
+        run: vmux dx test sdk --host --git
 
   test-headless:
     name: Test headless application profiles
@@ -420,7 +420,7 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
-              - 'ecs-policy.ron'
+              - '**/ecs-policy.ron'
               - 'crates/**'
               - 'examples/framework-consumer/**'
               - 'examples/host-consumer/**'

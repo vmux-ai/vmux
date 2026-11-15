@@ -1,0 +1,8 @@
+(legacy: [
+    (key: "crates/util/vmux_spawn/src/lib.rs||impl:Descriptors", fingerprint: "84f6b964ce22d4e9", issue: "VMX-253"),
+    (key: "crates/util/vmux_spawn/src/lib.rs||impl:ProcessGroup", fingerprint: "9355c491ca6bc446", issue: "VMX-253"),
+    (key: "crates/util/vmux_spawn/src/lib.rs||impl:Reaper", fingerprint: "193b6c022fca8ddc", issue: "VMX-253"),
+    (key: "crates/util/vmux_spawn/src/lib.rs||struct:Descriptors", fingerprint: "b56e65255df9efe2", issue: "VMX-253"),
+    (key: "crates/util/vmux_spawn/src/lib.rs||struct:ProcessGroup", fingerprint: "ac32b07586cad8c3", issue: "VMX-253"),
+    (key: "crates/util/vmux_spawn/src/lib.rs||struct:Reaper", fingerprint: "aaf6e43e0b684cbd", issue: "VMX-253"),
+])

@@ -598,7 +598,17 @@ fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut comman
                 }
                 "dx.ci-scope" => steps.push(Work::Scope(forwarded)),
                 "dx.ci-native" => steps.push(Work::NativeInputs(forwarded)),
-                "dx.framework-consumer" => steps.extend([Work::Acquire, Work::Consumer(forwarded)]),
+                "dx.checks.test" => steps.push(Work::Internal("pre-push".into(), Vec::new())),
+                "dx.checks.sdk" => {
+                    let mut arguments = Vec::new();
+                    if invocation.flag("host") {
+                        arguments.push("--host".into());
+                    }
+                    if invocation.flag("git") {
+                        arguments.push("--git".into());
+                    }
+                    steps.extend([Work::Acquire, Work::Consumer(arguments)]);
+                }
                 "dx.internal" => {
                     let Some(task) = invocation.value("task") else {
                         commands.entity(entity).insert((

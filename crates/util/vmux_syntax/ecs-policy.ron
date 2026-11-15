@@ -1,0 +1,14 @@
+(legacy: [
+    (key: "crates/util/vmux_syntax/src/lib.rs||const:GITHUB_DARK", fingerprint: "0312cf99300ce684", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||const:GITHUB_LIGHT", fingerprint: "6ed079aaf4763e7b", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||enum:TokenStyle", fingerprint: "87a96cf7369f07aa", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||impl:Palette", fingerprint: "d1e831fb0066ad10", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||impl:PaletteColour", fingerprint: "a9df7d4665f6db2a", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||impl:Token", fingerprint: "edd4b24ecd7eae85", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||impl:TokenScope", fingerprint: "8f6c610076507042", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||impl:TokenStyle", fingerprint: "680e95fb17b45532", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||struct:Palette", fingerprint: "ce4e38eb4a8dcf1b", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||struct:PaletteColour", fingerprint: "b13b76c05bd3dca8", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||struct:Token", fingerprint: "e3fad10e8656b649", issue: "VMX-253"),
+    (key: "crates/util/vmux_syntax/src/lib.rs||struct:TokenScope", fingerprint: "5b62c1dbdb431f58", issue: "VMX-253"),
+])
