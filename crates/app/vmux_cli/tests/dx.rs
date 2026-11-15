@@ -42,14 +42,11 @@ fn cargo_children_receive_command_specific_incremental_defaults_and_overrides() 
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 static FIXTURES: (std::sync::Mutex<u8>, std::sync::Condvar) =
     (std::sync::Mutex::new(0), std::sync::Condvar::new());
 
-#[cfg(not(feature = "runtime"))]
 struct Permit;
 
-#[cfg(not(feature = "runtime"))]
 impl Permit {
     fn acquire() -> Self {
         let mut active = FIXTURES.0.lock().unwrap();
@@ -61,7 +58,6 @@ impl Permit {
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 impl Drop for Permit {
     fn drop(&mut self) {
         let mut active = FIXTURES.0.lock().unwrap();
