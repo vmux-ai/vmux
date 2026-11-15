@@ -1,28 +1,37 @@
-# Vmux Framework
+# Reuse Vmux features in another app
 
-Vmux Framework is for building another application from the same Rust feature modules. You do not need it to use Vmux as a browser, IDE, or agent workspace.
+Vmux Framework lets another Rust application use parts of Vmux, such as project loading or pane layout. For example, you could use its pane-selection behavior in a new editor and write your own UI around it.
 
-## Start from an example
+This is optional reading. To change Vmux itself or make a personal build, follow [Make a change](feature-development.md) and [Make your own Vmux](customization.md).
 
-Read the [framework consumer](https://github.com/vmux-ai/vmux/tree/main/examples/framework-consumer) and [host consumer](https://github.com/vmux-ai/vmux/tree/main/examples/host-consumer). They use the actual public APIs without depending on the private relay repository.
+## See a small example
 
-From the Vmux checkout, run their checks with:
+The [pane example](https://github.com/vmux-ai/vmux/blob/main/examples/framework-consumer/tests/pane.rs) creates a Bevy app and enables Vmux's layout behavior:
+
+```rust
+use bevy_app::App;
+use vmux_app::VmuxPlugin;
+
+let mut app = App::new();
+app.add_plugins(VmuxPlugin::builder().layout(true).build());
+```
+
+It then creates panes, sends a selection request, and checks which pane became active. It runs as a test and does not open a window. Your application would supply the UI that displays those panes.
+
+The example directory is called `framework-consumer`: it uses Vmux as a dependency. Its [document example](https://github.com/vmux-ai/vmux/blob/main/examples/framework-consumer/src/lib.rs) also shows renaming and saving documents. These are sample code and tests, rather than a finished application template.
+
+## Run the example tests
+
+From the Vmux checkout:
 
 ```sh
 vmux framework-consumer
-vmux framework-consumer -- --git
 ```
 
-The first uses local path dependencies; the second checks pinned Git dependencies.
+This tests the examples against your local source. `vmux framework-consumer -- --git` tests the committed source as Git dependencies instead. Neither command launches Vmux.
 
-## Connect the pieces
+## Choose the parts you need
 
-`vmux_app` provides the shared builder for choosing features. Each feature's plugin registers its state and handlers. The application supplies its runner, native IO, permissions, and storage locations.
+`vmux_app` provides the builder for enabling features. Your application supplies its window, UI, permissions, and storage locations. The [host-path tests](https://github.com/vmux-ai/vmux/blob/main/examples/host-consumer/tests/host.rs) show how a separate product's name and namespace keep its data and service paths separate.
 
-A feature that works without a renderer should stay usable without the browser/window libraries. A custom host uses its own identity and data instead of borrowing Vmux's credentials. [How Vmux works](architecture.md) explains the UI/state split behind this.
-
-## Use one compatible revision
-
-Pin all Vmux dependencies to the same reviewed main commit or release tag and use its required Bevy version. Types from different revisions can be incompatible even when their names match.
-
-The SDK currently uses pinned Git revisions rather than a stable crates.io distribution. Check the example and feature code for platform support. Dynamic Rust plugin loading is not a supported feature.
+Use the example's Cargo features and pin all Vmux dependencies to one reviewed main commit or release tag, with its required Bevy version. The SDK currently uses Git dependencies; its public APIs can still change.
