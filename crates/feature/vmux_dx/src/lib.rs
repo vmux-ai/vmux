@@ -16,10 +16,13 @@ use storage::Storage;
 use target_lock::TargetLock;
 use work::{Outcome, Work};
 
+mod cargo;
 #[cfg(feature = "ci-syntax")]
 mod ci_native;
 mod ci_scope;
 mod consumer;
+mod debug;
+mod debug_io;
 mod environment;
 mod execution;
 mod local;
@@ -41,6 +44,10 @@ mod temporary;
 mod tooling;
 mod update_io;
 pub mod updates;
+#[expect(
+    dead_code,
+    reason = "VMX-253 retains the exact legacy schema until follow-up removal"
+)]
 mod work;
 mod workspace;
 mod workspace_io;
@@ -57,11 +64,22 @@ enum Stage {
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
+        if !app
+            .world()
+            .contains_resource::<vmux_ecs::blocking::BlockingRuntime>()
+        {
+            app.insert_resource(vmux_ecs::blocking::BlockingRuntime::new(
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-short", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-long", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
+            ));
+        }
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
             updates::Plugin,
             workspace::Plugin,
             repository_selection::Plugin,
+            debug::Plugin,
         ))
         .configure_sets(
             Update,
@@ -124,8 +142,8 @@ impl bevy_app::Plugin for Plugin {
                 refuse_plan,
                 receive,
                 collect,
-                select_local,
                 start,
+                native,
                 finish,
             )
                 .chain()
@@ -167,8 +185,13 @@ enum AdmissionPhase {
     Storage,
     Ready,
 }
+#[derive(Component, Default)]
+pub(crate) struct Step;
 
 #[derive(Component)]
+struct NativeSubmitted(debug::Captured);
+
+#[derive(Component, Clone)]
 struct Settings(Environment);
 
 #[derive(Component)]
@@ -210,6 +233,7 @@ impl Mailbox {
 #[derive(Message)]
 struct Completion {
     entity: Entity,
+    root: Entity,
     attempt: u64,
     result: std::result::Result<Outcome, Failure>,
 }
@@ -230,12 +254,12 @@ type Pending<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static Work,
+        Has<debug::Request>,
         &'static ChildOf,
         Option<&'static Predecessor>,
         &'static Attempt,
     ),
-    (Without<Running>, Without<Completed>),
+    (With<Step>, Without<Running>, Without<Completed>),
 >;
 type Inputs<'w, 's> = Query<
     'w,
@@ -246,7 +270,6 @@ type Inputs<'w, 's> = Query<
         &'static Storage,
         Option<&'static Lease>,
         Option<&'static workspace::Executable>,
-        Option<&'static local::Target>,
         &'static OperationState,
     ),
     (With<Planned>, Without<CliResult>),
@@ -276,6 +299,23 @@ type Preparing<'w, 's> = Query<
         &'static OperationState,
     ),
     (With<Admission>, Without<Accepted>, Without<CliResult>),
+>;
+type Receiving<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static ChildOf>,
+        &'static Attempt,
+        &'static debug::Captured,
+        Option<&'static NativeSubmitted>,
+    ),
+    With<Running>,
+>;
+type Adopting<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Settings, &'static mut OperationState),
+    (With<Accepted>, Without<CliResult>),
 >;
 
 fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
@@ -326,19 +366,35 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
             commands.entity(entity).insert(CliResult::default());
             continue;
         }
-        let resolved = match provider {
+        let resolved: Result<Checkout> = match provider {
             Some(provider) => {
                 let target = provider
                     .root
                     .join(".build-tools/providers")
                     .join(&provider.package);
-                workspace_io::Cache(target)
-                    .prepare(provider)
-                    .map(|target| Checkout {
-                        root: provider.root.clone(),
-                        target,
-                        build_target: Some(env!("VMUX_DX_HOST_TARGET").into()),
-                    })
+                let mut path = provider.root.clone();
+                let mut refused = false;
+                for component in target.strip_prefix(&provider.root).unwrap().components() {
+                    path.push(component);
+                    if std::fs::symlink_metadata(&path)
+                        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                    {
+                        refused = true;
+                        break;
+                    }
+                }
+                if refused {
+                    Err("Workspace provider cache cannot use symlinks".into())
+                } else {
+                    match std::fs::create_dir_all(target.parent().unwrap()) {
+                        Ok(()) => Ok(Checkout {
+                            root: provider.root.clone(),
+                            target,
+                            build_target: Some(env!("VMUX_DX_HOST_TARGET").into()),
+                        }),
+                        Err(error) => Err(error.into()),
+                    }
+                }
             }
             None => match resolved_context {
                 Some(checkout) => Ok(checkout.clone()),
@@ -482,7 +538,7 @@ fn configure_settings(mut requests: Preparing) {
 }
 
 fn prepare_storage(mut requests: Preparing, mut commands: Commands) {
-    for (entity, invocation, _, checkout, settings, mut phase, state) in &mut requests {
+    for (entity, _, _, checkout, settings, mut phase, state) in &mut requests {
         if *state != OperationState::Running || *phase != AdmissionPhase::Storage {
             continue;
         }
@@ -500,21 +556,6 @@ fn prepare_storage(mut requests: Preparing, mut commands: Commands) {
                 continue;
             }
         };
-        if invocation.is("dx.run")
-            && invocation.value("platform").unwrap_or("desktop") == "desktop"
-            && invocation.value("profile") == Some("local")
-        {
-            let product = match settings.0.product(&checkout.root) {
-                Ok(product) => product.value("VMUX_HOST_NAME").to_owned(),
-                Err(error) => {
-                    commands
-                        .entity(entity)
-                        .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
-                    continue;
-                }
-            };
-            commands.entity(entity).insert(local::Selection { product });
-        }
         commands.entity(entity).insert(storage);
         *phase = AdmissionPhase::Ready;
     }
@@ -543,19 +584,37 @@ struct Plans<'w, 's> {
 }
 
 impl Plans<'_, '_> {
-    fn step(&mut self, owner: Entity, tail: &mut Tail, work: Work) {
+    fn push<B: Bundle>(&mut self, owner: Entity, tail: &mut Tail, bundle: B) -> Entity {
         let mut step = self.commands.spawn((
-            Name::new(work.name()),
+            Step,
             OperationState::Pending,
             CreatedAt::now(),
             ChildOf(owner),
             Attempt(1),
-            work,
+            bundle,
         ));
         if let Some(previous) = tail.0 {
             step.insert(Predecessor(previous));
         }
-        tail.0 = Some(step.id());
+        let entity = step.id();
+        tail.0 = Some(entity);
+        entity
+    }
+
+    fn native(&mut self, owner: Entity, tail: &mut Tail, work: Work) {
+        let name = work.name();
+        self.push(owner, tail, (Name::new(name), work));
+    }
+
+    fn request<T: Component + Clone>(
+        &mut self,
+        owner: Entity,
+        tail: &mut Tail,
+        name: &'static str,
+        request: T,
+    ) {
+        let entity = self.push(owner, tail, Name::new(name));
+        self.commands.trigger(debug::Requested { entity, request });
     }
 }
 
@@ -569,6 +628,7 @@ type Planning<'w, 's> = Query<
         Entity,
         &'static CliInvocation,
         Option<&'static workspace::Dispatch>,
+        &'static Storage,
         &'static mut Tail,
     ),
     (With<Accepted>, Without<Planned>, Without<CliResult>),
@@ -579,84 +639,121 @@ fn plan_provider(
     providers: Query<&workspace::Provider>,
     mut plans: Plans,
 ) {
-    for (entity, _, dispatch, mut tail) in &mut operations {
-        let Some(dispatch) = dispatch else {
+    for (entity, _invocation, dispatch, storage, mut tail) in &mut operations {
+        if dispatch.is_none() {
             continue;
-        };
-        let Ok(provider) = providers.get(dispatch.provider) else {
-            plans.commands.entity(entity).insert((
-                OperationState::Failed,
-                CliResult(Err("Workspace provider is unavailable".into())),
-            ));
-            continue;
-        };
-        for work in [
-            Work::WorkspaceAcquire,
-            Work::WorkspaceCompile(
-                provider.package.clone(),
-                provider.binary.clone(),
-                provider.cargo.clone(),
-            ),
-            Work::WorkspaceInvoke(dispatch.arguments.clone()),
-        ] {
-            plans.step(entity, &mut tail, work);
         }
+        let dispatch = dispatch.unwrap();
+        let Ok(provider) = providers.get(dispatch.provider) else {
+            continue;
+        };
+        plans.request(
+            entity,
+            &mut tail,
+            "Check available build space",
+            debug::Capacity {
+                minimum: storage.minimum(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: false },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Check available build space",
+            debug::Capacity {
+                minimum: storage.minimum(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Build workspace CLI provider",
+            debug::Compile {
+                package: provider.package.clone(),
+                binary: provider.binary.clone(),
+                manifest: provider.cargo.clone(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Publish workspace CLI executable snapshot",
+            debug::Snapshot {
+                binary: provider.binary.clone(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Run workspace CLI provider",
+            debug::Invoke {
+                arguments: dispatch.arguments.clone(),
+            },
+        );
+
         plans.commands.entity(entity).insert(Planned);
     }
 }
+
 fn prepare_build(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.build")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.build") && tail.0.is_none()) {
             continue;
         }
-
-        for work in [Work::Check, Work::Acquire, Work::Seed, Work::Preflight] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Check);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
+        plans.native(entity, &mut tail, Work::Seed);
+        plans.native(entity, &mut tail, Work::Preflight);
     }
 }
 
 fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some()
-            || !(invocation.is("dx.build") && (platform == "desktop" && profile == "dev"))
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (platform == "desktop" && profile == "dev"))
         {
             continue;
         }
 
-        for work in [
-            Work::Native,
-            Work::Tailwind,
-            Work::Codesign,
-            Work::Helper,
-            Work::ClearReady,
-        ] {
-            plans.step(entity, &mut tail, work);
-        }
-        plans.step(
+        plans.native(entity, &mut tail, Work::Native);
+        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.request(
             entity,
             &mut tail,
-            Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]),
+            "Prepare signing identity",
+            debug::IdentityRequest { print: false },
         );
-        plans.step(
+        plans.native(entity, &mut tail, Work::Helper);
+        plans.request(entity, &mut tail, "Invalidate old artifact", debug::Clear);
+        plans.request(
             entity,
             &mut tail,
-            Work::cargo(&[
+            "Run Cargo",
+            cargo::Run::new(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]),
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run::new(&[
                 "build",
                 "-p",
                 "vmux_app",
@@ -685,95 +782,82 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         if cfg!(target_os = "macos") {
             args.extend(["--", "-C", "link-arg=-Wl,-headerpad,1000"].map(OsString::from));
         }
-        plans.step(entity, &mut tail, Work::Cargo(args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run { arguments: args },
+        );
         if cfg!(target_os = "macos") {
-            for work in [Work::SignDebug, Work::BundleDebug] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
+            plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
         }
-        plans.step(entity, &mut tail, Work::PublishDebug);
+        plans.request(
+            entity,
+            &mut tail,
+            "Verify and publish debug artifact",
+            debug::Publish,
+        );
     }
 }
 
 fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some()
-            || !(invocation.is("dx.build") && (platform == "desktop" && profile != "dev"))
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (platform == "desktop" && profile != "dev"))
         {
             continue;
         }
 
-        for work in [
-            Work::Native,
-            Work::Tailwind,
-            Work::PackageTools,
-            Work::Codesign,
-            Work::Package(profile.into()),
-        ] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Native);
+        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.native(entity, &mut tail, Work::PackageTools);
+        plans.request(
+            entity,
+            &mut tail,
+            "Prepare signing identity",
+            debug::IdentityRequest { print: false },
+        );
+        plans.native(entity, &mut tail, Work::Package(profile.into()));
     }
 }
 
 fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some()
-            || !(invocation.is("dx.build") && (platform == "ios" && profile == "release"))
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (platform == "ios" && profile == "release"))
         {
             continue;
         }
 
-        for work in [Work::Dioxus("ios".into()), Work::ReleaseIos] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Dioxus("ios".into()));
+        plans.native(entity, &mut tail, Work::ReleaseIos);
     }
 }
 
 fn plan_mobile(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some()
-            || !(invocation.is("dx.build")
-                && ((platform == "ios" && profile != "release") || platform == "android"))
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && ((platform == "ios" && profile != "release") || platform == "android"))
         {
             continue;
         }
 
-        plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+        plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
         let mut args = vec![
             "build".into(),
             format!("--{platform}").into(),
@@ -784,93 +868,90 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
             args.push("--release".into());
         }
         args.append(&mut forwarded);
-        plans.step(entity, &mut tail, Work::Tool("dx".into(), args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run tool",
+            debug::Tool {
+                program: "dx".into(),
+                arguments: args,
+            },
+        );
         if platform == "ios" {
-            for work in [Work::ResourcesIos, Work::VerifyIos(false)] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.native(entity, &mut tail, Work::ResourcesIos);
+            plans.native(entity, &mut tail, Work::VerifyIos(false));
         }
     }
 }
 
 fn plan_web(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.build") && (platform == "web")) {
+        if !(dispatch.is_none() && invocation.is("dx.build") && (platform == "web")) {
             continue;
         }
 
-        for work in [
-            Work::Dioxus(platform.into()),
-            Work::Binaryen,
-            Work::Tailwind,
-            Work::Css,
-        ] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
+        plans.native(entity, &mut tail, Work::Binaryen);
+        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.native(entity, &mut tail, Work::Css);
         let mut args = vec!["build".into(), "--platform".into(), "web".into()];
         if profile != "dev" {
             args.extend(["--ssg".into(), "--release".into()]);
         }
         args.append(&mut forwarded);
-        plans.step(entity, &mut tail, Work::Tool("dx".into(), args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run tool",
+            debug::Tool {
+                program: "dx".into(),
+                arguments: args,
+            },
+        );
         if profile != "dev" {
-            plans.step(entity, &mut tail, Work::FlattenWeb);
+            plans.native(entity, &mut tail, Work::FlattenWeb);
         }
     }
 }
 
 fn refuse_build(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _tail) in &mut operations {
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some()
-            || !invocation.is("dx.build")
-            || matches!(platform, "desktop" | "ios" | "android" | "web")
+    for (entity, invocation, dispatch, _storage, _tail) in &mut operations {
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (!matches!(platform, "desktop" | "ios" | "android" | "web")))
         {
             continue;
         }
+
         plans.commands.entity(entity).insert((
             OperationState::Failed,
             CliResult(Err("Unsupported build platform".into())),
         ));
+        continue;
     }
 }
 
 fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        if dispatch.is_some() || !(invocation.is("dx.build")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        if !(dispatch.is_none() && invocation.is("dx.build")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Finish(profile.into()));
+        plans.native(entity, &mut tail, Work::Finish(profile.into()));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_run(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = if invocation.is("dx.serve") {
             "dev"
         } else {
@@ -881,77 +962,80 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
         } else {
             invocation.value("platform").unwrap_or("desktop")
         };
-        if dispatch.is_some() || !(invocation.is("dx.run") || invocation.is("dx.serve")) {
+        if !(dispatch.is_none() && (invocation.is("dx.run") || invocation.is("dx.serve"))) {
             continue;
         }
 
-        plans.step(entity, &mut tail, Work::Acquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
         if platform != "desktop" {
-            plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+            plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
             if platform == "web" {
-                for work in [Work::Binaryen, Work::Tailwind, Work::Css] {
-                    plans.step(entity, &mut tail, work);
-                }
+                plans.native(entity, &mut tail, Work::Binaryen);
+                plans.native(entity, &mut tail, Work::Tailwind);
+                plans.native(entity, &mut tail, Work::Css);
             }
             if platform == "ios" {
-                plans.step(entity, &mut tail, Work::Simulator);
+                plans.native(entity, &mut tail, Work::Simulator);
             }
         }
-        if platform == "desktop" && profile == "local" {
-            for work in [Work::LocalEntries, Work::LocalLaunch] {
-                plans.step(entity, &mut tail, work);
-            }
-        } else {
-            plans.step(
-                entity,
-                &mut tail,
-                Work::Run(profile.into(), platform.into()),
-            );
-        }
+        plans.request(
+            entity,
+            &mut tail,
+            "Run artifact",
+            debug::Run {
+                profile: profile.into(),
+                platform: platform.into(),
+            },
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_stop(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.stop")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.stop")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Stop);
+        plans.request(entity, &mut tail, "Stop development service", debug::Stop);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.reset-layout")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.reset-layout")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Reset);
+        plans.native(entity, &mut tail, Work::Reset);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_test(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.test")) {
+        if !(dispatch.is_none() && invocation.is("dx.test")) {
             continue;
         }
 
-        for work in [Work::Acquire, Work::Seed] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
+        plans.native(entity, &mut tail, Work::Seed);
         let mut args = vec![
             "test".into(),
             "--workspace".into(),
@@ -965,35 +1049,41 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
             args.extend(["--features".into(), features.to_owned()]);
         }
         args.append(&mut forwarded);
-        plans.step(entity, &mut tail, Work::Cargo(args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run { arguments: args },
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_lint(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.lint")) {
+        if !(dispatch.is_none() && invocation.is("dx.lint")) {
             continue;
         }
 
-        for work in [Work::Acquire, Work::Seed] {
-            plans.step(entity, &mut tail, work);
-        }
-        plans.step(
+        plans.request(
             entity,
             &mut tail,
-            Work::cargo(&["fmt", "--all", "--", "--check"]),
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
+        plans.native(entity, &mut tail, Work::Seed);
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run::new(&["fmt", "--all", "--", "--check"]),
         );
         let mut args = vec![
             "clippy".into(),
@@ -1008,51 +1098,57 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
         }
         args.append(&mut forwarded);
         args.extend(["--".into(), "-D".into(), "warnings".into()]);
-        plans.step(entity, &mut tail, Work::Cargo(args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run { arguments: args },
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_doctor(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.doctor")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.doctor")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Doctor);
+        plans.native(entity, &mut tail, Work::Doctor);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_setup(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some() || !(invocation.is("dx.setup")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none() && invocation.is("dx.setup")) {
             continue;
         }
 
         if platform == "desktop" {
-            for work in [
-                Work::Check,
-                Work::Acquire,
-                Work::Native,
-                Work::Tailwind,
-                Work::PackageTools,
-                Work::Codesign,
-                Work::Helper,
-            ] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.native(entity, &mut tail, Work::Check);
+            plans.request(
+                entity,
+                &mut tail,
+                "Acquire target lock",
+                debug::Acquire { inherit: true },
+            );
+            plans.native(entity, &mut tail, Work::Native);
+            plans.native(entity, &mut tail, Work::Tailwind);
+            plans.native(entity, &mut tail, Work::PackageTools);
+            plans.request(
+                entity,
+                &mut tail,
+                "Prepare signing identity",
+                debug::IdentityRequest { print: false },
+            );
+            plans.native(entity, &mut tail, Work::Helper);
         } else {
-            plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+            plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
             if platform == "web" {
-                for work in [Work::Binaryen, Work::Tailwind] {
-                    plans.step(entity, &mut tail, work);
-                }
+                plans.native(entity, &mut tail, Work::Binaryen);
+                plans.native(entity, &mut tail, Work::Tailwind);
             }
         }
 
@@ -1061,65 +1157,69 @@ fn plan_setup(mut operations: Planning, mut plans: Plans) {
 }
 
 fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.cache.status")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.cache.status")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Status);
+        plans.native(entity, &mut tail, Work::Status);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.cache.clean")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.cache.clean")) {
             continue;
         }
 
-        for work in [Work::Acquire, Work::Clean(invocation.flag("apply"))] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
+        plans.native(entity, &mut tail, Work::Clean(invocation.flag("apply")));
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.ci-scope")) {
+        if !(dispatch.is_none() && invocation.is("dx.ci-scope")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Scope(forwarded));
+        plans.native(entity, &mut tail, Work::Scope(forwarded));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.ci-native")) {
+        if !(dispatch.is_none() && invocation.is("dx.ci-native")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::NativeInputs(forwarded));
+        plans.native(entity, &mut tail, Work::NativeInputs(forwarded));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_checks(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.checks.test")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.checks.test")) {
             continue;
         }
-        plans.step(
+        plans.native(
             entity,
             &mut tail,
             Work::Internal("pre-push".into(), Vec::new()),
@@ -1129,11 +1229,10 @@ fn plan_checks(mut operations: Planning, mut plans: Plans) {
 }
 
 fn plan_sdk(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.checks.sdk")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.checks.sdk")) {
             continue;
         }
-
         let mut arguments = Vec::new();
         if invocation.flag("host") {
             arguments.push("--host".into());
@@ -1141,22 +1240,25 @@ fn plan_sdk(mut operations: Planning, mut plans: Plans) {
         if invocation.flag("git") {
             arguments.push("--git".into());
         }
-        for work in [Work::Acquire, Work::Consumer(arguments)] {
-            plans.step(entity, &mut tail, work);
-        }
-
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
+        plans.native(entity, &mut tail, Work::Consumer(arguments));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_internal(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.internal")) {
+        if !(dispatch.is_none() && invocation.is("dx.internal")) {
             continue;
         }
 
@@ -1181,35 +1283,72 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
                     continue;
                 }
             };
-            for work in [
-                Work::Check,
-                Work::Acquire,
-                Work::Preflight,
-                Work::CliCompile,
-                Work::CliPackage(preview),
-                Work::Finish("release".into()),
-            ] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.native(entity, &mut tail, Work::Check);
+            plans.request(
+                entity,
+                &mut tail,
+                "Acquire target lock",
+                debug::Acquire { inherit: true },
+            );
+            plans.native(entity, &mut tail, Work::Preflight);
+            plans.native(entity, &mut tail, Work::CliCompile);
+            plans.native(entity, &mut tail, Work::CliPackage(preview));
+            plans.native(entity, &mut tail, Work::Finish("release".into()));
         } else {
             if task == "cargo" {
-                for work in [Work::Acquire, Work::Seed] {
-                    plans.step(entity, &mut tail, work);
+                plans.request(
+                    entity,
+                    &mut tail,
+                    "Acquire target lock",
+                    debug::Acquire { inherit: true },
+                );
+                plans.native(entity, &mut tail, Work::Seed);
+            }
+            match task {
+                "cargo" => {
+                    plans.request(
+                        entity,
+                        &mut tail,
+                        "Run Cargo",
+                        cargo::Run {
+                            arguments: forwarded,
+                        },
+                    );
+                }
+                "ensure-signing" => {
+                    plans.request(
+                        entity,
+                        &mut tail,
+                        "Prepare signing identity",
+                        debug::IdentityRequest { print: true },
+                    );
+                }
+                "debug-sign" => {
+                    plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
+                }
+                "debug-bundle" => {
+                    plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
+                }
+                _ => {
+                    plans.native(entity, &mut tail, Work::Internal(task.into(), forwarded));
                 }
             }
-            plans.step(entity, &mut tail, Work::Internal(task.into(), forwarded));
         }
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
-fn refuse_plan(operations: Planning, mut plans: Plans) {
-    for (entity, _, _, _) in &operations {
-        plans.commands.entity(entity).insert((
-            OperationState::Failed,
-            CliResult(Err("Unknown development command".into())),
-        ));
+fn refuse_plan(operations: Planning, mut commands: Commands) {
+    for (entity, _, dispatch, _, _) in &operations {
+        let error = if dispatch.is_some() {
+            "Workspace provider is unavailable"
+        } else {
+            "Unknown development command"
+        };
+        commands
+            .entity(entity)
+            .insert((OperationState::Failed, CliResult(Err(error.into()))));
     }
 }
 
@@ -1219,16 +1358,21 @@ fn start(
     completed: Query<Entity, With<Completed>>,
     operations: Inputs,
     mailbox: Res<Mailbox>,
+    reads: Query<&OperationState, With<repository_io::Read>>,
     mut commands: Commands,
 ) {
-    if !running.is_empty() {
+    if !running.is_empty()
+        || reads
+            .iter()
+            .any(|state| matches!(state, OperationState::Pending | OperationState::Running))
+    {
         return;
     }
-    for (entity, work, parent, predecessor, attempt) in &steps {
+    for (entity, requested, parent, predecessor, attempt) in &steps {
         if predecessor.is_some_and(|previous| !completed.contains(previous.0)) {
             continue;
         }
-        let Ok((checkout, settings, storage, lease, executable, local, state)) =
+        let Ok((checkout, settings, _storage, lease, executable, state)) =
             operations.get(parent.parent())
         else {
             continue;
@@ -1236,7 +1380,87 @@ fn start(
         if *state != OperationState::Running {
             continue;
         }
-        if matches!(work, Work::LocalLaunch) && local.is_none() {
+        let mut captured_settings = settings.clone();
+        if let Some(executable) = executable {
+            captured_settings
+                .0
+                .set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
+        }
+        let mut step = commands.entity(entity);
+        step.insert((
+            debug::Captured {
+                root: parent.parent(),
+                attempt: attempt.0,
+            },
+            checkout.clone(),
+            captured_settings,
+            Running,
+            OperationState::Running,
+        ));
+        if requested {
+            step.insert(debug::Lease(lease.map(|lease| lease.0.clone())));
+        }
+        mailbox.wake.unpark();
+        break;
+    }
+}
+
+type NativeReady<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Work,
+        Option<&'static ChildOf>,
+        &'static Attempt,
+        &'static debug::Captured,
+        &'static Checkout,
+        &'static Settings,
+    ),
+    (With<Running>, Without<NativeSubmitted>),
+>;
+
+fn native(
+    steps: NativeReady,
+    operations: Inputs,
+    mailbox: Res<Mailbox>,
+    mut completions: MessageWriter<Completion>,
+    mut commands: Commands,
+) {
+    for (entity, work, parent, attempt, captured, checkout, settings) in &steps {
+        if parent.is_none_or(|parent| parent.parent() != captured.root)
+            || attempt.0 != captured.attempt
+        {
+            commands.entity(entity).despawn();
+            if operations
+                .get(captured.root)
+                .is_ok_and(|(_, _, _, _, _, state)| *state == OperationState::Running)
+            {
+                commands.entity(captured.root).remove::<Lease>().insert((
+                    OperationState::Failed,
+                    CliResult(Err("Development step ownership changed".into())),
+                ));
+            }
+            continue;
+        }
+        let Ok((_, _, storage, lease, executable, _)) = operations.get(captured.root) else {
+            continue;
+        };
+        if work.retired() {
+            completions.write(Completion {
+                entity,
+                root: captured.root,
+                attempt: captured.attempt,
+                result: Err(Failure::message(
+                    "Migrated DX work requires its concrete typed request",
+                )),
+            });
+            commands
+                .entity(entity)
+                .insert(NativeSubmitted(debug::Captured {
+                    root: captured.root,
+                    attempt: captured.attempt,
+                }));
             continue;
         }
         let checkout = checkout.clone();
@@ -1244,18 +1468,16 @@ fn start(
         if let Some(executable) = executable {
             environment.set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
         }
-        if let Some(local) = local {
-            environment.set("VMUX_DX_LOCAL_APP", local.0.as_os_str());
-        }
         let storage = storage.clone();
         let lease = lease.map(|lease| lease.0.clone());
         let work = work.clone();
         let sender = mailbox.sender.clone();
         let wake = mailbox.wake.clone();
+        let root = captured.root;
         let attempt = attempt.0;
         commands
             .entity(entity)
-            .insert((Running, OperationState::Running));
+            .insert(NativeSubmitted(debug::Captured { root, attempt }));
         thread::spawn(move || {
             let name = work.name();
             let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1267,6 +1489,7 @@ fn start(
             };
             let _ = sender.send(Completion {
                 entity,
+                root,
                 attempt,
                 result,
             });
@@ -1283,60 +1506,10 @@ fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
     }
 }
 
-type Selections<'w, 's> = Query<
-    'w,
-    's,
-    (Entity, &'static local::Selection, &'static Children),
-    (
-        With<local::Inspected>,
-        Without<local::Target>,
-        Without<CliResult>,
-    ),
->;
-
-fn select_local(operations: Selections, entries: Query<&local::Entry>, mut commands: Commands) {
-    for (entity, selection, children) in &operations {
-        let prefix = format!("{} (", selection.product);
-        let mut latest = None;
-        for child in children.iter() {
-            let Ok(entry) = entries.get(child) else {
-                continue;
-            };
-            if !entry.directory || entry.symlink {
-                continue;
-            }
-            let Some(name) = entry.path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if !name.starts_with(&prefix) || !name.ends_with(").app") {
-                continue;
-            }
-            if latest.is_none_or(|previous: &local::Entry| entry.modified > previous.modified) {
-                latest = Some(entry);
-            }
-        }
-        match latest {
-            Some(entry) => {
-                commands
-                    .entity(entity)
-                    .insert(local::Target(entry.path.clone()));
-            }
-            None => {
-                commands.entity(entity).insert((
-                    OperationState::Failed,
-                    CliResult(Err(
-                        "No completed local app; run vmux build -p local first".into()
-                    )),
-                ));
-            }
-        }
-    }
-}
-
 fn cancel(
     signals: Option<Res<signals::Signals>>,
     mut operations: Cancellations,
-    running: Query<&ChildOf, With<Running>>,
+    running: Query<(&debug::Captured, Option<&NativeSubmitted>), With<Running>>,
     mut commands: Commands,
 ) {
     if signals.is_none() {
@@ -1347,7 +1520,12 @@ fn cancel(
     };
     for (entity, mut state) in &mut operations {
         *state = OperationState::Canceled;
-        if !running.iter().any(|parent| parent.parent() == entity) {
+        if !running.iter().any(|(captured, submitted)| {
+            submitted
+                .map(|submitted| submitted.0.root)
+                .unwrap_or(captured.root)
+                == entity
+        }) {
             commands
                 .entity(entity)
                 .insert(CliResult(Ok((128 + signal) as u8)));
@@ -1356,72 +1534,90 @@ fn cancel(
 }
 
 fn collect(
-    mut completions: MessageReader<Completion>,
-    steps: Query<(&ChildOf, &Attempt), With<Running>>,
-    mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
+    mut completions: ResMut<Messages<Completion>>,
+    steps: Receiving,
+    mut operations: Adopting,
+    leases: Query<&Lease>,
     mut commands: Commands,
 ) {
-    for completion in completions.read() {
-        let Ok((parent, attempt)) = steps.get(completion.entity) else {
+    for completion in completions.drain() {
+        let Ok((parent, attempt, captured, submitted)) = steps.get(completion.entity) else {
             continue;
         };
-        if attempt.0 != completion.attempt {
+        let accepted = submitted.map(|submitted| &submitted.0).unwrap_or(captured);
+        if accepted.root != completion.root || accepted.attempt != completion.attempt {
             continue;
         }
-        let Ok((mut settings, mut state)) = operations.get_mut(parent.parent()) else {
+        if parent.is_none_or(|parent| parent.parent() != accepted.root)
+            || attempt.0 != accepted.attempt
+            || captured.root != accepted.root
+            || captured.attempt != accepted.attempt
+        {
+            commands.entity(completion.entity).despawn();
+            if let Ok((_, mut state)) = operations.get_mut(accepted.root) {
+                commands.entity(accepted.root).remove::<Lease>();
+                if *state == OperationState::Running {
+                    *state = OperationState::Failed;
+                    commands
+                        .entity(accepted.root)
+                        .insert(CliResult(Err("Development step ownership changed".into())));
+                }
+            }
+            continue;
+        }
+        let Ok((mut settings, mut state)) = operations.get_mut(completion.root) else {
+            commands.entity(completion.entity).despawn();
             continue;
         };
         if *state == OperationState::Canceled {
             commands
                 .entity(completion.entity)
-                .remove::<Running>()
+                .remove::<(Running, Lease)>()
                 .insert((Completed, OperationState::Canceled));
             continue;
         }
-        match &completion.result {
+        match completion.result {
             Ok(outcome) => {
                 match outcome {
-                    Outcome::LocalEntries(entries) => {
-                        for entry in entries {
-                            commands.spawn((entry.clone(), Completed, ChildOf(parent.parent())));
-                        }
-                        commands.entity(parent.parent()).insert(local::Inspected);
-                    }
                     Outcome::Executable(executable) => {
                         commands
-                            .entity(parent.parent())
-                            .insert(executable.clone())
+                            .entity(completion.root)
+                            .insert(executable)
                             .remove::<Lease>();
                     }
                     Outcome::Done => {}
                     Outcome::Lease(lease) => {
-                        commands
-                            .entity(parent.parent())
-                            .insert(Lease(lease.clone()));
+                        commands.entity(completion.root).insert(Lease(lease));
                     }
+                    Outcome::LocalEntries(entries) => drop(entries),
                     Outcome::Identity(identity) => {
-                        settings.0.set("APPLE_SIGNING_IDENTITY", identity);
+                        settings.0.set("APPLE_SIGNING_IDENTITY", &identity);
                     }
                     Outcome::Artifacts(paths) => {
                         for path in paths {
                             commands.spawn((
                                 Name::new(path.display().to_string()),
-                                Artifact(path.clone()),
+                                Artifact(path),
                                 CreatedAt::now(),
                                 vmux_ecs::Ready,
                                 Completed,
-                                ChildOf(parent.parent()),
+                                ChildOf(completion.root),
                             ));
                         }
                     }
                     Outcome::ToolPath(key, path) => {
                         let key = key.to_str().expect("tool configuration key");
-                        settings.0.set(key, path);
+                        settings.0.set(key, &path);
                     }
+                }
+                if let Ok(lease) = leases.get(completion.entity) {
+                    commands
+                        .entity(completion.root)
+                        .insert(Lease(lease.0.clone()));
                 }
                 commands
                     .entity(completion.entity)
-                    .remove::<Running>()
+                    .remove::<(Running, Lease)>()
                     .insert((Completed, OperationState::Succeeded));
             }
             Err(error) => {
@@ -1433,10 +1629,10 @@ fn collect(
                 eprintln!("vmux: {error}");
                 commands
                     .entity(completion.entity)
-                    .remove::<Running>()
+                    .remove::<(Running, Lease)>()
                     .insert((Completed, OperationState::Failed));
                 commands
-                    .entity(parent.parent())
+                    .entity(completion.root)
                     .insert(CliResult(Ok(error.code() as u8)));
             }
         }
@@ -1446,11 +1642,20 @@ fn collect(
 fn finish(
     operations: Finishing,
     completed: Query<Entity, With<Completed>>,
+    running: Query<(&debug::Captured, Option<&NativeSubmitted>), With<Running>>,
     artifacts: Query<&Artifact, With<vmux_ecs::Ready>>,
     mut commands: Commands,
 ) {
     for (entity, children, state) in &operations {
         if *state == OperationState::Canceled {
+            continue;
+        }
+        if running.iter().any(|(captured, submitted)| {
+            submitted
+                .map(|submitted| submitted.0.root)
+                .unwrap_or(captured.root)
+                == entity
+        }) {
             continue;
         }
         if children.iter().all(|child| completed.contains(child)) {
@@ -1469,6 +1674,7 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
     struct Fixture {
@@ -1513,7 +1719,10 @@ mod tests {
         }
 
         fn step(&mut self, command: &str) -> Entity {
-            let work = Work::Tool("/bin/sh".into(), vec!["-c".into(), command.into()]);
+            let work = debug::Tool {
+                program: "/bin/sh".into(),
+                arguments: vec!["-c".into(), command.into()],
+            };
             let mut step = self.app.world_mut().spawn((
                 OperationState::Pending,
                 ChildOf(self.operation),
@@ -1539,6 +1748,396 @@ mod tests {
                 std::thread::park_timeout(Duration::from_millis(10));
             }
         }
+
+        fn program(&self, name: &str, script: &str) -> std::path::PathBuf {
+            let directory = self.directory.path().join("tools");
+            std::fs::create_dir_all(&directory).unwrap();
+            let path = directory.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn cargo(&mut self, arguments: &[&str]) -> Entity {
+            let program = self.program("cargo", r#"
+if [ "$1" = '-V' ]; then
+    printf 'cargo fixture 1\n'
+    exit 0
+fi
+printf '%s\n' "$@" > "$VMUX_CARGO_FIXTURE/arguments"
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' "$CARGO_INCREMENTAL" "$CEF_PATH" "$CMAKE_C_COMPILER_LAUNCHER" "$CMAKE_CXX_COMPILER_LAUNCHER" "$RUSTC_WRAPPER" "$TAILWINDCSS" "$VMUX_TARGET_LOCK_TARGET" "$VMUX_BUILD_STORAGE_ROOT" "$VMUX_TARGET_LOCK_OWNER_PID" "$VMUX_DX_BIN" > "$VMUX_CARGO_FIXTURE/environment"
+exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
+"#);
+            let rustc = self.program("rustc", "printf 'rustc fixture 1\\nhost: fixture-host\\n'");
+            let root = self.directory.path().canonicalize().unwrap();
+            let mut settings = self
+                .app
+                .world_mut()
+                .get_mut::<Settings>(self.operation)
+                .unwrap();
+            for name in [
+                "RUSTC_WRAPPER",
+                "RUSTC_WORKSPACE_WRAPPER",
+                "CMAKE_C_COMPILER_LAUNCHER",
+                "CMAKE_CXX_COMPILER_LAUNCHER",
+                "CARGO_INCREMENTAL",
+                "RUSTFLAGS",
+                "CARGO_ENCODED_RUSTFLAGS",
+                "CARGO_BUILD_TARGET",
+                "MACOSX_DEPLOYMENT_TARGET",
+                "VMUX_DX_PLATFORM",
+                "VMUX_CARGO_FIXTURE_EXIT",
+            ] {
+                settings.0.remove(name);
+            }
+            settings.0.set("CARGO_BIN", program.as_os_str());
+            settings.0.set("RUSTC", rustc.as_os_str());
+            settings.0.set(
+                "PATH",
+                format!("{}:/usr/bin:/bin", root.join("tools").display()),
+            );
+            settings.0.set("VMUX_CARGO_FIXTURE", root.as_os_str());
+            settings
+                .0
+                .set("VMUX_CEF_SDK_CACHE", root.join("cef-sdk").as_os_str());
+            settings.0.set("VMUX_DISABLE_SCCACHE", "1");
+            settings.0.set("VMUX_BUILD_PROFILE", "dev");
+            settings.0.set("CI", "true");
+            self.app
+                .world_mut()
+                .spawn((
+                    cargo::Run::new(arguments),
+                    OperationState::Pending,
+                    ChildOf(self.operation),
+                    Attempt(1),
+                ))
+                .id()
+        }
+    }
+
+    #[test]
+    fn typed_cargo_preserves_arguments_environment_overrides_and_probe_fallbacks() {
+        for probe in [
+            None,
+            Some("exit 7"),
+            Some("[ \"$1\" = '--version' ]"),
+            Some("printf '\\377'; exit 0"),
+        ] {
+            let mut fixture = Fixture::new();
+            let step = fixture.cargo(&["fmt", "--", "space in argument"]);
+            if let Some(probe) = probe {
+                fixture.program("sccache", probe);
+            }
+            let mut settings = fixture
+                .app
+                .world_mut()
+                .get_mut::<Settings>(fixture.operation)
+                .unwrap();
+            settings.0.set("VMUX_DISABLE_SCCACHE", "0");
+            settings.0.set("CI", "false");
+            settings.0.set("CARGO_INCREMENTAL", "custom");
+            settings.0.set("CMAKE_C_COMPILER_LAUNCHER", "custom-c");
+            settings.0.set("TAILWINDCSS_BIN", "selected-tailwind");
+            assert_eq!(fixture.result(), 0);
+            assert_eq!(
+                std::fs::read_to_string(fixture.directory.path().join("arguments")).unwrap(),
+                "fmt\n--\nspace in argument\n"
+            );
+            let environment =
+                std::fs::read_to_string(fixture.directory.path().join("environment")).unwrap();
+            let values: Vec<_> = environment.split('|').collect();
+            assert_eq!(values[0], "custom");
+            assert!(values[1].ends_with("/cef-sdk"));
+            assert_eq!(values[2], "custom-c");
+            assert_eq!(
+                values[3],
+                if probe == Some("printf '\\377'; exit 0") {
+                    "sccache"
+                } else {
+                    ""
+                }
+            );
+            assert_eq!(
+                values[4],
+                if probe == Some("printf '\\377'; exit 0") {
+                    "sccache"
+                } else {
+                    ""
+                }
+            );
+            assert_eq!(values[5], "selected-tailwind");
+            assert_eq!(
+                std::path::Path::new(values[6]),
+                fixture
+                    .directory
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .join("target")
+            );
+            assert_eq!(
+                std::path::Path::new(values[7]),
+                fixture.directory.path().canonicalize().unwrap()
+            );
+            assert_eq!(values[8], std::process::id().to_string());
+            assert_eq!(
+                std::path::Path::new(values[9]),
+                std::env::current_exe().unwrap()
+            );
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(step)
+                    .unwrap()
+                    .0
+                    .get("CARGO_INCREMENTAL"),
+                Some(std::ffi::OsStr::new("custom"))
+            );
+        }
+    }
+
+    #[test]
+    fn typed_cargo_records_the_existing_git_seed_contract_and_replaces_old_markers() {
+        for original in [None, Some(""), Some("0")] {
+            let mut fixture = Fixture::new();
+            let step = fixture.cargo(&["build", "--package", "fixture"]);
+            let root = fixture.directory.path().canonicalize().unwrap();
+            std::fs::create_dir_all(root.join(".cargo")).unwrap();
+            std::fs::create_dir_all(root.join("nested")).unwrap();
+            std::fs::create_dir_all(root.join("target/.vmux-seed")).unwrap();
+            std::fs::write(root.join("target/.vmux-seed/obsolete"), "").unwrap();
+            let files = [
+                ".cargo/config.toml",
+                "Cargo.lock",
+                "Cargo.toml",
+                "nested/Cargo.toml",
+            ];
+            for file in files {
+                std::fs::write(root.join(file), format!("fixture: {file}\n")).unwrap();
+            }
+            let mut settings = fixture
+                .app
+                .world_mut()
+                .get_mut::<Settings>(fixture.operation)
+                .unwrap();
+            settings.0.set("CI", "false");
+            settings.0.set("RUSTFLAGS", "-C debuginfo=0");
+            if let Some(original) = original {
+                settings.0.set("CARGO_INCREMENTAL", original);
+            }
+            let incremental = if original == Some("0") { "0" } else { "1" };
+            let mut input = format!(
+                "cargo=cargo fixture 1\nrustc=rustc fixture 1\nhost: fixture-host\nrustc-wrapper=\nrustc-workspace-wrapper=\ncargo-incremental={incremental}\nrustflags=-C debuginfo=0\ncargo-encoded-rustflags=\ncargo-build-target=\nmacosx-deployment-target=\n"
+            );
+            for file in files {
+                input.push_str(&format!("file={file}\n"));
+            }
+            let output = std::process::Command::new("/usr/bin/git")
+                .current_dir(&root)
+                .arg("hash-object")
+                .args(files)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            input.push_str(std::str::from_utf8(&output.stdout).unwrap());
+            std::fs::write(root.join("seed-input"), input).unwrap();
+            let output = std::process::Command::new("/usr/bin/git")
+                .current_dir(&root)
+                .args(["hash-object", "seed-input"])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let expected = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(fixture.result(), 0);
+            let markers: Vec<_> = std::fs::read_dir(root.join("target/.vmux-seed"))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect();
+            assert_eq!(markers, vec![OsString::from(expected.trim())]);
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(step)
+                    .unwrap()
+                    .0
+                    .get("CARGO_INCREMENTAL"),
+                original.map(std::ffi::OsStr::new)
+            );
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(fixture.operation)
+                    .unwrap()
+                    .0
+                    .get("CARGO_INCREMENTAL"),
+                original.map(std::ffi::OsStr::new)
+            );
+        }
+    }
+
+    #[test]
+    fn typed_cargo_failure_preserves_exit_code_and_skips_seed_publication() {
+        let mut fixture = Fixture::new();
+        let step = fixture.cargo(&["build"]);
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set("CI", "false");
+        settings.0.set("VMUX_CARGO_FIXTURE_EXIT", "37");
+        assert_eq!(fixture.result(), 37);
+        assert!(!fixture.directory.path().join("target/.vmux-seed").exists());
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Settings>(step)
+                .unwrap()
+                .0
+                .get("CARGO_INCREMENTAL"),
+            None
+        );
+    }
+
+    #[test]
+    fn typed_cargo_seed_failure_preserves_the_marker_and_reports_failure_after_the_tool_succeeds() {
+        let mut fixture = Fixture::new();
+        fixture.cargo(&["build"]);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap()
+            .0
+            .set("CI", "false");
+        let target = fixture.directory.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join(".vmux-seed"), "protected marker").unwrap();
+        assert_eq!(fixture.result(), 1);
+        assert_eq!(
+            std::fs::read_to_string(fixture.directory.path().join("arguments")).unwrap(),
+            "build\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join(".vmux-seed")).unwrap(),
+            "protected marker"
+        );
+    }
+
+    #[test]
+    fn typed_cargo_in_ci_clears_inherited_cef_and_preserves_the_selected_wrapper() {
+        let mut fixture = Fixture::new();
+        fixture.cargo(&["build"]);
+        fixture.program("sccache", "exit 0");
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set("VMUX_DISABLE_SCCACHE", "0");
+        settings.0.remove("VMUX_CEF_SDK_CACHE");
+        settings.0.set("CEF_PATH", "inherited-sdk");
+        settings.0.set("RUSTC_WRAPPER", "selected-wrapper");
+        assert_eq!(fixture.result(), 0);
+        let environment =
+            std::fs::read_to_string(fixture.directory.path().join("environment")).unwrap();
+        let values: Vec<_> = environment.split('|').collect();
+        assert_eq!(values[0], "0");
+        assert_eq!(values[1], "");
+        assert_eq!(values[2], "sccache");
+        assert_eq!(values[3], "sccache");
+        assert_eq!(values[4], "selected-wrapper");
+        assert!(!fixture.directory.path().join("target/.vmux-seed").exists());
+    }
+
+    #[test]
+    fn canceled_cargo_probe_drains_its_process_and_retains_the_target_until_completion() {
+        let mut fixture = Fixture::new();
+        let step = fixture.cargo(&["build"]);
+        fixture.program(
+            "sccache",
+            "printf '%s' \"$$\" > \"$VMUX_CARGO_FIXTURE/probe-pid\"; exec /bin/sleep 30",
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap()
+            .0
+            .set("VMUX_DISABLE_SCCACHE", "0");
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .insert(Lease(Arc::new(
+                TargetLock::acquire(&checkout.root, &checkout.target).unwrap(),
+            )));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            fixture.app.update();
+            if let Ok(text) = std::fs::read_to_string(fixture.directory.path().join("probe-pid"))
+                && let Ok(pid) = text.parse::<u32>()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline, "Cargo probe did not start");
+            std::thread::park_timeout(Duration::from_millis(5));
+        };
+        assert!(signals::Signals::alive(pid));
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .insert(OperationState::Canceled);
+        loop {
+            fixture.app.update();
+            if fixture.app.world().get::<Completed>(step).is_some() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Canceled Cargo probe did not drain"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        assert!(!signals::Signals::alive(pid));
+        assert!(!fixture.directory.path().join("arguments").exists());
+        assert!(!fixture.directory.path().join("target/.vmux-seed").exists());
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Settings>(step)
+                .unwrap()
+                .0
+                .get("CARGO_INCREMENTAL"),
+            None
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .remove::<Lease>();
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1560,6 +2159,23 @@ mod tests {
             std::fs::read_to_string(fixture.directory.path().join("order")).unwrap(),
             "firstsecond"
         );
+    }
+
+    #[test]
+    fn migrated_legacy_tool_inputs_are_refused_before_native_execution() {
+        let mut fixture = Fixture::new();
+        fixture.app.world_mut().spawn((
+            Step,
+            Work::Tool(
+                "sh".into(),
+                vec!["-c".into(), "printf unexpected > unexpected".into()],
+            ),
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        assert_ne!(fixture.result(), 0);
+        assert!(!fixture.directory.path().join("unexpected").exists());
     }
 
     #[test]
@@ -1628,9 +2244,25 @@ mod tests {
     fn stale_completion_cannot_advance_the_current_attempt() {
         let mut fixture = Fixture::new();
         let step = fixture.step("exit 99");
-        fixture.app.world_mut().entity_mut(step).insert(Running);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(step)
+            .remove::<debug::Tool>();
+        fixture.app.world_mut().entity_mut(step).insert((
+            Running,
+            NativeSubmitted(debug::Captured {
+                root: fixture.operation,
+                attempt: 1,
+            }),
+            debug::Captured {
+                root: fixture.operation,
+                attempt: 1,
+            },
+        ));
         fixture.app.world_mut().write_message(Completion {
             entity: step,
+            root: fixture.operation,
             attempt: 0,
             result: Ok(Outcome::Done),
         });
@@ -1645,9 +2277,428 @@ mod tests {
         );
         fixture.app.world_mut().write_message(Completion {
             entity: step,
+            root: fixture.operation,
             attempt: 1,
             result: Ok(Outcome::Done),
         });
         assert_eq!(fixture.result(), 0);
+    }
+
+    #[test]
+    fn native_receipts_cannot_cross_their_captured_operation_when_a_step_is_reparented() {
+        for detached in [false, true] {
+            let mut fixture = Fixture::new();
+            fixture.app.world_mut().spawn((
+                Completed,
+                OperationState::Succeeded,
+                ChildOf(fixture.operation),
+            ));
+            let step = fixture.step("exit 99");
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(step)
+                .remove::<debug::Tool>();
+            fixture.app.world_mut().entity_mut(step).insert((
+                Running,
+                NativeSubmitted(debug::Captured {
+                    root: fixture.operation,
+                    attempt: 1,
+                }),
+                debug::Captured {
+                    root: fixture.operation,
+                    attempt: 1,
+                },
+            ));
+            let mut environment = Environment::current();
+            environment.remove("VMUX_DX_OWNER_ORACLE");
+            let other = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Accepted,
+                    Operation::bundle("dx.fixture").unwrap().running(),
+                    Settings(environment),
+                ))
+                .id();
+            if detached {
+                fixture.app.world_mut().entity_mut(step).remove::<ChildOf>();
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(step)
+                    .insert(ChildOf(other));
+            }
+            fixture.app.update();
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<CliResult>(fixture.operation)
+                    .is_none()
+            );
+            fixture.app.world_mut().write_message(Completion {
+                entity: step,
+                root: fixture.operation,
+                attempt: 1,
+                result: Ok(Outcome::ToolPath(
+                    "VMUX_DX_OWNER_ORACLE".into(),
+                    "wrong-owner".into(),
+                )),
+            });
+            fixture.app.update();
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(other)
+                    .unwrap()
+                    .0
+                    .get("VMUX_DX_OWNER_ORACLE")
+                    .is_none()
+            );
+            assert!(fixture.app.world().get_entity(step).is_err());
+            assert_eq!(
+                fixture.app.world().get::<OperationState>(fixture.operation),
+                Some(&OperationState::Failed)
+            );
+            let checkout = fixture
+                .app
+                .world()
+                .get::<Checkout>(fixture.operation)
+                .unwrap()
+                .clone();
+            let settings = fixture
+                .app
+                .world()
+                .get::<Settings>(fixture.operation)
+                .unwrap()
+                .clone();
+            let storage = fixture
+                .app
+                .world()
+                .get::<Storage>(fixture.operation)
+                .unwrap()
+                .clone();
+            fixture.operation = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Accepted,
+                    Planned,
+                    Operation::bundle("dx.fixture").unwrap().running(),
+                    checkout,
+                    settings,
+                    storage,
+                ))
+                .id();
+            fixture.previous = None;
+            fixture.step("printf recovered > recovered");
+            assert_eq!(fixture.result(), 0);
+            assert_eq!(
+                std::fs::read_to_string(fixture.directory.path().join("recovered")).unwrap(),
+                "recovered"
+            );
+        }
+    }
+
+    #[test]
+    fn acquired_lease_transfers_to_the_root_without_losing_exclusion() {
+        let mut fixture = Fixture::new();
+        fixture.app.world_mut().spawn((
+            debug::Acquire { inherit: false },
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        assert_eq!(fixture.result(), 0);
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .remove::<Lease>();
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn discarded_acquired_lease_releases_exclusion_after_the_request_drains() {
+        for disposition in [
+            OperationState::Canceled,
+            OperationState::Failed,
+            OperationState::Running,
+        ] {
+            let mut fixture = Fixture::new();
+            let step = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    debug::Acquire { inherit: false },
+                    OperationState::Pending,
+                    ChildOf(fixture.operation),
+                    Attempt(1),
+                ))
+                .id();
+            let checkout = fixture
+                .app
+                .world()
+                .get::<Checkout>(fixture.operation)
+                .unwrap()
+                .clone();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while fixture.app.world().get::<Lease>(step).is_none() {
+                fixture.app.update();
+                assert!(Instant::now() < deadline, "lease candidate did not arrive");
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            if disposition == OperationState::Running {
+                let other = fixture.app.world_mut().spawn_empty().id();
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(step)
+                    .insert(ChildOf(other));
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.operation)
+                    .insert(disposition);
+            }
+            loop {
+                fixture.app.update();
+                if fixture.app.world().get::<Completed>(step).is_some()
+                    || fixture.app.world().get_entity(step).is_err()
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "discarded lease did not drain");
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Lease>(fixture.operation)
+                    .is_none()
+            );
+            assert!(
+                TargetLock::try_acquire(&checkout.root, &checkout.target)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn discarded_unconsumed_lock_receipts_release_exclusion_after_completion() {
+        for disposition in [OperationState::Canceled, OperationState::Failed] {
+            let mut fixture = Fixture::new();
+            fixture.app.add_observer(
+                move |receipt: On<Add, debug_io::AcquiredLock>,
+                      parents: Query<&ChildOf>,
+                      mut roots: Query<&mut OperationState, With<Accepted>>| {
+                    let request = parents.get(receipt.entity).unwrap().parent();
+                    let root = parents.get(request).unwrap().parent();
+                    *roots.get_mut(root).unwrap() = disposition.clone();
+                },
+            );
+            let step = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    debug::Acquire { inherit: false },
+                    OperationState::Pending,
+                    ChildOf(fixture.operation),
+                    Attempt(1),
+                ))
+                .id();
+            let checkout = fixture
+                .app
+                .world()
+                .get::<Checkout>(fixture.operation)
+                .unwrap()
+                .clone();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                fixture.app.update();
+                if fixture.app.world().get::<Completed>(step).is_some() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "unconsumed lock did not complete"
+                );
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Lease>(fixture.operation)
+                    .is_none()
+            );
+            assert!(
+                TargetLock::try_acquire(&checkout.root, &checkout.target)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn lock_inheritance_uses_the_process_contract_and_rejects_configuration_overrides() {
+        let mut fixture = Fixture::new();
+        if std::env::var_os("VMUX_LOCK_BORROWER_TEST").is_some() {
+            let root =
+                std::path::PathBuf::from(std::env::var_os("VMUX_BUILD_STORAGE_ROOT").unwrap());
+            let target =
+                std::path::PathBuf::from(std::env::var_os("VMUX_TARGET_LOCK_TARGET").unwrap());
+            let storage = Storage::new(
+                root.clone(),
+                target.clone(),
+                policy::Policy::environment().unwrap(),
+            )
+            .unwrap();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(fixture.operation)
+                .insert((
+                    Checkout {
+                        root,
+                        target,
+                        build_target: None,
+                    },
+                    storage,
+                ));
+            fixture.app.world_mut().spawn((
+                debug::Acquire { inherit: true },
+                OperationState::Pending,
+                ChildOf(fixture.operation),
+                Attempt(1),
+            ));
+            assert_eq!(fixture.result(), 0);
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Lease>(fixture.operation)
+                    .is_none()
+            );
+            return;
+        }
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        let held = TargetLock::acquire(&checkout.root, &checkout.target).unwrap();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::lock_inheritance_uses_the_process_contract_and_rejects_configuration_overrides",
+                "--nocapture",
+            ])
+            .env("VMUX_LOCK_BORROWER_TEST", "1")
+            .env("VMUX_TARGET_LOCK_OWNER_PID", std::process::id().to_string())
+            .env("VMUX_BUILD_STORAGE_ROOT", &checkout.root)
+            .env("VMUX_TARGET_LOCK_TARGET", &checkout.target)
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_none()
+        );
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set(
+            "VMUX_TARGET_LOCK_OWNER_PID",
+            unsafe { libc::getppid() }.to_string(),
+        );
+        settings
+            .0
+            .set("VMUX_BUILD_STORAGE_ROOT", checkout.root.as_os_str());
+        settings
+            .0
+            .set("VMUX_TARGET_LOCK_TARGET", checkout.target.as_os_str());
+        fixture.app.world_mut().spawn((
+            debug::Acquire { inherit: true },
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        for _ in 0..4 {
+            fixture.app.update();
+        }
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<CliResult>(fixture.operation)
+                .is_none()
+        );
+        drop(held);
+        assert_eq!(fixture.result(), 0);
+    }
+
+    #[test]
+    fn typed_tool_uses_the_selected_program_and_website_working_directory() {
+        let mut fixture = Fixture::new();
+        let root = fixture.directory.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("website")).unwrap();
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set("DX_BIN", "/bin/sh");
+        settings.0.set("VMUX_TOOL_PROBE_ROOT", root.as_os_str());
+        fixture.app.world_mut().spawn((
+            debug::Tool {
+                program: "dx".into(),
+                arguments: vec![
+                    "-c".into(),
+                    "pwd > \"$VMUX_TOOL_PROBE_ROOT/selected-cwd\"".into(),
+                    "--platform".into(),
+                    "web".into(),
+                ],
+            },
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        assert_eq!(fixture.result(), 0);
+        assert_eq!(
+            std::fs::read_to_string(root.join("selected-cwd"))
+                .unwrap()
+                .trim(),
+            root.join("website").display().to_string()
+        );
     }
 }

@@ -61,7 +61,7 @@ Run the website for the branch you are editing:
 vmux serve my-vmux
 ```
 
-Open the URL shown in Terminal, then visit `/docs`. This starts the website development server and watches its styles while you edit the guides. For this documentation PR, the branch is `docs-guide`.
+Open the URL shown in Terminal, then visit `/docs`. This starts the website development server and watches its styles while you edit the guides.
 
 ## Give a distributed build its own name
 

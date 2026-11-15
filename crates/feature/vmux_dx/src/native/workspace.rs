@@ -22,7 +22,7 @@ impl Native {
             .arg("--target-dir")
             .arg(&self.checkout.target);
         Execution::new(command).run()?;
-        Executable::snapshot(&self.checkout.directory("debug").join(binary))
+        Err("Workspace compilation requires its concrete typed request".into())
     }
 
     pub fn workspace_invoke(&self, arguments: &[OsString]) -> Result<()> {

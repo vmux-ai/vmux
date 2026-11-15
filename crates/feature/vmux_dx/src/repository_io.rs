@@ -1,65 +1,34 @@
-use std::ffi::OsString;
-use std::path::PathBuf;
-
-use crate::Result;
 use crate::environment::Environment;
 use crate::execution::Execution;
+use bevy_ecs::prelude::Component;
+use std::path::PathBuf;
+use std::process::Output;
+use vmux_ecs::blocking::Lane;
+use vmux_ecs::jobs::Job;
 
-pub struct Repository(pub PathBuf);
+#[derive(Component, Clone)]
+#[component(immutable)]
+pub struct Read {
+    pub root: PathBuf,
+    pub arguments: Vec<&'static str>,
+}
 
-impl Repository {
-    pub fn worktrees(&self) -> Result<Vec<Record>> {
-        let environment = Environment::current();
-        let mut command = environment.command("git", &self.0);
-        command.args(["worktree", "list", "--porcelain", "-z"]);
-        let output = Execution::new(command).output(None)?;
-        let mut records = Record::parse(&output.stdout)?;
-        let mut command = environment.command("git", &self.0);
-        command.args(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-        let common = Execution::new(command).output(None)?;
-        let common = PathBuf::from(std::str::from_utf8(&common.stdout)?.trim());
-        let mut command = environment.command("git", &self.0);
-        command.args(["config", "--local", "--get", "core.worktree"]);
-        let setting = Execution::new(command).output_any(None)?;
-        if setting.status.success() {
-            let root = common
-                .join(std::str::from_utf8(&setting.stdout)?.trim())
-                .canonicalize()?;
-            for record in &mut records {
-                if record.path == common {
-                    record.path = root.clone();
-                }
-            }
+impl Job for Read {
+    type Output = Result<Output, String>;
+
+    fn run(self) -> Self::Output {
+        let mut command = Environment::current().command("git", &self.root);
+        command.args(self.arguments);
+        let output = Execution::new(command)
+            .output_any(None)
+            .map_err(|error| error.to_string())?;
+        if output.stdout.len() > 1024 * 1024 || output.stderr.len() > 1024 * 1024 {
+            return Err("Git repository metadata exceeds 1 MiB".into());
         }
-        Ok(records)
+        Ok(output)
     }
-}
 
-pub struct Record {
-    pub path: PathBuf,
-    pub branch: Option<OsString>,
-}
-
-impl Record {
-    fn parse(bytes: &[u8]) -> Result<Vec<Self>> {
-        let text = std::str::from_utf8(bytes)?;
-        let mut records = Vec::new();
-        let mut path = None;
-        let mut branch = None;
-        for field in text.split('\0') {
-            if let Some(value) = field.strip_prefix("worktree ") {
-                path = Some(PathBuf::from(value));
-            } else if let Some(value) = field.strip_prefix("branch refs/heads/") {
-                branch = Some(value.into());
-            } else if field.is_empty()
-                && let Some(path) = path.take()
-            {
-                records.push(Self {
-                    path,
-                    branch: branch.take(),
-                });
-            }
-        }
-        Ok(records)
+    fn lane(&self) -> Lane {
+        Lane::Process
     }
 }

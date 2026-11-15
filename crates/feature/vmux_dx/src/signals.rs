@@ -19,6 +19,10 @@ pub struct Signals {
 }
 
 impl Signals {
+    pub fn active() -> bool {
+        CHILD_GROUP.load(Ordering::Relaxed) > 0
+    }
+
     pub fn alive(pid: u32) -> bool {
         pid > 0 && pid <= i32::MAX as u32 && unsafe { kill(pid as i32, 0) } == 0
     }

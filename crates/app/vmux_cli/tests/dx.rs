@@ -42,21 +42,48 @@ fn cargo_children_receive_command_specific_incremental_defaults_and_overrides() 
     }
 }
 
+static FIXTURES: (std::sync::Mutex<u8>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+struct Permit;
+
+impl Permit {
+    fn acquire() -> Self {
+        let mut active = FIXTURES.0.lock().unwrap();
+        while *active >= 4 {
+            active = FIXTURES.1.wait(active).unwrap();
+        }
+        *active += 1;
+        Self
+    }
+}
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        let mut active = FIXTURES.0.lock().unwrap();
+        *active -= 1;
+        FIXTURES.1.notify_one();
+    }
+}
+
 #[cfg(not(feature = "runtime"))]
 struct WorkspaceFixture {
     _directory: tempfile::TempDir,
     root: std::path::PathBuf,
+    _permit: Permit,
 }
 
 #[cfg(not(feature = "runtime"))]
 impl WorkspaceFixture {
     fn new() -> Self {
+        let permit = Permit::acquire();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("workspace with spaces");
         std::fs::create_dir_all(root.join("bin")).unwrap();
         let fixture = Self {
             _directory: directory,
             root,
+            _permit: permit,
         };
         std::fs::write(fixture.root.join("Cargo.toml"), "[workspace]\nmembers = []\n[workspace.metadata.vmux.dx]\nproviders = [{name = 'fixtures', package = 'fixture-provider', binary = 'provider-bin', manifest = 'provider.ron'}]\n").unwrap();
         fixture.manifest("fixtures", "fixture");
@@ -144,6 +171,49 @@ impl Drop for WorkspaceChild {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn provider_forwarding_uses_positional_indexes_and_places_the_delimiter_last() {
+    let fixture = WorkspaceFixture::new();
+    std::fs::write(
+        fixture.root.join("provider.ron"),
+        r#"(cli:Some((commands:[(
+        id:"fixture",name:"fixtures",commands:[(
+            id:"fixture.echo",name:"echo",arguments:[
+                (id:"second",index:Some(2)),
+                (id:"forward",index:Some(3),trailing:true),
+                (id:"option",long:Some("option")),
+                (id:"first",index:Some(1)),
+            ],
+        )],subcommand_required:true,
+    )])))"#,
+    )
+    .unwrap();
+    fixture.run(&["fixtures", "echo", "first value", "second value", "--option", "option value", "--", "--literal", "tail value"])
+        .assert().success()
+        .stdout("fixtures\necho\n--option\noption value\nfirst value\nsecond value\n--\n--literal\ntail value\n");
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn provider_help_refuses_a_fifo_manifest_without_waiting_for_a_writer() {
+    let fixture = WorkspaceFixture::new();
+    let path = fixture.root.join("provider.ron");
+    std::fs::remove_file(&path).unwrap();
+    let output = std::process::Command::new("mkfifo")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    fixture
+        .run(&["fixtures", "--help"])
+        .timeout(std::time::Duration::from_secs(2))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Workspace provider manifest"));
+    assert!(!fixture.root.join("compiled").exists());
 }
 
 #[test]
@@ -711,11 +781,13 @@ struct Fixture {
     directory: tempfile::TempDir,
     root: std::path::PathBuf,
     target: std::path::PathBuf,
+    _permit: Permit,
 }
 
 #[cfg(unix)]
 impl Fixture {
     fn new() -> Self {
+        let permit = Permit::acquire();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("checkout with spaces");
         let target = directory.path().join("target with spaces");
@@ -762,6 +834,7 @@ impl Fixture {
             directory,
             root,
             target,
+            _permit: permit,
         };
         let git = std::process::Command::new("git")
             .arg("-C")
@@ -994,6 +1067,450 @@ else:
         }
         command
     }
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn git_configuration_failures_do_not_count_as_missing_core_worktree() {
+    let fixture = Fixture::new();
+    fixture
+        .command()
+        .args(["cache", "-b", "main", "status"])
+        .assert()
+        .success();
+    fixture.script(
+        "git",
+        r#"#!/bin/sh
+case "$*" in
+  'config --local --get core.worktree') exit 73 ;;
+  *) exec /usr/bin/git "$@" ;;
+esac
+"#,
+    );
+    fixture
+        .command()
+        .args(["cache", "-b", "main", "status"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Git repository read failed"))
+        .stderr(predicate::str::contains("73"));
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn resolved_launch_cancellation_drains_a_tool_that_ignores_the_signal() {
+    let fixture = Fixture::new();
+    let app = fixture
+        .target
+        .join("release/Vmux (fixture).app/Contents/MacOS");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
+    fixture.script(
+        "codesign",
+        r#"#!/bin/sh
+trap '' TERM INT
+printf '%s' $$ > "$TEST_ROOT/tool-started"
+sleep 60 &
+printf '%s' "$!" > "$TEST_ROOT/tool-child.pending"
+mv "$TEST_ROOT/tool-child.pending" "$TEST_ROOT/tool-child"
+wait
+"#,
+    );
+    let mut child = WorkspaceChild(
+        std::process::Command::new(env!("CARGO_BIN_EXE_vmux"))
+            .current_dir(&fixture.root)
+            .args(["run", "-p", "local"])
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", fixture.root.join("bin").display()),
+            )
+            .env("CARGO_TARGET_DIR", &fixture.target)
+            .env_remove("CARGO_BUILD_TARGET")
+            .env("TEST_ROOT", &fixture.root)
+            .env("TEST_OPEN_LOG", fixture.root.join("open.log"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !fixture.root.join("tool-child").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "signature verification never started"
+        );
+        assert!(child.0.try_wait().unwrap().is_none());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let pid: i32 = std::fs::read_to_string(fixture.root.join("tool-started"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let _cleanup = OwnedGroup(pid);
+    let descendant: i32 = std::fs::read_to_string(fixture.root.join("tool-child"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(143));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "CLI did not finish cancellation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    while unsafe { libc::kill(descendant, 0) } == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "owned tool survived CLI exit"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!fixture.root.join("open.log").exists());
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn workspace_capacity_is_rechecked_before_compilation() {
+    let fixture = WorkspaceFixture::new();
+    fixture.tool("df", r#"
+if [ -e "$VMUX_WORKSPACE_TEST_ROOT/capacity-first" ]; then free=0; else
+    touch "$VMUX_WORKSPACE_TEST_ROOT/capacity-first"
+    free=2097152
+fi
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 2097152 0 %s 0%% /\n' "$free"
+"#);
+    fixture
+        .run(&["fixtures", "echo"])
+        .env("VMUX_BUILD_STORAGE_MIN_GIB", "1")
+        .env("VMUX_BUILD_STORAGE_WARN_GIB", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Insufficient build space"));
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn workspace_capacity_probe_cancels_and_drains_before_exit() {
+    let fixture = WorkspaceFixture::new();
+    fixture.tool(
+        "df",
+        r#"
+trap '' TERM INT
+printf '%s' $$ > "$VMUX_WORKSPACE_TEST_ROOT/probe.pending"
+mv "$VMUX_WORKSPACE_TEST_ROOT/probe.pending" "$VMUX_WORKSPACE_TEST_ROOT/probe-started"
+exec sleep 60
+"#,
+    );
+    let mut command = fixture.command();
+    command
+        .args(["fixtures", "echo"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let mut child = WorkspaceChild(command.spawn().unwrap());
+    let marker = fixture.root.join("probe-started");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "capacity probe never started"
+        );
+        assert!(child.0.try_wait().unwrap().is_none());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let pid: i32 = std::fs::read_to_string(marker).unwrap().parse().unwrap();
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGINT) }, 0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(130));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "capacity probe did not drain"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(all(target_os = "macos", not(feature = "runtime")))]
+fn debug_fifo_inputs_are_refused_before_launching() {
+    for name in [".vmux-dev-ready", "vmux"] {
+        let fixture = Fixture::new();
+        fixture.command().args(["build"]).assert().success();
+        let path = fixture.target.join("debug").join(name);
+        std::fs::remove_file(&path).unwrap();
+        let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        fixture
+            .command()
+            .args(["run"])
+            .timeout(std::time::Duration::from_secs(10))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Debug input must be a regular file",
+            ));
+        assert!(!fixture.root.join("open.log").exists());
+    }
+}
+
+#[cfg(all(unix, not(feature = "runtime")))]
+struct OwnedGroup(i32);
+
+#[cfg(all(unix, not(feature = "runtime")))]
+impl Drop for OwnedGroup {
+    fn drop(&mut self) {
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
+    }
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn repository_read_cancellation_preserves_the_signal_and_prevents_following_stages() {
+    let fixture = Fixture::new();
+    fixture.script(
+        "git",
+        r#"#!/bin/sh
+case "$*" in
+  'worktree list --porcelain -z')
+    printf '%s' $$ > "$TEST_ROOT/git-started"
+    sleep 60 &
+    printf '%s' "$!" > "$TEST_ROOT/git-descendant.pending"
+    mv "$TEST_ROOT/git-descendant.pending" "$TEST_ROOT/git-descendant"
+    wait
+    ;;
+  *)
+    printf '%s\n' "$*" >> "$TEST_ROOT/git-following"
+    exec /usr/bin/git "$@"
+    ;;
+esac
+"#,
+    );
+    let mut child = WorkspaceChild(
+        std::process::Command::new(env!("CARGO_BIN_EXE_vmux"))
+            .current_dir(&fixture.root)
+            .args(["cache", "-b", "main", "status"])
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", fixture.root.join("bin").display()),
+            )
+            .env("CARGO_TARGET_DIR", &fixture.target)
+            .env("TEST_ROOT", &fixture.root)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !fixture.root.join("git-descendant").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Git read never started"
+        );
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "CLI exited before its Git read"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let descendant: i32 = std::fs::read_to_string(fixture.root.join("git-descendant"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(143));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "CLI did not process cancellation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    while unsafe { libc::kill(descendant, 0) } == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Git descendant survived cancellation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let following = fixture.root.join("git-following");
+    if following.exists() {
+        let commands = std::fs::read_to_string(following).unwrap();
+        assert!(!commands.contains("--git-common-dir"));
+        assert!(!commands.contains("core.worktree"));
+    }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn signing_identity_provisioning_verifies_creation_and_stops_after_import_failure() {
+    for fail in [false, true] {
+        let fixture = Fixture::new();
+        fixture.script(
+            "openssl",
+            r#"#!/bin/sh
+next=
+for arg do
+  if [ -n "$next" ]; then printf fixture > "$arg"; next=; continue; fi
+  case "$arg" in -out|-keyout) next=yes;; esac
+done
+"#,
+        );
+        fixture.script("security", r#"#!/bin/sh
+case "$1" in
+  find-identity) if [ -f "$TEST_ROOT/created" ]; then printf '1) fixture "Fixture Identity"\n'; fi ;;
+  import) [ "${FAIL_IMPORT:-0}" != 1 ] || exit 45; test -f "$2" || exit 46; touch "$TEST_ROOT/created" ;;
+  add-trusted-cert) test -f "$TEST_ROOT/created" || exit 47; touch "$TEST_ROOT/trusted" ;;
+esac
+"#);
+        let mut command = fixture.command();
+        command
+            .args(["internal", "ensure-signing"])
+            .env_remove("APPLE_SIGNING_IDENTITY")
+            .env("VMUX_LOCAL_SIGNING_IDENTITY", "Fixture Identity")
+            .env(
+                "VMUX_LOCAL_CODESIGN_KEYCHAIN",
+                fixture.root.join("fixture.keychain-db"),
+            )
+            .env("TEST_ROOT", &fixture.root)
+            .env("FAIL_IMPORT", if fail { "1" } else { "0" });
+        if fail {
+            command.assert().code(45);
+            assert!(!fixture.root.join("trusted").exists());
+        } else {
+            command
+                .assert()
+                .success()
+                .stdout(predicate::str::contains("Fixture Identity"));
+            assert!(fixture.root.join("created").is_file());
+            assert!(fixture.root.join("trusted").is_file());
+        }
+    }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn debug_bundle_preserves_metadata_and_reuses_signatures_until_inputs_change() {
+    let fixture = Fixture::new();
+    let debug = fixture.target.join("debug");
+    std::fs::create_dir_all(&debug).unwrap();
+    for name in ["vmux", "vmux_vm", "vmux_service", "vmux_desktop"] {
+        std::fs::write(debug.join(name), format!("#!/bin/sh\nprintf '{name}'\n")).unwrap();
+        std::fs::set_permissions(debug.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fixture.script(
+        "plist-buddy",
+        "#!/bin/sh\nexec /usr/libexec/PlistBuddy \"$@\"\n",
+    );
+    fixture.script("rustc", "#!/bin/sh\nprintf '%s\\n' \"$TEST_STDLIB\"\n");
+    fixture.script(
+        "codesign",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_SIGN_LOG\"\n",
+    );
+    let stdlib = fixture.directory.path().join("stdlib with spaces");
+    std::fs::create_dir_all(&stdlib).unwrap();
+    let log = fixture.root.join("signatures.log");
+    for _ in 0..2 {
+        fixture
+            .command()
+            .args(["internal", "debug-bundle"])
+            .env("TEST_STDLIB", &stdlib)
+            .env("TEST_SIGN_LOG", &log)
+            .assert()
+            .success();
+    }
+    let app = debug.join("Vmux Dev.app");
+    let plist = plist::Value::from_file(app.join("Contents/Info.plist")).unwrap();
+    let dictionary = plist.as_dictionary().unwrap();
+    assert_eq!(
+        dictionary["CFBundleIdentifier"].as_string(),
+        Some("ai.vmux.desktop.dev")
+    );
+    assert_eq!(
+        dictionary["CFBundleDisplayName"].as_string(),
+        Some("Vmux Dev (main)")
+    );
+    let service = app.join("Contents/Library/LoginItems/Vmux Service.app");
+    let plist = plist::Value::from_file(service.join("Contents/Info.plist")).unwrap();
+    let dictionary = plist.as_dictionary().unwrap();
+    assert_eq!(
+        dictionary["CFBundleExecutable"].as_string(),
+        Some("Vmux Service")
+    );
+    assert_eq!(dictionary["LSUIElement"].as_boolean(), Some(true));
+    assert_eq!(
+        std::fs::read(app.join("Contents/MacOS/vmux_desktop")).unwrap(),
+        std::fs::read(debug.join("vmux_desktop")).unwrap()
+    );
+    let first = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(
+        first
+            .lines()
+            .filter(|line| line.starts_with("--force"))
+            .count(),
+        2
+    );
+    std::fs::write(debug.join("vmux_desktop"), "#!/bin/sh\nprintf 'rebuilt'\n").unwrap();
+    fixture
+        .command()
+        .args(["internal", "debug-bundle"])
+        .env("TEST_STDLIB", &stdlib)
+        .env("TEST_SIGN_LOG", &log)
+        .assert()
+        .success();
+    let after = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(
+        after
+            .lines()
+            .filter(|line| line.starts_with("--force"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        std::fs::read(app.join("Contents/MacOS/vmux_desktop")).unwrap(),
+        std::fs::read(debug.join("vmux_desktop")).unwrap()
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn native_launch_refusal_keeps_the_tool_diagnostic_and_exit_status() {
+    let fixture = Fixture::new();
+    let app = fixture
+        .target
+        .join("release/Vmux (fixture).app/Contents/MacOS");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
+    fixture.script(
+        "codesign",
+        "#!/bin/sh\nprintf 'fixture signature permission denied\\n' >&2\nexit 44\n",
+    );
+    fixture
+        .command()
+        .args(["run", "-p", "local"])
+        .assert()
+        .code(44)
+        .stderr(predicate::str::contains(
+            "fixture signature permission denied",
+        ));
+    assert!(!fixture.root.join("open.log").exists());
 }
 
 #[test]

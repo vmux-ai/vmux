@@ -60,6 +60,27 @@ pub enum Work {
 }
 
 impl Work {
+    pub(crate) fn retired(&self) -> bool {
+        matches!(
+            self,
+            Self::Acquire
+                | Self::Codesign
+                | Self::Tool(_, _)
+                | Self::Cargo(_)
+                | Self::ClearReady
+                | Self::SignDebug
+                | Self::BundleDebug
+                | Self::PublishDebug
+                | Self::Run(_, _)
+                | Self::LocalEntries
+                | Self::LocalLaunch
+                | Self::Stop
+                | Self::WorkspaceCompile(_, _, _)
+                | Self::WorkspaceAcquire
+                | Self::WorkspaceInvoke(_)
+        )
+    }
+
     pub(crate) fn cargo(args: &[&str]) -> Self {
         Self::Cargo(args.iter().map(OsString::from).collect())
     }

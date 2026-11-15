@@ -25,6 +25,12 @@ impl CliWake {
     }
 }
 
+impl std::task::Wake for CliWake {
+    fn wake(self: std::sync::Arc<Self>) {
+        self.0.unpark();
+    }
+}
+
 #[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
 pub struct CliManifest {
     #[serde(default)]

@@ -46,11 +46,12 @@ impl TargetLock {
     }
 
     pub fn acquire(root: &Path, target: &Path) -> Result<Self> {
+        Self::check()?;
         let path = Self::path(root, target)?;
         let mut waiting = false;
         let file = if cfg!(target_os = "macos") {
             loop {
-                Signals::check()?;
+                Self::check()?;
                 let acquired = Command::new("shlock")
                     .arg("-f")
                     .arg(&path)
@@ -71,7 +72,7 @@ impl TargetLock {
                 .truncate(false)
                 .open(&path)?;
             loop {
-                Signals::check()?;
+                Self::check()?;
                 match file.try_lock() {
                     Ok(()) => break,
                     Err(TryLockError::WouldBlock) => {
@@ -83,7 +84,17 @@ impl TargetLock {
             }
             Some(file)
         };
-        Ok(Self { path, file })
+        let lease = Self { path, file };
+        Self::check()?;
+        Ok(lease)
+    }
+
+    fn check() -> Result<()> {
+        Signals::check()?;
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err("Target lock acquisition canceled".into());
+        }
+        Ok(())
     }
 
     fn waiting(target: &Path, waiting: &mut bool) {
