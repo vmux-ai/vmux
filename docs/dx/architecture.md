@@ -58,6 +58,16 @@ Filesystem, network, process, and native API calls sit behind adapters. Handlers
 
 The repository's policy checks test these relationships. Ownership is inferred from the code; local `ecs-policy.ron` files carry migration debt and the exceptions the checker cannot infer. Read the feature's types, handlers, and tests first, and use a policy file when a check points to one.
 
+## Native VM and Docker
+
+`vmux_container` owns the pages, typed CLI/GUI requests, configuration, selection and canonical inventory. `vmux_vm` owns the leased native lifecycle and ECS dependency batches. Docker input becomes entities before dependency decisions or UI projection; the persisted inventory is a restore input, not a second live registry.
+
+Startup and shutdown use exclusive process and guest-file leases. Operations own cancellation, so Stop can supersede startup and dependency work without an older completion replacing a newer request. The same stop receipt remains observed during preparation and readiness, including before the supervisor publishes its control socket. Bounded retirement cleans up helpers and forwarding while preserving guest disks. GUI Quit respects engine ownership; independent CLI engines and other profiles survive it.
+
+Native adapters perform scoped filesystem, process, Docker, SSH and forwarding IO. Guest preparation verifies images and uses no-follow directory handles and atomic writes. The VMM runs in a signed helper because entering it takes over that process. Forwarding keeps attempted exposures until an authoritative receipt, preventing lost acknowledgements from leaking host listeners. The shared VM page placement and address scope retain one hosted surface during navigation.
+
+See [VM and Docker](../ux/containers.md) for controls, automatic discovery and the supported port-binding scope. The first backend targets Apple Silicon macOS and Docker.
+
 ## What to read next
 
 [Make a change](feature-development.md) walks through a feature edit. [Test and share a build](validation-and-release.md) gives the test and build commands. [Vmux Framework](framework.md) is optional reading if you want to build a different application from the same pieces.
