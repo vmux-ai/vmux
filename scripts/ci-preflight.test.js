@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const Preflight = require('./ci-preflight.js');
 const CliArtifact = require('./ci-cli.js');
+const Sources = require('./ci-cache.js');
 
 class Fixture {
   constructor(t) {
@@ -70,6 +71,42 @@ class Fixture {
   synthetic(base, head) {
     const tree = this.git('merge-tree', '--write-tree', base, head).split('\n')[0];
     return this.git('commit-tree', tree, '-p', base, '-p', head, '-m', 'Synthetic PR merge');
+  }
+
+  compilerCache(watch = '') {
+    fs.writeFileSync(path.join(this.root, 'Cargo.toml'), '[package]\nname = "cache-fixture"\nversion = "0.1.0"\nedition = "2024"\n');
+    fs.mkdirSync(path.join(this.root, 'src'));
+    fs.writeFileSync(path.join(this.root, 'src/main.rs'), 'fn main() { println!("original"); }\n');
+    if (watch === 'directory') {
+      fs.writeFileSync(path.join(this.root, 'src/main.rs'), 'fn main() { println!("{}", env!("CACHE_VALUE")); }\n');
+      fs.writeFileSync(path.join(this.root, 'src/value.txt'), 'original');
+      fs.writeFileSync(path.join(this.root, 'build.rs'), 'fn main() { let value = std::fs::read_to_string("src/value.txt").unwrap_or_default(); println!("cargo:rustc-env=CACHE_VALUE={value}"); println!("cargo:rerun-if-changed=src"); }\n');
+    }
+    if (watch === 'git') {
+      fs.writeFileSync(path.join(this.root, 'src/main.rs'), 'fn main() { println!("{}", env!("CACHE_VALUE")); }\n');
+      fs.writeFileSync(path.join(this.root, 'build.rs'), 'fn main() { let output = std::process::Command::new("git").args(["rev-parse", "HEAD"]).output().unwrap(); let value = String::from_utf8(output.stdout).unwrap(); println!("cargo:rustc-env=CACHE_VALUE={}", value.trim()); println!("cargo:rerun-if-changed=.git/HEAD"); println!("cargo:rerun-if-changed=.git/logs/HEAD"); }\n');
+    }
+    this.commit('compiler fixture');
+    return new Sources(this.root, '.source-cache.json', 'target');
+  }
+
+  compile(target = 'target') {
+    const env = Preflight.gitEnvironment();
+    for (const key of ['CARGO_TARGET_DIR', 'CARGO_BUILD_TARGET', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTFLAGS']) delete env[key];
+    env.CARGO_INCREMENTAL = '0';
+    execFileSync('cargo', ['build', '--offline', '--target-dir', target], { cwd: this.root, env, stdio: 'pipe' });
+    return path.join(this.root, target, 'debug/cache-fixture');
+  }
+
+  restoreCache(snapshot, target, save = 'true') {
+    const state = path.join(this.root, `action-state-${require('node:crypto').randomUUID()}`);
+    Sources.run({ GITHUB_WORKSPACE: this.root, GITHUB_STATE: state, INPUT_SNAPSHOT: snapshot, INPUT_TARGET: target, INPUT_SAVE: save });
+    const post = { GITHUB_WORKSPACE: this.root, INPUT_SNAPSHOT: '', INPUT_TARGET: '', INPUT_SAVE: '' };
+    for (const line of fs.readFileSync(state, 'utf8').trim().split('\n')) {
+      const separator = line.indexOf('=');
+      post[`STATE_${line.slice(0, separator)}`] = line.slice(separator + 1);
+    }
+    return post;
   }
 }
 
@@ -675,5 +712,181 @@ test('macOS packaging preflights run lean checks in parallel and require both re
       assert.equal(workflow.gate('build-macos', { ...valid, CHECK: result }).status, checkRequired ? 1 : 0);
       assert.equal(workflow.gate('build-macos', { ...valid, RESULT: result }).status, 1);
     }
+  }
+});
+
+test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
+  for (const save of ['true', 'false']) {
+    const fixture = new Fixture(t);
+    const snapshot = path.join(fixture.root, '.source-cache.json');
+    const post = fixture.restoreCache('.source-cache.json', 'target', save);
+    fs.writeFileSync(path.join(fixture.root, 'feature.txt'), 'final job contents\n');
+    Sources.run(post);
+    assert.equal(fs.existsSync(snapshot), save === 'true');
+    if (save === 'true') {
+      const record = JSON.parse(fs.readFileSync(snapshot, 'utf8'));
+      assert.equal(record.files['feature.txt'].hash, require('node:crypto').createHash('sha256').update('final job contents\n').digest('hex'));
+    }
+  }
+});
+
+test('identical sources restored from a compiler snapshot remain fresh to Cargo', (t) => {
+  const fixture = new Fixture(t);
+  const sources = fixture.compilerCache();
+  const binary = fixture.compile();
+  sources.save();
+  const modified = fs.statSync(binary, { bigint: true }).mtimeNs;
+  fs.utimesSync(path.join(fixture.root, 'src/main.rs'), new Date(), new Date());
+  sources.restore();
+  fixture.compile();
+  assert.equal(fs.statSync(binary, { bigint: true }).mtimeNs, modified);
+  assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'original\n');
+});
+
+test('changed source older than cached compiler artifacts cannot reuse stale code', (t) => {
+  for (const snapshot of ['valid', 'missing', 'corrupt', 'legacy']) {
+    const fixture = new Fixture(t);
+    const sources = fixture.compilerCache();
+    fixture.compile();
+    sources.save();
+    if (snapshot === 'missing') fs.unlinkSync(sources.snapshot);
+    if (snapshot === 'corrupt') fs.writeFileSync(sources.snapshot, '{bad snapshot');
+    fs.writeFileSync(path.join(fixture.root, 'src/main.rs'), 'fn main() { println!("changed"); }\n');
+    fs.utimesSync(path.join(fixture.root, 'src/main.rs'), 1, 1);
+    if (snapshot === 'legacy') {
+      const record = JSON.parse(fs.readFileSync(sources.snapshot, 'utf8'));
+      record.version = 1;
+      record.files['src/main.rs'].hash = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(fixture.root, 'src/main.rs'))).digest('hex');
+      record.files['src/main.rs'].mtime = '1000000000';
+      fs.writeFileSync(sources.snapshot, JSON.stringify(record));
+    }
+    sources.restore();
+    const binary = fixture.compile();
+    assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'changed\n', snapshot);
+  }
+});
+
+test('restoring another target preserves fresh artifacts and rebuilds stale code', (t) => {
+  for (const mode of ['instance', 'action']) {
+    for (const changed of [false, true]) {
+      const fixture = new Fixture(t);
+      const first = fixture.compilerCache();
+      const second = new Sources(fixture.root, '.alternate-cache.json', 'alternate-target');
+      const file = path.join(fixture.root, 'src/main.rs');
+      fs.writeFileSync(file, 'fn main() { println!("changed"); }\n');
+      fs.utimesSync(file, 1, 1);
+      fixture.compile('alternate-target');
+      second.save();
+      if (changed) fs.writeFileSync(file, 'fn main() { println!("original"); }\n');
+      else fs.utimesSync(file, new Date(), new Date());
+      const initial = fixture.compile();
+      const modified = fs.statSync(initial, { bigint: true }).mtimeNs;
+      first.save();
+      fs.writeFileSync(file, 'fn main() { println!("changed"); }\n');
+      let post;
+      if (mode === 'action') post = fixture.restoreCache('.source-cache.json', 'target');
+      else first.restore();
+      second.restore();
+      if (post) Sources.run(post);
+      else first.save();
+      first.restore();
+      const binary = fixture.compile();
+      assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'changed\n', mode);
+      if (!changed) assert.equal(fs.statSync(binary, { bigint: true }).mtimeNs, modified, mode);
+    }
+  }
+});
+
+test('source timestamp restoration preserves files reached through symbolic links', (t) => {
+  const fixture = new Fixture(t);
+  const sources = fixture.compilerCache();
+  const external = path.join(fixture.root, 'external.rs');
+  fs.writeFileSync(external, 'external source');
+  fs.symlinkSync(external, path.join(fixture.root, 'linked.rs'));
+  fixture.git('add', 'linked.rs');
+  sources.save();
+  fs.writeFileSync(external, 'modified external source');
+  fs.utimesSync(external, 1, 1);
+  const before = fs.statSync(external, { bigint: true }).mtimeNs;
+  sources.restore();
+  assert.equal(fs.statSync(external, { bigint: true }).mtimeNs, before);
+});
+
+test('workspace caches isolate compiler flags and omit packaged runtime bundles', (t) => {
+  const fixture = new Fixture(t);
+  const sources = fixture.compilerCache();
+  fixture.compile();
+  const env = { GITHUB_SHA: fixture.head, VMUX_CACHE_PARTITION: 'test', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64' };
+  const inputs = sources.inputs(env);
+  const advanced = sources.inputs({ ...env, GITHUB_SHA: fixture.base });
+  assert.equal(inputs.prefix, advanced.prefix);
+  assert.notEqual(inputs.key, advanced.key);
+  for (const flags of [{ RUSTFLAGS: '-C opt-level=1' }, { CARGO_ENCODED_RUSTFLAGS: '-C\x1fopt-level=1' }, { CARGO_PROFILE_RELEASE_LTO: 'off' }]) {
+    assert.notEqual(sources.inputs({ ...env, ...flags }).prefix, inputs.prefix);
+  }
+  const globs = inputs.paths.split('\n');
+  const includes = globs.filter((glob) => !glob.startsWith('!'));
+  const excludes = globs.filter((glob) => glob.startsWith('!')).map((glob) => glob.slice(1));
+  for (const artifact of ['target/debug/cache-fixture', 'target/debug/deps/cache_fixture-123456', 'target/aarch64-apple-ios/debug/deps/cache_fixture-123456']) {
+    assert.equal(includes.some((glob) => path.matchesGlob(artifact, glob)), true);
+    assert.equal(excludes.some((glob) => path.matchesGlob(artifact, glob)), false);
+  }
+  for (const bundle of ['target/debug/Vmux.app/Contents/MacOS/cache-fixture', 'target/release/Vmux.app.tar.gz', 'target/release/Vmux.dmg', 'target/debug/cache-fixture.app/Contents/MacOS/cache-fixture', 'target/debug/cache-fixture.tar.gz']) {
+    assert.equal(includes.some((glob) => path.matchesGlob(bundle, glob)) && !excludes.some((glob) => path.matchesGlob(bundle, glob)), false, bundle);
+  }
+});
+
+test('directory watchers stay fresh only while their tracked source set is identical', (t) => {
+  const fixture = new Fixture(t);
+  const sources = fixture.compilerCache('directory');
+  const binary = fixture.compile();
+  sources.save();
+  const modified = fs.statSync(binary, { bigint: true }).mtimeNs;
+  fs.utimesSync(path.join(fixture.root, 'src'), new Date(), new Date());
+  sources.restore();
+  fixture.compile();
+  assert.equal(fs.statSync(binary, { bigint: true }).mtimeNs, modified);
+  fs.unlinkSync(path.join(fixture.root, 'src/value.txt'));
+  fs.utimesSync(path.join(fixture.root, 'src'), 1, 1);
+  sources.restore();
+  fixture.compile();
+  assert.equal(execFileSync(binary, { encoding: 'utf8' }), '\n');
+});
+
+test('cached build metadata is refreshed for the current Git revision', (t) => {
+  const fixture = new Fixture(t);
+  const sources = fixture.compilerCache('git');
+  const binary = fixture.compile();
+  sources.save();
+  fixture.git('commit', '--allow-empty', '-m', 'new identity');
+  fs.utimesSync(path.join(fixture.root, '.git/HEAD'), 1, 1);
+  fs.utimesSync(path.join(fixture.root, '.git/logs/HEAD'), 1, 1);
+  sources.restore();
+  fixture.compile();
+  assert.equal(execFileSync(binary, { encoding: 'utf8' }).trim(), fixture.git('rev-parse', 'HEAD'));
+});
+
+test('replacing a Rust source with a tracked symlink cannot reuse the old executable', (t) => {
+  const fixture = new Fixture(t);
+  const sources = fixture.compilerCache();
+  fs.writeFileSync(path.join(fixture.root, 'src/alternate.rs'), 'fn main() { println!("alternate"); }\n');
+  fixture.git('add', 'src/alternate.rs');
+  const binary = fixture.compile();
+  sources.save();
+  fs.unlinkSync(path.join(fixture.root, 'src/main.rs'));
+  fs.symlinkSync('alternate.rs', path.join(fixture.root, 'src/main.rs'));
+  sources.restore();
+  fixture.compile();
+  assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'alternate\n');
+});
+
+test('cache locations reject symlink parents before any restoration', (t) => {
+  for (const link of ['target', '.build-tools']) {
+    const fixture = new Fixture(t);
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'vmux-external-cache-'));
+    t.after(() => fs.rmSync(external, { recursive: true, force: true }));
+    fs.symlinkSync(external, path.join(fixture.root, link));
+    assert.throws(() => Sources.verify({ GITHUB_WORKSPACE: fixture.root }), /symbolic links/);
+    assert.deepEqual(fs.readdirSync(external), []);
   }
 });

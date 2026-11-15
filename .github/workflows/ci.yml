@@ -308,7 +308,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: policy
-          save-if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/cache-workspace
+        with:
+          cache-key: policy
       - name: Test build preparation and source ownership
         run: |
           node --test scripts/ci-preflight.test.js
@@ -939,6 +942,35 @@ jobs:
         if: needs.changes.outputs.macos_package != 'true'
         run: vmux internal verify-web-bundle
 
+      - name: Check lean macOS desktop features
+        run: vmux internal cargo -- check --locked -p vmux_desktop --no-default-features --features dev
+
+  warm-mac:
+    name: Warm macOS type-check cache
+    needs: [plan, changes, cef-version, dx-macos]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.macos == 'true'
+    runs-on: macos-latest
+    env:
+      VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
+      - uses: ./.github/actions/setup-macos
+        with:
+          cache-key: check-mac
+          cef-version: ${{ needs.cef-version.outputs.version }}
+          packaging: "false"
+      - name: Check desktop, CLI, and daemon
+        run: vmux internal cargo -- check --locked -p vmux_desktop -p vmux_cli -p vmux_app --all-targets --features vmux_desktop/package,vmux_app/service-daemon
+      - name: Verify generated UI assets
+        run: vmux internal verify-web-bundle
       - name: Check lean macOS desktop features
         run: vmux internal cargo -- check --locked -p vmux_desktop --no-default-features --features dev
 

@@ -15,11 +15,23 @@ runs:
       with:
         targets: wasm32-unknown-unknown
 
+    - name: Validate website cache locations
+      shell: bash
+      env:
+        VMUX_CACHE_TARGET: website/target
+      run: node scripts/ci-cache.js validate
+
     - uses: Swatinem/rust-cache@v2
       with:
         workspaces: website
         shared-key: ${{ inputs.cache-key }}
         save-if: ${{ github.ref == 'refs/heads/main' }}
+
+    - uses: ./.github/actions/cache-workspace
+      with:
+        cache-key: ${{ inputs.cache-key }}
+        workspace: website
+        target: website/target
 
     - name: Cache binaryen
       uses: actions/cache@v5

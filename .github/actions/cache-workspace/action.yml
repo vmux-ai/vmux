@@ -1,0 +1,45 @@
+name: Cache workspace compiler artifacts
+description: Restore shared source artifacts and publish updated snapshots only from main
+inputs:
+  cache-key:
+    description: Compiler profile partition
+    required: true
+  target:
+    description: Cargo target directory
+    required: false
+    default: target
+  workspace:
+    description: Cargo workspace directory inside the checkout
+    required: false
+    default: .
+  branch-cache:
+    description: Retain an isolated cache for profiles that main never compiles
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - id: inputs
+      shell: bash
+      env:
+        VMUX_CACHE_PARTITION: ${{ inputs.cache-key }}
+        VMUX_CACHE_TARGET: ${{ inputs.target }}
+        VMUX_CACHE_WORKSPACE: ${{ inputs.workspace }}
+      run: node scripts/ci-cache.js inputs
+    - uses: actions/cache@v5
+      if: github.ref == 'refs/heads/main' || inputs.branch-cache == 'true'
+      with:
+        path: ${{ steps.inputs.outputs.paths }}
+        key: ${{ steps.inputs.outputs.key }}
+        restore-keys: ${{ steps.inputs.outputs.prefix }}-
+    - uses: actions/cache/restore@v5
+      if: github.ref != 'refs/heads/main' && inputs.branch-cache != 'true'
+      with:
+        path: ${{ steps.inputs.outputs.paths }}
+        key: ${{ steps.inputs.outputs.key }}
+        restore-keys: ${{ steps.inputs.outputs.prefix }}-
+    - uses: ./.github/actions/cache-sources
+      with:
+        snapshot: ${{ steps.inputs.outputs.snapshot }}
+        target: ${{ steps.inputs.outputs.target }}
+        save: ${{ github.ref == 'refs/heads/main' || inputs.branch-cache == 'true' }}
