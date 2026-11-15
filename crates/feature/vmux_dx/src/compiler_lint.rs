@@ -9,10 +9,13 @@ use vmux_ecs::{OperationState, Order};
 use crate::Settings;
 use crate::compiler_lint_io::{Prepare, Read};
 use crate::debug::{Complete, Facts, Failed, Io, IoWriter, Lease, Root, Sequence, Stage};
-use crate::debug_io::{AcquiredLock, FileBytes, RunProcess};
+use crate::debug_io::{
+    AcquireTarget, AcquiredLock, CaptureOutput, Done, FileBytes, RunProcess, ToolOutput,
+};
 use crate::execution::Failure;
 use crate::policy::Policy;
 use crate::repository::Checkout;
+use crate::storage::Storage;
 use crate::work::Outcome;
 
 pub(crate) struct Plugin;
@@ -22,7 +25,8 @@ impl bevy_app::Plugin for Plugin {
         app.add_systems(
             Update,
             (
-                read, configure, acquire, adopt, toolchain, install, fixtures, check, finish,
+                read, configure, prepare, guard, capacity, acquire, adopt, toolchain, install,
+                fixtures, check, finish,
             )
                 .chain()
                 .in_set(Stage::Decide),
@@ -42,8 +46,13 @@ enum Phase {
     #[default]
     Read,
     Configure,
+    Prepare,
+    GuardBefore,
+    CapacityBefore,
     Acquire,
     Adopt,
+    GuardAfter,
+    CapacityAfter,
     Toolchain,
     Install,
     Fixtures,
@@ -98,6 +107,10 @@ struct ToolchainFile;
 struct VersionFile;
 #[derive(Component)]
 struct Lock;
+#[derive(Component)]
+struct Directories;
+#[derive(Component)]
+struct CapacitySlot;
 type Requests<'w, 's> = Query<
     'w,
     's,
@@ -136,11 +149,32 @@ type Locks<'w, 's> = Query<
     (With<Io>, With<Lock>),
 >;
 
+type Capacities<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ToolOutput,
+        &'static ChildOf,
+        &'static Order,
+        &'static OperationState,
+    ),
+    (With<Io>, With<CapacitySlot>),
+>;
+
+type DirectoryReceipts<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ChildOf, &'static OperationState),
+    (With<Io>, With<Directories>, With<Done>),
+>;
+
 #[derive(SystemParam)]
 struct Outputs<'w, 's> {
     toolchain: Files<'w, 's, ToolchainFile>,
     versions: Files<'w, 's, VersionFile>,
     locks: Locks<'w, 's>,
+    capacities: Capacities<'w, 's>,
+    directories: DirectoryReceipts<'w, 's>,
 }
 
 impl Outputs<'_, '_> {
@@ -175,6 +209,28 @@ impl Outputs<'_, '_> {
         }
         let (entity, value, _) = latest?;
         Some((entity, value))
+    }
+
+    fn capacity(&self, owner: Entity) -> Option<&ToolOutput> {
+        let mut latest = None;
+        for (value, parent, order, state) in &self.capacities {
+            if parent.parent() != owner || *state != OperationState::Succeeded {
+                continue;
+            }
+            if latest
+                .as_ref()
+                .is_none_or(|(_, previous)| order.0 > *previous)
+            {
+                latest = Some((value, order.0));
+            }
+        }
+        Some(latest?.0)
+    }
+
+    fn prepared(&self, owner: Entity) -> bool {
+        self.directories
+            .iter()
+            .any(|(parent, state)| parent.parent() == owner && *state == OperationState::Succeeded)
     }
 }
 
@@ -268,17 +324,6 @@ fn configure(
             "DYLINT_DRIVER_PATH",
             checkout.root.join(".build-tools/dylint-drivers"),
         );
-        io.commands.entity(entity).insert(configuration);
-        *phase = Phase::Acquire;
-        wake.0.wake_by_ref();
-    }
-}
-
-fn acquire(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
-    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
-        if *phase != Phase::Acquire {
-            continue;
-        }
         let policy = match Policy::configured(&settings.0) {
             Ok(policy) => policy,
             Err(error) => {
@@ -288,13 +333,142 @@ fn acquire(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
                 continue;
             }
         };
+        io.commands
+            .entity(entity)
+            .insert((configuration, Storage::new(policy)));
+        *phase = Phase::Prepare;
+        wake.0.wake_by_ref();
+    }
+}
+
+fn prepare(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
+    for (entity, _, checkout, _, mut phase, mut sequence) in &mut requests {
+        if *phase != Phase::Prepare {
+            continue;
+        }
         io.request(
             &mut sequence,
             entity,
             &mut None,
             Prepare {
                 root: checkout.root.clone(),
-                policy,
+            },
+            Directories,
+            false,
+        );
+        *phase = Phase::GuardBefore;
+        wake.0.wake_by_ref();
+    }
+}
+
+fn guard(
+    mut requests: Requests,
+    facts: Facts,
+    outputs: Outputs,
+    mut io: IoWriter,
+    wake: Res<JobWake>,
+) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, Phase::GuardBefore | Phase::GuardAfter) || facts.pending(entity) {
+            continue;
+        }
+        if !outputs.prepared(entity) {
+            continue;
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut None,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "df".into(),
+                vec![
+                    "-Pk".into(),
+                    checkout.root.join(".build-tools/lints").into_os_string(),
+                ],
+            ),
+            CapacitySlot,
+            false,
+        );
+        *phase = if *phase == Phase::GuardBefore {
+            Phase::CapacityBefore
+        } else {
+            Phase::CapacityAfter
+        };
+        wake.0.wake_by_ref();
+    }
+}
+
+fn capacity(
+    mut requests: Requests,
+    facts: Facts,
+    outputs: Outputs,
+    storage: Query<&Storage>,
+    mut io: IoWriter,
+    wake: Res<JobWake>,
+) {
+    for (entity, _, _, _, mut phase, _) in &mut requests {
+        if !matches!(*phase, Phase::CapacityBefore | Phase::CapacityAfter) || facts.pending(entity)
+        {
+            continue;
+        }
+        let (Some(output), Ok(storage)) = (outputs.capacity(entity), storage.get(entity)) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(&output.0.stdout) else {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Invalid filesystem capacity")));
+            continue;
+        };
+        let Some(blocks) = text
+            .lines()
+            .nth(1)
+            .and_then(|line| line.split_whitespace().nth(3))
+        else {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Invalid filesystem capacity")));
+            continue;
+        };
+        let free = blocks
+            .parse::<u64>()
+            .ok()
+            .and_then(|blocks| blocks.checked_mul(1024));
+        let Some(free) = free else {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Invalid filesystem capacity")));
+            continue;
+        };
+        if let Err(error) = storage.policy().check(free) {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::from_error(error)));
+            continue;
+        }
+        *phase = if *phase == Phase::CapacityBefore {
+            Phase::Acquire
+        } else {
+            Phase::Toolchain
+        };
+        wake.0.wake_by_ref();
+    }
+}
+
+fn acquire(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
+    for (entity, _, checkout, _, mut phase, mut sequence) in &mut requests {
+        if *phase != Phase::Acquire {
+            continue;
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut None,
+            AcquireTarget {
+                root: checkout.root.clone(),
+                target: checkout.root.join(".build-tools/lints"),
             },
             Lock,
             false,
@@ -311,7 +485,7 @@ fn adopt(
     mut io: IoWriter,
     wake: Res<JobWake>,
 ) {
-    for (entity, _, checkout, mut settings, mut phase, _) in &mut requests {
+    for (entity, _, checkout, mut settings, mut phase, mut sequence) in &mut requests {
         if *phase != Phase::Adopt || facts.pending(entity) {
             continue;
         }
@@ -336,7 +510,17 @@ fn adopt(
         settings
             .0
             .set("VMUX_BUILD_STORAGE_ROOT", checkout.root.as_os_str());
-        *phase = Phase::Toolchain;
+        io.request(
+            &mut sequence,
+            entity,
+            &mut None,
+            Prepare {
+                root: checkout.root.clone(),
+            },
+            Directories,
+            false,
+        );
+        *phase = Phase::GuardAfter;
         wake.0.wake_by_ref();
     }
 }

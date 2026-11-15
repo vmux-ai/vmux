@@ -2,32 +2,27 @@ use std::fs;
 use std::io::Read as _;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use bevy_ecs::prelude::*;
 use vmux_ecs::blocking::{BlockingCancellation, Lane};
 use vmux_ecs::jobs::Job;
 
-use crate::debug_io::{AcquiredLock, FileBytes, IoJob};
+use crate::debug_io::{Done, FileBytes, IoJob};
 use crate::execution::Failure;
-use crate::policy::Policy;
-use crate::storage::Storage;
-use crate::target_lock::TargetLock;
 
 #[derive(Component, Clone)]
 #[component(immutable)]
 #[require(crate::debug::Io)]
 pub(crate) struct Prepare {
     pub root: PathBuf,
-    pub policy: Policy,
 }
 
 impl IoJob for Prepare {
-    type Data = AcquiredLock;
+    type Data = Done;
 }
 
 impl Job for Prepare {
-    type Output = Result<AcquiredLock, Failure>;
+    type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
         let target = self.root.join(".build-tools/lints");
@@ -52,25 +47,11 @@ impl Job for Prepare {
                 Err(error) => return Err(Failure::message(error.to_string())),
             }
             Self::validate(directory)?;
-            Storage::new(self.root.clone(), directory.clone(), self.policy.clone())
-                .map_err(Failure::from_error)?;
-        }
-        Storage::new(self.root.clone(), target.clone(), self.policy.clone())
-            .map_err(Failure::from_error)?
-            .guard()
-            .map_err(Failure::from_error)?;
-        let lock = TargetLock::acquire(&self.root, &target).map_err(Failure::from_error)?;
-        if BlockingCancellation::canceled() {
-            return Err(Failure::message("Compiler tool preparation canceled"));
         }
         for directory in &directories {
             Self::validate(directory)?;
         }
-        Storage::new(self.root.clone(), target, self.policy)
-            .map_err(Failure::from_error)?
-            .guard()
-            .map_err(Failure::from_error)?;
-        Ok(AcquiredLock(Arc::new(lock)))
+        Ok(Done)
     }
 
     fn lane(&self) -> Lane {
@@ -84,7 +65,16 @@ impl Prepare {
             Ok(metadata) if !metadata.is_dir() || metadata.is_symlink() => Err(Failure::message(
                 "Compiler tools require dedicated nonsymlink cache directories",
             )),
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                let canonical =
+                    fs::canonicalize(path).map_err(|error| Failure::message(error.to_string()))?;
+                if canonical != path {
+                    return Err(Failure::message(
+                        "Compiler tools require dedicated nonsymlink cache directories",
+                    ));
+                }
+                Ok(())
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(Failure::message(error.to_string())),
         }

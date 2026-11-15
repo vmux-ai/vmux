@@ -5385,6 +5385,18 @@ if [ "$1" = +nightly-2026-08-20 ] && [ "$2" = install ] && [ "$COMPILER_FAIL_INS
 "#).unwrap();
                 fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
             }
+            let path = self.root.join("bin/df");
+            fs::write(&path, r#"#!/bin/sh
+if [ ! -f "$TEST_ROOT/compiler-capacity" ]; then
+  printf 1 > "$TEST_ROOT/compiler-capacity"
+  blocks="${COMPILER_FREE_FIRST:-104857600}"
+else
+  printf 2 > "$TEST_ROOT/compiler-capacity"
+  blocks="${COMPILER_FREE_SECOND:-104857600}"
+fi
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nfixture 209715200 0 %s 0%% /\n' "$blocks"
+"#).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
             let mut settings = self
                 .app
                 .world_mut()
@@ -5924,6 +5936,43 @@ exit 0
             } else {
                 assert!(!log.exists());
             }
+        }
+    }
+
+    #[test]
+    fn compiler_capacity_refusals_before_and_after_lock_release_all_loans() {
+        for (before, after, checks) in [("0", "104857600", "1"), ("104857600", "0", "2")] {
+            let mut fixture = Fixture::new();
+            fixture.compiler();
+            let mut settings = fixture
+                .app
+                .world_mut()
+                .get_mut::<Settings>(fixture.operation)
+                .unwrap();
+            settings.0.set("VMUX_BUILD_STORAGE_MIN_GIB", "1");
+            settings.0.set("VMUX_BUILD_STORAGE_WARN_GIB", "1");
+            settings.0.set("COMPILER_FREE_FIRST", before);
+            settings.0.set("COMPILER_FREE_SECOND", after);
+            assert_ne!(
+                fixture.run(crate::compiler_lint::Run {
+                    fixtures: true,
+                    arguments: Some(Vec::new())
+                }),
+                0
+            );
+            assert_eq!(
+                fs::read_to_string(fixture.root.join("compiler-capacity")).unwrap(),
+                checks
+            );
+            assert!(!fixture.root.join("compiler-events").exists());
+            assert!(
+                crate::target_lock::TargetLock::try_acquire(
+                    &fixture.root,
+                    &fixture.root.join(".build-tools/lints")
+                )
+                .unwrap()
+                .is_some()
+            );
         }
     }
 

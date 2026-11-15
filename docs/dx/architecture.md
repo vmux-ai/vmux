@@ -98,7 +98,8 @@ SDK and headless checks follow their application/consumer roots, lean checks fol
 `cargo lint` delegates to DX. A private compiler plugin owns the accepted lint request,
 configuration, preparation stages and target lease. Concrete file/process jobs perform
 bounded IO; registered systems choose stages, retain cancellation ownership and stop after
-failure. CI and `vmux dx test` use this same request. Compiler tools and artifacts use dedicated
+failure. Compiler systems check capacity before and after acquiring the target lease.
+CI and `vmux dx test` use this same request. Compiler tools and artifacts use dedicated
 nonsymlink caches guarded before and after lock acquisition.
 
 The Dylint library is an isolated workspace pinned to a dated nightly; product builds keep
