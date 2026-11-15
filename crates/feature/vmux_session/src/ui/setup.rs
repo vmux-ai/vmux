@@ -51,8 +51,9 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .state
         .read()
         .clone();
-    let notice = if onboarding.paused || chat.status() == "errored" {
-        Some(rsx! { RecoveryControls { pending: keys.pending } })
+    let resumable = onboarding.paused || chat.status() == "errored";
+    let notice = if resumable {
+        Some(rsx! { RecoveryControls { pending: keys.pending, show_retry: false } })
     } else if chat.authentication_pending() {
         Some(rsx! { RecoveryControls { pending: keys.pending, allow_change: false } })
     } else if chat.setup_busy() && chat.status() != "authentication" {
@@ -68,7 +69,9 @@ pub(super) fn Controls(chat: Chat) -> Element {
     };
     let on_choose = (!keys.pending && !chat.authentication_pending())
         .then_some(EventHandler::new(move |_| Choice::ChangeAgent.choose()));
-    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, SetupComposer { chat, keys } } }
+    let on_resume =
+        (resumable && !keys.pending).then_some(EventHandler::new(move |_| Choice::Retry.choose()));
+    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, on_resume, SetupComposer { chat, keys } } }
 }
 
 #[component]
@@ -78,6 +81,7 @@ pub(super) fn Frame(
     #[props(default)] chat: Option<Chat>,
     #[props(default)] onboarding: OnboardingUiState,
     #[props(default)] on_choose: Option<EventHandler<()>>,
+    #[props(default)] on_resume: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
     let task = Task::of(chat, &onboarding);
@@ -92,7 +96,9 @@ pub(super) fn Frame(
                     completed_steps: task.completed,
                     pending_step: task.pending,
                     detail_step: Some(task.current),
-                    on_select: on_choose,
+                    on_select: on_resume.or(on_choose),
+                    action_step: if on_resume.is_some() { task.current } else { 0 },
+                    action_label: if on_resume.is_some() { translate("common-resume") } else { translate("common-choose") },
                     message: task.message,
                     icon: task.icon,
                     if let Some(notice) = notice { {notice} }
@@ -296,17 +302,21 @@ impl Connection {
 }
 
 #[component]
-fn RecoveryControls(pending: bool, #[props(default = true)] allow_change: bool) -> Element {
+fn RecoveryControls(
+    pending: bool,
+    #[props(default = true)] allow_change: bool,
+    #[props(default = true)] show_retry: bool,
+) -> Element {
     rsx! {
         div { "data-slot": "composer-notice", class: "px-1 pt-2",
             ConversationPrompt {
-                actions: Some(rsx! { PromptConfirmation {
+                actions: Some(rsx! { if show_retry { PromptConfirmation {
                     confirm_label: Choice::Retry.label(),
                     pending,
                     cancel_label: Some(Choice::Cancel.label()),
                     on_confirm: move |_| Choice::Retry.choose(),
                     on_cancel: move |_| Choice::Cancel.choose(),
-                } }),
+                } } else { CancelControl {} } }),
                 if allow_change {
                 Button {
                     variant: ButtonVariant::Ghost,
@@ -701,7 +711,9 @@ mod tests {
             for button in html.split("<button").skip(1) {
                 let attributes = button.split('>').next().unwrap();
                 if attributes.contains(&choose_label) {
-                    assert!(!attributes.contains("disabled"));
+                    assert!(
+                        !attributes.contains(" disabled=") && !attributes.ends_with(" disabled")
+                    );
                     assert!(!attributes.contains("role=\"checkbox\""));
                 }
             }
@@ -925,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn setup_failure_offers_retry_instead_of_an_unrelated_work_composer() {
+    fn setup_failure_offers_resume_on_the_current_step_without_submitting_work() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         let host = Rc::new(Host::default());
         let mut dom = VirtualDom::new_with_props(FailedSetup, FailedSetupProps { setup: true });
@@ -943,7 +955,12 @@ mod tests {
         assert!(
             html.find("data-slot=\"composer-notice\"").unwrap() < html.find("<fieldset").unwrap()
         );
-        let label = translate("common-retry");
+        let label = translate("common-resume");
+        assert!(html.split("<li ").skip(1).any(|row| {
+            let row = row.split("</li>").next().unwrap();
+            row.contains("aria-current=\"step\"")
+                && row.contains(&format!("aria-label=\"{label}\""))
+        }));
         let retry = initial
             .edits
             .iter()
@@ -956,7 +973,7 @@ mod tests {
                 } if value == &label => Some(*id),
                 _ => None,
             })
-            .expect("failed setup must offer retry");
+            .expect("failed setup must offer a current-step Resume action");
         dom.runtime().handle_event(
             "click",
             Event::new(

@@ -88,6 +88,7 @@ fn SetupWelcome() -> Element {
                     notice: Some(rsx! { ComposerNotice {
                         content: Some(rsx! { ComposerTask {
                             title: translate("onboarding-setup"),
+                            action_label: translate("common-choose"),
                             steps: vec![translate("onboarding-checklist-select"), translate("onboarding-checklist-install"), translate("onboarding-checklist-connect")],
                             on_select: Some(EventHandler::new(move |_| {
                                 let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest {
@@ -143,7 +144,7 @@ mod tests {
         for prompt in vmux_ui::components::starter_prompts::StarterPrompt::all() {
             assert!(!html.contains(&prompt.text()));
         }
-        let label = translate("onboarding-checklist-select");
+        let label = translate("common-choose");
         let start = initial
             .edits
             .iter()

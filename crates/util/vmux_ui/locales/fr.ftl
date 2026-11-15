@@ -1350,3 +1350,7 @@ onboarding-installing-agent = Installation de { $agent }
 common-continue = Continuer
 common-confirm = Confirmer
 onboarding-continue-agent = Continuer avec { $agent }
+
+common-choose = Choisir
+
+common-resume = Reprendre

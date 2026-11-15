@@ -1350,3 +1350,7 @@ onboarding-installing-agent = جارٍ تثبيت { $agent }
 common-continue = متابعة
 common-confirm = تأكيد
 onboarding-continue-agent = المتابعة باستخدام { $agent }
+
+common-choose = اختيار
+
+common-resume = استئناف

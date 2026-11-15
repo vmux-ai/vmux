@@ -1350,3 +1350,7 @@ onboarding-installing-agent = Встановлення { $agent }
 common-continue = Продовжити
 common-confirm = Підтвердити
 onboarding-continue-agent = Продовжити з { $agent }
+
+common-choose = Вибрати
+
+common-resume = Відновити

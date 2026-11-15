@@ -1350,3 +1350,7 @@ onboarding-installing-agent = { $agent } installeren
 common-continue = Doorgaan
 common-confirm = Bevestigen
 onboarding-continue-agent = Doorgaan met { $agent }
+
+common-choose = Kiezen
+
+common-resume = Hervatten

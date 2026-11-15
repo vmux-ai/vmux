@@ -1,3 +1,4 @@
+use crate::components::button::{Button, ButtonSize};
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
 use dioxus::prelude::*;
@@ -11,6 +12,7 @@ pub fn TaskStep(
     #[props(default)] pending: bool,
     #[props(default)] current: bool,
     #[props(default)] on_select: Option<EventHandler<()>>,
+    #[props(default = translate("common-continue"))] action_label: String,
     #[props(default = rsx! {})] children: Element,
 ) -> Element {
     let row = rsx! {
@@ -26,25 +28,25 @@ pub fn TaskStep(
         } else if pending {
             LoadingIcon { class: "size-3.5 shrink-0 opacity-75".to_string() }
         }
-        if on_select.is_some() {
-            LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 shrink-0 opacity-55".to_string() }
-        }
     };
     rsx! {
         li {
             class: "flex min-w-0 flex-col text-inherit",
             aria_current: (current || pending).then_some("step"),
             aria_busy: pending,
-            if let Some(on_select) = on_select {
-                button {
-                    r#type: "button",
-                    aria_label: label,
-                    class: "flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-medium transition-colors hover:bg-background/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary motion-reduce:transition-none",
-                    onclick: move |_| on_select.call(()),
-                    {row}
+            div { class: if on_select.is_some() { "flex min-h-8 items-center gap-2 px-2 text-sm font-medium" } else if current || pending { "flex min-h-8 items-center gap-2 px-2 py-1 text-sm font-medium" } else { "flex min-h-8 items-center gap-2 px-2 py-1 text-sm opacity-55" },
+                {row}
+                if let Some(on_select) = on_select {
+                    Button {
+                        size: ButtonSize::Sm,
+                        r#type: "button",
+                        class: "shrink-0",
+                        aria_label: action_label.clone(),
+                        title: label,
+                        onclick: move |_| on_select.call(()),
+                        {action_label}
+                    }
                 }
-            } else {
-                div { class: if current || pending { "flex min-h-8 items-center gap-2 px-2 py-1 text-sm font-medium" } else { "flex min-h-8 items-center gap-2 px-2 py-1 text-sm opacity-55" }, {row} }
             }
             {children}
         }

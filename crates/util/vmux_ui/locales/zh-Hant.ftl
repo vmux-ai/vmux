@@ -1347,3 +1347,7 @@ onboarding-installing-agent = 正在安裝 { $agent }
 common-continue = 繼續
 common-confirm = 確認
 onboarding-continue-agent = 使用 { $agent } 繼續
+
+common-choose = 選擇
+
+common-resume = 繼續

@@ -374,6 +374,8 @@ pub fn ComposerTask(
     #[props(default)] message: String,
     #[props(default)] icon: Option<String>,
     #[props(default)] on_select: Option<EventHandler<()>>,
+    #[props(default)] action_step: usize,
+    #[props(default = translate("common-continue"))] action_label: String,
     #[props(default)] detail_step: Option<usize>,
     #[props(default = rsx! {})] children: Element,
 ) -> Element {
@@ -399,7 +401,8 @@ pub fn ComposerTask(
                         completed: completed_steps.contains(&index),
                         pending: pending_step == Some(index),
                         current: current == Some(index),
-                        on_select: if index == 0 { on_select } else { None },
+                        on_select: if index == action_step { on_select } else { None },
+                        action_label: action_label.clone(),
                         if detail_step == Some(index) {
                             div { class: "composer-task-details ml-6 grid",
                                 div { class: "min-h-0 overflow-hidden px-2 pb-2 pt-1", {children.clone()} }
@@ -518,7 +521,10 @@ mod tests {
             let number = content.split('<').next().unwrap();
             assert_eq!(number, format!("{}.", index + 1));
         }
-        assert!(!list.contains("disabled"));
+        let action = list.split("<button ").nth(1).expect("explicit step action");
+        let attributes = action.split('>').next().unwrap();
+        assert!(!attributes.contains(" disabled=") && !attributes.ends_with(" disabled"));
+        assert!(action.contains(&translate("common-continue")));
     }
 
     #[component]
