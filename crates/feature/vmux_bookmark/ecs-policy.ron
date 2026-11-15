@@ -47,6 +47,7 @@ legacy: [
 ],
 boundaries: [
     (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkStorePlugin", fingerprint: "8832592b1511eae0", interface: "Bevy bookmark store plugin composition and typed default-seeding registration", input: "external: Bevy App plugin installation", output: "ECS: crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkAutoSave", lifetime: "one plugin installation; default-seeding state belongs to the canonical store entity", bounds: "only schema registration, loaded/default-seeding events and the store systems; no retained configuration engine", teardown: "installation metadata drops after registration; seeding completion removes transient store components and publishes canonical pins", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_bookmark/src/store.rs||impl:Plugin for BookmarkStorePlugin", fingerprint: "565f967150f3a16f", interface: "Bevy bookmark store plugin composition and typed default-seeding registration", input: "external: Bevy App plugin installation", output: "ECS: crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkAutoSave", lifetime: "one plugin installation; default-seeding state belongs to the canonical store entity", bounds: "only schema registration, loaded/default-seeding events and the store systems; no retained configuration engine", teardown: "installation metadata drops after registration; seeding completion removes transient store components and publishes canonical pins", architecture: "ECS ownership boundaries"),
 ],
 values: [
 ],
