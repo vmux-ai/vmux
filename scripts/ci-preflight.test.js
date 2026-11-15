@@ -849,6 +849,16 @@ test('compiler-cache policy pairs each workflow restore with a successful explic
   }
 });
 
+test('superseded PRs cancel heavy Lint while failed preparation still runs its gate', () => {
+  const workflow = new Workflow();
+  const expression = workflow.jobs.lint.if;
+  const body = expression.startsWith('${{') ? expression.slice(3, -2) : expression;
+  for (const state of ['success', 'failure', 'cancelled']) {
+    const applicable = Function('always', 'cancelled', `return (${body});`)(() => true, () => state === 'cancelled');
+    assert.equal(applicable, state !== 'cancelled', state);
+  }
+});
+
 test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
   for (const save of ['true', 'false']) {
     const fixture = new Fixture(t);
