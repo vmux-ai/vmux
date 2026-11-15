@@ -62,19 +62,19 @@ pub const DOCS: &[Doc] = &[
     },
     Doc {
         slug: "architecture",
-        title: "Architecture",
+        title: "How Vmux works",
         group: "DX",
         content: include_str!("../../docs/dx/architecture.md"),
     },
     Doc {
         slug: "feature-development",
-        title: "Feature development",
+        title: "Make a change",
         group: "DX",
         content: include_str!("../../docs/dx/feature-development.md"),
     },
     Doc {
         slug: "validation-and-release",
-        title: "Validation and release",
+        title: "Test and share a build",
         group: "DX",
         content: include_str!("../../docs/dx/validation-and-release.md"),
     },

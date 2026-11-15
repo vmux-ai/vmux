@@ -1,34 +1,28 @@
 # Vmux Framework
 
-Vmux Framework reuses the architecture's feature capabilities in another application. It is optional: Vmux's browser, IDE, and ACP harness work with existing projects in any stack.
+Vmux Framework is for building another application from the same Rust feature modules. You do not need it to use Vmux as a browser, IDE, or agent workspace.
 
-## Composition
+## Start from an example
 
-Use `vmux_app` as the public composition facade. Select capabilities and supply the host's runner, IO, permissions, storage, and platform adapters. A renderer-free core should not acquire CEF, windowing, or product UI because Vmux also uses it.
+Read the [framework consumer](https://github.com/vmux-ai/vmux/tree/main/examples/framework-consumer) and [host consumer](https://github.com/vmux-ai/vmux/tree/main/examples/host-consumer). They use the actual public APIs without depending on the private relay repository.
 
-Cargo features choose compiled capabilities; the builder chooses installed plugins. Native plugins are linked Rust crates. The plugin, contracts, manifest, and assets form a feature's public contribution. Dynamic Rust loading and a generic prebuilt product host are not supported capabilities.
-
-## Start from a real consumer
-
-Inspect the independent [framework consumer](https://github.com/vmux-ai/vmux/tree/main/examples/framework-consumer) and [host consumer](https://github.com/vmux-ai/vmux/tree/main/examples/host-consumer). They demonstrate current APIs without inheriting the repository's private environment or relay dependencies.
+From the Vmux checkout, run their checks with:
 
 ```sh
 vmux framework-consumer
 vmux framework-consumer -- --git
 ```
 
-Path and immutable Git modes run the same behavioral checks. Use the examples and selected capability's public types rather than copy an old builder signature from prose.
+The first uses local path dependencies; the second checks pinned Git dependencies.
 
-## Contracts and boundaries
+## Connect the pieces
 
-The host remains authoritative. UI renders selected projections and sends intent. Commands, agents, and tools reach the same feature operations. Adapters preserve contract meaning while translating framing and lifecycle.
+`vmux_app` provides the shared builder for choosing features. Each feature's plugin registers its state and handlers. The application supplies its runner, native IO, permissions, and storage locations.
 
-A custom host supplies product identity, paths, assets, and native permissions. It does not inherit Vmux credentials or data because a display name matches. Omit or refuse unsupported capabilities at the boundary.
+A feature that works without a renderer should stay usable without the browser/window libraries. A custom host uses its own identity and data instead of borrowing Vmux's credentials. [How Vmux works](architecture.md) explains the UI/state split behind this.
 
-## Compatibility
+## Use one compatible revision
 
-Pin all Vmux dependencies to the same reviewed main revision or release tag and use its required Bevy version. Matching names across revisions do not make ECS types compatible.
+Pin all Vmux dependencies to the same reviewed main commit or release tag and use its required Bevy version. Types from different revisions can be incompatible even when their names match.
 
-The SDK is consumed from pinned Git revisions, not a stable crates.io distribution. Platform availability is capability-specific. Product compositions do not promise adapters for every target. Follow storage migrations and protocol negotiation when changing persisted or wire contracts.
-
-Read [Architecture](architecture.md) and [Feature development](feature-development.md) for the model and flow to preserve.
+The SDK currently uses pinned Git revisions rather than a stable crates.io distribution. Check the example and feature code for platform support. Dynamic Rust plugin loading is not a supported feature.

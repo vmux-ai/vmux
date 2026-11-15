@@ -1,28 +1,25 @@
 # Vmux docs
 
-Vmux combines a browser, an IDE, terminals, and ACP agents in one workspace. These guides explain the experience to preserve and the architecture to extend. Code, tests, typed contracts, and feature manifests define exact behavior.
+Use Vmux to work across a browser, code, terminals, and agent conversations in one project. You can also build and change Vmux itself.
 
-## UX
+## UX: use Vmux
 
-- [Get something done](ux/getting-things-done.md): turn a goal into Project Sessions, independent tasks, and a reviewed result.
-- [Projects, Spaces, and Sessions](ux/workspace.md): organize related work and keep the right checkout and surfaces in view.
-- [Browser](ux/browser.md): research, reproduce behavior, and inspect the running product.
-- [Code and Git](ux/code-and-git.md): inspect a checkout, make a focused change, and review its diff.
-- [Terminal](ux/terminal.md): run project commands and return to ongoing processes.
-- [Agents](ux/agents.md): delegate tasks, inspect activity, and review permission requests and outcomes.
+Start with [Get something done](ux/getting-things-done.md). It follows a goal through a Project, related Sessions, parallel tasks, and review.
+
+- [Projects and Sessions](ux/workspace.md): organize the work and its checkout.
+- [Browser](ux/browser.md): research and inspect a running product.
+- [Code and Git](ux/code-and-git.md): edit files and review changes.
+- [Terminal](ux/terminal.md): run commands and return to processes.
+- [Agents](ux/agents.md): give tasks, inspect results, and steer the work.
 - [Remote access](ux/remote.md): pair the phone and reconnect to host work.
 
-## DX
+## DX: build and change Vmux
 
-- [Getting started](dx/getting-started.md): prepare a checkout, build a branch, and inspect the result.
-- [Make your own Vmux](dx/customization.md): personal builds, feature composition, branding, fork PRs, and optional upstream contributions.
-- [Architecture](dx/architecture.md): plugin composition, ECS ownership, runtime boundaries, and crate layout.
-- [Feature development](dx/feature-development.md): find the owner and trace intent through state, IO, and presentation.
-- [Validation and release](dx/validation-and-release.md): targeted checks, automated policy, CI, and distribution.
-- [Vmux Framework](dx/framework.md): reuse capabilities in an independent application.
+1. [Getting started](dx/getting-started.md): get a checkout running on your Mac.
+2. [How Vmux works](dx/architecture.md): connect familiar React ideas to Dioxus and Bevy.
+3. [Make a change](dx/feature-development.md): find a feature, follow its request, and test an edit.
+4. [Test and share a build](dx/validation-and-release.md): run checks and choose where to share the result.
 
-Start with Get something done to use Vmux. For a first build or personal version, read Getting started and Make your own Vmux; use Architecture and Feature development when changing behavior. Then inspect the owning feature's plugin, manifest, and behavioral tests.
+[Make your own Vmux](dx/customization.md) covers personal builds and branding. [Vmux Framework](dx/framework.md) is for building a separate application from reusable features.
 
-## Keeping the guides useful
-
-Document durable decisions and user expectations in the relevant topic, in the PR that changes them. Keep implementation details beside their types and tests. Do not copy module inventories, current field lists, or debugging history into the guides. Repository workflow rules live in [AGENTS.md](https://github.com/vmux-ai/vmux/blob/main/AGENTS.md); executable checks enforce coding policy.
+You do not need to read every guide first. Follow the short DX path for your first change, then return to the feature or customization topic you need.

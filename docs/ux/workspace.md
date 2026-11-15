@@ -12,6 +12,8 @@ When previewing another checkout, activate it before making changes there. Keep 
 
 Use tabs to retain arrangements and split panes to keep related pages beside one another: an agent Session with Code and Terminal, or a Browser reference beside the code it describes. Each pane retains its own navigation history.
 
+The same Space can be viewed in another window. Its name and project context are shared; tabs, panes, and focus remain local to each window.
+
 Selecting a tab reveals its arrangement. Navigating one pane does not replace unrelated panes. Commands act through the focused window and surface, while a background agent keeps its own Session anchor.
 
 ## Organize Sessions around outcomes

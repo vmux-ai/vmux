@@ -1,8 +1,10 @@
-# Validation and release
+# Test and share a build
 
-Use the smallest check that exercises a change while editing. The pre-push gate and CI provide the broader safety net before it lands.
+While editing, run the test for the behavior you changed. Before pushing, run the repository checks. Use a complete local bundle when checking packaging or native permissions.
 
-## The inner loop
+## During an edit
+
+These commands use layout as an example:
 
 ```sh
 vmux internal cargo -- test --locked -p vmux_layout --lib
@@ -10,34 +12,31 @@ vmux internal cargo -- clippy --locked -p vmux_layout --all-targets
 cargo fmt --all -- --check
 ```
 
-Select the actual feature and test; `vmux_layout` is an example. Run one build/test invocation at a time per workspace. If a build is needed, use its result instead of paying for a compile check first. Check exit status and the new artifact before reporting success.
+Choose the crate and test that cover your change. Run builds and tests one at a time when they use the same workspace output. If you are about to build the app, use the build to catch compile errors instead of running a separate compile check first.
 
-Use development builds for iteration and local packages for native integration, permissions, or packaging QA. People launch and test the app; agents build, inspect logs, and resolve failures.
-
-## Executable policy
+## Before a push
 
 ```sh
 vmux internal pre-push
 ```
 
-The policy target checks ECS ownership, adapter provenance, and frozen migration debt. Conventions checks repository-specific source rules. fmt owns formatting, Clippy owns standard Rust diagnostics, and feature tests own behavior. The check implementations and their Cargo targets are the source of truth for each rule.
+This runs the development-command and CLI tests, formatting, ownership policy, and source conventions. The installed Git hook runs it on push too.
 
-When a check rejects new code, improve the code or document its actual bounded interface. Do not refresh legacy fingerprints or add broad exceptions. Detailed rules and regression fixtures live with the checker; these guides explain their architectural reason.
+fmt checks formatting. Clippy checks Rust diagnostics. The repository's policy tests check Vmux-specific ownership and source rules. If a check fails, read its file/type diagnostic and fix the code or the actual exception; do not change a frozen fingerprint just to pass.
 
-The pre-push hook runs CLI/DX regressions, repository policy, formatting, and diff validation. Install it in every feature worktree. CI treats failed or unexpectedly skipped required checks as failure.
+CI runs the affected tests and platform checks. A PR may reuse successful branch results only when its source and base match. Check CI on the latest commit before merging.
 
-## CI and integration
+## Check a complete bundle
 
-CI selects affected crates and consumers from source and Cargo metadata. Shared contracts, manifests, toolchains, build inputs, or uncertain ownership require broader validation. Native checks and packaging follow affected platform/build boundaries.
+```sh
+vmux build -b my-vmux -p local
+vmux run -b my-vmux -p local
+```
 
-CI reuses the verified development CLI within a run and runs independent Rust/lean checks in parallel. Selected native tooling checks share their preparation runner. Branch validation is reusable only for an exact head, captured base, merged tree, and compatible execution definition. Main and release validation retain their required package/startup checks. Check the latest head and all applicable results before merging.
+Use this when the change affects native integration, resources, or packaging. `vmux cache status` reports build storage, and `vmux cache clean` previews reclaimable caches; add `--apply` to clean them. Running apps and locked build outputs are retained. Try the behavior in that completed build. Use copied data for storage/migration changes.
 
-Describe behavior, validation, and required manual QA in the PR. Rebase onto a fetched target when it advances, keep the diff scoped, and respect branch leases. After merge, remove only landed, unused worktrees and compile caches; retain active work and prepared QA artifacts until their owner releases them.
+## Choose how to share
 
-## Distribution
+A local build can be the finished result. Push to your fork if you want a durable personal branch or a reviewable PR. For an upstream contribution, keep the diff focused and explain the behavior and validation.
 
-Local packages exercise native integration without publishing a release. Release preparation adds pinned toolchain/browser provenance, product identity, signing, packaging, update verification, and required notarization.
-
-Workflow and command implementations define artifact names and exact steps. Build CLI, application binaries, metadata, and resources from the same accepted product inputs. Version persisted and wire contracts with their owner, and identify breaking changes for consumers.
-
-Signed standalone CLI updates and checkout development refresh have different owners. Release updates verify signed artifacts; source refresh follows the selected checkout. Neither path replaces another runtime or imports another product's data.
+A distributable release has additional signing, resource, update-verification, and platform requirements. The release workflow defines the current steps and artifact names. Use your own product identity and update settings for an independently branded version; see [Make your own Vmux](customization.md).

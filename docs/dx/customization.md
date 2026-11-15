@@ -1,38 +1,30 @@
 # Make your own Vmux
 
-You can build a personal version of Vmux without making an upstream contribution. Use the same source, feature architecture, and developer commands, then decide whether the result should remain local, live in your fork, or be shared upstream.
+You can keep a personal Vmux build without contributing it upstream. Start with a working source build from [Getting started](getting-started.md), then make one change at a time.
 
-## Start from a working build
+## Keep personal changes in a fork
 
-Follow [Getting started](getting-started.md) and verify a normal build before customizing it. Use a feature worktree for the change and keep its Project/Space/Session context clear. A small first variation is easier to inspect, validate, and maintain than several unrelated changes at once.
+Fork the repository if you want to save and share your version. Clone that fork and use a worktree for each change. A PR in your own fork is useful for reviewing your work; an upstream PR is optional.
 
-If you want a durable personal branch, fork the public repository and clone your fork. Keep the upstream repository as a remote so later updates can be reviewed and incorporated through the normal Git workflow.
+For a behavior change, follow [Make a change](feature-development.md). If you want a different set of features, look at how `vmux_app` connects plugins and what the chosen host enables. The code and command help show the available options for your revision.
 
-## Choose what to change
+## Change the name
 
-For a behavior change, find the owning feature and extend its plugin, typed intent, and state. For a different composition, select the capabilities the host should compile/install. Existing runtime roots compose features; their public contracts and manifests show the supported boundaries.
-
-Use [Feature development](feature-development.md) for product changes and [Vmux Framework](framework.md) when building a distinct application from reusable capabilities. Exact switches and APIs remain defined by the selected revision's code and help.
-
-## Give a branded version its own identity
-
-The product build supports a distinct name and reverse-domain namespace together:
+A separately branded build needs both a name and a namespace. For example, with an existing `orbit` worktree:
 
 ```sh
 VMUX_HOST_NAME="Orbit" VMUX_HOST_NAMESPACE="org.example.orbit" vmux build -b orbit -p local
 VMUX_HOST_NAME="Orbit" VMUX_HOST_NAMESPACE="org.example.orbit" vmux run -b orbit -p local
 ```
 
-Use your actual worktree branch in place of `orbit`. Keep the accepted product inputs consistent between build, launch, and packaging. Product identity separates data, configuration, service, and credential namespaces; a matching display name is not permission to use another product's data.
+Use your branch name and your own reverse-domain namespace. Use the same settings for building and running. The namespace separates the app's data, configuration, service, and credentials from Vmux.
 
-Custom products default to their own update configuration and limited native media capabilities. Configure supported assets, permissions, and update endpoints through the product build metadata when your host needs them. Do not assume an independently branded version can use the official Vmux update channel or signing identity.
+A custom product does not automatically use Vmux's official update or signing configuration. Its native permissions and assets also need the settings for that product. The product build code defines those options; configure them before distributing the build.
 
-## Validate and choose how to share
+## Test and share the result
 
-Run the relevant behavior checks and pre-push gate, inspect the diff, and try the prepared artifact with copied data when storage/schema changes are involved. Keep the personal configuration and product boundary explicit.
+Try the changed behavior, run its tests, and run `vmux internal pre-push`. Use copied data when changing storage or migrations.
 
-A local build is a valid outcome. A PR in your fork provides a review point for your own version. An upstream PR is optional and should describe the general behavior it improves, its validation, and any compatibility implications rather than require everyone to adopt personal settings.
+You can stop at a local build, push the branch to your fork, or open an upstream PR for a generally useful change. Explain what changed and how you checked it.
 
-## Work on it from inside Vmux
-
-The installed Vmux can host the Project and Sessions while the CLI builds the customized checkout. Agents can prepare changes and artifacts for review; you launch and evaluate the result. A future in-product self-build-to-PR workflow can reuse this same checked-out source, scoped task, validation, and sharing path.
+You can do this work inside the installed Vmux: open the fork as a Project, use its worktree in a Space, and keep the conversation, Code, Git, and Terminal together. The source/build workflow is the same whether you edit manually or use an agent.

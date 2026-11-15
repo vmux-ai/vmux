@@ -1,50 +1,44 @@
-# Feature development
+# Make a change
 
-Start with the user-visible behavior and find its owning feature. An endpoint, menu item, or page should extend that owner rather than create another integration layer.
+Start with one behavior you can reproduce. For example: a terminal shortcut uses the wrong pane, or a page refresh loses the current selection. Build Vmux first using [Getting started](getting-started.md).
 
-## Change routing
+## Find the feature
 
-| Change | Start with |
-|---|---|
-| Product behavior, page state, or persistence | The owning crate under `crates/feature/`. |
-| Runtime composition or native host integration | The application root and platform adapter. |
-| Shared infrastructure or transport contract | The existing capability owner and consumers. |
-| Developer command, build, or repository check | `vmux_dx`, its manifest, and native/test boundaries. |
-| Experience or design guidance | The relevant UX or DX topic. |
+Look under `crates/feature/`. Terminal code is in `vmux_terminal`; browser code is in `vmux_browser`; pane and selection behavior is in `vmux_layout`.
 
-Read the root plugin as the feature's table of contents. Registered systems, typed requests, the manifest, and behavioral tests show the current flow. Documentation is not a substitute for those interfaces.
+For a Terminal change, start with `crates/feature/vmux_terminal/src/lib.rs`. It points to the UI, event types, and host code. Look for the plugin and the handlers it registers. A search can help locate the behavior:
 
-## Feature design flow
-
-```mermaid
-flowchart LR
-    input["page · command · agent"] -->|typed intent| system["owning systems"]
-    system -->|query and mutate| state["entities and components"]
-    state -->|projection| page["UiState and rendered page"]
-    system -->|accepted immutable request| io["bounded adapter"]
-    io -->|result| system
+```sh
+rg -n 'focus' crates/feature/vmux_terminal/src
 ```
 
-Identify the owner, independently addressed entities, contracts, schedule ordering, and IO lifetime before editing. Trace success, failure, cancellation, retry, and restoration through that model. A system's parameters make its state access and dependencies visible.
+## Trace the request
 
-Retain the original owner and accepted input across a boundary. Reparenting, replacement, or a newer revision can invalidate a result. Check validity when it is applied, not only when the worker returns.
+Follow the UI callback or command to its event type, then find the Rust handler that receives it. Check which entity/components it reads and what state it changes. Finally, find the view data the page receives.
 
-## Native UI
+This is the same debugging habit as following a React callback into a reducer and back to rendered props. The state and handler are separate from the component, so closing or recreating a page does not have to recreate the work.
 
-The host owns product decisions. A native page sends `UiEvent` intent and renders `UiState`. Drafts, caret, IME composition, pointer geometry, focus, and scroll can remain local presentation state; they do not replace host selection or persistence.
+For IO, also follow the returned result. A result arriving after navigation or cancellation should not change a different page or task.
 
-Current values belong in state. One-shot notifications and requested DOM effects use typed events/effects. Keep page permissions and contributions in the owning manifest. Reuse shared layout, commands, and tools instead of defining page-only registries.
+## Change the behavior and test it
 
-Locate the element inside its existing container before changing layout. Preserve the user flow: immediate feedback, stable reading position, usable prior presentation, and localized controls. Use the [feature guides](../README.md#ux) to understand the task the person is trying to complete.
+Keep the fix in the feature that already handles the behavior. If it needs another feature, use the existing request or shared data rather than call its private handler directly.
 
-## Prove the behavior
+Find a nearby behavioral test and add a case for the problem you reproduced. Run the relevant crate's test. For example:
 
-Test observable regressions with an independent oracle. Install the production plugin and use its schedules/messages for ECS tests. At boundaries, test framing, refusal, cancellation, or persistence. For visible interactions, inspect DOM behavior and resulting state.
+```sh
+vmux internal cargo -- test --locked -p vmux_layout --lib
+```
 
-Avoid tests that mirror constants, constructors, CSS literals, or implementation shape. DX policy checks enforce coding and ownership rules; fmt and Clippy own formatting and standard diagnostics.
+For an ECS test, add the feature's production plugin to the test app and send the real request. Check the resulting state. For UI work, try the interaction and inspect what the page displays. The expected user outcome matters more than the exact internal function arrangement.
 
-## Finish the change
+## Try the result
 
-Run the targeted checks in [Validation and release](validation-and-release.md), then the pre-push gate. Prepare an artifact for required manual app QA and let the person exercise it. Update a UX/DX topic only when a durable expectation or boundary changes; keep method-level details in names, types, and tests.
+```sh
+vmux build -b my-vmux
+vmux run -b my-vmux
+```
 
-Follow [AGENTS.md](https://github.com/vmux-ai/vmux/blob/main/AGENTS.md) for delivery and cleanup rules.
+Check the original problem and a nearby normal case. Then run the checks in [Validation and release](validation-and-release.md).
+
+Keep the result in your own branch, share a PR in your fork, or propose a general improvement upstream. Explain what was wrong, what now happens, and how you checked it. Update a guide only if the way someone uses or understands the feature changed.

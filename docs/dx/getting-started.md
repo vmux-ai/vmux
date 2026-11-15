@@ -1,23 +1,25 @@
 # Getting started
 
-Build Vmux from source for your own version or an upstream contribution. Start from the public [vmux repository](https://github.com/vmux-ai/vmux), or clone your fork if you want to keep personal changes. The private relay repository is not a prerequisite.
+This guide takes you from a source checkout to a running Vmux build. You can use it to make your own version or prepare a contribution.
 
-## Prepare a checkout
+## Before you start
 
-macOS is the primary development and packaged host platform. iOS is the remote companion, and Linux is built and tested in CI. Windows and Android are not supported host targets yet.
+Use a Mac with [Rust installed through rustup](https://rustup.rs/) and Apple's command-line tools. macOS is the main development platform. Linux runs the test suite in CI; the iPhone app connects to a host remotely.
 
-Install Rust through rustup and the Apple command-line tools first. `vmux setup` then prepares the checkout's remaining native tools.
+## Get the source
 
-Create a feature worktree before editing:
+Clone Vmux, or use your fork's URL if you want to keep personal changes:
 
 ```sh
 git clone https://github.com/vmux-ai/vmux.git
 cd vmux
-git worktree add .worktrees/navigation -b navigation
-cd .worktrees/navigation
+git worktree add .worktrees/my-vmux -b my-vmux
+cd .worktrees/my-vmux
 ```
 
-Use the checkout's pinned toolchain and tool versions. Install the minimal development CLI without building the desktop or its browser runtime:
+A worktree gives this branch its own directory. Keep your edits and builds there.
+
+## Install the development commands
 
 ```sh
 cargo install --path crates/app/vmux_cli --no-default-features --features dx
@@ -26,44 +28,30 @@ vmux doctor
 vmux internal setup-hooks
 ```
 
-`setup` prepares native tools; `doctor` reports missing or mismatched prerequisites. Rust and tool pins belong to the checkout, and the CEF manifest owns browser runtime provenance. The development CLI refreshes when its compiler inputs change.
+`setup` installs the tools the checkout needs. `doctor` tells you what is missing. The last command installs the checks that run before a push.
 
-## Build and inspect a change
-
-```sh
-vmux build -b navigation
-vmux run -b navigation
-```
-
-`build` compiles and signs without launching the app. `run` opens a completed artifact and does not compile a missing one. Branch names resolve to existing worktrees; ambiguous aliases are refused.
-
-Use the development profile for iteration. Use a local package for packaging, permissions, or distribution-like behavior:
+## Build and open Vmux
 
 ```sh
-vmux build -b navigation -p local
-vmux run -b navigation -p local
+vmux build -b my-vmux
+vmux run -b my-vmux
 ```
 
-`-P/--platform` chooses a target such as `ios`; `-p/--profile` chooses the build profile. Command help defines the current options.
+The first command builds and signs the app. The second opens the completed build. If the build failed, fix that error before trying to run it.
 
-Agents prepare builds and inspect logs; the person performs app QA. Agents do not launch or automate Vmux.
+Use this development build while changing code. When you need to check a complete local bundle, run:
 
-## Protect existing work
+```sh
+vmux build -b my-vmux -p local
+vmux run -b my-vmux -p local
+```
 
-Builds enforce target locks and storage policy. Run one build or Cargo test invocation at a time per workspace. `vmux cache status` inspects storage; `vmux cache clean` previews cleanup and `--apply` performs it under the lock.
+## Make a small change
 
-Development and local builds can share persistent profile data. Use `VMUX_DATA_DIR` with an absolute path to a copy for persistence, schema, or migration tests. Never use `VMUX_TEST=1` with real shared data. Respect GUI/service data leases when changing builds or profiles.
+Read [How Vmux works](architecture.md) next. It explains the UI and state model using familiar React concepts. [Make a change](feature-development.md) shows where to look in the code and how to test a feature.
 
-## Make your first change
+Keep your first change small: reproduce a problem, find its handler, change the behavior, and run the relevant test. You can keep the build locally, push it to your fork, or open an upstream PR. [Make your own Vmux](customization.md) covers a separate name and product settings.
 
-For a personal variant, start with [Make your own Vmux](customization.md). Read [Architecture](architecture.md) and [Feature development](feature-development.md) to locate the owner of a behavior change. Start at the owning feature's root plugin and follow its typed requests, projections, and behavioral tests. [AGENTS.md](https://github.com/vmux-ai/vmux/blob/main/AGENTS.md) holds repository workflow rules; [Validation and release](validation-and-release.md) explains the checks that enforce them.
+If you use the installed Vmux as your editor, open this repository as a Project and select the worktree for your Space. Browser, Code, Terminal, and Sessions can stay beside each other while you work. The build commands are the same whether you type them yourself or ask an agent to prepare a change.
 
-## Develop Vmux from inside Vmux
-
-Open the public Vmux repository as a Project, create the feature worktree, and align a Space with that checkout. Give a Session a focused outcome, such as investigating a bug or preparing a tested change. Keep Code, Git, Browser, and Terminal beside the conversation to inspect its inputs and result.
-
-The same CLI commands prepare the branch's app while the installed Vmux hosts the development Session. Agents build and report artifacts; the person launches the completed branch for app QA. Use copied data when the work concerns storage or schemas.
-
-A first change can follow this loop: locate the owning plugin, trace its request and state, make one focused change, run its targeted test and the pre-push gate, then inspect the diff. Keep the result locally, open a PR in your fork, or propose a general improvement upstream. Share the goal, validation, and required QA so another Session can review it without rediscovering the task.
-
-An automated in-product self-build-to-PR flow is future work. This reproducible checkout, validation, and review path is the entry point that workflow can reuse.
+When testing storage or migrations, point `VMUX_DATA_DIR` at an absolute path to a copy of the data. Normal builds can share profile data; using a copy keeps your everyday workspace safe.

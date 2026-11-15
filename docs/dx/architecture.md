@@ -1,75 +1,63 @@
-# Architecture
+# How Vmux works
 
-Vmux composes a browser, IDE, agent harness, service, and mobile client from feature plugins. A new capability should have one owner and one integration model across those surfaces.
+If you know React, start with the UI. Vmux uses Dioxus components written in Rust: a component receives props and returns markup with `rsx!`, much as a React component returns JSX.
 
-## Applications as plugin graphs
+The main difference is where application state lives. Most product state is held by Bevy, a Rust ECS library, outside the page. The UI displays that state and sends requests when the user interacts with it.
 
-A plugin installs a capability's components, messages, systems, schedules, manifests, and boundary adapters into an ECS world. Application roots select plugins and platform adapters; feature crates own their behavior.
+## From React to Vmux
 
-```text
-feature = state + systems + UI + commands + tools + contracts
-runtime = feature plugins + platform adapters
+| In a React application | In Vmux |
+|---|---|
+| A component renders JSX | A Dioxus component renders `rsx!`. |
+| Props describe what to display | Props and `UiState` describe the page's current view. |
+| A reducer or store holds shared state | Bevy components hold data on entities. |
+| Dispatch sends an action | A typed event or message asks a system to do something. |
+| An effect or service performs work | A system handles the request and starts IO when needed. |
+| A feature module is wired into the app | A plugin registers the feature's data and handlers. |
+
+These are comparisons, not identical APIs. In particular, a Bevy system is not a component effect: Bevy schedules it over the data it requests.
+
+## Follow one interaction
+
+A typical native-page interaction follows this path:
+
+```mermaid
+flowchart LR
+    click["User clicks a control"] --> event["UI sends a typed request"]
+    event --> handler["Feature system handles it"]
+    handler --> state["State changes in Bevy"]
+    state --> view["Page receives an updated view"]
+    view --> render["Dioxus renders it"]
 ```
 
-Cargo features decide what can be compiled. Runtime composition decides which compiled plugins are installed. `vmux_app` supplies the shared facade; desktop, mobile, daemon, CLI, and MCP hosts provide their entry points, runners, and IO.
+For example, a Terminal page can request input to a running process. The terminal feature handles the request; the background service manages the process. Output updates the terminal's display. Closing the page does not necessarily stop the process, so reopening it can show the same work.
 
-A feature does not install a sibling as a hidden dependency. Shared composition belongs at the application root. Split plugins for independent configuration, platform, reuse, or lifecycle boundaries.
+The page can keep a text draft, caret position, or scroll locally, just as you would in React. A change to the actual project, selected session, process, or saved setting goes through the Rust handler. This keeps a second page, a remote client, and an agent in agreement.
 
-## Design vocabulary
+## The four ECS words you need
 
-| Primitive | Responsibility |
+An **entity** is an ID for something such as a page, process, or session. **Components** are pieces of data attached to that ID. A **system** is a function that reads or changes matching data. A **plugin** registers the components, messages, and systems for a feature.
+
+Start at a feature's plugin to see its handlers. Then follow the event type to the system that receives it. You do not need to learn every ECS API before making a small change.
+
+## Where the code lives
+
+| Directory | What you will find |
 |---|---|
-| Crate | Own a capability and its contracts. |
-| Plugin | Install the capability into a runtime. |
-| Entity | Give independently addressed or removable work an identity. |
-| Component | Store typed state or capabilities on that identity. |
-| System | Perform an operation through declared ECS inputs and outputs. |
-| Event or message | Carry transient intent or facts without calling another owner's internals. |
-| UiEvent | Carry permission-checked UI intent to the host. |
-| UiState | Project host-owned state into a page. |
+| `crates/app/` | Desktop, mobile, and CLI entry points. |
+| `crates/feature/` | Browser, Terminal, Code, Git, Session, layout, and other features. |
+| `crates/util/` | Shared state, transport, storage, and other supporting code. |
 
-The same type can cross UI, IPC, remote, CLI, or tool boundaries when it represents the same contract. Adapters change framing, not the domain model.
+A feature usually includes its UI, event types, handlers, and tests. `feature.ron` lists what it contributes, such as pages, commands, and tools. `vmux_app` connects features into the selected application.
 
-## Runtime and trust boundaries
-
-The desktop owns visible layout, input, native integration, and its host ECS. The background service owns processes and sessions that outlive a view. Native pages render projections and emit intent; arbitrary web pages remain untrusted browser content.
-
-Mobile is a remote client of supported host capabilities. Both endpoints connect outward through an opaque relay, and the inner encrypted session ends at the host. The public client owns this contract; relay admission, registry, and deployment internals belong to the relay repository.
-
-Platform credentials stay at their designated native boundary. Children, pages, and tools receive scoped capabilities, not an unrestricted key broker or the host's state.
-
-## State and ownership
-
-Canonical product state lives on entities and components. Resources hold truly global facts. Reuse shared identity, name, activity, order, and relationship primitives before creating aggregates that repeat them.
-
-Systems own selection, reconciliation, retries, and commits. They stay private to their registering plugin. Features communicate through typed data and explicit schedule ordering. UI snapshots and read indexes are derived from canonical state and do not become a second mutation authority.
-
-Long work has identity and an observable lifecycle. Capture accepted inputs before IO, perform bounded blocking work outside the schedule, and adopt results only while their owner, generation, and operation remain current. Worker completion is not a domain commit. Cancellation and replacement prevent late results from changing a new owner.
+The desktop displays pages and handles native integration. The background service keeps processes and conversations alive beyond a page. Mobile uses supported host features through a remote connection. Web pages stay ordinary browser content and do not receive unrestricted access to the host.
 
 ### ECS ownership boundaries
 
-An adapter translates an external format or performs bounded IO. It names its interface, canonical input/output, scope, lifetime, and cancellation or eviction. Handles, bytes, codec scratch, and read-only presentation caches may remain there; product policy and normalized mutable state may not.
+Filesystem, network, process, and native API calls sit behind adapters. Handlers decide what should happen; an adapter performs the outside operation and returns its result. Before applying a delayed result, the handler checks that it still belongs to the current task or page.
 
-`ecs-policy.ron` records item-specific contracts and frozen migration debt. DX policy checks validate declarations, production ownership references, and adapter provenance. Changed legacy code gains a real owner or boundary; the frozen baseline is not refreshed to approve it.
+The repository's policy checks test these relationships. `ecs-policy.ron` currently also records migration debt and exceptions the source checker cannot infer. It is not a guide to implementing a feature; read the feature's types, handlers, and tests.
 
-Repository checks, build adapters, and static website rendering run before or outside the product world. Their boundaries describe source analysis, build inputs, or presentation, not another product registry or workflow engine.
+## What to read next
 
-## Persisted and wire contracts
-
-A feature owns storage semantics and migrations. Shared infrastructure supplies versioned records, atomic IO, and receipts; owning systems decide when current state commits. Stable identities and stored keys survive implementation changes. Incompatible data is migrated or explicitly refused before acceptance.
-
-Local and remote use the same typed contracts where meaning is shared. Wire layout changes require the protocol's compatibility/version mechanism. Secrets and browser storage follow their designated credential/encryption owner.
-
-## Platforms and crate layout
-
-- `crates/app/`: product entry points and runtime adapters.
-- `crates/feature/`: cohesive user capabilities, including state, UI, commands, IO, and contracts.
-- `crates/util/`: reusable infrastructure and composition support.
-
-Platform imports and plugins are gated at their boundary. Renderer-free cores remain usable without native browser/window dependencies. The `host` cfg alias describes compiled code, not a crate's directory.
-
-## Invariants
-
-Keep one feature owner, one canonical state model, and one shared contract per boundary. Compose runtimes from those owners. Treat web content as untrusted, make long work observable, and apply results only to the operation that accepted them.
-
-Use [Feature development](feature-development.md) to route a change and [Vmux Framework](framework.md) to reuse a capability. Current type layouts and modules remain in code and tests.
+[Make a change](feature-development.md) walks through a feature edit. [Test and share a build](validation-and-release.md) gives the test and build commands. [Vmux Framework](framework.md) is optional reading if you want to build a different application from the same pieces.

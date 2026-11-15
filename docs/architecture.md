@@ -2,7 +2,7 @@
 
 The guides are now organized by [UX and DX](README.md).
 
-Read [Architecture](dx/architecture.md) for composition, ownership, and runtime boundaries, [Feature development](dx/feature-development.md) to route a change, or [Getting started](dx/getting-started.md) for the development workflow.
+Read [How Vmux works](dx/architecture.md) for composition, ownership, and runtime boundaries, [Make a change](dx/feature-development.md) to route a change, or [Getting started](dx/getting-started.md) for the development workflow.
 
 ### ECS ownership boundaries
 
