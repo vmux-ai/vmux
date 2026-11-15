@@ -70,7 +70,7 @@ body:not([inert]) [data-vmux-onboarding-entry] .chat-message-enter{animation-pla
 @keyframes vmux-choice-open{from{grid-template-rows:0fr}to{grid-template-rows:1fr}}
 @keyframes vmux-setup-detail{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:1px),(max-height:1px){.session-chat-page .onboarding-origin,.session-chat-page .chat-message-enter,.session-chat-page .session-chat-prompt-shell,.session-chat-page .setup-notice,.session-chat-page .onboarding-detail,.session-chat-page .composer-task-details,.session-chat-page .composer-task-details>div{animation-play-state:paused!important}}
-@media(prefers-reduced-motion:reduce){.session-chat-page .onboarding-origin,.session-chat-page .chat-message-enter,.session-chat-page .session-chat-prompt-shell,.session-chat-page .setup-notice,.session-chat-page .onboarding-detail,.session-chat-page .composer-notice-content,.session-chat-page [role="option"]{animation:none!important;transition:none!important}}
+@media(prefers-reduced-motion:reduce){.session-chat-page .onboarding-origin,.session-chat-page .chat-message-enter,.session-chat-page .session-chat-prompt-shell,.session-chat-page .setup-notice,.session-chat-page .onboarding-detail,.session-chat-page .composer-task-details,.session-chat-page .composer-task-details>div,.session-chat-page .composer-notice-content,.session-chat-page [role="option"]{animation:none!important;transition:none!important}}
 "#;
 }
 

@@ -1343,3 +1343,7 @@ onboarding-setup-paused-agent = { $agent } 設定已暫停。請重試以繼續�
 onboarding-start-agent-description = 我會協助你設定並連線至 { $agent }。
 onboarding-preparing-agent = 正在準備 { $agent }
 onboarding-installing-agent = 正在安裝 { $agent }
+
+common-continue = 繼續
+common-confirm = 確認
+onboarding-continue-agent = 使用 { $agent } 繼續

@@ -10,6 +10,7 @@ use vmux_ui::components::composer::{
 };
 use vmux_ui::components::message::MessageFrame;
 use vmux_ui::components::progress::{Progress, ProgressIndicator};
+use vmux_ui::components::prompt::{ConversationPrompt, PromptConfirmation};
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -65,7 +66,9 @@ pub(super) fn Controls(chat: Chat) -> Element {
     } else {
         Some(rsx! { RecoveryControls { pending: keys.pending } })
     };
-    rsx! { Frame { notice, chat: Some(chat), onboarding, SetupComposer { chat, keys } } }
+    let on_choose = (!keys.pending && !chat.authentication_pending())
+        .then_some(EventHandler::new(move |_| Choice::ChangeAgent.choose()));
+    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, SetupComposer { chat, keys } } }
 }
 
 #[component]
@@ -74,19 +77,22 @@ pub(super) fn Frame(
     #[props(default)] compact: bool,
     #[props(default)] chat: Option<Chat>,
     #[props(default)] onboarding: OnboardingUiState,
+    #[props(default)] on_choose: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
     let task = Task::of(chat, &onboarding);
     rsx! {
         ComposerFrame {
             borderless: true,
-            content_class: if compact { "h-16".to_string() } else { String::new() },
+            content_class: if compact { "h-12".to_string() } else { String::new() },
             notice: Some(rsx! { ComposerNotice {
                 content: Some(rsx! { ComposerTask {
                     title: task.title,
                     steps: task.steps,
                     completed_steps: task.completed,
                     pending_step: task.pending,
+                    detail_step: Some(task.current),
+                    on_select: on_choose,
                     message: task.message,
                     icon: task.icon,
                     if let Some(notice) = notice { {notice} }
@@ -103,6 +109,7 @@ struct Task {
     steps: Vec<String>,
     completed: Vec<usize>,
     pending: Option<usize>,
+    current: usize,
     message: String,
     icon: Option<String>,
 }
@@ -187,11 +194,14 @@ impl Task {
         } else {
             String::new()
         };
+        let current =
+            pending.unwrap_or_else(|| (0..3).find(|index| !completed.contains(index)).unwrap_or(2));
         Self {
             title,
             steps,
             completed,
             pending,
+            current,
             message,
             icon: agent
                 .filter(|agent| !agent.icon.is_empty())
@@ -217,15 +227,16 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
     let pending = chat.authentication_pending() || keys.pending;
     let clicked = connection.clone();
     rsx! {
-        div { "data-slot": "composer-notice", class: "flex flex-wrap items-center gap-2 px-3 py-3",
-            Button {
-                variant: ButtonVariant::Secondary,
-                size: ButtonSize::Sm,
-                aria_label: translate("onboarding-connect"),
-                disabled: pending || !available,
-                onclick: move |_| clicked.connect(chat),
-                {translate("onboarding-connect")}
-            }
+        div { "data-slot": "composer-notice", class: "px-1 pt-2",
+            ConversationPrompt {
+                actions: Some(rsx! { PromptConfirmation {
+                    confirm_label: translate("onboarding-connect"),
+                    enabled: available,
+                    pending,
+                    cancel_label: Some(translate("common-cancel")),
+                    on_confirm: move |_| clicked.connect(chat),
+                    on_cancel: move |_| Choice::Cancel.choose(),
+                } }),
             if connection.method.is_some() && connection.key && !chat.key_input_requested() && !pending {
                 Button {
                     size: ButtonSize::Xs,
@@ -236,6 +247,7 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
                     onclick: move |_| chat.request_key_input(true),
                     {translate("onboarding-use-key")}
                 }
+            }
             }
         }
     }
@@ -285,20 +297,26 @@ impl Connection {
 
 #[component]
 fn RecoveryControls(pending: bool, #[props(default = true)] allow_change: bool) -> Element {
-    let choices = [Choice::Retry, Choice::Cancel, Choice::ChangeAgent];
     rsx! {
-        div { "data-slot": "composer-notice", class: "flex flex-wrap items-center gap-2 px-2 pt-2",
-            for choice in choices {
-                if allow_change || !matches!(choice, Choice::ChangeAgent) {
+        div { "data-slot": "composer-notice", class: "px-1 pt-2",
+            ConversationPrompt {
+                actions: Some(rsx! { PromptConfirmation {
+                    confirm_label: Choice::Retry.label(),
+                    pending,
+                    cancel_label: Some(Choice::Cancel.label()),
+                    on_confirm: move |_| Choice::Retry.choose(),
+                    on_cancel: move |_| Choice::Cancel.choose(),
+                } }),
+                if allow_change {
                 Button {
-                    variant: if matches!(choice, Choice::Retry) { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                    variant: ButtonVariant::Ghost,
                     size: ButtonSize::Sm,
-                    disabled: pending && !matches!(choice, Choice::Cancel),
-                    style: if matches!(choice, Choice::Retry) { "" } else { "color:inherit;" },
+                    disabled: pending,
+                    style: "color:inherit;",
                     class: "[&:hover]:bg-background/5",
-                    aria_label: choice.label(),
-                    onclick: move |_| choice.choose(),
-                    {choice.label()}
+                    aria_label: Choice::ChangeAgent.label(),
+                    onclick: move |_| Choice::ChangeAgent.choose(),
+                    {Choice::ChangeAgent.label()}
                 }
                 }
             }
@@ -683,7 +701,8 @@ mod tests {
             for button in html.split("<button").skip(1) {
                 let attributes = button.split('>').next().unwrap();
                 if attributes.contains(&choose_label) {
-                    assert!(attributes.contains("role=\"checkbox\""));
+                    assert!(!attributes.contains("disabled"));
+                    assert!(!attributes.contains("role=\"checkbox\""));
                 }
             }
             if status != "authentication" {

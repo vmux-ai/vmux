@@ -140,4 +140,9 @@ shape: (
     (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||enum:PropertySlot", fingerprint: "0b00ebb24877f299", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
+values: [
+    (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:ExternalMemories", owner: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:MemoriesDir", lifetime: "immutable source/destination paths of one external Markdown memory import"),
+    (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:MemoriesDir", owner: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:KnowledgeVault", lifetime: "immutable memory-directory address produced by the canonical Knowledge vault"),
+    (key: "crates/feature/vmux_knowledge/src/driver/agent_config.rs||struct:AgentConfigPaths", owner: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:KnowledgeVault", lifetime: "immutable external agent configuration paths for one vault synchronization call"),
+],
 )

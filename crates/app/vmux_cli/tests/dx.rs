@@ -744,6 +744,24 @@ fn positional_branches_refuse_a_missing_worktree_before_building_or_launching() 
             .failure()
             .stderr(predicate::str::contains("Branch has no worktree"));
     }
+    for command in ["build", "run"] {
+        for option in ["-b", "--branch"] {
+            fixture
+                .command()
+                .args([command, option, "missing-dx-fixture-branch"])
+                .assert()
+                .failure()
+                .stderr(predicate::str::contains("Branch has no worktree"));
+        }
+        fixture
+            .command()
+            .args([command, "one-branch", "-b", "another-branch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Conflicting positional and option branch values",
+            ));
+    }
     assert!(!fixture.root.join("open.log").exists());
 }
 

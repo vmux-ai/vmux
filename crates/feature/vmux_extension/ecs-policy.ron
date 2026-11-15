@@ -547,4 +547,7 @@ shape: (
     (key: "crates/feature/vmux_extension/src/match_pattern.rs||enum:Host", fingerprint: "0e94b3b0e758df5f", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
+boundaries: [
+    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:size", fingerprint: "10469602993452b2", interface: "extension popup DOM sizing to layout UI projection", input: "ECS: crates/feature/vmux_extension/src/host/model.rs||struct:ExtensionPopup", output: "external: bounded popup preferred-size presentation", lifetime: "one current extension popup sizing notification", bounds: "validated channel and finite document dimensions only; popup lifecycle stays in registered systems", teardown: "popup closure drops sizing notifications and projected values", architecture: "ECS ownership boundaries"),
+],
 )

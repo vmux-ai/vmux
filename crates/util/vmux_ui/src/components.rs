@@ -34,6 +34,7 @@ pub mod permission_menu;
 pub mod popup;
 pub mod progress;
 pub mod project_picker;
+pub mod prompt;
 pub mod prompt_box;
 pub mod prompt_media_options;
 pub mod segmented_control;

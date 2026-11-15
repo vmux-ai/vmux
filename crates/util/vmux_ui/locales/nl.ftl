@@ -1346,3 +1346,7 @@ onboarding-setup-paused-agent = Het instellen van { $agent } is gepauzeerd. Prob
 onboarding-start-agent-description = Ik help je { $agent } in te stellen en te verbinden.
 onboarding-preparing-agent = { $agent } voorbereiden
 onboarding-installing-agent = { $agent } installeren
+
+common-continue = Doorgaan
+common-confirm = Bevestigen
+onboarding-continue-agent = Doorgaan met { $agent }

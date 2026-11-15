@@ -1346,3 +1346,7 @@ onboarding-setup-paused-agent = Konfiguracja { $agent } została wstrzymana. Spr
 onboarding-start-agent-description = Pomogę Ci skonfigurować i połączyć { $agent }.
 onboarding-preparing-agent = Przygotowywanie { $agent }
 onboarding-installing-agent = Instalowanie { $agent }
+
+common-continue = Kontynuuj
+common-confirm = Potwierdź
+onboarding-continue-agent = Kontynuuj z { $agent }

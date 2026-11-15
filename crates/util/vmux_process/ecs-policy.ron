@@ -186,4 +186,11 @@ shape: (
     (key: "crates/util/vmux_process/src/shell_integration.rs||enum:Shell", fingerprint: "e06d9815b56e606d", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
+values: [
+    (key: "crates/util/vmux_process/src/runtime_driver.rs||struct:ProcessLaunch", owner: "crates/util/vmux_process/src/runtime_driver.rs||struct:CreateRequest", lifetime: "immutable launch arguments of one queued runtime create request"),
+    (key: "crates/util/vmux_process/src/runtime_driver.rs||struct:CountRequest", owner: "crates/util/vmux_process/src/plugin.rs||struct:Counting", lifetime: "one immutable native reply request carried by its canonical ECS operation entity until response or disposal"),
+    (key: "crates/util/vmux_process/src/runtime_driver.rs||struct:ProcessCreated", owner: "crates/util/vmux_process/src/runtime_driver.rs||struct:CreateRequest", lifetime: "one create reply carrying the accepted ProcessId and its update-channel handle"),
+    (key: "crates/util/vmux_process/src/runtime_driver.rs||struct:ShutdownRequest", owner: "crates/util/vmux_process/src/plugin.rs||struct:Shutdown", lifetime: "one immutable native reply request carried by its canonical ECS operation entity until response or disposal"),
+    (key: "crates/util/vmux_process/src/runtime_driver.rs||struct:CreateRequest", owner: "crates/util/vmux_process/src/plugin.rs||struct:Creation", lifetime: "one immutable create payload carried by an accepted ECS creation entity until execution or refusal"),
+],
 )

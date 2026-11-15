@@ -2142,11 +2142,11 @@ fn binary_child_namespaces_do_not_depend_on_source_order() {
         let mut sources = [
             (
                 "crates/util/fixture/src/bin/alpha.rs",
-                "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+                "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 } #[derive(SystemSet)] pub enum Phase { Input }",
             ),
             (
                 "crates/util/fixture/src/bin/zeta.rs",
-                "use bevy_app::App; use bevy_ecs::prelude::*; mod alpha; fn read(rows:Query<&alpha::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }",
+                "use bevy_app::App; use bevy_ecs::prelude::*; mod alpha; fn read(rows:Query<&alpha::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read.in_set(alpha::Phase::Input)); }",
             ),
         ];
         if reverse {
@@ -2159,6 +2159,21 @@ fn binary_child_namespaces_do_not_depend_on_source_order() {
         inventory.resolve_usage();
         assert!(inventory.canonical(
             &inventory.entries[&inventory.key("struct:State")],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+        let mut scheduled = Inventory::default();
+        for (path, source) in sources {
+            let source = if path.ends_with("zeta.rs") {
+                "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; mod alpha; fn read(rows:Query<&alpha::State>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read.in_set(alpha::Phase::Input)); } } fn main() { let mut app=App::new(); app.add_plugins(Root); }"
+            } else {
+                source
+            };
+            scheduled.source(path, source);
+        }
+        scheduled.resolve_usage();
+        assert!(scheduled.canonical(
+            &scheduled.entries[&scheduled.key("enum:Phase")],
             &Policy::default(),
             &mut BTreeSet::new()
         ));
@@ -2485,7 +2500,7 @@ fn renderer_ownership_follows_component_nodes_and_ignores_labels() {
         ("rsx! { div { \"Child\" } }", false),
     ] {
         let inventory = Inventory::fixture(&format!(
-            "#[component] fn Child() -> Element {{ rsx! {{ div {{}} }} }} #[component] fn Parent() -> Element {{ {body} }}"
+            "use dioxus::prelude::*; #[component] fn Child() -> Element {{ rsx! {{ div {{}} }} }} #[component] fn Parent() -> Element {{ {body} }}"
         ));
         let parent = inventory.key("fn:Parent");
         let child = inventory.key("fn:Child");
@@ -6333,6 +6348,7 @@ struct Declaration {
     generic_parameters: Vec<String>,
     plugin_parameters: Vec<String>,
     component_bindings: BTreeMap<String, String>,
+    parameter_bindings: BTreeSet<String>,
     local: bool,
     dynamic: bool,
     opaque: bool,
@@ -6702,7 +6718,6 @@ impl Inventory {
     }
 
     fn source(&mut self, path: &str, source: &str) {
-        self.sources.insert(path.into(), source.into());
         self.root_bindings.get_mut().clear();
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
@@ -6713,7 +6728,7 @@ impl Inventory {
             self.script(path, source);
             return;
         }
-        self.sources.insert(path.to_string(), source.to_string());
+        self.sources.insert(path.into(), source.into());
         let namespace = Namespace::of(path, &[]).0;
         self.roots
             .insert(namespace.split("::").next().unwrap().to_string());
@@ -6811,6 +6826,7 @@ impl Inventory {
                 generic_parameters: Vec::new(),
                 plugin_parameters: Vec::new(),
                 component_bindings: BTreeMap::new(),
+                parameter_bindings: BTreeSet::new(),
                 local: false,
                 dynamic: false,
                 opaque: true,
@@ -7462,6 +7478,13 @@ impl Inventory {
                 continue;
             }
             for path in &candidate.reference_paths {
+                if matches!(value.kind, Kind::Function)
+                    && candidate
+                        .parameter_bindings
+                        .contains(path.split("::").next().unwrap())
+                {
+                    continue;
+                }
                 let mut path = path.as_str();
                 loop {
                     if let Some(resolved) = self
@@ -8553,7 +8576,7 @@ impl Inventory {
                 let previous = self.usage.get(path).expect("source usage");
                 let mut usage = Usage {
                     testing: path.contains("/tests/"),
-                    namespace: Namespace::of(path, &[]).0,
+                    namespace: previous.namespace.clone(),
                     resolved_tests: previous.resolved_tests.clone(),
                     registrars: registrars.clone(),
                     ..Default::default()
@@ -9782,7 +9805,7 @@ impl Inventory {
             let mut usage = Usage {
                 resolved_tests: test_symbols.clone(),
                 testing: path.contains("/tests/"),
-                namespace: Namespace::of(path, &[]).0,
+                namespace: self.namespace(path, &[]).0,
                 ..Usage::default()
             };
             usage.visit_file(&file);
@@ -10097,12 +10120,20 @@ impl Declarations<'_> {
         let mut generic_parameters = Vec::new();
         let mut plugin_parameters = Vec::new();
         let mut component_bindings = BTreeMap::new();
+        let mut parameter_bindings = AppLocalBindings(BTreeSet::new());
         let mut plugin = false;
         let mut plugin_path = None;
         let mut parameter_path = None;
         if let Ok(file) = syn::parse2::<syn::File>(tokens.clone()) {
             references.visit_file(&file);
             for item in &file.items {
+                if let Item::Fn(function) = item {
+                    for argument in &function.sig.inputs {
+                        if let syn::FnArg::Typed(argument) = argument {
+                            parameter_bindings.visit_pat(&argument.pat);
+                        }
+                    }
+                }
                 if let Item::Impl(implementation) = item {
                     if let Type::Path(owner) = implementation.self_ty.as_ref() {
                         plugin_parameters = References::arguments(&owner.path);
@@ -10441,6 +10472,7 @@ impl Declarations<'_> {
             generic_parameters,
             plugin_parameters,
             component_bindings,
+            parameter_bindings: parameter_bindings.0,
             local: references.local,
             dynamic: references.dynamic,
             opaque: references.opaque,
@@ -11760,7 +11792,7 @@ impl AppComposition {
             metadata: BTreeSet::new(),
         };
         for (path, source) in &inventory.sources {
-            declarations.namespace = Namespace::of(path, &[]).0;
+            declarations.namespace = inventory.namespace(path, &[]).0;
             let source = syn::parse_file(source).expect("ownership source");
             declarations.visit_file(&source);
         }

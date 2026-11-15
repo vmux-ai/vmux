@@ -1343,3 +1343,7 @@ onboarding-setup-paused-agent = { $agent } 설정이 중단되었습니다. 다�
 onboarding-start-agent-description = { $agent } 설정과 연결을 도와드릴게요.
 onboarding-preparing-agent = { $agent } 준비 중
 onboarding-installing-agent = { $agent } 설치 중
+
+common-continue = 계속
+common-confirm = 확인
+onboarding-continue-agent = { $agent }로 계속

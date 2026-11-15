@@ -374,34 +374,45 @@ pub fn ComposerTask(
     #[props(default)] message: String,
     #[props(default)] icon: Option<String>,
     #[props(default)] on_select: Option<EventHandler<()>>,
+    #[props(default)] detail_step: Option<usize>,
     #[props(default = rsx! {})] children: Element,
 ) -> Element {
     let completed = !steps.is_empty() && completed_steps.len() == steps.len();
-    let label = title.clone();
+    let current =
+        pending_step.or_else(|| (0..steps.len()).find(|index| !completed_steps.contains(index)));
     let heading = rsx! {
         AgentThumbnail { src: icon, seed: "vmux-setup-agent".to_string(), background: String::new(), inverted: true, class: "size-5".to_string() }
         span {
-            class: "min-w-0 flex-1",
-            style: on_select.is_some().then_some("background-image:linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end));background-clip:text;-webkit-background-clip:text;color:transparent;"),
+            class: "min-w-0 flex-1 bg-[linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end))] bg-clip-text text-transparent",
             {title}
         }
         if completed { LineIconView { icon: LineIcon::Check, class: "size-4".to_string() } }
     };
     rsx! {
         div { class: "p-2 text-inherit", "data-slot": "composer-task",
-            if let Some(on_select) = on_select {
-                button { r#type: "button", aria_label: label.clone(), class: "flex h-10 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-inherit transition-colors hover:bg-background/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none", onclick: move |_| on_select.call(()), {heading} }
-            } else {
-                h3 { class: "flex h-10 items-center gap-2 px-2 text-sm font-medium", {heading} }
-            }
+            h3 { class: "flex h-8 items-center gap-2 px-2 text-sm font-medium", {heading} }
             ol { role: "list", class: "ml-8 list-none",
                 for (index, label) in steps.into_iter().enumerate() {
-                    TaskStep { number: index + 1, label, completed: completed_steps.contains(&index), pending: pending_step == Some(index) }
+                    TaskStep {
+                        number: index + 1,
+                        label,
+                        completed: completed_steps.contains(&index),
+                        pending: pending_step == Some(index),
+                        current: current == Some(index),
+                        on_select: if index == 0 { on_select } else { None },
+                        if detail_step == Some(index) {
+                            div { class: "composer-task-details ml-6 grid",
+                                div { class: "min-h-0 overflow-hidden px-2 pb-2 pt-1", {children.clone()} }
+                            }
+                        }
+                    }
                 }
             }
             if !message.is_empty() { p { role: "status", aria_live: "polite", class: "px-2 pb-1 pt-2 text-xs leading-relaxed opacity-70", {message} } }
-            div { class: "composer-task-details grid",
-                div { class: "min-h-0 overflow-hidden", {children} }
+            if detail_step.is_none() {
+                div { class: "composer-task-details grid",
+                    div { class: "min-h-0 overflow-hidden", {children} }
+                }
             }
         }
     }
@@ -486,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn setup_task_exposes_one_entry_and_an_ordered_readonly_progress_list() {
+    fn setup_task_exposes_an_actionable_step_and_ordered_progress() {
         let mut dom = VirtualDom::new(TaskFixture);
         dom.rebuild_in_place();
         let html = dioxus_ssr::render(&dom);

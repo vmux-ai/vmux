@@ -1346,3 +1346,7 @@ onboarding-setup-paused-agent = Настройка { $agent } приостано
 onboarding-start-agent-description = Я помогу настроить и подключить { $agent }.
 onboarding-preparing-agent = Подготовка { $agent }
 onboarding-installing-agent = Установка { $agent }
+
+common-continue = Продолжить
+common-confirm = Подтвердить
+onboarding-continue-agent = Продолжить с { $agent }

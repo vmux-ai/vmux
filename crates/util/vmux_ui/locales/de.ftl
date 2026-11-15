@@ -1346,3 +1346,7 @@ onboarding-setup-paused-agent = Die Einrichtung von { $agent } ist pausiert. Ver
 onboarding-start-agent-description = Ich helfe Ihnen, { $agent } einzurichten und zu verbinden.
 onboarding-preparing-agent = { $agent } wird vorbereitet
 onboarding-installing-agent = { $agent } wird installiert
+
+common-continue = Weiter
+common-confirm = Bestätigen
+onboarding-continue-agent = Mit { $agent } fortfahren

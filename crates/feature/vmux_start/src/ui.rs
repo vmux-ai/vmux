@@ -84,7 +84,7 @@ fn SetupWelcome() -> Element {
             div { class: "h-[var(--vmux-welcome-composer-height)] shrink-0",
                 ComposerFrame {
                     borderless: true,
-                    content_class: "h-16".to_string(),
+                    content_class: "h-12".to_string(),
                     notice: Some(rsx! { ComposerNotice {
                         content: Some(rsx! { ComposerTask {
                             title: translate("onboarding-setup"),
@@ -143,7 +143,7 @@ mod tests {
         for prompt in vmux_ui::components::starter_prompts::StarterPrompt::all() {
             assert!(!html.contains(&prompt.text()));
         }
-        let label = translate("onboarding-setup");
+        let label = translate("onboarding-checklist-select");
         let start = initial
             .edits
             .iter()

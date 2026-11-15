@@ -1326,3 +1326,7 @@ onboarding-setup-paused-agent = { $agent } のセットアップを中断しま�
 onboarding-start-agent-description = { $agent } のセットアップと接続をお手伝いします。
 onboarding-preparing-agent = { $agent } を準備中
 onboarding-installing-agent = { $agent } をインストール中
+
+common-continue = 続ける
+common-confirm = 確認
+onboarding-continue-agent = { $agent } で続ける

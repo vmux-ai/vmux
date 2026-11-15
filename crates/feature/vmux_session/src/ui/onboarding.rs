@@ -2,13 +2,16 @@ use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::composer::DisabledComposer;
 use vmux_ui::components::manager::{ManagerSearch, ManagerSearchRow};
+use vmux_ui::components::prompt::{
+    ConversationPrompt, PromptConfirmation, PromptOption, PromptSelection, PromptSelectionChange,
+};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{UiStateBinding, send};
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use super::setup::Identity;
 use crate::onboarding::{AgentOption, OnboardingConnect, OnboardingUiState};
-use vmux_ui::components::choice::{ChoiceKey, ChoiceOptions};
+use vmux_ui::components::choice::ChoiceKey;
 
 #[component]
 pub(super) fn Onboarding() -> Element {
@@ -22,7 +25,6 @@ pub(super) fn Onboarding() -> Element {
 
 #[component]
 fn Conversation(state: OnboardingUiState) -> Element {
-    let retry_agent = state.agent_id.clone();
     rsx! {
         super::surface::Page { accent: Identity::COLOR.to_string(), setup: true, onboarding_entry: true,
             super::surface::Transcript { id: "setup-scroll".to_string(), at_bottom: false,
@@ -38,15 +40,6 @@ fn Conversation(state: OnboardingUiState) -> Element {
                     compact: true,
                     onboarding: state.clone(),
                     notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1",
-                        if state.paused {
-                            vmux_ui::components::button::Button {
-                                variant: vmux_ui::components::button::ButtonVariant::Secondary,
-                                size: vmux_ui::components::button::ButtonSize::Sm,
-                                aria_label: translate("common-retry"),
-                                onclick: move |_| { let _ = send(&OnboardingConnect { agent_id: retry_agent.clone() }); },
-                                {translate("common-retry")}
-                            }
-                        }
                         AgentSelector { state }
                     } }),
                 DisabledComposer {
@@ -62,18 +55,27 @@ fn Conversation(state: OnboardingUiState) -> Element {
 fn AgentSelector(state: OnboardingUiState) -> Element {
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0_usize);
+    let initial_choice = if state.paused || state.failed {
+        state.agent_id.clone()
+    } else {
+        String::new()
+    };
+    let mut choice = use_signal(move || initial_choice);
     let candidates = Candidates::of(&state, &query());
     let loading = state.agents.is_empty();
     let pending = state.starting;
-    let cursor = selected().min(candidates.0.len().saturating_sub(1));
-    let clicked = candidates.clone();
-    let keyed = candidates.clone();
     let searched = candidates.clone();
-    let mut labels = Vec::new();
+    let pointed = candidates.clone();
+    let mut options = Vec::new();
     let mut icons = Vec::new();
     let mut details = Vec::new();
     for agent in &candidates.0 {
-        labels.push(agent.name.clone());
+        options.push(PromptOption {
+            value: agent.id.clone(),
+            label: agent.name.clone(),
+            description: String::new(),
+            disabled: false,
+        });
         icons.push(rsx! {
             AgentThumbnail {
                 src: (!agent.icon.is_empty()).then_some(agent.icon.clone()),
@@ -85,12 +87,35 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
         });
         details.push(rsx! {
             if agent.installed {
-                span { class: "text-[10px] opacity-60", {translate("common-installed")} }
+                span { class: "shrink-0 text-xs opacity-55", {translate("common-installed")} }
             }
         });
     }
+    let chosen = choice();
+    let agent = state.agents.iter().find(|agent| agent.id == chosen);
+    let confirm_label = match agent {
+        Some(agent) if (state.paused || state.failed) && agent.id == state.agent_id => {
+            translate("common-retry")
+        }
+        Some(agent) => translate_with(
+            "onboarding-continue-agent",
+            &[("agent", TranslationValue::String(&agent.name))],
+        ),
+        None => translate("common-continue"),
+    };
+    let enabled = agent.is_some();
     rsx! {
-        div { class: "flex w-full flex-col gap-2",
+        ConversationPrompt {
+            actions: Some(rsx! { PromptConfirmation {
+                confirm_label,
+                enabled,
+                pending,
+                on_confirm: move |_| {
+                    if enabled && !pending {
+                        let _ = send(&OnboardingConnect { agent_id: choice() });
+                    }
+                },
+            } }),
             ManagerSearchRow {
                 ManagerSearch {
                     value: query(),
@@ -99,7 +124,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     inherit_color: true,
                     onsearch: move |value| { query.set(value); selected.set(0); },
                     onkeydown: Some(EventHandler::new(move |event| {
-                        if !pending { searched.key(event, selected, false); }
+                        if !pending { searched.key(event, selected, choice, false); }
                     })),
                 }
             }
@@ -110,20 +135,22 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
             } else if candidates.0.is_empty() {
                 p { role: "status", class: "px-2 py-2 text-sm text-muted-foreground", {translate("common-no-results")} }
             } else {
-                ChoiceOptions {
-                    options: labels,
+                PromptSelection {
+                    label: translate("onboarding-checklist-select"),
+                    options,
                     leading: icons,
                     trailing: details,
-                    compact: true,
-                    framed: true,
+                    selected: if chosen.is_empty() { Vec::new() } else { vec![chosen] },
                     viewport_class: "max-h-[min(14rem,35vh)]".to_string(),
-                    show_numbers: false,
-                    show_help: false,
-                    selected: cursor,
                     disabled: pending,
-                    on_select: move |index| { if !pending { clicked.choose(index); } },
-                    on_hover: move |index| { if !pending { selected.set(index); } },
-                    on_keydown: move |event| { if !pending { keyed.key(event, selected, true); } },
+                    on_change: move |change: PromptSelectionChange| {
+                        if !pending {
+                            if let Some(index) = pointed.0.iter().position(|agent| agent.id == change.value) {
+                                selected.set(index);
+                            }
+                            choice.set(change.value);
+                        }
+                    },
                 }
             }
         }
@@ -217,15 +244,19 @@ impl Candidates {
         }
     }
 
-    fn choose(&self, index: usize) {
+    fn choose(&self, index: usize, mut choice: Signal<String>) {
         if let Some(agent) = self.0.get(index) {
-            let _ = send(&OnboardingConnect {
-                agent_id: agent.id.clone(),
-            });
+            choice.set(agent.id.clone());
         }
     }
 
-    fn key(&self, event: KeyboardEvent, mut selected: Signal<usize>, numbers: bool) {
+    fn key(
+        &self,
+        event: KeyboardEvent,
+        mut selected: Signal<usize>,
+        choice: Signal<String>,
+        numbers: bool,
+    ) {
         let Some(key) = ChoiceKey::of(&event, numbers) else {
             return;
         };
@@ -234,10 +265,18 @@ impl Candidates {
         }
         let current = selected().min(self.0.len() - 1);
         match key {
-            ChoiceKey::Next => selected.set((current + 1).min(self.0.len() - 1)),
-            ChoiceKey::Previous => selected.set(current.saturating_sub(1)),
-            ChoiceKey::Submit => self.choose(current),
-            ChoiceKey::Number(index) => self.choose(index),
+            ChoiceKey::Next => {
+                let next = (current + 1).min(self.0.len() - 1);
+                selected.set(next);
+                self.choose(next, choice);
+            }
+            ChoiceKey::Previous => {
+                let previous = current.saturating_sub(1);
+                selected.set(previous);
+                self.choose(previous, choice);
+            }
+            ChoiceKey::Submit => self.choose(current, choice),
+            ChoiceKey::Number(index) => self.choose(index, choice),
         }
         event.prevent_default();
         event.stop_propagation();
@@ -358,6 +397,23 @@ mod tests {
             self.dom.render_immediate_to_vec();
         }
 
+        fn choose(&mut self, element: dioxus::core::ElementId) {
+            self.dom.runtime().handle_event(
+                "change",
+                Event::new(
+                    EventData::Form(SerializedFormData {
+                        value: "true".into(),
+                        values: Vec::new(),
+                        valid: true,
+                    })
+                    .into_any(),
+                    true,
+                ),
+                element,
+            );
+            self.dom.render_immediate_to_vec();
+        }
+
         fn search(&mut self, element: dioxus::core::ElementId, value: &str) {
             self.dom.runtime().handle_event(
                 "input",
@@ -377,14 +433,14 @@ mod tests {
     }
 
     #[test]
-    fn guide_offers_only_agent_choices_and_a_choice_starts_setup() {
+    fn agent_selection_stays_editable_and_only_confirmation_starts_setup() {
         let mut fixture = Fixture::new(false);
         let html = dioxus_ssr::render(&fixture.dom);
         let intro = translate("onboarding-setup-intro");
         assert!(fixture.initial.edits.iter().any(|edit| {
             matches!(edit, Mutation::CreateTextNode { value, .. } if value == &intro)
         }));
-        assert!(html.contains("role=\"listbox\""));
+        assert!(html.contains("role=\"radiogroup\""));
         for prompt in vmux_ui::components::starter_prompts::StarterPrompt::all() {
             assert!(!html.contains(&prompt.text()));
         }
@@ -392,8 +448,14 @@ mod tests {
         assert!(!html.contains(&translate("tools-view-list")));
         assert!(!html.contains(&translate("onboarding-more-agents")));
         let choice = fixture.element("aria-label", "Agent A");
-        fixture.click(choice);
-        assert_eq!(fixture.selected(), "a");
+        let other = fixture.element("aria-label", "Agent B");
+        let confirm = fixture.element("aria-label", &translate("common-continue"));
+        fixture.choose(choice);
+        assert!(fixture.host.0.borrow().is_empty());
+        fixture.choose(other);
+        assert!(fixture.host.0.borrow().is_empty());
+        fixture.click(confirm);
+        assert_eq!(fixture.selected(), "b");
     }
 
     #[test]
@@ -411,8 +473,11 @@ mod tests {
         let composer = fixture.element("id", vmux_ui::components::composer::PROMPT_INPUT_ID);
         fixture.press(composer, Key::Enter, Code::Enter);
         assert!(fixture.host.0.borrow().is_empty());
-        let choice = fixture.element("aria-label", "Agent B");
-        fixture.press(choice, Key::Enter, Code::Enter);
+        let search = fixture.element("aria-label", &translate("onboarding-search-agents"));
+        let confirm = fixture.element("aria-label", &translate("common-continue"));
+        fixture.press(search, Key::Enter, Code::Enter);
+        assert!(fixture.host.0.borrow().is_empty());
+        fixture.click(confirm);
         assert_eq!(fixture.selected(), "b");
     }
 
@@ -421,7 +486,7 @@ mod tests {
         let mut fixture = Fixture::new(true);
         let choice = fixture.element("aria-label", "Agent A");
         let search = fixture.element("aria-label", &translate("onboarding-search-agents"));
-        fixture.click(choice);
+        fixture.choose(choice);
         fixture.press(choice, Key::Enter, Code::Enter);
         fixture.press(choice, Key::Character(" ".into()), Code::Space);
         fixture.search(search, "agent b");
@@ -504,15 +569,18 @@ mod tests {
     }
 
     #[test]
-    fn search_updates_the_choices_and_enter_connects_the_result_once() {
+    fn search_selects_a_draft_and_confirmation_connects_the_result_once() {
         let mut fixture = Fixture::new(false);
         let search = fixture.element("aria-label", &translate("onboarding-search-agents"));
+        let confirm = fixture.element("aria-label", &translate("common-continue"));
         fixture.search(search, "agent b");
         let html = dioxus_ssr::render(&fixture.dom);
         assert!(html.contains("Agent B"));
         assert!(!html.contains("Agent A"));
         assert!(fixture.host.0.borrow().is_empty());
         fixture.press(search, Key::Enter, Code::Enter);
+        assert!(fixture.host.0.borrow().is_empty());
+        fixture.click(confirm);
         assert_eq!(fixture.selected(), "b");
     }
 }
