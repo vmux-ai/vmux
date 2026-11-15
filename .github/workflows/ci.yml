@@ -314,7 +314,7 @@ jobs:
           node --test scripts/ci-preflight.test.js
           cargo test --locked -p vmux_dx --features ci-syntax --lib
           cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
-          cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
+          cargo test --locked -p vmux_dx --test policy --test conventions
 
   test-sdk-path:
     name: Test public SDK from an independent workspace

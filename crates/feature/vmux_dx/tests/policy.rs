@@ -2515,6 +2515,11 @@ impl Boundary {
             || path.starts_with("crates/util/vmux_macro/")
             || matches!(
                 path,
+                "crates/feature/vmux_dx/tests/policy.rs"
+                    | "crates/feature/vmux_dx/tests/conventions.rs"
+            )
+            || matches!(
+                path,
                 "crates/feature/vmux_dx/build.rs"
                     | "crates/feature/vmux_dx/src/source.rs"
                     | "crates/app/vmux_cli/tests/dx.rs"

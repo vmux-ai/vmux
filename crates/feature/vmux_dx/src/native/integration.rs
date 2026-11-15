@@ -135,11 +135,11 @@ impl Native {
             vec![
                 "test",
                 "-p",
-                "vmux_macro",
+                "vmux_dx",
                 "--test",
-                "source_conventions",
+                "conventions",
                 "--test",
-                "ecs_ownership",
+                "policy",
             ],
         ] {
             let mut command = self.command(self.get("CARGO_BIN", "cargo"));

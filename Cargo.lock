@@ -10597,11 +10597,13 @@ dependencies = [
  "base64 0.22.1",
  "bevy_app",
  "bevy_ecs",
+ "dioxus-rsx",
  "flate2",
  "libc",
  "minisign-verify",
  "plist",
  "proc-macro2",
+ "quote",
  "ron 0.12.1",
  "semver",
  "serde",
@@ -10914,13 +10916,11 @@ dependencies = [
 name = "vmux_macro"
 version = "0.0.35"
 dependencies = [
- "dioxus-rsx",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
  "ron 0.12.1",
  "serde",
- "serde_json",
  "syn 2.0.117",
 ]
 

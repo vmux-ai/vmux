@@ -172,8 +172,8 @@ impl Workspace {
         for file in files {
             if file == Path::new("ecs-policy.ron") {
                 if !self.packages.iter().any(|package| {
-                    package.name == "vmux_macro"
-                        && package.directory == Path::new("crates/util/vmux_macro")
+                    package.name == "vmux_dx"
+                        && package.directory == Path::new("crates/feature/vmux_dx")
                 }) {
                     return self.full();
                 }
@@ -214,7 +214,7 @@ impl Workspace {
             }
         }
         if policy {
-            selected.insert("vmux_macro".into());
+            selected.insert("vmux_dx".into());
         }
         let mut lint = BTreeSet::new();
         for package in &self.packages {
@@ -329,17 +329,17 @@ mod tests {
     fn policy_ledger_inputs_do_not_expand_the_production_dependency_graph() {
         let mut workspace = Workspace::fixture();
         workspace.packages.push(Package {
-            name: "vmux_macro".into(),
-            directory: "crates/util/vmux_macro".into(),
+            name: "vmux_dx".into(),
+            directory: "crates/feature/vmux_dx".into(),
             dependencies: BTreeSet::new(),
         });
         for package in &mut workspace.packages {
             if package.name == "unrelated" {
-                package.dependencies.insert("vmux_macro".into());
+                package.dependencies.insert("vmux_dx".into());
             }
         }
         let policy = workspace.select(&["ecs-policy.ron".into()]);
-        assert_eq!(policy.packages, BTreeSet::from(["vmux_macro".into()]));
+        assert_eq!(policy.packages, BTreeSet::from(["vmux_dx".into()]));
         assert_eq!(policy.lint, policy.packages);
         assert!(!policy.workspace);
         assert!(!policy.lean);
@@ -354,7 +354,7 @@ mod tests {
                 "consumer".into(),
                 "leaf".into(),
                 "vmux_desktop".into(),
-                "vmux_macro".into(),
+                "vmux_dx".into(),
             ])
         );
         assert_eq!(feature.lint, feature.packages);
@@ -371,7 +371,7 @@ mod tests {
                 .workspace
         );
         for package in &mut workspace.packages {
-            if package.name == "vmux_macro" {
+            if package.name == "vmux_dx" {
                 package.directory = "crates/feature/foreign-policy".into();
             }
         }
