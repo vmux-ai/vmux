@@ -1,15 +1,15 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, symlink};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::task::Waker;
 
-use bevy_ecs::prelude::Component;
+use bevy_ecs::prelude::{Component, Entity, Resource};
 use sha2::{Digest, Sha256};
 use vmux_ecs::blocking::Lane;
 use vmux_ecs::jobs::Job;
@@ -65,11 +65,28 @@ pub struct Report<T> {
     _guard: Arc<Guard>,
 }
 
+impl<J: IoJob> Task<J> {
+    pub fn tracked(
+        mut job: J,
+        target: Option<Arc<TargetLock>>,
+        temporary: Vec<Arc<Temporary>>,
+        wake: Waker,
+        cleanup: CleanupRoute,
+    ) -> (Self, Flight, CleanupFlight) {
+        let cleanup_flight = cleanup.flight.clone();
+        let (mut guard, flight) = Guard::new(target, temporary, wake);
+        Arc::get_mut(&mut guard).unwrap().cleanup = Some(cleanup);
+        job.retain(&guard);
+        (Self { job, guard }, flight, cleanup_flight)
+    }
+}
+
 pub struct Guard {
     target: Option<Arc<TargetLock>>,
     temporary: Vec<Arc<Temporary>>,
     complete: Arc<AtomicBool>,
     wake: Waker,
+    cleanup: Option<CleanupRoute>,
 }
 
 impl Guard {
@@ -86,6 +103,7 @@ impl Guard {
                 temporary,
                 complete,
                 wake,
+                cleanup: None,
             }),
             flight,
         )
@@ -110,8 +128,140 @@ impl Flight {
     }
 }
 
+#[derive(Component, Clone)]
+pub struct CleanupFlight(Arc<AtomicBool>);
+
+impl CleanupFlight {
+    pub fn pending(&self) -> bool {
+        !self.0.load(Ordering::Acquire)
+    }
+}
+
+#[derive(Resource)]
+pub struct CleanupQueue {
+    sender: mpsc::Sender<(Entity, CleanupData)>,
+    receiver: Mutex<mpsc::Receiver<(Entity, CleanupData)>>,
+}
+
+impl Default for CleanupQueue {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            sender,
+            receiver: Mutex::new(receiver),
+        }
+    }
+}
+
+impl CleanupQueue {
+    pub fn route(&self, entity: Entity, root: Entity, wake: Waker) -> CleanupRoute {
+        CleanupRoute {
+            entity,
+            root,
+            sender: self.sender.clone(),
+            flight: CleanupFlight(Arc::new(AtomicBool::new(true))),
+            wake,
+        }
+    }
+
+    pub fn receive(&self) -> Option<(Entity, CleanupData)> {
+        self.receiver.lock().unwrap().try_recv().ok()
+    }
+}
+
+impl Drop for CleanupQueue {
+    fn drop(&mut self) {
+        while let Ok((_entity, data)) = self.receiver.get_mut().unwrap().try_recv() {
+            drop(data);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CleanupRoute {
+    entity: Entity,
+    root: Entity,
+    sender: mpsc::Sender<(Entity, CleanupData)>,
+    flight: CleanupFlight,
+    wake: Waker,
+}
+
+#[derive(Clone)]
+struct Retained {
+    target: Option<Arc<TargetLock>>,
+    temporary: Vec<Arc<Temporary>>,
+    io: Flight,
+    route: CleanupRoute,
+}
+
+pub struct CleanupData {
+    child: Option<std::process::Child>,
+    retained: Retained,
+}
+
+impl CleanupData {
+    pub fn root(&self) -> Entity {
+        self.retained.route.root
+    }
+
+    pub fn io(&self) -> Flight {
+        self.retained.io.clone()
+    }
+
+    pub fn flight(&self) -> CleanupFlight {
+        self.retained.route.flight.clone()
+    }
+}
+
+impl Drop for CleanupData {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            Signals::terminate_group(child.id());
+            let _ = child.wait();
+        }
+        self.retained.temporary.clear();
+        self.retained.target.take();
+        self.retained.route.flight.0.store(true, Ordering::Release);
+        self.retained.route.wake.wake_by_ref();
+    }
+}
+
+#[derive(Component)]
+pub struct ReapRequest {
+    data: Arc<Mutex<Option<CleanupData>>>,
+    flight: CleanupFlight,
+}
+
+impl ReapRequest {
+    pub fn new(data: CleanupData) -> Self {
+        Self {
+            flight: data.flight(),
+            data: Arc::new(Mutex::new(Some(data))),
+        }
+    }
+
+    pub fn job(&self) -> impl FnOnce() + Send + 'static {
+        let state = self.data.clone();
+        move || {
+            let data = state.lock().unwrap().take();
+            drop(data);
+        }
+    }
+}
+
+impl Drop for ReapRequest {
+    fn drop(&mut self) {
+        let data = self.data.lock().unwrap().take();
+        drop(data);
+        while self.flight.pending() {
+            std::thread::park_timeout(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
 pub trait IoJob: Job<Output = Result<Self::Data, Failure>> + Component {
     type Data: IoValue;
+    fn retain(&mut self, _guard: &Arc<Guard>) {}
 }
 
 pub trait IoValue: Component + Clone {
@@ -302,6 +452,7 @@ pub struct SpawnProcess {
     pub cwd: PathBuf,
     pub program: OsString,
     pub arguments: Vec<OsString>,
+    retained: Option<Retained>,
 }
 
 impl SpawnProcess {
@@ -316,12 +467,23 @@ impl SpawnProcess {
             cwd: cwd.to_owned(),
             program,
             arguments,
+            retained: None,
         }
     }
 }
 
 impl IoJob for SpawnProcess {
     type Data = ProcessValue;
+    fn retain(&mut self, guard: &Arc<Guard>) {
+        if let Some(route) = &guard.cleanup {
+            self.retained = Some(Retained {
+                target: guard.target.clone(),
+                temporary: guard.temporary.clone(),
+                io: Flight(guard.complete.clone()),
+                route: route.clone(),
+            });
+        }
+    }
 }
 
 impl Job for SpawnProcess {
@@ -336,8 +498,14 @@ impl Job for SpawnProcess {
         let child = command
             .spawn()
             .map_err(|error| Failure::message(error.to_string()))?;
+        if let Some(retained) = &self.retained {
+            retained.route.flight.0.store(false, Ordering::Release);
+        }
         Ok(ProcessValue {
-            _lease: Arc::new(Process(Mutex::new(child))),
+            _lease: Arc::new(Process {
+                child: Some(child),
+                retained: self.retained,
+            }),
         })
     }
 
@@ -632,10 +800,15 @@ impl Job for WriteFile {
         if vmux_ecs::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
-        fs::write(&self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
-        Ok(PendingValue {
-            _lease: Arc::new(Pending(self.0)),
-        })
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&self.0)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        let pending = Arc::new(Pending(self.0));
+        file.write_all(&self.1)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        Ok(PendingValue { _lease: pending })
     }
 
     fn lane(&self) -> Lane {
@@ -694,11 +867,30 @@ impl Job for CreateTemporary {
     }
 }
 
-pub struct Process(Mutex<std::process::Child>);
+pub struct Process {
+    child: Option<std::process::Child>,
+    retained: Option<Retained>,
+}
 
 impl Drop for Process {
     fn drop(&mut self) {
-        if let Ok(mut child) = self.0.lock() {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        if let Some(retained) = self.retained.take() {
+            let entity = retained.route.entity;
+            let sender = retained.route.sender.clone();
+            let wake = retained.route.wake.clone();
+            let data = CleanupData {
+                child: Some(child),
+                retained,
+            };
+            if let Err(error) = sender.send((entity, data)) {
+                drop(error.0.1);
+            } else {
+                wake.wake_by_ref();
+            }
+        } else {
             Signals::terminate_group(child.id());
             let _ = child.wait();
         }
@@ -721,6 +913,87 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn staging_rejects_existing_files_and_links_without_changing_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        fs::write(&source, b"original").unwrap();
+        let symbolic = directory.path().join("symbolic");
+        symlink(&source, &symbolic).unwrap();
+        let hard = directory.path().join("hard");
+        fs::hard_link(&source, &hard).unwrap();
+        for path in [&source, &symbolic, &hard] {
+            assert!(
+                WriteFile(path.to_owned(), b"replacement".to_vec())
+                    .run()
+                    .is_err()
+            );
+            assert_eq!(fs::read(&source).unwrap(), b"original");
+            assert!(fs::symlink_metadata(path).is_ok());
+        }
+    }
+
+    #[test]
+    fn staging_refuses_a_fifo_without_waiting_for_a_reader() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("staging");
+        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            sender
+                .send(WriteFile(path, b"replacement".to_vec()).run().is_err())
+                .unwrap();
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("FIFO open blocked")
+        );
+        thread.join().unwrap();
+        assert!(fs::symlink_metadata(directory.path().join("staging")).is_ok());
+    }
+
+    #[test]
+    fn failed_partial_staging_write_removes_the_owned_file() {
+        if let Some(path) = std::env::var_os("VMUX_STAGING_QUOTA_FIXTURE") {
+            let limit = libc::rlimit {
+                rlim_cur: 1,
+                rlim_max: 1,
+            };
+            unsafe {
+                libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+                assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+            }
+            let path = PathBuf::from(path);
+            assert!(
+                WriteFile(path.clone(), b"more than one byte".to_vec())
+                    .run()
+                    .is_err()
+            );
+            assert!(!path.exists());
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "debug_io::tests::failed_partial_staging_write_removes_the_owned_file",
+                "--nocapture",
+            ])
+            .env(
+                "VMUX_STAGING_QUOTA_FIXTURE",
+                directory.path().join("staging"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     struct Released {
         path: PathBuf,
         result: mpsc::Sender<bool>,
@@ -735,6 +1008,52 @@ mod tests {
                 )
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn discarded_process_result_keeps_its_loan_until_worker_cleanup_finishes() {
+        let directory = tempfile::tempdir().unwrap();
+        let temporary = Arc::new(Temporary::create(directory.path(), "loan").unwrap());
+        let path = temporary.path().to_owned();
+        let queue = CleanupQueue::default();
+        let wake = std::task::Waker::noop().clone();
+        let route = queue.route(Entity::PLACEHOLDER, Entity::PLACEHOLDER, wake.clone());
+        let environment = Environment::current();
+        let process = SpawnProcess::new(
+            &environment,
+            directory.path(),
+            "/bin/sleep".into(),
+            vec!["60".into()],
+        );
+        let (task, io, cleanup) =
+            Task::tracked(process, None, vec![temporary.clone()], wake, route);
+        drop(temporary);
+        let report = task.run();
+        assert!(report.result.is_ok());
+        drop(report);
+        assert!(!io.pending());
+        assert!(cleanup.pending());
+        assert!(path.exists());
+        let (_entity, data) = queue
+            .receive()
+            .expect("discarded process must request cleanup");
+        let request = ReapRequest::new(data);
+        let pool = vmux_ecs::blocking::BlockingPool::new("cleanup-fixture", 1, 1);
+        let mut running = pool.try_spawn(None, request.job()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(result) = running.poll() {
+                assert!(result.is_ok());
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "process cleanup did not finish"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        assert!(!cleanup.pending());
+        assert!(!path.exists());
     }
 
     #[test]

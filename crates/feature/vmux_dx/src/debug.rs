@@ -11,10 +11,10 @@ use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake
 use vmux_ecs::{Operation, OperationState, Order};
 
 use crate::debug_io::{
-    CaptureOutput, CopyFile, CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes,
-    FileDigest, Flight, HashFile, InspectPath, IoJob, IoValue, LinkPath, PathMetadata,
-    PendingValue, ProcessValue, ReadDirectory, ReadFile, RemoveFile, RenamePath, RunProcess,
-    SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
+    CaptureOutput, CleanupFlight, CleanupQueue, CopyFile, CreateDirectory, CreateTemporary,
+    DirectoryEntries, Done, FileBytes, FileDigest, Flight, HashFile, InspectPath, IoJob, IoValue,
+    LinkPath, PathMetadata, PendingValue, ProcessValue, ReadDirectory, ReadFile, ReapRequest,
+    RemoveFile, RenamePath, RunProcess, SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
 };
 use crate::execution::Failure;
 use crate::repository::Checkout;
@@ -26,123 +26,137 @@ pub struct Plugin;
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            IoPlugin::<CaptureOutput>::default(),
-            IoPlugin::<SpawnProcess>::default(),
-            IoPlugin::<RunProcess>::default(),
-            IoPlugin::<ReadFile>::default(),
-            IoPlugin::<HashFile>::default(),
-            IoPlugin::<InspectPath>::default(),
-            IoPlugin::<ReadDirectory>::default(),
-            IoPlugin::<CreateDirectory>::default(),
-            IoPlugin::<CopyFile>::default(),
-            IoPlugin::<RemoveFile>::default(),
-            IoPlugin::<LinkPath>::default(),
-            IoPlugin::<WriteFile>::default(),
-            IoPlugin::<RenamePath>::default(),
-            IoPlugin::<CreateTemporary>::default(),
-        ))
-        .configure_sets(
-            Update,
-            (
-                Stage::Collect,
-                Stage::Decide,
-                Stage::Admit,
-                Stage::Submit,
-                Stage::Release,
+        app.init_resource::<CleanupQueue>()
+            .add_plugins((
+                IoPlugin::<CaptureOutput>::default(),
+                IoPlugin::<SpawnProcess>::default(),
+                IoPlugin::<RunProcess>::default(),
+                IoPlugin::<ReadFile>::default(),
+                IoPlugin::<HashFile>::default(),
+                IoPlugin::<InspectPath>::default(),
+                IoPlugin::<ReadDirectory>::default(),
+                IoPlugin::<CreateDirectory>::default(),
+                IoPlugin::<CopyFile>::default(),
+                IoPlugin::<RemoveFile>::default(),
+                IoPlugin::<LinkPath>::default(),
+                IoPlugin::<WriteFile>::default(),
+                IoPlugin::<RenamePath>::default(),
+                IoPlugin::<CreateTemporary>::default(),
+            ))
+            .configure_sets(
+                Update,
+                (
+                    Stage::Collect,
+                    Stage::Decide,
+                    Stage::Admit,
+                    Stage::Submit,
+                    Stage::Release,
+                )
+                    .chain()
+                    .in_set(JobSet::Apply)
+                    .after(crate::Stage::Execute),
             )
-                .chain()
-                .in_set(JobSet::Apply)
-                .after(crate::Stage::Execute),
-        )
-        .add_observer(accept::<Capacity>)
-        .add_observer(accept::<IdentityRequest>)
-        .add_observer(accept::<Clear>)
-        .add_observer(accept::<Sign>)
-        .add_observer(accept::<Bundle>)
-        .add_observer(accept::<Publish>)
-        .add_observer(accept::<Run>)
-        .add_observer(accept::<Stop>)
-        .add_observer(accept::<Compile>)
-        .add_observer(accept::<Snapshot>)
-        .add_observer(accept::<Invoke>)
-        .add_observer(accept::<Signature>)
-        .add_systems(PreUpdate, cancel)
-        .add_systems(
-            Update,
-            (
-                initialize,
-                cancel,
+            .add_observer(accept::<Capacity>)
+            .add_observer(accept::<IdentityRequest>)
+            .add_observer(accept::<Clear>)
+            .add_observer(accept::<Sign>)
+            .add_observer(accept::<Bundle>)
+            .add_observer(accept::<Publish>)
+            .add_observer(accept::<Run>)
+            .add_observer(accept::<Stop>)
+            .add_observer(accept::<Compile>)
+            .add_observer(accept::<Snapshot>)
+            .add_observer(accept::<Invoke>)
+            .add_observer(accept::<Signature>)
+            .add_systems(PreUpdate, cancel)
+            .add_systems(
+                Update,
                 (
-                    identity_start,
-                    identity_keychain,
-                    identity_lookup,
-                    create_certificate,
-                    import_identity,
-                    trust_identity,
-                    identity_confirm,
+                    initialize,
+                    cancel,
+                    (
+                        identity_start,
+                        identity_keychain,
+                        identity_lookup,
+                        create_certificate,
+                        import_identity,
+                        trust_identity,
+                        identity_confirm,
+                    )
+                        .chain(),
+                    capacity,
+                    clear,
+                    sign,
+                    (
+                        bundle_start,
+                        bundle_branch,
+                        bundle_plan,
+                        bundle_directories,
+                        configure_app,
+                        copy_resources,
+                        configure_service,
+                        bundle_service,
+                        bundle_wait,
+                        bundle_desktop,
+                    )
+                        .chain(),
+                    (publish_start, publish_check, publish_done).chain(),
+                    (
+                        prepare_frontend,
+                        serve,
+                        run_start,
+                        inspect_local,
+                        inspect_development,
+                        inspect_package,
+                        collect_local_entries,
+                        verify_development,
+                        run_select,
+                        run_verify,
+                        run_execute,
+                        finish_run,
+                    )
+                        .chain(),
+                    stop,
+                    (
+                        read_signature_inputs,
+                        hash_inputs,
+                        inspect_cache,
+                        write_stamp,
+                        signature_cache,
+                        prepare_signature,
+                        copy_binary,
+                        inspect_format,
+                        sign_bundle,
+                        signature_format,
+                        signature_done,
+                        signature_rpaths,
+                        signature_libraries,
+                        signature_bindings,
+                    )
+                        .chain(),
+                    compile,
+                    snapshot,
+                    invoke,
+                    wake,
                 )
-                    .chain(),
-                capacity,
-                clear,
-                sign,
-                (
-                    bundle_start,
-                    bundle_branch,
-                    bundle_plan,
-                    bundle_directories,
-                    configure_app,
-                    copy_resources,
-                    configure_service,
-                    bundle_service,
-                    bundle_wait,
-                    bundle_desktop,
-                )
-                    .chain(),
-                (publish_start, publish_check, publish_done).chain(),
-                (
-                    prepare_frontend,
-                    serve,
-                    run_start,
-                    inspect_local,
-                    inspect_development,
-                    inspect_package,
-                    collect_local_entries,
-                    verify_development,
-                    run_select,
-                    run_verify,
-                    run_execute,
-                    finish_run,
-                )
-                    .chain(),
-                stop,
-                (
-                    read_signature_inputs,
-                    hash_inputs,
-                    inspect_cache,
-                    write_stamp,
-                    signature_cache,
-                    prepare_signature,
-                    copy_binary,
-                    inspect_format,
-                    sign_bundle,
-                    signature_format,
-                    signature_done,
-                    signature_rpaths,
-                    signature_libraries,
-                    signature_bindings,
-                )
-                    .chain(),
-                compile,
-                snapshot,
-                invoke,
-                wake,
+                    .chain()
+                    .in_set(Stage::Decide),
             )
-                .chain()
-                .in_set(Stage::Decide),
-        )
-        .add_systems(Update, (admit, ApplyDeferred).chain().in_set(Stage::Admit))
-        .add_systems(Update, (release, finish).chain().in_set(Stage::Release));
+            .add_systems(Update, (admit, ApplyDeferred).chain().in_set(Stage::Admit))
+            .add_systems(
+                Update,
+                (
+                    release,
+                    receive_cleanups,
+                    reap,
+                    collect_reaped,
+                    released,
+                    forget_cleanups,
+                    finish,
+                )
+                    .chain()
+                    .in_set(Stage::Release),
+            );
     }
 }
 
@@ -443,6 +457,15 @@ struct Sent;
 #[derive(Component)]
 struct Released;
 
+#[derive(Component)]
+struct OutputsDropped;
+
+#[derive(Component)]
+struct CleanupWitness;
+
+#[derive(Component)]
+struct Reaping(vmux_ecs::blocking::BlockingTask<()>);
+
 #[derive(Component, Clone)]
 struct Failed(Failure);
 
@@ -533,6 +556,9 @@ struct Input(PathBuf);
 
 #[derive(Component)]
 struct Expected(String);
+
+#[derive(Component)]
+struct Consumed(String);
 
 #[derive(Component)]
 struct Identity(String);
@@ -3499,6 +3525,7 @@ type SignatureLinks<'w, 's> = Query<
 struct SignatureData<'w, 's> {
     inputs: Query<'w, 's, (Entity, &'static Input, &'static Order, &'static ChildOf)>,
     expected: Query<'w, 's, &'static Expected>,
+    consumed: Query<'w, 's, &'static Consumed>,
     preparation: Query<
         'w,
         's,
@@ -3611,7 +3638,7 @@ fn hash_inputs(
             continue;
         }
 
-        let Signature { suffix, .. } = request;
+        let Signature { suffix, binary, .. } = request;
         if facts.pending(entity) {
             continue;
         }
@@ -3641,6 +3668,7 @@ fn hash_inputs(
             continue;
         };
         hash.update(entitlements.as_bytes());
+        let mut external = hash.clone();
         let mut sources = spec
             .inputs
             .iter()
@@ -3648,17 +3676,35 @@ fn hash_inputs(
             .collect::<Vec<_>>();
         sources.sort_by_key(|(_, _, order, _)| order.0);
         let mut pending = false;
-        for (source, _, _, _) in sources {
+        for (source, input_path, _, _) in sources {
             let Some(input) = facts.digest(entity, source) else {
                 pending = true;
                 break;
             };
             hash.update(input.as_bytes());
+            if input_path.0 != *binary {
+                external.update(input.as_bytes());
+            }
         }
         if pending {
             continue;
         }
         let value = format!("{:x}{suffix}", hash.finalize());
+        let consumed = format!("{:x}{suffix}", external.finalize());
+        if *phase == SignaturePhase::Record {
+            if !spec
+                .consumed
+                .get(entity)
+                .is_ok_and(|initial| initial.0 == consumed)
+            {
+                io.commands.entity(entity).insert(Failed(Failure::message(
+                    "Signing inputs changed while the signature was prepared",
+                )));
+                continue;
+            }
+        } else {
+            io.commands.entity(entity).insert(Consumed(consumed));
+        }
         io.commands.entity(entity).insert(Expected(value.clone()));
 
         *phase = if *phase == SignaturePhase::Record {
@@ -4757,6 +4803,7 @@ fn submit<J: IoJob>(
     scope: Scope,
     loans: Loans,
     wake: Res<JobWake>,
+    cleanup: Res<CleanupQueue>,
     mut commands: Commands,
 ) {
     for (entity, job, parent) in &pending {
@@ -4783,7 +4830,16 @@ fn submit<J: IoJob>(
             }
             current = owner.0;
         }
-        let (task, flight) = Task::new(job.clone(), target, temporary, wake.0.clone());
+        let root = scope.requests.get(parent.parent()).unwrap().0.0;
+        let witness = commands
+            .spawn((Root(root), Owner(parent.parent()), CleanupWitness))
+            .id();
+        let route = cleanup.route(witness, root, wake.0.clone());
+        let (task, flight, cleanup_flight) =
+            Task::tracked(job.clone(), target, temporary, wake.0.clone(), route);
+        commands
+            .entity(witness)
+            .insert((flight.clone(), cleanup_flight));
         commands.entity(entity).insert((
             Submitted,
             Root(scope.requests.get(parent.parent()).unwrap().0.0),
@@ -4809,23 +4865,107 @@ fn release(
     requests: Releasing,
     results: Query<(Entity, &ChildOf), With<Io>>,
     flights: Query<&Flight>,
+    dropped: Query<(), With<OutputsDropped>>,
     mut commands: Commands,
 ) {
     if Signals::active() || flights.iter().any(Flight::pending) {
         return;
     }
     for entity in &requests {
+        if dropped.contains(entity) {
+            continue;
+        }
         commands.entity(entity).remove::<Lease>();
     }
     for (entity, parent) in &results {
-        if requests.contains(parent.parent()) {
+        if requests.contains(parent.parent()) && !dropped.contains(parent.parent()) {
             commands
                 .entity(entity)
                 .remove::<(TemporaryValue, ProcessValue, PendingValue)>();
         }
     }
     for entity in &requests {
+        commands.entity(entity).insert(OutputsDropped);
+    }
+}
+
+fn receive_cleanups(cleanup: Res<CleanupQueue>, mut commands: Commands) {
+    while let Some((entity, data)) = cleanup.receive() {
+        if let Ok(mut witness) = commands.get_entity(entity) {
+            witness.insert(ReapRequest::new(data));
+        } else {
+            commands.spawn((
+                Root(data.root()),
+                data.io(),
+                data.flight(),
+                CleanupWitness,
+                ReapRequest::new(data),
+            ));
+        }
+    }
+}
+
+fn reap(
+    runtime: Res<vmux_ecs::blocking::BlockingRuntime>,
+    wake: Res<JobWake>,
+    pending: Query<(Entity, &ReapRequest), Without<Reaping>>,
+    mut commands: Commands,
+) {
+    for (entity, request) in &pending {
+        if let Ok(task) = runtime.try_spawn(
+            vmux_ecs::blocking::Lane::Process,
+            Some(wake.0.clone()),
+            request.job(),
+        ) {
+            commands.entity(entity).insert(Reaping(task));
+        }
+    }
+}
+
+fn collect_reaped(mut tasks: Query<(Entity, &mut Reaping)>, mut commands: Commands) {
+    for (entity, mut task) in &mut tasks {
+        if task.0.poll().is_some() {
+            commands.entity(entity).remove::<(Reaping, ReapRequest)>();
+        }
+    }
+}
+
+fn released(
+    requests: Releasing,
+    dropped: Query<&Root, With<OutputsDropped>>,
+    flights: Query<(&Root, &Flight)>,
+    cleanups: Query<(&Root, &CleanupFlight)>,
+    mut commands: Commands,
+) {
+    for entity in &requests {
+        let Ok(owner) = dropped.get(entity) else {
+            continue;
+        };
+        if flights
+            .iter()
+            .any(|(root, flight)| root.0 == owner.0 && flight.pending())
+            || cleanups
+                .iter()
+                .any(|(root, flight)| root.0 == owner.0 && flight.pending())
+        {
+            continue;
+        }
         commands.entity(entity).insert(Released);
+    }
+}
+
+type Drained<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Flight, &'static CleanupFlight),
+    (With<CleanupWitness>, Without<ReapRequest>, Without<Reaping>),
+>;
+
+fn forget_cleanups(witnesses: Drained, mut commands: Commands) {
+    for (entity, io, output) in &witnesses {
+        if !io.pending() && !output.pending() {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -5061,6 +5201,103 @@ mod tests {
             fs::write(path, bytes).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+
+        fn signature(&mut self, source: &Path, binary: &Path) -> Entity {
+            let checkout = self
+                .app
+                .world()
+                .get::<Checkout>(self.operation)
+                .unwrap()
+                .clone();
+            let mut settings = self
+                .app
+                .world()
+                .get::<Settings>(self.operation)
+                .unwrap()
+                .clone();
+            settings.0.set("APPLE_SIGNING_IDENTITY", "fixture");
+            let owner = self
+                .app
+                .world_mut()
+                .spawn((
+                    Signature {
+                        path: binary.to_owned(),
+                        binary: binary.to_owned(),
+                        stamp: binary.with_extension("signed"),
+                        identifier: None,
+                        suffix: String::new(),
+                    },
+                    Captured {
+                        root: self.operation,
+                        attempt: 1,
+                    },
+                    Root(self.operation),
+                    Owner(self.operation),
+                    SignaturePhase::Start,
+                    Sequence(0),
+                    Sources,
+                    checkout,
+                    settings,
+                    ChildOf(self.operation),
+                ))
+                .id();
+            if source != binary {
+                self.app
+                    .world_mut()
+                    .entity_mut(owner)
+                    .insert(CopyFrom(source.to_owned()));
+            }
+            self.app
+                .world_mut()
+                .spawn((Input(source.to_owned()), Order(0), ChildOf(owner)));
+            self.settle_io(owner);
+            owner
+        }
+    }
+
+    #[test]
+    fn signing_refuses_a_source_changed_after_the_binary_was_copied() {
+        let mut fixture = Fixture::new();
+        let source = fixture.root.join("source");
+        let binary = fixture.root.join("signed-output");
+        fs::write(&source, b"first version").unwrap();
+        fixture.executable(
+            &fixture.root.join("bin/codesign"),
+            br#"#!/bin/sh
+if [ "$1" = --verify ]; then printf 'new version' > "$TEST_ROOT/source"; fi
+exit 0
+"#,
+        );
+        let owner = fixture.signature(&source, &binary);
+        assert!(fixture.app.world().get::<Failed>(owner).is_some());
+        assert!(!binary.with_extension("signed").exists());
+        assert_eq!(fs::read(&binary).unwrap(), b"first version");
+    }
+
+    #[test]
+    fn inplace_signing_keeps_a_cache_hit_after_codesign_changes_the_binary() {
+        let mut fixture = Fixture::new();
+        let binary = fixture.root.join("signed-output");
+        fs::write(&binary, b"first version").unwrap();
+        fixture.executable(
+            &fixture.root.join("bin/codesign"),
+            br#"#!/bin/sh
+if [ "$1" = --force ]; then
+    for argument do target=$argument; done
+    printf 'signature' >> "$target"
+    printf 'signed\n' >> "$TEST_ROOT/signatures"
+fi
+exit 0
+"#,
+        );
+        let first = fixture.signature(&binary, &binary);
+        assert!(fixture.app.world().get::<Failed>(first).is_none());
+        let second = fixture.signature(&binary, &binary);
+        assert!(fixture.app.world().get::<Failed>(second).is_none());
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("signatures")).unwrap(),
+            "signed\n"
+        );
     }
 
     #[test]
