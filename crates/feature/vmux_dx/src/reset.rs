@@ -68,13 +68,15 @@ pub(crate) struct Requested {
 }
 
 #[derive(Component)]
+#[require(Phase)]
 struct Request {
     context: Entity,
     attempt: u64,
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum Phase {
+    #[default]
     Select,
     Inspect,
     Canonical,
@@ -125,12 +127,42 @@ struct Session;
 #[derive(Component)]
 struct Candidate;
 
-#[derive(Component)]
-enum Purpose {
+#[derive(Component, Clone, Copy)]
+struct Purpose {
+    kind: PurposeKind,
+    entity: Option<Entity>,
+}
+
+impl Purpose {
+    fn new(kind: PurposeKind) -> Self {
+        Self { kind, entity: None }
+    }
+
+    fn targeted(kind: PurposeKind, entity: Entity) -> Self {
+        Self {
+            kind,
+            entity: Some(entity),
+        }
+    }
+
+    fn target(&self, kind: PurposeKind) -> Option<&Entity> {
+        if self.kind != kind {
+            return None;
+        }
+        self.entity.as_ref()
+    }
+
+    fn is(&self, kind: PurposeKind) -> bool {
+        self.kind == kind && self.entity.is_none()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PurposeKind {
     Root,
-    Store(Entity),
+    Store,
     Profiles,
-    Session(Entity),
+    Session,
     Logs,
 }
 
@@ -195,6 +227,10 @@ struct Writer<'w, 's> {
 }
 
 impl Writer<'_, '_> {
+    fn fail(&mut self, entity: Entity, failure: Failure) {
+        self.commands.entity(entity).insert(Failed(failure));
+    }
+
     fn request<J: StorageJob>(&mut self, owner: Entity, purpose: Purpose, job: J) {
         self.commands.spawn((
             Io,
@@ -370,7 +406,7 @@ fn resolve(
             continue;
         };
         for (receipt, owner, purpose, metadata) in &metadata {
-            if owner.0 != entity || !matches!(purpose, Purpose::Root) || *phase != Phase::Inspect {
+            if owner.0 != entity || !purpose.is(PurposeKind::Root) || *phase != Phase::Inspect {
                 continue;
             }
             if metadata
@@ -379,15 +415,18 @@ fn resolve(
                 .is_some_and(|value| value.is_dir() || value.is_symlink())
             {
                 *phase = Phase::Canonical;
-                io.request(entity, Purpose::Root, Canonicalize(path.0.clone()));
+                io.request(
+                    entity,
+                    Purpose::new(PurposeKind::Root),
+                    Canonicalize(path.0.clone()),
+                );
             } else {
                 io.commands.entity(entity).insert(Complete);
             }
             io.commands.entity(receipt).despawn();
         }
         for (receipt, owner, purpose, canonical) in &canonical {
-            if owner.0 != entity || !matches!(purpose, Purpose::Root) || *phase != Phase::Canonical
-            {
+            if owner.0 != entity || !purpose.is(PurposeKind::Root) || *phase != Phase::Canonical {
                 continue;
             }
             io.commands.entity(entity).insert(Cwd(canonical.0.clone()));
@@ -396,7 +435,11 @@ fn resolve(
         }
         if *phase == Phase::Select && !pending.iter().any(|owner| owner.0 == entity) {
             *phase = Phase::Inspect;
-            io.request(entity, Purpose::Root, Inspect(path.0.clone()));
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::Root),
+                Inspect(path.0.clone()),
+            );
         }
     }
 }
@@ -462,9 +505,7 @@ fn timestamp(
                 continue;
             }
             if !output.0.status.success() {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::status(output.0.status)));
+                io.fail(entity, Failure::status(output.0.status));
             } else {
                 match std::str::from_utf8(&output.0.stdout) {
                     Ok(value) if !value.trim().is_empty() && !value.contains('/') => {
@@ -474,9 +515,7 @@ fn timestamp(
                         *phase = Phase::Stores;
                     }
                     _ => {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message("Invalid layout backup timestamp")));
+                        io.fail(entity, Failure::message("Invalid layout backup timestamp"));
                     }
                 }
             }
@@ -493,7 +532,7 @@ fn timestamp(
         };
         io.request(
             entity,
-            Purpose::Root,
+            Purpose::new(PurposeKind::Root),
             Capture {
                 environment: settings.0.clone(),
                 directory: checkout.root.clone(),
@@ -527,7 +566,11 @@ fn stores(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: Wr
                         ChildOf(entity),
                     ))
                     .id();
-                io.request(entity, Purpose::Store(file), Inspect(path.0.join(name)));
+                io.request(
+                    entity,
+                    Purpose::targeted(PurposeKind::Store, file),
+                    Inspect(path.0.join(name)),
+                );
             }
             continue;
         }
@@ -535,7 +578,7 @@ fn stores(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: Wr
             if owner.0 != entity {
                 continue;
             }
-            let Purpose::Store(file) = purpose else {
+            let Some(file) = purpose.target(PurposeKind::Store) else {
                 continue;
             };
             let Ok(path) = layout.paths.get(*file) else {
@@ -550,7 +593,7 @@ fn stores(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: Wr
                 if layout.development.contains(entity) {
                     io.request(
                         entity,
-                        Purpose::Store(*file),
+                        Purpose::targeted(PurposeKind::Store, *file),
                         Remove {
                             path: path.0.clone(),
                             directory: false,
@@ -561,7 +604,7 @@ fn stores(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: Wr
                     let name = path.0.file_name().unwrap().to_string_lossy();
                     io.request(
                         entity,
-                        Purpose::Store(*file),
+                        Purpose::targeted(PurposeKind::Store, *file),
                         Rename {
                             source: path.0.clone(),
                             destination: path
@@ -579,7 +622,7 @@ fn stores(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: Wr
             if owner.0 != entity {
                 continue;
             }
-            if let Purpose::Store(file) = purpose {
+            if let Some(file) = purpose.target(PurposeKind::Store) {
                 io.commands.entity(*file).despawn();
                 io.commands.entity(receipt).despawn();
             }
@@ -603,7 +646,11 @@ fn sessions(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: 
         };
         if !layout.enumerated.contains(entity) {
             io.commands.entity(entity).insert(Enumerated);
-            io.request(entity, Purpose::Profiles, Inspect(path.0.join("profiles")));
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::Profiles),
+                Inspect(path.0.join("profiles")),
+            );
             continue;
         }
         let mut scheduled = false;
@@ -611,44 +658,42 @@ fn sessions(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: 
             if owner.0 != entity {
                 continue;
             }
-            match purpose {
-                Purpose::Profiles if metadata.0.as_ref().is_some_and(|value| value.is_dir()) => {
+            if purpose.is(PurposeKind::Profiles)
+                && metadata.0.as_ref().is_some_and(|value| value.is_dir())
+            {
+                io.request(
+                    entity,
+                    Purpose::new(PurposeKind::Profiles),
+                    ReadDirectory(path.0.join("profiles")),
+                );
+                scheduled = true;
+            } else if let Some(file) = purpose.target(PurposeKind::Session) {
+                let Ok(path) = layout.paths.get(*file) else {
+                    continue;
+                };
+                if metadata
+                    .0
+                    .as_ref()
+                    .is_some_and(|value| value.is_file() || value.is_symlink())
+                {
                     io.request(
                         entity,
-                        Purpose::Profiles,
-                        ReadDirectory(path.0.join("profiles")),
+                        Purpose::targeted(PurposeKind::Session, *file),
+                        Remove {
+                            path: path.0.clone(),
+                            directory: false,
+                            lock: None,
+                        },
                     );
                     scheduled = true;
+                } else {
+                    io.commands.entity(*file).despawn();
                 }
-                Purpose::Session(file) => {
-                    let Ok(path) = layout.paths.get(*file) else {
-                        continue;
-                    };
-                    if metadata
-                        .0
-                        .as_ref()
-                        .is_some_and(|value| value.is_file() || value.is_symlink())
-                    {
-                        io.request(
-                            entity,
-                            Purpose::Session(*file),
-                            Remove {
-                                path: path.0.clone(),
-                                directory: false,
-                                lock: None,
-                            },
-                        );
-                        scheduled = true;
-                    } else {
-                        io.commands.entity(*file).despawn();
-                    }
-                }
-                _ => {}
             }
             io.commands.entity(receipt).despawn();
         }
         for (receipt, owner, purpose, entries) in &receipts.entries {
-            if owner.0 != entity || !matches!(purpose, Purpose::Profiles) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Profiles) {
                 continue;
             }
             for (path, metadata) in &entries.0 {
@@ -660,7 +705,11 @@ fn sessions(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: 
                     .commands
                     .spawn((Session, Owner(entity), Cwd(path.clone()), ChildOf(entity)))
                     .id();
-                io.request(entity, Purpose::Session(file), Inspect(path));
+                io.request(
+                    entity,
+                    Purpose::targeted(PurposeKind::Session, file),
+                    Inspect(path),
+                );
                 scheduled = true;
             }
             io.commands.entity(receipt).despawn();
@@ -669,7 +718,7 @@ fn sessions(mut requests: Requests, layout: Layout, receipts: Receipts, mut io: 
             if owner.0 != entity {
                 continue;
             }
-            if let Purpose::Session(file) = purpose {
+            if let Some(file) = purpose.target(PurposeKind::Session) {
                 io.commands.entity(*file).despawn();
                 io.commands.entity(receipt).despawn();
             }
@@ -705,7 +754,7 @@ fn logs(
         };
         let mut received = false;
         for (receipt, owner, purpose, metadata) in &metadata {
-            if owner.0 != entity || !matches!(purpose, Purpose::Logs) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Logs) {
                 continue;
             }
             received = true;
@@ -713,7 +762,7 @@ fn logs(
                 Some(value) if value.is_dir() || value.is_symlink() => {
                     io.request(
                         entity,
-                        Purpose::Logs,
+                        Purpose::new(PurposeKind::Logs),
                         Remove {
                             path: path.0.join("logs"),
                             directory: value.is_dir(),
@@ -726,14 +775,18 @@ fn logs(
             io.commands.entity(receipt).despawn();
         }
         for (receipt, owner, purpose, _) in &done {
-            if owner.0 == entity && matches!(purpose, Purpose::Logs) {
+            if owner.0 == entity && purpose.is(PurposeKind::Logs) {
                 received = true;
                 *phase = Phase::Done;
                 io.commands.entity(receipt).despawn();
             }
         }
         if !received && !pending.iter().any(|owner| owner.0 == entity) {
-            io.request(entity, Purpose::Logs, Inspect(path.0.join("logs")));
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::Logs),
+                Inspect(path.0.join("logs")),
+            );
         }
     }
 }

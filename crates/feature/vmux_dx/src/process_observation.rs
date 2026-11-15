@@ -27,7 +27,15 @@ impl bevy_app::Plugin for Plugin {
             .add_systems(PreUpdate, cancel)
             .add_systems(
                 Update,
-                (initialize, collect, cancel, parse, submit, drain, wake)
+                (
+                    initialize,
+                    collect,
+                    cancel,
+                    (parse, parse_opened, inspect).chain(),
+                    submit,
+                    drain,
+                    wake,
+                )
                     .chain()
                     .in_set(Stage),
             );
@@ -38,6 +46,7 @@ impl bevy_app::Plugin for Plugin {
 struct Stage;
 
 #[derive(Component)]
+#[require(Phase)]
 pub(crate) struct Request {
     pub context: Entity,
     pub attempt: u64,
@@ -63,8 +72,9 @@ impl Scope<'_, '_> {
     }
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
+    #[default]
     Processes,
     User,
     Opened,
@@ -121,7 +131,12 @@ impl vmux_ecs::jobs::Job for Read {
 }
 
 type Owners<'w, 's> = Query<'w, 's, (&'static Attempt, &'static ChildOf)>;
-type Incoming<'w, 's> = Query<'w, 's, (Entity, &'static Request, &'static ChildOf), Without<Phase>>;
+type Incoming<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Request, &'static ChildOf),
+    (Without<OperationState>, Without<Failed>),
+>;
 type Requests<'w, 's> = Query<
     'w,
     's,
@@ -255,22 +270,19 @@ fn collect(results: Returned, mut commands: Commands) {
 fn parse(
     mut requests: Requests,
     results: Results,
-    existing: Query<(Entity, &Owner, &Pid)>,
     contexts: Query<(&Checkout, &Settings)>,
-    users: Query<&User>,
-    pending: Query<&Owner, With<Read>>,
     mut commands: Commands,
 ) {
     for (entity, request, _, mut phase) in &mut requests {
-        let Ok((checkout, settings)) = contexts.get(request.context) else {
+        let Ok((_checkout, _settings)) = contexts.get(request.context) else {
             continue;
         };
-        let mut received = false;
+        let mut _received = false;
         for (receipt, owner, output) in &results {
             if owner.0 != entity {
                 continue;
             }
-            received = true;
+            _received = true;
             let valid = if *phase == Phase::Opened {
                 matches!(output.0.status.code(), Some(0 | 1)) && output.0.stderr.is_empty()
             } else {
@@ -333,6 +345,56 @@ fn parse(
                         *phase = Phase::Opened;
                     }
                 }
+                _ => continue,
+            }
+
+            commands.entity(receipt).despawn();
+        }
+    }
+}
+
+fn parse_opened(
+    mut requests: Requests,
+    results: Results,
+    existing: Query<(Entity, &Owner, &Pid)>,
+    contexts: Query<(&Checkout, &Settings)>,
+    mut commands: Commands,
+) {
+    for (entity, request, _, phase) in &mut requests {
+        let Ok((_checkout, _settings)) = contexts.get(request.context) else {
+            continue;
+        };
+        let mut _received = false;
+        for (receipt, owner, output) in &results {
+            if owner.0 != entity {
+                continue;
+            }
+            _received = true;
+            let valid = if *phase == Phase::Opened {
+                matches!(output.0.status.code(), Some(0 | 1)) && output.0.stderr.is_empty()
+            } else {
+                output.0.status.success()
+            };
+            if !valid {
+                let mut error = Failure::status(output.0.status);
+                if !output.0.stderr.is_empty() {
+                    error = error.context(String::from_utf8_lossy(&output.0.stderr).trim());
+                }
+                commands.entity(entity).insert(Failed(error));
+                commands.entity(receipt).despawn();
+                continue;
+            }
+            let text = match std::str::from_utf8(&output.0.stdout) {
+                Ok(text) => text,
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert(Failed(Failure::message(error.to_string())));
+                    commands.entity(receipt).despawn();
+                    continue;
+                }
+            };
+            match *phase {
                 Phase::Opened => {
                     let mut by_pid = std::collections::HashMap::new();
                     for (candidate, owner, value) in &existing {
@@ -391,10 +453,27 @@ fn parse(
                         commands.entity(entity).insert(Ready);
                     }
                 }
+                _ => continue,
             }
+
             commands.entity(receipt).despawn();
         }
-        if received || pending.iter().any(|owner| owner.0 == entity) {
+    }
+}
+
+fn inspect(
+    mut requests: Requests,
+    contexts: Query<(&Checkout, &Settings)>,
+    users: Query<&User>,
+    pending: Query<&Owner, With<Read>>,
+    mut commands: Commands,
+) {
+    for (entity, request, _, phase) in &mut requests {
+        let Ok((checkout, settings)) = contexts.get(request.context) else {
+            continue;
+        };
+
+        if pending.iter().any(|owner| owner.0 == entity) {
             continue;
         }
         let (program, arguments) = match *phase {

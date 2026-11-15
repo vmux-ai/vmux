@@ -41,7 +41,21 @@ impl bevy_app::Plugin for Plugin {
         .add_systems(PreUpdate, cancel)
         .add_systems(
             Update,
-            (cancel, guard, advance).chain().in_set(Stage::Decide),
+            (
+                cancel,
+                guard,
+                (
+                    observe_input,
+                    observe_compiler,
+                    prepare_input,
+                    check,
+                    compile,
+                    handoff,
+                )
+                    .chain(),
+            )
+                .chain()
+                .in_set(Stage::Decide),
         )
         .add_systems(Update, finish.in_set(Stage::Finish));
     }
@@ -69,6 +83,7 @@ pub(crate) struct Requested {
 }
 
 #[derive(Component)]
+#[require(Phase)]
 struct Bootstrap;
 
 #[derive(Component)]
@@ -77,8 +92,9 @@ struct Caller(Entity);
 #[derive(Component)]
 struct Arguments(Vec<OsString>);
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
+    #[default]
     Manifest,
     Source,
     Cache,
@@ -352,21 +368,20 @@ fn guard(
     }
 }
 
-fn advance(
+fn observe_input(
     mut requests: AdvanceRequests,
     scope: Scope,
     results: AdvanceResults,
-    wake: Res<JobWake>,
     mut commands: Commands,
 ) {
-    for (entity, checkout, settings, arguments, mut phase) in &mut requests {
+    for (entity, _checkout, settings, _arguments, mut phase) in &mut requests {
         if scope.pending.iter().any(|owner| owner.0 == entity)
             || scope.guards.iter().any(|owner| owner.0 == entity)
         {
             continue;
         }
-        let mut settled = false;
-        for (receipt, owner, metadata, fingerprint, done, lock, output) in &results {
+        let mut _settled = false;
+        for (receipt, owner, metadata, fingerprint, done, _lock, _output) in &results {
             if owner.0 != entity {
                 continue;
             }
@@ -378,7 +393,7 @@ fn advance(
                         *phase = Phase::Source;
                     } else {
                         commands.entity(entity).insert(Complete);
-                        settled = true;
+                        _settled = true;
                     }
                 }
                 Phase::Source => {
@@ -387,10 +402,10 @@ fn advance(
                     };
                     if fingerprint.0 == env!("VMUX_DX_SOURCE_KEY") {
                         commands.entity(entity).insert(Complete);
-                        settled = true;
+                        _settled = true;
                     } else if settings.0.present("VMUX_DX_HANDOFF") {
                         commands.entity(entity).insert(Failed(Failure::message("The refreshed CLI still differs from its checkout; compiler inputs changed during bootstrap")));
-                        settled = true;
+                        _settled = true;
                     } else {
                         *phase = Phase::Cache;
                     }
@@ -407,12 +422,38 @@ fn advance(
                         commands.entity(entity).insert(Failed(Failure::message(
                             "Development tool cache must not be a symlink",
                         )));
-                        settled = true;
+                        _settled = true;
                     } else {
                         *phase = Phase::Create;
                     }
                 }
                 Phase::Create if done.is_some() => *phase = Phase::Guard,
+                _ => continue,
+            }
+
+            commands.entity(receipt).despawn();
+        }
+    }
+}
+
+fn observe_compiler(
+    mut requests: AdvanceRequests,
+    scope: Scope,
+    results: AdvanceResults,
+    mut commands: Commands,
+) {
+    for (entity, _checkout, _settings, _arguments, mut phase) in &mut requests {
+        if scope.pending.iter().any(|owner| owner.0 == entity)
+            || scope.guards.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        }
+        let mut _settled = false;
+        for (receipt, owner, metadata, _fingerprint, _done, lock, output) in &results {
+            if owner.0 != entity {
+                continue;
+            }
+            match *phase {
                 Phase::Acquire => {
                     let Some(lock) = lock else {
                         continue;
@@ -432,7 +473,7 @@ fn advance(
                             error = error.context(String::from_utf8_lossy(&output.0.stderr).trim());
                         }
                         commands.entity(entity).insert(Failed(error));
-                        settled = true;
+                        _settled = true;
                     }
                 }
                 Phase::Binary => {
@@ -444,18 +485,25 @@ fn advance(
                         commands.entity(entity).insert(Failed(Failure::message(
                             "Development CLI build produced no executable",
                         )));
-                        settled = true;
+                        _settled = true;
                     }
                 }
                 _ => continue,
             }
+
             commands.entity(receipt).despawn();
         }
-        if settled {
+    }
+}
+
+fn prepare_input(mut requests: AdvanceRequests, scope: Scope, mut commands: Commands) {
+    for (entity, checkout, _settings, _arguments, phase) in &mut requests {
+        if scope.pending.iter().any(|owner| owner.0 == entity)
+            || scope.guards.iter().any(|owner| owner.0 == entity)
+        {
             continue;
         }
         match *phase {
-            Phase::Manifest => continue,
             Phase::Source => {
                 commands.spawn((
                     Io,
@@ -483,6 +531,31 @@ fn advance(
                     ChildOf(entity),
                 ));
             }
+            Phase::Acquire => {
+                commands.spawn((
+                    Io,
+                    Owner(entity),
+                    Acquire {
+                        root: checkout.root.clone(),
+                        target: checkout.target.clone(),
+                    },
+                    Operation::bundle("dx.bootstrap.io").unwrap(),
+                    ChildOf(entity),
+                ));
+            }
+            _ => continue,
+        }
+    }
+}
+
+fn check(mut requests: AdvanceRequests, scope: Scope, wake: Res<JobWake>, mut commands: Commands) {
+    for (entity, _checkout, _settings, _arguments, phase) in &mut requests {
+        if scope.pending.iter().any(|owner| owner.0 == entity)
+            || scope.guards.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        }
+        match *phase {
             Phase::Guard | Phase::Recheck => {
                 let loan = scope.loans.get(entity).ok().map(|lock| lock.0.clone());
                 commands.spawn((
@@ -496,7 +569,9 @@ fn advance(
                         attempt: 1,
                     },
                     OperationState::Running,
-                    crate::storage_runtime::Request::Guard,
+                    crate::storage_runtime::Request::new(
+                        crate::storage_runtime::RequestKind::Guard,
+                    ),
                     crate::storage_runtime::Captured {
                         root: entity,
                         attempt: 1,
@@ -505,18 +580,19 @@ fn advance(
                 ));
                 wake.0.wake_by_ref();
             }
-            Phase::Acquire => {
-                commands.spawn((
-                    Io,
-                    Owner(entity),
-                    Acquire {
-                        root: checkout.root.clone(),
-                        target: checkout.target.clone(),
-                    },
-                    Operation::bundle("dx.bootstrap.io").unwrap(),
-                    ChildOf(entity),
-                ));
-            }
+            _ => continue,
+        }
+    }
+}
+
+fn compile(mut requests: AdvanceRequests, scope: Scope, mut commands: Commands) {
+    for (entity, checkout, settings, _arguments, phase) in &mut requests {
+        if scope.pending.iter().any(|owner| owner.0 == entity)
+            || scope.guards.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        }
+        match *phase {
             Phase::Compile => {
                 let mut environment = settings.0.clone();
                 environment.remove("CARGO_BUILD_TARGET");
@@ -563,6 +639,24 @@ fn advance(
                     ChildOf(entity),
                 ));
             }
+            _ => continue,
+        }
+    }
+}
+
+fn handoff(
+    mut requests: AdvanceRequests,
+    scope: Scope,
+    wake: Res<JobWake>,
+    mut commands: Commands,
+) {
+    for (entity, checkout, _settings, arguments, mut phase) in &mut requests {
+        if scope.pending.iter().any(|owner| owner.0 == entity)
+            || scope.guards.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        }
+        match *phase {
             Phase::Release => {
                 if scope
                     .flights
@@ -587,6 +681,7 @@ fn advance(
                     ChildOf(entity),
                 ));
             }
+            _ => continue,
         }
     }
 }

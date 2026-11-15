@@ -62,29 +62,35 @@ impl bevy_app::Plugin for Plugin {
                 (prepare_cargo, probe_cargo, configure_cargo).chain(),
                 compile,
                 prepare_web,
-                scan_web,
+                (scan_web, scan_directories).chain(),
                 hash_web,
                 verify_web,
                 copy_binaries,
                 (
                     prepare_desktop,
                     configure_desktop,
-                    provision_keychain,
-                    configure_keychain,
-                    execute_packager,
+                    (create_staging, provision_keychain, prepare_certificate).chain(),
+                    (
+                        create_keychain,
+                        configure_keychain,
+                        activate_keychain,
+                        confirm_keychain,
+                    )
+                        .chain(),
+                    (execute_packager, run_packager).chain(),
                     title_desktop,
                     postprocess_desktop,
                     inspect_desktop,
-                    verify_desktop,
+                    (verify_desktop, extract_certificate).chain(),
                     cleanup_keychain,
-                    publish_desktop,
+                    (observe_publication, publish_desktop).chain(),
                 )
                     .chain(),
                 (
                     prepare_cef,
                     validate_cef,
                     inject_web,
-                    bundle_cef,
+                    (bundle_cef, collect_cef).chain(),
                     trim_cef,
                     resources,
                     embed_service,
@@ -157,6 +163,36 @@ struct Fast(bool);
 #[derive(Component)]
 struct Manifest(toml::Table);
 
+impl Manifest {
+    fn configuration(
+        &self,
+        product: &crate::product::ProductMetadata,
+    ) -> crate::Result<serde_json::Value> {
+        let metadata = self
+            .0
+            .get("package")
+            .and_then(|value| value.get("metadata"))
+            .and_then(|value| value.get("packager"))
+            .ok_or("Missing packaging configuration")?;
+        let mut config = serde_json::to_value(metadata)?;
+        config["icons"] = serde_json::json!([product.value("VMUX_HOST_ICON")]);
+        config["dmg"]["background"] = product.value("VMUX_HOST_DMG_BACKGROUND").into();
+        config["macos"]["entitlements"] = product.value("VMUX_HOST_ENTITLEMENTS").into();
+        config["macos"]["info-plist-path"] = product.value("VMUX_HOST_USAGE_DESCRIPTIONS").into();
+        for binary in config["binaries"]
+            .as_array_mut()
+            .ok_or("Missing packaging binaries")?
+        {
+            if binary["path"] == "Vmux Service" {
+                binary["path"] = product.value("VMUX_HOST_SERVICE_NAME").into();
+            }
+        }
+        config["before-packaging-command"] = "\"$VMUX_DX_BIN\" internal package-binaries".into();
+        config["before-each-package-command"] = "\"$VMUX_DX_BIN\" internal before-package".into();
+        Ok(config)
+    }
+}
+
 #[derive(Component)]
 struct Version(String);
 
@@ -179,6 +215,7 @@ struct OriginalKeychain(OsString);
 struct GuardRef(Entity);
 
 #[derive(Component)]
+#[require(CleanupPhase)]
 struct KeychainScope {
     owner: Entity,
     context: Entity,
@@ -260,11 +297,36 @@ struct CertificateDirectory(std::sync::Arc<crate::temporary::Temporary>);
 #[derive(Component)]
 struct Bundle(PathBuf);
 
+impl Bundle {
+    fn service_contents(&self, product: &crate::product::ProductMetadata) -> PathBuf {
+        self.0
+            .join("Contents/Library/LoginItems")
+            .join(product.value("VMUX_HOST_SERVICE_BUNDLE"))
+            .join("Contents")
+    }
+}
+
 #[derive(Component)]
 struct Framework(PathBuf);
 
 #[derive(Component)]
 struct CefVersion(String);
+
+impl CefVersion {
+    fn from_manifest(bytes: &[u8]) -> Option<Self> {
+        let text = std::str::from_utf8(bytes).ok()?;
+        let table = text.parse::<toml::Table>().ok()?;
+        let mut parts = table.get("cef_version")?.as_str()?.split('.');
+        let major = parts.next()?.parse::<u64>().ok()?;
+        let minor = parts.next()?.parse::<u64>().ok()?;
+        let patch = parts.next()?.parse::<u64>().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        let compatibility = major.checked_mul(10)?.checked_add(minor)?;
+        Some(Self(format!("{compatibility}.0.{patch}")))
+    }
+}
 
 #[derive(Component)]
 struct SignTarget;
@@ -292,13 +354,15 @@ pub(crate) struct Web {
 }
 
 #[derive(Component)]
+#[require(Phase)]
 struct Scope {
     context: Entity,
     attempt: u64,
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
+    #[default]
     Start,
     Cli,
     Desktop,
@@ -403,13 +467,43 @@ struct File;
 #[derive(Component)]
 struct Expected(String);
 
-#[derive(Component)]
-enum Purpose {
+#[derive(Component, Clone, Copy)]
+struct Purpose {
+    kind: PurposeKind,
+    entity: Option<Entity>,
+}
+
+impl Purpose {
+    fn new(kind: PurposeKind) -> Self {
+        Self { kind, entity: None }
+    }
+
+    fn targeted(kind: PurposeKind, entity: Entity) -> Self {
+        Self {
+            kind,
+            entity: Some(entity),
+        }
+    }
+
+    fn target(&self, kind: PurposeKind) -> Option<&Entity> {
+        if self.kind != kind {
+            return None;
+        }
+        self.entity.as_ref()
+    }
+
+    fn is(&self, kind: PurposeKind) -> bool {
+        self.kind == kind && self.entity.is_none()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PurposeKind {
     Compile,
     Required,
     Stamp,
-    Directory(Entity),
-    Hash(Entity),
+    Directory,
+    Hash,
     Copy,
     CargoCache,
     CargoProbe,
@@ -423,9 +517,9 @@ enum Purpose {
     Helpers,
     Service,
     Launch,
-    Plist(Entity),
-    Inspect(Entity),
-    Signature(Entity),
+    Plist,
+    Inspect,
+    Signature,
     Notary,
     Metadata,
     AppManifest,
@@ -497,7 +591,7 @@ type CargoRequests<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static Scope, &'static mut CargoPhase),
-    (Without<Failed>, Without<Complete>),
+    (With<CargoPreparation>, Without<Failed>, Without<Complete>),
 >;
 
 type CargoIncoming<'w, 's> = Query<
@@ -600,6 +694,34 @@ struct Lifetimes<'w, 's> {
     rows: Query<'w, 's, (Entity, &'static ChildOf)>,
 }
 
+impl Lifetimes<'_, '_> {
+    fn drained(&self, entity: Entity, desktop: bool) -> bool {
+        if self
+            .flights
+            .iter()
+            .any(|(owner, flight)| owner.0 == entity && flight.pending())
+        {
+            return false;
+        };
+        if self
+            .observations
+            .get(entity)
+            .is_ok_and(|observation| !self.processes.drained(observation.0))
+        {
+            return false;
+        };
+        if desktop
+            && !self
+                .cleanup
+                .get(entity)
+                .is_ok_and(|phase| *phase == CleanupPhase::Done)
+        {
+            return false;
+        };
+        true
+    }
+}
+
 #[derive(bevy_ecs::system::SystemParam)]
 struct ArtifactResults<'w, 's> {
     published: Query<'w, 's, &'static Published>,
@@ -615,12 +737,143 @@ struct Outcomes<'w, 's> {
     keys: Keys<'w, 's>,
 }
 
+impl Outcomes<'_, '_> {
+    fn result(
+        &self,
+        entity: Entity,
+        error: Option<&Failed>,
+        artifacts: Vec<PathBuf>,
+    ) -> Result<Outcome, Failure> {
+        if let Some(error) = error {
+            let Ok(recovery) = self.recovery.get(entity) else {
+                return Err(error.0.clone());
+            };
+            let path = match self.keys.directory(entity) {
+                Some(directory) => {
+                    directory
+                        .0
+                        .retention()
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    directory.0.path().display().to_string()
+                }
+                None => String::new(),
+            };
+            return Err(error.0.clone().context(&format!(
+                "Keychain cleanup failed: {}; retained {}",
+                recovery.0, path
+            )));
+        }
+        if self.desktops.contains(entity) {
+            return Ok(Outcome::Artifacts(artifacts));
+        }
+        Ok(Outcome::Done)
+    }
+}
+
 #[derive(bevy_ecs::system::SystemParam)]
 struct Writer<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
 impl Writer<'_, '_> {
+    fn write(&mut self, entity: Entity, path: PathBuf, bytes: Vec<u8>) {
+        self.request(
+            entity,
+            Purpose::new(PurposeKind::Copy),
+            Write {
+                path,
+                bytes,
+                mode: 0o644,
+            },
+        );
+    }
+
+    fn copy(&mut self, entity: Entity, source: PathBuf, destination: PathBuf) {
+        self.request(
+            entity,
+            Purpose::new(PurposeKind::Copy),
+            Copy {
+                source,
+                destination,
+            },
+        );
+    }
+
+    fn remove(&mut self, entity: Entity, checkout: &Checkout, settings: &Settings, path: PathBuf) {
+        self.capture(
+            entity,
+            Purpose::new(PurposeKind::Copy),
+            checkout,
+            settings,
+            "rm",
+            vec![path.into_os_string()],
+        );
+    }
+
+    fn labels(
+        &mut self,
+        entity: Entity,
+        context: (&Checkout, &mut Settings),
+        product: &crate::product::ProductMetadata,
+        desktop: &Desktop,
+        revision: &str,
+        branch: Option<String>,
+    ) {
+        let (checkout, settings) = context;
+        let name = if desktop.profile == "local" {
+            format!("{} ({revision})", product.value("VMUX_HOST_NAME"))
+        } else {
+            product.value("VMUX_HOST_NAME").to_owned()
+        };
+        let identifier = if desktop.profile == "local" {
+            format!("{}.{revision}", product.value("VMUX_HOST_BUNDLE_ID"))
+        } else {
+            product.value("VMUX_HOST_BUNDLE_ID").to_owned()
+        };
+        let title = if desktop.profile == "local" {
+            format!(
+                "{} ({})",
+                product.value("VMUX_HOST_NAME"),
+                branch
+                    .filter(|branch| !branch.is_empty())
+                    .unwrap_or_else(|| revision.to_owned())
+            )
+        } else {
+            product.value("VMUX_HOST_NAME").to_owned()
+        };
+        settings.0.set("VMUX_GIT_HASH", revision);
+        settings.0.set("VMUX_BUNDLE_ID", &identifier);
+        settings.0.set("VMUX_BUILD_PROFILE", &desktop.profile);
+        settings.0.set(
+            "VMUX_CARGO_RELEASE_DIR",
+            checkout.directory("release").as_os_str(),
+        );
+        settings
+            .0
+            .set("VMUX_TARGET_LOCK_TARGET", checkout.target.as_os_str());
+        settings
+            .0
+            .set("VMUX_TARGET_LOCK_OWNER_PID", std::process::id().to_string());
+        settings
+            .0
+            .set("VMUX_BUILD_STORAGE_TARGET", checkout.target.as_os_str());
+        settings
+            .0
+            .set("VMUX_BUILD_STORAGE_ROOT", checkout.root.as_os_str());
+        if let Some(binary) = settings.0.get("TAILWINDCSS_BIN").map(OsStr::to_owned) {
+            settings.0.set("TAILWINDCSS", binary);
+        }
+        self.commands.entity(entity).insert((
+            Name::new(name),
+            Identifier(Some(identifier)),
+            Title(title),
+        ));
+    }
+
+    fn fail(&mut self, entity: Entity, failure: Failure) {
+        self.commands.entity(entity).insert(Failed(failure));
+    }
+
     fn request<J: StorageJob>(&mut self, root: Entity, purpose: Purpose, job: J) -> Entity {
         self.commands
             .spawn((
@@ -680,6 +933,7 @@ fn accept<T: Component + Clone>(
     if existing.contains(event.entity) {
         return;
     }
+    commands.entity(event.entity).remove::<Arguments>();
     commands.entity(event.entity).insert((
         Scope {
             context: event.context,
@@ -810,8 +1064,13 @@ fn submit<J: StorageJob>(
     }
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
+#[require(CargoPhase)]
+struct CargoPreparation;
+
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
 enum CargoPhase {
+    #[default]
     Cache,
     Version,
     Compiler,
@@ -875,17 +1134,19 @@ fn prepare_cargo(
         })();
         match result {
             Ok(Some(cache)) => {
-                io.request(entity, Purpose::CargoCache, CreateDirectory(cache));
+                io.request(
+                    entity,
+                    Purpose::new(PurposeKind::CargoCache),
+                    CreateDirectory(cache),
+                );
             }
             Ok(None) => {}
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         }
-        io.commands.entity(entity).insert(CargoPhase::Cache);
+        io.commands.entity(entity).insert(CargoPreparation);
     }
 }
 
@@ -908,7 +1169,7 @@ fn probe_cargo(
         };
         let receipt = io.capture(
             entity,
-            Purpose::CargoProbe,
+            Purpose::new(PurposeKind::CargoProbe),
             checkout,
             settings,
             "sccache",
@@ -938,12 +1199,12 @@ fn configure_cargo(
         };
         let mut success = false;
         for (_, owner, purpose, output) in &outputs {
-            if owner.0 == entity && matches!(purpose, Purpose::CargoProbe) {
+            if owner.0 == entity && purpose.is(PurposeKind::CargoProbe) {
                 success = output.0.status.success();
             }
         }
         for (receipt, owner, purpose) in &replies {
-            if owner.0 == entity && matches!(purpose, Purpose::CargoProbe) {
+            if owner.0 == entity && purpose.is(PurposeKind::CargoProbe) {
                 io.commands.entity(receipt).despawn();
             }
         }
@@ -955,7 +1216,7 @@ fn configure_cargo(
                 .to_owned();
             let receipt = io.capture(
                 entity,
-                Purpose::CargoProbe,
+                Purpose::new(PurposeKind::CargoProbe),
                 checkout,
                 &settings,
                 "sccache",
@@ -1000,11 +1261,9 @@ fn compile(
             continue;
         }
         for (receipt, owner, purpose, output) in &outputs {
-            if owner.0 == entity && matches!(purpose, Purpose::Compile) {
+            if owner.0 == entity && purpose.is(PurposeKind::Compile) {
                 if !output.0.status.success() {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::status(output.0.status)));
+                    io.fail(entity, Failure::status(output.0.status));
                     io.commands.entity(receipt).despawn();
                     *phase = Phase::Done;
                     continue;
@@ -1072,7 +1331,7 @@ fn compile(
             .to_owned();
         io.request(
             entity,
-            Purpose::Compile,
+            Purpose::new(PurposeKind::Compile),
             Capture {
                 environment,
                 directory: checkout.root.clone(),
@@ -1096,9 +1355,7 @@ fn prepare_web(
             && let Ok(verification) = verifications.get(entity)
         {
             if verification.app.as_os_str().is_empty() {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message("Missing app bundle path")));
+                io.fail(entity, Failure::message("Missing app bundle path"));
                 continue;
             };
             io.commands
@@ -1119,16 +1376,15 @@ fn prepare_web(
                     continue;
                 };
                 if request.app.as_os_str().is_empty() {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message("Missing VMUX_APP_BUNDLE")));
+                    io.fail(entity, Failure::message("Missing VMUX_APP_BUNDLE"));
                     continue;
                 };
                 if !request.app.is_absolute() || request.app.extension() != Some(OsStr::new("app"))
                 {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Packaging requires an absolute app bundle path",
-                    )));
+                    io.fail(
+                        entity,
+                        Failure::message("Packaging requires an absolute app bundle path"),
+                    );
                     continue;
                 }
                 io.commands
@@ -1155,11 +1411,15 @@ fn prepare_web(
             "assets/tool-logos/mcp.png",
             "assets/tool-logos/npm.svg",
         ] {
-            io.request(entity, Purpose::Required, Inspect(source.join(name)));
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::Required),
+                Inspect(source.join(name)),
+            );
         }
         io.request(
             entity,
-            Purpose::Stamp,
+            Purpose::new(PurposeKind::Stamp),
             ReadFile(source.join(".bundle-stamp")),
         );
         io.commands.entity(entity).insert(Source(source));
@@ -1167,17 +1427,11 @@ fn prepare_web(
     }
 }
 
-fn scan_web(
-    mut requests: Requests,
-    receipts: Receipts,
-    sources: Query<&Source>,
-    directories: WebDirectories,
-    mut io: Writer,
-) {
+fn scan_web(mut requests: Requests, receipts: Receipts, sources: Query<&Source>, mut io: Writer) {
     let Receipts {
         paths: required,
         files: stamps,
-        entries,
+        entries: _entries,
         pending,
         ..
     } = receipts;
@@ -1191,19 +1445,17 @@ fn scan_web(
         if *phase == Phase::Stamp {
             let mut valid = true;
             for (receipt, owner, purpose, metadata) in &required {
-                if owner.0 != entity || !matches!(purpose, Purpose::Required) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Required) {
                     continue;
                 };
                 if !metadata.0.as_ref().is_some_and(|value| value.is_file()) {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message("Incomplete stylesheet bundle")));
+                    io.fail(entity, Failure::message("Incomplete stylesheet bundle"));
                     valid = false;
                 }
                 io.commands.entity(receipt).despawn();
             }
             for (receipt, owner, purpose, bytes) in &stamps {
-                if owner.0 != entity || !matches!(purpose, Purpose::Stamp) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Stamp) {
                     continue;
                 };
                 let mut expected = BTreeSet::new();
@@ -1237,9 +1489,10 @@ fn scan_web(
                 io.commands.entity(receipt).despawn();
             }
             if !valid {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "Invalid or unsafe stylesheet stamp",
-                )));
+                io.fail(
+                    entity,
+                    Failure::message("Invalid or unsafe stylesheet stamp"),
+                );
                 continue;
             }
             io.commands
@@ -1247,6 +1500,30 @@ fn scan_web(
             *phase = Phase::Scan;
             continue;
         }
+    }
+}
+
+fn scan_directories(
+    mut requests: Requests,
+    receipts: Receipts,
+    sources: Query<&Source>,
+    directories: WebDirectories,
+    mut io: Writer,
+) {
+    let Receipts {
+        paths: _required,
+        files: _stamps,
+        entries,
+        pending,
+        ..
+    } = receipts;
+    for (entity, _, mut phase) in &mut requests {
+        if pending.iter().any(|owner| owner.0 == entity) {
+            continue;
+        };
+        let Ok(_source) = sources.get(entity) else {
+            continue;
+        };
         if *phase != Phase::Scan {
             continue;
         };
@@ -1259,7 +1536,7 @@ fn scan_web(
             let mut data = None;
             for (receipt, owner, purpose, value) in &entries {
                 if owner.0 == entity
-                    && matches!(purpose, Purpose::Directory(id) if *id == directory)
+                    && matches!(purpose, Purpose { kind: PurposeKind::Directory, entity: Some(id) } if *id == directory)
                 {
                     data = Some(&value.0);
                     io.commands.entity(receipt).despawn();
@@ -1269,7 +1546,7 @@ fn scan_web(
             let Some(data) = data else {
                 io.request(
                     entity,
-                    Purpose::Directory(directory),
+                    Purpose::targeted(PurposeKind::Directory, directory),
                     ReadDirectory(path.0.clone()),
                 );
                 continue;
@@ -1284,9 +1561,10 @@ fn scan_web(
                     io.commands
                         .spawn((Cwd(path.clone()), Owner(entity), Actual, ChildOf(entity)));
                 } else if !metadata.is_file() {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Stylesheet bundle contains a non-regular entry",
-                    )));
+                    io.fail(
+                        entity,
+                        Failure::message("Stylesheet bundle contains a non-regular entry"),
+                    );
                 }
             }
             io.commands.entity(directory).insert(Scanned);
@@ -1311,7 +1589,11 @@ fn hash_web(
         };
         for (file, path, owner) in &files {
             if owner.0 == entity {
-                io.request(entity, Purpose::Hash(file), Hash(path.0.clone()));
+                io.request(
+                    entity,
+                    Purpose::targeted(PurposeKind::Hash, file),
+                    Hash(path.0.clone()),
+                );
             }
         }
         *phase = Phase::Verify;
@@ -1343,7 +1625,9 @@ fn verify_web(
             expected_paths.insert(path.0.clone());
             let mut matched = false;
             for (receipt, owner, purpose, hash) in &hashes {
-                if owner.0 == entity && matches!(purpose, Purpose::Hash(id) if *id == file) {
+                if owner.0 == entity
+                    && matches!(purpose, Purpose { kind: PurposeKind::Hash, entity: Some(id) } if *id == file)
+                {
                     matched = hash.0 == expected.0;
                     commands.entity(receipt).despawn();
                     break;
@@ -1390,9 +1674,7 @@ fn copy_binaries(
             let product = match settings.0.product(&checkout.root) {
                 Ok(product) => product,
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::from_error(error)));
+                    io.fail(entity, Failure::from_error(error));
                     continue;
                 }
             };
@@ -1409,14 +1691,7 @@ fn copy_binaries(
                     release.join(product.value("VMUX_HOST_SERVICE_NAME")),
                 ),
             ] {
-                io.request(
-                    entity,
-                    Purpose::Copy,
-                    Copy {
-                        source,
-                        destination,
-                    },
-                );
+                io.copy(entity, source, destination);
             }
             *phase = Phase::Done;
         } else if *phase == Phase::Done && !pending.iter().any(|owner| owner.0 == entity) {
@@ -1456,9 +1731,7 @@ fn prepare_cef(
         } else if let Some(home) = settings.0.get("HOME") {
             PathBuf::from(home).join(".local/share/Chromium Embedded Framework.framework")
         } else {
-            io.commands
-                .entity(entity)
-                .insert(Failed(Failure::message("Missing HOME")));
+            io.fail(entity, Failure::message("Missing HOME"));
             continue;
         };
         if *phase == Phase::Cef {
@@ -1467,16 +1740,20 @@ fn prepare_cef(
                 .insert(Framework(framework.clone()));
             io.request(
                 entity,
-                Purpose::CefManifest,
+                Purpose::new(PurposeKind::CefManifest),
                 ReadFile(checkout.root.join("cef/manifest.toml")),
             );
         }
         let binary = framework.join("Chromium Embedded Framework");
-        io.request(entity, Purpose::CefBinary, Inspect(binary.clone()));
+        io.request(
+            entity,
+            Purpose::new(PurposeKind::CefBinary),
+            Inspect(binary.clone()),
+        );
         for (purpose, program, argument) in [
-            (Purpose::CefArch, "lipo", "-archs"),
-            (Purpose::CefVersion, "otool", "-L"),
-            (Purpose::CefExport, "nm", "-gU"),
+            (Purpose::new(PurposeKind::CefArch), "lipo", "-archs"),
+            (Purpose::new(PurposeKind::CefVersion), "otool", "-L"),
+            (Purpose::new(PurposeKind::CefExport), "nm", "-gU"),
         ] {
             io.capture(
                 entity,
@@ -1518,34 +1795,18 @@ fn validate_cef(
         let mut expected = versions.get(entity).ok().map(|version| version.0.clone());
         if *phase == Phase::ValidateSource {
             for (receipt, owner, purpose, bytes) in &manifests {
-                if owner.0 != entity || !matches!(purpose, Purpose::CefManifest) {
+                if owner.0 != entity || !purpose.is(PurposeKind::CefManifest) {
                     continue;
                 };
-                let version = std::str::from_utf8(&bytes.0)
-                    .ok()
-                    .and_then(|text| text.parse::<toml::Table>().ok())
-                    .and_then(|table| table.get("cef_version")?.as_str().map(str::to_owned));
-                if let Some(version) = version {
-                    let parts: Vec<_> = version.split('.').collect();
-                    if let [major, minor, patch] = parts.as_slice()
-                        && let (Ok(major), Ok(minor), Ok(patch)) = (
-                            major.parse::<u64>(),
-                            minor.parse::<u64>(),
-                            patch.parse::<u64>(),
-                        )
-                    {
-                        expected = major
-                            .checked_mul(10)
-                            .and_then(|major| major.checked_add(minor))
-                            .map(|major| format!("{major}.0.{patch}"));
-                    }
+                if let Some(version) = CefVersion::from_manifest(&bytes.0) {
+                    expected = Some(version.0);
                 }
                 io.commands.entity(receipt).despawn();
             }
         }
         let mut executable = false;
         for (receipt, owner, purpose, value) in &metadata {
-            if owner.0 != entity || !matches!(purpose, Purpose::CefBinary) {
+            if owner.0 != entity || !purpose.is(PurposeKind::CefBinary) {
                 continue;
             };
             executable = value.0.as_ref().is_some_and(|metadata| {
@@ -1563,9 +1824,9 @@ fn validate_cef(
             let Ok(text) = std::str::from_utf8(&output.0.stdout) else {
                 continue;
             };
-            match purpose {
-                Purpose::CefArch => arm64 = text.split_whitespace().any(|arch| arch == "arm64"),
-                Purpose::CefVersion => {
+            match purpose.kind {
+                PurposeKind::CefArch => arm64 = text.split_whitespace().any(|arch| arch == "arm64"),
+                PurposeKind::CefVersion => {
                     version_matches = expected.as_deref().is_some_and(|expected| {
                         text.split("compatibility version ")
                             .nth(1)
@@ -1573,7 +1834,7 @@ fn validate_cef(
                             == Some(expected)
                     })
                 }
-                Purpose::CefExport => {
+                PurposeKind::CefExport => {
                     exports = text.lines().any(|line| {
                         line.split_whitespace().last() == Some("_cef_set_os_crypt_keys")
                     })
@@ -1583,9 +1844,10 @@ fn validate_cef(
             io.commands.entity(receipt).despawn();
         }
         if !executable || !arm64 || !version_matches || !exports {
-            io.commands.entity(entity).insert(Failed(Failure::message(
-                "CEF binary, architecture, version or exports failed validation",
-            )));
+            io.fail(
+                entity,
+                Failure::message("CEF binary, architecture, version or exports failed validation"),
+            );
             continue;
         }
         if let Some(expected) = expected {
@@ -1599,7 +1861,7 @@ fn validate_cef(
             };
             io.request(
                 entity,
-                Purpose::Locales,
+                Purpose::new(PurposeKind::Locales),
                 ReadDirectory(
                     bundle.0.join(
                         "Contents/Frameworks/Chromium Embedded Framework.framework/Resources",
@@ -1630,7 +1892,7 @@ fn inject_web(
         let web = bundle.0.join("Contents/Resources/webview-apps");
         io.capture(
             entity,
-            Purpose::Copy,
+            Purpose::new(PurposeKind::Copy),
             checkout,
             settings,
             "rm",
@@ -1641,6 +1903,76 @@ fn inject_web(
 }
 
 fn bundle_cef(
+    mut requests: Requests,
+    contexts: Query<(&Checkout, &Settings)>,
+    bundles: Query<&Bundle>,
+    frameworks: Query<&Framework>,
+    pending: Pending,
+    mut io: Writer,
+) {
+    for (entity, scope, mut phase) in &mut requests {
+        if !matches!(
+            *phase,
+            Phase::BundleCef | Phase::WebCopy | Phase::InspectEmbedded
+        ) || pending.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        };
+        let (Ok((checkout, settings)), Ok(bundle), Ok(_framework)) = (
+            contexts.get(scope.context),
+            bundles.get(entity),
+            frameworks.get(entity),
+        ) else {
+            continue;
+        };
+        if *phase == Phase::BundleCef {
+            let web = bundle.0.join("Contents/Resources/webview-apps/_shared");
+            io.capture(
+                entity,
+                Purpose::new(PurposeKind::Copy),
+                checkout,
+                settings,
+                "mkdir",
+                vec!["-p".into(), web.clone().into_os_string()],
+            );
+            *phase = Phase::WebCopy;
+            continue;
+        }
+        if *phase == Phase::WebCopy {
+            io.capture(
+                entity,
+                Purpose::new(PurposeKind::Copy),
+                checkout,
+                settings,
+                "cp",
+                vec![
+                    "-R".into(),
+                    checkout
+                        .root
+                        .join("crates/util/vmux_ui/dist/.")
+                        .into_os_string(),
+                    bundle
+                        .0
+                        .join("Contents/Resources/webview-apps/_shared")
+                        .into_os_string(),
+                ],
+            );
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::Embedded),
+                Inspect(
+                    bundle
+                        .0
+                        .join("Contents/Frameworks/Chromium Embedded Framework.framework"),
+                ),
+            );
+            *phase = Phase::InspectEmbedded;
+            continue;
+        }
+    }
+}
+
+fn collect_cef(
     mut requests: Requests,
     contexts: Query<(&Checkout, &Settings)>,
     bundles: Query<&Bundle>,
@@ -1664,54 +1996,10 @@ fn bundle_cef(
         ) else {
             continue;
         };
-        if *phase == Phase::BundleCef {
-            let web = bundle.0.join("Contents/Resources/webview-apps/_shared");
-            io.capture(
-                entity,
-                Purpose::Copy,
-                checkout,
-                settings,
-                "mkdir",
-                vec!["-p".into(), web.clone().into_os_string()],
-            );
-            *phase = Phase::WebCopy;
-            continue;
-        }
-        if *phase == Phase::WebCopy {
-            io.capture(
-                entity,
-                Purpose::Copy,
-                checkout,
-                settings,
-                "cp",
-                vec![
-                    "-R".into(),
-                    checkout
-                        .root
-                        .join("crates/util/vmux_ui/dist/.")
-                        .into_os_string(),
-                    bundle
-                        .0
-                        .join("Contents/Resources/webview-apps/_shared")
-                        .into_os_string(),
-                ],
-            );
-            io.request(
-                entity,
-                Purpose::Embedded,
-                Inspect(
-                    bundle
-                        .0
-                        .join("Contents/Frameworks/Chromium Embedded Framework.framework"),
-                ),
-            );
-            *phase = Phase::InspectEmbedded;
-            continue;
-        }
         let mut inspected = false;
         let mut embedded = false;
         for (receipt, owner, purpose, value) in &metadata {
-            if owner.0 == entity && matches!(purpose, Purpose::Embedded) {
+            if owner.0 == entity && purpose.is(PurposeKind::Embedded) {
                 inspected = true;
                 embedded = value.0.as_ref().is_some_and(|value| value.is_dir());
                 io.commands.entity(receipt).despawn();
@@ -1723,15 +2011,13 @@ fn bundle_cef(
         let verifier = match settings.0.required("VMUX_DX_BIN") {
             Ok(binary) => binary.to_owned(),
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
         io.capture(
             entity,
-            Purpose::Copy,
+            Purpose::new(PurposeKind::Copy),
             checkout,
             settings,
             verifier,
@@ -1748,7 +2034,7 @@ fn bundle_cef(
         if !embedded {
             io.capture(
                 entity,
-                Purpose::Copy,
+                Purpose::new(PurposeKind::Copy),
                 checkout,
                 settings,
                 settings
@@ -1800,7 +2086,7 @@ fn trim_cef(
             continue;
         };
         for (receipt, owner, purpose, value) in &entries {
-            if owner.0 != entity || !matches!(purpose, Purpose::Locales) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Locales) {
                 continue;
             };
             let mut english = false;
@@ -1815,7 +2101,7 @@ fn trim_cef(
                 {
                     io.capture(
                         entity,
-                        Purpose::Copy,
+                        Purpose::new(PurposeKind::Copy),
                         checkout,
                         settings,
                         "rm",
@@ -1824,15 +2110,13 @@ fn trim_cef(
                 }
             }
             if !english {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message("CEF English locale is missing")));
+                io.fail(entity, Failure::message("CEF English locale is missing"));
             }
             io.commands.entity(receipt).despawn();
         }
         io.request(
             entity,
-            Purpose::Helpers,
+            Purpose::new(PurposeKind::Helpers),
             ReadDirectory(bundle.0.join("Contents/Frameworks")),
         );
         *phase = Phase::Resources;
@@ -1859,9 +2143,7 @@ fn resources(
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
@@ -1880,30 +2162,20 @@ fn resources(
                 destination.join("crash_reporter.cfg"),
             ),
         ] {
-            io.request(
-                entity,
-                Purpose::Copy,
-                Copy {
-                    source,
-                    destination,
-                },
-            );
+            io.copy(entity, source, destination);
         }
         for (receipt, owner, purpose, value) in &helpers {
-            if owner.0 != entity || !matches!(purpose, Purpose::Helpers) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Helpers) {
                 continue;
             };
             for (path, _) in &value.0 {
                 if path.extension() != Some(OsStr::new("app")) {
                     continue;
                 };
-                io.request(
+                io.copy(
                     entity,
-                    Purpose::Copy,
-                    Copy {
-                        source: product.value("VMUX_HOST_ICON").into(),
-                        destination: path.join("Contents/Resources/Vmux.icns"),
-                    },
+                    product.value("VMUX_HOST_ICON").into(),
+                    path.join("Contents/Resources/Vmux.icns"),
                 );
                 let helper = io
                     .commands
@@ -1915,7 +2187,7 @@ fn resources(
                     .id();
                 io.request(
                     entity,
-                    Purpose::Plist(helper),
+                    Purpose::targeted(PurposeKind::Plist, helper),
                     ReadFile(path.join("Contents/Info.plist")),
                 );
             }
@@ -1950,7 +2222,7 @@ fn embed_service(
             if owner.0 != entity {
                 continue;
             };
-            let Purpose::Plist(helper) = purpose else {
+            let Some(helper) = purpose.target(PurposeKind::Plist) else {
                 continue;
             };
             let Ok(path) = helper_paths.get(*helper) else {
@@ -1959,16 +2231,12 @@ fn embed_service(
             let mut value = match plist::Value::from_reader(std::io::Cursor::new(&bytes.0)) {
                 Ok(value) => value,
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message(error.to_string())));
+                    io.fail(entity, Failure::message(error.to_string()));
                     continue;
                 }
             };
             let Some(dictionary) = value.as_dictionary_mut() else {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message("Invalid helper plist")));
+                io.fail(entity, Failure::message("Invalid helper plist"));
                 continue;
             };
             dictionary.insert(
@@ -1977,28 +2245,16 @@ fn embed_service(
             );
             let mut bytes = Vec::new();
             if let Err(error) = value.to_writer_xml(&mut bytes) {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message(error.to_string())));
+                io.fail(entity, Failure::message(error.to_string()));
                 continue;
             };
-            io.request(
-                entity,
-                Purpose::Copy,
-                Write {
-                    path: path.0.clone(),
-                    bytes,
-                    mode: 0o644,
-                },
-            );
+            io.write(entity, path.0.clone(), bytes);
             io.commands.entity(receipt).despawn();
         }
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
@@ -2006,10 +2262,10 @@ fn embed_service(
             .0
             .join("Contents/MacOS")
             .join(product.value("VMUX_HOST_SERVICE_NAME"));
-        io.request(entity, Purpose::Service, Inspect(source));
+        io.request(entity, Purpose::new(PurposeKind::Service), Inspect(source));
         io.request(
             entity,
-            Purpose::Launch,
+            Purpose::new(PurposeKind::Launch),
             ReadFile(checkout.root.join("packaging/macos/ai.vmux.service.plist")),
         );
         *phase = Phase::ServiceCopy;
@@ -2036,9 +2292,7 @@ fn remove_service(
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
@@ -2054,7 +2308,7 @@ fn remove_service(
             .join(product.value("VMUX_HOST_SERVICE_NAME"));
         let mut inspected = false;
         for (receipt, owner, purpose, metadata) in &metadata {
-            if owner.0 != entity || !matches!(purpose, Purpose::Service) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Service) {
                 continue;
             };
             inspected = true;
@@ -2063,17 +2317,14 @@ fn remove_service(
                 .as_ref()
                 .is_some_and(|metadata| metadata.is_file())
             {
-                io.request(
-                    entity,
-                    Purpose::Copy,
-                    Copy {
-                        source: source.clone(),
-                        destination: destination.clone(),
-                    },
-                );
+                io.copy(entity, source.clone(), destination.clone());
                 io.commands.entity(entity).insert(RemoveService);
             } else {
-                io.request(entity, Purpose::Required, Inspect(destination.clone()));
+                io.request(
+                    entity,
+                    Purpose::new(PurposeKind::Required),
+                    Inspect(destination.clone()),
+                );
             }
             io.commands.entity(receipt).despawn();
         }
@@ -2128,29 +2379,20 @@ fn configure_service(
             } else {
                 product.value("VMUX_HOST_SERVICE_ID").to_owned()
             };
-            let service = bundle
-                .0
-                .join("Contents/Library/LoginItems")
-                .join(product.value("VMUX_HOST_SERVICE_BUNDLE"))
-                .join("Contents");
+            let service = bundle.service_contents(&product);
             if removal.contains(entity) {
-                io.capture(
+                io.remove(
                     entity,
-                    Purpose::Copy,
                     checkout,
                     settings,
-                    "rm",
-                    vec![
-                        bundle
-                            .0
-                            .join("Contents/MacOS")
-                            .join(product.value("VMUX_HOST_SERVICE_NAME"))
-                            .into_os_string(),
-                    ],
+                    bundle
+                        .0
+                        .join("Contents/MacOS")
+                        .join(product.value("VMUX_HOST_SERVICE_NAME")),
                 );
             }
             for (receipt, owner, purpose, metadata) in &metadata {
-                if owner.0 == entity && matches!(purpose, Purpose::Required) {
+                if owner.0 == entity && purpose.is(PurposeKind::Required) {
                     if !metadata
                         .0
                         .as_ref()
@@ -2161,112 +2403,107 @@ fn configure_service(
                     io.commands.entity(receipt).despawn();
                 }
             }
-            let mut info = plist::Dictionary::new();
-            for (key, value) in [
-                ("CFBundleDevelopmentRegion", "en"),
-                (
-                    "CFBundleExecutable",
-                    product.value("VMUX_HOST_SERVICE_NAME"),
-                ),
-                ("CFBundleName", product.value("VMUX_HOST_SERVICE_NAME")),
-                (
-                    "CFBundleDisplayName",
-                    product.value("VMUX_HOST_SERVICE_NAME"),
-                ),
-                ("CFBundleIdentifier", label.as_str()),
-                ("CFBundleInfoDictionaryVersion", "6.0"),
-                ("CFBundlePackageType", "APPL"),
-                ("CFBundleIconFile", "Vmux"),
-            ] {
-                info.insert(key.into(), plist::Value::String(value.into()));
-            }
-            info.insert("LSUIElement".into(), plist::Value::Boolean(true));
-            let mut info_bytes = Vec::new();
-            plist::Value::Dictionary(info).to_writer_xml(&mut info_bytes)?;
-            io.request(
-                entity,
-                Purpose::Copy,
-                Write {
-                    path: service.join("Info.plist"),
-                    bytes: info_bytes,
-                    mode: 0o644,
-                },
-            );
-            io.request(
-                entity,
-                Purpose::Copy,
-                Copy {
-                    source: product.value("VMUX_HOST_ICON").into(),
-                    destination: service.join("Resources/Vmux.icns"),
-                },
-            );
+            let mut prepared = false;
             for (receipt, owner, purpose, bytes) in &files {
-                if owner.0 != entity || !matches!(purpose, Purpose::Launch) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Launch) {
                     continue;
                 };
-                let mut launch = plist::Value::from_reader(std::io::Cursor::new(&bytes.0))?;
-                let dictionary = launch
-                    .as_dictionary_mut()
-                    .ok_or("Invalid service launch plist")?;
-                dictionary.insert("Label".into(), plist::Value::String(label.clone()));
-                dictionary.insert(
-                    "BundleProgram".into(),
-                    plist::Value::String(format!(
-                        "Contents/Library/LoginItems/{}/Contents/MacOS/{}",
-                        product.value("VMUX_HOST_SERVICE_BUNDLE"),
-                        product.value("VMUX_HOST_SERVICE_NAME")
-                    )),
-                );
-                dictionary.insert(
-                    "AssociatedBundleIdentifiers".into(),
-                    plist::Value::Array(vec![plist::Value::String(
-                        settings
-                            .0
-                            .get("VMUX_BUNDLE_ID")
-                            .unwrap_or(OsStr::new("ai.vmux.desktop"))
-                            .to_string_lossy()
-                            .into_owned(),
-                    )]),
-                );
-                dictionary
-                    .get_mut("EnvironmentVariables")
-                    .and_then(plist::Value::as_dictionary_mut)
-                    .ok_or("Missing launch environment")?
-                    .insert(
-                        "VMUX_BUILD_PROFILE".into(),
-                        plist::Value::String(profile.into()),
-                    );
-                let log = plist::Value::String(format!(
-                    "/tmp/{}-service.log",
-                    product.value("VMUX_HOST_RUNTIME_STEM")
-                ));
-                dictionary.insert("StandardOutPath".into(), log.clone());
-                dictionary.insert("StandardErrorPath".into(), log);
-                let mut bytes = Vec::new();
-                launch.to_writer_xml(&mut bytes)?;
-                io.request(
+                let bundle_id = settings
+                    .0
+                    .get("VMUX_BUNDLE_ID")
+                    .unwrap_or(OsStr::new("ai.vmux.desktop"))
+                    .to_string_lossy();
+                let (info_bytes, bytes) =
+                    bytes.service_plists(&product, &label, profile, &bundle_id)?;
+                io.write(entity, service.join("Info.plist"), info_bytes);
+                io.copy(
                     entity,
-                    Purpose::Copy,
-                    Write {
-                        path: bundle
-                            .0
-                            .join("Contents/Library/LaunchAgents")
-                            .join(product.value("VMUX_HOST_AGENT_PLIST")),
-                        bytes,
-                        mode: 0o644,
-                    },
+                    product.value("VMUX_HOST_ICON").into(),
+                    service.join("Resources/Vmux.icns"),
+                );
+                io.write(
+                    entity,
+                    bundle
+                        .0
+                        .join("Contents/Library/LaunchAgents")
+                        .join(product.value("VMUX_HOST_AGENT_PLIST")),
+                    bytes,
                 );
                 io.commands.entity(receipt).despawn();
+                prepared = true;
+            }
+            if !prepared {
+                return Err("Missing service launch configuration".into());
             }
             Ok(())
         })();
         if let Err(error) = result {
-            io.commands
-                .entity(entity)
-                .insert(Failed(Failure::from_error(error)));
+            io.fail(entity, Failure::from_error(error));
             continue;
         };
         *phase = Phase::SignScan;
+    }
+}
+
+impl FileBytes {
+    fn service_plists(
+        &self,
+        product: &crate::product::ProductMetadata,
+        label: &str,
+        profile: &str,
+        bundle_id: &str,
+    ) -> crate::Result<(Vec<u8>, Vec<u8>)> {
+        let name = product.value("VMUX_HOST_SERVICE_NAME");
+        let mut info = plist::Dictionary::new();
+        for (key, value) in [
+            ("CFBundleDevelopmentRegion", "en"),
+            ("CFBundleExecutable", name),
+            ("CFBundleName", name),
+            ("CFBundleDisplayName", name),
+            ("CFBundleIdentifier", label),
+            ("CFBundleInfoDictionaryVersion", "6.0"),
+            ("CFBundlePackageType", "APPL"),
+            ("CFBundleIconFile", "Vmux"),
+        ] {
+            info.insert(key.into(), plist::Value::String(value.into()));
+        }
+        info.insert("LSUIElement".into(), plist::Value::Boolean(true));
+        let mut info_bytes = Vec::new();
+        plist::Value::Dictionary(info).to_writer_xml(&mut info_bytes)?;
+        let mut launch = plist::Value::from_reader(std::io::Cursor::new(&self.0))?;
+        let dictionary = launch
+            .as_dictionary_mut()
+            .ok_or("Invalid service launch plist")?;
+        dictionary.insert("Label".into(), plist::Value::String(label.to_owned()));
+        dictionary.insert(
+            "BundleProgram".into(),
+            plist::Value::String(format!(
+                "Contents/Library/LoginItems/{}/Contents/MacOS/{}",
+                product.value("VMUX_HOST_SERVICE_BUNDLE"),
+                product.value("VMUX_HOST_SERVICE_NAME")
+            )),
+        );
+        dictionary.insert(
+            "AssociatedBundleIdentifiers".into(),
+            plist::Value::Array(vec![plist::Value::String(bundle_id.to_owned())]),
+        );
+        dictionary
+            .get_mut("EnvironmentVariables")
+            .and_then(plist::Value::as_dictionary_mut)
+            .ok_or("Missing launch environment")?
+            .insert(
+                "VMUX_BUILD_PROFILE".into(),
+                plist::Value::String(profile.into()),
+            );
+        let log = plist::Value::String(format!(
+            "/tmp/{}-service.log",
+            product.value("VMUX_HOST_RUNTIME_STEM")
+        ));
+        dictionary.insert("StandardOutPath".into(), log.clone());
+        dictionary.insert("StandardErrorPath".into(), log);
+        let mut bytes = Vec::new();
+        launch.to_writer_xml(&mut bytes)?;
+        Ok((info_bytes, bytes))
     }
 }
 
@@ -2294,9 +2531,7 @@ fn prepare_desktop(
             continue;
         };
         if !cfg!(target_os = "macos") {
-            io.commands
-                .entity(entity)
-                .insert(Failed(Failure::message("Desktop packaging requires macOS")));
+            io.fail(entity, Failure::message("Desktop packaging requires macOS"));
             continue;
         };
         let fast = settings.0.get("VMUX_CI_FAST_PACKAGE") == Some(OsStr::new("1"));
@@ -2318,24 +2553,24 @@ fn prepare_desktop(
                 || settings.0.get("IS_RELEASE_PR") == Some(OsStr::new("1"))
                 || !(event == Some(OsStr::new("pull_request")) || feature)
             {
-                io.commands.entity(entity).insert(Failed(Failure::message("Fast package mode requires a non-release pull request or verified feature preflight")));
+                io.fail(entity, Failure::message("Fast package mode requires a non-release pull request or verified feature preflight"));
                 continue;
             };
         }
         io.commands.entity(entity).insert(Fast(fast));
         io.request(
             entity,
-            Purpose::Metadata,
+            Purpose::new(PurposeKind::Metadata),
             ReadFile(checkout.root.join("Cargo.toml")),
         );
         io.request(
             entity,
-            Purpose::AppManifest,
+            Purpose::new(PurposeKind::AppManifest),
             ReadFile(checkout.root.join("crates/app/vmux_desktop/Cargo.toml")),
         );
         io.capture(
             entity,
-            Purpose::Revision,
+            Purpose::new(PurposeKind::Revision),
             checkout,
             settings,
             "git",
@@ -2343,7 +2578,7 @@ fn prepare_desktop(
         );
         let branch = io.capture(
             entity,
-            Purpose::Branch,
+            Purpose::new(PurposeKind::Branch),
             checkout,
             settings,
             "git",
@@ -2390,14 +2625,14 @@ fn configure_desktop(
                 if owner.0 != entity {
                     continue;
                 };
-                match purpose {
-                    Purpose::Revision => {
+                match purpose.kind {
+                    PurposeKind::Revision => {
                         revision = Some(std::str::from_utf8(&output.0.stdout)?.trim().to_owned())
                     }
-                    Purpose::Branch if output.0.status.success() => {
+                    PurposeKind::Branch if output.0.status.success() => {
                         branch = Some(std::str::from_utf8(&output.0.stdout)?.trim().to_owned())
                     }
-                    Purpose::Branch => {}
+                    PurposeKind::Branch => {}
                     _ => continue,
                 }
                 io.commands.entity(receipt).despawn();
@@ -2411,8 +2646,8 @@ fn configure_desktop(
                     continue;
                 };
                 let table: toml::Table = std::str::from_utf8(&bytes.0)?.parse()?;
-                match purpose {
-                    Purpose::Metadata => {
+                match purpose.kind {
+                    PurposeKind::Metadata => {
                         io.commands.entity(entity).insert(Version(
                             table
                                 .get("workspace")
@@ -2423,7 +2658,7 @@ fn configure_desktop(
                                 .into(),
                         ));
                     }
-                    Purpose::AppManifest => {
+                    PurposeKind::AppManifest => {
                         io.commands.entity(entity).insert(Manifest(table));
                     }
                     _ => continue,
@@ -2434,87 +2669,177 @@ fn configure_desktop(
             for (&key, value) in product.values() {
                 settings.0.set(key, value.as_str());
             }
-            let name = if desktop.profile == "local" {
-                format!("{} ({revision})", product.value("VMUX_HOST_NAME"))
-            } else {
-                product.value("VMUX_HOST_NAME").to_owned()
-            };
-            let identifier = if desktop.profile == "local" {
-                format!("{}.{revision}", product.value("VMUX_HOST_BUNDLE_ID"))
-            } else {
-                product.value("VMUX_HOST_BUNDLE_ID").to_owned()
-            };
-            let title = if desktop.profile == "local" {
-                format!(
-                    "{} ({})",
-                    product.value("VMUX_HOST_NAME"),
-                    branch
-                        .filter(|branch| !branch.is_empty())
-                        .unwrap_or_else(|| revision.clone())
-                )
-            } else {
-                product.value("VMUX_HOST_NAME").to_owned()
-            };
             if (desktop.profile == "local" || fast.get(entity).is_ok_and(|fast| fast.0))
                 && !settings.0.present("SKIP_NOTARIZE")
             {
                 settings.0.set("SKIP_NOTARIZE", "1");
             }
-            settings.0.set("VMUX_GIT_HASH", &revision);
-            settings.0.set("VMUX_BUNDLE_ID", &identifier);
-            settings.0.set("VMUX_BUILD_PROFILE", &desktop.profile);
-            settings.0.set(
-                "VMUX_CARGO_RELEASE_DIR",
-                checkout.directory("release").as_os_str(),
+            io.labels(
+                entity,
+                (checkout, &mut settings),
+                &product,
+                desktop,
+                &revision,
+                branch,
             );
             settings
                 .0
-                .set("VMUX_TARGET_LOCK_TARGET", checkout.target.as_os_str());
-            settings
-                .0
-                .set("VMUX_TARGET_LOCK_OWNER_PID", std::process::id().to_string());
-            settings
-                .0
-                .set("VMUX_BUILD_STORAGE_TARGET", checkout.target.as_os_str());
-            settings
-                .0
-                .set("VMUX_BUILD_STORAGE_ROOT", checkout.root.as_os_str());
-            settings
-                .0
                 .set("VMUX_DX_BIN", std::env::current_exe()?.as_os_str());
-            if let Some(binary) = settings.0.get("TAILWINDCSS_BIN").map(OsStr::to_owned) {
-                settings.0.set("TAILWINDCSS", binary);
-            }
-            io.commands.entity(entity).insert((
-                Name::new(name),
-                Identifier(Some(identifier)),
-                Title(title),
-                CleanupPhase::Start,
-            ));
+            io.commands.entity(entity).insert(CleanupPhase::Start);
             io.request(
                 entity,
-                Purpose::Staging,
+                Purpose::new(PurposeKind::Staging),
                 CreateDirectory(checkout.directory("release")),
             );
             Ok(())
         })();
         if let Err(error) = result {
-            io.commands
-                .entity(entity)
-                .insert(Failed(Failure::from_error(error)));
+            io.fail(entity, Failure::from_error(error));
             continue;
         };
         *phase = Phase::Staging;
     }
 }
 
+fn create_staging(
+    mut requests: Requests,
+    receipts: Receipts,
+    contexts: Query<(&Checkout, &Settings)>,
+    names: Query<&Name>,
+    mut io: Writer,
+) {
+    let Receipts {
+        temporary: directories,
+        outputs: _outputs,
+        pending,
+        ..
+    } = receipts;
+    for (entity, scope, mut phase) in &mut requests {
+        if !matches!(*phase, Phase::Staging) || pending.iter().any(|owner| owner.0 == entity) {
+            continue;
+        };
+        let Ok((checkout, settings)) = contexts.get(scope.context) else {
+            continue;
+        };
+
+        let mut created = false;
+        for (receipt, owner, purpose, directory) in &directories {
+            if owner.0 != entity || !purpose.is(PurposeKind::Staging) {
+                continue;
+            };
+            let Ok(name) = names.get(entity) else {
+                continue;
+            };
+            io.commands.entity(entity).insert((
+                Staging(directory.0.clone()),
+                Bundle(directory.0.path().join(format!("{}.app", name.as_str()))),
+            ));
+            io.commands.entity(receipt).despawn();
+            created = true;
+        }
+        if created {
+            io.capture(
+                entity,
+                Purpose::new(PurposeKind::Keychains),
+                checkout,
+                settings,
+                "security",
+                vec!["list-keychains".into(), "-d".into(), "user".into()],
+            );
+            *phase = Phase::KeychainList;
+        } else {
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::Staging),
+                CreateTemporary {
+                    parent: checkout.directory("release"),
+                    prefix: ".vmux-package".into(),
+                },
+            );
+        }
+    }
+}
+
 fn provision_keychain(
     mut requests: Requests,
     receipts: Receipts,
-    keys: Keys,
     loans: Query<&Lease>,
     contexts: Query<(&Checkout, &Settings)>,
-    names: Query<&Name>,
+    mut io: Writer,
+) {
+    let Receipts {
+        temporary: _directories,
+        outputs,
+        pending,
+        ..
+    } = receipts;
+    for (entity, scope, mut phase) in &mut requests {
+        if !matches!(*phase, Phase::KeychainList) || pending.iter().any(|owner| owner.0 == entity) {
+            continue;
+        };
+        let Ok((checkout, settings)) = contexts.get(scope.context) else {
+            continue;
+        };
+
+        for (receipt, owner, purpose, output) in &outputs {
+            if owner.0 != entity || !purpose.is(PurposeKind::Keychains) {
+                continue;
+            };
+            let guard = io
+                .commands
+                .spawn((
+                    KeychainScope {
+                        owner: entity,
+                        context: scope.context,
+                        attempt: scope.attempt,
+                        directory: checkout.root.clone(),
+                        environment: settings.0.clone(),
+                        lease: loans.get(scope.context).ok().map(|lease| lease.0.clone()),
+                    },
+                    CleanupPhase::Start,
+                    Name::new("Signing keychain cleanup"),
+                    vmux_ecs::CreatedAt::now(),
+                ))
+                .id();
+            io.commands.entity(entity).insert(GuardRef(guard));
+            for (order, line) in String::from_utf8_lossy(&output.0.stdout)
+                .lines()
+                .enumerate()
+            {
+                let path = line.trim().trim_matches('"');
+                if !path.is_empty() {
+                    io.commands.spawn((
+                        OriginalKeychain(path.into()),
+                        Order(order as u32),
+                        ChildOf(guard),
+                    ));
+                }
+            }
+            io.commands.entity(receipt).despawn();
+        }
+        if settings.0.present("APPLE_CERTIFICATE")
+            || settings.0.present("APPLE_CERTIFICATE_PASSWORD")
+        {
+            io.request(
+                entity,
+                Purpose::new(PurposeKind::SigningDirectory),
+                CreateTemporary {
+                    parent: std::env::temp_dir(),
+                    prefix: "vmux-build".into(),
+                },
+            );
+            *phase = Phase::KeychainTemporary;
+        } else {
+            *phase = Phase::Packager
+        };
+    }
+}
+
+fn prepare_certificate(
+    mut requests: Requests,
+    receipts: Receipts,
+    keys: Keys,
+    contexts: Query<(&Checkout, &Settings)>,
     mut io: Writer,
 ) {
     let Receipts {
@@ -2524,110 +2849,17 @@ fn provision_keychain(
         ..
     } = receipts;
     for (entity, scope, mut phase) in &mut requests {
-        if !matches!(
-            *phase,
-            Phase::Staging
-                | Phase::KeychainList
-                | Phase::KeychainTemporary
-                | Phase::KeychainPassword
-        ) || pending.iter().any(|owner| owner.0 == entity)
+        if !matches!(*phase, Phase::KeychainTemporary | Phase::KeychainPassword)
+            || pending.iter().any(|owner| owner.0 == entity)
         {
             continue;
         };
         let Ok((checkout, settings)) = contexts.get(scope.context) else {
             continue;
         };
-        if *phase == Phase::Staging {
-            let mut created = false;
+        if *phase == Phase::KeychainTemporary {
             for (receipt, owner, purpose, directory) in &directories {
-                if owner.0 != entity || !matches!(purpose, Purpose::Staging) {
-                    continue;
-                };
-                let Ok(name) = names.get(entity) else {
-                    continue;
-                };
-                io.commands.entity(entity).insert((
-                    Staging(directory.0.clone()),
-                    Bundle(directory.0.path().join(format!("{}.app", name.as_str()))),
-                ));
-                io.commands.entity(receipt).despawn();
-                created = true;
-            }
-            if created {
-                io.capture(
-                    entity,
-                    Purpose::Keychains,
-                    checkout,
-                    settings,
-                    "security",
-                    vec!["list-keychains".into(), "-d".into(), "user".into()],
-                );
-                *phase = Phase::KeychainList;
-            } else {
-                io.request(
-                    entity,
-                    Purpose::Staging,
-                    CreateTemporary {
-                        parent: checkout.directory("release"),
-                        prefix: ".vmux-package".into(),
-                    },
-                );
-            }
-        } else if *phase == Phase::KeychainList {
-            for (receipt, owner, purpose, output) in &outputs {
-                if owner.0 != entity || !matches!(purpose, Purpose::Keychains) {
-                    continue;
-                };
-                let guard = io
-                    .commands
-                    .spawn((
-                        KeychainScope {
-                            owner: entity,
-                            context: scope.context,
-                            attempt: scope.attempt,
-                            directory: checkout.root.clone(),
-                            environment: settings.0.clone(),
-                            lease: loans.get(scope.context).ok().map(|lease| lease.0.clone()),
-                        },
-                        CleanupPhase::Start,
-                        Name::new("Signing keychain cleanup"),
-                        vmux_ecs::CreatedAt::now(),
-                    ))
-                    .id();
-                io.commands.entity(entity).insert(GuardRef(guard));
-                for (order, line) in String::from_utf8_lossy(&output.0.stdout)
-                    .lines()
-                    .enumerate()
-                {
-                    let path = line.trim().trim_matches('"');
-                    if !path.is_empty() {
-                        io.commands.spawn((
-                            OriginalKeychain(path.into()),
-                            Order(order as u32),
-                            ChildOf(guard),
-                        ));
-                    }
-                }
-                io.commands.entity(receipt).despawn();
-            }
-            if settings.0.present("APPLE_CERTIFICATE")
-                || settings.0.present("APPLE_CERTIFICATE_PASSWORD")
-            {
-                io.request(
-                    entity,
-                    Purpose::SigningDirectory,
-                    CreateTemporary {
-                        parent: std::env::temp_dir(),
-                        prefix: "vmux-build".into(),
-                    },
-                );
-                *phase = Phase::KeychainTemporary;
-            } else {
-                *phase = Phase::Packager
-            };
-        } else if *phase == Phase::KeychainTemporary {
-            for (receipt, owner, purpose, directory) in &directories {
-                if owner.0 != entity || !matches!(purpose, Purpose::SigningDirectory) {
+                if owner.0 != entity || !purpose.is(PurposeKind::SigningDirectory) {
                     continue;
                 };
                 let Some(guard) = keys.entity(entity) else {
@@ -2638,7 +2870,7 @@ fn provision_keychain(
                     .insert(SigningDirectory(directory.0.clone()));
                 io.capture(
                     entity,
-                    Purpose::Password,
+                    Purpose::new(PurposeKind::Password),
                     checkout,
                     settings,
                     "uuidgen",
@@ -2649,7 +2881,7 @@ fn provision_keychain(
             *phase = Phase::KeychainPassword;
         } else {
             for (receipt, owner, purpose, output) in &outputs {
-                if owner.0 != entity || !matches!(purpose, Purpose::Password) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Password) {
                     continue;
                 };
                 io.commands.entity(entity).insert(Password(
@@ -2662,30 +2894,22 @@ fn provision_keychain(
     }
 }
 
-fn configure_keychain(
+fn create_keychain(
     mut requests: Requests,
     receipts: Receipts,
     contexts: Query<(&Checkout, &Settings)>,
     keys: Keys,
     passwords: Query<&Password>,
-    originals: Query<(&OriginalKeychain, &Order, &ChildOf)>,
     mut io: Writer,
 ) {
     let Receipts {
-        outputs, pending, ..
+        outputs: _outputs,
+        pending,
+        ..
     } = receipts;
     for (entity, scope, mut phase) in &mut requests {
-        if !matches!(
-            *phase,
-            Phase::KeychainCreate
-                | Phase::KeychainConfigure
-                | Phase::KeychainUnlock
-                | Phase::KeychainImport
-                | Phase::KeychainPartition
-                | Phase::KeychainActivate
-                | Phase::KeychainIdentity
-                | Phase::KeychainConfirm
-        ) || pending.iter().any(|owner| owner.0 == entity)
+        if !matches!(*phase, Phase::KeychainCreate | Phase::KeychainConfigure)
+            || pending.iter().any(|owner| owner.0 == entity)
         {
             continue;
         };
@@ -2706,7 +2930,7 @@ fn configure_keychain(
                     settings.0.required("APPLE_SIGNING_IDENTITY")?;
                     io.request(
                         entity,
-                        Purpose::Provision,
+                        Purpose::new(PurposeKind::Provision),
                         Write {
                             path: directory.0.path().join("cert.p12"),
                             bytes: certificate,
@@ -2733,6 +2957,62 @@ fn configure_keychain(
                         path.into_os_string(),
                     ])
                 }
+                _ => unreachable!(),
+            }
+        })();
+        match result {
+            Ok(arguments) => {
+                io.capture(
+                    entity,
+                    if *phase == Phase::KeychainConfirm {
+                        Purpose::new(PurposeKind::Identity)
+                    } else {
+                        Purpose::new(PurposeKind::Provision)
+                    },
+                    checkout,
+                    settings,
+                    "security",
+                    arguments,
+                );
+            }
+            Err(error) => {
+                io.fail(entity, Failure::from_error(error));
+            }
+        }
+    }
+}
+
+fn configure_keychain(
+    mut requests: Requests,
+    receipts: Receipts,
+    contexts: Query<(&Checkout, &Settings)>,
+    keys: Keys,
+    passwords: Query<&Password>,
+    mut io: Writer,
+) {
+    let Receipts {
+        outputs: _outputs,
+        pending,
+        ..
+    } = receipts;
+    for (entity, scope, mut phase) in &mut requests {
+        if !matches!(
+            *phase,
+            Phase::KeychainUnlock | Phase::KeychainImport | Phase::KeychainPartition
+        ) || pending.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        };
+        let (Ok((checkout, settings)), Ok(directory), Ok(password)) = (
+            contexts.get(scope.context),
+            keys.directory(entity).ok_or(()),
+            passwords.get(entity),
+        ) else {
+            continue;
+        };
+        let path = directory.0.path().join("signing.keychain-db");
+        let result = (|| -> crate::Result<Vec<OsString>> {
+            match *phase {
                 Phase::KeychainUnlock => {
                     *phase = Phase::KeychainImport;
                     Ok(vec![
@@ -2770,6 +3050,61 @@ fn configure_keychain(
                         path.into_os_string(),
                     ])
                 }
+                _ => unreachable!(),
+            }
+        })();
+        match result {
+            Ok(arguments) => {
+                io.capture(
+                    entity,
+                    if *phase == Phase::KeychainConfirm {
+                        Purpose::new(PurposeKind::Identity)
+                    } else {
+                        Purpose::new(PurposeKind::Provision)
+                    },
+                    checkout,
+                    settings,
+                    "security",
+                    arguments,
+                );
+            }
+            Err(error) => {
+                io.fail(entity, Failure::from_error(error));
+            }
+        }
+    }
+}
+
+fn activate_keychain(
+    mut requests: Requests,
+    receipts: Receipts,
+    contexts: Query<(&Checkout, &Settings)>,
+    keys: Keys,
+    passwords: Query<&Password>,
+    originals: Query<(&OriginalKeychain, &Order, &ChildOf)>,
+    mut io: Writer,
+) {
+    let Receipts {
+        outputs: _outputs,
+        pending,
+        ..
+    } = receipts;
+    for (entity, scope, mut phase) in &mut requests {
+        if !matches!(*phase, Phase::KeychainActivate)
+            || pending.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        };
+        let (Ok((checkout, settings)), Ok(directory), Ok(_password)) = (
+            contexts.get(scope.context),
+            keys.directory(entity).ok_or(()),
+            passwords.get(entity),
+        ) else {
+            continue;
+        };
+        let path = directory.0.path().join("signing.keychain-db");
+        let result: crate::Result<Vec<OsString>> = {
+            match *phase {
                 Phase::KeychainActivate => {
                     *phase = Phase::KeychainIdentity;
                     let mut arguments = vec![
@@ -2791,23 +3126,71 @@ fn configure_keychain(
                     }
                     Ok(arguments)
                 }
-                _ => {
-                    if *phase == Phase::KeychainIdentity {
-                        *phase = Phase::KeychainConfirm;
-                    }
-                    Ok(vec![
-                        "find-identity".into(),
-                        "-v".into(),
-                        "-p".into(),
-                        "codesigning".into(),
-                        path.into_os_string(),
-                    ])
-                }
+                _ => unreachable!(),
             }
-        })();
+        };
+        match result {
+            Ok(arguments) => {
+                io.capture(
+                    entity,
+                    if *phase == Phase::KeychainConfirm {
+                        Purpose::new(PurposeKind::Identity)
+                    } else {
+                        Purpose::new(PurposeKind::Provision)
+                    },
+                    checkout,
+                    settings,
+                    "security",
+                    arguments,
+                );
+            }
+            Err(error) => {
+                io.fail(entity, Failure::from_error(error));
+            }
+        }
+    }
+}
+
+fn confirm_keychain(
+    mut requests: Requests,
+    receipts: Receipts,
+    contexts: Query<(&Checkout, &Settings)>,
+    keys: Keys,
+    passwords: Query<&Password>,
+    mut io: Writer,
+) {
+    let Receipts {
+        outputs, pending, ..
+    } = receipts;
+    for (entity, scope, mut phase) in &mut requests {
+        if !matches!(*phase, Phase::KeychainIdentity | Phase::KeychainConfirm)
+            || pending.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        };
+        let (Ok((checkout, settings)), Ok(directory), Ok(_password)) = (
+            contexts.get(scope.context),
+            keys.directory(entity).ok_or(()),
+            passwords.get(entity),
+        ) else {
+            continue;
+        };
+        let path = directory.0.path().join("signing.keychain-db");
+        let result: crate::Result<Vec<OsString>> = {
+            if *phase == Phase::KeychainIdentity {
+                *phase = Phase::KeychainConfirm;
+            }
+            Ok(vec![
+                "find-identity".into(),
+                "-v".into(),
+                "-p".into(),
+                "codesigning".into(),
+                path.into_os_string(),
+            ])
+        };
         if *phase == Phase::KeychainConfirm {
             for (receipt, owner, purpose, output) in &outputs {
-                if owner.0 != entity || !matches!(purpose, Purpose::Identity) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Identity) {
                     continue;
                 };
                 let identity = settings
@@ -2816,9 +3199,12 @@ fn configure_keychain(
                     .unwrap_or(OsStr::new(""))
                     .to_string_lossy();
                 if !String::from_utf8_lossy(&output.0.stdout).contains(&format!("\"{identity}\"")) {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "APPLE_SIGNING_IDENTITY does not match the imported identity",
-                    )));
+                    io.fail(
+                        entity,
+                        Failure::message(
+                            "APPLE_SIGNING_IDENTITY does not match the imported identity",
+                        ),
+                    );
                 } else {
                     *phase = Phase::Packager
                 };
@@ -2828,7 +3214,7 @@ fn configure_keychain(
                 continue;
             };
             if outputs.iter().any(|(_, owner, purpose, _)| {
-                owner.0 == entity && matches!(purpose, Purpose::Identity)
+                owner.0 == entity && purpose.is(PurposeKind::Identity)
             }) {
                 continue;
             };
@@ -2838,9 +3224,9 @@ fn configure_keychain(
                 io.capture(
                     entity,
                     if *phase == Phase::KeychainConfirm {
-                        Purpose::Identity
+                        Purpose::new(PurposeKind::Identity)
                     } else {
-                        Purpose::Provision
+                        Purpose::new(PurposeKind::Provision)
                     },
                     checkout,
                     settings,
@@ -2849,9 +3235,7 @@ fn configure_keychain(
                 );
             }
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
             }
         }
     }
@@ -2860,6 +3244,7 @@ fn configure_keychain(
 fn execute_packager(
     mut requests: Requests,
     inputs: Inputs,
+    prepared: Query<(), With<Arguments>>,
     keys: Keys,
     mut contexts: Query<(&Checkout, &mut Settings)>,
     mut io: Writer,
@@ -2874,8 +3259,8 @@ fn execute_packager(
         bundles,
         ..
     } = inputs;
-    for (entity, scope, mut phase) in &mut requests {
-        if *phase != Phase::Packager {
+    for (entity, scope, phase) in &mut requests {
+        if *phase != Phase::Packager || prepared.contains(entity) {
             continue;
         };
         let (
@@ -2900,13 +3285,7 @@ fn execute_packager(
         };
         let result = (|| -> crate::Result<Vec<OsString>> {
             let product = settings.0.product(&checkout.root)?;
-            let metadata = manifest
-                .0
-                .get("package")
-                .and_then(|value| value.get("metadata"))
-                .and_then(|value| value.get("packager"))
-                .ok_or("Missing packaging configuration")?;
-            let mut config = serde_json::to_value(metadata)?;
+            let mut config = manifest.configuration(&product)?;
             config["name"] = "vmux_desktop".into();
             config["product-name"] = name.as_str().into();
             config["identifier"] = settings
@@ -2922,23 +3301,6 @@ fn execute_packager(
                 .to_string_lossy()
                 .into_owned()
                 .into();
-            config["icons"] = serde_json::json!([product.value("VMUX_HOST_ICON")]);
-            config["dmg"]["background"] = product.value("VMUX_HOST_DMG_BACKGROUND").into();
-            config["macos"]["entitlements"] = product.value("VMUX_HOST_ENTITLEMENTS").into();
-            config["macos"]["info-plist-path"] =
-                product.value("VMUX_HOST_USAGE_DESCRIPTIONS").into();
-            for binary in config["binaries"]
-                .as_array_mut()
-                .ok_or("Missing packaging binaries")?
-            {
-                if binary["path"] == "Vmux Service" {
-                    binary["path"] = product.value("VMUX_HOST_SERVICE_NAME").into();
-                }
-            }
-            config["before-packaging-command"] =
-                "\"$VMUX_DX_BIN\" internal package-binaries".into();
-            config["before-each-package-command"] =
-                "\"$VMUX_DX_BIN\" internal before-package".into();
             settings.0.set("VMUX_APP_BUNDLE", bundle.0.as_os_str());
             settings.0.set("APP_BUNDLE", bundle.0.as_os_str());
             if let Some(keychain) = keys.keychain(entity) {
@@ -2959,26 +3321,47 @@ fn execute_packager(
         })();
         match result {
             Ok(arguments) => {
-                io.capture(
-                    entity,
-                    Purpose::Packager,
-                    checkout,
-                    &settings,
-                    settings
-                        .0
-                        .get("CARGO_BIN")
-                        .unwrap_or(OsStr::new("cargo"))
-                        .to_owned(),
-                    arguments,
-                );
-                *phase = Phase::Packaged;
+                io.commands.entity(entity).insert(Arguments(arguments));
             }
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
             }
         }
+    }
+}
+
+#[derive(Component)]
+struct Arguments(Vec<OsString>);
+
+fn run_packager(
+    mut requests: Requests,
+    prepared: Query<&Arguments>,
+    contexts: Query<(&Checkout, &Settings)>,
+    mut io: Writer,
+) {
+    for (entity, scope, mut phase) in &mut requests {
+        if *phase != Phase::Packager {
+            continue;
+        }
+        let Ok(arguments) = prepared.get(entity) else {
+            continue;
+        };
+        let Ok((checkout, settings)) = contexts.get(scope.context) else {
+            continue;
+        };
+        io.capture(
+            entity,
+            Purpose::new(PurposeKind::Packager),
+            checkout,
+            settings,
+            settings
+                .0
+                .get("CARGO_BIN")
+                .unwrap_or(OsStr::new("cargo"))
+                .to_owned(),
+            arguments.0.clone(),
+        );
+        *phase = Phase::Packaged;
     }
 }
 
@@ -3002,7 +3385,7 @@ fn title_desktop(
         if *phase == Phase::Packaged {
             io.request(
                 entity,
-                Purpose::AppPlist,
+                Purpose::new(PurposeKind::AppPlist),
                 ReadFile(bundle.0.join("Contents/Info.plist")),
             );
             *phase = Phase::Title;
@@ -3012,7 +3395,7 @@ fn title_desktop(
             continue;
         };
         for (receipt, owner, purpose, bytes) in &files {
-            if owner.0 != entity || !matches!(purpose, Purpose::AppPlist) {
+            if owner.0 != entity || !purpose.is(PurposeKind::AppPlist) {
                 continue;
             };
             let result = (|| -> crate::Result<Vec<u8>> {
@@ -3029,21 +3412,11 @@ fn title_desktop(
             })();
             match result {
                 Ok(bytes) => {
-                    io.request(
-                        entity,
-                        Purpose::Copy,
-                        Write {
-                            path: bundle.0.join("Contents/Info.plist"),
-                            bytes,
-                            mode: 0o644,
-                        },
-                    );
+                    io.write(entity, bundle.0.join("Contents/Info.plist"), bytes);
                     *phase = Phase::Postprocess;
                 }
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::from_error(error)));
+                    io.fail(entity, Failure::from_error(error));
                 }
             }
             io.commands.entity(receipt).despawn();
@@ -3072,15 +3445,13 @@ fn postprocess_desktop(
             let program = match settings.0.required("VMUX_DX_BIN") {
                 Ok(program) => program.to_owned(),
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::from_error(error)));
+                    io.fail(entity, Failure::from_error(error));
                     continue;
                 }
             };
             io.capture(
                 entity,
-                Purpose::Postprocess,
+                Purpose::new(PurposeKind::Postprocess),
                 checkout,
                 settings,
                 program,
@@ -3110,13 +3481,11 @@ fn inspect_desktop(
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
-        let mut required = vec!["Contents/MacOS/vmux_desktop".into(), "Contents/MacOS/vmux".into(), "Contents/Frameworks/vmux_desktop Helper.app/Contents/MacOS/vmux_desktop Helper".into(), "Contents/Frameworks/vmux_desktop Helper.app/Contents/Resources/Vmux.icns".into(), "Contents/Frameworks/vmux_desktop Helper (Renderer).app/Contents/MacOS/vmux_desktop Helper (Renderer)".into(), "Contents/Info.plist".into(), "Contents/Resources/Vmux.icns".into(), "Contents/Resources/crash_reporter.cfg".into()];
+        let mut required = vec!["Contents/MacOS/vmux_vm".into(), "Contents/MacOS/vmux_desktop".into(), "Contents/MacOS/vmux".into(), "Contents/Frameworks/vmux_desktop Helper.app/Contents/MacOS/vmux_desktop Helper".into(), "Contents/Frameworks/vmux_desktop Helper.app/Contents/Resources/Vmux.icns".into(), "Contents/Frameworks/vmux_desktop Helper (Renderer).app/Contents/MacOS/vmux_desktop Helper (Renderer)".into(), "Contents/Info.plist".into(), "Contents/Resources/Vmux.icns".into(), "Contents/Resources/crash_reporter.cfg".into()];
         required.extend([
             format!(
                 "Contents/Library/LoginItems/{}/Contents/MacOS/{}",
@@ -3135,7 +3504,7 @@ fn inspect_desktop(
         for path in required {
             io.request(
                 entity,
-                Purpose::BundleRequired,
+                Purpose::new(PurposeKind::BundleRequired),
                 Inspect(bundle.0.join(path)),
             );
         }
@@ -3145,13 +3514,13 @@ fn inspect_desktop(
         ] {
             io.request(
                 entity,
-                Purpose::BundleForbidden,
+                Purpose::new(PurposeKind::BundleForbidden),
                 Inspect(bundle.0.join(path)),
             );
         }
         io.request(
             entity,
-            Purpose::BundleLaunch,
+            Purpose::new(PurposeKind::BundleLaunch),
             ReadFile(
                 bundle
                     .0
@@ -3161,12 +3530,12 @@ fn inspect_desktop(
         );
         io.request(
             entity,
-            Purpose::CliHash,
+            Purpose::new(PurposeKind::CliHash),
             Hash(bundle.0.join("Contents/MacOS/vmux")),
         );
         io.request(
             entity,
-            Purpose::DesktopHash,
+            Purpose::new(PurposeKind::DesktopHash),
             Hash(bundle.0.join("Contents/MacOS/vmux_desktop")),
         );
         *phase = Phase::VerifyBundle;
@@ -3185,16 +3554,11 @@ fn verify_desktop(
         paths,
         files,
         hashes,
-        temporary: directories,
         pending,
         ..
     } = receipts;
     for (entity, scope, mut phase) in &mut requests {
-        if !matches!(
-            *phase,
-            Phase::VerifyBundle | Phase::Certificate | Phase::Extracted
-        ) || pending.iter().any(|owner| owner.0 == entity)
-        {
+        if *phase != Phase::VerifyBundle || pending.iter().any(|owner| owner.0 == entity) {
             continue;
         };
         let (Ok((checkout, settings)), Ok(bundle)) =
@@ -3202,97 +3566,117 @@ fn verify_desktop(
         else {
             continue;
         };
-        if *phase == Phase::VerifyBundle {
-            let mut valid = true;
-            for (receipt, owner, purpose, path) in &paths {
-                if owner.0 != entity {
-                    continue;
-                };
-                match purpose {
-                    Purpose::BundleRequired => valid &= path.0.is_some(),
-                    Purpose::BundleForbidden => valid &= path.0.is_none(),
-                    _ => continue,
-                };
-                io.commands.entity(receipt).despawn();
-            }
-            for (receipt, owner, purpose, bytes) in &files {
-                if owner.0 != entity || !matches!(purpose, Purpose::BundleLaunch) {
-                    continue;
-                };
-                valid &= !bytes.0.windows(11).any(|window| window == b"{{PROFILE}}");
-                io.commands.entity(receipt).despawn();
-            }
-            let mut cli = None;
-            let mut desktop = None;
-            for (receipt, owner, purpose, hash) in &hashes {
-                if owner.0 != entity {
-                    continue;
-                };
-                match purpose {
-                    Purpose::CliHash => cli = Some(&hash.0),
-                    Purpose::DesktopHash => desktop = Some(&hash.0),
-                    _ => continue,
-                };
-                io.commands.entity(receipt).despawn();
-            }
-            if !valid || cli.is_none() || desktop.is_none() || cli == desktop {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "Package resources, LaunchAgent or executable identities failed validation",
-                )));
+        let mut valid = true;
+        for (receipt, owner, purpose, path) in &paths {
+            if owner.0 != entity {
                 continue;
             };
-            if verifications.contains(entity) {
-                io.commands.entity(entity).insert(Complete);
+            match purpose.kind {
+                PurposeKind::BundleRequired => valid &= path.0.is_some(),
+                PurposeKind::BundleForbidden => valid &= path.0.is_none(),
+                _ => continue,
+            };
+            io.commands.entity(receipt).despawn();
+        }
+        for (receipt, owner, purpose, bytes) in &files {
+            if owner.0 != entity || !purpose.is(PurposeKind::BundleLaunch) {
                 continue;
             };
-            io.capture(
+            valid &= !bytes.0.windows(11).any(|window| window == b"{{PROFILE}}");
+            io.commands.entity(receipt).despawn();
+        }
+        let mut cli = None;
+        let mut desktop = None;
+        for (receipt, owner, purpose, hash) in &hashes {
+            if owner.0 != entity {
+                continue;
+            };
+            match purpose.kind {
+                PurposeKind::CliHash => cli = Some(&hash.0),
+                PurposeKind::DesktopHash => desktop = Some(&hash.0),
+                _ => continue,
+            };
+            io.commands.entity(receipt).despawn();
+        }
+        if !valid || cli.is_none() || desktop.is_none() || cli == desktop {
+            io.fail(
                 entity,
-                Purpose::VerifyBundle,
-                checkout,
-                settings,
-                "codesign",
-                vec![
-                    "--verify".into(),
-                    "--deep".into(),
-                    "--strict".into(),
-                    bundle.0.clone().into_os_string(),
-                ],
+                Failure::message(
+                    "Package resources, LaunchAgent or executable identities failed validation",
+                ),
             );
+            continue;
+        };
+        if verifications.contains(entity) {
+            io.commands.entity(entity).insert(Complete);
+            continue;
+        };
+        io.capture(
+            entity,
+            Purpose::new(PurposeKind::VerifyBundle),
+            checkout,
+            settings,
+            "codesign",
+            vec![
+                "--verify".into(),
+                "--deep".into(),
+                "--strict".into(),
+                bundle.0.clone().into_os_string(),
+            ],
+        );
+        io.request(
+            entity,
+            Purpose::new(PurposeKind::CertificateDirectory),
+            CreateTemporary {
+                parent: std::env::temp_dir(),
+                prefix: "vmux-signature-check".into(),
+            },
+        );
+        *phase = Phase::Certificate;
+    }
+}
+
+fn extract_certificate(
+    mut requests: Requests,
+    contexts: Query<(&Checkout, &Settings)>,
+    bundles: Query<&Bundle>,
+    directories: Replies<TemporaryDirectory>,
+    pending: Pending,
+    mut io: Writer,
+) {
+    for (entity, scope, mut phase) in &mut requests {
+        if *phase != Phase::Certificate || pending.iter().any(|owner| owner.0 == entity) {
+            continue;
+        }
+        let (Ok((_checkout, settings)), Ok(bundle)) =
+            (contexts.get(scope.context), bundles.get(entity))
+        else {
+            continue;
+        };
+        for (receipt, owner, purpose, directory) in &directories {
+            if owner.0 != entity || !purpose.is(PurposeKind::CertificateDirectory) {
+                continue;
+            };
+            io.commands
+                .entity(entity)
+                .insert(CertificateDirectory(directory.0.clone()));
             io.request(
                 entity,
-                Purpose::CertificateDirectory,
-                CreateTemporary {
-                    parent: std::env::temp_dir(),
-                    prefix: "vmux-signature-check".into(),
+                Purpose::new(PurposeKind::Certificate),
+                Capture {
+                    environment: settings.0.clone(),
+                    directory: directory.0.path().into(),
+                    program: "codesign".into(),
+                    arguments: vec![
+                        "--display".into(),
+                        "--extract-certificates".into(),
+                        bundle.0.join("Contents/MacOS/vmux").into_os_string(),
+                    ],
                 },
             );
-            *phase = Phase::Certificate;
-        } else if *phase == Phase::Certificate {
-            for (receipt, owner, purpose, directory) in &directories {
-                if owner.0 != entity || !matches!(purpose, Purpose::CertificateDirectory) {
-                    continue;
-                };
-                io.commands
-                    .entity(entity)
-                    .insert(CertificateDirectory(directory.0.clone()));
-                io.request(
-                    entity,
-                    Purpose::Certificate,
-                    Capture {
-                        environment: settings.0.clone(),
-                        directory: directory.0.path().into(),
-                        program: "codesign".into(),
-                        arguments: vec![
-                            "--display".into(),
-                            "--extract-certificates".into(),
-                            bundle.0.join("Contents/MacOS/vmux").into_os_string(),
-                        ],
-                    },
-                );
-                io.commands.entity(receipt).despawn();
-            }
-            *phase = Phase::Extracted;
+            io.commands.entity(receipt).despawn();
         }
+        *phase = Phase::Extracted;
     }
 }
 
@@ -3330,7 +3714,7 @@ fn cleanup_keychain(
             };
             let mut checked = false;
             for (receipt, owner, purpose, metadata) in &paths {
-                if owner.0 != entity || !matches!(purpose, Purpose::Certificate) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Certificate) {
                     continue;
                 };
                 checked = true;
@@ -3339,9 +3723,10 @@ fn cleanup_keychain(
                     .as_ref()
                     .is_some_and(|metadata| metadata.is_file() && metadata.len() > 0)
                 {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Packaged CLI has no signing certificate",
-                    )));
+                    io.fail(
+                        entity,
+                        Failure::message("Packaged CLI has no signing certificate"),
+                    );
                 }
                 io.commands.entity(receipt).despawn();
             }
@@ -3354,7 +3739,7 @@ fn cleanup_keychain(
             {
                 io.request(
                     entity,
-                    Purpose::Certificate,
+                    Purpose::new(PurposeKind::Certificate),
                     Inspect(directory.0.path().join("codesign0")),
                 );
                 continue;
@@ -3373,7 +3758,7 @@ fn cleanup_keychain(
                     .entity(entity)
                     .insert(RecoveryFailure(error.0.clone()));
                 if failure.is_none() {
-                    io.commands.entity(entity).insert(Failed(error.0.clone()));
+                    io.fail(entity, error.0.clone());
                 }
             } else if failure.is_none() {
                 io.commands.entity(entity).insert(Phase::Publication);
@@ -3458,55 +3843,55 @@ fn cleanup_guards(
         {
             continue;
         };
-        let arguments = match *phase {
-            CleanupPhase::Start => {
-                let mut values = Vec::new();
-                for (path, order, parent) in &originals {
-                    if parent.parent() == entity {
-                        values.push((order.0, path.0.clone()));
+        let arguments =
+            match *phase {
+                CleanupPhase::Start => {
+                    let mut values = Vec::new();
+                    for (path, order, parent) in &originals {
+                        if parent.parent() == entity {
+                            values.push((order.0, path.0.clone()));
+                        }
+                    }
+                    values.sort_by_key(|(order, _)| *order);
+                    let mut arguments = vec![
+                        "list-keychains".into(),
+                        "-d".into(),
+                        "user".into(),
+                        "-s".into(),
+                    ];
+                    for (_, path) in values {
+                        arguments.push(path);
+                    }
+                    *phase = CleanupPhase::Restore;
+                    Some((Purpose::new(PurposeKind::Restore), arguments))
+                }
+                CleanupPhase::Restore => {
+                    if !replies.iter().any(|(guard, purpose)| {
+                        guard.0 == entity && purpose.is(PurposeKind::Restore)
+                    }) {
+                        continue;
+                    };
+                    if let Ok(path) = keys.get(entity) {
+                        *phase = CleanupPhase::Delete;
+                        Some((
+                            Purpose::new(PurposeKind::Delete),
+                            vec!["delete-keychain".into(), path.0.clone().into_os_string()],
+                        ))
+                    } else {
+                        *phase = CleanupPhase::Done;
+                        None
                     }
                 }
-                values.sort_by_key(|(order, _)| *order);
-                let mut arguments = vec![
-                    "list-keychains".into(),
-                    "-d".into(),
-                    "user".into(),
-                    "-s".into(),
-                ];
-                for (_, path) in values {
-                    arguments.push(path);
-                }
-                *phase = CleanupPhase::Restore;
-                Some((Purpose::Restore, arguments))
-            }
-            CleanupPhase::Restore => {
-                if !replies.iter().any(|(guard, purpose)| {
-                    guard.0 == entity && matches!(purpose, Purpose::Restore)
-                }) {
-                    continue;
-                };
-                if let Ok(path) = keys.get(entity) {
-                    *phase = CleanupPhase::Delete;
-                    Some((
-                        Purpose::Delete,
-                        vec!["delete-keychain".into(), path.0.clone().into_os_string()],
-                    ))
-                } else {
-                    *phase = CleanupPhase::Done;
+                CleanupPhase::Delete => {
+                    if replies.iter().any(|(guard, purpose)| {
+                        guard.0 == entity && purpose.is(PurposeKind::Delete)
+                    }) {
+                        *phase = CleanupPhase::Done
+                    };
                     None
                 }
-            }
-            CleanupPhase::Delete => {
-                if replies
-                    .iter()
-                    .any(|(guard, purpose)| guard.0 == entity && matches!(purpose, Purpose::Delete))
-                {
-                    *phase = CleanupPhase::Done
-                };
-                None
-            }
-            CleanupPhase::Done => None,
-        };
+                CleanupPhase::Done => None,
+            };
         if let Some((purpose, arguments)) = arguments {
             commands.spawn((
                 Operation::bundle("dx.keychain.cleanup").unwrap(),
@@ -3657,26 +4042,20 @@ fn forget_witnesses(
     }
 }
 
-fn publish_desktop(
+fn observe_publication(
     mut requests: Requests,
     artifacts: PublicationInputs,
-    receipts: Receipts,
-    loans: Query<&Lease>,
+    pending: Pending,
     desktops: Query<(), With<Desktop>>,
     mut io: Writer,
 ) {
     let PublicationInputs {
         observations,
         processes,
-        contexts,
-        staging,
         publications,
         results,
         ..
     } = artifacts;
-    let Receipts {
-        entries, pending, ..
-    } = receipts;
     for (entity, scope, phase) in &mut requests {
         if *phase != Phase::Publication
             || !desktops.contains(entity)
@@ -3686,7 +4065,7 @@ fn publish_desktop(
         };
         if let Ok(observation) = observations.get(entity) {
             if let Some(error) = processes.error(observation.0) {
-                io.commands.entity(entity).insert(Failed(error.clone()));
+                io.fail(entity, error.clone());
                 continue;
             };
             if !processes.ready(observation.0) {
@@ -3706,14 +4085,49 @@ fn publish_desktop(
             io.commands.entity(entity).insert(Observation(observation));
             continue;
         }
-        if let Ok(publication) = publications.get(entity) {
-            if let Ok((ready, failure)) = results.get(publication.0) {
-                if let Some(failure) = failure {
-                    io.commands.entity(entity).insert(Failed(failure.0.clone()));
-                } else if ready {
-                    io.commands.entity(entity).insert(Complete);
-                }
+        if let Ok(publication) = publications.get(entity)
+            && let Ok((ready, failure)) = results.get(publication.0)
+        {
+            if let Some(failure) = failure {
+                io.fail(entity, failure.0.clone());
+            } else if ready {
+                io.commands.entity(entity).insert(Complete);
             }
+        }
+    }
+}
+
+fn publish_desktop(
+    mut requests: Requests,
+    artifacts: PublicationInputs,
+    receipts: Receipts,
+    loans: Query<&Lease>,
+    desktops: Query<(), With<Desktop>>,
+    mut io: Writer,
+) {
+    let PublicationInputs {
+        observations,
+        processes,
+        contexts,
+        staging,
+        publications,
+        ..
+    } = artifacts;
+    let Receipts {
+        entries, pending, ..
+    } = receipts;
+    for (entity, scope, phase) in &mut requests {
+        if *phase != Phase::Publication
+            || !desktops.contains(entity)
+            || publications.contains(entity)
+            || pending.iter().any(|owner| owner.0 == entity)
+        {
+            continue;
+        }
+        let Ok(observation) = observations.get(entity) else {
+            continue;
+        };
+        if !processes.ready(observation.0) {
             continue;
         }
         let (Ok(checkout), Ok(staging)) = (contexts.get(scope.context), staging.get(entity)) else {
@@ -3721,19 +4135,21 @@ fn publish_desktop(
         };
         let mut listed = false;
         for (receipt, owner, purpose, entries) in &entries {
-            if owner.0 != entity || !matches!(purpose, Purpose::Staging) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Staging) {
                 continue;
             };
             listed = true;
-            let observation = observations.get(entity).unwrap();
             if entries.0.iter().any(|(path, _)| {
                 path.file_name().is_some_and(|name| {
                     processes.uses(observation.0, &checkout.directory("release").join(name))
                 })
             }) {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "An artifact being replaced is running; quit that build first",
-                )));
+                io.fail(
+                    entity,
+                    Failure::message(
+                        "An artifact being replaced is running; quit that build first",
+                    ),
+                );
                 continue;
             }
             let publication = io
@@ -3767,7 +4183,7 @@ fn publish_desktop(
         if !listed {
             io.request(
                 entity,
-                Purpose::Staging,
+                Purpose::new(PurposeKind::Staging),
                 ReadDirectory(staging.0.path().into()),
             );
         }
@@ -3801,7 +4217,7 @@ fn scan_signatures(
             let mut values = None;
             for (receipt, owner, purpose, entries) in &entries {
                 if owner.0 == entity
-                    && matches!(purpose, Purpose::Directory(id) if *id == directory)
+                    && matches!(purpose, Purpose { kind: PurposeKind::Directory, entity: Some(id) } if *id == directory)
                 {
                     values = Some(&entries.0);
                     io.commands.entity(receipt).despawn();
@@ -3811,7 +4227,7 @@ fn scan_signatures(
             let Some(values) = values else {
                 io.request(
                     entity,
-                    Purpose::Directory(directory),
+                    Purpose::targeted(PurposeKind::Directory, directory),
                     ReadDirectory(path.0.clone()),
                 );
                 continue;
@@ -3879,9 +4295,7 @@ fn inspect_signatures(
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
@@ -3890,7 +4304,7 @@ fn inspect_signatures(
             if owner.0 != entity {
                 continue;
             };
-            let Purpose::Inspect(file) = purpose else {
+            let Some(file) = purpose.target(PurposeKind::Inspect) else {
                 continue;
             };
             let Ok((_, path, parent)) = files.get(*file) else {
@@ -3947,7 +4361,7 @@ fn inspect_signatures(
                 if parent.parent() == entity {
                     io.capture(
                         entity,
-                        Purpose::Inspect(file),
+                        Purpose::targeted(PurposeKind::Inspect, file),
                         checkout,
                         settings,
                         "file",
@@ -3976,7 +4390,7 @@ fn sign(
             if owner.0 != entity {
                 continue;
             };
-            let Purpose::Signature(target) = purpose else {
+            let Some(target) = purpose.target(PurposeKind::Signature) else {
                 continue;
             };
             io.commands.entity(*target).insert(Signed);
@@ -4033,7 +4447,7 @@ fn sign(
             Ok(arguments) => {
                 io.capture(
                     entity,
-                    Purpose::Signature(target),
+                    Purpose::targeted(PurposeKind::Signature, target),
                     checkout,
                     settings,
                     "codesign",
@@ -4041,9 +4455,7 @@ fn sign(
                 );
             }
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
             }
         }
     }
@@ -4067,7 +4479,7 @@ fn verify_signature(
         };
         io.capture(
             entity,
-            Purpose::Copy,
+            Purpose::new(PurposeKind::Copy),
             checkout,
             settings,
             "codesign",
@@ -4110,7 +4522,7 @@ fn notarize(
             } else {
                 io.capture(
                     entity,
-                    Purpose::Copy,
+                    Purpose::new(PurposeKind::Copy),
                     checkout,
                     settings,
                     "ditto",
@@ -4145,7 +4557,7 @@ fn notarize(
                 Ok(arguments) => {
                     io.capture(
                         entity,
-                        Purpose::Notary,
+                        Purpose::new(PurposeKind::Notary),
                         checkout,
                         settings,
                         "xcrun",
@@ -4154,14 +4566,12 @@ fn notarize(
                     *phase = Phase::NotaryReceipt;
                 }
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::from_error(error)));
+                    io.fail(entity, Failure::from_error(error));
                 }
             }
         } else {
             for (receipt, owner, purpose, output) in &outputs {
-                if owner.0 != entity || !matches!(purpose, Purpose::Notary) {
+                if owner.0 != entity || !purpose.is(PurposeKind::Notary) {
                     continue;
                 };
                 let receipt_value: Result<serde_json::Value, _> =
@@ -4171,9 +4581,10 @@ fn notarize(
                 }) {
                     *phase = Phase::Staple;
                 } else {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Notarization did not accept the app",
-                    )));
+                    io.fail(
+                        entity,
+                        Failure::message("Notarization did not accept the app"),
+                    );
                 }
                 io.commands.entity(receipt).despawn();
             }
@@ -4199,7 +4610,7 @@ fn staple(
         };
         io.capture(
             entity,
-            Purpose::Copy,
+            Purpose::new(PurposeKind::Copy),
             checkout,
             settings,
             "xcrun",
@@ -4234,7 +4645,7 @@ fn assess(
         if *phase == Phase::Assess {
             io.capture(
                 entity,
-                Purpose::Copy,
+                Purpose::new(PurposeKind::Copy),
                 checkout,
                 settings,
                 "spctl",
@@ -4249,7 +4660,7 @@ fn assess(
         } else {
             io.capture(
                 entity,
-                Purpose::Copy,
+                Purpose::new(PurposeKind::Copy),
                 checkout,
                 settings,
                 "rm",
@@ -4310,12 +4721,61 @@ fn cancel(
     }
 }
 
+#[derive(bevy_ecs::system::SystemParam)]
+struct Waiting<'w, 's> {
+    observations: Query<'w, 's, &'static Observation>,
+    processes: crate::process_observation::Facts<'w, 's>,
+    publications: Query<'w, 's, &'static Published>,
+    published: Query<'w, 's, (), With<publication::Drained>>,
+    guards: Query<
+        'w,
+        's,
+        (
+            &'static KeychainScope,
+            &'static CleanupPhase,
+            Has<ReleaseKeychain>,
+        ),
+    >,
+    flights: Query<'w, 's, (&'static Witness, &'static Flight)>,
+}
+
+impl Waiting<'_, '_> {
+    fn pending(&self, entity: Entity) -> bool {
+        if self
+            .observations
+            .get(entity)
+            .is_ok_and(|observation| !self.processes.drained(observation.0))
+        {
+            return true;
+        }
+        if self
+            .publications
+            .get(entity)
+            .is_ok_and(|publication| !self.published.contains(publication.0))
+        {
+            return true;
+        }
+        if self.guards.iter().any(|(scope, phase, released)| {
+            scope.owner == entity && released && *phase != CleanupPhase::Done
+        }) {
+            return true;
+        }
+        self.flights
+            .iter()
+            .any(|(witness, flight)| witness.owner == entity && flight.pending())
+    }
+}
+
 fn wake(
     requests: WakeRequests,
+    waiting: Waiting,
     io: Query<(&Owner, &OperationState), With<Io>>,
     wake: Res<JobWake>,
 ) {
     for entity in &requests {
+        if waiting.pending(entity) {
+            continue;
+        }
         if !io
             .iter()
             .any(|(owner, state)| owner.0 == entity && *state == OperationState::Running)
@@ -4334,46 +4794,16 @@ fn finish(
     mut completions: MessageWriter<Completion>,
     mut commands: Commands,
 ) {
-    let Outcomes {
-        desktops,
-        recovery,
-        keys,
-        ..
-    } = outcomes;
     let ArtifactResults {
         published,
         publications,
         destinations,
         ..
     } = artifacts;
-    let Lifetimes {
-        observations,
-        processes,
-        cleanup,
-        flights,
-        rows,
-        ..
-    } = lifetimes;
     for (entity, scope, error) in &requests {
-        if flights
-            .iter()
-            .any(|(owner, flight)| owner.0 == entity && flight.pending())
-        {
+        if !lifetimes.drained(entity, outcomes.desktops.contains(entity)) {
             continue;
-        };
-        if observations
-            .get(entity)
-            .is_ok_and(|observation| !processes.drained(observation.0))
-        {
-            continue;
-        };
-        if desktops.contains(entity)
-            && !cleanup
-                .get(entity)
-                .is_ok_and(|phase| *phase == CleanupPhase::Done)
-        {
-            continue;
-        };
+        }
         if published
             .get(entity)
             .is_ok_and(|published| !publications.contains(published.0))
@@ -4389,7 +4819,7 @@ fn finish(
             }
         }
         let mut remaining = false;
-        for (child, parent) in &rows {
+        for (child, parent) in &lifetimes.rows {
             if parent.parent() == entity
                 && !published
                     .get(entity)
@@ -4411,36 +4841,14 @@ fn finish(
             entity,
             context: scope.context,
             attempt: scope.attempt,
-            result: match error {
-                Some(error) => {
-                    if let Ok(recovery) = recovery.get(entity) {
-                        let path = keys
-                            .directory(entity)
-                            .map(|directory| {
-                                directory
-                                    .0
-                                    .retention()
-                                    .store(true, std::sync::atomic::Ordering::Release);
-                                directory.0.path().display().to_string()
-                            })
-                            .unwrap_or_default();
-                        Err(error.0.clone().context(&format!(
-                            "Keychain cleanup failed: {}; retained {}",
-                            recovery.0, path
-                        )))
-                    } else {
-                        Err(error.0.clone())
-                    }
-                }
-                None if desktops.contains(entity) => Ok(Outcome::Artifacts(artifacts)),
-                None => Ok(Outcome::Done),
-            },
+            result: outcomes.result(entity, error, artifacts),
         });
-        if let Some(guard) = keys.entity(entity) {
+        if let Some(guard) = outcomes.keys.entity(entity) {
             commands.entity(guard).despawn();
         }
         commands.entity(entity).remove::<(
             Scope,
+            Arguments,
             Staging,
             SigningDirectory,
             CertificateDirectory,
@@ -4539,7 +4947,7 @@ mod tests {
         app.world_mut().spawn((
             Io,
             Owner(step),
-            Purpose::Copy,
+            Purpose::new(PurposeKind::Copy),
             Capture {
                 environment,
                 directory: root.clone(),

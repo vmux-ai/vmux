@@ -25,3 +25,7 @@ Cargo execution owns its environment preparation, optional compiler-cache probes
 Compiler-cache selection respects the command's incremental mode. VM helpers contribute their hypervisor entitlements to signature inputs and participate in readiness verification. Bundle copies replace staged files atomically, so an already-open executable retains its original contents through rebuilding.
 
 Provider snapshots open the source once, validate that handle, and copy at most 64 MiB with cancellation checks. A private staging file is published only after copying succeeds. Failed or canceled copies remove partial files before their target and temporary loans are released.
+
+Development command admission captures configuration before target selection and tooling preparation. Registered systems own phase changes and native operation ordering; their query capabilities perform synchronous lookup, selection, and scoped state mutation. Native format conversion produces plist bytes from accepted inputs without running a workflow. IO routing discriminators belong to their canonical operation components, and the unchanged compatibility schema remains migration debt until its last callers are removed.
+
+Packaging waits for process observations, publication journals, and keychain restoration to drain. The reactive CLI sleeps while those children are pending and resumes from their completion wakes. Bundle verification requires the VM helper as well as the desktop, service, and CLI binaries before publication.

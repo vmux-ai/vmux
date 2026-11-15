@@ -35,7 +35,13 @@ impl bevy_app::Plugin for Plugin {
         .add_systems(PreUpdate, cancel)
         .add_systems(
             Update,
-            (initialize, cancel, adopt, advance, retire)
+            (
+                initialize,
+                cancel,
+                (adopt, inspect).chain(),
+                (rollback, advance).chain(),
+                retire,
+            )
                 .chain()
                 .in_set(Stage::Decide),
         )
@@ -61,6 +67,7 @@ pub(crate) struct Request {
 }
 
 #[derive(Component)]
+#[require(State)]
 pub(crate) struct Move;
 
 #[derive(Component)]
@@ -111,15 +118,37 @@ struct Received;
 #[derive(Component)]
 struct Reported;
 
-#[derive(Component)]
-enum Purpose {
-    Inspect(Entity),
-    Backup(Entity),
-    BackupProbe(Entity),
-    Publish(Entity),
-    Remove(Entity),
-    Restore(Entity),
-    Rollback(Entity),
+#[derive(Component, Clone, Copy)]
+struct Purpose {
+    kind: PurposeKind,
+    entity: Option<Entity>,
+}
+
+impl Purpose {
+    fn targeted(kind: PurposeKind, entity: Entity) -> Self {
+        Self {
+            kind,
+            entity: Some(entity),
+        }
+    }
+
+    fn target(&self, kind: PurposeKind) -> Option<&Entity> {
+        if self.kind != kind {
+            return None;
+        }
+        self.entity.as_ref()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PurposeKind {
+    Inspect,
+    Backup,
+    BackupProbe,
+    Publish,
+    Remove,
+    Restore,
+    Rollback,
 }
 
 type Incoming<'w, 's> = Query<'w, 's, (Entity, &'static Request), Without<OperationState>>;
@@ -137,7 +166,6 @@ type Moves<'w, 's> = Query<
     ),
     With<Move>,
 >;
-type InitialMoves<'w, 's> = Query<'w, 's, Entity, (With<Move>, Without<State>)>;
 type Replies<'w, 's, T> =
     Query<'w, 's, (Entity, &'static Owner, &'static Purpose, &'static T), With<Received>>;
 type Returned<'w, 's, J> = Query<
@@ -212,12 +240,7 @@ type FinishRequests<'w, 's> = Query<
     (With<Request>, With<Drained>, Without<Reported>),
 >;
 
-fn initialize(
-    incoming: Incoming,
-    moves: InitialMoves,
-    plans: InitializePlans,
-    mut commands: Commands,
-) {
+fn initialize(incoming: Incoming, plans: InitializePlans, mut commands: Commands) {
     for (entity, request) in &incoming {
         let mut orders = std::collections::HashSet::new();
         let mut destinations = std::collections::HashSet::new();
@@ -245,9 +268,6 @@ fn initialize(
         commands
             .entity(entity)
             .insert(Operation::bundle("dx.publication").unwrap().running());
-    }
-    for entity in &moves {
-        commands.entity(entity).insert(State::Pending);
     }
 }
 
@@ -280,10 +300,16 @@ fn collect<J: StorageJob>(
                 commands.entity(entity).insert(OperationState::Failed);
                 if let Ok(purpose) = purposes.get(entity) {
                     match purpose {
-                        Purpose::Backup(target) => {
+                        Purpose {
+                            kind: PurposeKind::Backup,
+                            entity: Some(target),
+                        } => {
                             commands.entity(*target).insert(State::BackupFailed);
                         }
-                        Purpose::Publish(target) => {
+                        Purpose {
+                            kind: PurposeKind::Publish,
+                            entity: Some(target),
+                        } => {
                             commands.entity(*target).insert(
                                 if moves.get(*target).is_ok_and(|backup| backup.is_some()) {
                                     State::BackedUp
@@ -292,13 +318,22 @@ fn collect<J: StorageJob>(
                                 },
                             );
                         }
-                        Purpose::Restore(target) => {
+                        Purpose {
+                            kind: PurposeKind::Restore,
+                            entity: Some(target),
+                        } => {
                             commands.entity(*target).insert(State::RestoreFailed);
                         }
-                        Purpose::Rollback(target) => {
+                        Purpose {
+                            kind: PurposeKind::Rollback,
+                            entity: Some(target),
+                        } => {
                             commands.entity(*target).insert(State::Removing);
                         }
-                        Purpose::BackupProbe(target) => {
+                        Purpose {
+                            kind: PurposeKind::BackupProbe,
+                            entity: Some(target),
+                        } => {
                             commands.entity(*target).insert(State::RestoreFailed);
                         }
                         _ => {}
@@ -363,19 +398,21 @@ fn cancel(
     }
 }
 
-fn adopt(
-    done: Replies<Done>,
-    metadata: Replies<PathMetadata>,
-    moves: Moves,
-    requests: Query<&Request>,
-    aborting: Query<(), With<Aborting>>,
-    mut io: Writer,
-) {
+fn adopt(done: Replies<Done>, moves: Moves, mut io: Writer) {
     for (receipt, _, purpose, _) in &done {
         let (target, state) = match purpose {
-            Purpose::Backup(entity) => (*entity, State::BackedUp),
-            Purpose::Publish(entity) => (*entity, State::Published),
-            Purpose::Remove(entity) => {
+            Purpose {
+                kind: PurposeKind::Backup,
+                entity: Some(entity),
+            } => (*entity, State::BackedUp),
+            Purpose {
+                kind: PurposeKind::Publish,
+                entity: Some(entity),
+            } => (*entity, State::Published),
+            Purpose {
+                kind: PurposeKind::Remove,
+                entity: Some(entity),
+            } => {
                 let Ok((_, _, _, _, _, _, backup)) = moves.get(*entity) else {
                     continue;
                 };
@@ -388,7 +425,10 @@ fn adopt(
                     },
                 )
             }
-            Purpose::Restore(entity) => (*entity, State::Restored),
+            Purpose {
+                kind: PurposeKind::Restore,
+                entity: Some(entity),
+            } => (*entity, State::Restored),
             _ => continue,
         };
         io.commands.entity(target).insert(state);
@@ -397,11 +437,29 @@ fn adopt(
         }
         io.commands.entity(receipt).despawn();
     }
+}
+
+fn inspect(
+    metadata: Replies<PathMetadata>,
+    moves: Moves,
+    requests: Query<&Request>,
+    aborting: Query<(), With<Aborting>>,
+    mut io: Writer,
+) {
     for (receipt, owner, purpose, metadata) in &metadata {
         let target = match purpose {
-            Purpose::Inspect(entity) | Purpose::Rollback(entity) | Purpose::BackupProbe(entity) => {
-                *entity
+            Purpose {
+                kind: PurposeKind::Inspect,
+                entity: Some(entity),
             }
+            | Purpose {
+                kind: PurposeKind::Rollback,
+                entity: Some(entity),
+            }
+            | Purpose {
+                kind: PurposeKind::BackupProbe,
+                entity: Some(entity),
+            } => *entity,
             _ => continue,
         };
         let Ok((_, _, _, destination, order, _, backup)) = moves.get(target) else {
@@ -410,7 +468,7 @@ fn adopt(
         let Ok(request) = requests.get(owner.0) else {
             continue;
         };
-        if matches!(purpose, Purpose::Inspect(_)) {
+        if purpose.target(PurposeKind::Inspect).is_some() {
             if aborting.contains(owner.0) {
                 io.commands.entity(target).insert(State::Pending);
             } else if metadata
@@ -433,7 +491,7 @@ fn adopt(
                     .insert((Backup(backup.clone()), State::BackingUp));
                 io.request(
                     owner.0,
-                    Purpose::Backup(target),
+                    Purpose::targeted(PurposeKind::Backup, target),
                     Rename {
                         source: destination.0.clone(),
                         destination: backup,
@@ -442,7 +500,7 @@ fn adopt(
             } else {
                 io.commands.entity(target).insert(State::Prepared);
             }
-        } else if matches!(purpose, Purpose::BackupProbe(_)) {
+        } else if purpose.target(PurposeKind::BackupProbe).is_some() {
             io.commands.entity(target).insert(if metadata.0.is_some() {
                 State::BackedUp
             } else {
@@ -452,7 +510,7 @@ fn adopt(
             io.commands.entity(target).insert(State::Removing);
             io.request(
                 owner.0,
-                Purpose::Remove(target),
+                Purpose::targeted(PurposeKind::Remove, target),
                 Remove {
                     path: destination.0.clone(),
                     directory: metadata.is_dir(),
@@ -470,36 +528,16 @@ fn adopt(
     }
 }
 
-fn advance(
-    requests: Query<(Entity, &Request), Without<Drained>>,
-    moves: Moves,
-    io_rows: Query<(Entity, &Owner, &OperationState), With<Io>>,
-    flights: Query<(&Owner, &Flight)>,
-    aborting: Query<(), With<Aborting>>,
-    wake: Res<JobWake>,
-    mut io: Writer,
-) {
-    for (root, request) in &requests {
-        if io_rows.iter().any(|(_, owner, state)| {
-            owner.0 == root && matches!(*state, OperationState::Pending | OperationState::Running)
-        }) {
-            continue;
-        }
-        if flights
-            .iter()
-            .any(|(owner, flight)| owner.0 == root && flight.pending())
-        {
-            continue;
-        }
-        for (row, owner, _) in &io_rows {
-            if owner.0 == root {
-                io.commands.entity(row).despawn();
-            }
-        }
-        let rollback = aborting.contains(root);
+#[derive(bevy_ecs::system::SystemParam)]
+struct Selection<'w, 's> {
+    moves: Moves<'w, 's>,
+}
+
+impl Selection<'_, '_> {
+    fn next(&self, root: Entity, rollback: bool) -> Option<Entity> {
         let mut candidate = None;
         let mut candidate_order = None;
-        for item in &moves {
+        for item in &self.moves {
             if item.1.parent() != root {
                 continue;
             }
@@ -525,7 +563,46 @@ fn advance(
                 candidate_order = Some(item.4.0);
             }
         }
-        let Some((entity, _, source, destination, _, state, backup)) = candidate else {
+        candidate.map(|item| item.0)
+    }
+}
+
+type Rollbacks<'w, 's> =
+    Query<'w, 's, (Entity, &'static Request), (Without<Drained>, With<Aborting>)>;
+
+type Advancing<'w, 's> =
+    Query<'w, 's, (Entity, &'static Request), (Without<Drained>, Without<Aborting>)>;
+
+fn rollback(
+    requests: Rollbacks,
+    selection: Selection,
+    io_rows: Query<(Entity, &Owner, &OperationState), With<Io>>,
+    flights: Query<(&Owner, &Flight)>,
+    wake: Res<JobWake>,
+    mut io: Writer,
+) {
+    for (root, request) in &requests {
+        if io_rows.iter().any(|(_, owner, state)| {
+            owner.0 == root && matches!(*state, OperationState::Pending | OperationState::Running)
+        }) {
+            continue;
+        }
+        if flights
+            .iter()
+            .any(|(owner, flight)| owner.0 == root && flight.pending())
+        {
+            continue;
+        }
+        for (row, owner, _) in &io_rows {
+            if owner.0 == root {
+                io.commands.entity(row).despawn();
+            }
+        }
+        let rollback = true;
+        let Some((entity, _, _source, destination, _, state, backup)) = selection
+            .next(root, rollback)
+            .and_then(|entity| selection.moves.get(entity).ok())
+        else {
             io.commands.entity(root).insert(Drained);
             if !rollback {
                 io.commands.entity(root).insert(Ready);
@@ -533,104 +610,143 @@ fn advance(
             wake.0.wake_by_ref();
             continue;
         };
-        if rollback {
-            match *state {
-                State::BackupFailed => {
-                    if let Some(backup) = backup {
-                        io.request(
-                            root,
-                            Purpose::BackupProbe(entity),
-                            Inspect(backup.0.clone()),
-                        );
-                    } else {
-                        io.commands.entity(entity).insert(State::Restored);
-                        wake.0.wake_by_ref();
-                    }
-                }
-                State::RestoreFailed => {
-                    request.staging.retention().store(true, Ordering::Release);
-                    eprintln!(
-                        "Artifact restore failed at {}; retained {}",
-                        backup
-                            .map_or(destination.0.as_path(), |backup| backup.0.as_path())
-                            .display(),
-                        request.staging.path().display()
+
+        match *state {
+            State::BackupFailed => {
+                if let Some(backup) = backup {
+                    io.request(
+                        root,
+                        Purpose::targeted(PurposeKind::BackupProbe, entity),
+                        Inspect(backup.0.clone()),
                     );
+                } else {
                     io.commands.entity(entity).insert(State::Restored);
                     wake.0.wake_by_ref();
                 }
-                State::Restoring => {
-                    let Some(backup) = backup else {
-                        io.commands.entity(entity).insert(State::Restored);
-                        wake.0.wake_by_ref();
-                        continue;
-                    };
-                    io.request(
-                        root,
-                        Purpose::Restore(entity),
-                        Rename {
-                            source: backup.0.clone(),
-                            destination: destination.0.clone(),
-                        },
-                    );
-                }
-                State::Removing => {
-                    request.staging.retention().store(true, Ordering::Release);
-                    eprintln!(
-                        "Artifact rollback failed at {}; retained {}",
-                        destination.0.display(),
-                        request.staging.path().display()
-                    );
-                    io.commands.entity(entity).insert(if backup.is_some() {
-                        State::Restoring
-                    } else {
-                        State::Restored
-                    });
+            }
+            State::RestoreFailed => {
+                request.staging.retention().store(true, Ordering::Release);
+                eprintln!(
+                    "Artifact restore failed at {}; retained {}",
+                    backup
+                        .map_or(destination.0.as_path(), |backup| backup.0.as_path())
+                        .display(),
+                    request.staging.path().display()
+                );
+                io.commands.entity(entity).insert(State::Restored);
+                wake.0.wake_by_ref();
+            }
+            State::Restoring => {
+                let Some(backup) = backup else {
+                    io.commands.entity(entity).insert(State::Restored);
                     wake.0.wake_by_ref();
-                }
-                State::Restored => {}
-                _ => {
-                    io.commands.entity(entity).insert(State::RollbackInspect);
-                    io.request(
-                        root,
-                        Purpose::Rollback(entity),
-                        Inspect(destination.0.clone()),
-                    );
-                }
+                    continue;
+                };
+                io.request(
+                    root,
+                    Purpose::targeted(PurposeKind::Restore, entity),
+                    Rename {
+                        source: backup.0.clone(),
+                        destination: destination.0.clone(),
+                    },
+                );
             }
-        } else {
-            match *state {
-                State::Pending => {
-                    if !source.0.starts_with(request.staging.path())
-                        || source.0.parent() != Some(request.staging.path())
-                    {
-                        io.commands.entity(root).insert((
-                            Aborting,
-                            Failed(Failure::message("Publication source is outside staging")),
-                        ));
-                        wake.0.wake_by_ref();
-                        continue;
-                    }
-                    io.commands.entity(entity).insert(State::Inspecting);
-                    io.request(
-                        root,
-                        Purpose::Inspect(entity),
-                        Inspect(destination.0.clone()),
-                    );
-                }
-                State::Prepared | State::BackedUp => {
-                    io.commands.entity(entity).insert(State::Publishing);
-                    io.request(
-                        root,
-                        Purpose::Publish(entity),
-                        Rename {
-                            source: source.0.clone(),
-                            destination: destination.0.clone(),
-                        },
-                    );
-                }
-                _ => {}
+            State::Removing => {
+                request.staging.retention().store(true, Ordering::Release);
+                eprintln!(
+                    "Artifact rollback failed at {}; retained {}",
+                    destination.0.display(),
+                    request.staging.path().display()
+                );
+                io.commands.entity(entity).insert(if backup.is_some() {
+                    State::Restoring
+                } else {
+                    State::Restored
+                });
+                wake.0.wake_by_ref();
             }
+            State::Restored => {}
+            _ => {
+                io.commands.entity(entity).insert(State::RollbackInspect);
+                io.request(
+                    root,
+                    Purpose::targeted(PurposeKind::Rollback, entity),
+                    Inspect(destination.0.clone()),
+                );
+            }
+        }
+    }
+}
+
+fn advance(
+    requests: Advancing,
+    selection: Selection,
+    io_rows: Query<(Entity, &Owner, &OperationState), With<Io>>,
+    flights: Query<(&Owner, &Flight)>,
+    wake: Res<JobWake>,
+    mut io: Writer,
+) {
+    for (root, request) in &requests {
+        if io_rows.iter().any(|(_, owner, state)| {
+            owner.0 == root && matches!(*state, OperationState::Pending | OperationState::Running)
+        }) {
+            continue;
+        }
+        if flights
+            .iter()
+            .any(|(owner, flight)| owner.0 == root && flight.pending())
+        {
+            continue;
+        }
+        for (row, owner, _) in &io_rows {
+            if owner.0 == root {
+                io.commands.entity(row).despawn();
+            }
+        }
+        let rollback = false;
+        let Some((entity, _, source, destination, _, state, _backup)) = selection
+            .next(root, rollback)
+            .and_then(|entity| selection.moves.get(entity).ok())
+        else {
+            io.commands.entity(root).insert(Drained);
+            if !rollback {
+                io.commands.entity(root).insert(Ready);
+            }
+            wake.0.wake_by_ref();
+            continue;
+        };
+
+        match *state {
+            State::Pending => {
+                if !source.0.starts_with(request.staging.path())
+                    || source.0.parent() != Some(request.staging.path())
+                {
+                    io.commands.entity(root).insert((
+                        Aborting,
+                        Failed(Failure::message("Publication source is outside staging")),
+                    ));
+                    wake.0.wake_by_ref();
+                    continue;
+                }
+                io.commands.entity(entity).insert(State::Inspecting);
+                io.request(
+                    root,
+                    Purpose::targeted(PurposeKind::Inspect, entity),
+                    Inspect(destination.0.clone()),
+                );
+            }
+            State::Prepared | State::BackedUp => {
+                io.commands.entity(entity).insert(State::Publishing);
+                io.request(
+                    root,
+                    Purpose::targeted(PurposeKind::Publish, entity),
+                    Rename {
+                        source: source.0.clone(),
+                        destination: destination.0.clone(),
+                    },
+                );
+            }
+            _ => {}
         }
     }
 }

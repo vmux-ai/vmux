@@ -979,7 +979,6 @@ done
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    #[cfg(target_os = "macos")]
     fn native(&self, program: &str) -> std::process::Command {
         let mut command = std::process::Command::new(program);
         command.current_dir(&self.root).env(
@@ -1029,6 +1028,7 @@ printf '%s\n' "$VMUX_DX_HANDOFF" "$BOOTSTRAP_ORIGINAL" "$@"
         .unwrap();
     }
 
+    #[cfg(target_os = "macos")]
     fn ios_tools(&self) {
         self.script(
             "plist-buddy",
@@ -2009,6 +2009,31 @@ esac
         std::fs::read_to_string(app.join("sentinel")).unwrap(),
         "previous artifact"
     );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn bundle_verification_refuses_a_missing_vm_helper() {
+    let fixture = Fixture::new();
+    fixture
+        .command()
+        .args(["build", "-p", "local"])
+        .assert()
+        .success();
+    let app = fixture.target.join("release/Vmux (9999999).app");
+    fixture
+        .command()
+        .args(["internal", "verify-bundle", "--"])
+        .arg(&app)
+        .assert()
+        .success();
+    std::fs::remove_file(app.join("Contents/MacOS/vmux_vm")).unwrap();
+    fixture
+        .command()
+        .args(["internal", "verify-bundle", "--"])
+        .arg(&app)
+        .assert()
+        .failure();
 }
 
 #[test]

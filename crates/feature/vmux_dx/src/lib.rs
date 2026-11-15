@@ -56,6 +56,10 @@ mod tooling;
 mod tooling_io;
 mod update_io;
 pub mod updates;
+#[expect(
+    dead_code,
+    reason = "VMX-253 retains the exact legacy schema until follow-up removal"
+)]
 mod work;
 mod workspace;
 mod workspace_io;
@@ -82,6 +86,7 @@ impl bevy_app::Plugin for Plugin {
                 vmux_ecs::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
             ));
         }
+        app.register_required_components::<Work, Step>();
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
             updates::Plugin,
@@ -112,7 +117,15 @@ impl bevy_app::Plugin for Plugin {
             Update,
             (
                 admit,
-                accept,
+                (
+                    resolve,
+                    load_settings,
+                    configure_target,
+                    ensure_tooling,
+                    configure_settings,
+                    accept,
+                )
+                    .chain(),
                 (
                     (
                         plan_provider,
@@ -148,10 +161,10 @@ impl bevy_app::Plugin for Plugin {
                 refuse_plan,
                 receive,
                 cancel,
-                collect,
+                (collect, apply).chain(),
                 retire,
                 start,
-                dispatch,
+                (dispatch_storage, dispatch).chain(),
                 native,
                 finish,
             )
@@ -275,6 +288,7 @@ type Incoming<'w, 's> = Query<
         Without<CliResult>,
         Without<tooling::Waiting>,
         Without<Admitting>,
+        Without<Preparing>,
     ),
 >;
 type Pending<'w, 's> = Query<
@@ -388,13 +402,35 @@ fn admit(
     }
 }
 
-fn accept(
-    requests: Incoming,
-    providers: Query<&workspace::Provider>,
-    prepared: Query<(), With<tooling::Checked>>,
-    validated: Query<&Validated>,
-    mut commands: Commands,
-) {
+#[derive(Component)]
+struct Preparing;
+
+#[derive(Component)]
+struct SettingsLoaded;
+
+#[derive(Component)]
+struct TargetConfigured;
+
+#[derive(Component)]
+struct ToolsPrepared;
+
+#[derive(Component)]
+struct SettingsConfigured;
+
+type Preparations<'w, 's, F> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CliInvocation,
+        Option<&'static workspace::Dispatch>,
+        &'static mut Checkout,
+        &'static mut Settings,
+    ),
+    (With<Preparing>, Without<CliResult>, F),
+>;
+
+fn resolve(requests: Incoming, providers: Query<&workspace::Provider>, mut commands: Commands) {
     for (entity, invocation, dispatch, resolved_context) in &requests {
         if invocation.is("dx.update") {
             continue;
@@ -445,7 +481,7 @@ fn accept(
                 None => continue,
             },
         };
-        let mut checkout = match resolved {
+        let checkout = match resolved {
             Ok(checkout) => checkout,
             Err(error) => {
                 commands
@@ -454,8 +490,16 @@ fn accept(
                 continue;
             }
         };
-        let mut environment = Environment::current();
-        if provider.is_none()
+        commands
+            .entity(entity)
+            .insert((Preparing, checkout, Settings(Environment::current())));
+    }
+}
+
+fn load_settings(mut requests: Preparations<Without<SettingsLoaded>>, mut commands: Commands) {
+    for (entity, invocation, dispatch, checkout, mut settings) in &mut requests {
+        let environment = &mut settings.0;
+        if dispatch.is_none()
             && let Err(error) = environment.load(&checkout.root)
         {
             commands
@@ -463,16 +507,6 @@ fn accept(
                 .insert(CliResult(Err(error.to_string())));
             continue;
         }
-        let profile = if invocation.is("dx.serve") {
-            Some("dev")
-        } else {
-            invocation.value("profile")
-        };
-        let platform = if invocation.is("dx.serve") {
-            Some("web")
-        } else {
-            invocation.value("platform")
-        };
         if (invocation.is("dx.build") || invocation.is("dx.run"))
             && let Err(error) = environment.product(&checkout.root)
         {
@@ -481,6 +515,21 @@ fn accept(
                 .insert(CliResult(Err(error.to_string())));
             continue;
         }
+        commands.entity(entity).insert(SettingsLoaded);
+    }
+}
+
+fn configure_target(
+    mut requests: Preparations<(With<SettingsLoaded>, Without<TargetConfigured>)>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, dispatch, mut checkout, mut settings) in &mut requests {
+        let environment = &mut settings.0;
+        let platform = if invocation.is("dx.serve") {
+            Some("web")
+        } else {
+            invocation.value("platform")
+        };
         if invocation.is("dx.internal") && invocation.value("task") == Some("cli-release") {
             environment.remove("CARGO_BUILD_TARGET");
             environment.set(
@@ -494,7 +543,7 @@ fn accept(
                 checkout.root.join("website/target").as_os_str(),
             );
         }
-        if provider.is_none()
+        if dispatch.is_none()
             && let Err(error) = checkout.configure(
                 environment.get("CARGO_TARGET_DIR"),
                 environment.get("CARGO_BUILD_TARGET"),
@@ -505,17 +554,53 @@ fn accept(
                 .insert(CliResult(Err(error.to_string())));
             continue;
         }
-        if provider.is_none() && !prepared.contains(entity) {
+        commands.entity(entity).insert(TargetConfigured);
+    }
+}
+
+fn ensure_tooling(
+    mut requests: Preparations<(
+        With<TargetConfigured>,
+        Without<ToolsPrepared>,
+        Without<tooling::Waiting>,
+    )>,
+    prepared: Query<(), With<tooling::Checked>>,
+    mut commands: Commands,
+) {
+    for (entity, _, dispatch, checkout, mut settings) in &mut requests {
+        if dispatch.is_none() && !prepared.contains(entity) {
             commands.trigger(tooling::Requested {
                 entity,
-                checkout,
-                environment,
+                checkout: checkout.clone(),
+                environment: settings.0.clone(),
             });
             continue;
         }
-        if provider.is_none() {
-            environment.set("CARGO_TARGET_DIR", checkout.target.as_os_str());
+        if dispatch.is_none() {
+            settings
+                .0
+                .set("CARGO_TARGET_DIR", checkout.target.as_os_str());
         }
+        commands.entity(entity).insert(ToolsPrepared);
+    }
+}
+
+fn configure_settings(
+    mut requests: Preparations<(With<ToolsPrepared>, Without<SettingsConfigured>)>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, _, _, mut settings) in &mut requests {
+        let environment = &mut settings.0;
+        let profile = if invocation.is("dx.serve") {
+            Some("dev")
+        } else {
+            invocation.value("profile")
+        };
+        let platform = if invocation.is("dx.serve") {
+            Some("web")
+        } else {
+            invocation.value("platform")
+        };
         if let Some(profile) = profile {
             environment.set("VMUX_BUILD_PROFILE", profile);
         } else if !environment.present("VMUX_BUILD_PROFILE") {
@@ -532,6 +617,21 @@ fn accept(
         } else if !environment.present("VMUX_PROFILE") {
             environment.set("VMUX_PROFILE", "personal");
         }
+        commands.entity(entity).insert(SettingsConfigured);
+    }
+}
+
+fn accept(
+    mut requests: Preparations<(
+        With<SettingsConfigured>,
+        Without<Accepted>,
+        Without<Admitting>,
+    )>,
+    validated: Query<&Validated>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, _, checkout, settings) in &mut requests {
+        let environment = settings.0.clone();
         let storage = match policy::Policy::configured(&environment) {
             Ok(policy) => Storage::new(policy),
             Err(error) => {
@@ -563,7 +663,7 @@ fn accept(
                 Attempt(1),
                 Running,
                 OperationState::Running,
-                storage_runtime::Request::Validate,
+                storage_runtime::Request::new(storage_runtime::RequestKind::Validate),
                 storage_runtime::Captured {
                     root: entity,
                     attempt: 1,
@@ -578,7 +678,7 @@ fn accept(
             Name::new(invocation.command.clone()),
             CreatedAt::now(),
             Cwd(checkout.root.clone()),
-            checkout,
+            checkout.clone(),
             storage,
             Settings(environment),
         ));
@@ -1429,14 +1529,20 @@ type Dispatches<'w, 's> = Query<
     (With<Running>, Without<Assigned>, Without<NativeSubmitted>),
 >;
 
-fn dispatch(requests: Dispatches, loans: Query<&Lease>, mut commands: Commands) {
-    for (entity, work, started, checkout, settings) in &requests {
+fn dispatch_storage(requests: Dispatches, loans: Query<&Lease>, mut commands: Commands) {
+    for (entity, work, started, _checkout, settings) in &requests {
         let storage = match work {
-            Work::Check => Some(storage_runtime::Request::Check),
-            Work::Preflight => Some(storage_runtime::Request::Preflight),
-            Work::Finish(profile) => Some(storage_runtime::Request::Finish(profile.clone())),
-            Work::Status => Some(storage_runtime::Request::Report),
-            Work::Clean(apply) => Some(storage_runtime::Request::Clean(
+            Work::Check => Some(storage_runtime::Request::new(
+                storage_runtime::RequestKind::Check,
+            )),
+            Work::Preflight => Some(storage_runtime::Request::new(
+                storage_runtime::RequestKind::Preflight,
+            )),
+            Work::Finish(profile) => Some(storage_runtime::Request::finish(profile.clone())),
+            Work::Status => Some(storage_runtime::Request::new(
+                storage_runtime::RequestKind::Report,
+            )),
+            Work::Clean(apply) => Some(storage_runtime::Request::clean(
                 *apply
                     || settings.0.get("VMUX_BUILD_STORAGE_APPLY")
                         == Some(std::ffi::OsStr::new("1")),
@@ -1455,6 +1561,11 @@ fn dispatch(requests: Dispatches, loans: Query<&Lease>, mut commands: Commands) 
             ));
             continue;
         }
+    }
+}
+
+fn dispatch(requests: Dispatches, mut commands: Commands) {
+    for (entity, work, started, checkout, settings) in &requests {
         match work {
             Work::Package(profile) => commands.trigger(package::Requested {
                 entity,
@@ -1653,12 +1764,22 @@ fn cancel(
     }
 }
 
+#[derive(SystemParam)]
+struct Replies<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl Replies<'_, '_> {
+    fn send(&mut self, entity: Entity, result: CliResult) {
+        self.commands.entity(entity).insert(result);
+    }
+}
+
 fn collect(
     mut completions: MessageReader<Completion>,
     steps: Completions,
     mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
-    leases: Query<&Lease>,
-    mut commands: Commands,
+    mut replies: Replies,
 ) {
     for completion in completions.read() {
         let Ok((parent, attempt, started)) = steps.get(completion.entity) else {
@@ -1670,57 +1791,124 @@ fn collect(
         if attempt.is_none_or(|attempt| attempt.0 != completion.attempt)
             || parent.is_none_or(|parent| parent.parent() != completion.context)
         {
-            commands.entity(completion.entity).despawn();
+            replies.commands.entity(completion.entity).despawn();
             if let Ok((_, mut state)) = operations.get_mut(completion.context) {
                 if *state == OperationState::Canceled {
-                    commands.entity(completion.context).insert(CliResult(Ok((128
-                        + signals::Signals::pending().unwrap_or(15))
-                        as u8)));
+                    replies.send(
+                        completion.context,
+                        CliResult(Ok((128 + signals::Signals::pending().unwrap_or(15)) as u8)),
+                    );
                 } else {
                     *state = OperationState::Failed;
-                    commands
-                        .entity(completion.context)
-                        .insert(CliResult(Err("Development step ownership changed".into())));
+                    replies.send(
+                        completion.context,
+                        CliResult(Err("Development step ownership changed".into())),
+                    );
                 }
             }
             continue;
         }
-        let parent = parent.unwrap();
-        let Ok((mut settings, mut state)) = operations.get_mut(completion.context) else {
+        let Ok((_, state)) = operations.get_mut(completion.context) else {
             continue;
         };
         if *state == OperationState::Canceled {
-            commands
+            replies
+                .commands
                 .entity(completion.entity)
                 .remove::<(Running, Lease)>()
                 .insert((Completed, OperationState::Canceled));
             continue;
         }
         if *state != OperationState::Running {
-            commands
+            replies
+                .commands
                 .entity(completion.entity)
                 .remove::<(Running, Lease)>()
                 .insert((Completed, OperationState::Failed));
-            commands.entity(completion.context).insert(CliResult(Err(
-                "Development operation is no longer running".into(),
-            )));
+            replies.send(
+                completion.context,
+                CliResult(Err("Development operation is no longer running".into())),
+            );
             continue;
         }
-        match &completion.result {
+        replies
+            .commands
+            .entity(completion.entity)
+            .insert(Receipt(completion.result.clone()));
+    }
+}
+
+#[derive(Component)]
+#[component(immutable)]
+struct Receipt(std::result::Result<Outcome, Failure>);
+
+type Applying<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Started,
+        Option<&'static ChildOf>,
+        Option<&'static Attempt>,
+        &'static Receipt,
+    ),
+>;
+
+fn apply(
+    receipts: Applying,
+    mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
+    leases: Query<&Lease>,
+    mut replies: Replies,
+) {
+    for (entity, started, parent, attempt, receipt) in &receipts {
+        let Ok((mut settings, mut state)) = operations.get_mut(started.context) else {
+            continue;
+        };
+        if parent.is_none_or(|parent| parent.parent() != started.context)
+            || attempt.is_none_or(|attempt| attempt.0 != started.attempt)
+        {
+            replies.commands.entity(entity).despawn();
+            *state = OperationState::Failed;
+            replies.send(
+                started.context,
+                CliResult(Err("Development step ownership changed".into())),
+            );
+            continue;
+        }
+        if *state != OperationState::Running {
+            replies
+                .commands
+                .entity(entity)
+                .remove::<(Running, Lease, Receipt)>()
+                .insert((Completed, state.clone()));
+            continue;
+        }
+        let parent = parent.unwrap();
+        match &receipt.0 {
             Ok(outcome) => {
                 match outcome {
+                    Outcome::LocalEntries(_) | Outcome::Lease(_) => {
+                        replies.send(
+                            started.context,
+                            CliResult(Err(
+                                "Retired DX receipt requires its concrete typed request".into(),
+                            )),
+                        );
+                    }
                     Outcome::Executable(executable) => {
-                        commands
+                        replies
+                            .commands
                             .entity(parent.parent())
                             .insert(executable.clone())
                             .remove::<Lease>();
                     }
                     Outcome::Done => {
-                        if let Ok(lease) = leases.get(completion.entity) {
-                            commands
-                                .entity(completion.context)
+                        if let Ok(lease) = leases.get(entity) {
+                            replies
+                                .commands
+                                .entity(started.context)
                                 .insert(Lease(lease.0.clone()));
-                            commands.entity(completion.entity).remove::<Lease>();
+                            replies.commands.entity(entity).remove::<Lease>();
                         }
                     }
                     Outcome::Identity(identity) => {
@@ -1728,7 +1916,7 @@ fn collect(
                     }
                     Outcome::Artifacts(paths) => {
                         for path in paths {
-                            commands.spawn((
+                            replies.commands.spawn((
                                 Name::new(path.display().to_string()),
                                 Artifact(path.clone()),
                                 CreatedAt::now(),
@@ -1743,8 +1931,9 @@ fn collect(
                         settings.0.set(key, path);
                     }
                 }
-                commands
-                    .entity(completion.entity)
+                replies
+                    .commands
+                    .entity(entity)
                     .remove::<Running>()
                     .insert((Completed, OperationState::Succeeded));
             }
@@ -1755,15 +1944,15 @@ fn collect(
                     OperationState::Failed
                 };
                 eprintln!("vmux: {error}");
-                commands
-                    .entity(completion.entity)
+                replies
+                    .commands
+                    .entity(entity)
                     .remove::<Running>()
                     .insert((Completed, OperationState::Failed));
-                commands
-                    .entity(parent.parent())
-                    .insert(CliResult(Ok(error.code() as u8)));
+                replies.send(parent.parent(), CliResult(Ok(error.code() as u8)));
             }
         }
+        replies.commands.entity(entity).remove::<Receipt>();
     }
 }
 

@@ -42,7 +42,14 @@ impl bevy_app::Plugin for Plugin {
         .add_systems(
             Update,
             (
-                cancel, compile, prepare, archive, verify, publish, forget, wake,
+                cancel,
+                compile,
+                (prepare, create_staging).chain(),
+                (archive, sign_archive, sign_binary).chain(),
+                verify,
+                publish,
+                forget,
+                wake,
             )
                 .chain()
                 .in_set(Stage::Decide),
@@ -76,13 +83,15 @@ pub(crate) struct Package {
 }
 
 #[derive(Component)]
+#[require(Phase)]
 struct Scope {
     context: Entity,
     attempt: u64,
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
+    #[default]
     Start,
     Compiling,
     Version,
@@ -110,7 +119,9 @@ struct Failed(Failure);
 struct Complete;
 
 #[derive(Component)]
-struct Io;
+struct Io {
+    purpose: Purpose,
+}
 
 #[derive(Component)]
 struct Owner(Entity);
@@ -146,8 +157,9 @@ struct Submitted;
 #[derive(Component)]
 struct Received;
 
-#[derive(Component)]
+#[derive(Clone, Copy, Default)]
 enum Purpose {
+    #[default]
     Compile,
     Version,
     Probe,
@@ -173,7 +185,7 @@ type Packages<'w, 's> = Query<
     (Without<Failed>, Without<Complete>),
 >;
 type Replies<'w, 's, T> =
-    Query<'w, 's, (Entity, &'static Owner, &'static Purpose, &'static T), With<Received>>;
+    Query<'w, 's, (Entity, &'static Owner, &'static Io, &'static T), With<Received>>;
 type Returned<'w, 's, J> = Query<
     'w,
     's,
@@ -207,11 +219,14 @@ struct Writer<'w, 's> {
 }
 
 impl Writer<'_, '_> {
+    fn fail(&mut self, entity: Entity, failure: Failure) {
+        self.commands.entity(entity).insert(Failed(failure));
+    }
+
     fn request<J: StorageJob>(&mut self, root: Entity, purpose: Purpose, job: J) {
         self.commands.spawn((
-            Io,
+            Io { purpose },
             Owner(root),
-            purpose,
             job,
             Operation::bundle("dx.cli-package.io").unwrap(),
             ChildOf(root),
@@ -401,18 +416,19 @@ fn compile(
         }
         if *phase == Phase::Start {
             if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "Standalone CLI release packaging currently targets macOS aarch64",
-                )));
+                io.fail(
+                    entity,
+                    Failure::message(
+                        "Standalone CLI release packaging currently targets macOS aarch64",
+                    ),
+                );
                 continue;
             }
             let Ok((checkout, settings)) = contexts.get(scope.context) else {
                 continue;
             };
             if let Err(error) = settings.0.required("VMUX_UPDATE_PUBLIC_KEY") {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
             let mut environment = settings.0.clone();
@@ -452,15 +468,13 @@ fn compile(
             );
         }
         for (receipt, owner, purpose, output) in &outputs {
-            if owner.0 != entity || !matches!(purpose, Purpose::Compile) {
+            if owner.0 != entity || !matches!(purpose.purpose, Purpose::Compile) {
                 continue;
             }
             if output.0.status.success() {
                 io.commands.entity(entity).insert(Complete);
             } else {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::status(output.0.status)));
+                io.fail(entity, Failure::status(output.0.status));
             }
             io.commands.entity(receipt).despawn();
         }
@@ -471,7 +485,6 @@ fn prepare(
     mut requests: Packages,
     contexts: Query<(&Checkout, &Settings)>,
     receipts: Receipts,
-    versions: Query<&Version>,
     mut io: Writer,
 ) {
     for (entity, scope, package, mut phase) in &mut requests {
@@ -480,9 +493,12 @@ fn prepare(
         };
         if *phase == Phase::Start {
             if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "Standalone CLI release packaging currently targets macOS aarch64",
-                )));
+                io.fail(
+                    entity,
+                    Failure::message(
+                        "Standalone CLI release packaging currently targets macOS aarch64",
+                    ),
+                );
                 continue;
             }
             *phase = Phase::Version;
@@ -493,7 +509,9 @@ fn prepare(
             );
         }
         for (receipt, owner, purpose, bytes) in &receipts.bytes {
-            if owner.0 != entity || !matches!(purpose, Purpose::Version) || *phase != Phase::Version
+            if owner.0 != entity
+                || !matches!(purpose.purpose, Purpose::Version)
+                || *phase != Phase::Version
             {
                 continue;
             }
@@ -509,9 +527,7 @@ fn prepare(
                         .map(str::to_owned)
                 });
             let Some(version) = version else {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message("Missing workspace version")));
+                io.fail(entity, Failure::message("Missing workspace version"));
                 io.commands.entity(receipt).despawn();
                 continue;
             };
@@ -541,8 +557,25 @@ fn prepare(
             );
             io.commands.entity(receipt).despawn();
         }
+    }
+}
+
+fn create_staging(
+    mut requests: Packages,
+    contexts: Query<(&Checkout, &Settings)>,
+    receipts: Receipts,
+    versions: Query<&Version>,
+    mut io: Writer,
+) {
+    for (entity, scope, _package, mut phase) in &mut requests {
+        let Ok((checkout, _settings)) = contexts.get(scope.context) else {
+            continue;
+        };
         for (receipt, owner, purpose, output) in &receipts.outputs {
-            if owner.0 != entity || !matches!(purpose, Purpose::Probe) || *phase != Phase::Probe {
+            if owner.0 != entity
+                || !matches!(purpose.purpose, Purpose::Probe)
+                || *phase != Phase::Probe
+            {
                 continue;
             }
             let Ok(version) = versions.get(entity) else {
@@ -552,9 +585,10 @@ fn prepare(
                 || std::str::from_utf8(&output.0.stdout).ok().map(str::trim)
                     != Some(format!("vmux {}", version.0).as_str())
             {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "Standalone release CLI does not match the workspace version",
-                )));
+                io.fail(
+                    entity,
+                    Failure::message("Standalone release CLI does not match the workspace version"),
+                );
             } else {
                 *phase = Phase::Directory;
                 io.request(
@@ -567,7 +601,7 @@ fn prepare(
         }
         for (receipt, owner, purpose, _) in &receipts.done {
             if owner.0 != entity
-                || !matches!(purpose, Purpose::Directory)
+                || !matches!(purpose.purpose, Purpose::Directory)
                 || *phase != Phase::Directory
             {
                 continue;
@@ -602,7 +636,7 @@ fn archive(
     mut io: Writer,
 ) {
     for (entity, scope, _, mut phase) in &mut requests {
-        let Ok((checkout, settings)) = contexts.get(scope.context) else {
+        let Ok((checkout, _settings)) = contexts.get(scope.context) else {
             continue;
         };
         let Ok(directory) = staging.get(entity) else {
@@ -617,13 +651,11 @@ fn archive(
                 continue;
             }
             if !output.0.status.success() {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::status(output.0.status)));
+                io.fail(entity, Failure::status(output.0.status));
                 io.commands.entity(receipt).despawn();
                 continue;
             }
-            match purpose {
+            match purpose.purpose {
                 Purpose::Binary => {
                     *phase = Phase::Archive;
                     io.request(
@@ -648,16 +680,36 @@ fn archive(
             }
             io.commands.entity(receipt).despawn();
         }
+    }
+}
+
+fn sign_archive(
+    mut requests: Packages,
+    contexts: Query<(&Checkout, &Settings)>,
+    staging: Query<&Directory>,
+    names: Query<&Name>,
+    receipts: Receipts,
+    mut io: Writer,
+) {
+    for (entity, scope, _, mut phase) in &mut requests {
+        let Ok((checkout, settings)) = contexts.get(scope.context) else {
+            continue;
+        };
+        let Ok(directory) = staging.get(entity) else {
+            continue;
+        };
+        let Ok(name) = names.get(entity) else {
+            continue;
+        };
+        let archive = directory.0.path().join(name.as_str());
         for (receipt, owner, purpose, _) in &receipts.done {
-            if owner.0 != entity || !matches!(purpose, Purpose::Archive) {
+            if owner.0 != entity || !matches!(purpose.purpose, Purpose::Archive) {
                 continue;
             }
             let key = match settings.0.required("VMUX_UPDATE_PRIVATE_KEY") {
                 Ok(key) => key.to_owned(),
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::from_error(error)));
+                    io.fail(entity, Failure::from_error(error));
                     continue;
                 }
             };
@@ -691,15 +743,35 @@ fn archive(
             );
             io.commands.entity(receipt).despawn();
         }
+    }
+}
+
+fn sign_binary(
+    mut requests: Packages,
+    contexts: Query<(&Checkout, &Settings)>,
+    staging: Query<&Directory>,
+    names: Query<&Name>,
+    receipts: Receipts,
+    mut io: Writer,
+) {
+    for (entity, scope, _, phase) in &mut requests {
+        let Ok((checkout, settings)) = contexts.get(scope.context) else {
+            continue;
+        };
+        let Ok(directory) = staging.get(entity) else {
+            continue;
+        };
+        let Ok(name) = names.get(entity) else {
+            continue;
+        };
+        let _archive = directory.0.path().join(name.as_str());
         if *phase != Phase::SignBinary || receipts.pending.iter().any(|owner| owner.0 == entity) {
             continue;
         }
         let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
             Ok(value) => value.to_owned(),
             Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::from_error(error)));
+                io.fail(entity, Failure::from_error(error));
                 continue;
             }
         };
@@ -770,7 +842,7 @@ fn verify(
         };
         let Some((signature_receipt, _, _, signature)) =
             signatures.iter().find(|(_, owner, purpose, _)| {
-                owner.0 == entity && matches!(purpose, Purpose::SignatureBytes)
+                owner.0 == entity && matches!(purpose.purpose, Purpose::SignatureBytes)
             })
         else {
             continue;
@@ -1076,9 +1148,10 @@ mod tests {
             ))
             .id();
         app.world_mut().spawn((
-            Io,
+            Io {
+                purpose: Purpose::Compile,
+            },
             Owner(step),
-            Purpose::Compile,
             Capture {
                 environment,
                 directory: root.clone(),

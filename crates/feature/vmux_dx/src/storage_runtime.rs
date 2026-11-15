@@ -53,8 +53,28 @@ impl bevy_app::Plugin for Plugin {
         .add_systems(
             Update,
             (
-                status, initialize, cancel, validate, capacity, directory, processes, usage,
-                protect, locks, evict, select, remove, report, wake,
+                status,
+                initialize,
+                cancel,
+                validate,
+                capacity,
+                (
+                    directory,
+                    scan_roots,
+                    scan_profiles,
+                    scan_caches,
+                    collect_caches,
+                )
+                    .chain(),
+                processes,
+                (collect_usage, usage).chain(),
+                protect,
+                locks,
+                evict,
+                (select, select_caches, retain_apps).chain(),
+                (collect_removals, remove).chain(),
+                report,
+                wake,
             )
                 .chain()
                 .in_set(Stage::Decide),
@@ -74,17 +94,51 @@ enum Stage {
 }
 
 #[derive(Component, Clone)]
-pub(crate) enum Request {
+pub(crate) struct Request {
+    kind: RequestKind,
+    profile: Option<String>,
+    apply: bool,
+}
+
+impl Request {
+    pub(crate) fn new(kind: RequestKind) -> Self {
+        Self {
+            kind,
+            profile: None,
+            apply: false,
+        }
+    }
+
+    pub(crate) fn finish(profile: String) -> Self {
+        Self {
+            kind: RequestKind::Finish,
+            profile: Some(profile),
+            apply: false,
+        }
+    }
+
+    pub(crate) fn clean(apply: bool) -> Self {
+        Self {
+            kind: RequestKind::Clean,
+            profile: None,
+            apply,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RequestKind {
     Validate,
     Check,
     Guard,
     Preflight,
-    Finish(String),
+    Finish,
     Report,
-    Clean(bool),
+    Clean,
 }
 
 #[derive(Component)]
+#[require(Phase)]
 pub(crate) struct Captured {
     pub root: Entity,
     pub attempt: u64,
@@ -96,8 +150,9 @@ pub(crate) struct Loan(pub Option<Arc<crate::target_lock::TargetLock>>);
 #[derive(Component, Clone, Copy)]
 struct Root(Entity);
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
+    #[default]
     Target,
     Canonical,
     Capacity,
@@ -135,21 +190,51 @@ struct Received;
 struct Admitted;
 
 #[derive(Component, Clone, Copy)]
-enum Purpose {
+struct Purpose {
+    kind: PurposeKind,
+    entity: Option<Entity>,
+}
+
+impl Purpose {
+    fn new(kind: PurposeKind) -> Self {
+        Self { kind, entity: None }
+    }
+
+    fn targeted(kind: PurposeKind, entity: Entity) -> Self {
+        Self {
+            kind,
+            entity: Some(entity),
+        }
+    }
+
+    fn target(&self, kind: PurposeKind) -> Option<&Entity> {
+        if self.kind != kind {
+            return None;
+        }
+        self.entity.as_ref()
+    }
+
+    fn is(&self, kind: PurposeKind) -> bool {
+        self.kind == kind && self.entity.is_none()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PurposeKind {
     Target,
     Canonical,
     Capacity,
     Tag,
     Roots,
-    Profiles(Entity),
-    Caches(Entity),
-    CacheEntries(Entity),
-    Increments(Entity),
+    Profiles,
+    Caches,
+    CacheEntries,
+    Increments,
     Usage,
     Revision,
-    Lock(Entity),
-    Delete(Entity),
-    Seed(Entity),
+    Lock,
+    Delete,
+    Seed,
 }
 
 #[derive(Component)]
@@ -245,6 +330,10 @@ struct IoWriter<'w, 's> {
 }
 
 impl IoWriter<'_, '_> {
+    fn fail(&mut self, entity: Entity, failure: Failure) {
+        self.commands.entity(entity).insert(Failed(failure));
+    }
+
     fn request<J: StorageJob>(&mut self, job: J, root: Entity, purpose: Purpose) {
         self.commands.spawn((
             WorkOperation::bundle("dx.storage.io").unwrap(),
@@ -466,6 +555,24 @@ struct Candidates<'w, 's> {
     measured: MeasuredRows<'w, 's>,
 }
 
+impl Candidates<'_, '_> {
+    fn next(&self, root: Entity) -> Option<Entity> {
+        let mut chosen = None;
+        for (entity, owner, _, _, seed, _) in &self.selected {
+            if owner.0 != root {
+                continue;
+            }
+            if seed {
+                return Some(entity);
+            }
+            if chosen.is_none() {
+                chosen = Some(entity);
+            }
+        }
+        chosen
+    }
+}
+
 #[derive(SystemParam)]
 struct Metering<'w, 's> {
     paths: MeasurementRows<'w, 's>,
@@ -476,7 +583,7 @@ struct Metering<'w, 's> {
 }
 
 type InitializeIncoming<'w, 's> =
-    Query<'w, 's, (Entity, &'static Captured), (With<Request>, Without<Phase>)>;
+    Query<'w, 's, (Entity, &'static Captured), (With<Request>, Without<Cwd>)>;
 
 type ReceiveResults<'w, 's, J> = Query<
     'w,
@@ -599,7 +706,7 @@ fn initialize(incoming: InitializeIncoming, facts: Facts, mut commands: Commands
         commands.spawn((
             WorkOperation::bundle("dx.storage.io").unwrap(),
             Inspect(checkout.target.clone()),
-            Purpose::Target,
+            Purpose::new(PurposeKind::Target),
             Root(entity),
             ChildOf(entity),
         ));
@@ -682,51 +789,50 @@ fn validate(
             continue;
         };
         for (receipt, root, purpose, PathMetadata(metadata)) in &receipts.metadata {
-            if root.0 != entity || *phase != Phase::Target || !matches!(purpose, Purpose::Target) {
+            if root.0 != entity || *phase != Phase::Target || !purpose.is(PurposeKind::Target) {
                 continue;
             }
 
-            let path = match metadata {
-                Some(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                    checkout.target.clone()
-                }
-                Some(_) => {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
+            let path =
+                match metadata {
+                    Some(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                        checkout.target.clone()
+                    }
+                    Some(_) => {
+                        io.fail(entity, Failure::message(
                         "Build storage requires a dedicated, nonsymlink Cargo target directory",
-                    )));
-                    io.commands.entity(receipt).despawn();
-                    continue;
-                }
-                None => {
-                    let Some(parent) = checkout.target.parent() else {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message("Missing target parent")));
+                    ));
                         io.commands.entity(receipt).despawn();
                         continue;
-                    };
-                    io.commands.entity(entity).insert(Missing);
-                    parent.to_owned()
-                }
-            };
+                    }
+                    None => {
+                        let Some(parent) = checkout.target.parent() else {
+                            io.fail(entity, Failure::message("Missing target parent"));
+                            io.commands.entity(receipt).despawn();
+                            continue;
+                        };
+                        io.commands.entity(entity).insert(Missing);
+                        parent.to_owned()
+                    }
+                };
             io.commands.entity(entity).insert(Anchor(path.clone()));
-            io.request(Canonicalize(path), entity, Purpose::Canonical);
+            io.request(
+                Canonicalize(path),
+                entity,
+                Purpose::new(PurposeKind::Canonical),
+            );
             *phase = Phase::Canonical;
             io.commands.entity(receipt).despawn();
         }
         for (receipt, root, purpose, CanonicalPath(path)) in &receipts.canonical {
-            if root.0 != entity
-                || *phase != Phase::Canonical
-                || !matches!(purpose, Purpose::Canonical)
+            if root.0 != entity || *phase != Phase::Canonical || !purpose.is(PurposeKind::Canonical)
             {
                 continue;
             }
 
             let canonical = if missing.contains(entity) {
                 let Some(name) = checkout.target.file_name() else {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message("Missing target filename")));
+                    io.fail(entity, Failure::message("Missing target filename"));
                     io.commands.entity(receipt).despawn();
                     continue;
                 };
@@ -735,10 +841,13 @@ fn validate(
                 path.clone()
             };
             if canonical != checkout.target || checkout.root.starts_with(&checkout.target) {
-                io.commands.entity(entity).insert(Failed(Failure::message(
-                    "Build storage requires a dedicated, nonsymlink Cargo target directory",
-                )));
-            } else if matches!(request, Request::Validate) {
+                io.fail(
+                    entity,
+                    Failure::message(
+                        "Build storage requires a dedicated, nonsymlink Cargo target directory",
+                    ),
+                );
+            } else if matches!(request.kind, RequestKind::Validate) {
                 io.commands.entity(entity).insert(Complete);
             } else {
                 *phase = Phase::Capacity;
@@ -764,15 +873,13 @@ fn capacity(
         };
         let mut value = None;
         for (receipt, root, purpose, ToolOutput(output)) in &receipts.output {
-            if root.0 != entity || !matches!(purpose, Purpose::Capacity) {
+            if root.0 != entity || !purpose.is(PurposeKind::Capacity) {
                 continue;
             }
             let text = match std::str::from_utf8(&output.stdout) {
                 Ok(text) => text,
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message(error.to_string())));
+                    io.fail(entity, Failure::message(error.to_string()));
                     io.commands.entity(receipt).despawn();
                     continue;
                 }
@@ -785,9 +892,7 @@ fn capacity(
             }
             io.commands.entity(receipt).despawn();
             if value.is_none() {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message("Invalid filesystem capacity")));
+                io.fail(entity, Failure::message("Invalid filesystem capacity"));
             }
         }
         if let Some(value) = value {
@@ -796,9 +901,9 @@ fn capacity(
             if *phase == Phase::FinalCapacity {
                 *phase = Phase::Reporting;
             } else {
-                match request {
-                    Request::Check | Request::Guard => {
-                        if matches!(request, Request::Check) {
+                match request.kind {
+                    RequestKind::Check | RequestKind::Guard => {
+                        if matches!(request.kind, RequestKind::Check) {
                             println!("Build storage: {:.1} GiB free", value as f64 / GIB as f64);
                             if value < policy.warning {
                                 eprintln!(
@@ -808,14 +913,12 @@ fn capacity(
                             }
                         }
                         if let Err(error) = policy.check(value) {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::from_error(error)));
+                            io.fail(entity, Failure::from_error(error));
                         } else {
                             io.commands.entity(entity).insert(Complete);
                         }
                     }
-                    Request::Preflight => *phase = Phase::Tag,
+                    RequestKind::Preflight => *phase = Phase::Tag,
                     _ => *phase = Phase::Tag,
                 }
             }
@@ -824,7 +927,7 @@ fn capacity(
         if receipts
             .pending
             .iter()
-            .any(|(root, purpose)| root.0 == entity && matches!(purpose, Purpose::Capacity))
+            .any(|(root, purpose)| root.0 == entity && purpose.is(PurposeKind::Capacity))
         {
             continue;
         }
@@ -839,18 +942,12 @@ fn capacity(
                 arguments: vec!["-Pk".into(), anchor.0.clone().into_os_string()],
             },
             entity,
-            Purpose::Capacity,
+            Purpose::new(PurposeKind::Capacity),
         );
     }
 }
 
-fn directory(
-    mut requests: Requests,
-    facts: Facts,
-    receipts: Receipts,
-    scan: Scan,
-    mut io: IoWriter,
-) {
+fn directory(mut requests: Requests, facts: Facts, receipts: Receipts, mut io: IoWriter) {
     for (entity, request, captured, mut phase) in &mut requests {
         let Ok((checkout, _, _, _)) = facts.get(captured.root) else {
             continue;
@@ -859,7 +956,7 @@ fn directory(
             Phase::Tag => {
                 let mut received = false;
                 for (receipt, root, purpose, PathMetadata(metadata)) in &receipts.metadata {
-                    if root.0 != entity || !matches!(purpose, Purpose::Tag) {
+                    if root.0 != entity || !purpose.is(PurposeKind::Tag) {
                         continue;
                     }
                     received = true;
@@ -867,13 +964,13 @@ fn directory(
                         io.request(
                             ReadFile(checkout.target.join("CACHEDIR.TAG")),
                             entity,
-                            Purpose::Tag,
+                            Purpose::new(PurposeKind::Tag),
                         );
                         *phase = Phase::TagRead;
                     } else {
                         if matches!(
-                            request,
-                            Request::Preflight | Request::Clean(_) | Request::Finish(_)
+                            request.kind,
+                            RequestKind::Preflight | RequestKind::Clean | RequestKind::Finish
                         ) {
                             println!("Build storage: no Cargo cache tag; cache deletion skipped");
                         }
@@ -885,13 +982,13 @@ fn directory(
                     io.request(
                         Inspect(checkout.target.join("CACHEDIR.TAG")),
                         entity,
-                        Purpose::Tag,
+                        Purpose::new(PurposeKind::Tag),
                     );
                 }
             }
             Phase::TagRead => {
                 for (receipt, root, purpose, FileBytes(bytes)) in &receipts.bytes {
-                    if root.0 != entity || !matches!(purpose, Purpose::Tag) {
+                    if root.0 != entity || !purpose.is(PurposeKind::Tag) {
                         continue;
                     }
                     match std::str::from_utf8(bytes) {
@@ -902,8 +999,8 @@ fn directory(
                         }
                         Ok(_) => {
                             if matches!(
-                                request,
-                                Request::Preflight | Request::Clean(_) | Request::Finish(_)
+                                request.kind,
+                                RequestKind::Preflight | RequestKind::Clean | RequestKind::Finish
                             ) {
                                 println!(
                                     "Build storage: no Cargo cache tag; cache deletion skipped"
@@ -911,225 +1008,293 @@ fn directory(
                             }
                         }
                         Err(error) => {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::message(error.to_string())));
+                            io.fail(entity, Failure::message(error.to_string()));
                         }
                     }
                     io.commands.entity(receipt).despawn();
                     *phase = Phase::Roots;
                 }
             }
-            Phase::Roots => {
-                if scan.missing.contains(entity) {
-                    io.commands.entity(entity).insert(Usage(0));
-                    *phase = Phase::Usage;
+            _ => {}
+        }
+    }
+}
+
+fn scan_roots(
+    mut requests: Requests,
+    facts: Facts,
+    receipts: Receipts,
+    scan: Scan,
+    mut io: IoWriter,
+) {
+    for (entity, _request, captured, mut phase) in &mut requests {
+        let Ok((checkout, _, _, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        if *phase == Phase::Roots {
+            if scan.missing.contains(entity) {
+                io.commands.entity(entity).insert(Usage(0));
+                *phase = Phase::Usage;
+                continue;
+            }
+            let mut received = false;
+            for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
+                if root.0 != entity || !purpose.is(PurposeKind::Roots) {
                     continue;
                 }
-                let mut received = false;
-                for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
-                    if root.0 != entity || !matches!(purpose, Purpose::Roots) {
-                        continue;
+                received = true;
+                io.commands.spawn((
+                    Search,
+                    Root(entity),
+                    Cwd(checkout.target.clone()),
+                    ChildOf(entity),
+                ));
+                for (path, metadata) in entries {
+                    if metadata.is_dir() {
+                        io.commands.spawn((
+                            Search,
+                            Root(entity),
+                            Cwd(path.clone()),
+                            Name::new(path.file_name().unwrap().to_string_lossy().into_owned()),
+                            Metadata(metadata.clone()),
+                            ChildOf(entity),
+                        ));
                     }
-                    received = true;
-                    io.commands.spawn((
-                        Search,
-                        Root(entity),
-                        Cwd(checkout.target.clone()),
-                        ChildOf(entity),
-                    ));
-                    for (path, metadata) in entries {
-                        if metadata.is_dir() {
-                            io.commands.spawn((
-                                Search,
-                                Root(entity),
-                                Cwd(path.clone()),
-                                Name::new(path.file_name().unwrap().to_string_lossy().into_owned()),
-                                Metadata(metadata.clone()),
-                                ChildOf(entity),
-                            ));
-                        }
-                    }
-                    io.commands.entity(receipt).despawn();
-                    *phase = Phase::Profiles;
                 }
-                if !received && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+                io.commands.entity(receipt).despawn();
+                *phase = Phase::Profiles;
+            }
+            if !received && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+                io.request(
+                    ReadDirectory(checkout.target.clone()),
+                    entity,
+                    Purpose::new(PurposeKind::Roots),
+                );
+            }
+        }
+    }
+}
+
+fn scan_profiles(
+    mut requests: Requests,
+    facts: Facts,
+    receipts: Receipts,
+    scan: Scan,
+    mut io: IoWriter,
+) {
+    for (entity, _request, captured, mut phase) in &mut requests {
+        let Ok((_checkout, _, _, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        if *phase == Phase::Profiles {
+            let mut planned = false;
+            for (search, root, path) in &scan.searches {
+                if root.0 != entity {
+                    continue;
+                }
+                planned = true;
+                for name in ["debug", "release", "cef-helper"] {
+                    let path = path.0.join(name);
+                    let candidate = io
+                        .commands
+                        .spawn((
+                            Candidate,
+                            Root(entity),
+                            Cwd(path.clone()),
+                            Name::new(name),
+                            ChildOf(search),
+                        ))
+                        .id();
                     io.request(
-                        ReadDirectory(checkout.target.clone()),
+                        Inspect(path),
                         entity,
-                        Purpose::Roots,
+                        Purpose::targeted(PurposeKind::Profiles, candidate),
                     );
                 }
+                io.commands.entity(search).insert(Expanded);
             }
-            Phase::Profiles => {
-                let mut planned = false;
-                for (search, root, path) in &scan.searches {
-                    if root.0 != entity {
-                        continue;
-                    }
-                    planned = true;
-                    for name in ["debug", "release", "cef-helper"] {
-                        let path = path.0.join(name);
-                        let candidate = io
-                            .commands
-                            .spawn((
-                                Candidate,
-                                Root(entity),
-                                Cwd(path.clone()),
-                                Name::new(name),
-                                ChildOf(search),
-                            ))
-                            .id();
-                        io.request(Inspect(path), entity, Purpose::Profiles(candidate));
-                    }
-                    io.commands.entity(search).insert(Expanded);
+            for (receipt, root, purpose, PathMetadata(metadata)) in &receipts.metadata {
+                if root.0 != entity {
+                    continue;
                 }
-                for (receipt, root, purpose, PathMetadata(metadata)) in &receipts.metadata {
-                    if root.0 != entity {
-                        continue;
+                let Some(candidate) = purpose.target(PurposeKind::Profiles) else {
+                    continue;
+                };
+                match metadata {
+                    Some(metadata) if metadata.is_dir() => {
+                        io.commands
+                            .entity(*candidate)
+                            .insert((Profile, Metadata(metadata.clone())))
+                            .remove::<Candidate>();
                     }
-                    let Purpose::Profiles(candidate) = purpose else {
-                        continue;
-                    };
-                    match metadata {
-                        Some(metadata) if metadata.is_dir() => {
-                            io.commands
-                                .entity(*candidate)
-                                .insert((Profile, Metadata(metadata.clone())))
-                                .remove::<Candidate>();
-                        }
-                        _ => {
-                            io.commands.entity(*candidate).despawn();
-                        }
+                    _ => {
+                        io.commands.entity(*candidate).despawn();
                     }
-                    io.commands.entity(receipt).despawn();
                 }
-                if !planned && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
-                    *phase = Phase::Caches;
-                }
+                io.commands.entity(receipt).despawn();
             }
-            Phase::Caches => {
-                let mut planned = false;
-                for (profile, root, path) in &scan.profiles {
-                    if root.0 != entity {
-                        continue;
-                    }
-                    planned = true;
-                    for name in [".fingerprint", "deps", "build", "incremental", "examples"] {
-                        let path = path.0.join(name);
-                        let candidate = io
-                            .commands
-                            .spawn((
-                                Candidate,
-                                Root(entity),
-                                Cwd(path.clone()),
-                                Name::new(name),
-                                ChildOf(profile),
-                            ))
-                            .id();
-                        io.request(Inspect(path), entity, Purpose::Caches(candidate));
-                    }
-                    if path.0.file_name() == Some(OsStr::new("release")) {
+            if !planned && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+                *phase = Phase::Caches;
+            }
+        }
+    }
+}
+
+fn scan_caches(
+    mut requests: Requests,
+    facts: Facts,
+    receipts: Receipts,
+    scan: Scan,
+    mut io: IoWriter,
+) {
+    for (entity, _request, captured, phase) in &mut requests {
+        let Ok((_checkout, _, _, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        if *phase != Phase::Caches {
+            continue;
+        }
+
+        let mut _planned = false;
+        for (profile, root, path) in &scan.profiles {
+            if root.0 != entity {
+                continue;
+            }
+            _planned = true;
+            for name in [".fingerprint", "deps", "build", "incremental", "examples"] {
+                let path = path.0.join(name);
+                let candidate = io
+                    .commands
+                    .spawn((
+                        Candidate,
+                        Root(entity),
+                        Cwd(path.clone()),
+                        Name::new(name),
+                        ChildOf(profile),
+                    ))
+                    .id();
+                io.request(
+                    Inspect(path),
+                    entity,
+                    Purpose::targeted(PurposeKind::Caches, candidate),
+                );
+            }
+            if path.0.file_name() == Some(OsStr::new("release")) {
+                io.request(
+                    ReadDirectory(path.0.clone()),
+                    entity,
+                    Purpose::targeted(PurposeKind::CacheEntries, profile),
+                );
+            }
+            io.commands.entity(profile).insert(Expanded);
+        }
+        for (receipt, root, purpose, PathMetadata(metadata)) in &receipts.metadata {
+            if root.0 != entity {
+                continue;
+            }
+            let Some(candidate) = purpose.target(PurposeKind::Caches) else {
+                continue;
+            };
+
+            match metadata {
+                Some(metadata) if metadata.is_dir() => {
+                    io.commands
+                        .entity(*candidate)
+                        .insert((Cache, Metadata(metadata.clone())))
+                        .remove::<Candidate>();
+                    if let Ok(path) = scan.paths.get(*candidate)
+                        && path.0.file_name() == Some(OsStr::new("incremental"))
+                    {
+                        io.commands.entity(*candidate).insert(Incremental);
                         io.request(
                             ReadDirectory(path.0.clone()),
                             entity,
-                            Purpose::CacheEntries(profile),
+                            Purpose::targeted(PurposeKind::Increments, *candidate),
                         );
                     }
-                    io.commands.entity(profile).insert(Expanded);
                 }
-                for (receipt, root, purpose, PathMetadata(metadata)) in &receipts.metadata {
-                    if root.0 != entity {
-                        continue;
-                    }
-                    let Purpose::Caches(candidate) = purpose else {
-                        continue;
-                    };
+                _ => {
+                    io.commands.entity(*candidate).despawn();
+                }
+            }
+            io.commands.entity(receipt).despawn();
+        }
+    }
+}
 
-                    match metadata {
-                        Some(metadata) if metadata.is_dir() => {
-                            io.commands
-                                .entity(*candidate)
-                                .insert((Cache, Metadata(metadata.clone())))
-                                .remove::<Candidate>();
-                            if let Ok(path) = scan.paths.get(*candidate)
-                                && path.0.file_name() == Some(OsStr::new("incremental"))
-                            {
-                                io.commands.entity(*candidate).insert(Incremental);
-                                io.request(
-                                    ReadDirectory(path.0.clone()),
-                                    entity,
-                                    Purpose::Increments(*candidate),
-                                );
-                            }
+fn collect_caches(mut requests: Requests, facts: Facts, receipts: Receipts, mut io: IoWriter) {
+    for (entity, _request, captured, mut phase) in &mut requests {
+        let Ok((_checkout, _, _, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        if *phase != Phase::Caches {
+            continue;
+        }
+        let planned = false;
+        for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
+            if root.0 != entity {
+                continue;
+            }
+            match purpose {
+                Purpose {
+                    kind: PurposeKind::Increments,
+                    entity: Some(cache),
+                } => {
+                    for (path, metadata) in entries {
+                        if !metadata.is_dir() {
+                            continue;
                         }
-                        _ => {
-                            io.commands.entity(*candidate).despawn();
-                        }
+                        io.commands.spawn((
+                            Increment,
+                            Root(entity),
+                            Cwd(path.clone()),
+                            Metadata(metadata.clone()),
+                            ChildOf(*cache),
+                        ));
                     }
                     io.commands.entity(receipt).despawn();
                 }
-                for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
-                    if root.0 != entity {
-                        continue;
-                    }
-                    match purpose {
-                        Purpose::Increments(cache) => {
-                            for (path, metadata) in entries {
-                                if !metadata.is_dir() {
-                                    continue;
-                                }
-                                io.commands.spawn((
-                                    Increment,
-                                    Root(entity),
-                                    Cwd(path.clone()),
-                                    Metadata(metadata.clone()),
-                                    ChildOf(*cache),
-                                ));
-                            }
-                            io.commands.entity(receipt).despawn();
+                Purpose {
+                    kind: PurposeKind::CacheEntries,
+                    entity: Some(profile),
+                } => {
+                    for (path, metadata) in entries {
+                        if !metadata.is_dir() {
+                            continue;
                         }
-                        Purpose::CacheEntries(profile) => {
-                            for (path, metadata) in entries {
-                                if !metadata.is_dir() {
-                                    continue;
-                                }
-                                let Some(name) = path.file_name().and_then(OsStr::to_str) else {
-                                    continue;
-                                };
-                                let Some(revision) = name
-                                    .strip_prefix("Vmux (")
-                                    .and_then(|name| name.strip_suffix(").app"))
-                                else {
-                                    continue;
-                                };
-                                if !(7..=40).contains(&revision.len())
-                                    || !revision.bytes().all(|byte| {
-                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-                                    })
-                                {
-                                    continue;
-                                }
-                                io.commands.spawn((
-                                    Artifact,
-                                    Root(entity),
-                                    Cwd(path.clone()),
-                                    Name::new(name.to_owned()),
-                                    Metadata(metadata.clone()),
-                                    ChildOf(*profile),
-                                ));
-                            }
-                            io.commands.entity(receipt).despawn();
+                        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+                            continue;
+                        };
+                        let Some(revision) = name
+                            .strip_prefix("Vmux (")
+                            .and_then(|name| name.strip_suffix(").app"))
+                        else {
+                            continue;
+                        };
+                        if !(7..=40).contains(&revision.len())
+                            || !revision
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                        {
+                            continue;
                         }
-                        _ => continue,
+                        io.commands.spawn((
+                            Artifact,
+                            Root(entity),
+                            Cwd(path.clone()),
+                            Name::new(name.to_owned()),
+                            Metadata(metadata.clone()),
+                            ChildOf(*profile),
+                        ));
                     }
+                    io.commands.entity(receipt).despawn();
                 }
-
-                if !planned && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
-                    *phase = Phase::Usage;
-                }
+                _ => continue,
             }
-            _ => {}
+        }
+
+        if !planned && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+            *phase = Phase::Usage;
         }
     }
 }
@@ -1168,7 +1333,7 @@ fn processes(
     }
 }
 
-fn usage(
+fn collect_usage(
     mut requests: Requests,
     facts: Facts,
     receipts: Receipts,
@@ -1176,25 +1341,22 @@ fn usage(
     captures: Query<&Capture>,
     mut io: IoWriter,
 ) {
-    for (entity, request, captured, mut phase) in &mut requests {
+    for (entity, _request, captured, phase) in &mut requests {
         if *phase != Phase::Usage {
             continue;
         }
-        let Ok((checkout, settings, storage, _)) = facts.get(captured.root) else {
+        let Ok((_checkout, _settings, _storage, _)) = facts.get(captured.root) else {
             continue;
         };
-        let mut received = false;
+        let _received = false;
         for (receipt, owner, purpose, output) in &receipts.output {
-            if owner.0 != entity || !matches!(purpose, Purpose::Usage) {
+            if owner.0 != entity || !purpose.is(PurposeKind::Usage) {
                 continue;
             }
-            received = true;
             let text = match std::str::from_utf8(&output.0.stdout) {
                 Ok(text) => text,
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message(error.to_string())));
+                    io.fail(entity, Failure::message(error.to_string()));
                     io.commands.entity(receipt).despawn();
                     continue;
                 }
@@ -1247,13 +1409,28 @@ fn usage(
             }
             let expected = expected_paths.len();
             if invalid || matched.len() != expected {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message("Invalid compile cache size")));
+                io.fail(entity, Failure::message("Invalid compile cache size"));
             }
             io.commands.entity(receipt).despawn();
         }
-        if received || receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+    }
+}
+
+fn usage(
+    mut requests: Requests,
+    facts: Facts,
+    receipts: Receipts,
+    metering: Metering,
+    mut io: IoWriter,
+) {
+    for (entity, request, captured, mut phase) in &mut requests {
+        if *phase != Phase::Usage {
+            continue;
+        }
+        let Ok((checkout, settings, storage, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        if receipts.pending.iter().any(|(root, _)| root.0 == entity) {
             continue;
         }
         let mut total = 0u64;
@@ -1296,9 +1473,7 @@ fn usage(
             }
         }
         if overflow {
-            io.commands
-                .entity(entity)
-                .insert(Failed(Failure::message("Compile cache size overflow")));
+            io.fail(entity, Failure::message("Compile cache size overflow"));
             continue;
         }
         if !measured {
@@ -1310,7 +1485,7 @@ fn usage(
                     arguments,
                 },
                 entity,
-                Purpose::Usage,
+                Purpose::new(PurposeKind::Usage),
             );
             continue;
         }
@@ -1325,15 +1500,16 @@ fn usage(
             .capacities
             .get(entity)
             .is_ok_and(|capacity| capacity.0 < storage.policy().minimum);
-        match request {
-            Request::Report => *phase = Phase::Reporting,
-            Request::Clean(_) if metering.tagged.contains(entity) => {
+        match request.kind {
+            RequestKind::Report => *phase = Phase::Reporting,
+            RequestKind::Clean if metering.tagged.contains(entity) => {
                 io.commands.entity(entity).insert(Pruning);
                 *phase = Phase::Processes;
             }
-            Request::Preflight | Request::Finish(_) if metering.tagged.contains(entity) => {
+            RequestKind::Preflight | RequestKind::Finish if metering.tagged.contains(entity) => {
                 if low
-                    || matches!(request, Request::Finish(_)) && total > storage.policy().cache_limit
+                    || matches!(request.kind, RequestKind::Finish)
+                        && total > storage.policy().cache_limit
                 {
                     io.commands.entity(entity).insert(Pruning);
                 }
@@ -1408,14 +1584,14 @@ fn locks(
             io.request(
                 Open(path.0.join(".cargo-lock"), options),
                 entity,
-                Purpose::Lock(profile),
+                Purpose::targeted(PurposeKind::Lock, profile),
             );
         }
         for (receipt, root, purpose, OpenedFile(file)) in &receipts.file {
             if root.0 != entity {
                 continue;
             }
-            let Purpose::Lock(profile) = purpose else {
+            let Some(profile) = purpose.target(PurposeKind::Lock) else {
                 continue;
             };
             match file.try_lock() {
@@ -1424,9 +1600,7 @@ fn locks(
                 }
                 Err(TryLockError::WouldBlock) => {}
                 Err(TryLockError::Error(error)) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message(error.to_string())));
+                    io.fail(entity, Failure::message(error.to_string()));
                 }
             }
             io.commands.entity(receipt).despawn();
@@ -1500,21 +1674,19 @@ fn select(
     mut requests: Requests,
     facts: Facts,
     retention: Retention,
-    candidates: Candidates,
-    profiles: Profiles,
     receipts: Receipts,
     mut io: IoWriter,
 ) {
-    for (entity, request, captured, mut phase) in &mut requests {
+    for (entity, request, captured, phase) in &mut requests {
         if *phase != Phase::Select {
             continue;
         }
-        let Ok((checkout, settings, storage, _)) = facts.get(captured.root) else {
+        let Ok((checkout, settings, _storage, _)) = facts.get(captured.root) else {
             continue;
         };
         if !retention.choosing.contains(entity) {
             io.commands.entity(entity).insert(Choosing);
-            if matches!(request, Request::Finish(profile) if profile == "local")
+            if matches!(request.kind, RequestKind::Finish if request.profile.as_deref() == Some("local"))
                 && retention.tagged.contains(entity)
             {
                 io.request(
@@ -1525,14 +1697,14 @@ fn select(
                         arguments: vec!["rev-parse".into(), "--short=7".into(), "HEAD".into()],
                     },
                     entity,
-                    Purpose::Revision,
+                    Purpose::new(PurposeKind::Revision),
                 );
             } else {
                 io.commands.entity(entity).insert(Current(String::new()));
             }
         }
         for (receipt, root, purpose, ToolOutput(output)) in &receipts.output {
-            if root.0 != entity || !matches!(purpose, Purpose::Revision) {
+            if root.0 != entity || !purpose.is(PurposeKind::Revision) {
                 continue;
             }
 
@@ -1544,9 +1716,7 @@ fn select(
                             .bytes()
                             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                     {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message("Invalid current build revision")));
+                        io.fail(entity, Failure::message("Invalid current build revision"));
                     } else {
                         io.commands
                             .entity(entity)
@@ -1554,9 +1724,7 @@ fn select(
                     }
                 }
                 Err(error) => {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message(error.to_string())));
+                    io.fail(entity, Failure::message(error.to_string()));
                 }
             }
             io.commands.entity(receipt).despawn();
@@ -1565,7 +1733,7 @@ fn select(
             if root.0 != entity {
                 continue;
             }
-            let Purpose::CacheEntries(cache) = purpose else {
+            let Some(cache) = purpose.target(PurposeKind::CacheEntries) else {
                 continue;
             };
 
@@ -1586,14 +1754,31 @@ fn select(
             }
             io.commands.entity(receipt).despawn();
         }
+    }
+}
 
-        let mut planned = false;
+fn select_caches(
+    mut requests: Requests,
+    facts: Facts,
+    retention: Retention,
+    candidates: Candidates,
+    profiles: Profiles,
+    mut io: IoWriter,
+) {
+    for (entity, _request, captured, phase) in &mut requests {
+        if *phase != Phase::Select {
+            continue;
+        }
+        let Ok((_checkout, _settings, _storage, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        let mut _planned = false;
         if retention.pruning.contains(entity) {
             for (cache, root, path, parent) in &candidates.caches {
                 if root.0 != entity {
                     continue;
                 }
-                planned = true;
+                _planned = true;
                 io.commands.entity(cache).insert(Expanded);
                 if profiles.locks.get(parent.parent()).is_err() || profiles.active.contains(cache) {
                     continue;
@@ -1607,17 +1792,36 @@ fn select(
                     io.request(
                         ReadDirectory(path.0.clone()),
                         entity,
-                        Purpose::CacheEntries(cache),
+                        Purpose::targeted(PurposeKind::CacheEntries, cache),
                     );
                 } else {
                     io.commands.entity(cache).insert(Selected);
                 }
             }
         }
+    }
+}
+
+fn retain_apps(
+    mut requests: Requests,
+    facts: Facts,
+    retention: Retention,
+    candidates: Candidates,
+    profiles: Profiles,
+    receipts: Receipts,
+    mut io: IoWriter,
+) {
+    for (entity, request, captured, mut phase) in &mut requests {
+        if *phase != Phase::Select {
+            continue;
+        }
+        let Ok((_checkout, _settings, storage, _)) = facts.get(captured.root) else {
+            continue;
+        };
         let Ok(current) = retention.currents.get(entity) else {
             continue;
         };
-        if matches!(request, Request::Finish(profile) if profile == "local")
+        if matches!(request.kind, RequestKind::Finish if request.profile.as_deref() == Some("local"))
             && retention.tagged.contains(entity)
         {
             let mut ordered = Vec::new();
@@ -1631,9 +1835,7 @@ fn select(
                 let modified = match metadata.0.modified() {
                     Ok(modified) => modified,
                     Err(error) => {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message(error.to_string())));
+                        io.fail(entity, Failure::message(error.to_string()));
                         continue;
                     }
                 };
@@ -1672,38 +1874,32 @@ fn select(
                 }
             }
         }
-        if !planned && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+        if !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
             *phase = Phase::Removing;
         }
     }
 }
 
-fn remove(
+fn collect_removals(
     mut requests: Requests,
     facts: Facts,
     candidates: Candidates,
     profiles: Profiles,
     receipts: Receipts,
-    retention: Retention,
     mut io: IoWriter,
 ) {
-    for (entity, request, captured, mut phase) in &mut requests {
+    for (entity, _, captured, phase) in &mut requests {
         if *phase != Phase::Removing {
             continue;
         }
         let Ok((checkout, _, _, _)) = facts.get(captured.root) else {
             continue;
         };
-        let apply = match request {
-            Request::Clean(apply) => *apply,
-            Request::Preflight | Request::Finish(_) => true,
-            _ => false,
-        };
         for (receipt, root, purpose, _) in &receipts.done {
             if root.0 != entity {
                 continue;
             }
-            let Purpose::Delete(target) = purpose else {
+            let Some(target) = purpose.target(PurposeKind::Delete) else {
                 continue;
             };
 
@@ -1724,7 +1920,7 @@ fn remove(
             if root.0 != entity {
                 continue;
             }
-            let Purpose::Seed(profile) = purpose else {
+            let Some(profile) = purpose.target(PurposeKind::Seed) else {
                 continue;
             };
             if let Some(metadata) = metadata
@@ -1741,23 +1937,34 @@ fn remove(
             }
             io.commands.entity(receipt).despawn();
         }
+    }
+}
 
+fn remove(
+    mut requests: Requests,
+    facts: Facts,
+    candidates: Candidates,
+    profiles: Profiles,
+    receipts: Receipts,
+    retention: Retention,
+    mut io: IoWriter,
+) {
+    for (entity, request, captured, mut phase) in &mut requests {
+        if *phase != Phase::Removing {
+            continue;
+        }
+        let Ok((checkout, _, _, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        let apply = match request.kind {
+            RequestKind::Clean => request.apply,
+            RequestKind::Preflight | RequestKind::Finish => true,
+            _ => false,
+        };
         if receipts.pending.iter().any(|(root, _)| root.0 == entity) {
             continue;
         }
-        let mut chosen = None;
-        for item in &candidates.selected {
-            if item.1.0 != entity {
-                continue;
-            }
-            if chosen.is_none() || item.4 {
-                chosen = Some(item);
-            }
-            if item.4 {
-                break;
-            }
-        }
-        let Some((target, _, path, metadata, seed, artifact)) = chosen else {
+        let Some(target) = candidates.next(entity) else {
             io.commands
                 .entity(entity)
                 .insert(Processed)
@@ -1767,20 +1974,24 @@ fn remove(
                     io.commands.entity(row).remove::<Usage>();
                 }
             }
-            *phase = if matches!(request, Request::Preflight) {
+            *phase = if matches!(request.kind, RequestKind::Preflight) {
                 Phase::FinalCapacity
             } else {
                 Phase::Usage
             };
             continue;
         };
+        let Ok((_, _, path, metadata, seed, artifact)) = candidates.selected.get(target) else {
+            continue;
+        };
         if !path.0.starts_with(&checkout.target) || path.0 == checkout.target {
-            io.commands
-                .entity(entity)
-                .insert(Failed(Failure::message(format!(
+            io.fail(
+                entity,
+                Failure::message(format!(
                     "Refusing to delete outside Cargo target: {}",
                     path.0.display()
-                ))));
+                )),
+            );
             continue;
         }
         let mut ancestor = target;
@@ -1803,7 +2014,7 @@ fn remove(
                 io.request(
                     Inspect(checkout.target.join(".vmux-seed")),
                     entity,
-                    Purpose::Seed(profile),
+                    Purpose::targeted(PurposeKind::Seed, profile),
                 );
                 continue;
             }
@@ -1826,7 +2037,7 @@ fn remove(
                 lock,
             },
             entity,
-            Purpose::Delete(target),
+            Purpose::targeted(PurposeKind::Delete, target),
         );
     }
 }
@@ -1849,8 +2060,8 @@ fn report(
             continue;
         };
         let policy = storage.policy();
-        match request {
-            Request::Preflight => {
+        match request.kind {
+            RequestKind::Preflight => {
                 println!(
                     "Build storage: {:.1} GiB free",
                     capacity.0 as f64 / GIB as f64
@@ -1866,7 +2077,8 @@ fn report(
                     );
                 }
             }
-            Request::Finish(profile) => {
+            RequestKind::Finish => {
+                let profile = request.profile.as_deref().unwrap();
                 println!(
                     "Build storage: {:.1} GiB free after {profile} build",
                     capacity.0 as f64 / GIB as f64
@@ -1877,7 +2089,7 @@ fn report(
                     );
                 }
             }
-            Request::Clean(_) | Request::Report => {
+            RequestKind::Clean | RequestKind::Report => {
                 let Ok(usage) = usages.get(entity) else {
                     continue;
                 };
@@ -2046,7 +2258,7 @@ fn finish(
         }
         let result = match failed {
             Some(failed)
-                if matches!(request, Request::Finish(_)) && Signals::pending().is_none() =>
+                if matches!(request.kind, RequestKind::Finish) && Signals::pending().is_none() =>
             {
                 eprintln!(
                     "Build storage: cleanup skipped after successful build: {}",
@@ -2157,15 +2369,15 @@ mod tests {
                     self.storage.clone(),
                 ))
                 .id();
-            let guard = matches!(request, Request::Guard);
-            let work = match request {
-                Request::Validate => unreachable!(),
-                Request::Check => crate::work::Work::Check,
-                Request::Guard => crate::work::Work::Check,
-                Request::Preflight => crate::work::Work::Preflight,
-                Request::Finish(profile) => crate::work::Work::Finish(profile),
-                Request::Report => crate::work::Work::Status,
-                Request::Clean(apply) => crate::work::Work::Clean(apply),
+            let guard = matches!(request.kind, RequestKind::Guard);
+            let work = match request.kind {
+                RequestKind::Validate => unreachable!(),
+                RequestKind::Check => crate::work::Work::Check,
+                RequestKind::Guard => crate::work::Work::Check,
+                RequestKind::Preflight => crate::work::Work::Preflight,
+                RequestKind::Finish => crate::work::Work::Finish(request.profile.clone().unwrap()),
+                RequestKind::Report => crate::work::Work::Status,
+                RequestKind::Clean => crate::work::Work::Clean(request.apply),
             };
             let step = app
                 .world_mut()
@@ -2188,7 +2400,7 @@ mod tests {
                             attempt: 1,
                         },
                         OperationState::Running,
-                        Request::Guard,
+                        Request::new(RequestKind::Guard),
                         Captured {
                             root: operation,
                             attempt: 1,
@@ -2291,7 +2503,7 @@ mod tests {
         for profile in profiles {
             fixture.caches(profile);
         }
-        assert_eq!(fixture.run(Request::Clean(true)), 0);
+        assert_eq!(fixture.run(Request::clean(true)), 0);
         for profile in profiles {
             let path = fixture.checkout.target.join(profile);
             assert_eq!(
@@ -2325,7 +2537,7 @@ mod tests {
                 .display()
         );
         fixture.observe("12 vmux_desktop", &opened);
-        assert_eq!(fixture.run(Request::Clean(true)), 0);
+        assert_eq!(fixture.run(Request::clean(true)), 0);
         assert!(
             fixture
                 .checkout
@@ -2364,7 +2576,7 @@ mod tests {
         fixture.caches("debug");
         let lock = File::create(fixture.checkout.target.join("debug/.cargo-lock")).unwrap();
         lock.lock().unwrap();
-        assert_eq!(fixture.run(Request::Clean(true)), 0);
+        assert_eq!(fixture.run(Request::clean(true)), 0);
         assert!(fixture.checkout.target.join("debug/deps/object.o").exists());
         assert!(
             fixture
@@ -2387,7 +2599,7 @@ mod tests {
         let fixture = Fixture::new();
         fixture.caches("debug");
         fs::remove_file(fixture.checkout.target.join("CACHEDIR.TAG")).unwrap();
-        assert_eq!(fixture.run(Request::Clean(true)), 0);
+        assert_eq!(fixture.run(Request::clean(true)), 0);
         assert!(fixture.checkout.target.join("debug/deps/object.o").exists());
     }
 
@@ -2401,7 +2613,7 @@ mod tests {
         fs::write(outside.join("important"), "user data").unwrap();
         std::os::unix::fs::symlink(&outside, fixture.checkout.target.join("debug/examples"))
             .unwrap();
-        assert_eq!(fixture.run(Request::Clean(true)), 0);
+        assert_eq!(fixture.run(Request::clean(true)), 0);
         assert_eq!(
             fs::read_to_string(outside.join("important")).unwrap(),
             "user data"
@@ -2409,18 +2621,18 @@ mod tests {
         let link = fixture.checkout.root.join("target-link");
         std::os::unix::fs::symlink(&fixture.checkout.target, &link).unwrap();
         fixture.checkout.target = link;
-        assert_ne!(fixture.run(Request::Clean(true)), 0);
+        assert_ne!(fixture.run(Request::clean(true)), 0);
         let dangling = fixture.checkout.root.join("dangling-target");
         std::os::unix::fs::symlink(fixture.checkout.root.join("missing"), &dangling).unwrap();
         fixture.checkout.target = dangling;
-        assert_ne!(fixture.run(Request::Clean(true)), 0);
+        assert_ne!(fixture.run(Request::clean(true)), 0);
     }
 
     #[test]
     fn cleanup_preview_keeps_cache_and_seed_marker() {
         let fixture = Fixture::new();
         fixture.caches("debug");
-        assert_eq!(fixture.run(Request::Clean(false)), 0);
+        assert_eq!(fixture.run(Request::clean(false)), 0);
         assert!(fixture.checkout.target.join("debug/deps/object.o").exists());
         assert!(
             fixture
@@ -2459,7 +2671,7 @@ mod tests {
             apps[1].join("Contents/MacOS/vmux_desktop").display()
         );
         fixture.observe("12 vmux_desktop", &opened);
-        assert_eq!(fixture.run(Request::Finish("local".into())), 0);
+        assert_eq!(fixture.run(Request::finish("local".into())), 0);
         for (index, app) in apps.iter().enumerate() {
             assert_eq!(app.exists(), matches!(index, 0 | 1 | 5 | 6));
         }
@@ -2487,7 +2699,7 @@ mod tests {
             "shipping app",
         );
         fixture.write("release/Vmux.dmg", "shipping image");
-        assert_eq!(fixture.run(Request::Finish("release".into())), 0);
+        assert_eq!(fixture.run(Request::finish("release".into())), 0);
         assert!(
             !fixture
                 .checkout
@@ -2507,7 +2719,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.caches("debug");
         fixture.storage.policy.warning = u64::MAX;
-        assert_eq!(fixture.run(Request::Finish("dev".into())), 0);
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
         assert!(fixture.checkout.target.join("debug/deps/object.o").exists());
         assert!(
             fixture
@@ -2529,7 +2741,7 @@ mod tests {
             "ready app",
         );
         fixture.observe("12 vmux_desktop", &format!("p12\nn{}\n", app.display()));
-        assert_eq!(fixture.run(Request::Finish("dev".into())), 0);
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
         assert!(!old.exists());
         assert_eq!(
             fs::read(recent.join("query-cache.bin")).unwrap(),
@@ -2545,7 +2757,7 @@ mod tests {
         let cache = fixture.incremental("debug", "compiling-crate", 1);
         let lock = File::create(fixture.checkout.target.join("debug/.cargo-lock")).unwrap();
         lock.lock().unwrap();
-        assert_eq!(fixture.run(Request::Finish("dev".into())), 0);
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
         assert_eq!(
             fs::read(cache.join("query-cache.bin")).unwrap(),
             vec![b'x'; 512 * 1024]
@@ -2560,7 +2772,7 @@ mod tests {
         fixture.storage.policy.cache_limit = 1;
         let old = fixture.incremental("debug", "old-crate", 1);
         let recent = fixture.incremental("debug", "recent-crate", 2);
-        assert_eq!(fixture.run(Request::Preflight), 0);
+        assert_eq!(fixture.run(Request::new(RequestKind::Preflight)), 0);
         assert!(!old.exists());
         assert_eq!(
             fs::read(recent.join("query-cache.bin")).unwrap(),
@@ -2581,7 +2793,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.storage.policy.incremental_limit = 2 * 1024 * 1024;
         let cache = fixture.incremental("debug", "warm-crate", 1);
-        assert_eq!(fixture.run(Request::Finish("dev".into())), 0);
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
         assert_eq!(
             fs::read(cache.join("query-cache.bin")).unwrap(),
             vec![b'x'; 512 * 1024]
@@ -2594,7 +2806,7 @@ mod tests {
         fixture.storage.policy.incremental_limit = 768 * 1024;
         let recent = fixture.incremental("debug", "recent-crate", 2);
         let old = fixture.incremental("release", "old-crate", 1);
-        assert_eq!(fixture.run(Request::Finish("dev".into())), 0);
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
         assert!(!old.exists());
         assert_eq!(
             fs::read(recent.join("query-cache.bin")).unwrap(),
@@ -2608,7 +2820,7 @@ mod tests {
         let file = fixture.checkout.root.join("source");
         fs::write(&file, "source code").unwrap();
         fixture.checkout.target = fixture.checkout.root.clone();
-        assert_ne!(fixture.run(Request::Clean(true)), 0);
+        assert_ne!(fixture.run(Request::clean(true)), 0);
         assert_eq!(fs::read_to_string(file).unwrap(), "source code");
     }
 }
