@@ -596,7 +596,6 @@ fn identity(
     facts: Facts,
     identities: Query<&Identity>,
     keychains: Query<&Keychain>,
-    mut commands: Commands,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
@@ -615,7 +614,7 @@ fn identity(
                         Some(value) => match value.to_str() {
                             Some(value) => value.to_owned(),
                             None => {
-                                commands
+                                io.commands
                                     .entity(entity)
                                     .insert(Failed(Failure::message("Invalid signing identity")));
                                 continue;
@@ -626,7 +625,7 @@ fn identity(
                     if *print {
                         println!("{identity}");
                     }
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Complete(Outcome::Identity(identity)));
                     continue;
@@ -635,20 +634,20 @@ fn identity(
                     .get("VMUX_LOCAL_SIGNING_IDENTITY")
                     .unwrap_or(OsStr::new("Vmux Dev"));
                 let Some(identity) = identity.to_str() else {
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Failed(Failure::message("Invalid signing identity")));
                     continue;
                 };
                 if identity.contains(['\r', '\n']) {
-                    commands.entity(entity).insert(Failed(Failure::message(
+                    io.commands.entity(entity).insert(Failed(Failure::message(
                         "Signing identity must be a single line",
                     )));
                     continue;
                 }
-                commands.entity(entity).insert(Identity(identity.into()));
+                io.commands.entity(entity).insert(Identity(identity.into()));
                 if let Some(keychain) = environment.get("VMUX_LOCAL_CODESIGN_KEYCHAIN") {
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Keychain(keychain.to_owned()));
                 } else {
@@ -678,12 +677,14 @@ fn identity(
                             continue;
                         };
                         let keychain = OsString::from(value.trim().trim_matches('"'));
-                        commands.entity(entity).insert(Keychain(keychain.clone()));
+                        io.commands
+                            .entity(entity)
+                            .insert(Keychain(keychain.clone()));
                         keychain
                     }
                 };
                 if keychain.is_empty() {
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Failed(Failure::message("Default user keychain not found")));
                     continue;
@@ -711,7 +712,7 @@ fn identity(
                     if *print {
                         println!("{}", identity.0);
                     }
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Complete(Outcome::Identity(identity.0.clone())));
                     continue;
@@ -884,7 +885,7 @@ fn identity(
                     continue;
                 };
                 if !found.contains(&format!("\"{}\"", identity.0)) {
-                    commands.entity(entity).insert(Failed(Failure::message(
+                    io.commands.entity(entity).insert(Failed(Failure::message(
                         "Created identity is not valid for codesigning",
                     )));
                     continue;
@@ -897,7 +898,7 @@ fn identity(
                 if *print {
                     println!("{}", identity.0);
                 }
-                commands
+                io.commands
                     .entity(entity)
                     .insert(Complete(Outcome::Identity(identity.0.clone())));
             }
@@ -906,13 +907,7 @@ fn identity(
     }
 }
 
-fn capacity(
-    mut requests: Requests,
-    facts: Facts,
-    targets: Query<&Target>,
-    mut commands: Commands,
-    mut io: IoWriter,
-) {
+fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         let Request::Capacity { minimum } = request else {
             continue;
@@ -923,7 +918,7 @@ fn capacity(
         let mut previous = None;
         match *phase {
             Phase::Start => {
-                commands
+                io.commands
                     .entity(entity)
                     .insert(Target(checkout.target.clone()));
                 *phase = Phase::CapacityInspect;
@@ -960,7 +955,7 @@ fn capacity(
                     );
                 } else if let Some(parent) = target.0.parent() {
                     let parent = parent.to_owned();
-                    commands.entity(entity).insert(Target(parent.clone()));
+                    io.commands.entity(entity).insert(Target(parent.clone()));
                     io.request(
                         &mut sequence,
                         entity,
@@ -970,7 +965,7 @@ fn capacity(
                         false,
                     );
                 } else {
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Failed(Failure::message("Cannot find target filesystem")));
                 }
@@ -991,16 +986,16 @@ fn capacity(
                 };
                 match free {
                     Some(free) if free >= *minimum => {
-                        commands.entity(entity).insert(Complete(Outcome::Done));
+                        io.commands.entity(entity).insert(Complete(Outcome::Done));
                     }
                     Some(_) => {
-                        commands.entity(entity).insert(Failed(Failure::message(format!(
+                        io.commands.entity(entity).insert(Failed(Failure::message(format!(
                             "Insufficient build space: need {} GiB free; stop unused apps/builds and run vmux cache clean --apply",
                             *minimum as f64 / crate::policy::GIB as f64,
                         ))));
                     }
                     None => {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message("Invalid filesystem capacity")));
                     }
@@ -1011,7 +1006,7 @@ fn capacity(
     }
 }
 
-fn clear(mut requests: Requests, facts: Facts, mut commands: Commands, mut io: IoWriter) {
+fn clear(mut requests: Requests, facts: Facts, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if !matches!(request, Request::Clear) || facts.pending(entity) {
             continue;
@@ -1022,7 +1017,7 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands, mut io: I
                 let product = match settings.0.product(&checkout.root) {
                     Ok(product) => product,
                     Err(error) => {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message(error.to_string())));
                         continue;
@@ -1062,7 +1057,7 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands, mut io: I
                 let product = match settings.0.product(&checkout.root) {
                     Ok(product) => product,
                     Err(error) => {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message(error.to_string())));
                         continue;
@@ -1097,7 +1092,7 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands, mut io: I
                 *phase = Phase::ClearFinish;
             }
             Phase::ClearFinish => {
-                commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
             _ => {}
         }
@@ -1194,7 +1189,6 @@ fn bundle(
     layouts: Query<&Layout>,
     signatures: Signatures,
     wake: Res<JobWake>,
-    mut commands: Commands,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
@@ -1205,7 +1199,7 @@ fn bundle(
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                commands
+                io.commands
                     .entity(entity)
                     .insert(Failed(Failure::message(error.to_string())));
                 continue;
@@ -1271,7 +1265,7 @@ fn bundle(
                 let manifest: toml::Table = match manifest.parse() {
                     Ok(manifest) => manifest,
                     Err(error) => {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message(error.to_string())));
                         continue;
@@ -1283,7 +1277,7 @@ fn bundle(
                     .and_then(|value| value.get("version"))
                     .and_then(toml::Value::as_str)
                 else {
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Failed(Failure::message("Missing workspace version")));
                     continue;
@@ -1459,7 +1453,7 @@ fn bundle(
                 let binary = service_contents
                     .join("MacOS")
                     .join(product.value("VMUX_HOST_SERVICE_NAME"));
-                commands.entity(entity).insert(Layout {
+                io.commands.entity(entity).insert(Layout {
                     app,
                     service,
                     binary,
@@ -1469,7 +1463,8 @@ fn bundle(
             }
             Phase::BundleService => {
                 let layout = layouts.get(entity).unwrap();
-                let signature = commands
+                let signature = io
+                    .commands
                     .spawn((
                         Request::Signature {
                             path: layout.service.clone(),
@@ -1496,7 +1491,8 @@ fn bundle(
                 .into_iter()
                 .enumerate()
                 {
-                    commands.spawn((Input(path), Order(order as u32), ChildOf(signature)));
+                    io.commands
+                        .spawn((Input(path), Order(order as u32), ChildOf(signature)));
                 }
                 *phase = Phase::BundleServiceWait;
             }
@@ -1507,7 +1503,7 @@ fn bundle(
                         continue;
                     }
                     if let Some(failed) = failed {
-                        commands.entity(entity).insert(failed.clone());
+                        io.commands.entity(entity).insert(failed.clone());
                         pending = true;
                         break;
                     }
@@ -1517,7 +1513,7 @@ fn bundle(
                     continue;
                 }
                 if *phase == Phase::BundleWait {
-                    commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
                     continue;
                 }
                 io.request(
@@ -1545,7 +1541,8 @@ fn bundle(
                 };
                 let layout = layouts.get(entity).unwrap();
                 let binary = layout.app.join("Contents/MacOS/vmux_desktop");
-                let signature = commands
+                let signature = io
+                    .commands
                     .spawn((
                         Request::Signature {
                             path: layout.app.clone(),
@@ -1571,7 +1568,8 @@ fn bundle(
                     ))
                     .id();
                 for path in [debug.join("deps"), stdlib.trim().into()] {
-                    commands.spawn((Rpath(path), Order(0), ChildOf(signature)));
+                    io.commands
+                        .spawn((Rpath(path), Order(0), ChildOf(signature)));
                 }
                 for (order, path) in [
                     debug.join("vmux_desktop"),
@@ -1583,7 +1581,8 @@ fn bundle(
                 .into_iter()
                 .enumerate()
                 {
-                    commands.spawn((Input(path), Order(order as u32), ChildOf(signature)));
+                    io.commands
+                        .spawn((Input(path), Order(order as u32), ChildOf(signature)));
                 }
                 *phase = Phase::BundleWait;
             }
@@ -1601,7 +1600,6 @@ fn publish(
     facts: Facts,
     files: Query<(&File, &Order, &ChildOf)>,
     wake: Res<JobWake>,
-    mut commands: Commands,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
@@ -1622,7 +1620,7 @@ fn publish(
                     let product = match settings.0.product(&checkout.root) {
                         Ok(product) => product,
                         Err(error) => {
-                            commands
+                            io.commands
                                 .entity(entity)
                                 .insert(Failed(Failure::message(error.to_string())));
                             continue;
@@ -1640,7 +1638,8 @@ fn publish(
                     );
                 }
                 for (order, path) in paths.into_iter().enumerate() {
-                    commands.spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
+                    io.commands
+                        .spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
                     io.request(
                         &mut sequence,
                         entity,
@@ -1671,7 +1670,7 @@ fn publish(
                 for (file, order, _) in sources {
                     let valid = matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
                     if !valid {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message(format!(
                                 "Missing executable: {}",
@@ -1691,7 +1690,7 @@ fn publish(
                 }
                 if cfg!(target_os = "macos") {
                     if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(None))) {
-                        commands.entity(entity).insert(Failed(Failure::message(
+                        io.commands.entity(entity).insert(Failed(Failure::message(
                             "Cannot publish debug app over existing artifact",
                         )));
                         continue;
@@ -1699,7 +1698,7 @@ fn publish(
                     let product = match settings.0.product(&checkout.root) {
                         Ok(product) => product,
                         Err(error) => {
-                            commands
+                            io.commands
                                 .entity(entity)
                                 .insert(Failed(Failure::message(error.to_string())));
                             continue;
@@ -1748,7 +1747,7 @@ fn publish(
                     let product = match settings.0.product(&checkout.root) {
                         Ok(product) => product,
                         Err(error) => {
-                            commands
+                            io.commands
                                 .entity(entity)
                                 .insert(Failed(Failure::message(error.to_string())));
                             continue;
@@ -1758,7 +1757,7 @@ fn publish(
                 } else {
                     debug.join("vmux_desktop")
                 };
-                commands
+                io.commands
                     .entity(entity)
                     .insert(Complete(Outcome::Artifacts(vec![path])));
             }
@@ -1778,7 +1777,6 @@ fn run(
     checks: Query<(&File, &Expected, &Order, &ChildOf)>,
     entries: Query<(&crate::local::Entry, &ChildOf)>,
     wake: Res<JobWake>,
-    mut commands: Commands,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
@@ -1854,13 +1852,13 @@ fn run(
                 );
                 *phase = Phase::LaunchDone;
             } else {
-                commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
         } else {
             let product = match settings.0.product(&checkout.root) {
                 Ok(product) => product,
                 Err(error) => {
-                    commands
+                    io.commands
                         .entity(entity)
                         .insert(Failed(Failure::message(error.to_string())));
                     continue;
@@ -1897,7 +1895,7 @@ fn run(
                                 Tag::Path,
                                 false,
                             );
-                            commands.entity(entity).insert(Target(target));
+                            io.commands.entity(entity).insert(Target(target));
                         }
                     }
                     *phase = Phase::LaunchInspect;
@@ -1906,7 +1904,7 @@ fn run(
                     "local" => {
                         if !matches!(facts.get(entity, Tag::Directory), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
                         {
-                            commands.entity(entity).insert(Failed(Failure::message(
+                            io.commands.entity(entity).insert(Failed(Failure::message(
                                 "No completed local app; run vmux build -p local first",
                             )));
                             continue;
@@ -1927,7 +1925,7 @@ fn run(
                         };
                         let mut lines = stamp.lines();
                         if lines.next() != checkout.root.to_str() {
-                            commands.entity(entity).insert(Failed(Failure::message(
+                            io.commands.entity(entity).insert(Failed(Failure::message(
                                 "Artifact belongs to another checkout",
                             )));
                             continue;
@@ -1936,7 +1934,7 @@ fn run(
                         let mut count = 0;
                         for line in lines {
                             let Some((checksum, path)) = line.split_once("  ") else {
-                                commands
+                                io.commands
                                     .entity(entity)
                                     .insert(Failed(Failure::message("Invalid readiness stamp")));
                                 failed = true;
@@ -1944,11 +1942,11 @@ fn run(
                             };
                             let path = PathBuf::from(path);
                             if !path.starts_with(checkout.directory("debug")) {
-                                commands.entity(entity).insert(Failed(Failure::message("Development artifact is incomplete or has changed; run vmux build")));
+                                io.commands.entity(entity).insert(Failed(Failure::message("Development artifact is incomplete or has changed; run vmux build")));
                                 failed = true;
                                 break;
                             }
-                            commands.spawn((
+                            io.commands.spawn((
                                 File(path.clone()),
                                 Expected(checksum.into()),
                                 Order(count),
@@ -1968,7 +1966,7 @@ fn run(
                             continue;
                         }
                         if count != if cfg!(target_os = "macos") { 4 } else { 3 } {
-                            commands
+                            io.commands
                                 .entity(entity)
                                 .insert(Failed(Failure::message("Incomplete readiness stamp")));
                             continue;
@@ -1978,7 +1976,7 @@ fn run(
                     _ => {
                         if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
                         {
-                            commands.entity(entity).insert(Failed(Failure::message(
+                            io.commands.entity(entity).insert(Failed(Failure::message(
                                 "No completed app; run vmux build first",
                             )));
                             continue;
@@ -1997,14 +1995,14 @@ fn run(
                             let modified = match metadata.modified() {
                                 Ok(modified) => modified,
                                 Err(error) => {
-                                    commands
+                                    io.commands
                                         .entity(entity)
                                         .insert(Failed(Failure::message(error.to_string())));
                                     failed = true;
                                     break;
                                 }
                             };
-                            commands.spawn((
+                            io.commands.spawn((
                                 crate::local::Entry {
                                     path: path.clone(),
                                     modified,
@@ -2032,7 +2030,7 @@ fn run(
                             }
                         }
                         if !valid {
-                            commands.entity(entity).insert(Failed(Failure::message(
+                            io.commands.entity(entity).insert(Failed(Failure::message(
                                 "Development artifact is incomplete or has changed; run vmux build",
                             )));
                             continue;
@@ -2044,7 +2042,7 @@ fn run(
                         } else {
                             checkout.directory("debug").join("vmux_desktop")
                         };
-                        commands.entity(entity).insert(Target(path));
+                        io.commands.entity(entity).insert(Target(path));
                         *phase = if cfg!(target_os = "macos") {
                             Phase::LaunchVerify
                         } else {
@@ -2073,12 +2071,14 @@ fn run(
                         }
                     }
                     let Some(latest) = latest else {
-                        commands.entity(entity).insert(Failed(Failure::message(
+                        io.commands.entity(entity).insert(Failed(Failure::message(
                             "No completed local app; run vmux build -p local first",
                         )));
                         continue;
                     };
-                    commands.entity(entity).insert(Target(latest.path.clone()));
+                    io.commands
+                        .entity(entity)
+                        .insert(Target(latest.path.clone()));
                     *phase = Phase::LaunchVerify;
                 }
                 Phase::LaunchVerify => {
@@ -2137,7 +2137,7 @@ fn run(
                     *phase = Phase::LaunchDone;
                 }
                 Phase::LaunchDone => {
-                    commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
                 }
                 _ => {}
             }
@@ -2149,13 +2149,7 @@ fn run(
     }
 }
 
-fn stop(
-    mut requests: Requests,
-    facts: Facts,
-    wake: Res<JobWake>,
-    mut commands: Commands,
-    mut io: IoWriter,
-) {
+fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if !matches!(request, Request::Stop) || facts.pending(entity) {
             continue;
@@ -2219,7 +2213,7 @@ fn stop(
                 *phase = Phase::StopDone;
             }
             Phase::StopDone => {
-                commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
             _ => {}
         }
@@ -2260,7 +2254,6 @@ fn signature(
     facts: Facts,
     spec: SignatureData,
     wake: Res<JobWake>,
-    mut commands: Commands,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
@@ -2281,7 +2274,7 @@ fn signature(
         let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
-                commands
+                io.commands
                     .entity(entity)
                     .insert(Failed(Failure::message(error.to_string())));
                 continue;
@@ -2348,7 +2341,7 @@ fn signature(
                 let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
                     Ok(identity) => identity,
                     Err(error) => {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message(error.to_string())));
                         continue;
@@ -2378,7 +2371,7 @@ fn signature(
                     continue;
                 }
                 let value = format!("{:x}{suffix}", hash.finalize());
-                commands.entity(entity).insert(Expected(value.clone()));
+                io.commands.entity(entity).insert(Expected(value.clone()));
                 if *phase == Phase::SignatureRecord {
                     let Some(checksum) = facts.text(entity, Tag::Binary) else {
                         continue;
@@ -2460,7 +2453,7 @@ fn signature(
                 if actual == format!("{}\n{checksum}\n", spec.expected.get(entity).unwrap().0)
                     && output.status.success()
                 {
-                    commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
                     continue;
                 }
                 *phase = Phase::SignaturePrepare;
@@ -2486,7 +2479,7 @@ fn signature(
                         Tag::None,
                         false,
                     );
-                    commands.entity(entity).insert(Copied);
+                    io.commands.entity(entity).insert(Copied);
                     if linking.is_some() {
                         io.request(
                             &mut sequence,
@@ -2535,7 +2528,7 @@ fn signature(
                     let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
                         Ok(identity) => identity,
                         Err(error) => {
-                            commands
+                            io.commands
                                 .entity(entity)
                                 .insert(Failed(Failure::message(error.to_string())));
                             continue;
@@ -2592,7 +2585,7 @@ fn signature(
                     continue;
                 };
                 if !format.contains("Mach-O") {
-                    commands.entity(entity).insert(Failed(Failure::message(
+                    io.commands.entity(entity).insert(Failed(Failure::message(
                         "Cannot sign a non-Mach-O development binary",
                     )));
                     continue;
@@ -2600,7 +2593,7 @@ fn signature(
                 let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
                     Ok(identity) => identity,
                     Err(error) => {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message(error.to_string())));
                         continue;
@@ -2651,7 +2644,7 @@ fn signature(
                 *phase = Phase::SignatureRefresh;
             }
             Phase::SignatureDone => {
-                commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
             Phase::SignatureRpaths => {
                 let Some(rpaths) = facts.text(entity, Tag::Rpaths) else {
@@ -2695,20 +2688,20 @@ fn signature(
                         continue;
                     }
                     let Some(original) = line.trim().split(" (compatibility").next() else {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message("Malformed library path")));
                         break;
                     };
                     let Some(name) = Path::new(original).file_name() else {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message("Missing library name")));
                         break;
                     };
                     let replacement = format!("@rpath/{}", name.to_string_lossy());
                     let path = directory.join(name);
-                    commands.spawn((
+                    io.commands.spawn((
                         Binding {
                             original: original.into(),
                             replacement,
@@ -2738,7 +2731,7 @@ fn signature(
                     }
                     if !matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file())
                     {
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Failed(Failure::message("Missing shared Bevy library")));
                         break;
@@ -2778,13 +2771,7 @@ fn signature(
 type WakeChanges<'w, 's> =
     Query<'w, 's, Entity, Or<(Changed<Phase>, Added<Complete>, Added<Failed>)>>;
 
-fn provider(
-    mut requests: Requests,
-    facts: Facts,
-    wake: Res<JobWake>,
-    mut commands: Commands,
-    mut io: IoWriter,
-) {
+fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if facts.pending(entity) {
             continue;
@@ -2824,7 +2811,7 @@ fn provider(
                     );
                     *phase = Phase::ProviderCompiled;
                 } else {
-                    commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
                 }
             }
             Request::ProviderSnapshot { binary } => {
@@ -2844,7 +2831,7 @@ fn provider(
                     Phase::SnapshotInspect => {
                         let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
                         if !valid {
-                            commands.entity(entity).insert(Failed(Failure::message(
+                            io.commands.entity(entity).insert(Failed(Failure::message(
                                 "Workspace provider build produced no bounded executable",
                             )));
                             continue;
@@ -2886,7 +2873,7 @@ fn provider(
                     Phase::SnapshotCheck => {
                         let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
                         if !valid {
-                            commands.entity(entity).insert(Failed(Failure::message(
+                            io.commands.entity(entity).insert(Failed(Failure::message(
                                 "Workspace executable snapshot is incomplete",
                             )));
                             continue;
@@ -2899,7 +2886,7 @@ fn provider(
                             temporary.path().join("provider"),
                             temporary.clone(),
                         );
-                        commands
+                        io.commands
                             .entity(entity)
                             .insert(Complete(Outcome::Executable(executable)));
                     }
@@ -2909,7 +2896,7 @@ fn provider(
             Request::ProviderInvoke { arguments } => {
                 if *phase == Phase::Start {
                     let Some(program) = settings.0.get("VMUX_DX_PROVIDER_EXECUTABLE") else {
-                        commands.entity(entity).insert(Failed(Failure::message(
+                        io.commands.entity(entity).insert(Failed(Failure::message(
                             "Workspace executable snapshot is missing",
                         )));
                         continue;
@@ -2931,7 +2918,7 @@ fn provider(
                     );
                     *phase = Phase::ProviderInvoked;
                 } else {
-                    commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
                 }
             }
             _ => continue,
