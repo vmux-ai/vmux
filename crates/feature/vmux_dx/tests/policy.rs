@@ -7223,7 +7223,7 @@ impl Inventory {
                 &implementation.namespace,
                 &function.generic_parameters,
                 arguments,
-                &bindings,
+                bindings,
             ) else {
                 continue;
             };
