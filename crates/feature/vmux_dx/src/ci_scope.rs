@@ -195,6 +195,25 @@ impl Workspace {
         let mut lean = false;
         let mut policy = false;
         for file in files {
+            if (file.starts_with("website/src")
+                || matches!(
+                    file.to_str(),
+                    Some("website/build.rs" | "website/Cargo.toml" | "website/Cargo.lock")
+                ))
+                && !self
+                    .packages
+                    .iter()
+                    .any(|package| package.directory.starts_with("website"))
+            {
+                if !self.packages.iter().any(|package| {
+                    package.name == "vmux_dx"
+                        && package.directory == Path::new("crates/feature/vmux_dx")
+                }) {
+                    return self.full();
+                }
+                policy = true;
+                continue;
+            }
             if Scope::policy(file) {
                 if !self.packages.iter().any(|package| {
                     package.name == "vmux_dx"
@@ -429,6 +448,44 @@ mod tests {
             }
         }
         assert!(workspace.select(&["ecs-policy.ron".into()]).workspace);
+    }
+
+    #[test]
+    fn independent_website_inputs_run_policy_without_rebuilding_product_consumers() {
+        let mut workspace = Workspace::fixture();
+        workspace.packages.push(Package {
+            name: "vmux_dx".into(),
+            directory: "crates/feature/vmux_dx".into(),
+            dependencies: BTreeSet::new(),
+        });
+        for path in [
+            "website/src/app.rs",
+            "website/build.rs",
+            "website/Cargo.toml",
+            "website/Cargo.lock",
+        ] {
+            let selected = workspace.select(&[path.into(), "website/ecs-policy.ron".into()]);
+            assert_eq!(
+                selected.packages,
+                BTreeSet::from(["vmux_dx".into()]),
+                "{path}"
+            );
+            assert!(!selected.workspace, "{path}");
+            assert!(!selected.lean, "{path}");
+        }
+        assert!(
+            workspace
+                .select(&["website/public/updates.json".into()])
+                .workspace
+        );
+        workspace.packages.push(Package {
+            name: "site".into(),
+            directory: "website".into(),
+            dependencies: BTreeSet::new(),
+        });
+        let selected = workspace.select(&["website/src/app.rs".into()]);
+        assert_eq!(selected.packages, BTreeSet::from(["site".into()]));
+        assert!(workspace.select(&["website/build.rs".into()]).workspace);
     }
 
     #[test]

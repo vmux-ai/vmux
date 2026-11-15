@@ -421,6 +421,8 @@ jobs:
           filters: |
             code:
               - '**/ecs-policy.ron'
+              - 'website/src/**'
+              - 'website/build.rs'
               - 'crates/**'
               - 'examples/framework-consumer/**'
               - 'examples/host-consumer/**'
