@@ -85,11 +85,38 @@ impl bevy_app::Plugin for Plugin {
                 capacity,
                 clear,
                 sign,
-                bundle,
-                publish,
+                (
+                    bundle_start,
+                    bundle_branch,
+                    bundle_plan,
+                    bundle_directories,
+                    configure_app,
+                    copy_resources,
+                    configure_service,
+                    bundle_service,
+                    bundle_wait,
+                    bundle_desktop,
+                )
+                    .chain(),
+                (publish_start, publish_check, publish_done).chain(),
                 run,
                 stop,
-                signature,
+                (
+                    read_signature_inputs,
+                    hash_inputs,
+                    inspect_cache,
+                    write_stamp,
+                    signature_cache,
+                    prepare_signature,
+                    copy_binary,
+                    inspect_format,
+                    sign_bundle,
+                    signature_format,
+                    signature_done,
+                    signature_rpaths,
+                    signature_bindings,
+                )
+                    .chain(),
                 compile,
                 snapshot,
                 invoke,
@@ -208,6 +235,10 @@ enum BundlePhase {
     Start,
     Branch,
     Plan,
+    Directories,
+    AppPlist,
+    Resources,
+    ServicePlist,
     Service,
     ServiceWait,
     Desktop,
@@ -315,8 +346,13 @@ enum SignaturePhase {
     #[default]
     Start,
     Inputs,
+    InspectCache,
+    Save,
     Cache,
     Prepare,
+    Copy,
+    InspectFormat,
+    Sign,
     Format,
     Refresh,
     Record,
@@ -461,6 +497,33 @@ struct Target(PathBuf);
 
 #[derive(Component)]
 struct File(PathBuf);
+
+#[derive(Component)]
+struct Draft;
+
+#[derive(Component)]
+struct Destination(Entity);
+
+#[derive(Component)]
+struct Version(String);
+
+#[derive(SystemParam)]
+struct Layouts<'w, 's> {
+    destinations: Query<'w, 's, &'static Destination>,
+    drafts: Query<'w, 's, (&'static Layout, &'static Name, &'static Version), With<Draft>>,
+}
+
+impl Layouts<'_, '_> {
+    fn get(&self, owner: Entity) -> Option<(&Layout, &Name, &Version)> {
+        let Ok(destination) = self.destinations.get(owner) else {
+            return None;
+        };
+        let Ok(draft) = self.drafts.get(destination.0) else {
+            return None;
+        };
+        Some(draft)
+    }
+}
 
 #[derive(Component)]
 struct Layout {
@@ -1611,16 +1674,350 @@ fn sign(
     }
 }
 
-fn bundle(
+fn bundle_start(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Start) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let _debug = checkout.directory("debug");
+        let mut previous = None;
+
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            ReadFile(checkout.root.join("Cargo.toml")),
+            Tag::Manifest,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "git".into(),
+                ["symbolic-ref", "--quiet", "--short", "HEAD"]
+                    .map(OsString::from)
+                    .into(),
+            ),
+            Tag::Branch,
+            true,
+        );
+        *phase = BundlePhase::Branch;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn bundle_branch(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Branch) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let _debug = checkout.directory("debug");
+        let mut previous = None;
+
+        let Some(ToolOutput(output)) = facts.get(entity, Tag::Branch) else {
+            continue;
+        };
+        let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
+        if !output.status.success() || branch.trim().is_empty() {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    "git".into(),
+                    ["rev-parse", "--short=7", "HEAD"]
+                        .map(OsString::from)
+                        .into(),
+                ),
+                Tag::Commit,
+                true,
+            );
+        }
+        *phase = BundlePhase::Plan;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn bundle_plan(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, _, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Plan) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let debug = checkout.directory("debug");
+
+        let Some(manifest) = facts.text(entity, Tag::Manifest) else {
+            continue;
+        };
+        let manifest: toml::Table = match manifest.parse() {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let Some(version) = manifest
+            .get("workspace")
+            .and_then(|value| value.get("package"))
+            .and_then(|value| value.get("version"))
+            .and_then(toml::Value::as_str)
+        else {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Missing workspace version")));
+            continue;
+        };
+        let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
+        let commit = facts.text(entity, Tag::Commit).unwrap_or_default();
+        let source = if !branch.trim().is_empty() {
+            branch.trim()
+        } else if !commit.trim().is_empty() {
+            commit.trim()
+        } else {
+            "unknown"
+        };
+        let title = format!("{} Dev ({source})", product.value("VMUX_HOST_NAME"));
+        let app = debug.join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")));
+        let contents = app.join("Contents");
+        let plist = contents.join("Info.plist");
+        let service = contents
+            .join("Library/LoginItems")
+            .join(product.value("VMUX_HOST_SERVICE_BUNDLE"));
+        let service_contents = service.join("Contents");
+
+        let binary = service_contents
+            .join("MacOS")
+            .join(product.value("VMUX_HOST_SERVICE_NAME"));
+        let draft = io
+            .commands
+            .spawn((
+                Draft,
+                Name::new(title),
+                Version(version.to_owned()),
+                Layout {
+                    app,
+                    service,
+                    binary,
+                    plist,
+                },
+                ChildOf(entity),
+            ))
+            .id();
+        io.commands.entity(entity).insert(Destination(draft));
+        *phase = BundlePhase::Directories;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn bundle_directories(
     mut requests: BundleRequests,
     facts: Facts,
-    roots: Query<&Root>,
-    layouts: Query<&Layout>,
-    signatures: Signatures,
+    layouts: Layouts,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
     for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Directories) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let _debug = checkout.directory("debug");
+        let mut previous = None;
+
+        let (layout, _, _) = layouts.get(entity).unwrap();
+        let contents = layout.app.join("Contents");
+        let service_contents = layout.service.join("Contents");
+        let plist = &layout.plist;
+        for directory in [
+            contents.join("MacOS"),
+            contents.join("Resources"),
+            contents.join("Frameworks"),
+            service_contents.join("MacOS"),
+        ] {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CreateDirectory(directory),
+                Tag::None,
+                false,
+            );
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(
+                checkout.root.join("packaging/macos/Info.plist"),
+                plist.clone(),
+            ),
+            Tag::None,
+            false,
+        );
+        *phase = BundlePhase::AppPlist;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn configure_app(
+    mut requests: BundleRequests,
+    facts: Facts,
+    layouts: Layouts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::AppPlist) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let _debug = checkout.directory("debug");
+        let mut previous = None;
+
+        let (layout, name, version) = layouts.get(entity).unwrap();
+        let plist = &layout.plist;
+        let title = serde_json::to_string(name.as_str()).unwrap();
+        let version = &version.0;
+        let mut updates = vec![
+            format!(
+                "Set :CFBundleIdentifier {}.dev",
+                product.value("VMUX_HOST_BUNDLE_ID")
+            ),
+            format!("Set :CFBundleDisplayName {title}"),
+            format!("Set :CFBundleName {title}"),
+            format!(
+                "Merge {}",
+                serde_json::to_string(product.value("VMUX_HOST_USAGE_DESCRIPTIONS")).unwrap()
+            ),
+            format!("Set :CFBundleShortVersionString {version}"),
+            format!("Set :CFBundleVersion {version}"),
+        ];
+        for update in updates.drain(..) {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    settings
+                        .0
+                        .get("PLIST_BUDDY")
+                        .unwrap_or(OsStr::new("/usr/libexec/PlistBuddy"))
+                        .to_owned(),
+                    vec!["-c".into(), update.into(), plist.as_os_str().into()],
+                ),
+                Tag::None,
+                false,
+            );
+        }
+        *phase = BundlePhase::Resources;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn copy_resources(
+    mut requests: BundleRequests,
+    facts: Facts,
+    layouts: Layouts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Resources) {
+            continue;
+        }
+
         if facts.pending(entity) {
             continue;
         }
@@ -1636,386 +2033,40 @@ fn bundle(
         };
         let debug = checkout.directory("debug");
         let mut previous = None;
-        match *phase {
-            BundlePhase::Start => {
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    ReadFile(checkout.root.join("Cargo.toml")),
-                    Tag::Manifest,
-                    false,
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(
-                        &settings.0,
-                        &checkout.root,
-                        "git".into(),
-                        ["symbolic-ref", "--quiet", "--short", "HEAD"]
-                            .map(OsString::from)
-                            .into(),
-                    ),
-                    Tag::Branch,
-                    true,
-                );
-                *phase = BundlePhase::Branch;
-            }
-            BundlePhase::Branch => {
-                let Some(ToolOutput(output)) = facts.get(entity, Tag::Branch) else {
-                    continue;
-                };
-                let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
-                if !output.status.success() || branch.trim().is_empty() {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            "git".into(),
-                            ["rev-parse", "--short=7", "HEAD"]
-                                .map(OsString::from)
-                                .into(),
-                        ),
-                        Tag::Commit,
-                        true,
-                    );
-                }
-                *phase = BundlePhase::Plan;
-            }
-            BundlePhase::Plan => {
-                let Some(manifest) = facts.text(entity, Tag::Manifest) else {
-                    continue;
-                };
-                let manifest: toml::Table = match manifest.parse() {
-                    Ok(manifest) => manifest,
-                    Err(error) => {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message(error.to_string())));
-                        continue;
-                    }
-                };
-                let Some(version) = manifest
-                    .get("workspace")
-                    .and_then(|value| value.get("package"))
-                    .and_then(|value| value.get("version"))
-                    .and_then(toml::Value::as_str)
-                else {
-                    io.commands
-                        .entity(entity)
-                        .insert(Failed(Failure::message("Missing workspace version")));
-                    continue;
-                };
-                let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
-                let commit = facts.text(entity, Tag::Commit).unwrap_or_default();
-                let source = if !branch.trim().is_empty() {
-                    branch.trim()
-                } else if !commit.trim().is_empty() {
-                    commit.trim()
-                } else {
-                    "unknown"
-                };
-                let title = serde_json::to_string(&format!(
-                    "{} Dev ({source})",
-                    product.value("VMUX_HOST_NAME")
-                ))
-                .unwrap();
-                let app = debug.join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")));
-                let contents = app.join("Contents");
-                let plist = contents.join("Info.plist");
-                let service = contents
-                    .join("Library/LoginItems")
-                    .join(product.value("VMUX_HOST_SERVICE_BUNDLE"));
-                let service_contents = service.join("Contents");
-                let service_plist = service_contents.join("Info.plist");
-                for directory in [
-                    contents.join("MacOS"),
-                    contents.join("Resources"),
-                    contents.join("Frameworks"),
-                    service_contents.join("MacOS"),
-                ] {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CreateDirectory(directory),
-                        Tag::None,
-                        false,
-                    );
-                }
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CopyFile(
-                        checkout.root.join("packaging/macos/Info.plist"),
-                        plist.clone(),
-                    ),
-                    Tag::None,
-                    false,
-                );
-                let mut updates = vec![
-                    format!(
-                        "Set :CFBundleIdentifier {}.dev",
-                        product.value("VMUX_HOST_BUNDLE_ID")
-                    ),
-                    format!("Set :CFBundleDisplayName {title}"),
-                    format!("Set :CFBundleName {title}"),
-                    format!(
-                        "Merge {}",
-                        serde_json::to_string(product.value("VMUX_HOST_USAGE_DESCRIPTIONS"))
-                            .unwrap()
-                    ),
-                    format!("Set :CFBundleShortVersionString {version}"),
-                    format!("Set :CFBundleVersion {version}"),
-                ];
-                for update in updates.drain(..) {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            settings
-                                .0
-                                .get("PLIST_BUDDY")
-                                .unwrap_or(OsStr::new("/usr/libexec/PlistBuddy"))
-                                .to_owned(),
-                            vec!["-c".into(), update.into(), plist.as_os_str().into()],
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                }
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CopyFile(
-                        product.value("VMUX_HOST_ICON").into(),
-                        contents.join("Resources/Vmux.icns"),
-                    ),
-                    Tag::None,
-                    false,
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CopyFile(
-                        product.value("VMUX_HOST_TRAY_ICON").into(),
-                        contents.join("Resources/tray.png"),
-                    ),
-                    Tag::None,
-                    false,
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CopyFile(debug.join("vmux"), contents.join("MacOS/vmux")),
-                    Tag::None,
-                    false,
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CopyFile(plist.clone(), service_plist.clone()),
-                    Tag::None,
-                    false,
-                );
-                for key in ["CFBundleExecutable", "CFBundleName", "CFBundleDisplayName"] {
-                    let update = format!(
-                        "Set :{key} {}",
-                        serde_json::to_string(product.value("VMUX_HOST_SERVICE_NAME")).unwrap()
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            settings
-                                .0
-                                .get("PLIST_BUDDY")
-                                .unwrap_or(OsStr::new("/usr/libexec/PlistBuddy"))
-                                .to_owned(),
-                            vec!["-c".into(), update.into(), service_plist.as_os_str().into()],
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                }
-                for update in [
-                    format!(
-                        "Set :CFBundleIdentifier {}.dev",
-                        product.value("VMUX_HOST_SERVICE_ID")
-                    ),
-                    "Set :LSUIElement true".into(),
-                ] {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            settings
-                                .0
-                                .get("PLIST_BUDDY")
-                                .unwrap_or(OsStr::new("/usr/libexec/PlistBuddy"))
-                                .to_owned(),
-                            vec!["-c".into(), update.into(), service_plist.as_os_str().into()],
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                }
-                let binary = service_contents
-                    .join("MacOS")
-                    .join(product.value("VMUX_HOST_SERVICE_NAME"));
-                io.commands.entity(entity).insert(Layout {
-                    app,
-                    service,
-                    binary,
-                    plist,
-                });
-                *phase = BundlePhase::Service;
-            }
-            BundlePhase::Service => {
-                let layout = layouts.get(entity).unwrap();
-                let signature = io
-                    .commands
-                    .spawn((
-                        Signature {
-                            path: layout.service.clone(),
-                            binary: layout.binary.clone(),
-                            stamp: debug.join(".vmux-dev-service-signed"),
-                            identifier: None,
-                            suffix: String::new(),
-                        },
-                        CopyFrom(debug.join("vmux_service")),
-                        checkout.clone(),
-                        settings.clone(),
-                        Root(roots.get(entity).unwrap().0),
-                        SignaturePhase::Start,
-                        Sequence(0),
-                        Sources,
-                        Owner(entity),
-                        ChildOf(entity),
-                    ))
-                    .id();
-                for (order, path) in [
-                    debug.join("vmux_service"),
-                    layout.service.join("Contents/Info.plist"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    io.commands
-                        .spawn((Input(path), Order(order as u32), ChildOf(signature)));
-                }
-                *phase = BundlePhase::ServiceWait;
-            }
-            BundlePhase::ServiceWait | BundlePhase::Wait => {
-                let mut pending = false;
-                for (parent, complete, failed) in &signatures {
-                    if parent.parent() != entity {
-                        continue;
-                    }
-                    if let Some(failed) = failed {
-                        io.commands.entity(entity).insert(failed.clone());
-                        pending = true;
-                        break;
-                    }
-                    pending |= complete.is_none();
-                }
-                if pending {
-                    continue;
-                }
-                if *phase == BundlePhase::Wait {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
-                    continue;
-                }
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(
-                        &settings.0,
-                        &checkout.root,
-                        settings
-                            .0
-                            .get("RUSTC")
-                            .unwrap_or(OsStr::new("rustc"))
-                            .to_owned(),
-                        ["--print", "target-libdir"].map(OsString::from).into(),
-                    ),
-                    Tag::Stdlib,
-                    false,
-                );
-                *phase = BundlePhase::Desktop;
-            }
-            BundlePhase::Desktop => {
-                let Some(stdlib) = facts.text(entity, Tag::Stdlib) else {
-                    continue;
-                };
-                let layout = layouts.get(entity).unwrap();
-                let binary = layout.app.join("Contents/MacOS/vmux_desktop");
-                let signature = io
-                    .commands
-                    .spawn((
-                        Signature {
-                            path: layout.app.clone(),
-                            binary,
-                            stamp: debug.join(".vmux-dev-desktop-signed"),
-                            identifier: None,
-                            suffix: format!(
-                                "\n{}\n{}",
-                                debug.join("deps").display(),
-                                stdlib.trim()
-                            ),
-                        },
-                        CopyFrom(debug.join("vmux_desktop")),
-                        Linking(debug.join("deps")),
-                        checkout.clone(),
-                        settings.clone(),
-                        Root(roots.get(entity).unwrap().0),
-                        SignaturePhase::Start,
-                        Sequence(0),
-                        Sources,
-                        Owner(entity),
-                        ChildOf(entity),
-                    ))
-                    .id();
-                for path in [debug.join("deps"), stdlib.trim().into()] {
-                    io.commands
-                        .spawn((Rpath(path), Order(0), ChildOf(signature)));
-                }
-                for (order, path) in [
-                    debug.join("vmux_desktop"),
-                    layout.app.join("Contents/MacOS/vmux"),
-                    layout.plist.clone(),
-                    layout.app.join("Contents/Resources/Vmux.icns"),
-                    debug.join(".vmux-dev-service-signed"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    io.commands
-                        .spawn((Input(path), Order(order as u32), ChildOf(signature)));
-                }
-                *phase = BundlePhase::Wait;
-            }
-        }
+
+        let (layout, _, _) = layouts.get(entity).unwrap();
+        let contents = layout.app.join("Contents");
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(
+                product.value("VMUX_HOST_ICON").into(),
+                contents.join("Resources/Vmux.icns"),
+            ),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(
+                product.value("VMUX_HOST_TRAY_ICON").into(),
+                contents.join("Resources/tray.png"),
+            ),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(debug.join("vmux"), contents.join("MacOS/vmux")),
+            Tag::None,
+            false,
+        );
+        *phase = BundlePhase::ServicePlist;
 
         if *phase != previous_phase {
             wake.0.wake_by_ref();
@@ -2023,7 +2074,394 @@ fn bundle(
     }
 }
 
-fn publish(
+fn configure_service(
+    mut requests: BundleRequests,
+    facts: Facts,
+    layouts: Layouts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::ServicePlist) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let _debug = checkout.directory("debug");
+        let mut previous = None;
+
+        let (layout, _, _) = layouts.get(entity).unwrap();
+        let plist = &layout.plist;
+        let service_plist = layout.service.join("Contents/Info.plist");
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(plist.clone(), service_plist.clone()),
+            Tag::None,
+            false,
+        );
+        for key in ["CFBundleExecutable", "CFBundleName", "CFBundleDisplayName"] {
+            let update = format!(
+                "Set :{key} {}",
+                serde_json::to_string(product.value("VMUX_HOST_SERVICE_NAME")).unwrap()
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    settings
+                        .0
+                        .get("PLIST_BUDDY")
+                        .unwrap_or(OsStr::new("/usr/libexec/PlistBuddy"))
+                        .to_owned(),
+                    vec!["-c".into(), update.into(), service_plist.as_os_str().into()],
+                ),
+                Tag::None,
+                false,
+            );
+        }
+        for update in [
+            format!(
+                "Set :CFBundleIdentifier {}.dev",
+                product.value("VMUX_HOST_SERVICE_ID")
+            ),
+            "Set :LSUIElement true".into(),
+        ] {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    settings
+                        .0
+                        .get("PLIST_BUDDY")
+                        .unwrap_or(OsStr::new("/usr/libexec/PlistBuddy"))
+                        .to_owned(),
+                    vec!["-c".into(), update.into(), service_plist.as_os_str().into()],
+                ),
+                Tag::None,
+                false,
+            );
+        }
+        *phase = BundlePhase::Service;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn bundle_service(
+    mut requests: BundleRequests,
+    facts: Facts,
+    roots: Query<&Root>,
+    layouts: Layouts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Service) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let debug = checkout.directory("debug");
+
+        let (layout, _, _) = layouts.get(entity).unwrap();
+        let signature = io
+            .commands
+            .spawn((
+                Signature {
+                    path: layout.service.clone(),
+                    binary: layout.binary.clone(),
+                    stamp: debug.join(".vmux-dev-service-signed"),
+                    identifier: None,
+                    suffix: String::new(),
+                },
+                CopyFrom(debug.join("vmux_service")),
+                checkout.clone(),
+                settings.clone(),
+                Root(roots.get(entity).unwrap().0),
+                SignaturePhase::Start,
+                Sequence(0),
+                Sources,
+                Owner(entity),
+                ChildOf(entity),
+            ))
+            .id();
+        for (order, path) in [
+            debug.join("vmux_service"),
+            layout.service.join("Contents/Info.plist"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            io.commands
+                .spawn((Input(path), Order(order as u32), ChildOf(signature)));
+        }
+        *phase = BundlePhase::ServiceWait;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn bundle_wait(
+    mut requests: BundleRequests,
+    facts: Facts,
+    signatures: Signatures,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::ServiceWait | BundlePhase::Wait) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let _debug = checkout.directory("debug");
+        let mut previous = None;
+
+        let mut pending = false;
+        for (parent, complete, failed) in &signatures {
+            if parent.parent() != entity {
+                continue;
+            }
+            if let Some(failed) = failed {
+                io.commands.entity(entity).insert(failed.clone());
+                pending = true;
+                break;
+            }
+            pending |= complete.is_none();
+        }
+        if pending {
+            continue;
+        }
+        if *phase == BundlePhase::Wait {
+            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            continue;
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                settings
+                    .0
+                    .get("RUSTC")
+                    .unwrap_or(OsStr::new("rustc"))
+                    .to_owned(),
+                ["--print", "target-libdir"].map(OsString::from).into(),
+            ),
+            Tag::Stdlib,
+            false,
+        );
+        *phase = BundlePhase::Desktop;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn bundle_desktop(
+    mut requests: BundleRequests,
+    facts: Facts,
+    roots: Query<&Root>,
+    layouts: Layouts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, BundlePhase::Desktop) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let debug = checkout.directory("debug");
+
+        let Some(stdlib) = facts.text(entity, Tag::Stdlib) else {
+            continue;
+        };
+        let (layout, _, _) = layouts.get(entity).unwrap();
+        let binary = layout.app.join("Contents/MacOS/vmux_desktop");
+        let signature = io
+            .commands
+            .spawn((
+                Signature {
+                    path: layout.app.clone(),
+                    binary,
+                    stamp: debug.join(".vmux-dev-desktop-signed"),
+                    identifier: None,
+                    suffix: format!("\n{}\n{}", debug.join("deps").display(), stdlib.trim()),
+                },
+                CopyFrom(debug.join("vmux_desktop")),
+                Linking(debug.join("deps")),
+                checkout.clone(),
+                settings.clone(),
+                Root(roots.get(entity).unwrap().0),
+                SignaturePhase::Start,
+                Sequence(0),
+                Sources,
+                Owner(entity),
+                ChildOf(entity),
+            ))
+            .id();
+        for path in [debug.join("deps"), stdlib.trim().into()] {
+            io.commands
+                .spawn((Rpath(path), Order(0), ChildOf(signature)));
+        }
+        for (order, path) in [
+            debug.join("vmux_desktop"),
+            layout.app.join("Contents/MacOS/vmux"),
+            layout.plist.clone(),
+            layout.app.join("Contents/Resources/Vmux.icns"),
+            debug.join(".vmux-dev-service-signed"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            io.commands
+                .spawn((Input(path), Order(order as u32), ChildOf(signature)));
+        }
+        *phase = BundlePhase::Wait;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn publish_start(
+    mut requests: PublishRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, PublishPhase::Start) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let debug = checkout.directory("debug");
+        let mut previous = None;
+
+        let mut paths = vec![
+            debug.join("vmux"),
+            debug.join("vmux_service"),
+            debug.join("vmux_desktop"),
+        ];
+        if cfg!(target_os = "macos") {
+            let product = match settings.0.product(&checkout.root) {
+                Ok(product) => product,
+                Err(error) => {
+                    io.commands
+                        .entity(entity)
+                        .insert(Failed(Failure::message(error.to_string())));
+                    continue;
+                }
+            };
+            let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
+            paths.push(debug.join(&name).join("Contents/MacOS/vmux_desktop"));
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                InspectPath(checkout.directory("release").join(name)),
+                Tag::Path,
+                false,
+            );
+        }
+        for (order, path) in paths.into_iter().enumerate() {
+            io.commands
+                .spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                InspectPath(path.clone()),
+                Tag::Library(order as u32),
+                false,
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                HashFile(path),
+                Tag::Input(order as u32),
+                false,
+            );
+        }
+        *phase = PublishPhase::Check;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn publish_check(
     mut requests: PublishRequests,
     facts: Facts,
     files: Query<(&File, &Order, &ChildOf)>,
@@ -2031,165 +2469,134 @@ fn publish(
     mut io: IoWriter,
 ) {
     for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, PublishPhase::Check) {
+            continue;
+        }
+
         if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
         let debug = checkout.directory("debug");
         let mut previous = None;
-        match *phase {
-            PublishPhase::Start => {
-                let mut paths = vec![
-                    debug.join("vmux"),
-                    debug.join("vmux_service"),
-                    debug.join("vmux_desktop"),
-                ];
-                if cfg!(target_os = "macos") {
-                    let product = match settings.0.product(&checkout.root) {
-                        Ok(product) => product,
-                        Err(error) => {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::message(error.to_string())));
-                            continue;
-                        }
-                    };
-                    let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
-                    paths.push(debug.join(&name).join("Contents/MacOS/vmux_desktop"));
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        InspectPath(checkout.directory("release").join(name)),
-                        Tag::Path,
-                        false,
-                    );
-                }
-                for (order, path) in paths.into_iter().enumerate() {
-                    io.commands
-                        .spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        InspectPath(path.clone()),
-                        Tag::Library(order as u32),
-                        false,
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        HashFile(path),
-                        Tag::Input(order as u32),
-                        false,
-                    );
-                }
-                *phase = PublishPhase::Check;
-            }
-            PublishPhase::Check => {
-                let mut sources = files
-                    .iter()
-                    .filter(|(_, _, parent)| parent.parent() == entity)
-                    .collect::<Vec<_>>();
-                sources.sort_by_key(|(_, order, _)| order.0);
-                let mut stamp = format!("{}\n", checkout.root.display());
-                let mut failed = false;
-                for (file, order, _) in sources {
-                    let valid = matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
-                    if !valid {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message(format!(
-                                "Missing executable: {}",
-                                file.0.display()
-                            ))));
-                        failed = true;
-                        break;
-                    }
-                    let Some(checksum) = facts.text(entity, Tag::Input(order.0)) else {
-                        failed = true;
-                        break;
-                    };
-                    stamp.push_str(&format!("{checksum}  {}\n", file.0.display()));
-                }
-                if failed {
-                    continue;
-                }
-                if cfg!(target_os = "macos") {
-                    if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(None))) {
-                        io.commands.entity(entity).insert(Failed(Failure::message(
-                            "Cannot publish debug app over existing artifact",
-                        )));
-                        continue;
-                    }
-                    let product = match settings.0.product(&checkout.root) {
-                        Ok(product) => product,
-                        Err(error) => {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::message(error.to_string())));
-                            continue;
-                        }
-                    };
-                    let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CreateDirectory(checkout.directory("release")),
-                        Tag::None,
-                        false,
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        LinkPath(debug.join(&name), checkout.directory("release").join(name)),
-                        Tag::None,
-                        false,
-                    );
-                }
-                let temporary = debug.join(".vmux-dev-ready.tmp");
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    WriteFile(temporary.clone(), stamp.into_bytes()),
-                    Tag::None,
-                    false,
-                );
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    RenamePath(temporary, debug.join(".vmux-dev-ready")),
-                    Tag::None,
-                    false,
-                );
-                *phase = PublishPhase::Done;
-            }
-            PublishPhase::Done => {
-                println!("Debug build ready: {}\nRun: vmux run", debug.display());
-                let path = if cfg!(target_os = "macos") {
-                    let product = match settings.0.product(&checkout.root) {
-                        Ok(product) => product,
-                        Err(error) => {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::message(error.to_string())));
-                            continue;
-                        }
-                    };
-                    debug.join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")))
-                } else {
-                    debug.join("vmux_desktop")
-                };
+
+        let mut sources = files
+            .iter()
+            .filter(|(_, _, parent)| parent.parent() == entity)
+            .collect::<Vec<_>>();
+        sources.sort_by_key(|(_, order, _)| order.0);
+        let mut stamp = format!("{}\n", checkout.root.display());
+        let mut failed = false;
+        for (file, order, _) in sources {
+            let valid = matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
+            if !valid {
                 io.commands
                     .entity(entity)
-                    .insert(Complete(Outcome::Artifacts(vec![path])));
+                    .insert(Failed(Failure::message(format!(
+                        "Missing executable: {}",
+                        file.0.display()
+                    ))));
+                failed = true;
+                break;
             }
+            let Some(checksum) = facts.text(entity, Tag::Input(order.0)) else {
+                failed = true;
+                break;
+            };
+            stamp.push_str(&format!("{checksum}  {}\n", file.0.display()));
         }
+        if failed {
+            continue;
+        }
+        if cfg!(target_os = "macos") {
+            if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(None))) {
+                io.commands.entity(entity).insert(Failed(Failure::message(
+                    "Cannot publish debug app over existing artifact",
+                )));
+                continue;
+            }
+            let product = match settings.0.product(&checkout.root) {
+                Ok(product) => product,
+                Err(error) => {
+                    io.commands
+                        .entity(entity)
+                        .insert(Failed(Failure::message(error.to_string())));
+                    continue;
+                }
+            };
+            let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CreateDirectory(checkout.directory("release")),
+                Tag::None,
+                false,
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                LinkPath(debug.join(&name), checkout.directory("release").join(name)),
+                Tag::None,
+                false,
+            );
+        }
+        let temporary = debug.join(".vmux-dev-ready.tmp");
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            WriteFile(temporary.clone(), stamp.into_bytes()),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            RenamePath(temporary, debug.join(".vmux-dev-ready")),
+            Tag::None,
+            false,
+        );
+        *phase = PublishPhase::Done;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn publish_done(mut requests: PublishRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, _, checkout, settings, phase, _sequence) in &mut requests {
+        if !matches!(*phase, PublishPhase::Done) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let debug = checkout.directory("debug");
+
+        println!("Debug build ready: {}\nRun: vmux run", debug.display());
+        let path = if cfg!(target_os = "macos") {
+            let product = match settings.0.product(&checkout.root) {
+                Ok(product) => product,
+                Err(error) => {
+                    io.commands
+                        .entity(entity)
+                        .insert(Failed(Failure::message(error.to_string())));
+                    continue;
+                }
+            };
+            debug.join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")))
+        } else {
+            debug.join("vmux_desktop")
+        };
+        io.commands
+            .entity(entity)
+            .insert(Complete(Outcome::Artifacts(vec![path])));
 
         if *phase != previous_phase {
             wake.0.wake_by_ref();
@@ -2596,7 +3003,7 @@ fn stop(mut requests: StopRequests, facts: Facts, wake: Res<JobWake>, mut io: Io
                             .to_owned(),
                         ["--print", "target-libdir"].map(OsString::from).into(),
                     ),
-                    Tag::None,
+                    Tag::Stdlib,
                     false,
                 );
                 *phase = StopPhase::Execute;
@@ -2672,7 +3079,7 @@ struct SignatureData<'w, 's> {
     >,
 }
 
-fn signature(
+fn read_signature_inputs(
     mut requests: SignatureRequests,
     facts: Facts,
     spec: SignatureData,
@@ -2680,12 +3087,619 @@ fn signature(
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Start | SignaturePhase::Refresh) {
+            continue;
+        }
+
+        let Signature { binary, stamp, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            HashFile(product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()),
+            Tag::Entitlements,
+            false,
+        );
+        let mut sources = spec
+            .inputs
+            .iter()
+            .filter(|(_, _, parent)| parent.parent() == entity)
+            .collect::<Vec<_>>();
+        sources.sort_by_key(|(_, order, _)| order.0);
+        for (input, order, _) in sources {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                HashFile(input.0.clone()),
+                Tag::Input(order.0),
+                false,
+            );
+        }
+        if *phase == SignaturePhase::Start {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                InspectPath(stamp.clone()),
+                Tag::Stamp,
+                false,
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                InspectPath(binary.clone()),
+                Tag::Binary,
+                false,
+            );
+            *phase = SignaturePhase::Inputs;
+        } else {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                HashFile(binary.clone()),
+                Tag::Binary,
+                false,
+            );
+            *phase = SignaturePhase::Record;
+        }
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn hash_inputs(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Inputs | SignaturePhase::Record) {
+            continue;
+        }
+
+        let Signature { suffix, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
+            Ok(identity) => identity,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut hash = Sha256::new();
+        hash.update(identity.as_encoded_bytes());
+        let Some(entitlements) = facts.text(entity, Tag::Entitlements) else {
+            continue;
+        };
+        hash.update(entitlements.as_bytes());
+        let mut sources = spec
+            .inputs
+            .iter()
+            .filter(|(_, _, parent)| parent.parent() == entity)
+            .collect::<Vec<_>>();
+        sources.sort_by_key(|(_, order, _)| order.0);
+        let mut pending = false;
+        for (_, order, _) in sources {
+            let Some(input) = facts.text(entity, Tag::Input(order.0)) else {
+                pending = true;
+                break;
+            };
+            hash.update(input.as_bytes());
+        }
+        if pending {
+            continue;
+        }
+        let value = format!("{:x}{suffix}", hash.finalize());
+        io.commands.entity(entity).insert(Expected(value.clone()));
+
+        *phase = if *phase == SignaturePhase::Record {
+            SignaturePhase::Save
+        } else {
+            SignaturePhase::InspectCache
+        };
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn inspect_cache(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::InspectCache) {
+            continue;
+        }
+
         let Signature {
             path,
             binary,
             stamp,
-            identifier,
-            suffix,
+            ..
+        } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+        let exists = matches!(facts.get(entity, Tag::Stamp), Some(PathMetadata(Some(metadata))) if metadata.is_file())
+            && matches!(facts.get(entity, Tag::Binary), Some(PathMetadata(Some(metadata))) if metadata.is_file());
+        if exists {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                ReadFile(stamp.clone()),
+                Tag::Stamp,
+                false,
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                HashFile(binary.clone()),
+                Tag::Binary,
+                false,
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    "codesign".into(),
+                    vec![
+                        "--verify".into(),
+                        "--strict".into(),
+                        path.as_os_str().into(),
+                    ],
+                ),
+                Tag::Signature,
+                true,
+            );
+            *phase = SignaturePhase::Cache;
+        } else {
+            *phase = SignaturePhase::Prepare;
+        }
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn write_stamp(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Save) {
+            continue;
+        }
+
+        let Signature { stamp, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        let value = &spec.expected.get(entity).unwrap().0;
+        let Some(checksum) = facts.text(entity, Tag::Binary) else {
+            continue;
+        };
+        let temporary = stamp.with_extension("tmp");
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            WriteFile(
+                temporary.clone(),
+                format!("{value}\n{checksum}\n").into_bytes(),
+            ),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            RenamePath(temporary, stamp.clone()),
+            Tag::None,
+            false,
+        );
+        *phase = SignaturePhase::Done;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn signature_cache(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Cache) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        let Some(actual) = facts.text(entity, Tag::Stamp) else {
+            continue;
+        };
+        let Some(checksum) = facts.text(entity, Tag::Binary) else {
+            continue;
+        };
+        let Some(ToolOutput(output)) = facts.get(entity, Tag::Signature) else {
+            continue;
+        };
+        if actual == format!("{}\n{checksum}\n", spec.expected.get(entity).unwrap().0)
+            && output.status.success()
+        {
+            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            continue;
+        }
+        *phase = SignaturePhase::Prepare;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn prepare_signature(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Prepare) {
+            continue;
+        }
+
+        let Signature { identifier, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        let (copy, copied, _) = spec.preparation.get(entity).unwrap();
+        *phase = if copy.is_some() && copied.is_none() {
+            SignaturePhase::Copy
+        } else if identifier.is_some() {
+            SignaturePhase::InspectFormat
+        } else {
+            SignaturePhase::Sign
+        };
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn copy_binary(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Copy) {
+            continue;
+        }
+
+        let Signature { binary, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        let (copy, _, linking) = spec.preparation.get(entity).unwrap();
+        let Some(copy) = copy else {
+            *phase = SignaturePhase::Prepare;
+            continue;
+        };
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CreateDirectory(binary.parent().unwrap().to_owned()),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(copy.0.clone(), binary.clone()),
+            Tag::None,
+            false,
+        );
+        io.commands.entity(entity).insert(Copied);
+        if linking.is_some() {
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    "otool".into(),
+                    vec!["-l".into(), binary.as_os_str().into()],
+                ),
+                Tag::Rpaths,
+                false,
+            );
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    "otool".into(),
+                    vec!["-L".into(), binary.as_os_str().into()],
+                ),
+                Tag::Libraries,
+                false,
+            );
+            *phase = SignaturePhase::Rpaths;
+        } else {
+            *phase = SignaturePhase::Prepare;
+        }
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn inspect_format(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::InspectFormat) {
+            continue;
+        }
+
+        let Signature { binary, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "file".into(),
+                vec![binary.as_os_str().into()],
+            ),
+            Tag::Format,
+            false,
+        );
+        *phase = SignaturePhase::Format;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn sign_bundle(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Sign) {
+            continue;
+        }
+
+        let Signature { path, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+        let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
+            Ok(identity) => identity,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut arguments = vec![
+            "--force".into(),
+            "--sign".into(),
+            identity.to_owned(),
+            "--options".into(),
+            "runtime".into(),
+            "--entitlements".into(),
+            product.value("VMUX_HOST_DEV_ENTITLEMENTS").into(),
+        ];
+        if let Some(keychain) = settings.0.get("CODESIGN_KEYCHAIN") {
+            arguments.extend(["--keychain".into(), keychain.to_owned()]);
+        }
+        arguments.push(path.as_os_str().into());
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "codesign".into(),
+                vec![
+                    "--verify".into(),
+                    "--strict".into(),
+                    path.as_os_str().into(),
+                ],
+            ),
+            Tag::None,
+            false,
+        );
+        *phase = SignaturePhase::Refresh;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn signature_format(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Format) {
+            continue;
+        }
+
+        let Signature {
+            path, identifier, ..
         } = request;
         if facts.pending(entity) {
             continue;
@@ -2701,349 +3715,259 @@ fn signature(
             }
         };
         let mut previous = None;
-        match *phase {
-            SignaturePhase::Start | SignaturePhase::Refresh => {
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    HashFile(product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()),
-                    Tag::Entitlements,
-                    false,
-                );
-                let mut sources = spec
-                    .inputs
-                    .iter()
-                    .filter(|(_, _, parent)| parent.parent() == entity)
-                    .collect::<Vec<_>>();
-                sources.sort_by_key(|(_, order, _)| order.0);
-                for (input, order, _) in sources {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        HashFile(input.0.clone()),
-                        Tag::Input(order.0),
-                        false,
-                    );
-                }
-                if *phase == SignaturePhase::Start {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        InspectPath(stamp.clone()),
-                        Tag::Stamp,
-                        false,
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        InspectPath(binary.clone()),
-                        Tag::Binary,
-                        false,
-                    );
-                    *phase = SignaturePhase::Inputs;
-                } else {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        HashFile(binary.clone()),
-                        Tag::Binary,
-                        false,
-                    );
-                    *phase = SignaturePhase::Record;
-                }
+
+        let Some(format) = facts.text(entity, Tag::Format) else {
+            continue;
+        };
+        if !format.contains("Mach-O") {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "Cannot sign a non-Mach-O development binary",
+            )));
+            continue;
+        }
+        let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
+            Ok(identity) => identity,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
             }
-            SignaturePhase::Inputs | SignaturePhase::Record => {
-                let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
-                    Ok(identity) => identity,
-                    Err(error) => {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message(error.to_string())));
-                        continue;
-                    }
-                };
-                let mut hash = Sha256::new();
-                hash.update(identity.as_encoded_bytes());
-                let Some(entitlements) = facts.text(entity, Tag::Entitlements) else {
-                    continue;
-                };
-                hash.update(entitlements.as_bytes());
-                let mut sources = spec
-                    .inputs
-                    .iter()
-                    .filter(|(_, _, parent)| parent.parent() == entity)
-                    .collect::<Vec<_>>();
-                sources.sort_by_key(|(_, order, _)| order.0);
-                let mut pending = false;
-                for (_, order, _) in sources {
-                    let Some(input) = facts.text(entity, Tag::Input(order.0)) else {
-                        pending = true;
-                        break;
-                    };
-                    hash.update(input.as_bytes());
-                }
-                if pending {
-                    continue;
-                }
-                let value = format!("{:x}{suffix}", hash.finalize());
-                io.commands.entity(entity).insert(Expected(value.clone()));
-                if *phase == SignaturePhase::Record {
-                    let Some(checksum) = facts.text(entity, Tag::Binary) else {
-                        continue;
-                    };
-                    let temporary = stamp.with_extension("tmp");
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        WriteFile(
-                            temporary.clone(),
-                            format!("{value}\n{checksum}\n").into_bytes(),
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        RenamePath(temporary, stamp.clone()),
-                        Tag::None,
-                        false,
-                    );
-                    *phase = SignaturePhase::Done;
-                } else {
-                    let exists = matches!(facts.get(entity, Tag::Stamp), Some(PathMetadata(Some(metadata))) if metadata.is_file())
-                        && matches!(facts.get(entity, Tag::Binary), Some(PathMetadata(Some(metadata))) if metadata.is_file());
-                    if exists {
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            ReadFile(stamp.clone()),
-                            Tag::Stamp,
-                            false,
-                        );
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            HashFile(binary.clone()),
-                            Tag::Binary,
-                            false,
-                        );
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            CaptureOutput::new(
-                                &settings.0,
-                                &checkout.root,
-                                "codesign".into(),
-                                vec![
-                                    "--verify".into(),
-                                    "--strict".into(),
-                                    path.as_os_str().into(),
-                                ],
-                            ),
-                            Tag::Signature,
-                            true,
-                        );
-                        *phase = SignaturePhase::Cache;
-                    } else {
-                        *phase = SignaturePhase::Prepare;
-                    }
-                }
-            }
-            SignaturePhase::Cache => {
-                let Some(actual) = facts.text(entity, Tag::Stamp) else {
-                    continue;
-                };
-                let Some(checksum) = facts.text(entity, Tag::Binary) else {
-                    continue;
-                };
-                let Some(ToolOutput(output)) = facts.get(entity, Tag::Signature) else {
-                    continue;
-                };
-                if actual == format!("{}\n{checksum}\n", spec.expected.get(entity).unwrap().0)
-                    && output.status.success()
-                {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
-                    continue;
-                }
-                *phase = SignaturePhase::Prepare;
-            }
-            SignaturePhase::Prepare => {
-                let (copy, copied, linking) = spec.preparation.get(entity).unwrap();
-                if let Some(copy) = copy
-                    && copied.is_none()
-                {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CreateDirectory(binary.parent().unwrap().to_owned()),
-                        Tag::None,
-                        false,
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CopyFile(copy.0.clone(), binary.clone()),
-                        Tag::None,
-                        false,
-                    );
-                    io.commands.entity(entity).insert(Copied);
-                    if linking.is_some() {
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            CaptureOutput::new(
-                                &settings.0,
-                                &checkout.root,
-                                "otool".into(),
-                                vec!["-l".into(), binary.as_os_str().into()],
-                            ),
-                            Tag::Rpaths,
-                            false,
-                        );
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            CaptureOutput::new(
-                                &settings.0,
-                                &checkout.root,
-                                "otool".into(),
-                                vec!["-L".into(), binary.as_os_str().into()],
-                            ),
-                            Tag::Libraries,
-                            false,
-                        );
-                        *phase = SignaturePhase::Rpaths;
-                    }
-                } else if identifier.is_some() {
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            "file".into(),
-                            vec![binary.as_os_str().into()],
-                        ),
-                        Tag::Format,
-                        false,
-                    );
-                    *phase = SignaturePhase::Format;
-                } else {
-                    let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
-                        Ok(identity) => identity,
-                        Err(error) => {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::message(error.to_string())));
-                            continue;
-                        }
-                    };
-                    let mut arguments = vec![
-                        "--force".into(),
-                        "--sign".into(),
-                        identity.to_owned(),
-                        "--options".into(),
-                        "runtime".into(),
-                        "--entitlements".into(),
-                        product.value("VMUX_HOST_DEV_ENTITLEMENTS").into(),
-                    ];
-                    if let Some(keychain) = settings.0.get("CODESIGN_KEYCHAIN") {
-                        arguments.extend(["--keychain".into(), keychain.to_owned()]);
-                    }
-                    arguments.push(path.as_os_str().into());
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            "codesign".into(),
-                            arguments,
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            "codesign".into(),
-                            vec![
-                                "--verify".into(),
-                                "--strict".into(),
-                                path.as_os_str().into(),
-                            ],
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                    *phase = SignaturePhase::Refresh;
-                }
-            }
-            SignaturePhase::Format => {
-                let Some(format) = facts.text(entity, Tag::Format) else {
-                    continue;
-                };
-                if !format.contains("Mach-O") {
-                    io.commands.entity(entity).insert(Failed(Failure::message(
-                        "Cannot sign a non-Mach-O development binary",
-                    )));
-                    continue;
-                }
-                let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
-                    Ok(identity) => identity,
-                    Err(error) => {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message(error.to_string())));
-                        continue;
-                    }
-                };
-                let mut arguments = vec![
-                    "--force".into(),
-                    "--sign".into(),
-                    identity.to_owned(),
-                    "--options".into(),
-                    "runtime".into(),
-                    "--entitlements".into(),
-                    product.value("VMUX_HOST_DEV_ENTITLEMENTS").into(),
-                ];
-                if let Some(keychain) = settings.0.get("CODESIGN_KEYCHAIN") {
-                    arguments.extend(["--keychain".into(), keychain.to_owned()]);
-                }
-                arguments.extend([
-                    "--identifier".into(),
-                    identifier.as_ref().unwrap().as_str().into(),
+        };
+        let mut arguments = vec![
+            "--force".into(),
+            "--sign".into(),
+            identity.to_owned(),
+            "--options".into(),
+            "runtime".into(),
+            "--entitlements".into(),
+            product.value("VMUX_HOST_DEV_ENTITLEMENTS").into(),
+        ];
+        if let Some(keychain) = settings.0.get("CODESIGN_KEYCHAIN") {
+            arguments.extend(["--keychain".into(), keychain.to_owned()]);
+        }
+        arguments.extend([
+            "--identifier".into(),
+            identifier.as_ref().unwrap().as_str().into(),
+            path.as_os_str().into(),
+        ]);
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
+            Tag::None,
+            false,
+        );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "codesign".into(),
+                vec![
+                    "--verify".into(),
+                    "--strict".into(),
                     path.as_os_str().into(),
-                ]);
-                io.request(
-                    &mut sequence,
-                    entity,
-                    &mut previous,
-                    CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
-                    Tag::None,
-                    false,
-                );
+                ],
+            ),
+            Tag::None,
+            false,
+        );
+        *phase = SignaturePhase::Refresh;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn signature_done(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, phase, _sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Done) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        io.commands.entity(entity).insert(Complete(Outcome::Done));
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn signature_rpaths(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Rpaths) {
+            continue;
+        }
+
+        let Signature { binary, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        let Some(rpaths) = facts.text(entity, Tag::Rpaths) else {
+            continue;
+        };
+        let Some(libraries) = facts.text(entity, Tag::Libraries) else {
+            continue;
+        };
+        let (_, _, linking) = spec.preparation.get(entity).unwrap();
+        let directory = &linking.unwrap().0;
+        for (rpath, _, _, parent) in &spec.links {
+            let Some(rpath) = rpath else {
+                continue;
+            };
+            if parent.parent() != entity
+                || rpaths.contains(&format!("path {} (", rpath.0.display()))
+            {
+                continue;
+            }
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    "install_name_tool".into(),
+                    vec![
+                        "-add_rpath".into(),
+                        rpath.0.as_os_str().into(),
+                        binary.as_os_str().into(),
+                    ],
+                ),
+                Tag::None,
+                false,
+            );
+        }
+        let mut order = 0;
+        for line in libraries.lines() {
+            if !line.contains("libbevy_dylib") {
+                continue;
+            }
+            let Some(original) = line.trim().split(" (compatibility").next() else {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message("Malformed library path")));
+                break;
+            };
+            let Some(name) = Path::new(original).file_name() else {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message("Missing library name")));
+                break;
+            };
+            let replacement = format!("@rpath/{}", name.to_string_lossy());
+            let path = directory.join(name);
+            io.commands.spawn((
+                Binding {
+                    original: original.into(),
+                    replacement,
+                },
+                Order(order),
+                ChildOf(entity),
+            ));
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                InspectPath(path),
+                Tag::Library(order),
+                false,
+            );
+            order += 1;
+        }
+        *phase = SignaturePhase::Bindings;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn signature_bindings(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Bindings) {
+            continue;
+        }
+
+        let Signature { binary, .. } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        for (_, binding, order, parent) in &spec.links {
+            let Some(binding) = binding else {
+                continue;
+            };
+            if parent.parent() != entity {
+                continue;
+            }
+            if !matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file())
+            {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message("Missing shared Bevy library")));
+                break;
+            }
+            if binding.original != binding.replacement {
                 io.request(
                     &mut sequence,
                     entity,
@@ -3051,135 +3975,20 @@ fn signature(
                     CaptureOutput::new(
                         &settings.0,
                         &checkout.root,
-                        "codesign".into(),
+                        "install_name_tool".into(),
                         vec![
-                            "--verify".into(),
-                            "--strict".into(),
-                            path.as_os_str().into(),
+                            "-change".into(),
+                            binding.original.as_str().into(),
+                            binding.replacement.as_str().into(),
+                            binary.as_os_str().into(),
                         ],
                     ),
                     Tag::None,
                     false,
                 );
-                *phase = SignaturePhase::Refresh;
-            }
-            SignaturePhase::Done => {
-                io.commands.entity(entity).insert(Complete(Outcome::Done));
-            }
-            SignaturePhase::Rpaths => {
-                let Some(rpaths) = facts.text(entity, Tag::Rpaths) else {
-                    continue;
-                };
-                let Some(libraries) = facts.text(entity, Tag::Libraries) else {
-                    continue;
-                };
-                let (_, _, linking) = spec.preparation.get(entity).unwrap();
-                let directory = &linking.unwrap().0;
-                for (rpath, _, _, parent) in &spec.links {
-                    let Some(rpath) = rpath else {
-                        continue;
-                    };
-                    if parent.parent() != entity
-                        || rpaths.contains(&format!("path {} (", rpath.0.display()))
-                    {
-                        continue;
-                    }
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            "install_name_tool".into(),
-                            vec![
-                                "-add_rpath".into(),
-                                rpath.0.as_os_str().into(),
-                                binary.as_os_str().into(),
-                            ],
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                }
-                let mut order = 0;
-                for line in libraries.lines() {
-                    if !line.contains("libbevy_dylib") {
-                        continue;
-                    }
-                    let Some(original) = line.trim().split(" (compatibility").next() else {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message("Malformed library path")));
-                        break;
-                    };
-                    let Some(name) = Path::new(original).file_name() else {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message("Missing library name")));
-                        break;
-                    };
-                    let replacement = format!("@rpath/{}", name.to_string_lossy());
-                    let path = directory.join(name);
-                    io.commands.spawn((
-                        Binding {
-                            original: original.into(),
-                            replacement,
-                        },
-                        Order(order),
-                        ChildOf(entity),
-                    ));
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        InspectPath(path),
-                        Tag::Library(order),
-                        false,
-                    );
-                    order += 1;
-                }
-                *phase = SignaturePhase::Bindings;
-            }
-            SignaturePhase::Bindings => {
-                for (_, binding, order, parent) in &spec.links {
-                    let Some(binding) = binding else {
-                        continue;
-                    };
-                    if parent.parent() != entity {
-                        continue;
-                    }
-                    if !matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file())
-                    {
-                        io.commands
-                            .entity(entity)
-                            .insert(Failed(Failure::message("Missing shared Bevy library")));
-                        break;
-                    }
-                    if binding.original != binding.replacement {
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            CaptureOutput::new(
-                                &settings.0,
-                                &checkout.root,
-                                "install_name_tool".into(),
-                                vec![
-                                    "-change".into(),
-                                    binding.original.as_str().into(),
-                                    binding.replacement.as_str().into(),
-                                    binary.as_os_str().into(),
-                                ],
-                            ),
-                            Tag::None,
-                            false,
-                        );
-                    }
-                }
-                *phase = SignaturePhase::Prepare;
             }
         }
+        *phase = SignaturePhase::Prepare;
 
         if *phase != previous_phase {
             wake.0.wake_by_ref();
@@ -3741,11 +4550,60 @@ mod tests {
             }
         }
 
+        fn service_probe(&self) {
+            let source = self.root.join("service_probe.rs");
+            fs::write(
+                &source,
+                r#"fn main() {
+    let root = std::path::PathBuf::from(std::env::var_os("TEST_ROOT").unwrap());
+    let mut arguments = Vec::new();
+    for argument in std::env::args().skip(1) { arguments.push(argument); }
+    let library = std::env::var("DYLD_LIBRARY_PATH").unwrap_or_default();
+    std::fs::write(root.join("stopped"), format!("{}\n{library}\n", arguments.join(" "))).unwrap();
+}"#,
+            )
+            .unwrap();
+            let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
+            let status = std::process::Command::new(compiler)
+                .arg("--edition=2024")
+                .arg(&source)
+                .arg("-o")
+                .arg(self.target.join("debug/vmux"))
+                .status()
+                .unwrap();
+            assert!(status.success(), "service probe compilation failed");
+        }
+
         fn executable(&self, path: &Path, bytes: &[u8]) {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, bytes).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+    }
+
+    #[test]
+    fn stop_uses_the_accepted_rustc_library_path_before_invoking_the_service() {
+        let mut fixture = Fixture::new();
+        let rustc = fixture.root.join("bin/rustc");
+        fixture.executable(&rustc, b"#!/bin/sh\nprintf '%s\\n' \"$TEST_ROOT/stdlib\"\n");
+        fixture.service_probe();
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap()
+            .0
+            .set("RUSTC", rustc.as_os_str());
+        assert_eq!(fixture.run(Work::Stop), 0);
+        let stopped = fs::read_to_string(fixture.root.join("stopped")).unwrap();
+        let mut lines = stopped.lines();
+        assert_eq!(lines.next(), Some("service stop"));
+        let expected = format!(
+            "{}:{}:",
+            fixture.root.join("stdlib").display(),
+            fixture.target.join("debug/deps").display()
+        );
+        assert!(lines.next().unwrap().starts_with(&expected), "{stopped}");
     }
 
     #[test]
