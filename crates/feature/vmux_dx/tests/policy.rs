@@ -315,10 +315,134 @@ fn io_adapters_can_name_an_actual_canonical_component_owner() {
 }
 
 #[test]
+fn local_policy_fragments_preserve_global_adapter_checks_and_duplicate_refusal() {
+    let repository = Repository::new();
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/alpha/src/lib.rs",
+        "#[vmux_api::ui_event] pub struct State { pub bytes: Vec<u8> }",
+    );
+    inventory.source(
+        "crates/util/beta/src/lib.rs",
+        "use alpha::State; pub struct Codec { bytes: Vec<u8> } impl Codec { pub fn decode(self) -> State { State { bytes: self.bytes } } }",
+    );
+    inventory.resolve_usage();
+    let mut boundaries = Vec::new();
+    for key in [
+        "crates/util/beta/src/lib.rs||struct:Codec",
+        "crates/util/beta/src/lib.rs||impl:Codec",
+    ] {
+        let mut boundary = Boundary::fixture(&inventory, key);
+        boundary.interface = "network: bounded wire codec".into();
+        boundary.input = "external: framed bytes".into();
+        boundary.output = "ECS: crates/util/alpha/src/lib.rs||struct:State".into();
+        boundaries.push(boundary);
+    }
+    let fragment = Policy {
+        boundaries,
+        ..Default::default()
+    };
+    repository.write(
+        "crates/util/beta/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    let policy = Policy::load(repository.0.path()).unwrap();
+    let errors = policy.audit(&inventory);
+    assert!(errors.is_empty(), "{errors:?}");
+    let mut duplicate = fragment;
+    duplicate.boundaries.push(duplicate.boundaries[0].clone());
+    repository.write(
+        "crates/util/beta/ecs-policy.ron",
+        &ron::to_string(&duplicate).unwrap(),
+    );
+    let policy = Policy::load(repository.0.path()).unwrap();
+    assert!(
+        policy
+            .audit(&inventory)
+            .iter()
+            .any(|error| error.contains("duplicate policy entry"))
+    );
+    duplicate.boundaries.pop();
+    duplicate.boundaries[0].fingerprint = "stale".into();
+    repository.write(
+        "crates/util/beta/ecs-policy.ron",
+        &ron::to_string(&duplicate).unwrap(),
+    );
+    let policy = Policy::load(repository.0.path()).unwrap();
+    assert!(
+        policy
+            .audit(&inventory)
+            .iter()
+            .any(|error| error.contains("stale/incomplete adapter"))
+    );
+}
+
+#[test]
+fn policy_fragments_reject_foreign_records_provenance_and_malformed_files() {
+    for (path, source, expected) in [
+        (
+            "crates/util/alpha/ecs-policy.ron",
+            "(revision: \"changed\")",
+            "Global provenance",
+        ),
+        (
+            "crates/util/alpha/ecs-policy.ron",
+            "(unknown: [])",
+            "Unexpected field",
+        ),
+        (
+            "crates/util/alpha/src/ecs-policy.ron",
+            "()",
+            "Misplaced policy fragment",
+        ),
+        (
+            "website/ecs-policy.ron",
+            "(legacy: [(key: \"scripts/fixture.sh||script\", fingerprint: \"fixed\", issue: \"VMX-253\")])",
+            "Foreign policy record",
+        ),
+        (
+            "crates/ecs-policy.ron",
+            "(values: [(key: \"crates/util/alpha/src/lib.rs||struct:Value\", owner: \"crates/util/alpha/src/lib.rs||struct:State\", lifetime: \"one operation\")])",
+            "Foreign policy record",
+        ),
+    ] {
+        let repository = Repository::new();
+        repository.write(path, source);
+        let error = Policy::load(repository.0.path())
+            .err()
+            .expect("invalid fragment must fail");
+        assert!(error.contains(expected), "{path}: {error}");
+    }
+    let repository = Repository::new();
+    repository.write("ecs-policy.ron", "(revision: \"fixed\", legacy: [(key: \"fixture.rs||struct:Value\", fingerprint: \"fixed\", issue: \"VMX-253\")])");
+    assert!(
+        Policy::load(repository.0.path())
+            .err()
+            .unwrap()
+            .contains("Root policy holds only")
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn policy_fragments_refuse_symlinks_instead_of_reading_another_location() {
+    let repository = Repository::new();
+    repository.write("website/source.ron", "()");
+    std::os::unix::fs::symlink(
+        "source.ron",
+        repository.0.path().join("website/ecs-policy.ron"),
+    )
+    .unwrap();
+    let error = Policy::load(repository.0.path())
+        .err()
+        .expect("symlink fragment must fail");
+    assert!(error.contains("regular file"), "{error}");
+}
+
+#[test]
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
-    let source = std::fs::read_to_string(root.0.join("ecs-policy.ron")).expect("ownership policy");
-    let policy: Policy = ron::from_str(&source).expect("valid ownership policy");
+    let policy = Policy::load(&root.0).expect("valid ownership policy");
     let architecture = std::fs::read_to_string(root.0.join("docs/architecture.md"))
         .expect("architecture boundary contract");
     assert!(
@@ -2149,6 +2273,25 @@ fn adding_component_to_a_ui_payload_does_not_create_business_ownership() {
 
 struct Workspace(PathBuf);
 
+struct Repository(tempfile::TempDir);
+
+impl Repository {
+    fn new() -> Self {
+        let repository = Self(tempfile::tempdir().unwrap());
+        repository.write(
+            "ecs-policy.ron",
+            &format!("(revision: \"{FROZEN_REVISION}\")"),
+        );
+        repository
+    }
+
+    fn write(&self, path: &str, source: &str) {
+        let path = self.0.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, source).unwrap();
+    }
+}
+
 impl Workspace {
     fn current() -> Self {
         let current = std::env::current_dir().expect("current directory");
@@ -2162,7 +2305,7 @@ impl Workspace {
 }
 
 #[derive(Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 struct Policy {
     revision: String,
     legacy: Vec<Legacy>,
@@ -2172,6 +2315,124 @@ struct Policy {
 }
 
 impl Policy {
+    fn load(root: &Path) -> Result<Self, String> {
+        let mut policy = Self::read(&root.join("ecs-policy.ron"))?;
+        if !policy.legacy.is_empty() || !policy.boundaries.is_empty() || !policy.values.is_empty() {
+            return Err(
+                "Root policy holds only historical revision and upstream references".into(),
+            );
+        }
+        let mut files = Vec::new();
+        for directory in ["crates", "examples", "website", "patches", "scripts"] {
+            Self::paths(&root.join(directory), &mut files)?;
+        }
+        files.sort();
+        for path in files {
+            let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+            let directory = relative
+                .parent()
+                .ok_or("Policy fragment needs a directory")?;
+            if Self::directory(relative).as_deref() != Some(directory) {
+                return Err(format!("Misplaced policy fragment {}", relative.display()));
+            }
+            let fragment = Self::read(&path)?;
+            if !fragment.revision.is_empty() || !fragment.upstream.is_empty() {
+                return Err(format!(
+                    "Global provenance belongs in root policy: {}",
+                    relative.display()
+                ));
+            }
+            for record in &fragment.legacy {
+                Self::check_record(directory, &record.key)?;
+            }
+            for record in &fragment.boundaries {
+                Self::check_record(directory, &record.key)?;
+            }
+            for record in &fragment.values {
+                Self::check_record(directory, &record.key)?;
+            }
+            policy.legacy.extend(fragment.legacy);
+            policy.boundaries.extend(fragment.boundaries);
+            policy.values.extend(fragment.values);
+        }
+        Ok(policy)
+    }
+
+    fn check_record(directory: &Path, key: &str) -> Result<(), String> {
+        let source = Path::new(key.split('|').next().unwrap());
+        if Self::directory(source).as_deref() != Some(directory) {
+            return Err(format!(
+                "Foreign policy record {key} in {}",
+                directory.display()
+            ));
+        }
+        Ok(())
+    }
+
+    fn read(path: &Path) -> Result<Self, String> {
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(format!("Policy must be a regular file: {}", path.display()));
+        }
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        ron::from_str(&source).map_err(|error| format!("{}: {error}", path.display()))
+    }
+
+    fn paths(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+        let entries = match std::fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("{}: {error}", directory.display())),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if kind.is_dir() {
+                if matches!(
+                    path.file_name().and_then(|name| name.to_str()),
+                    Some(
+                        "target" | "node_modules" | ".git" | ".worktrees" | "dist" | ".build-tools"
+                    )
+                ) {
+                    continue;
+                }
+                Self::paths(&path, files)?;
+            } else if path
+                .file_name()
+                .is_some_and(|name| name == "ecs-policy.ron")
+            {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    fn directory(path: &Path) -> Option<PathBuf> {
+        for container in [
+            "crates/app",
+            "crates/feature",
+            "crates/util",
+            "examples",
+            "patches",
+        ] {
+            if let Ok(relative) = path.strip_prefix(container) {
+                return Some(Path::new(container).join(relative.components().next()?.as_os_str()));
+            }
+        }
+        for directory in ["website", "scripts"] {
+            if path.starts_with(directory) {
+                return Some(directory.into());
+            }
+        }
+        if path.parent() == Some(Path::new("crates")) {
+            return Some("crates".into());
+        }
+        None
+    }
+
     fn audit(&self, inventory: &Inventory) -> Vec<String> {
         let mut errors = Vec::new();
         let mut records = BTreeSet::new();
@@ -2513,6 +2774,11 @@ impl Boundary {
             || inventory.fixture_lock(adapter)
             || path == "fixture.rs"
             || path.starts_with("crates/util/vmux_macro/")
+            || matches!(
+                path,
+                "crates/feature/vmux_dx/tests/policy.rs"
+                    | "crates/feature/vmux_dx/tests/conventions.rs"
+            )
             || matches!(
                 path,
                 "crates/feature/vmux_dx/build.rs"

@@ -1,0 +1,19 @@
+(legacy: [
+    (key: "crates/util/vmux_app/src/bin/vmux_service.rs||fn:main", fingerprint: "12aec1585b2c19a5", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/bin/vmux_service.rs||impl:DaemonBootstrap", fingerprint: "0353d98dd7b63efb", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/bin/vmux_service.rs||impl:DaemonTracing", fingerprint: "92c44700f40838ab", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/bin/vmux_service.rs||struct:DaemonBootstrap", fingerprint: "9604a8b8bd1af8bf", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/bin/vmux_service.rs||struct:DaemonTracing", fingerprint: "f38ebda5f2a8c34b", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/mobile.rs||impl:Plugin for VmuxMobilePlugin", fingerprint: "81797aea126f3172", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/mobile.rs||struct:VmuxMobilePlugin", fingerprint: "8899eb9802e30aab", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/plugin.rs||impl:Plugin for VmuxEcsPlugin", fingerprint: "85e80dfdc207b0af", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/plugin.rs||impl:Plugin for VmuxRuntimePlugin", fingerprint: "e93c58ef2ffe398a", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/plugin.rs||struct:VmuxEcsPlugin", fingerprint: "c4c55e77b9b46924", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/plugin.rs||struct:VmuxRuntimePlugin", fingerprint: "764d3f2b48bcf098", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/tool.rs||impl:Plugin for VmuxToolPlugin", fingerprint: "61384279f3286be4", issue: "VMX-253"),
+    (key: "crates/util/vmux_app/src/tool.rs||struct:VmuxToolPlugin", fingerprint: "30419701a5b8d453", issue: "VMX-253"),
+], boundaries: [
+    (key: "crates/util/vmux_app/src/profile_account.rs||struct:Plugin", fingerprint: "ed5518a21320d4d3", interface: "Bevy host Profile-to-Account composition binding", input: "external: Bevy runtime installation", output: "ECS: crates/util/vmux_ecs/src/profile.rs||struct:ActiveProfile", lifetime: "one host runtime", bounds: "Selects the existing data path and derives active labels from canonical account profiles; no second mutation authority", teardown: "Root and runtime metadata drop with the host", architecture: "ECS ownership boundaries"),
+    (key: "crates/util/vmux_app/src/profile_account.rs||impl:bevy_app :: Plugin for Plugin", fingerprint: "d1bf89237a7d4040", interface: "Bevy host Profile-to-Account composition binding", input: "external: Bevy runtime installation", output: "ECS: crates/util/vmux_ecs/src/profile.rs||struct:ActiveProfile", lifetime: "one host runtime", bounds: "Selects the existing data path and derives active labels from canonical account profiles; no second mutation authority", teardown: "Root and runtime metadata drop with the host", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_app/src/profile_account.rs||struct:Plugin")),
+    (key: "crates/util/vmux_app/src/plugin.rs||enum:VmuxPlugin", fingerprint: "d6789d8342f6c624", interface: "Bevy Plugin and app_plugin compile-time composition metadata", input: "external: typed App composition metadata", output: "ECS: crates/util/vmux_lsp/src/lib.rs||struct:RequestPolicy", lifetime: "one explicit App composition; no parallel runtime model", bounds: "one feature/plugin graph with declared schedules and contracts", teardown: "runtime lifecycle is ECS-owned; immutable registration metadata drops with composition", architecture: "ECS ownership boundaries"),
+])

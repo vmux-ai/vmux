@@ -314,7 +314,7 @@ jobs:
           node --test scripts/ci-preflight.test.js
           cargo test --locked -p vmux_dx --features ci-syntax --lib
           cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
-          cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
+          cargo test --locked -p vmux_dx --test policy --test conventions
 
   test-sdk-path:
     name: Test public SDK from an independent workspace
@@ -336,9 +336,9 @@ jobs:
         with:
           cache-key: sdk-path
           cef-version: ${{ needs.cef-version.outputs.version }}
-      - run: vmux framework-consumer
+      - run: vmux dx test sdk
       - name: Test isolated product hosts without a renderer
-        run: vmux framework-consumer -- --host
+        run: vmux dx test sdk --host
 
   test-sdk-git:
     name: Test SDK from immutable Git dependencies
@@ -360,9 +360,9 @@ jobs:
         with:
           cache-key: sdk-git
           cef-version: ${{ needs.cef-version.outputs.version }}
-      - run: vmux framework-consumer -- --git
+      - run: vmux dx test sdk --git
       - name: Test product hosts from immutable Git dependencies
-        run: vmux framework-consumer -- --host --git
+        run: vmux dx test sdk --host --git
 
   test-headless:
     name: Test headless application profiles
@@ -420,7 +420,9 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
-              - 'ecs-policy.ron'
+              - '**/ecs-policy.ron'
+              - 'website/src/**'
+              - 'website/build.rs'
               - 'crates/**'
               - 'examples/framework-consumer/**'
               - 'examples/host-consumer/**'

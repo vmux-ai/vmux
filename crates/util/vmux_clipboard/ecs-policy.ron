@@ -1,0 +1,8 @@
+(legacy: [
+    (key: "crates/util/vmux_clipboard/src/lib.rs||impl:Clipboard", fingerprint: "2cdf8076b10a7dae", issue: "VMX-253"),
+    (key: "crates/util/vmux_clipboard/src/lib.rs||struct:Clipboard", fingerprint: "ce8d8ea9004c3312", issue: "VMX-253"),
+    (key: "crates/util/vmux_clipboard/src/linux.rs||impl:super :: Clipboard", fingerprint: "0c24d0446019fd8d", issue: "VMX-253"),
+    (key: "crates/util/vmux_clipboard/src/macos.rs||fn:path_looks_like_image", fingerprint: "992df283f880d2c9", issue: "VMX-253"),
+    (key: "crates/util/vmux_clipboard/src/macos.rs||impl:super :: Clipboard", fingerprint: "0cd30046017b17fb", issue: "VMX-253"),
+    (key: "crates/util/vmux_clipboard/src/other.rs||impl:super :: Clipboard", fingerprint: "a1e12fd92cfb21a9", issue: "VMX-253"),
+])

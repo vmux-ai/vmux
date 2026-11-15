@@ -235,7 +235,7 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
         }
         if invocation.is("dx.help") {
             println!(
-                "Vmux development commands: build, run, stop, test, lint, doctor, cache\nUse vmux <command> --help."
+                "Vmux development commands: build, run, serve, stop, test, lint, doctor, cache\nUse vmux <command> --help."
             );
             commands.entity(entity).insert(CliResult::default());
             continue;
@@ -277,6 +277,16 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
                 .insert(CliResult(Err(error.to_string())));
             continue;
         }
+        let profile = if invocation.is("dx.serve") {
+            Some("dev")
+        } else {
+            invocation.value("profile")
+        };
+        let platform = if invocation.is("dx.serve") {
+            Some("web")
+        } else {
+            invocation.value("platform")
+        };
         if (invocation.is("dx.build") || invocation.is("dx.run"))
             && let Err(error) = environment.product(&checkout.root)
         {
@@ -292,7 +302,7 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
                 checkout.root.join(".build-tools/standalone").as_os_str(),
             );
         }
-        if invocation.value("platform") == Some("web") && !environment.present("CARGO_TARGET_DIR") {
+        if platform == Some("web") && !environment.present("CARGO_TARGET_DIR") {
             environment.set(
                 "CARGO_TARGET_DIR",
                 checkout.root.join("website/target").as_os_str(),
@@ -320,12 +330,12 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
         if provider.is_none() {
             environment.set("CARGO_TARGET_DIR", checkout.target.as_os_str());
         }
-        if let Some(profile) = invocation.value("profile") {
+        if let Some(profile) = profile {
             environment.set("VMUX_BUILD_PROFILE", profile);
         } else if !environment.present("VMUX_BUILD_PROFILE") {
             environment.set("VMUX_BUILD_PROFILE", "dev");
         }
-        if let Some(platform) = invocation.value("platform") {
+        if let Some(platform) = platform {
             environment.set("VMUX_DX_PLATFORM", platform);
         }
         if let Some(features) = invocation.value_os("features") {
@@ -391,8 +401,16 @@ type Planning<'w, 's> = Query<
 
 fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut commands: Commands) {
     for (entity, invocation, dispatch) in &operations {
-        let profile = invocation.value("profile").unwrap_or("dev");
-        let platform = invocation.value("platform").unwrap_or("desktop");
+        let profile = if invocation.is("dx.serve") {
+            "dev"
+        } else {
+            invocation.value("profile").unwrap_or("dev")
+        };
+        let platform = if invocation.is("dx.serve") {
+            "web"
+        } else {
+            invocation.value("platform").unwrap_or("desktop")
+        };
         let mut forwarded = invocation
             .arguments
             .get("forward")
@@ -519,7 +537,7 @@ fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut comman
                     }
                     steps.push(Work::Finish(profile.into()));
                 }
-                "dx.run" => {
+                "dx.run" | "dx.serve" => {
                     steps.push(Work::Acquire);
                     if platform != "desktop" {
                         steps.push(Work::Dioxus(platform.into()));
@@ -598,7 +616,17 @@ fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut comman
                 }
                 "dx.ci-scope" => steps.push(Work::Scope(forwarded)),
                 "dx.ci-native" => steps.push(Work::NativeInputs(forwarded)),
-                "dx.framework-consumer" => steps.extend([Work::Acquire, Work::Consumer(forwarded)]),
+                "dx.checks.test" => steps.push(Work::Internal("pre-push".into(), Vec::new())),
+                "dx.checks.sdk" => {
+                    let mut arguments = Vec::new();
+                    if invocation.flag("host") {
+                        arguments.push("--host".into());
+                    }
+                    if invocation.flag("git") {
+                        arguments.push("--git".into());
+                    }
+                    steps.extend([Work::Acquire, Work::Consumer(arguments)]);
+                }
                 "dx.internal" => {
                     let Some(task) = invocation.value("task") else {
                         commands.entity(entity).insert((

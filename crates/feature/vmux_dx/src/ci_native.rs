@@ -73,7 +73,7 @@ impl Changes {
 
     fn requires_native(&self, base: &str, head: &str, path: &str) -> bool {
         let file = Path::new(path);
-        if file.starts_with("docs") || path == "ecs-policy.ron" {
+        if file.starts_with("docs") || crate::ci_scope::Scope::policy(file) {
             return false;
         }
         if !file.starts_with("crates") || file.extension().is_none_or(|extension| extension != "rs")

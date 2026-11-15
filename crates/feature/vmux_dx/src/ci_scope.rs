@@ -11,6 +11,31 @@ pub struct Scope {
 }
 
 impl Scope {
+    pub(crate) fn policy(path: &Path) -> bool {
+        if path.file_name().is_none_or(|name| name != "ecs-policy.ron") {
+            return false;
+        }
+        if path == Path::new("ecs-policy.ron") {
+            return true;
+        }
+        let Some(directory) = path.parent() else {
+            return false;
+        };
+        if directory
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return false;
+        }
+        if matches!(directory.to_str(), Some("crates" | "website" | "scripts")) {
+            return true;
+        }
+        matches!(
+            directory.parent().and_then(Path::to_str),
+            Some("crates/app" | "crates/feature" | "crates/util" | "patches" | "examples")
+        )
+    }
+
     pub fn new(root: PathBuf) -> Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
@@ -170,10 +195,29 @@ impl Workspace {
         let mut lean = false;
         let mut policy = false;
         for file in files {
-            if file == Path::new("ecs-policy.ron") {
+            if (file.starts_with("website/src")
+                || matches!(
+                    file.to_str(),
+                    Some("website/build.rs" | "website/Cargo.toml" | "website/Cargo.lock")
+                ))
+                && !self
+                    .packages
+                    .iter()
+                    .any(|package| package.directory.starts_with("website"))
+            {
                 if !self.packages.iter().any(|package| {
-                    package.name == "vmux_macro"
-                        && package.directory == Path::new("crates/util/vmux_macro")
+                    package.name == "vmux_dx"
+                        && package.directory == Path::new("crates/feature/vmux_dx")
+                }) {
+                    return self.full();
+                }
+                policy = true;
+                continue;
+            }
+            if Scope::policy(file) {
+                if !self.packages.iter().any(|package| {
+                    package.name == "vmux_dx"
+                        && package.directory == Path::new("crates/feature/vmux_dx")
                 }) {
                     return self.full();
                 }
@@ -214,7 +258,7 @@ impl Workspace {
             }
         }
         if policy {
-            selected.insert("vmux_macro".into());
+            selected.insert("vmux_dx".into());
         }
         let mut lint = BTreeSet::new();
         for package in &self.packages {
@@ -329,17 +373,45 @@ mod tests {
     fn policy_ledger_inputs_do_not_expand_the_production_dependency_graph() {
         let mut workspace = Workspace::fixture();
         workspace.packages.push(Package {
-            name: "vmux_macro".into(),
-            directory: "crates/util/vmux_macro".into(),
+            name: "vmux_dx".into(),
+            directory: "crates/feature/vmux_dx".into(),
             dependencies: BTreeSet::new(),
         });
         for package in &mut workspace.packages {
             if package.name == "unrelated" {
-                package.dependencies.insert("vmux_macro".into());
+                package.dependencies.insert("vmux_dx".into());
             }
         }
+        for path in [
+            "ecs-policy.ron",
+            "crates/ecs-policy.ron",
+            "crates/feature/leaf/ecs-policy.ron",
+            "crates/feature/vmux_dx/ecs-policy.ron",
+            "crates/util/vmux_macro/ecs-policy.ron",
+            "crates/app/vmux_desktop/ecs-policy.ron",
+            "patches/bevy_window-0.19.0/ecs-policy.ron",
+            "examples/framework-consumer/ecs-policy.ron",
+            "website/ecs-policy.ron",
+            "scripts/ecs-policy.ron",
+        ] {
+            let policy = workspace.select(&[path.into()]);
+            assert_eq!(
+                policy.packages,
+                BTreeSet::from(["vmux_dx".into()]),
+                "{path}"
+            );
+            assert!(!policy.workspace, "{path}");
+            assert!(!policy.lean, "{path}");
+        }
+        for path in [
+            "other/ecs-policy.ron",
+            "crates/feature/leaf/src/ecs-policy.ron",
+            "website/nested/ecs-policy.ron",
+        ] {
+            assert!(!Scope::policy(Path::new(path)), "{path}");
+        }
         let policy = workspace.select(&["ecs-policy.ron".into()]);
-        assert_eq!(policy.packages, BTreeSet::from(["vmux_macro".into()]));
+        assert_eq!(policy.packages, BTreeSet::from(["vmux_dx".into()]));
         assert_eq!(policy.lint, policy.packages);
         assert!(!policy.workspace);
         assert!(!policy.lean);
@@ -354,7 +426,7 @@ mod tests {
                 "consumer".into(),
                 "leaf".into(),
                 "vmux_desktop".into(),
-                "vmux_macro".into(),
+                "vmux_dx".into(),
             ])
         );
         assert_eq!(feature.lint, feature.packages);
@@ -371,11 +443,49 @@ mod tests {
                 .workspace
         );
         for package in &mut workspace.packages {
-            if package.name == "vmux_macro" {
+            if package.name == "vmux_dx" {
                 package.directory = "crates/feature/foreign-policy".into();
             }
         }
         assert!(workspace.select(&["ecs-policy.ron".into()]).workspace);
+    }
+
+    #[test]
+    fn independent_website_inputs_run_policy_without_rebuilding_product_consumers() {
+        let mut workspace = Workspace::fixture();
+        workspace.packages.push(Package {
+            name: "vmux_dx".into(),
+            directory: "crates/feature/vmux_dx".into(),
+            dependencies: BTreeSet::new(),
+        });
+        for path in [
+            "website/src/app.rs",
+            "website/build.rs",
+            "website/Cargo.toml",
+            "website/Cargo.lock",
+        ] {
+            let selected = workspace.select(&[path.into(), "website/ecs-policy.ron".into()]);
+            assert_eq!(
+                selected.packages,
+                BTreeSet::from(["vmux_dx".into()]),
+                "{path}"
+            );
+            assert!(!selected.workspace, "{path}");
+            assert!(!selected.lean, "{path}");
+        }
+        assert!(
+            workspace
+                .select(&["website/public/updates.json".into()])
+                .workspace
+        );
+        workspace.packages.push(Package {
+            name: "site".into(),
+            directory: "website".into(),
+            dependencies: BTreeSet::new(),
+        });
+        let selected = workspace.select(&["website/src/app.rs".into()]);
+        assert_eq!(selected.packages, BTreeSet::from(["site".into()]));
+        assert!(workspace.select(&["website/build.rs".into()]).workspace);
     }
 
     #[test]

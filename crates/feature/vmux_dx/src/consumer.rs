@@ -40,7 +40,7 @@ impl Consumer {
         let host = args.iter().any(|arg| arg == "--host");
         let git = args.iter().any(|arg| arg == "--git");
         if args.len() != usize::from(host) + usize::from(git) {
-            return Err("usage: framework-consumer [--host] [--git]".into());
+            return Err("usage: dx test sdk [--host] [--git]".into());
         }
         if host && !git {
             return self.host(&self.root.join("examples/host-consumer"), None);

@@ -264,7 +264,14 @@ fn development_help_exposes_the_agreed_options_and_excludes_internal_integration
         .success()
         .stdout(predicate::str::contains("-p, --profile"))
         .stdout(predicate::str::contains("-P, --platform"))
-        .stdout(predicate::str::contains("-b, --branch"));
+        .stdout(predicate::str::contains("[BRANCH]"))
+        .stdout(predicate::str::contains("-b, --branch").not());
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .args(["dx", "test", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sdk"));
     Command::cargo_bin("vmux")
         .unwrap()
         .arg("--help")
@@ -622,6 +629,61 @@ fn both_branch_option_forms_refuse_a_missing_branch_without_changing_checkout() 
     }
 }
 
+#[test]
+#[cfg(unix)]
+fn positional_branches_refuse_a_missing_worktree_before_building_or_launching() {
+    let fixture = Fixture::new();
+    for command in ["build", "run", "serve"] {
+        fixture
+            .command()
+            .args([command, "missing-dx-fixture-branch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Branch has no worktree"));
+    }
+    assert!(!fixture.root.join("open.log").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn serve_uses_the_selected_website_and_development_profile() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.root.join("website")).unwrap();
+    std::fs::write(fixture.root.join("website/tailwind.input.css"), "fixture").unwrap();
+    fixture.script("dx", r#"#!/bin/sh
+if [ "$1" = --version ]; then printf 'dx 0.7.9\n'; exit 0; fi
+printf '%s\n%s\n%s\n%s\n' "$PWD" "$*" "$VMUX_BUILD_PROFILE" "$VMUX_DX_PLATFORM" > "$TEST_ROOT/serve.log"
+"#);
+    fixture.script(
+        "../dx-home/tools/binaryen-127/bin/wasm-opt",
+        "#!/bin/sh\nprintf 'wasm-opt version 127\\n'\n",
+    );
+    fixture
+        .command()
+        .args(["serve", "main"])
+        .env("DX_BIN", fixture.root.join("bin/dx"))
+        .env("DX_HOME", fixture.root.join("dx-home"))
+        .env("TAILWINDCSS_BIN", fixture.root.join("bin/tailwindcss"))
+        .env("TEST_ROOT", &fixture.root)
+        .env("VMUX_BUILD_PROFILE", "release")
+        .assert()
+        .success();
+    let output = std::fs::read_to_string(fixture.root.join("serve.log")).unwrap();
+    assert_eq!(
+        output,
+        format!(
+            "{}\nserve --platform web\ndev\nweb\n",
+            fixture
+                .root
+                .join("website")
+                .canonicalize()
+                .unwrap()
+                .display()
+        )
+    );
+    assert!(!fixture.root.join("open.log").exists());
+}
+
 #[cfg(unix)]
 struct Fixture {
     directory: tempfile::TempDir,
@@ -941,7 +1003,7 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
     std::fs::write(fixture.root.join(".env"), "VMUX_PROFILE=from-file\nVMUX_DATA_DIR=/file-data-must-not-win\nVMUX_REMOTE_RELAY_URL=https://production.invalid:443\n").unwrap();
     fixture
         .command()
-        .args(["run", "-p", "local"])
+        .args(["run", "main", "-p", "local"])
         .env("VMUX_PROFILE", "work")
         .env_remove("VMUX_TEST")
         .env("VMUX_DATA_DIR", &data)
@@ -1661,10 +1723,34 @@ METADATA
     );
         project.script("docs/architecture.md", "updated fixture documentation\n");
         project.script("ecs-policy.ron", "updated fixture policy\n");
+        for path in [
+            "crates/feature/sample/ecs-policy.ron",
+            "crates/ecs-policy.ron",
+            "website/ecs-policy.ron",
+            "scripts/ecs-policy.ron",
+            "patches/bevy_window-0.19.0/ecs-policy.ron",
+        ] {
+            project.script(path, "updated local fixture policy\n");
+        }
         project.native_commit();
         let output = project.native(Some(&base));
         assert!(output.status.success(), "{:?}", output);
         assert_eq!(output.stdout, b"native=false\n");
+
+        project.script(
+            "crates/feature/sample/src/ecs-policy.ron",
+            "misplaced fixture policy\n",
+        );
+        project.native_commit();
+        let output = project.native(Some(&base));
+        assert!(output.status.success(), "{:?}", output);
+        assert_eq!(output.stdout, b"native=true\n");
+        std::fs::remove_file(
+            project
+                .root()
+                .join("crates/feature/sample/src/ecs-policy.ron"),
+        )
+        .unwrap();
 
         project.script(
         "crates/feature/sample/src/lib.rs",
