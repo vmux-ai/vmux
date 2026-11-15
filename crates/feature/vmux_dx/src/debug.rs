@@ -199,25 +199,30 @@ enum Phase {
 #[derive(Component)]
 struct Sequence(u32);
 
-impl Sequence {
+#[derive(SystemParam)]
+struct IoWriter<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl IoWriter<'_, '_> {
     fn request<J: IoJob>(
         &mut self,
-        commands: &mut Commands,
+        sequence: &mut Sequence,
         owner: Entity,
         previous: &mut Option<Entity>,
         job: J,
         tag: Tag,
         optional: bool,
     ) {
-        let mut child = commands.spawn((
+        let mut child = self.commands.spawn((
             Operation::bundle("dx.debug.io").unwrap(),
             Io,
             job,
             tag,
-            Order(self.0),
+            Order(sequence.0),
             ChildOf(owner),
         ));
-        self.0 += 1;
+        sequence.0 += 1;
         if let Some(previous) = *previous {
             child.insert(After(previous));
         }
@@ -592,6 +597,7 @@ fn identity(
     identities: Query<&Identity>,
     keychains: Query<&Keychain>,
     mut commands: Commands,
+    mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         let Request::Identity { print } = request else {
@@ -646,8 +652,8 @@ fn identity(
                         .entity(entity)
                         .insert(Keychain(keychain.to_owned()));
                 } else {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -686,8 +692,8 @@ fn identity(
                     .map(OsString::from)
                     .to_vec();
                 arguments.push(keychain);
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
@@ -710,16 +716,16 @@ fn identity(
                         .insert(Complete(Outcome::Identity(identity.0.clone())));
                     continue;
                 }
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CreateTemporary,
                     Tag::Temporary,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "uuidgen".into(), Vec::new()),
@@ -745,8 +751,8 @@ fn identity(
                 let text = format!(
                     "[req]\ndistinguished_name=req_distinguished_name\nx509_extensions=v3_codesign\nprompt=no\n[req_distinguished_name]\nCN={identity}\n[v3_codesign]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n"
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     WriteFile(config.clone(), text.into_bytes()),
@@ -766,8 +772,8 @@ fn identity(
                     "-out".into(),
                     cert.clone().into_os_string(),
                 ]);
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
@@ -792,8 +798,8 @@ fn identity(
                     "-macalg".into(),
                     "sha1".into(),
                 ];
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
@@ -812,8 +818,8 @@ fn identity(
                     "-T".into(),
                     "/usr/bin/codesign".into(),
                 ];
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
@@ -830,8 +836,8 @@ fn identity(
                     keychain.clone(),
                     cert.into_os_string(),
                 ];
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
@@ -847,8 +853,8 @@ fn identity(
                     identity.into(),
                     keychain.clone(),
                 ];
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
@@ -862,8 +868,8 @@ fn identity(
                     "codesigning".into(),
                     keychain.clone(),
                 ];
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
@@ -900,7 +906,13 @@ fn identity(
     }
 }
 
-fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut commands: Commands) {
+fn capacity(
+    mut requests: Requests,
+    facts: Facts,
+    targets: Query<&Target>,
+    mut commands: Commands,
+    mut io: IoWriter,
+) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         let Request::Capacity { minimum } = request else {
             continue;
@@ -915,8 +927,8 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
                     .entity(entity)
                     .insert(Target(checkout.target.clone()));
                 *phase = Phase::CapacityInspect;
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     InspectPath(checkout.target.clone()),
@@ -933,8 +945,8 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
                 };
                 if metadata.is_some() {
                     *phase = Phase::CapacityRead;
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -949,8 +961,8 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
                 } else if let Some(parent) = target.0.parent() {
                     let parent = parent.to_owned();
                     commands.entity(entity).insert(Target(parent.clone()));
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         InspectPath(parent),
@@ -999,7 +1011,7 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
     }
 }
 
-fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
+fn clear(mut requests: Requests, facts: Facts, mut commands: Commands, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if !matches!(request, Request::Clear) || facts.pending(entity) {
             continue;
@@ -1017,16 +1029,16 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                     }
                 };
                 let debug = checkout.directory("debug");
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CreateDirectory(debug.clone()),
                     Tag::None,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     InspectPath(debug.join(".vmux-dev-ready")),
@@ -1036,8 +1048,8 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                 let alias = checkout
                     .directory("release")
                     .join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")));
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     InspectPath(alias),
@@ -1057,8 +1069,8 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                     }
                 };
                 if let Some(PathMetadata(Some(_))) = facts.get(entity, Tag::Stamp) {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         RemoveFile(checkout.directory("debug").join(".vmux-dev-ready")),
@@ -1069,8 +1081,8 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                 if let Some(PathMetadata(Some(metadata))) = facts.get(entity, Tag::Path)
                     && metadata.file_type().is_symlink()
                 {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         RemoveFile(
@@ -1183,6 +1195,7 @@ fn bundle(
     signatures: Signatures,
     wake: Res<JobWake>,
     mut commands: Commands,
+    mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if !matches!(request, Request::Bundle) || facts.pending(entity) {
@@ -1202,16 +1215,16 @@ fn bundle(
         let mut previous = None;
         match *phase {
             Phase::Start => {
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     ReadFile(checkout.root.join("Cargo.toml")),
                     Tag::Manifest,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(
@@ -1233,8 +1246,8 @@ fn bundle(
                 };
                 let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
                 if !output.status.success() || branch.trim().is_empty() {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -1303,8 +1316,8 @@ fn bundle(
                     contents.join("Frameworks"),
                     service_contents.join("MacOS"),
                 ] {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CreateDirectory(directory),
@@ -1312,8 +1325,8 @@ fn bundle(
                         false,
                     );
                 }
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CopyFile(
@@ -1339,8 +1352,8 @@ fn bundle(
                     format!("Set :CFBundleVersion {version}"),
                 ];
                 for update in updates.drain(..) {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -1357,8 +1370,8 @@ fn bundle(
                         false,
                     );
                 }
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CopyFile(
@@ -1368,8 +1381,8 @@ fn bundle(
                     Tag::None,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CopyFile(
@@ -1379,16 +1392,16 @@ fn bundle(
                     Tag::None,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CopyFile(debug.join("vmux"), contents.join("MacOS/vmux")),
                     Tag::None,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CopyFile(plist.clone(), service_plist.clone()),
@@ -1400,8 +1413,8 @@ fn bundle(
                         "Set :{key} {}",
                         serde_json::to_string(product.value("VMUX_HOST_SERVICE_NAME")).unwrap()
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -1425,8 +1438,8 @@ fn bundle(
                     ),
                     "Set :LSUIElement true".into(),
                 ] {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -1507,8 +1520,8 @@ fn bundle(
                     commands.entity(entity).insert(Complete(Outcome::Done));
                     continue;
                 }
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(
@@ -1589,6 +1602,7 @@ fn publish(
     files: Query<(&File, &Order, &ChildOf)>,
     wake: Res<JobWake>,
     mut commands: Commands,
+    mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if !matches!(request, Request::Publish) || facts.pending(entity) {
@@ -1616,8 +1630,8 @@ fn publish(
                     };
                     let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
                     paths.push(debug.join(&name).join("Contents/MacOS/vmux_desktop"));
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         InspectPath(checkout.directory("release").join(name)),
@@ -1627,16 +1641,16 @@ fn publish(
                 }
                 for (order, path) in paths.into_iter().enumerate() {
                     commands.spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         InspectPath(path.clone()),
                         Tag::Library(order as u32),
                         false,
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         HashFile(path),
@@ -1692,16 +1706,16 @@ fn publish(
                         }
                     };
                     let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CreateDirectory(checkout.directory("release")),
                         Tag::None,
                         false,
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         LinkPath(debug.join(&name), checkout.directory("release").join(name)),
@@ -1710,16 +1724,16 @@ fn publish(
                     );
                 }
                 let temporary = debug.join(".vmux-dev-ready.tmp");
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     WriteFile(temporary.clone(), stamp.into_bytes()),
                     Tag::None,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     RenamePath(temporary, debug.join(".vmux-dev-ready")),
@@ -1765,6 +1779,7 @@ fn run(
     entries: Query<(&crate::local::Entry, &ChildOf)>,
     wake: Res<JobWake>,
     mut commands: Commands,
+    mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         let Request::Run { profile, platform } = request else {
@@ -1792,8 +1807,8 @@ fn run(
                     ]
                     .map(OsString::from)
                     .to_vec();
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         SpawnProcess::new(
@@ -1820,8 +1835,8 @@ fn run(
                         format!("--{platform}").into(),
                     ]
                 };
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     RunProcess::new(
@@ -1854,16 +1869,16 @@ fn run(
             match *phase {
                 Phase::Start => {
                     match profile.as_str() {
-                        "local" => sequence.request(
-                            &mut commands,
+                        "local" => io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             InspectPath(checkout.directory("release")),
                             Tag::Directory,
                             false,
                         ),
-                        "dev" => sequence.request(
-                            &mut commands,
+                        "dev" => io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
@@ -1874,8 +1889,8 @@ fn run(
                             let target = checkout
                                 .directory("release")
                                 .join(format!("{}.app", product.value("VMUX_HOST_NAME")));
-                            sequence.request(
-                                &mut commands,
+                            io.request(
+                                &mut sequence,
                                 entity,
                                 &mut previous,
                                 InspectPath(target.clone()),
@@ -1896,8 +1911,8 @@ fn run(
                             )));
                             continue;
                         }
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             ReadDirectory(checkout.directory("release")),
@@ -1939,8 +1954,8 @@ fn run(
                                 Order(count),
                                 ChildOf(entity),
                             ));
-                            sequence.request(
-                                &mut commands,
+                            io.request(
+                                &mut sequence,
                                 entity,
                                 &mut previous,
                                 HashFile(path),
@@ -2068,8 +2083,8 @@ fn run(
                 }
                 Phase::LaunchVerify => {
                     let target = targets.get(entity).unwrap();
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -2111,8 +2126,8 @@ fn run(
                         environment.remove("CEF_PATH");
                         (target.0.as_os_str().to_owned(), Vec::new())
                     };
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         RunProcess::new(&environment, &checkout.root, program, arguments),
@@ -2134,7 +2149,13 @@ fn run(
     }
 }
 
-fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: Commands) {
+fn stop(
+    mut requests: Requests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut commands: Commands,
+    mut io: IoWriter,
+) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if !matches!(request, Request::Stop) || facts.pending(entity) {
             continue;
@@ -2143,8 +2164,8 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: 
         let mut previous = None;
         match *phase {
             Phase::Start => {
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(
@@ -2182,8 +2203,8 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: 
                             .to_string_lossy()
                     ),
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     RunProcess::new(
@@ -2240,6 +2261,7 @@ fn signature(
     spec: SignatureData,
     wake: Res<JobWake>,
     mut commands: Commands,
+    mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         let Request::Signature {
@@ -2268,8 +2290,8 @@ fn signature(
         let mut previous = None;
         match *phase {
             Phase::Start | Phase::SignatureRefresh => {
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     HashFile(product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()),
@@ -2283,8 +2305,8 @@ fn signature(
                     .collect::<Vec<_>>();
                 sources.sort_by_key(|(_, order, _)| order.0);
                 for (input, order, _) in sources {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         HashFile(input.0.clone()),
@@ -2293,16 +2315,16 @@ fn signature(
                     );
                 }
                 if *phase == Phase::Start {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         InspectPath(stamp.clone()),
                         Tag::Stamp,
                         false,
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         InspectPath(binary.clone()),
@@ -2311,8 +2333,8 @@ fn signature(
                     );
                     *phase = Phase::SignatureInputs;
                 } else {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         HashFile(binary.clone()),
@@ -2362,8 +2384,8 @@ fn signature(
                         continue;
                     };
                     let temporary = stamp.with_extension("tmp");
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         WriteFile(
@@ -2373,8 +2395,8 @@ fn signature(
                         Tag::None,
                         false,
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         RenamePath(temporary, stamp.clone()),
@@ -2386,24 +2408,24 @@ fn signature(
                     let exists = matches!(facts.get(entity, Tag::Stamp), Some(PathMetadata(Some(metadata))) if metadata.is_file())
                         && matches!(facts.get(entity, Tag::Binary), Some(PathMetadata(Some(metadata))) if metadata.is_file());
                     if exists {
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             ReadFile(stamp.clone()),
                             Tag::Stamp,
                             false,
                         );
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             HashFile(binary.clone()),
                             Tag::Binary,
                             false,
                         );
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             CaptureOutput::new(
@@ -2448,16 +2470,16 @@ fn signature(
                 if let Some(copy) = copy
                     && copied.is_none()
                 {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CreateDirectory(binary.parent().unwrap().to_owned()),
                         Tag::None,
                         false,
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CopyFile(copy.0.clone(), binary.clone()),
@@ -2466,8 +2488,8 @@ fn signature(
                     );
                     commands.entity(entity).insert(Copied);
                     if linking.is_some() {
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             CaptureOutput::new(
@@ -2479,8 +2501,8 @@ fn signature(
                             Tag::Rpaths,
                             false,
                         );
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             CaptureOutput::new(
@@ -2495,8 +2517,8 @@ fn signature(
                         *phase = Phase::SignatureRpaths;
                     }
                 } else if identifier.is_some() {
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -2532,8 +2554,8 @@ fn signature(
                         arguments.extend(["--keychain".into(), keychain.to_owned()]);
                     }
                     arguments.push(path.as_os_str().into());
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -2545,8 +2567,8 @@ fn signature(
                         Tag::None,
                         false,
                     );
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -2601,16 +2623,16 @@ fn signature(
                     identifier.as_ref().unwrap().as_str().into(),
                     path.as_os_str().into(),
                 ]);
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
                     Tag::None,
                     false,
                 );
-                sequence.request(
-                    &mut commands,
+                io.request(
+                    &mut sequence,
                     entity,
                     &mut previous,
                     CaptureOutput::new(
@@ -2649,8 +2671,8 @@ fn signature(
                     {
                         continue;
                     }
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         CaptureOutput::new(
@@ -2694,8 +2716,8 @@ fn signature(
                         Order(order),
                         ChildOf(entity),
                     ));
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         InspectPath(path),
@@ -2722,8 +2744,8 @@ fn signature(
                         break;
                     }
                     if binding.original != binding.replacement {
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             CaptureOutput::new(
@@ -2756,7 +2778,13 @@ fn signature(
 type WakeChanges<'w, 's> =
     Query<'w, 's, Entity, Or<(Changed<Phase>, Added<Complete>, Added<Failed>)>>;
 
-fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: Commands) {
+fn provider(
+    mut requests: Requests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut commands: Commands,
+    mut io: IoWriter,
+) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
         if facts.pending(entity) {
             continue;
@@ -2786,8 +2814,8 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                         "--target-dir".into(),
                         checkout.target.as_os_str().into(),
                     ];
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         RunProcess::new(&environment, &checkout.root, "cargo".into(), arguments),
@@ -2803,8 +2831,8 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                 let source = checkout.directory("debug").join(binary);
                 match *phase {
                     Phase::Start => {
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             InspectPath(source),
@@ -2821,8 +2849,8 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                             )));
                             continue;
                         }
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             CreateTemporary,
@@ -2837,16 +2865,16 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                             continue;
                         };
                         let path = temporary.path().join("provider");
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             CopyFile(source, path.clone()),
                             Tag::None,
                             false,
                         );
-                        sequence.request(
-                            &mut commands,
+                        io.request(
+                            &mut sequence,
                             entity,
                             &mut previous,
                             InspectPath(path),
@@ -2888,8 +2916,8 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                     };
                     let mut environment = settings.0.clone();
                     environment.set("VMUX_DX_PROVIDER_CHILD", "1");
-                    sequence.request(
-                        &mut commands,
+                    io.request(
+                        &mut sequence,
                         entity,
                         &mut previous,
                         RunProcess::new(
