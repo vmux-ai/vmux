@@ -25,10 +25,10 @@ The example directory is called `framework-consumer`: it uses Vmux as a dependen
 From the Vmux checkout:
 
 ```sh
-vmux framework-consumer
+vmux dx test sdk
 ```
 
-This tests the examples against your local source. `vmux framework-consumer -- --git` tests the committed source as Git dependencies instead. Neither command launches Vmux.
+This tests the examples against your local source. `vmux dx test sdk --git` tests the committed source as Git dependencies instead. Neither command launches Vmux.
 
 ## Choose the parts you need
 

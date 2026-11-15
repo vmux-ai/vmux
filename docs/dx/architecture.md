@@ -56,7 +56,7 @@ The desktop displays pages and handles native integration. The background servic
 
 Filesystem, network, process, and native API calls sit behind adapters. Handlers decide what should happen; an adapter performs the outside operation and returns its result. Before applying a delayed result, the handler checks that it still belongs to the current task or page.
 
-The repository's policy checks test these relationships. `ecs-policy.ron` currently also records migration debt and exceptions the source checker cannot infer. It is not a guide to implementing a feature; read the feature's types, handlers, and tests.
+The repository's policy checks test these relationships. Ownership is inferred from the code; local `ecs-policy.ron` files carry migration debt and the exceptions the checker cannot infer. Read the feature's types, handlers, and tests first, and use a policy file when a check points to one.
 
 ## What to read next
 

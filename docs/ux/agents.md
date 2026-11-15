@@ -1,27 +1,27 @@
 # Agents
 
-Use an ACP-compatible agent in a Session to investigate, implement, explain, or review a task. Vmux keeps that conversation beside the project surfaces you can inspect and use yourself.
+An agent is an assistant you can give a task: research a trip, compare products, plan a meal, or fix software. A Session keeps the conversation and its results together.
 
-## Give the task a reviewable outcome
+## Start a conversation
 
-State the goal, context, constraints, and expected result. A focused task such as “explain this failure and prepare a tested fix” is easier to steer and review than a collection of unrelated requests.
+Select an available agent for a new Session. If it needs setup or sign-in, complete that first. Then describe the result you want and the details that matter.
 
-The Session's working directory anchors its relative operations. An agent running in the background does not switch projects because you focus another window or Space.
+For shopping, include the budget and delivery country. For cooking, include ingredients, portions, and dietary requirements. For software, select the Project and describe how to reproduce the problem.
 
-## Divide a larger goal
+## Let tools support the task
 
-Keep related Sessions in one Project. Split independent tasks or reviews into separate Sessions, and provide the accepted outputs that dependent tasks need. Separate implementation worktrees where tasks would otherwise edit the same checkout.
+Connected agents can use the available tools alongside you: project management to choose the working context, Browser for sources, Knowledge for saved notes, Editor for local files, Git for changes, and Terminal for commands.
 
-Use Sessions as durable task context, not just disposable prompts. Follow up in the same conversation when you want a correction or extension of its result.
+Keep those pages beside the Session when you want to inspect the work. You can read the source, edit a note, inspect a diff, or take over a terminal yourself.
 
-## Inspect activity and permissions
+## Steer and review
 
-Read the agent's activity, inspect tool results, and review the diff or artifact. You can keep Browser, Code, and Terminal beside the Session to reproduce a problem or verify its proposed result.
+Follow up in the same Session with a correction or extra constraint. For example: “Include baggage in the flight price,” or “Use the ingredients I already have.”
 
-Capability access is explicit and belongs to the agent/task scope. A visible approval count is feedback, not authorization. Review requests for the action and context that need them. Agent-native configuration remains owned by that agent rather than being silently copied into another configuration.
+Review requests to use capabilities or perform an action in the context of the task. Before a booking, purchase, or published code change, inspect the completed details or diff and authorize the action you want.
 
-## Finish or continue the work
+## Continue later
 
-Review the outcome against the original goal and its validation. For code, inspect the diff and try the prepared product when needed before publishing or merging. Keep the Session linked to its Project and use its result as context for the next task.
+Return to the same Session for a follow-up. Start another for a separate task or independent review, and keep related Sessions in the same Project. Ask the agent to save a useful result in Knowledge when another task should reuse it.
 
-See [Get something done](getting-things-done.md) for the complete flow and [Remote access](remote.md) for returning to work from the phone.
+See [the task examples](getting-things-done.md), [Knowledge](knowledge.md), and [Projects and Sessions](workspace.md).

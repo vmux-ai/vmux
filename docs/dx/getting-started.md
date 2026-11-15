@@ -1,14 +1,10 @@
 # Getting started
 
-This guide takes you from a source checkout to a running Vmux build. You can use it to make your own version or prepare a contribution.
+Build Vmux, make one visible change, and try it. You can keep the result as your own version or contribute it upstream.
 
-## Before you start
+## Get a checkout running
 
-Use a Mac with [Rust installed through rustup](https://rustup.rs/) and Apple's command-line tools. macOS is the main development platform. Linux runs the test suite in CI; the iPhone app connects to a host remotely.
-
-## Get the source
-
-Clone Vmux, or use your fork's URL if you want to keep personal changes:
+You need a Mac, [Rust](https://rustup.rs/), and Apple's command-line tools.
 
 ```sh
 git clone https://github.com/vmux-ai/vmux.git
@@ -17,9 +13,9 @@ git worktree add .worktrees/my-vmux -b my-vmux
 cd .worktrees/my-vmux
 ```
 
-A worktree gives this branch its own directory. Keep your edits and builds there.
+A worktree is another directory for a branch. This one holds your changes and builds. Use your fork's clone URL if you want to save personal changes there.
 
-## Install the development commands
+Install the Vmux development command, prepare its tools, and check the setup:
 
 ```sh
 cargo install --path crates/app/vmux_cli --no-default-features --features dx
@@ -28,30 +24,31 @@ vmux doctor
 vmux internal setup-hooks
 ```
 
-`setup` installs the tools the checkout needs. `doctor` tells you what is missing. The last command installs the checks that run before a push.
-
-## Build and open Vmux
+Build your branch and open it:
 
 ```sh
-vmux build -b my-vmux
-vmux run -b my-vmux
+vmux build my-vmux
+vmux run my-vmux
 ```
 
-The first command builds and signs the app. The second opens the completed build. If the build failed, fix that error before trying to run it.
+`build` prepares the app; `run` opens the finished build. After an edit, repeat those two commands. If the build reports an error, fix it before running the app.
 
-Use this development build while changing code. When you need to check a complete local bundle, run:
+## Make your first change
+
+Open `crates/feature/vmux_terminal/assets/index.css`. Add `font-weight: 700;` inside its existing `body` rule, rebuild, and open Terminal. Ordinary terminal text should now appear bold. Remove the line to return to the original appearance.
+
+This first edit uses ordinary CSS. The UI components themselves use Dioxus, whose `rsx!` syntax plays the same role as JSX in React. [Make a change](feature-development.md) follows a screen from its styles into callbacks and application behavior.
+
+Before pushing, run:
 
 ```sh
-vmux build -b my-vmux -p local
-vmux run -b my-vmux -p local
+vmux dx test
 ```
 
-## Make a small change
+This checks the development tooling, CLI, formatting, and repository policies. The Git hook repeats these checks when you push.
 
-Read [How Vmux works](architecture.md) next. It explains the UI and state model using familiar React concepts. [Make a change](feature-development.md) shows where to look in the code and how to test a feature.
+## Where to go next
 
-Keep your first change small: reproduce a problem, find its handler, change the behavior, and run the relevant test. You can keep the build locally, push it to your fork, or open an upstream PR. [Make your own Vmux](customization.md) covers a separate name and product settings.
+[How Vmux works](architecture.md) explains where shared state lives and how a UI request reaches its handler. [Keep your own version](customization.md) covers a personal fork and sharing. You can read those as you need them.
 
-If you use the installed Vmux as your editor, open this repository as a Project and select the worktree for your Space. Browser, Code, Terminal, and Sessions can stay beside each other while you work. The build commands are the same whether you type them yourself or ask an agent to prepare a change.
-
-When testing storage or migrations, point `VMUX_DATA_DIR` at an absolute path to a copy of the data. Normal builds can share profile data; using a copy keeps your everyday workspace safe.
+You can use Vmux itself as the editor: open this checkout as a Project, select the worktree in its Space, and keep Code, Terminal, and a Session together. The same build and test commands work whether you edit manually or ask an agent to make the change.

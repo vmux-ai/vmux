@@ -1,30 +1,19 @@
-# Make your own Vmux
+# Keep your own version
 
-You can keep a personal Vmux build without contributing it upstream. Start with a working source build from [Getting started](getting-started.md), then make one change at a time.
+Your own Vmux can start with a change to one screen, shortcut, or feature. Follow [Getting started](getting-started.md), then build and try your change. A local build can be the finished result.
 
-## Keep personal changes in a fork
+## Save it in your fork
 
-Fork the repository if you want to save and share your version. Clone that fork and use a worktree for each change. A PR in your own fork is useful for reviewing your work; an upstream PR is optional.
+Create a fork on GitHub and clone that repository when starting your checkout. Keep each change on its own branch and worktree. Push the branch to your fork when you want to save it or open a PR for review.
 
-For a behavior change, follow [Make a change](feature-development.md). If you want a different set of features, look at how `vmux_app` connects plugins and what the chosen host enables. The code and command help show the available options for your revision.
+An upstream PR is optional. Share a change there when it would be useful to other Vmux users; explain the behavior and how you tested it. Personal preferences can stay in your own version.
 
-## Change the name
+## Change a feature
 
-A separately branded build needs both a name and a namespace. For example, with an existing `orbit` worktree:
+Start with the screen or interaction you want to improve. [Make a change](feature-development.md) shows how to find its UI and handler, try an edit, and run the relevant checks.
 
-```sh
-VMUX_HOST_NAME="Orbit" VMUX_HOST_NAMESPACE="org.example.orbit" vmux build -b orbit -p local
-VMUX_HOST_NAME="Orbit" VMUX_HOST_NAMESPACE="org.example.orbit" vmux run -b orbit -p local
-```
+For a different feature set, look at the plugins selected by `vmux_app`. [How Vmux works](architecture.md) explains how those pieces fit together. Reusing the pieces in an entirely separate application is covered by the optional [Framework guide](framework.md).
 
-Use your branch name and your own reverse-domain namespace. Use the same settings for building and running. The namespace separates the app's data, configuration, service, and credentials from Vmux.
+## Share an installable app
 
-A custom product does not automatically use Vmux's official update or signing configuration. Its native permissions and assets also need the settings for that product. The product build code defines those options; configure them before distributing the build.
-
-## Test and share the result
-
-Try the changed behavior, run its tests, and run `vmux internal pre-push`. Use copied data when changing storage or migrations.
-
-You can stop at a local build, push the branch to your fork, or open an upstream PR for a generally useful change. Explain what changed and how you checked it.
-
-You can do this work inside the installed Vmux: open the fork as a Project, use its worktree in a Space, and keep the conversation, Code, Git, and Terminal together. The source/build workflow is the same whether you edit manually or use an agent.
+When you want to distribute a separately named product, it also needs its own app identifier and signing/update settings. [Test and share a build](validation-and-release.md) covers that step. These settings are optional for your first code change.

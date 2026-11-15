@@ -1,44 +1,46 @@
 # Make a change
 
-Start with one behavior you can reproduce. For example: a terminal shortcut uses the wrong pane, or a page refresh loses the current selection. Build Vmux first using [Getting started](getting-started.md).
+Start with something you can see and try. Use the build from [Getting started](getting-started.md).
 
-## Find the feature
+## Try a small visual edit
 
-Look under `crates/feature/`. Terminal code is in `vmux_terminal`; browser code is in `vmux_browser`; pane and selection behavior is in `vmux_layout`.
+Open `crates/feature/vmux_terminal/assets/index.css`. Inside the existing `body` rule, add:
 
-For a Terminal change, start with `crates/feature/vmux_terminal/src/lib.rs`. It points to the UI, event types, and host code. Look for the plugin and the handlers it registers. A search can help locate the behavior:
-
-```sh
-rg -n 'focus' crates/feature/vmux_terminal/src
+```css
+font-weight: 700;
 ```
 
-## Trace the request
+Rebuild and open your branch:
 
-Follow the UI callback or command to its event type, then find the Rust handler that receives it. Check which entity/components it reads and what state it changes. Finally, find the view data the page receives.
+```sh
+vmux build my-vmux
+vmux run my-vmux
+```
 
-This is the same debugging habit as following a React callback into a reducer and back to rendered props. The state and handler are separate from the component, so closing or recreating a page does not have to recreate the work.
+Open Terminal and check that ordinary text is bold. This is a small CSS change with an obvious result; remove the line to undo it.
 
-For IO, also follow the returned result. A result arriving after navigation or cancellation should not change a different page or task.
+## Follow a behavior change
 
-## Change the behavior and test it
+Open `crates/feature/vmux_setting/src/ui.rs` and find `Page`, the Settings screen. Its `rsx!` markup is similar to JSX: it renders HTML-like elements and other components. The search input has this callback:
 
-Keep the fix in the feature that already handles the behavior. If it needs another feature, use the existing request or shared data rather than call its private handler directly.
+```rust
+onsearch: move |query| {
+    let _ = send(&SettingsFilterRequest { query });
+},
+```
 
-Find a nearby behavioral test and add a case for the problem you reproduced. Run the relevant crate's test. For example:
+The callback sends the search text to Rust code that filters the settings. Search for `SettingsFilterRequest` to find the handler and the state it updates. The page then receives the filtered view and renders it. [How Vmux works](architecture.md) explains this loop.
+
+For another feature, start under `crates/feature/`: `vmux_terminal` for Terminal, `vmux_browser` for Browser, and `vmux_layout` for panes and selection. Find its UI callback or command, follow the request to its handler, then find the state shown by the page.
+
+## Check the result
+
+Try the original behavior and a nearby normal case. For a behavior change, add a test for the outcome you expect and run that feature's tests. For example:
 
 ```sh
 vmux internal cargo -- test --locked -p vmux_layout --lib
 ```
 
-For an ECS test, add the feature's production plugin to the test app and send the real request. Check the resulting state. For UI work, try the interaction and inspect what the page displays. The expected user outcome matters more than the exact internal function arrangement.
+For a visual change, check the rendered screen rather than testing a literal CSS class. Before pushing, run `vmux dx test`. [Test and share a build](validation-and-release.md) covers the remaining checks and packaging.
 
-## Try the result
-
-```sh
-vmux build -b my-vmux
-vmux run -b my-vmux
-```
-
-Check the original problem and a nearby normal case. Then run the checks in [Validation and release](validation-and-release.md).
-
-Keep the result in your own branch, share a PR in your fork, or propose a general improvement upstream. Explain what was wrong, what now happens, and how you checked it. Update a guide only if the way someone uses or understands the feature changed.
+You can keep the result locally, open a PR in your fork, or propose it upstream. Update a guide when the way someone uses or understands the feature changes.

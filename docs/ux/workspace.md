@@ -1,29 +1,29 @@
 # Projects, Spaces, and Sessions
 
-A Project is the home for related work. A Space is the working context you keep on screen. Sessions are conversations and tasks you can return to within that Project.
+A Project keeps related work together. A Session is an agent conversation about a task. A Space is the workspace of pages you have on screen.
 
-## Set the working context
+## Give a goal a home
 
-Choose the Project and checkout that the task should use. A checkout is a concrete local directory and branch; several can belong to one Project. Code, Git, terminals, and new agent sessions use the Space's working context.
+For a Lisbon trip, keep flight and hotel Sessions in one Project. For a software fix, keep the implementation and review Sessions together. The project-management tools help select the Project and its working folder.
 
-When previewing another checkout, activate it before making changes there. Keep independent implementation tasks in separate worktrees so each can produce its own focused diff.
+A new Project can use an ordinary local folder for its files. When you ask an agent to prepare one, it can suggest a location for you to approve. For software, select the repository you intend to change.
 
-## Arrange the useful surfaces
+## Arrange the pages you need
 
-Use tabs to retain arrangements and split panes to keep related pages beside one another: an agent Session with Code and Terminal, or a Browser reference beside the code it describes. Each pane retains its own navigation history.
+Use a Space to keep Browser, a Session, and notes beside each other. Tabs retain arrangements; split panes let you compare pages without repeatedly switching between them.
 
 The same Space can be viewed in another window. Its name and project context are shared; tabs, panes, and focus remain local to each window.
 
-Selecting a tab reveals its arrangement. Navigating one pane does not replace unrelated panes. Commands act through the focused window and surface, while a background agent keeps its own Session anchor.
+## Split work when it helps
 
-## Organize Sessions around outcomes
+Keep a small task in one Session. For a larger goal, give each Session a clear job: compare flights, compare hotels, or review a code change. Share the accepted result with the next Session when it needs that information.
 
-A Session should have enough context to complete its task and a result you can review. Related Sessions belong in the Project even when they use different agents or branches. Reuse a Session for follow-up on the same task; start another for an independent goal or a distinct review.
+Related Sessions can use different agents. An ongoing task keeps its own working folder when you move to another Space, so switching your view does not redirect its work.
 
-You can return to prior work through the Project's related Sessions. Processes and conversations can remain active while their page is hidden; closing a view is not the same action as stopping the work.
+## Return to the result
 
-## Keep user context across tasks
+Open the Project's Sessions to continue a conversation or find a prior result. Keep reusable preferences and decisions in [Knowledge](knowledge.md), and useful websites in [Bookmarks](bookmarks.md).
 
-Profiles separate persistent user context. A change of Space or branch should not require recreating the profile's browser, sessions, or tools. Use the existing profile/build controls when changing applications or working contexts.
+Closing a page does not necessarily stop its background conversation or process. Use the task or process controls when you want the work to end.
 
-Follow [Get something done](getting-things-done.md) for a complete task flow and [Agents](agents.md) for collaboration and permissions.
+Try [Find and book a flight](book-a-flight.md) or [Fix a bug and make a PR](make-a-pr.md).

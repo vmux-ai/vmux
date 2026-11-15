@@ -82,7 +82,7 @@ vmux build
 vmux run
 ```
 
-Use `vmux build -b navigation -p local` to build a branch in its existing worktree.
+Use `vmux build navigation -p local` to build a branch in its existing worktree.
 `-P/--platform` selects desktop, ios, android, or web; `-p/--profile` selects dev,
 local, or release. Worktree directory names are accepted as unambiguous aliases.
 Builds seed compatible caches and preserve target locks. See `vmux --help` for

@@ -2,86 +2,149 @@ pub struct Doc {
     pub slug: &'static str,
     pub title: &'static str,
     pub group: &'static str,
+    pub section: &'static str,
     pub content: &'static str,
 }
 
 pub const DOCS: &[Doc] = &[
     Doc {
         slug: "getting-things-done",
-        title: "Get something done",
+        title: "Start with Vmux",
         group: "UX",
+        section: "Start here",
         content: include_str!("../../docs/ux/getting-things-done.md"),
+    },
+    Doc {
+        slug: "book-a-flight",
+        title: "Find and book a flight",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/book-a-flight.md"),
+    },
+    Doc {
+        slug: "shopping",
+        title: "Buy something",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/shopping.md"),
+    },
+    Doc {
+        slug: "cooking",
+        title: "Cook dinner",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/cooking.md"),
+    },
+    Doc {
+        slug: "make-a-pr",
+        title: "Fix a bug and make a PR",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/make-a-pr.md"),
+    },
+    Doc {
+        slug: "layout",
+        title: "Layout",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/layout.md"),
     },
     Doc {
         slug: "workspace",
         title: "Projects and Sessions",
         group: "UX",
+        section: "Features",
         content: include_str!("../../docs/ux/workspace.md"),
     },
     Doc {
         slug: "browser",
         title: "Browser",
         group: "UX",
+        section: "Features",
         content: include_str!("../../docs/ux/browser.md"),
+    },
+    Doc {
+        slug: "bookmarks",
+        title: "Bookmarks",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/bookmarks.md"),
+    },
+    Doc {
+        slug: "knowledge",
+        title: "Knowledge",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/knowledge.md"),
+    },
+    Doc {
+        slug: "agents",
+        title: "Agents",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/agents.md"),
     },
     Doc {
         slug: "code-and-git",
         title: "Code and Git",
         group: "UX",
+        section: "Features",
         content: include_str!("../../docs/ux/code-and-git.md"),
     },
     Doc {
         slug: "terminal",
         title: "Terminal",
         group: "UX",
+        section: "Features",
         content: include_str!("../../docs/ux/terminal.md"),
-    },
-    Doc {
-        slug: "agents",
-        title: "Agents",
-        group: "UX",
-        content: include_str!("../../docs/ux/agents.md"),
     },
     Doc {
         slug: "remote",
         title: "Remote access",
         group: "UX",
+        section: "Features",
         content: include_str!("../../docs/ux/remote.md"),
     },
     Doc {
         slug: "getting-started",
         title: "Getting started",
         group: "DX",
+        section: "Start here",
         content: include_str!("../../docs/dx/getting-started.md"),
-    },
-    Doc {
-        slug: "customization",
-        title: "Make your own Vmux",
-        group: "DX",
-        content: include_str!("../../docs/dx/customization.md"),
     },
     Doc {
         slug: "architecture",
         title: "How Vmux works",
         group: "DX",
+        section: "Start here",
         content: include_str!("../../docs/dx/architecture.md"),
     },
     Doc {
         slug: "feature-development",
         title: "Make a change",
         group: "DX",
+        section: "Start here",
         content: include_str!("../../docs/dx/feature-development.md"),
     },
     Doc {
         slug: "validation-and-release",
         title: "Test and share a build",
         group: "DX",
+        section: "Start here",
         content: include_str!("../../docs/dx/validation-and-release.md"),
     },
     Doc {
-        slug: "framework",
-        title: "Vmux Framework",
+        slug: "customization",
+        title: "Keep your own version",
         group: "DX",
+        section: "Your version",
+        content: include_str!("../../docs/dx/customization.md"),
+    },
+    Doc {
+        slug: "framework",
+        title: "Reuse features in another app",
+        group: "DX",
+        section: "Optional",
         content: include_str!("../../docs/dx/framework.md"),
     },
 ];
@@ -109,6 +172,24 @@ impl Doc {
             }
         }
         groups
+    }
+
+    pub fn sections(group: &str) -> Vec<(&'static str, Vec<usize>)> {
+        let mut sections: Vec<(&'static str, Vec<usize>)> = Vec::new();
+        for (index, doc) in DOCS.iter().enumerate() {
+            if doc.group != group {
+                continue;
+            }
+            if let Some((_, entries)) = sections
+                .iter_mut()
+                .find(|(section, _)| *section == doc.section)
+            {
+                entries.push(index);
+            } else {
+                sections.push((doc.section, vec![index]));
+            }
+        }
+        sections
     }
 
     pub fn target(href: &str) -> String {

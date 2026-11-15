@@ -17,7 +17,7 @@ Choose the crate and test that cover your change. Run builds and tests one at a 
 ## Before a push
 
 ```sh
-vmux internal pre-push
+vmux dx test
 ```
 
 This runs the development-command and CLI tests, formatting, ownership policy, and source conventions. The installed Git hook runs it on push too.
@@ -29,8 +29,8 @@ CI runs the affected tests and platform checks. A PR may reuse successful branch
 ## Check a complete bundle
 
 ```sh
-vmux build -b my-vmux -p local
-vmux run -b my-vmux -p local
+vmux build my-vmux -p local
+vmux run my-vmux -p local
 ```
 
 Use this when the change affects native integration, resources, or packaging. `vmux cache status` reports build storage, and `vmux cache clean` previews reclaimable caches; add `--apply` to clean them. Running apps and locked build outputs are retained. Try the behavior in that completed build. Use copied data for storage/migration changes.
@@ -40,3 +40,16 @@ Use this when the change affects native integration, resources, or packaging. `v
 A local build can be the finished result. Push to your fork if you want a durable personal branch or a reviewable PR. For an upstream contribution, keep the diff focused and explain the behavior and validation.
 
 A distributable release has additional signing, resource, update-verification, and platform requirements. The release workflow defines the current steps and artifact names. Use your own product identity and update settings for an independently branded version; see [Make your own Vmux](customization.md).
+
+## Give a distributed build its own name
+
+A personal code change can use the normal development build. For an independently named app, create a `.env` file at the root of your worktree:
+
+```dotenv
+VMUX_HOST_NAME=My Vmux
+VMUX_HOST_NAMESPACE=com.yourname.myvmux
+```
+
+The first value is the app's display name. The second is its unique app identifier, which separates its data and service paths. Replace the example identifier with one for your product. Build and run with the same ordinary commands; Vmux reads this file from the selected worktree.
+
+Distribution also needs your product's assets, permissions, signing, and update settings. Configure those before sharing an installer. They are separate from the first build-and-edit workflow.

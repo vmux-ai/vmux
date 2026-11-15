@@ -1,33 +1,37 @@
-# Get something done
+# Start with Vmux
 
-Start with the result you want: fix a bug, investigate a project, ship a feature, or produce an answer you can review. Vmux keeps the project, agent conversations, browser references, code, and commands together as that goal becomes work.
+If you use Chrome, start the same way: open a website, search, follow links, and use Back and Forward. Vmux also lets you keep an assistant conversation, notes, files, and commands beside those pages.
 
-## 1. Choose the Project
+## Try a real task
 
-Open or create the Project for the relevant repository or working directory. A Project groups related work; its sessions remain discoverable when you leave and return. Use the Space associated with that Project to keep the right checkout and pages in view.
+Choose the result you want, then follow one example:
 
-For research, keep the source pages and any notes beside the conversation. For software work, open Code, Git, and Terminal against the checkout the task should change.
+- [Find and book a flight](book-a-flight.md): compare flights, check the booking, and keep the confirmation.
+- [Buy something](shopping.md): compare products against your needs and complete a purchase.
+- [Cook dinner](cooking.md): use what you have, choose a recipe, and make a shopping list.
+- [Fix a bug and make a PR](make-a-pr.md): reproduce a problem, review a code change, and share it.
 
-## 2. Give a Session a clear outcome
+Each example shows what to ask an agent, what to keep open, and what to check before moving on.
 
-Start a Session with an ACP agent and describe the goal, relevant context, constraints, and what would count as done. For example: “Find why this checkout fails the login test, make a focused fix, and show the test result.”
+## Keep the work together
 
-Keep a coherent investigation and small fix in one Session. Split work when parts can progress independently or need different checkouts, agents, or review context. A useful split for a feature is investigation, implementation, and validation/review. Start dependent work when its inputs are ready rather than asking every Session to rediscover the same context.
+A **Project** keeps related work together. A **Session** is a conversation with an agent about a task. A **Space** is the workspace of pages you currently have on screen.
 
-## 3. Work in parallel deliberately
+For a trip, one Project can have a flight Session and a hotel Session. For software, one Project can have a fix Session and a review Session. Keep a small task in one conversation; split a larger goal when parts can progress separately.
 
-Give each Session a specific task and expected output. Keep related Sessions in the same Project, while using separate Spaces or worktrees for independent code changes. A background agent stays anchored to its own working directory even when you view another Space.
+Use the project-management tools to choose the Project and arrange its work. If an agent needs a local folder for a new Project, it can suggest one for you to approve.
 
-One Session can inspect behavior in the Browser while another prepares a code change. Review the investigation before implementation relies on it, and share the relevant conclusion or artifact with the next task.
+## Use the right tool for the next step
 
-## 4. Inspect and steer
+| What you want to do | Use |
+|---|---|
+| Open sites, compare sources, or fill a website form | [Browser](browser.md) |
+| Keep useful sites available | Bookmark folders |
+| Save preferences, a comparison, or a recipe for later | [Knowledge](knowledge.md) |
+| Organize related work and conversations | [Projects and Sessions](workspace.md) |
+| Ask an assistant to research or carry out a task | [Agents](agents.md) |
+| Read or change local files | [Code and Git](code-and-git.md) |
+| Inspect a branch, commit, or code diff | [Code and Git](code-and-git.md) |
+| Run a command or follow its output | [Terminal](terminal.md) |
 
-Read agent activity and results, inspect the code/diff, and run the appropriate commands in Terminal. Review permission requests in their task context. Ask for a narrower change or explain a new constraint in the same Session when the goal has not changed.
-
-Keep important references and the running product visible beside the work. A useful checkpoint is an observable result: an explanation with sources, a focused diff, a passing test, or a prepared app build.
-
-## 5. Review the outcome
-
-For a code task, review the diff and validation, try the prepared app when needed, and decide whether to create or merge a PR. For research, check the sources and whether the answer addresses the original question. Retain the Session with its Project so another task can start from the accepted result.
-
-Continue with [Workspace](workspace.md), [Browser](browser.md), [Code and Git](code-and-git.md), [Terminal](terminal.md), or [Agents](agents.md).
+You can use these pages yourself, or ask a connected agent to use the corresponding tools. Its actions and results stay visible beside the conversation. Return to the same Session when you want to correct or extend the result.

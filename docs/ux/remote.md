@@ -1,21 +1,21 @@
 # Remote access
 
-The iPhone companion lets you reconnect to supported workspace pages and ongoing conversations on your host.
+Use the iPhone companion to return to supported workspace pages and ongoing Sessions on your Mac.
 
-## Pair with the host
+## Connect your phone
 
-Enable Remote on the host, then use the supported pairing flow on the phone. Pairing establishes trust in that host. Both sides connect outward through the relay, so an inbound port is not required.
+Enable Remote on the Mac and follow the pairing flow with the phone. Keep the Mac available while you want to reach its work.
 
-Keep the host available for the remote work you want to reach. Remote is an explicit lifecycle switch; disabling it stops registration/retry. Revoking one client does not revoke every paired client.
+Pairing gives the phone access to that host. You can revoke a paired device or disable Remote when you want to end access.
 
-## Return to existing work
+## Pick up a task
 
-Remote pages use the host's supported capabilities. Reconnecting returns to existing processes and Sessions instead of launching duplicate work. Use the Project and Session context to review results, follow up, or continue a task.
+Open the relevant Project or Session to review a result, ask a follow-up, or continue the conversation. Reconnecting returns to existing host work, including supported terminal processes, rather than starting a duplicate task.
 
-The phone is a remote client, not a second local host. Available capabilities depend on the supported mobile pages and the connected host.
+The available pages depend on the phone app and host capabilities. For a trip, you can return to the research Session; for software, you can follow the agent's result and PR discussion.
 
-## Privacy and permissions
+## Know where the work lives
 
-The inner connection is encrypted through to the host. The relay sees connection metadata and forwards packets, but cannot read workspace contents. Native capabilities and task permissions remain scoped at the host.
+Your Mac runs the work. The connection to it is encrypted; the relay forwards traffic and cannot read the workspace contents. Task permissions still apply at the host.
 
-See [Agents](agents.md) and [Projects, Spaces, and Sessions](workspace.md) for organizing the work you reconnect to.
+See [Agents](agents.md) and [Projects and Sessions](workspace.md).

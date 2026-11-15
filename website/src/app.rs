@@ -196,18 +196,23 @@ fn DocsLayout() -> Element {
 #[component]
 fn Sidebar(active_slug: String, active_heading: Signal<String>) -> Element {
     rsx! {
-        for (group , idxs) in docs::Doc::groups() {
-            div { class: "mb-4",
-                div { class: "px-3 mb-1 text-xs uppercase tracking-wide text-text-muted", "{group}" }
-                for i in idxs {
-                    Link {
-                        class: "block px-3 py-1.5 rounded-md text-sm text-text no-underline hover:bg-surface",
-                        active_class: "bg-surface text-accent",
-                        to: Route::DocPage { slug: docs::DOCS[i].slug.to_string() },
-                        "{docs::DOCS[i].title}"
-                    }
-                    if docs::DOCS[i].slug == active_slug {
-                        {toc(docs::DOCS[i].content, active_heading)}
+        for (group, _) in docs::Doc::groups() {
+            div { class: "mb-6",
+                div { class: "px-3 mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted", "{group}" }
+                for (section, idxs) in docs::Doc::sections(group) {
+                    div { class: "mt-4",
+                        div { class: "px-3 mb-1 text-xs text-text-muted", "{section}" }
+                        for i in idxs {
+                            Link {
+                                class: "block px-3 py-1.5 rounded-md text-sm text-text no-underline hover:bg-surface",
+                                active_class: "bg-surface text-accent",
+                                to: Route::DocPage { slug: docs::DOCS[i].slug.to_string() },
+                                "{docs::DOCS[i].title}"
+                            }
+                            if docs::DOCS[i].slug == active_slug {
+                                {toc(docs::DOCS[i].content, active_heading)}
+                            }
+                        }
                     }
                 }
             }
