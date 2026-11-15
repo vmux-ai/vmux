@@ -1,123 +1,12 @@
-use base64::{Engine, engine::general_purpose::STANDARD};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
 
 use super::Native;
-use super::package::Publication;
 use crate::Result;
-use crate::execution::Execution;
 use crate::temporary::Temporary;
 
 impl Native {
-    pub fn cli_compile(&self) -> Result<()> {
-        if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            return Err("Standalone CLI release packaging currently targets macOS aarch64".into());
-        }
-        self.environment.required("VMUX_UPDATE_PUBLIC_KEY")?;
-        let mut command = self.command(
-            self.environment
-                .get("CARGO_BIN")
-                .unwrap_or(OsStr::new("cargo")),
-        );
-        command
-            .args([
-                "build",
-                "--locked",
-                "--release",
-                "-p",
-                "vmux_cli",
-                "--no-default-features",
-                "--features",
-                "dx",
-                "--target",
-                "aarch64-apple-darwin",
-                "--target-dir",
-            ])
-            .arg(&self.checkout.target)
-            .env_remove("CARGO_BUILD_TARGET")
-            .env_remove("CARGO_ENCODED_RUSTFLAGS")
-            .env_remove("RUSTFLAGS");
-        Execution::new(command).run()
-    }
-
-    pub fn cli_package(&self, preview: bool) -> Result<Vec<std::path::PathBuf>> {
-        if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            return Err("Standalone CLI release packaging currently targets macOS aarch64".into());
-        }
-        let version = self.workspace_version()?;
-        let binary = self
-            .checkout
-            .target
-            .join("aarch64-apple-darwin/release/vmux");
-        let mut probe = self.command(&binary);
-        probe.arg("--version").env("VMUX_CLI_UPDATE_HANDOFF", "1");
-        let output = Execution::new(probe).output(None)?;
-        if std::str::from_utf8(&output.stdout)?.trim() != format!("vmux {version}") {
-            return Err("Standalone release CLI does not match the workspace version".into());
-        }
-        let name = if preview {
-            "vmux-cli-nightly-aarch64-apple-darwin.tar.gz".into()
-        } else {
-            format!("vmux-cli-v{version}-aarch64-apple-darwin.tar.gz")
-        };
-        let directory = self.checkout.directory("release");
-        fs::create_dir_all(&directory)?;
-        let temporary = Temporary::create(&directory, ".cli-release")?;
-        let archive = temporary.path().join(&name);
-        let output = fs::File::create(&archive)?;
-        let encoder = flate2::write::GzEncoder::new(output, flate2::Compression::default());
-        let mut tar = tar::Builder::new(encoder);
-        let mut header = tar::Header::new_gnu();
-        let length = fs::metadata(&binary)?.len();
-        if length == 0 || length > 64 * 1024 * 1024 {
-            return Err("Standalone release CLI has an invalid size".into());
-        }
-        header.set_size(length);
-        header.set_mode(0o755);
-        header.set_cksum();
-        tar.append_data(&mut header, "vmux", fs::File::open(&binary)?)?;
-        tar.into_inner()?.finish()?.sync_all()?;
-        let mut sign = self.command(
-            self.environment
-                .get("CARGO_BIN")
-                .unwrap_or(OsStr::new("cargo")),
-        );
-        sign.args(["packager", "signer", "sign"])
-            .arg(&archive)
-            .arg("--private-key")
-            .arg(self.environment.required("VMUX_UPDATE_PRIVATE_KEY")?)
-            .arg("--password")
-            .arg(
-                self.environment
-                    .get("VMUX_UPDATE_PRIVATE_KEY_PASSWORD")
-                    .unwrap_or(OsStr::new("")),
-            );
-        Execution::new(sign).run()?;
-        let signature = archive.with_file_name(format!("{name}.sig"));
-        let key = String::from_utf8(
-            STANDARD.decode(
-                self.environment
-                    .required("VMUX_UPDATE_PUBLIC_KEY")?
-                    .as_encoded_bytes(),
-            )?,
-        )?;
-        let signature_text =
-            String::from_utf8(STANDARD.decode(fs::read_to_string(&signature)?.trim())?)?;
-        minisign_verify::PublicKey::decode(&key)?.verify(
-            &fs::read(&archive)?,
-            &minisign_verify::Signature::decode(&signature_text)?,
-            false,
-        )?;
-        let published = directory.join(&name);
-        let published_signature = directory.join(format!("{name}.sig"));
-        let mut publication = Publication::new(&temporary);
-        publication.publish(&archive, &published)?;
-        publication.publish(&signature, &published_signature)?;
-        publication.commit();
-        Ok(vec![published, published_signature])
-    }
-
     pub(super) fn workspace_version(&self) -> Result<String> {
         let manifest: toml::Table =
             fs::read_to_string(self.checkout.root.join("Cargo.toml"))?.parse()?;

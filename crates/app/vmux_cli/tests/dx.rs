@@ -850,6 +850,7 @@ case "$1" in
   -V|--version) printf 'cargo 1.90.0\n'; exit 0 ;;
   build|rustc)
     [ "${FAIL_BUILD:-0}" != 1 ] || exit 42
+    if [ -n "${TEST_BUILD_ENV:-}" ]; then printf '%s' "${CEF_PATH:-}" > "$TEST_BUILD_ENV"; fi
     case "$*" in *--release*) profile=release;; *cef-helper*) profile=cef-helper;; *) profile=debug;; esac
     output="$CARGO_TARGET_DIR/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}$profile"
     mkdir -p "$output"
@@ -917,7 +918,7 @@ for helper in "vmux_desktop Helper" "vmux_desktop Helper (Renderer)"; do
     contents="$app/Contents/Frameworks/$helper.app/Contents"
     mkdir -p "$contents/MacOS"
     printf '%s' "$helper" > "$contents/MacOS/$helper"
-    printf plist > "$contents/Info.plist"
+    printf '%s' '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>fixture.helper</string></dict></plist>' > "$contents/Info.plist"
 done
 "#);
         let framework = fixture
@@ -978,7 +979,7 @@ done
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", not(feature = "runtime")))]
     fn native(&self, program: &str) -> std::process::Command {
         let mut command = std::process::Command::new(program);
         command.current_dir(&self.root).env(
@@ -986,6 +987,46 @@ done
             format!("{}:/usr/bin:/bin", self.root.join("bin").display()),
         );
         command
+    }
+
+    fn bootstrap(&self) {
+        for (group, name) in [
+            ("feature", "vmux_dx"),
+            ("app", "vmux_cli"),
+            ("util", "vmux_ecs"),
+            ("util", "vmux_api"),
+            ("util", "vmux_task"),
+            ("util", "vmux_macro"),
+        ] {
+            let path = self.root.join("crates").join(group).join(name);
+            std::fs::create_dir_all(path.join("src")).unwrap();
+            std::fs::write(
+                path.join("Cargo.toml"),
+                format!("[package]\nname = '{name}'\nversion = '0.0.0'\n"),
+            )
+            .unwrap();
+            std::fs::write(path.join("src/lib.rs"), "pub struct BootstrapFixture;\n").unwrap();
+        }
+        self.script(
+            "cargo",
+            r#"#!/bin/sh
+set -eu
+while [ "$#" -gt 0 ]; do case "$1" in --target-dir) target=$2; shift;; esac; shift; done
+mkdir -p "$target/debug"
+cp "$BOOTSTRAP_ROOT/handoff" "$target/debug/vmux"
+chmod 755 "$target/debug/vmux"
+printf compiled > "$BOOTSTRAP_ROOT/bootstrap-compiled"
+"#,
+        );
+        std::fs::write(
+            self.root.join("handoff"),
+            r#"#!/bin/sh
+set -eu
+for lock in "$VMUX_TARGET_LOCK_ROOT"/*.lock; do [ ! -s "$lock" ] || exit 29; done
+printf '%s\n' "$VMUX_DX_HANDOFF" "$BOOTSTRAP_ORIGINAL" "$@"
+"#,
+        )
+        .unwrap();
     }
 
     #[cfg(target_os = "macos")]
@@ -1067,6 +1108,205 @@ else:
         }
         command
     }
+}
+
+#[test]
+#[cfg(unix)]
+fn cleanup_preview_reports_the_preserved_cache_usage() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.target.join("debug/.fingerprint")).unwrap();
+    std::fs::write(
+        fixture.target.join("debug/.fingerprint/current"),
+        "warm cache",
+    )
+    .unwrap();
+    std::fs::write(
+        fixture.target.join("CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55",
+    )
+    .unwrap();
+    fixture.script(
+        "du",
+        "#!/bin/sh\nshift\nfor path do printf '1048576\\t%s\\n' \"$path\"; done\n",
+    );
+    let before = fixture
+        .command()
+        .args(["cache", "status"])
+        .output()
+        .unwrap();
+    assert!(before.status.success());
+    let before = String::from_utf8(before.stdout).unwrap();
+    let summary = before
+        .lines()
+        .find(|line| line.contains("GiB of compile caches"))
+        .unwrap();
+    let (_, usage) = summary.split_once(", ").unwrap();
+    fixture
+        .command()
+        .env_remove("VMUX_BUILD_STORAGE_APPLY")
+        .args(["cache", "clean"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(usage));
+    assert_eq!(
+        std::fs::read_to_string(fixture.target.join("debug/.fingerprint/current")).unwrap(),
+        "warm cache"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn unsafe_cargo_target_is_refused_before_seed_or_tool_execution() {
+    let fixture = Fixture::new();
+    let target = fixture.directory.path().join("target-link");
+    std::os::unix::fs::symlink(&fixture.target, &target).unwrap();
+    fixture
+        .command()
+        .env("CARGO_TARGET_DIR", &target)
+        .args(["internal", "cargo", "--", "build"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "dedicated, nonsymlink Cargo target directory",
+        ));
+    assert!(!fixture.root.join("build.log").exists());
+    assert!(!fixture.root.join(".vmux-seed").exists());
+    assert!(fixture.root.join("Cargo.toml").is_file());
+}
+
+#[test]
+#[cfg(unix)]
+fn bootstrap_releases_its_lock_and_preserves_original_environment_and_arguments() {
+    let fixture = Fixture::new();
+    fixture.bootstrap();
+    std::fs::write(
+        fixture.root.join(".env"),
+        "BOOTSTRAP_ORIGINAL=from-dotenv\n",
+    )
+    .unwrap();
+    fixture
+        .command()
+        .env_remove("VMUX_DX_HANDOFF")
+        .env("BOOTSTRAP_ROOT", &fixture.root)
+        .env("BOOTSTRAP_ORIGINAL", "from-os")
+        .env(
+            "VMUX_TARGET_LOCK_ROOT",
+            fixture.directory.path().join("bootstrap-locks"),
+        )
+        .args(["doctor", "--root", fixture.root.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "1\nfrom-os\ndoctor\n--root\n{}\n",
+            fixture.root.display()
+        )));
+    assert!(fixture.root.join("bootstrap-compiled").is_file());
+}
+
+#[test]
+#[cfg(unix)]
+fn bootstrap_refuses_fifo_compiler_inputs_without_waiting_for_a_writer() {
+    let fixture = Fixture::new();
+    fixture.bootstrap();
+    let lock = fixture.root.join("Cargo.lock");
+    std::fs::remove_file(&lock).unwrap();
+    let path = std::ffi::CString::new(lock.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    fixture
+        .command()
+        .env_remove("VMUX_DX_HANDOFF")
+        .args(["doctor", "--root", fixture.root.to_str().unwrap()])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "CLI compiler input must be a regular file",
+        ));
+    assert!(!fixture.root.join("bootstrap-compiled").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn bootstrap_rechecks_capacity_under_its_lock_before_compilation() {
+    let fixture = Fixture::new();
+    fixture.bootstrap();
+    fixture.script("df", r#"#!/bin/sh
+if [ -e "$BOOTSTRAP_ROOT/capacity-checked" ]; then free=0; else
+    touch "$BOOTSTRAP_ROOT/capacity-checked"; free=1000000000
+fi
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 1000000000 0 %s 0%% /\n' "$free"
+"#);
+    fixture
+        .command()
+        .env_remove("VMUX_DX_HANDOFF")
+        .env("BOOTSTRAP_ROOT", &fixture.root)
+        .env("VMUX_BUILD_STORAGE_MIN_GIB", "1")
+        .env("VMUX_BUILD_STORAGE_WARN_GIB", "1")
+        .env(
+            "VMUX_TARGET_LOCK_ROOT",
+            fixture.directory.path().join("bootstrap-locks"),
+        )
+        .args(["doctor", "--root", fixture.root.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Insufficient build space"));
+    assert!(!fixture.root.join("bootstrap-compiled").exists());
+}
+
+#[test]
+#[cfg(all(unix, not(feature = "runtime")))]
+fn bootstrap_compile_cancellation_drains_before_releasing_the_lock() {
+    let fixture = Fixture::new();
+    fixture.bootstrap();
+    fixture.script(
+        "cargo",
+        r#"#!/bin/sh
+printf '%s' "$$" > "$BOOTSTRAP_ROOT/bootstrap-started"
+trap '' INT TERM
+sleep 60
+"#,
+    );
+    let mut command = fixture.native(env!("CARGO_BIN_EXE_vmux"));
+    command
+        .env_remove("VMUX_DX_HANDOFF")
+        .env("BOOTSTRAP_ROOT", &fixture.root)
+        .env(
+            "VMUX_TARGET_LOCK_ROOT",
+            fixture.directory.path().join("bootstrap-locks"),
+        )
+        .args(["doctor", "--root", fixture.root.to_str().unwrap()]);
+    let mut child = WorkspaceChild(command.spawn().unwrap());
+    let marker = fixture.root.join("bootstrap-started");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() {
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "bootstrap exited before compile"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "bootstrap compile did not start"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let pid: i32 = std::fs::read_to_string(marker).unwrap().parse().unwrap();
+    unsafe {
+        libc::kill(child.0.id() as i32, libc::SIGINT);
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "bootstrap did not drain"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(130));
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert!(!fixture.root.join("bootstrap-compiled").exists());
 }
 
 #[test]
@@ -1691,6 +1931,110 @@ fn signing_keychain_is_restored_even_when_certificate_import_fails() {
     assert!(log.contains("list-keychains -d user -s login.keychain-db system.keychain"));
     assert!(log.lines().last().unwrap().starts_with("delete-keychain "));
     assert!(!fixture.root.join("build.log").exists());
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn package_callbacks_prepare_the_configured_cef_sdk_cache_for_cargo() {
+    let fixture = Fixture::new();
+    let log = fixture.root.join("cargo-environment");
+    fixture
+        .command()
+        .args(["internal", "package-binaries"])
+        .env("TEST_BUILD_ENV", &log)
+        .env_remove("CEF_PATH")
+        .assert()
+        .success();
+    let cache = fixture.directory.path().join("cef-sdk");
+    assert_eq!(
+        std::fs::read_to_string(log).unwrap(),
+        cache.display().to_string()
+    );
+    assert!(cache.is_dir());
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn package_callbacks_refuse_missing_bundle_paths_before_mutation() {
+    let fixture = Fixture::new();
+    let sentinel = fixture
+        .root
+        .join("Contents/Resources/webview-apps/sentinel");
+    std::fs::create_dir_all(sentinel.parent().unwrap()).unwrap();
+    std::fs::write(&sentinel, "keep").unwrap();
+    for task in ["before-package", "finalize-package"] {
+        fixture
+            .command()
+            .args(["internal", task])
+            .env("CARGO_PACKAGER_FORMAT", "dmg")
+            .env_remove("VMUX_APP_BUNDLE")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Missing VMUX_APP_BUNDLE"));
+        assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "keep");
+    }
+    fixture
+        .command()
+        .args(["internal", "verify-bundle"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Missing app bundle path"));
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn package_rejects_corrupted_copied_web_assets_and_preserves_previous_release() {
+    let fixture = Fixture::new();
+    fixture.script(
+        "cp",
+        r#"#!/bin/sh
+/bin/cp "$@" || exit $?
+for destination do :; done
+case "$destination" in
+  */webview-apps/_shared) printf corrupt > "$destination/assets/index.css" ;;
+esac
+"#,
+    );
+    let app = fixture.target.join("release/Vmux (9999999).app");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("sentinel"), "previous artifact").unwrap();
+    fixture
+        .command()
+        .args(["build", "-p", "local"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Stylesheet checksum or file coverage mismatch",
+        ));
+    assert_eq!(
+        std::fs::read_to_string(app.join("sentinel")).unwrap(),
+        "previous artifact"
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn bundle_verification_refuses_a_missing_vm_helper() {
+    let fixture = Fixture::new();
+    fixture
+        .command()
+        .args(["build", "-p", "local"])
+        .assert()
+        .success();
+    let app = fixture.target.join("release/Vmux (9999999).app");
+    fixture
+        .command()
+        .args(["internal", "verify-bundle", "--"])
+        .arg(&app)
+        .assert()
+        .success();
+    std::fs::remove_file(app.join("Contents/MacOS/vmux_vm")).unwrap();
+    fixture
+        .command()
+        .args(["internal", "verify-bundle", "--"])
+        .arg(&app)
+        .assert()
+        .failure();
 }
 
 #[test]
