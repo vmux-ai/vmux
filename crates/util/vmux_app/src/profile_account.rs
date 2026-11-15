@@ -26,6 +26,13 @@ fn configure(
     commands.spawn((
         vmux_account::Root::at(directories.0.shared_data(), profile.0.id()),
         Active,
+        vmux_account::Server {
+            host: std::env::var("VMUX_ACCOUNT_HOST").unwrap_or_else(|_| "accounts.vmux.ai".into()),
+            port: std::env::var("VMUX_ACCOUNT_PORT")
+                .ok()
+                .and_then(|port| port.parse().ok())
+                .unwrap_or(8788),
+        },
     ));
 }
 

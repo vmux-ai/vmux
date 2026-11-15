@@ -2,14 +2,16 @@
 
 use dioxus::prelude::*;
 use vmux_api::team::{
-    ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamProfileCreateRequest,
-    TeamProfileError, TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
-    TeamProfilesRetryRequest, TeamUiState,
+    ProfileRow, TeamAccountCancelRequest, TeamAccountConnectRequest, TeamAccountDisconnectRequest,
+    TeamAccountError, TeamAccountState, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow,
+    TeamProfileCreateRequest, TeamProfileError, TeamProfileForm, TeamProfileFormCloseRequest,
+    TeamProfileFormInputRequest, TeamProfileFormOpenRequest, TeamProfileSwitchRequest,
+    TeamProfileSyncRequest, TeamProfileUpdateRequest, TeamProfilesRetryRequest, TeamUiState,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
+use vmux_ui::components::switch::{Switch, SwitchThumb};
 
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
@@ -32,6 +34,7 @@ pub fn Page() -> Element {
         active_profile,
         agents,
         profile_form,
+        account,
         ..
     } = team();
 
@@ -40,6 +43,9 @@ pub fn Page() -> Element {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
             div { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5",
                 div { class: "mx-auto w-full max-w-4xl",
+                    if let Some(account) = account {
+                        AccountSection { state: account }
+                    }
                     ProfileSection { profiles, active: active_profile, form: profile_form }
                     if !agents.is_empty() {
                         section {
@@ -55,6 +61,95 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+#[component]
+fn AccountSection(state: TeamAccountState) -> Element {
+    let connect_id = state.account_id.clone();
+    let disconnect_id = state.account_id.clone();
+    let cancel_id = state.account_id.clone();
+    let connection_id = state.connection_id.clone().unwrap_or_default();
+    let selection = state.clone();
+    let status = if state.connected {
+        "team-account-connected"
+    } else if state.server_account_id.is_some() {
+        "team-account-linked"
+    } else {
+        "team-account-local"
+    };
+    rsx! {
+        section { class: "mb-6 max-w-xl",
+            div { class: "mb-2.5 px-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground",
+                {translate("team-account")}
+            }
+            div { class: "flex items-center justify-between gap-3 px-0.5",
+                span { class: "text-sm text-muted-foreground", {translate(status)} }
+                div { class: "flex items-center gap-2",
+                    if state.pending {
+                        span { class: "h-4 w-20 animate-pulse rounded bg-foreground/10", aria_label: translate("team-account-connecting") }
+                        if state.can_cancel {
+                            button { r#type: "button", class: "rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/5",
+                                onclick: move |_| { let _ = send(&TeamAccountCancelRequest { account_id: cancel_id.clone(), connection_id: connection_id.clone() }); },
+                                {translate("common-cancel")}
+                            }
+                        }
+                    } else {
+                        if !state.connected && state.cloud_available {
+                            button { id: "connect-account", r#type: "button", class: "rounded-md bg-foreground/5 px-3 py-1.5 text-sm font-medium hover:bg-foreground/10", disabled: state.sync_pending,
+                                onclick: move |_| { let _ = send(&TeamAccountConnectRequest { account_id: connect_id.clone() }); },
+                                {translate("team-account-connect")}
+                            }
+                        }
+                        if state.server_account_id.is_some() {
+                            button { id: "disconnect-account", r#type: "button", class: "rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/5", disabled: state.sync_pending,
+                                onclick: move |_| { let _ = send(&TeamAccountDisconnectRequest { account_id: disconnect_id.clone() }); },
+                                {translate("team-account-disconnect")}
+                            }
+                        }
+                    }
+                }
+            }
+            if let (Some(code), Some(uri)) = (state.user_code, state.verification_uri) {
+                div { class: "mt-3 flex items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
+                    code { class: "font-mono text-base tracking-widest", "{code}" }
+                    button { id: "verify-account", r#type: "button", class: "text-sm text-primary hover:underline",
+                        onclick: move |_| { vmux_ui::navigation::PageNavigation::stack(uri.clone()); },
+                        {translate("team-account-verify")}
+                    }
+                }
+            }
+            if state.server_account_id.is_some() && state.profile_id.is_some() {
+                label { class: "mt-3 flex items-center gap-2 px-0.5 text-sm",
+                    Switch { id: "profile-sync-enabled", checked: Some(state.sync_enabled), disabled: state.pending || state.sync_pending,
+                        on_checked_change: move |enabled| {
+                            if let Some(profile_id) = &selection.profile_id {
+                                let _ = send(&TeamProfileSyncRequest { account_id: selection.account_id.clone(), binding_revision: selection.binding_revision, profile_id: profile_id.clone(), enabled });
+                            }
+                        },
+                        SwitchThumb {}
+                    }
+                    {translate("team-account-sync-profile")}
+                }
+                p { class: "mt-1 px-0.5 text-xs text-muted-foreground", {translate("team-account-sync-note")} }
+            }
+            if let Some(error) = state.error {
+                AccountError { error }
+            }
+        }
+    }
+}
+
+#[component]
+fn AccountError(error: TeamAccountError) -> Element {
+    let message = match error {
+        TeamAccountError::Unavailable => "team-account-unavailable",
+        TeamAccountError::SaveFailed => "team-account-save-failed",
+        TeamAccountError::AccountMismatch => "team-account-mismatch",
+        TeamAccountError::AccessDenied => "team-account-denied",
+        TeamAccountError::Expired => "team-account-expired",
+        TeamAccountError::NotLinked => "team-account-not-linked",
+    };
+    rsx! { p { class: "mt-2 px-0.5 text-xs text-destructive", role: "alert", {translate(message)} } }
 }
 
 #[component]

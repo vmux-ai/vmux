@@ -15,6 +15,7 @@ impl bevy_app::Plugin for AccountPlugin {
         app.add_plugins((
             crate::catalog::CatalogPlugin,
             crate::mutations::MutationsPlugin,
+            crate::connection::Plugin,
         ))
         .configure_sets(
             Update,
@@ -54,8 +55,19 @@ pub enum Set {
 #[cfg(all(test, feature = "local"))]
 mod tests {
     use super::*;
+    use crate::connection::{
+        Authorization, Authorized, Challenge, DeviceKey, Grant, KeyPrepared, KeyRequest,
+        OpenRequest, PollReady, PollRequest, Registered, RemoteAccount, SendRequest, SessionToken,
+        TransportReady, Verified, Waiting,
+    };
+    use crate::wire::Request;
+    use crate::{
+        Binding, CancelConnectRequest, ConnectRequest, Connection, DisconnectRequest,
+        Disconnecting, LinkRequest, Phase, Server, SyncEnabled, SyncRequest,
+    };
     use crate::{CreateRequest, Error, Failure, MutationCompleted, RenameRequest, Root};
     use crate::{Owner, Profile};
+    use ring::signature::KeyPair;
     use uuid::Uuid;
     use vmux_ecs::{ProfileId, Ready, Revision, Uuid as Id};
 
@@ -65,6 +77,89 @@ mod tests {
     }
 
     impl Fixture {
+        fn account(&self) -> (Entity, Uuid, u64) {
+            for entity in self.app.world().get::<Children>(self.root).unwrap().iter() {
+                if self.app.world().get::<crate::Account>(entity).is_some() {
+                    return (
+                        entity,
+                        self.app
+                            .world()
+                            .get::<Id>(entity)
+                            .unwrap()
+                            .0
+                            .parse()
+                            .unwrap(),
+                        self.app.world().get::<Revision>(entity).unwrap().0,
+                    );
+                }
+            }
+            panic!("account is missing")
+        }
+
+        fn connection(&self) -> Option<Entity> {
+            self.app
+                .world()
+                .get::<Children>(self.root)?
+                .iter()
+                .find(|&entity| self.app.world().get::<Connection>(entity).is_some())
+        }
+
+        fn phase(&mut self, expected: Phase) -> Entity {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if let Some(entity) = self.connection()
+                    && self.app.world().get::<Phase>(entity) == Some(&expected)
+                {
+                    return entity;
+                }
+                if let Some(error) = self.app.world().get::<crate::ConnectionError>(self.root) {
+                    panic!("connection failed: {:?}", error.0);
+                }
+                assert!(std::time::Instant::now() < deadline, "connection timed out");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        fn gateway(&mut self, account: Uuid, approved: bool) {
+            self.app.add_plugins(GatewayPlugin);
+            self.app.world_mut().entity_mut(self.root).insert((
+                crate::CloudAvailable,
+                Server {
+                    host: "accounts.example".into(),
+                    port: 8788,
+                },
+            ));
+            let mut gateway =
+                self.app
+                    .world_mut()
+                    .spawn((Gateway, Id(account.to_string()), ChildOf(self.root)));
+            if approved {
+                gateway.insert(Approved);
+            }
+        }
+
+        fn connect(&mut self) {
+            let account_id = self.account().1;
+            self.app.world_mut().write_message(ConnectRequest {
+                root: self.root,
+                account_id,
+            });
+        }
+
+        fn select(&mut self, profile_id: Uuid, enabled: bool) -> MutationCompleted {
+            let (_, account_id, binding_revision) = self.account();
+            let operation_id = Uuid::new_v4();
+            self.app.world_mut().write_message(SyncRequest {
+                root: self.root,
+                operation_id,
+                account_id,
+                binding_revision,
+                profile_id,
+                enabled,
+            });
+            self.result(operation_id)
+        }
         fn at(data: &std::path::Path) -> Self {
             let mut app = App::new();
             app.add_plugins((AccountPlugin, crate::local::LocalPlugin));
@@ -175,6 +270,383 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
         }
+    }
+
+    struct GatewayPlugin;
+
+    impl bevy_app::Plugin for GatewayPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(Update, (open, key, respond, delay).in_set(Set::Dispatch));
+        }
+    }
+
+    #[derive(Component)]
+    struct Gateway;
+
+    #[derive(Component)]
+    struct Approved;
+
+    fn open(
+        mut requests: MessageReader<OpenRequest>,
+        active: Query<(), With<Connection>>,
+        mut commands: Commands,
+    ) {
+        for request in requests.read() {
+            if active.contains(request.entity) {
+                commands.entity(request.entity).insert(TransportReady);
+            }
+        }
+    }
+
+    fn key(
+        mut requests: MessageReader<KeyRequest>,
+        active: Query<(), With<Connection>>,
+        mut commands: Commands,
+    ) {
+        for request in requests.read() {
+            if active.contains(request.entity) {
+                commands
+                    .entity(request.entity)
+                    .insert(KeyPrepared(Some(Ok(DeviceKey {
+                        id: Uuid::from_u128(7),
+                        seed: zeroize::Zeroizing::new([3; 32]),
+                        reused: false,
+                    }))));
+            }
+        }
+    }
+
+    fn respond(
+        mut requests: MessageReader<SendRequest>,
+        active: Query<&ChildOf, With<Connection>>,
+        gateways: Query<(&ChildOf, &Id, Has<Approved>), With<Gateway>>,
+        mut commands: Commands,
+    ) {
+        for request in requests.read() {
+            let Ok(owner) = active.get(request.entity) else {
+                continue;
+            };
+            let (_, remote_id, approved) = gateways
+                .iter()
+                .find(|(parent, _, _)| parent.parent() == owner.parent())
+                .unwrap();
+            let mut target = commands.entity(request.entity);
+            match &request.request {
+                Request::AuthorizeDevice => {
+                    target.insert((
+                        Authorized,
+                        Authorization {
+                            user_code: "ABCD-EFGH".into(),
+                            verification_uri: "https://accounts.example/device".into(),
+                        },
+                        Grant {
+                            code: "private-grant".into(),
+                            expires: std::time::Instant::now() + std::time::Duration::from_secs(60),
+                            interval: 5,
+                        },
+                    ));
+                }
+                Request::Token { device_code } => {
+                    assert_eq!(device_code, "private-grant");
+                    if approved {
+                        target.insert(SessionToken("private-session".into()));
+                    } else {
+                        target.insert(Waiting);
+                    }
+                }
+                Request::RegisterDevice { session_token, .. } => {
+                    assert_eq!(session_token, "private-session");
+                    target.insert(Registered);
+                }
+                Request::Challenge { .. } => {
+                    target.insert(Challenge("05".repeat(32)));
+                }
+                Request::Authenticate { signature } => {
+                    let key =
+                        ring::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32]).unwrap();
+                    let mut bytes = Vec::new();
+                    for offset in (0..signature.len()).step_by(2) {
+                        bytes.push(u8::from_str_radix(&signature[offset..offset + 2], 16).unwrap());
+                    }
+                    ring::signature::UnparsedPublicKey::new(
+                        &ring::signature::ED25519,
+                        key.public_key(),
+                    )
+                    .verify(&[5; 32], &bytes)
+                    .unwrap();
+                    target.insert(Verified);
+                }
+                Request::Account => {
+                    target.insert(RemoteAccount(remote_id.0.parse().unwrap()));
+                }
+            }
+        }
+    }
+
+    fn delay(
+        mut requests: MessageReader<PollRequest>,
+        active: Query<(), With<Connection>>,
+        mut commands: Commands,
+    ) {
+        for request in requests.read() {
+            if active.contains(request.entity) {
+                commands.entity(request.entity).insert(PollReady);
+            }
+        }
+    }
+
+    #[test]
+    fn authenticated_link_keeps_local_identity_and_requires_durable_explicit_profile_consent() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        let local_id = fixture.account().1;
+        let profile = fixture.profile("personal");
+        let remote = Uuid::from_u128(99);
+        fixture.gateway(remote, true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let account = fixture.account();
+        assert_eq!(account.1, local_id);
+        assert_eq!(fixture.profile("personal"), profile);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Binding>(account.0)
+                .unwrap()
+                .account_id
+                .as_deref(),
+            Some(remote.to_string().as_str())
+        );
+        let entity = fixture.entity("personal");
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<SyncEnabled>(entity)
+                .is_some_and(|enabled| enabled.0)
+        );
+        fixture.select(profile.0, true).result.unwrap();
+        let database = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
+        let values: String = database
+            .query_row("select group_concat(value) from records", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(!values.contains("private-grant") && !values.contains("private-session"));
+        drop(fixture);
+        let mut restored = Fixture::at(data.path());
+        assert_eq!(restored.account().1, local_id);
+        let restored_profile = restored.entity("personal");
+        assert!(
+            restored
+                .app
+                .world()
+                .get::<SyncEnabled>(restored_profile)
+                .unwrap()
+                .0
+        );
+        restored.app.world_mut().write_message(DisconnectRequest {
+            root: restored.root,
+            account_id: local_id,
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            restored.app.update();
+            if !restored
+                .app
+                .world()
+                .get::<Binding>(restored.account().0)
+                .unwrap()
+                .is_linked()
+                && restored
+                    .app
+                    .world()
+                    .get::<Disconnecting>(restored.root)
+                    .is_none()
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "disconnect timed out");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let entity = restored.entity("personal");
+        assert!(!restored.app.world().get::<SyncEnabled>(entity).unwrap().0);
+        assert_eq!(restored.profile("personal").0, profile.0);
+        drop(restored);
+        let mut reopened = Fixture::at(data.path());
+        assert!(
+            !reopened
+                .app
+                .world()
+                .get::<Binding>(reopened.account().0)
+                .unwrap()
+                .is_linked()
+        );
+        let entity = reopened.entity("personal");
+        assert!(!reopened.app.world().get::<SyncEnabled>(entity).unwrap().0);
+    }
+
+    #[test]
+    fn canceled_authentication_and_stale_context_cannot_link_or_select_profiles() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.gateway(Uuid::from_u128(99), false);
+        let profile = fixture.profile("personal").0;
+        let local_id = fixture.account().1;
+        assert_eq!(
+            fixture.select(profile, true).result.unwrap_err(),
+            Failure::NotLinked
+        );
+        fixture.connect();
+        let old = fixture.phase(Phase::AwaitingApproval);
+        let connection_id = fixture
+            .app
+            .world()
+            .get::<Id>(old)
+            .unwrap()
+            .0
+            .parse()
+            .unwrap();
+        fixture.app.world_mut().write_message(CancelConnectRequest {
+            root: fixture.root,
+            account_id: local_id,
+            connection_id,
+        });
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(old).is_err());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Binding>(fixture.account().0)
+                .is_none()
+        );
+        fixture.connect();
+        let replacement = fixture.phase(Phase::AwaitingApproval);
+        fixture.app.world_mut().write_message(CancelConnectRequest {
+            root: fixture.root,
+            account_id: local_id,
+            connection_id,
+        });
+        fixture.app.update();
+        assert_eq!(fixture.connection(), Some(replacement));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(replacement)
+            .insert((Phase::LookingUp, RemoteAccount(Uuid::from_u128(99))));
+        fixture.phase(Phase::Connected);
+        let (account, account_id, revision) = fixture.account();
+        let operation_id = Uuid::new_v4();
+        fixture.app.world_mut().write_message(SyncRequest {
+            root: fixture.root,
+            operation_id,
+            account_id,
+            binding_revision: revision - 1,
+            profile_id: profile,
+            enabled: true,
+        });
+        assert_eq!(
+            fixture.result(operation_id).result.unwrap_err(),
+            Failure::AccountMismatch
+        );
+        let operation_id = Uuid::new_v4();
+        fixture.app.world_mut().write_message(LinkRequest {
+            root: fixture.root,
+            operation_id,
+            account_id,
+            binding: Binding {
+                server: "accounts.example:8788".into(),
+                account_id: Some(Uuid::from_u128(100).to_string()),
+                credential_generation: revision,
+            },
+        });
+        assert_eq!(
+            fixture.result(operation_id).result.unwrap_err(),
+            Failure::AccountMismatch
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Binding>(account)
+                .unwrap()
+                .account_id,
+            Some(Uuid::from_u128(99).to_string())
+        );
+    }
+
+    #[test]
+    fn failed_binding_and_sync_writes_preserve_committed_settings_and_allow_retry() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        let (account, account_id, generation) = fixture.account();
+        let binding = Binding {
+            server: "accounts.example:8788".into(),
+            account_id: Some(Uuid::from_u128(99).to_string()),
+            credential_generation: generation,
+        };
+        let held = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
+        held.execute_batch("begin immediate").unwrap();
+        let operation_id = Uuid::new_v4();
+        fixture.app.world_mut().write_message(LinkRequest {
+            root: fixture.root,
+            operation_id,
+            account_id,
+            binding: binding.clone(),
+        });
+        assert!(matches!(
+            fixture.result(operation_id).result,
+            Err(Failure::Storage(_))
+        ));
+        assert!(fixture.app.world().get::<Binding>(account).is_none());
+        held.execute_batch("rollback").unwrap();
+        fixture.app.world_mut().write_message(LinkRequest {
+            root: fixture.root,
+            operation_id,
+            account_id,
+            binding: binding.clone(),
+        });
+        fixture.result(operation_id).result.unwrap();
+        let profile = fixture.profile("personal").0;
+        held.execute_batch("begin immediate").unwrap();
+        assert!(matches!(
+            fixture.select(profile, true).result,
+            Err(Failure::Storage(_))
+        ));
+        let entity = fixture.entity("personal");
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<SyncEnabled>(entity)
+                .is_some_and(|enabled| enabled.0)
+        );
+        held.execute_batch("rollback").unwrap();
+        fixture.select(profile, true).result.unwrap();
+        let (_, _, revision) = fixture.account();
+        let refresh = Uuid::new_v4();
+        fixture.app.world_mut().write_message(LinkRequest {
+            root: fixture.root,
+            operation_id: refresh,
+            account_id,
+            binding,
+        });
+        let selection = Uuid::new_v4();
+        fixture.app.world_mut().write_message(SyncRequest {
+            root: fixture.root,
+            operation_id: selection,
+            account_id,
+            binding_revision: revision,
+            profile_id: profile,
+            enabled: false,
+        });
+        assert_eq!(
+            fixture.result(selection).result.unwrap_err(),
+            Failure::AccountMismatch
+        );
+        assert!(fixture.app.world().get::<SyncEnabled>(entity).unwrap().0);
     }
 
     #[test]

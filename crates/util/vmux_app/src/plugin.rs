@@ -10,6 +10,8 @@ pub enum VmuxPlugin {
     Account(vmux_account::AccountPlugin),
     #[plugin(feature = "account-local", desktop, requires(account))]
     AccountLocal(vmux_account::local::LocalPlugin),
+    #[plugin(feature = "account-cloud", desktop, requires(account_local))]
+    AccountCloud(vmux_account::cloud::Plugin),
     #[plugin(feature = "profile-account", desktop, requires(account_local, runtime))]
     ProfileAccount(crate::profile_account::ProfileAccountPlugin),
     #[plugin(feature = "cli", cli, mcp, requires(ecs))]

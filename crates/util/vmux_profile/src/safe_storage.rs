@@ -244,6 +244,24 @@ impl SafeStorage {
     }
 
     #[cfg(target_os = "macos")]
+    pub(crate) fn seal_account(
+        context: &SafeStorageContext,
+        scope: &str,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, SafeStorageError> {
+        Self::cipher(context, true)?.seal_account(scope, plaintext)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn open_account(
+        context: &SafeStorageContext,
+        scope: &str,
+        ciphertext: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, SafeStorageError> {
+        Self::cipher(context, false)?.open_account(scope, ciphertext)
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn wrap_vault_key(
         context: &SafeStorageContext,
         vault_id: &str,

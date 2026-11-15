@@ -1,6 +1,6 @@
 use crate::account::Set;
 use crate::mutations::{EnsureDirectory, Initializing, Proposal, Target, Writing};
-use crate::profile::{Account, Failure, Owner, Profile};
+use crate::profile::{Account, Binding, Failure, Owner, Profile, SyncEnabled};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -127,6 +127,8 @@ pub(crate) struct Catalog<'w, 's> {
     accounts: AccountRows<'w, 's>,
     pub(crate) profiles: ProfileRows<'w, 's>,
     pub(crate) selections: Query<'w, 's, &'static Selection, With<Root>>,
+    bindings: Query<'w, 's, &'static Binding, With<Account>>,
+    consent: Query<'w, 's, &'static SyncEnabled, With<Profile>>,
 }
 
 impl Catalog<'_, '_> {
@@ -183,6 +185,10 @@ impl Catalog<'_, '_> {
             }
         }
         let (account, scope) = account.ok_or(Failure::InvalidStore)?;
+        let binding = self.bindings.get(account).ok();
+        if binding.is_some_and(|binding| !binding.is_valid()) {
+            return Err(Failure::InvalidStore);
+        }
         let mut directories = std::collections::HashSet::new();
         for entity in entities {
             if *entity == account {
@@ -193,6 +199,8 @@ impl Catalog<'_, '_> {
                 return Err(Failure::InvalidStore);
             };
             if owner.0 != account
+                || (self.consent.get(*entity).is_ok_and(|consent| consent.0)
+                    && !binding.is_some_and(Binding::is_linked))
                 || stored_scope.0 != scope
                 || Directory::named(&directory.0).id() != directory.0
                 || !directories.insert(&directory.0)

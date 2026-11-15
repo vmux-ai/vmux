@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use vmux_api::page::UiStateEmit;
 use vmux_api::team::{TeamMemberRow, TeamUiState};
 
-use crate::projection::TeamStateProjection;
+use crate::projection::TeamPresentation;
 
 pub struct RosterPlugin;
 
@@ -58,7 +58,7 @@ fn project(mut runtimes: Query<(&Members, &mut Team), (With<Runtime>, Changed<Me
     let Ok((members, mut team)) = runtimes.single_mut() else {
         return;
     };
-    team.0 = TeamStateProjection::build(members.0.clone(), Vec::new());
+    team.0 = TeamPresentation::build(members.0.clone(), Vec::new()).0;
 }
 
 fn emit(

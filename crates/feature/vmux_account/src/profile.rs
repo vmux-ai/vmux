@@ -10,6 +10,39 @@ use vmux_ecs::{ProfileId, Revision, Uuid as Id};
 #[reflect(Component, Serialize, Deserialize, Stored, @Format::new("account", 1))]
 pub struct Account;
 
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[reflect(Component, Serialize, Deserialize, Stored, @Format::new("account_binding", 1))]
+pub struct Binding {
+    pub server: String,
+    pub account_id: Option<String>,
+    pub credential_generation: u64,
+}
+
+impl Binding {
+    pub fn is_linked(&self) -> bool {
+        self.account_id.is_some()
+    }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        match &self.account_id {
+            Some(id) => {
+                !self.server.is_empty()
+                    && self.credential_generation > 0
+                    && self.server.len() <= 512
+                    && !self.server.chars().any(char::is_control)
+                    && Uuid::parse_str(id).is_ok_and(|id| !id.is_nil())
+            }
+            None => self.server.is_empty() && self.credential_generation == 0,
+        }
+    }
+}
+
+#[derive(
+    Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize,
+)]
+#[reflect(Component, Serialize, Deserialize, Stored, @Format::new("profile_sync", 1))]
+pub struct SyncEnabled(pub bool);
+
 impl Account {
     pub(crate) fn bundle(id: Uuid) -> impl Bundle {
         (
@@ -81,4 +114,9 @@ pub enum Failure {
     Conflict,
     Storage(String),
     InvalidStore,
+    AccountMismatch,
+    NotLinked,
+    NotAuthenticated,
+    AuthorizationExpired,
+    AccessDenied,
 }

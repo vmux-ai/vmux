@@ -33,7 +33,7 @@ use vmux_layout::window::WindowHierarchy;
 use vmux_session::{RunState, Session};
 use vmux_space::Spaces;
 
-use crate::projection::TeamStateProjection;
+use crate::projection::TeamPresentation;
 use uuid::Uuid;
 use vmux_account::{CreateRequest, MutationCompleted, RenameRequest};
 
@@ -49,6 +49,7 @@ impl Plugin for TeamPlugin {
             ProjectionPlugin,
             IntentPlugin,
             crate::TeamToolPlugin,
+            crate::cloud::Plugin,
         ))
         .add_agent_request::<AgentRenameProfile>()
         .add_systems(Startup, spawn_user_profile);
@@ -116,10 +117,7 @@ pub struct AgentRenameProfile {
 }
 
 #[derive(Component, Default)]
-struct Team;
-
-#[derive(Component, Clone, Debug, Default, PartialEq)]
-struct TeamPresentation(TeamUiState);
+pub(crate) struct Team;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct ProfileFormState(TeamProfileForm);
@@ -314,15 +312,18 @@ fn project(
     presentations: Query<&TeamPresentation>,
     forms: Query<&ProfileFormState>,
     projector: TeamProjector,
+    cloud: crate::cloud::Projection,
     mut commands: Commands,
 ) {
     for entity in &views {
         let target_space = projector.target(entity);
-        let mut state = TeamStateProjection::build(
+        let mut state = TeamPresentation::build(
             projector.members(target_space.or_else(|| projector.current())),
             projector.profiles(),
-        );
+        )
+        .0;
         state.profile_form = forms.get(entity).ok().map(|form| form.0.clone());
+        state.account = cloud.state(state.active_profile.as_ref());
         let presentation = TeamPresentation(state);
         if presentations
             .get(entity)

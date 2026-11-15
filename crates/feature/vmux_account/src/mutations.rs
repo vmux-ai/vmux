@@ -1,6 +1,6 @@
 use crate::account::Set;
 use crate::catalog::{Catalog, Error, Loading, Root};
-use crate::profile::{Account, Failure, Profile};
+use crate::profile::{Account, Binding, Failure, Profile, SyncEnabled};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::reflect::AppTypeRegistry;
@@ -19,10 +19,17 @@ impl bevy_app::Plugin for MutationsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CreateRequest>()
             .add_message::<RenameRequest>()
+            .add_message::<LinkRequest>()
+            .add_message::<SyncRequest>()
             .add_message::<MutationCompleted>()
             .add_message::<WriteRequest>()
             .add_message::<WriteCompleted>()
-            .add_systems(Update, (create, rename).chain().in_set(Set::Receive))
+            .add_systems(
+                Update,
+                (create, rename, link, select_sync)
+                    .chain()
+                    .in_set(Set::Receive),
+            )
             .add_systems(Update, prepare.in_set(Set::Prepare))
             .add_systems(Update, write.in_set(Set::Write))
             .add_systems(Update, apply.in_set(Set::Apply))
@@ -43,6 +50,24 @@ pub struct RenameRequest {
     pub operation_id: Uuid,
     pub profile_id: Uuid,
     pub name: String,
+}
+
+#[derive(Message)]
+pub struct LinkRequest {
+    pub root: Entity,
+    pub operation_id: Uuid,
+    pub account_id: Uuid,
+    pub binding: Binding,
+}
+
+#[derive(Message)]
+pub struct SyncRequest {
+    pub root: Entity,
+    pub operation_id: Uuid,
+    pub account_id: Uuid,
+    pub binding_revision: u64,
+    pub profile_id: Uuid,
+    pub enabled: bool,
 }
 
 #[derive(Message)]
@@ -105,6 +130,9 @@ struct Sent;
 
 #[derive(Component)]
 pub(crate) struct Writing;
+
+#[derive(Component)]
+struct ExpectedBinding(u64);
 
 #[derive(Component)]
 pub(crate) struct EnsureDirectory(pub(crate) String);
@@ -205,22 +233,124 @@ fn rename(
     }
 }
 
+fn link(
+    mut requests: MessageReader<LinkRequest>,
+    mut queue: Queue,
+    catalog: Catalog,
+    bindings: Query<&Binding, With<Account>>,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let result = match catalog.account(request.root) {
+            Some((account, id)) if id == request.account_id && request.binding.is_valid() => {
+                let current = bindings.get(account).ok();
+                if request.binding.is_linked()
+                    && current
+                        .is_some_and(|current| current.is_linked() && current != &request.binding)
+                {
+                    Err(Failure::AccountMismatch)
+                } else {
+                    queue.reserve(request.root, request.operation_id)
+                }
+            }
+            _ => Err(Failure::AccountMismatch),
+        };
+        let order = match result {
+            Ok(order) => order,
+            Err(error) => {
+                replies.write(MutationCompleted {
+                    root: request.root,
+                    operation_id: request.operation_id,
+                    result: Err(error),
+                    directory_id: None,
+                    created: false,
+                });
+                continue;
+            }
+        };
+        commands
+            .spawn((
+                Operation::bundle("account.link").unwrap(),
+                ChildOf(request.root),
+                request.binding.clone(),
+                order,
+            ))
+            .insert(Id(request.operation_id.to_string()));
+    }
+}
+
+fn select_sync(
+    mut requests: MessageReader<SyncRequest>,
+    mut queue: Queue,
+    catalog: Catalog,
+    bindings: Query<&Binding, With<Account>>,
+    revisions: Query<&Revision, With<Account>>,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let result = match catalog.account(request.root) {
+            Some((account, id))
+                if id == request.account_id
+                    && revisions
+                        .get(account)
+                        .is_ok_and(|revision| revision.0 == request.binding_revision) =>
+            {
+                if request.enabled && !bindings.get(account).is_ok_and(Binding::is_linked) {
+                    Err(Failure::NotLinked)
+                } else {
+                    queue.reserve(request.root, request.operation_id)
+                }
+            }
+            _ => Err(Failure::AccountMismatch),
+        };
+        let order = match result {
+            Ok(order) => order,
+            Err(error) => {
+                replies.write(MutationCompleted {
+                    root: request.root,
+                    operation_id: request.operation_id,
+                    result: Err(error),
+                    directory_id: None,
+                    created: false,
+                });
+                continue;
+            }
+        };
+        commands
+            .spawn((
+                Operation::bundle("account.sync-preference").unwrap(),
+                Target(request.profile_id),
+                ChildOf(request.root),
+                SyncEnabled(request.enabled),
+                ExpectedBinding(request.binding_revision),
+                order,
+            ))
+            .insert(Id(request.operation_id.to_string()));
+    }
+}
+
 type Pending<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
         &'static ChildOf,
-        &'static Name,
+        Option<&'static Name>,
         &'static Order,
         Option<&'static Target>,
         Has<Creation>,
+        Option<&'static Binding>,
+        Option<&'static SyncEnabled>,
+        Option<&'static ExpectedBinding>,
     ),
     (
         With<Operation>,
         Without<Prepared>,
         Without<Accepted>,
         Without<AwaitReload>,
+        Or<(With<Creation>, With<Target>, With<Binding>)>,
     ),
 >;
 
@@ -230,12 +360,13 @@ fn prepare(
     available: AvailableRoots,
     mut replies: MessageWriter<MutationCompleted>,
     identities: Query<&Id>,
+    account_state: Query<(&Revision, Option<&Binding>), With<Account>>,
     mut commands: Commands,
 ) {
     let mut ordered: Vec<_> = pending.iter().collect();
-    ordered.sort_by_key(|(_, _, _, order, _, _)| order.0);
+    ordered.sort_by_key(|(_, _, _, order, _, _, _, _, _)| order.0);
     let mut busy = std::collections::HashSet::new();
-    for (operation, parent, name, _, target, creation) in ordered {
+    for (operation, parent, name, _, target, creation, binding, sync, expected) in ordered {
         let root = parent.parent();
         if !available.contains(root) || !busy.insert(root) {
             continue;
@@ -243,8 +374,69 @@ fn prepare(
         let Some((account, scope)) = catalog.account(root) else {
             continue;
         };
+        let (account_revision, current_binding) = account_state.get(account).unwrap();
+        if expected.is_some_and(|expected| expected.0 != account_revision.0) {
+            replies.write(MutationCompleted {
+                root,
+                operation_id: identities.get(operation).unwrap().0.parse().unwrap(),
+                result: Err(Failure::AccountMismatch),
+                directory_id: None,
+                created: false,
+            });
+            commands.entity(operation).despawn();
+            continue;
+        }
+        if let Some(binding) = binding {
+            if binding.is_linked()
+                && current_binding.is_some_and(|current| current.is_linked() && current != binding)
+            {
+                replies.write(MutationCompleted {
+                    root,
+                    operation_id: identities.get(operation).unwrap().0.parse().unwrap(),
+                    result: Err(Failure::AccountMismatch),
+                    directory_id: None,
+                    created: false,
+                });
+                commands.entity(operation).despawn();
+                continue;
+            }
+            let revision = account_revision.0.checked_add(1);
+            let Some(revision) = revision.filter(|revision| *revision <= i64::MAX as u64) else {
+                replies.write(MutationCompleted {
+                    root,
+                    operation_id: identities.get(operation).unwrap().0.parse().unwrap(),
+                    result: Err(Failure::NotReady),
+                    directory_id: None,
+                    created: false,
+                });
+                commands.entity(operation).despawn();
+                continue;
+            };
+            commands.entity(root).insert(Writing);
+            commands.entity(operation).insert((
+                Prepared,
+                Target(scope),
+                Revision(revision),
+                CaptureRequest {
+                    scope_id: scope,
+                    entities: catalog.entities(root),
+                },
+            ));
+            continue;
+        }
+        if sync.is_some_and(|sync| sync.0) && !current_binding.is_some_and(Binding::is_linked) {
+            replies.write(MutationCompleted {
+                root,
+                operation_id: identities.get(operation).unwrap().0.parse().unwrap(),
+                result: Err(Failure::NotLinked),
+                directory_id: None,
+                created: false,
+            });
+            commands.entity(operation).despawn();
+            continue;
+        }
         let (target_id, directory, revision) = if creation {
-            let base = Directory::named(name.as_str()).into_id();
+            let base = Directory::named(name.unwrap().as_str()).into_id();
             let mut directory = base.clone();
             for suffix in 2usize.. {
                 if catalog.directory(account, &directory).is_none() {
@@ -288,7 +480,13 @@ fn prepare(
         if creation {
             let proposal = commands
                 .spawn((
-                    Profile::bundle(scope, target_id, &directory, name.as_str(), account),
+                    Profile::bundle(
+                        scope,
+                        target_id,
+                        &directory,
+                        name.unwrap().as_str(),
+                        account,
+                    ),
                     Proposal,
                     ChildOf(operation),
                 ))
@@ -324,6 +522,8 @@ type Captures<'w, 's> = Query<
         Option<&'static EnsureDirectory>,
         Has<Creation>,
         Has<Initializing>,
+        Option<&'static Binding>,
+        Option<&'static SyncEnabled>,
     ),
     Without<Sent>,
 >;
@@ -349,6 +549,8 @@ fn write(
         ensure,
         creation,
         initializing,
+        binding,
+        sync,
     ) in &mut captures
     {
         let root = parent.parent();
@@ -385,14 +587,35 @@ fn write(
             let name = name.unwrap().as_str();
             serde_json::json!({"create": name}).to_string()
         } else {
-            let name = name.unwrap();
             let mut failed = None;
             for record in &mut records {
                 if record.id != target.0 {
+                    if binding.is_some_and(|binding| !binding.is_linked()) {
+                        let Some(next) = record
+                            .revision
+                            .checked_add(1)
+                            .filter(|revision| *revision <= i64::MAX as u64)
+                        else {
+                            failed = Some("profile revision exhausted".to_string());
+                            break;
+                        };
+                        record.revision = next;
+                        if let Err(error) = record.set(&registry, &SyncEnabled(false)) {
+                            failed = Some(error);
+                            break;
+                        }
+                    }
                     continue;
                 }
                 record.revision = revision.unwrap().0;
-                if let Err(error) = record.set(&registry, name) {
+                let result = if let Some(binding) = binding {
+                    record.set(&registry, binding)
+                } else if let Some(sync) = sync {
+                    record.set(&registry, sync)
+                } else {
+                    record.set(&registry, name.unwrap())
+                };
+                if let Err(error) = result {
                     failed = Some(error);
                     break;
                 }
@@ -409,7 +632,13 @@ fn write(
                 commands.entity(entity).despawn();
                 continue;
             }
-            serde_json::json!({"rename": target.0, "name": name.as_str()}).to_string()
+            if let Some(binding) = binding {
+                serde_json::json!({"link": target.0, "binding": binding}).to_string()
+            } else if let Some(sync) = sync {
+                serde_json::json!({"sync": target.0, "enabled": sync.0}).to_string()
+            } else {
+                serde_json::json!({"rename": target.0, "name": name.unwrap().as_str()}).to_string()
+            }
         };
         requests.write(WriteRequest {
             entity,
@@ -440,6 +669,8 @@ type Writes<'w, 's> = Query<
         Option<&'static Name>,
         Has<Creation>,
         Has<Initializing>,
+        Option<&'static Binding>,
+        Option<&'static SyncEnabled>,
     ),
     With<Sent>,
 >;
@@ -457,7 +688,8 @@ fn apply(
         let Some(result) = event.result.take() else {
             continue;
         };
-        let Ok((parent, id, target, name, creation, initializing)) = active.get(event.entity)
+        let Ok((parent, id, target, name, creation, initializing, binding, sync)) =
+            active.get(event.entity)
         else {
             continue;
         };
@@ -572,7 +804,34 @@ fn apply(
                 .insert((Confirmed(confirmations), Accepted(commit)))
                 .remove::<Sent>();
         } else {
-            let target = if creation {
+            let target = if let Some(binding) = binding {
+                let (account, _) = catalog.account(root).unwrap();
+                commands
+                    .entity(account)
+                    .insert((binding.clone(), Revision(commit.receipt.revision)));
+                if !binding.is_linked() {
+                    for (_, id, _, _, owner, revision, _) in &catalog.profiles {
+                        if owner.0 != account {
+                            continue;
+                        }
+                        let profile_id = id.0.parse().unwrap();
+                        let profile = catalog.profile(root, profile_id).unwrap();
+                        let revision = revision.0 + 1;
+                        commands
+                            .entity(profile)
+                            .insert((SyncEnabled(false), Revision(revision)));
+                        confirmations.push((
+                            profile,
+                            Receipt {
+                                operation_id: commit.receipt.operation_id,
+                                entity_id: profile_id,
+                                revision,
+                            },
+                        ));
+                    }
+                }
+                account
+            } else if creation {
                 let Some((entity, _)) = proposals
                     .iter()
                     .find(|(_, parent)| parent.parent() == event.entity)
@@ -589,18 +848,22 @@ fn apply(
                 let Some(entity) = catalog.profile(root, commit.receipt.entity_id) else {
                     continue;
                 };
-                commands.entity(entity).insert((
-                    Name::new(name.unwrap().as_str().to_string()),
-                    Revision(commit.receipt.revision),
-                ));
+                commands
+                    .entity(entity)
+                    .insert(Revision(commit.receipt.revision));
+                if let Some(sync) = sync {
+                    commands.entity(entity).insert(*sync);
+                } else {
+                    commands
+                        .entity(entity)
+                        .insert(Name::new(name.unwrap().as_str().to_string()));
+                }
                 entity
             };
+            confirmations.push((target, commit.receipt.clone()));
             commands
                 .entity(event.entity)
-                .insert((
-                    Confirmed(vec![(target, commit.receipt.clone())]),
-                    Accepted(commit),
-                ))
+                .insert((Confirmed(confirmations), Accepted(commit)))
                 .remove::<Sent>();
             commands.entity(root).remove::<Writing>().remove::<Error>();
         }
@@ -618,7 +881,15 @@ fn replayed(
         if !ready.contains(root) {
             continue;
         }
-        if let Some(entity) = catalog.profile(root, commit.0.receipt.entity_id) {
+        if catalog
+            .account(root)
+            .is_some_and(|(_, id)| id == commit.0.receipt.entity_id)
+        {
+            commands
+                .entity(operation)
+                .insert(Accepted(commit.0.clone()))
+                .remove::<AwaitReload>();
+        } else if let Some(entity) = catalog.profile(root, commit.0.receipt.entity_id) {
             let directory = catalog.profiles.get(entity).unwrap().2.clone();
             commands
                 .entity(operation)

@@ -35,6 +35,8 @@ cli = [
 mcp = ["cli"]
 desktop = [
     "container",
+
+    "account-cloud",
     "acp",
     "bookmark",
     "browser",
@@ -83,6 +85,7 @@ bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
 account-local = ["account", "vmux_account/local"]
+account-cloud = ["account-local", "vmux_account/cloud"]
 profile-account = ["account-local", "runtime"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 flex = ["ecs", "dep:vmux_flex"]
