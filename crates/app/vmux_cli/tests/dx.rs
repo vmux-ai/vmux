@@ -633,14 +633,54 @@ fn both_branch_option_forms_refuse_a_missing_branch_without_changing_checkout() 
 #[cfg(unix)]
 fn positional_branches_refuse_a_missing_worktree_before_building_or_launching() {
     let fixture = Fixture::new();
-    for command in ["build", "run"] {
+    for command in ["build", "run", "serve"] {
         fixture
             .command()
-            .args([command, "missing-dx-fixture-branch", "-p", "local"])
+            .args([command, "missing-dx-fixture-branch"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("Branch has no worktree"));
     }
+    assert!(!fixture.root.join("open.log").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn serve_uses_the_selected_website_and_development_profile() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.root.join("website")).unwrap();
+    std::fs::write(fixture.root.join("website/tailwind.input.css"), "fixture").unwrap();
+    fixture.script("dx", r#"#!/bin/sh
+if [ "$1" = --version ]; then printf 'dx 0.7.9\n'; exit 0; fi
+printf '%s\n%s\n%s\n%s\n' "$PWD" "$*" "$VMUX_BUILD_PROFILE" "$VMUX_DX_PLATFORM" > "$TEST_ROOT/serve.log"
+"#);
+    fixture.script(
+        "../dx-home/tools/binaryen-127/bin/wasm-opt",
+        "#!/bin/sh\nprintf 'wasm-opt version 127\\n'\n",
+    );
+    fixture
+        .command()
+        .args(["serve", "main"])
+        .env("DX_BIN", fixture.root.join("bin/dx"))
+        .env("DX_HOME", fixture.root.join("dx-home"))
+        .env("TAILWINDCSS_BIN", fixture.root.join("bin/tailwindcss"))
+        .env("TEST_ROOT", &fixture.root)
+        .env("VMUX_BUILD_PROFILE", "release")
+        .assert()
+        .success();
+    let output = std::fs::read_to_string(fixture.root.join("serve.log")).unwrap();
+    assert_eq!(
+        output,
+        format!(
+            "{}\nserve --platform web\ndev\nweb\n",
+            fixture
+                .root
+                .join("website")
+                .canonicalize()
+                .unwrap()
+                .display()
+        )
+    );
     assert!(!fixture.root.join("open.log").exists());
 }
 
