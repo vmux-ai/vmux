@@ -38,6 +38,55 @@ pub struct SetupView;
 #[derive(Component)]
 pub struct SetupTarget;
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PageOutput<'w, 's> {
+    commands: Commands<'w, 's>,
+    views: Query<'w, 's, Has<SetupView>, With<vmux_ecs::page::HostsPage>>,
+}
+
+impl PageOutput<'_, '_> {
+    fn publish(&mut self, view: Entity, url: &str, label_key: &str, intent_url: String) {
+        self.commands.trigger(UiInput {
+            webview: view,
+            payload: vmux_api::address::PageAddressPublish {
+                address: vmux_api::address::PageAddress {
+                    url: url.to_string(),
+                    current: vmux_api::address::AddressOption {
+                        label_key: label_key.to_string(),
+                        icon: Some(vmux_api::BuiltinIcon::MessagesRound),
+                        intent: Some(vmux_api::address::AddressIntent::Navigate {
+                            url: intent_url,
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            },
+        });
+    }
+
+    fn reset(&mut self, view: Entity) {
+        if self.views.get(view).is_err() {
+            return;
+        }
+        self.commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                view,
+                &crate::state::ChatUiStatePatch {
+                    snapshot: Some(Box::new(crate::event::ChatSnapshot {
+                        setup_pending: true,
+                        status: "preparing".into(),
+                        ..Default::default()
+                    })),
+                    transcript: Some(Box::new(crate::event::ChatTranscriptState::default())),
+                    composer_draft: Some(crate::event::ChatComposerDraft::default()),
+                    ..Default::default()
+                },
+            ),
+        );
+    }
+}
+
 fn sync_views(
     mut views: Query<
         (
@@ -63,7 +112,7 @@ fn sync_views(
         With<crate::Session>,
     >,
     targets: Query<(&vmux_ecs::EntityTarget<crate::Session>, Has<SetupTarget>)>,
-    mut commands: Commands,
+    mut output: PageOutput,
 ) {
     let projected = drafts.single().ok();
     let draft = projected.map(|(draft, _)| draft);
@@ -78,12 +127,12 @@ fn sync_views(
     for (view, mut metadata, parent, setup, session_view, prewarmed) in &mut views {
         if crate::Route::parse(&metadata.url) != Some(crate::Route::Setup) {
             if setup {
-                commands.entity(view).remove::<SetupView>();
+                output.commands.entity(view).remove::<SetupView>();
             }
             continue;
         }
         if !setup {
-            commands.entity(view).insert(SetupView);
+            output.commands.entity(view).insert(SetupView);
         }
         if prewarmed {
             continue;
@@ -114,103 +163,51 @@ fn sync_views(
                 )
             {
                 metadata.url = crate::Route::Session(id.clone()).url();
-                commands.entity(view).remove::<SetupView>();
-                commands.entity(stack).remove::<SetupTarget>();
-                commands.trigger(UiInput {
-                    webview: view,
-                    payload: vmux_api::address::PageAddressPublish {
-                        address: vmux_api::address::PageAddress {
-                            url: metadata.url.clone(),
-                            current: vmux_api::address::AddressOption {
-                                label_key: "sessions-title".into(),
-                                icon: Some(vmux_api::BuiltinIcon::MessagesRound),
-                                intent: Some(vmux_api::address::AddressIntent::Navigate {
-                                    url: metadata.url.clone(),
-                                }),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        },
-                    },
-                });
+                output.commands.entity(view).remove::<SetupView>();
+                output.commands.entity(stack).remove::<SetupTarget>();
+                output.publish(view, &metadata.url, "sessions-title", metadata.url.clone());
                 continue;
             }
             if !bound {
-                commands
+                output
+                    .commands
                     .entity(view)
                     .remove::<(super::SessionView, super::ChatSynced)>();
-                commands.trigger(
-                    vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                        view,
-                        &crate::state::ChatUiStatePatch {
-                            snapshot: Some(Box::new(crate::event::ChatSnapshot {
-                                setup_pending: true,
-                                status: "preparing".into(),
-                                ..Default::default()
-                            })),
-                            transcript: Some(
-                                Box::new(crate::event::ChatTranscriptState::default()),
-                            ),
-                            composer_draft: Some(crate::event::ChatComposerDraft::default()),
-                            ..Default::default()
-                        },
-                    ),
-                );
-                commands.entity(stack).insert((
+                output.reset(view);
+                output.commands.entity(stack).insert((
                     vmux_ecs::EntityTarget::<crate::Session>::new(session),
                     SetupTarget,
                 ));
-                commands.write_message(vmux_ecs::PageOpenRequest {
+                output.commands.write_message(vmux_ecs::PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
                     url: crate::Route::Setup.url(),
                     request_id: None,
                 });
             }
         } else {
-            commands
+            output
+                .commands
                 .entity(stack)
                 .remove::<(vmux_ecs::EntityTarget<crate::Session>, SetupTarget)>();
             if session_view {
-                commands.entity(view).remove::<super::SessionView>();
+                output.commands.entity(view).remove::<super::SessionView>();
             }
         }
-        let title = match projected
-            .and_then(|(draft, catalog)| catalog.0.iter().find(|agent| agent.id == draft.agent_id))
-        {
-            Some(agent) if draft.is_some_and(|draft| draft.setup_started) => {
-                vmux_ui::i18n::translate_with(
-                    "onboarding-setup-agent",
-                    &[(
-                        "agent",
-                        vmux_ui::i18n::TranslationValue::String(&agent.name),
-                    )],
-                )
-            }
-            _ => vmux_ui::i18n::translate("onboarding-setup"),
-        };
+        let title = projected
+            .map(|(draft, catalog)| draft.title(catalog))
+            .unwrap_or_else(|| vmux_ui::i18n::translate("onboarding-setup"));
         if metadata.title != title {
             metadata.title = title;
         }
         if setup && !metadata.is_changed() {
             continue;
         }
-        commands.trigger(UiInput {
-            webview: view,
-            payload: vmux_api::address::PageAddressPublish {
-                address: vmux_api::address::PageAddress {
-                    url: metadata.url.clone(),
-                    current: vmux_api::address::AddressOption {
-                        label_key: "onboarding-setup".into(),
-                        icon: Some(vmux_api::BuiltinIcon::MessagesRound),
-                        intent: Some(vmux_api::address::AddressIntent::Navigate {
-                            url: crate::Route::Setup.url(),
-                        }),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            },
-        });
+        output.publish(
+            view,
+            &metadata.url,
+            "onboarding-setup",
+            crate::Route::Setup.url(),
+        );
     }
 }
 
@@ -256,6 +253,19 @@ impl Default for Draft {
 }
 
 impl Draft {
+    fn title(&self, catalog: &Catalog) -> String {
+        match catalog.0.iter().find(|agent| agent.id == self.agent_id) {
+            Some(agent) if self.setup_started => vmux_ui::i18n::translate_with(
+                "onboarding-setup-agent",
+                &[(
+                    "agent",
+                    vmux_ui::i18n::TranslationValue::String(&agent.name),
+                )],
+            ),
+            _ => vmux_ui::i18n::translate("onboarding-setup"),
+        }
+    }
+
     fn load(path: &std::path::Path) -> Self {
         let Ok(bytes) = std::fs::read(path) else {
             return Self::default();

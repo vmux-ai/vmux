@@ -74,26 +74,28 @@ fn support(
 fn authenticate(
     input: On<UiInput<ChatAuthenticate>>,
     views: vmux_session::host::SessionViews,
-    mut sessions: Query<(&SessionId, &mut RunState), With<Session>>,
+    mut sessions: Query<(&SessionId, &mut vmux_session::Authentication), With<Session>>,
     mut requests: MessageWriter<ServiceRequest>,
 ) {
     let Some(session) = views.session(input.event().webview) else {
         return;
     };
-    let Ok((id, mut state)) = sessions.get_mut(session) else {
+    let Ok((id, mut authentication)) = sessions.get_mut(session) else {
         return;
     };
-    let RunState::AuthenticationRequired {
-        methods, pending, ..
-    } = &mut *state
-    else {
-        return;
-    };
-    let method_id = &input.event().payload.method_id;
-    if *pending || !methods.iter().any(|method| &method.id == method_id) {
+    if !authentication.active {
         return;
     }
-    *pending = true;
+    let method_id = &input.event().payload.method_id;
+    if authentication.pending
+        || !authentication
+            .methods
+            .iter()
+            .any(|method| &method.id == method_id)
+    {
+        return;
+    }
+    authentication.pending = true;
     requests.write(ServiceRequest(ClientMessage::AuthenticateAcpAgent {
         sid: id.0.clone(),
         method_id: method_id.clone(),
@@ -103,22 +105,30 @@ fn authenticate(
 fn cancel(
     input: On<UiInput<ChatCancelSetup>>,
     views: vmux_session::host::SessionViews,
-    mut sessions: Query<&mut RunState, With<Session>>,
+    mut sessions: Query<
+        (
+            &mut RunState,
+            &vmux_session::Preparation,
+            &vmux_session::Authentication,
+        ),
+        With<Session>,
+    >,
     mut commands: Commands,
 ) {
     let Some(session) = views.session(input.event().webview) else {
         return;
     };
-    let Ok(mut state) = sessions.get_mut(session) else {
+    let Ok((mut state, preparation, authentication)) = sessions.get_mut(session) else {
         return;
     };
-    if matches!(
-        *state,
-        RunState::Preparing | RunState::Installing { .. } | RunState::AuthenticationRequired { .. }
-    ) {
+    if preparation.active() || authentication.active {
         *state = RunState::Errored("ACP setup cancelled".into());
         commands
             .entity(session)
+            .insert((
+                vmux_session::Authentication::default(),
+                vmux_session::Preparation::default(),
+            ))
             .insert(super::navigation_driver::RetryRequested)
             .remove::<vmux_ecs::ProcessAnchor>();
     }

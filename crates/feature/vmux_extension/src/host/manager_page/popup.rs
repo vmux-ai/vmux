@@ -143,6 +143,18 @@ impl PopupHost<'_, '_> {
         })
     }
 
+    fn register_window(&mut self, owner: Entity, url: String) -> Option<i32> {
+        let (_, Some(host)) = self.layouts.get(owner).ok()? else {
+            return None;
+        };
+        let (_, _, id) = self.native_windows.get(host.0).ok()?;
+        let window = self.model.windows.iter().find(|window| window.id == id.0)?;
+        let popup = self.virtual_windows.register_popup(url, window);
+        let id = popup.id;
+        self.events.write(ExtensionModelEvent::WindowCreated(popup));
+        Some(id)
+    }
+
     fn show(
         &mut self,
         owner: Entity,
@@ -175,19 +187,9 @@ impl PopupHost<'_, '_> {
         let id = match window_id.or(existing_id) {
             Some(id) => id,
             None => {
-                let Some((_, Some(host))) = self.layouts.get(owner).ok() else {
+                let Some(id) = self.register_window(owner, url.clone()) else {
                     return;
                 };
-                let Ok((_, _, id)) = self.native_windows.get(host.0) else {
-                    return;
-                };
-                let Some(window) = self.model.windows.iter().find(|window| window.id == id.0)
-                else {
-                    return;
-                };
-                let popup = self.virtual_windows.register_popup(url.clone(), window);
-                let id = popup.id;
-                self.events.write(ExtensionModelEvent::WindowCreated(popup));
                 id
             }
         };

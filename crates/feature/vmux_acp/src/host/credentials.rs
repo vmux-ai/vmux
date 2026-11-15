@@ -42,6 +42,7 @@ struct Recovery<'w, 's> {
             &'static SessionId,
             &'static AgentId,
             &'static vmux_session::RunState,
+            Option<&'static vmux_session::Authentication>,
         ),
         With<Session>,
     >,
@@ -135,7 +136,15 @@ fn save(
 fn replace(
     input: On<UiInput<ChatSaveKey>>,
     views: SessionViews,
-    sessions: Query<(&SessionId, &AgentId, &vmux_session::RunState), With<Session>>,
+    sessions: Query<
+        (
+            &SessionId,
+            &AgentId,
+            &vmux_session::RunState,
+            Option<&vmux_session::Authentication>,
+        ),
+        With<Session>,
+    >,
     pending: Query<&Save>,
     mut entry: KeyEntry,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -148,10 +157,12 @@ fn replace(
     let Some(entity) = views.session(webview) else {
         return;
     };
-    let Ok((session, agent, state)) = sessions.get(entity) else {
+    let Ok((session, agent, state, authentication)) = sessions.get(entity) else {
         return;
     };
-    if !state.needs_credentials() {
+    if !state.needs_credentials()
+        && !authentication.is_some_and(|authentication| authentication.active)
+    {
         return;
     }
     let Ok(mut progress) = entry.progress.get_mut(webview) else {
@@ -205,10 +216,12 @@ fn finish(
             }
             if let Some(expected) = &save.session
                 && let Some(current) = recovery.views.session(save.webview)
-                && let Ok((session, current_agent, state)) = recovery.sessions.get(current)
+                && let Ok((session, current_agent, state, authentication)) =
+                    recovery.sessions.get(current)
                 && session == expected
                 && current_agent == agent
-                && state.needs_credentials()
+                && (state.needs_credentials()
+                    || authentication.is_some_and(|authentication| authentication.active))
             {
                 if matches!(state, vmux_session::RunState::Errored(_))
                     && recovery.queues.empty(current)
@@ -242,7 +255,7 @@ fn finish(
                 .views
                 .session(save.webview)
                 .and_then(|current| recovery.sessions.get(current).ok())
-                .is_some_and(|(session, current_agent, _)| {
+                .is_some_and(|(session, current_agent, _, _)| {
                     session == expected && current_agent == agent
                 }),
         };

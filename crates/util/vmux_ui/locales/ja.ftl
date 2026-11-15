@@ -1331,6 +1331,5 @@ common-continue = 続ける
 common-confirm = 確認
 onboarding-continue-agent = { $agent } で続ける
 
-common-choose = 選択
 
 common-resume = 再開

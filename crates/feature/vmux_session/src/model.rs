@@ -169,7 +169,7 @@ impl Plugin for StagePlugin {
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save, Cwd, Description)]
+#[require(Save, Cwd, Description, crate::Authentication, crate::Preparation)]
 #[type_path = "vmux_session"]
 pub struct Session;
 

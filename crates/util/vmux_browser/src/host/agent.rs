@@ -695,9 +695,11 @@ mod opening_tests {
                     vmux_session::Session,
                     vmux_session::SessionId("source".into()),
                     vmux_session::SetupPending,
-                    vmux_session::RunState::AuthenticationRequired {
-                        methods: Vec::new(),
+                    vmux_session::RunState::Idle,
+                    vmux_session::Authentication {
+                        active: true,
                         pending: true,
+                        ..Default::default()
                     },
                 ))
                 .id();
@@ -859,18 +861,19 @@ mod opening_tests {
         *fixture
             .app
             .world_mut()
-            .get_mut::<vmux_session::RunState>(fixture.session)
-            .unwrap() = vmux_session::RunState::Preparing;
+            .get_mut::<vmux_session::Preparation>(fixture.session)
+            .unwrap() = vmux_session::Preparation::starting();
         let popup = fixture.open("https://example.test/auth");
         fixture.app.update();
         assert!(fixture.app.world().get_entity(popup).is_ok());
         *fixture
             .app
             .world_mut()
-            .get_mut::<vmux_session::RunState>(fixture.session)
-            .unwrap() = vmux_session::RunState::AuthenticationRequired {
-            methods: Vec::new(),
+            .get_mut::<vmux_session::Authentication>(fixture.session)
+            .unwrap() = vmux_session::Authentication {
+            active: true,
             pending: true,
+            ..Default::default()
         };
         fixture.app.update();
         assert!(fixture.app.world().get_entity(popup).is_ok());

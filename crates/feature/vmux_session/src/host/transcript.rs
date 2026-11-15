@@ -81,6 +81,35 @@ impl PushState {
 #[derive(Component)]
 struct Binding;
 
+#[derive(SystemParam)]
+struct ViewBindings<'w, 's> {
+    entries:
+        Query<'w, 's, (Entity, &'static ChildOf, &'static EntityTarget<Session>), With<Binding>>,
+    commands: Commands<'w, 's>,
+}
+
+impl ViewBindings<'_, '_> {
+    fn ensure(&mut self, webview: Entity, session: Entity) {
+        if self
+            .entries
+            .iter()
+            .any(|(_, parent, target)| parent.parent() == webview && target.entity() == session)
+        {
+            return;
+        }
+        for (binding, parent, _) in &self.entries {
+            if parent.parent() == webview {
+                self.commands.entity(binding).despawn();
+            }
+        }
+        self.commands.spawn((
+            EntityTarget::<Session>::new(session),
+            ChildOf(webview),
+            Binding,
+        ));
+    }
+}
+
 fn attach(sessions: Query<Entity, (With<Session>, Without<PushState>)>, mut commands: Commands) {
     for session in &sessions {
         commands.entity(session).insert(PushState::default());
@@ -179,6 +208,8 @@ type ProjectionView = (
 #[derive(SystemParam)]
 struct PushWorld<'w, 's> {
     sessions: Query<'w, 's, ChangedSession>,
+    authentication: Query<'w, 's, Ref<'static, crate::Authentication>>,
+    preparation: Query<'w, 's, Ref<'static, crate::Preparation>>,
     stacks: Query<
         'w,
         's,
@@ -219,6 +250,8 @@ struct ReadyWorld<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     metadata: Query<'w, 's, &'static PageMetadata>,
     sessions: Query<'w, 's, SessionProjection>,
+    authentication: Query<'w, 's, &'static crate::Authentication>,
+    preparation: Query<'w, 's, &'static crate::Preparation>,
     transcripts: Transcripts<'w, 's>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     user_profiles: Query<'w, 's, &'static Profile, With<User>>,
@@ -256,15 +289,17 @@ fn track_turn_duration(
                         .push(time.elapsed().saturating_sub(start).as_secs() as u32);
                 }
             }
-            RunState::Preparing
-            | RunState::Installing { .. }
-            | RunState::AwaitingApproval { .. }
-            | RunState::AuthenticationRequired { .. } => {}
+            RunState::AwaitingApproval { .. } => {}
         }
     }
 }
 
-fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut commands: Commands) {
+fn push_to_page(
+    mut world: PushWorld,
+    mut pushes: Query<&mut PushState>,
+    mut bindings: ViewBindings,
+    mut commands: Commands,
+) {
     let user_profile = world.user_profiles.single().ok();
     let user_moved = user_profile
         .as_ref()
@@ -313,6 +348,14 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             || loading_changes.contains(&session)
             || name.is_changed()
             || state.is_changed()
+            || world
+                .preparation
+                .get(session)
+                .is_ok_and(|preparation| preparation.is_changed())
+            || world
+                .authentication
+                .get(session)
+                .is_ok_and(|authentication| authentication.is_changed())
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
             || profile.as_ref().is_some_and(|profile| profile.is_changed())
             || imported
@@ -414,6 +457,12 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
                 &conversation.event_ids,
             )
         });
+        if let Ok(preparation) = world.preparation.get(session) {
+            projection.prepare(&preparation);
+        }
+        if let Ok(authentication) = world.authentication.get(session) {
+            projection.authenticate(&authentication);
+        }
         projection.snapshot.setup_pending = world.setup.contains(session);
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         else {
@@ -430,13 +479,10 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             commands.trigger(
                 vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                     webview,
-                    &crate::state::ChatUiStatePatch {
-                        viewport: Some(ChatViewportState {
-                            session: session_id.0.clone(),
-                            position: world.viewports.get(session).ok().copied(),
-                        }),
-                        ..Default::default()
-                    },
+                    &ChatProjection::viewport(
+                        Some(session_id),
+                        world.viewports.get(session).ok().copied(),
+                    ),
                 ),
             );
         }
@@ -456,16 +502,7 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
         if !initialized {
-            for (binding, parent, _) in &world.bindings {
-                if parent.parent() == webview {
-                    commands.entity(binding).despawn();
-                }
-            }
-            commands.spawn((
-                EntityTarget::<Session>::new(session),
-                ChildOf(webview),
-                Binding,
-            ));
+            bindings.ensure(webview, session);
         }
         push.context = context;
         push.last = Some(now);
@@ -497,6 +534,56 @@ impl QueuedPromptReads<'_, '_> {
 }
 
 impl ChatProjection {
+    fn viewport(
+        session: Option<&SessionId>,
+        position: Option<ChatViewport>,
+    ) -> crate::state::ChatUiStatePatch {
+        crate::state::ChatUiStatePatch {
+            viewport: Some(ChatViewportState {
+                session: session.map(|id| id.0.clone()).unwrap_or_default(),
+                position,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn prepare(&mut self, preparation: &crate::Preparation) {
+        if !preparation.active() {
+            return;
+        }
+        self.snapshot.status = if preparation.phase == crate::PreparationPhase::Installing {
+            "installing"
+        } else {
+            "preparing"
+        }
+        .into();
+        self.snapshot.error = preparation.detail.clone();
+        self.snapshot.install_percent = preparation.percent;
+    }
+
+    fn authenticate(&mut self, authentication: &crate::Authentication) {
+        if !authentication.active {
+            return;
+        }
+        self.snapshot.status = "authentication".into();
+        self.snapshot.authentication_methods = authentication.methods.clone();
+        self.snapshot.authentication_pending = authentication.pending;
+    }
+
+    fn approval(state: &RunState) -> Option<PendingApproval> {
+        match state {
+            RunState::AwaitingApproval {
+                call_id,
+                name,
+                args,
+            } => {
+                let args = vmux_api::json::JsonValue::from(args.clone());
+                Some(PendingApproval::new(call_id.clone(), name.clone(), &args))
+            }
+            _ => None,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn new(
         agent_id: &AgentId,
@@ -535,23 +622,10 @@ impl ChatProjection {
         });
         let page = messages.tail_with_prompt(limit);
         let error = match state {
-            RunState::Errored(message)
-            | RunState::Installing {
-                detail: message, ..
-            } => message.clone(),
+            RunState::Errored(message) => message.clone(),
             _ => String::new(),
         };
-        let approval = match state {
-            RunState::AwaitingApproval {
-                call_id,
-                name,
-                args,
-            } => {
-                let args = vmux_api::json::JsonValue::from(args.clone());
-                Some(PendingApproval::new(call_id.clone(), name.clone(), &args))
-            }
-            _ => None,
-        };
+        let approval = Self::approval(state);
         let (agent_name, accent_color) = profile
             .map(|p| (p.name.clone(), p.avatar.color.clone()))
             .unwrap_or_default();
@@ -572,18 +646,6 @@ impl ChatProjection {
             .unwrap_or_default();
         let transcript_empty = page.items.is_empty();
         let mut snapshot = ChatSnapshot {
-            install_percent: match state {
-                RunState::Installing { percent, .. } => *percent,
-                _ => None,
-            },
-            authentication_methods: match state {
-                RunState::AuthenticationRequired { methods, .. } => methods.clone(),
-                _ => Vec::new(),
-            },
-            authentication_pending: matches!(
-                state,
-                RunState::AuthenticationRequired { pending: true, .. }
-            ),
             status: state.status().to_string(),
             error,
             approval,
@@ -644,7 +706,7 @@ fn sync_ready_views(
         ReadyViewFilter,
     >,
     world: ReadyWorld,
-    bindings: Query<(Entity, &ChildOf, &EntityTarget<Session>), With<Binding>>,
+    mut bindings: ViewBindings,
     mut commands: Commands,
 ) {
     let user_profile = world.user_profiles.single().ok();
@@ -695,6 +757,12 @@ fn sync_ready_views(
                 &conversation.event_ids,
             )
         });
+        if let Ok(preparation) = world.preparation.get(session_entity) {
+            projection.prepare(preparation);
+        }
+        if let Ok(authentication) = world.authentication.get(session_entity) {
+            projection.authenticate(authentication);
+        }
         projection.snapshot.setup_pending = world.setup.contains(session_entity);
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
@@ -703,17 +771,10 @@ fn sync_ready_views(
         commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview,
-                &crate::state::ChatUiStatePatch {
-                    viewport: Some(ChatViewportState {
-                        session: world
-                            .session_ids
-                            .get(session_entity)
-                            .map(|id| id.0.clone())
-                            .unwrap_or_default(),
-                        position: viewport.copied(),
-                    }),
-                    ..Default::default()
-                },
+                &ChatProjection::viewport(
+                    world.session_ids.get(session_entity).ok(),
+                    viewport.copied(),
+                ),
             ),
         );
         commands.trigger(
@@ -736,20 +797,7 @@ fn sync_ready_views(
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
         commands.entity(webview).insert(ChatSynced);
-        if !bindings.iter().any(|(_, parent, target)| {
-            parent.parent() == webview && target.entity() == session_entity
-        }) {
-            for (binding, parent, _) in &bindings {
-                if parent.parent() == webview {
-                    commands.entity(binding).despawn();
-                }
-            }
-            commands.spawn((
-                EntityTarget::<Session>::new(session_entity),
-                ChildOf(webview),
-                Binding,
-            ));
-        }
+        bindings.ensure(webview, session_entity);
     }
 }
 

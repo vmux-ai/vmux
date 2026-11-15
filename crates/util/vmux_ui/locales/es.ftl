@@ -1351,6 +1351,5 @@ common-continue = Continuar
 common-confirm = Confirmar
 onboarding-continue-agent = Continuar con { $agent }
 
-common-choose = Elegir
 
 common-resume = Reanudar

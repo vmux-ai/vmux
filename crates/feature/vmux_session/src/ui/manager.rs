@@ -117,6 +117,18 @@ pub fn SessionsManager() -> Element {
 struct SessionSelection(Signal<HashSet<String>>);
 
 impl SessionSelection {
+    fn visible(self, presentation: &ManagerPresentation) -> Vec<SessionSummary> {
+        let selected_ids = self.ids();
+        let mut selected = Vec::new();
+        for session in &presentation.snapshot.sessions {
+            if selected_ids.contains(&session.id) && presentation.visible_ids.contains(&session.id)
+            {
+                selected.push(session.clone());
+            }
+        }
+        selected
+    }
+
     fn use_state() -> Self {
         Self(use_signal(HashSet::new))
     }
@@ -198,32 +210,13 @@ fn SessionsManagerActions(
 ) -> Element {
     let mut delete_confirm_open = use_signal(|| false);
     let selection = use_context::<SessionSelection>();
-    let selected_ids = selection.ids();
-    let selected_sessions = presentation
-        .snapshot
-        .sessions
-        .iter()
-        .filter(|session| {
-            selected_ids.contains(&session.id) && presentation.visible_ids.contains(&session.id)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let selected_sessions = selection.visible(&presentation);
     let selected_count = selected_sessions.len();
-    let selected_archived = selected_count > 0
-        && selected_sessions
-            .iter()
-            .all(|session| session.archived_at > 0);
-    let selected_targets = selected_sessions
-        .iter()
-        .map(ArchiveTarget::from_session)
-        .collect::<Vec<_>>();
-    let selected_deletable = selected_sessions
-        .iter()
-        .map(DeleteTarget::from_session)
-        .collect::<Vec<_>>();
+    let selected_targets = ArchiveTarget::from_sessions(&selected_sessions);
+    let selected_archived = ArchiveTarget::all_archived(&selected_targets);
+    let selected_deletable = DeleteTarget::from_sessions(&selected_sessions);
     let mutations = use_context::<SessionMutations>();
     let deleted_provider_count = mutations.deleted_provider_count();
-    let delete_confirm = use_memo(move || Some(delete_confirm_open()));
     let mut toolbar = Vec::new();
     toolbar.push(
         ToolbarControl::button(translate("onboarding-setup"), move |_| {
@@ -311,6 +304,19 @@ fn SessionsManagerActions(
             },
         }
         PageToolbar { controls: toolbar }
+        DeleteSessionsDialog { delete_confirm_open, selected_deletable }
+    }
+}
+
+#[component]
+fn DeleteSessionsDialog(
+    mut delete_confirm_open: Signal<bool>,
+    selected_deletable: Vec<DeleteTarget>,
+) -> Element {
+    let selection = use_context::<SessionSelection>();
+    let mutations = use_context::<SessionMutations>();
+    let delete_confirm = use_memo(move || Some(delete_confirm_open()));
+    rsx! {
         AlertDialogRoot {
             open: Into::<ReadSignal<Option<bool>>>::into(delete_confirm),
             on_open_change: Callback::new(move |next| delete_confirm_open.set(next)),

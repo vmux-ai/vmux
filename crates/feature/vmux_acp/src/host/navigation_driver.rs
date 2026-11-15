@@ -109,6 +109,34 @@ impl AcpCatalog<'_, '_> {
 }
 
 impl AgentPageOpenWorkspace<'_, '_> {
+    pub(super) fn cwd(
+        &self,
+        route: &Route,
+        stack: Entity,
+        restoring: bool,
+        opener: &PageOpener,
+        launches: &Query<&vmux_ecs::terminal::TerminalLaunch>,
+        projects: &vmux_ecs::profile::Projects,
+    ) -> Result<std::path::PathBuf, String> {
+        if matches!(
+            route,
+            Route::Manager | Route::Provider { .. } | Route::Setup
+        ) {
+            return Ok(std::path::PathBuf::new());
+        }
+        if restoring && let Ok(launch) = launches.get(stack) {
+            return Ok(std::path::PathBuf::from(&launch.cwd));
+        }
+        let tab_dir = opener.tab(stack).and_then(|(_, startup_dir)| startup_dir);
+        if let Some(path) = vmux_space::WorkspaceCwd::from_tab(tab_dir.as_deref())? {
+            return Ok(path);
+        }
+        if let Some(dir) = self.startup_dir(stack, &opener.settings) {
+            return Ok(dir.path);
+        }
+        projects.path().map(Path::to_path_buf)
+    }
+
     pub(super) fn startup_dir(
         &self,
         entity: Entity,
@@ -207,6 +235,36 @@ impl PageOpener<'_, '_> {
         }
     }
 
+    fn agent_identity(
+        &self,
+        selected_agent: Option<String>,
+    ) -> Result<(String, String, Option<String>), String> {
+        let agent_id = selected_agent
+            .or_else(|| {
+                self.settings
+                    .agent
+                    .acp
+                    .first()
+                    .map(|config| config.id.clone())
+            })
+            .or_else(|| self.catalog.installed_id())
+            .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
+        let config = self
+            .settings
+            .agent
+            .acp
+            .iter()
+            .find(|config| config.id == agent_id);
+        if config.is_none() && self.catalog.agent(&agent_id).is_none() {
+            return Err(format!("ACP agent unavailable for '{agent_id}'"));
+        }
+        Ok((
+            agent_id.clone(),
+            self.catalog.profile_name(&agent_id, config),
+            self.catalog.icon(&agent_id),
+        ))
+    }
+
     fn open_session(
         &mut self,
         task_entity: Entity,
@@ -247,26 +305,7 @@ impl PageOpener<'_, '_> {
         else {
             return Err(format!("Session '{}' was not found", id.0));
         };
-        let agent_id = selected_agent
-            .or_else(|| {
-                self.settings
-                    .agent
-                    .acp
-                    .first()
-                    .map(|config| config.id.clone())
-            })
-            .or_else(|| self.catalog.installed_id())
-            .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-        let config = self
-            .settings
-            .agent
-            .acp
-            .iter()
-            .find(|config| config.id == agent_id);
-        if config.is_none() && self.catalog.agent(&agent_id).is_none() {
-            return Err(format!("ACP agent unavailable for '{agent_id}'"));
-        }
-        let icon = self.catalog.icon(&agent_id);
+        let (agent_id, agent_name, icon) = self.agent_identity(selected_agent)?;
         let has_history = self
             .transcripts
             .read(session_entity, |transcript| !transcript.messages.is_empty());
@@ -277,7 +316,6 @@ impl PageOpener<'_, '_> {
             provider_kind.as_ref().zip(provider_sid.as_ref()),
         )
         .0;
-        let agent_name = self.catalog.profile_name(&agent_id, config);
         let cwd_missing = stored_cwd.as_os_str().is_empty();
         let cwd = if cwd_missing {
             default_cwd.to_path_buf()
@@ -328,11 +366,23 @@ impl PageOpener<'_, '_> {
             resume,
         );
         let prompt = self.defer_initial_prompt(task.stack, initial_prompt, initial_attachments);
+        self.queue_attachment(task_entity, task.id, request, prompt, transition_webview);
+        Ok(PageOpenCompletion::PendingAttachment)
+    }
+
+    fn queue_attachment(
+        &mut self,
+        task_entity: Entity,
+        id: vmux_ecs::PageOpenId,
+        request: AcpAgentAttachment,
+        prompt: DeferredAttachmentPrompt,
+        transition_webview: Option<Entity>,
+    ) {
         let operation = self
             .commands
             .spawn((
                 request,
-                PageNavigation::new(task.id),
+                PageNavigation::new(id),
                 prompt,
                 EntityTarget::<PageOpenTask>::new(task_entity),
             ))
@@ -342,7 +392,6 @@ impl PageOpener<'_, '_> {
                 .entity(operation)
                 .insert(EntityTarget::<SessionView>::new(webview));
         }
-        Ok(PageOpenCompletion::PendingAttachment)
     }
 
     fn defer_initial_prompt(

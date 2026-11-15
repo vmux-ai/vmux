@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -10,7 +12,6 @@ use vmux_ecs::{
     Cwd, EntityTarget, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet,
     PageOpenTask, PendingPrompt, PendingPromptAttachments, UiState, UiStateWriter,
 };
-use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
 use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
@@ -56,7 +57,9 @@ impl bevy::prelude::Plugin for NavigationPlugin {
                     start_workspace_checks,
                     release_transition,
                     discard_stale_inline_transitions,
-                    prepare,
+                    prepare_transition,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    prepare_workspace,
                     open,
                 )
                     .chain()
@@ -270,26 +273,12 @@ fn target_metadata(route: &Route, url: &str) -> PageMetadata {
     }
 }
 
-fn prepare(
+fn prepare_transition(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     manager_views: Query<(Entity, &ChildOf), With<SessionManagerView>>,
     projection: TransitionProjection,
-    workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
-    child_of: Query<&ChildOf>,
-    space_hierarchy: vmux_layout::space::SpaceHierarchy,
-    mut tabs: Query<(
-        Entity,
-        &mut Tab,
-        Option<&TabWorkspace>,
-        Option<&TabWorktree>,
-        Option<&TabWorktreeReady>,
-        Option<&TabDirDecided>,
-    )>,
-    settings: Option<Res<AppSettings>>,
-    active_space: FocusedSpace,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -350,6 +339,30 @@ fn prepare(
                 .insert((PageOpenDeferred, AwaitingAgentTransitionPaint));
             continue;
         }
+    }
+}
+
+fn prepare_workspace(
+    tasks: Query<(Entity, &PageOpenTask), (PendingPageOpen, Without<AwaitingAgentTransitionPaint>)>,
+    pending: Query<(), With<TabWorktreePending>>,
+    workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
+    child_of: Query<&ChildOf>,
+    workspace: AgentPageOpenWorkspace,
+    mut tabs: Query<(
+        Entity,
+        &mut Tab,
+        Option<&TabWorkspace>,
+        Option<&TabWorktree>,
+        Option<&TabWorktreeReady>,
+        Option<&TabDirDecided>,
+    )>,
+    settings: Option<Res<AppSettings>>,
+    mut commands: Commands,
+) {
+    for (task_entity, task) in &tasks {
+        let Some(route) = Route::parse(&task.url) else {
+            continue;
+        };
         if matches!(
             route,
             Route::Manager | Route::Provider { .. } | Route::Setup
@@ -369,13 +382,10 @@ fn prepare(
             ));
             continue;
         }
-        let configured_project_dir = settings.as_deref().and_then(|settings| {
-            let space_id = space_hierarchy
-                .id(task.stack)
-                .or_else(|| active_space.id().map(str::to_string))?;
-            vmux_setting::StartupDir::resolve(settings, &space_id, None)
-                .map(|dir| dir.path.to_string_lossy().into_owned())
-        });
+        let configured_project_dir = settings
+            .as_deref()
+            .and_then(|settings| workspace.startup_dir(task.stack, settings))
+            .map(|dir| dir.path.to_string_lossy().into_owned());
         let Ok((_, mut tab, workspace, metadata, ready, decided)) = tabs.get_mut(tab_entity) else {
             continue;
         };
@@ -537,49 +547,17 @@ fn open(
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
-        let default_cwd = if matches!(
-            route,
-            Route::Manager | Route::Provider { .. } | Route::Setup
-        ) {
-            PathBuf::new()
-        } else {
-            let tab = opener.tab(task.stack);
-            let tab_dir = tab
-                .as_ref()
-                .and_then(|(_, startup_dir)| startup_dir.clone());
-            let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
-            let restored_cwd = restoring
-                .then(|| launches.get(task.stack).ok())
-                .flatten()
-                .map(|launch| PathBuf::from(&launch.cwd));
-            if let Some(cwd) = restored_cwd {
-                cwd
-            } else {
-                match vmux_space::WorkspaceCwd::from_tab(tab_dir.as_deref()) {
-                    Ok(Some(path)) => path,
-                    Ok(None) => match space_startup_dir {
-                        Some(dir) => dir.path,
-                        None => match projects.path() {
-                            Ok(path) => path.to_path_buf(),
-                            Err(message) => {
-                                opener
-                                    .commands
-                                    .entity(entity)
-                                    .insert(PageOpenError { message });
-                                continue;
-                            }
-                        },
-                    },
-                    Err(message) => {
-                        opener
-                            .commands
-                            .entity(entity)
-                            .insert(PageOpenError { message });
-                        continue;
-                    }
+        let default_cwd =
+            match workspace.cwd(&route, task.stack, restoring, &opener, &launches, &projects) {
+                Ok(cwd) => cwd,
+                Err(message) => {
+                    opener
+                        .commands
+                        .entity(entity)
+                        .insert(PageOpenError { message });
+                    continue;
                 }
-            }
-        };
+            };
         let (initial_prompt, initial_attachments) = open_q
             .p1()
             .get(task.stack)
@@ -1009,7 +987,7 @@ mod tests {
         );
         assert!(matches!(
             fixture.app.world().get::<vmux_session::RunState>(session),
-            Some(vmux_session::RunState::Preparing)
+            Some(vmux_session::RunState::Idle)
         ));
         assert_eq!(fixture.view(), view);
         assert!(fixture.app.world().get::<SessionView>(view).is_some());

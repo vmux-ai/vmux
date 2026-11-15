@@ -36,7 +36,9 @@ pub use queue::{
     PromptQueue, QueuePlugin, QueuedPrompt, QueuedPromptId, QueuedPromptReads, QueuedPrompts,
 };
 pub use route::Route;
-pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};
+pub use run_state::{
+    AgentTurnMeta, Authentication, Failure, FailureKind, Preparation, PreparationPhase, RunState,
+};
 #[cfg(host)]
 pub use runtime::SessionHostPlugin;
 #[cfg(host)]

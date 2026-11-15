@@ -1017,7 +1017,11 @@ fn submit(
     bindings: Query<(), With<ChatSubmitBinding>>,
     composers: Query<&ComposerState, With<SessionView>>,
     targets: super::session::SessionViews,
-    sessions: Query<&crate::RunState>,
+    sessions: Query<(
+        &crate::Preparation,
+        &crate::Authentication,
+        Has<crate::SetupPending>,
+    )>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
@@ -1027,7 +1031,9 @@ fn submit(
     if let Some(session) = targets.session(caller)
         && sessions
             .get(session)
-            .is_ok_and(crate::RunState::setup_in_progress)
+            .is_ok_and(|(preparation, authentication, setup)| {
+                setup || preparation.active() || authentication.active
+            })
     {
         return;
     }

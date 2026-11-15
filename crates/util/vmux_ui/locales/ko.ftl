@@ -1348,6 +1348,5 @@ common-continue = 계속
 common-confirm = 확인
 onboarding-continue-agent = { $agent }로 계속
 
-common-choose = 선택
 
 common-resume = 재개

@@ -95,6 +95,33 @@ pub(super) fn resolve_installed_catalog_launch(
 }
 
 impl AcpInstallJob {
+    pub(super) fn launch_ready(&self) -> Option<bool> {
+        self.outcome.as_ref().map(|outcome| outcome.launch.is_ok())
+    }
+
+    pub(super) fn take_package_change(&mut self) -> bool {
+        if self.package_reported
+            || !self
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.package_added)
+        {
+            return false;
+        }
+        self.package_reported = true;
+        true
+    }
+
+    pub(super) fn poll(&mut self) {
+        if let Some(result) = self.task.as_mut().and_then(|task| task.poll()) {
+            self.task.take();
+            self.outcome = Some(result.unwrap_or_else(|_| AcpInstallOutcome {
+                package_added: false,
+                launch: Err("agent installation failed unexpectedly".to_string()),
+            }));
+        }
+    }
+
     pub(super) fn take_progress(&self) -> Option<InstallState> {
         self.progress.try_iter().last()
     }

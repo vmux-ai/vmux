@@ -94,10 +94,13 @@ fn start(
                 agent_id: agent_id.0.clone(),
             },
         ));
-        *state = RunState::Installing {
-            detail: vmux_ui::i18n::translate("agent-preparing"),
-            percent: None,
-        };
+        *state = RunState::Idle;
+        commands
+            .entity(entity)
+            .insert(vmux_session::Preparation::installing(
+                vmux_ui::i18n::translate("agent-preparing"),
+                None,
+            ));
     }
 }
 
@@ -151,7 +154,7 @@ fn poll(
     }
     for (job_entity, key, mut job, mut install_state, related_waiters) in &mut jobs {
         let related_waiters = related_waiters
-            .map(|related| related.iter().collect::<Vec<_>>())
+            .map(AcpInstallWaiters::snapshot)
             .unwrap_or_default();
         if let Some(progress) = job.take_progress() {
             *install_state = progress;
@@ -159,36 +162,25 @@ fn poll(
                 if invalid_waiters.contains(entity) {
                     continue;
                 }
-                if let Ok((_, session_id, agent_id, _, _, _, waiter, mut state)) =
+                if let Ok((_, session_id, agent_id, _, _, _, waiter, _state)) =
                     waiters.get_mut(*entity)
                     && waiter.matches(session_id, agent_id)
                 {
-                    *state = RunState::Installing {
-                        detail: install_state.message.clone(),
-                        percent: install_state.pct,
-                    };
+                    commands
+                        .entity(*entity)
+                        .insert(vmux_session::Preparation::installing(
+                            install_state.message.clone(),
+                            install_state.pct,
+                        ));
                 }
             }
         }
-        if let Some(result) = job.task.as_mut().and_then(|task| task.poll()) {
-            job.task.take();
-            job.outcome = Some(result.unwrap_or_else(|_| AcpInstallOutcome {
-                package_added: false,
-                launch: Err("agent installation failed unexpectedly".to_string()),
-            }));
-        }
-        let Some((package_added, launch_ready)) = job
-            .outcome
-            .as_ref()
-            .map(|outcome| (outcome.package_added, outcome.launch.is_ok()))
-        else {
+        job.poll();
+        let Some(launch_ready) = job.launch_ready() else {
             continue;
         };
-        if package_added && !job.package_reported {
-            package_changes.write(AcpPackageChanged {
-                agent_id: key.agent_id.clone(),
-            });
-            job.package_reported = true;
+        if job.take_package_change() {
+            package_changes.write(AcpPackageChanged::new(key.agent_id.clone()));
         }
         let has_waiters = related_waiters.iter().any(|entity| {
             waiters
@@ -221,7 +213,10 @@ fn poll(
                         settings.as_deref(),
                     );
                     service_requests.write(ServiceRequest(message));
-                    *state = RunState::Preparing;
+                    *state = RunState::Idle;
+                    commands
+                        .entity(entity)
+                        .insert(vmux_session::Preparation::starting());
                     commands
                         .entity(entity)
                         .insert(AcpSpawnQueued)
@@ -229,6 +224,9 @@ fn poll(
                 }
                 Err(message) => {
                     *state = RunState::Errored(format!("ACP installation failed: {message}"));
+                    commands
+                        .entity(entity)
+                        .insert(vmux_session::Preparation::default());
                     commands.entity(entity).remove::<AcpInstallWaiter>();
                 }
             }

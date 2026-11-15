@@ -98,7 +98,7 @@ pub(super) fn Frame(
                     detail_step: Some(task.current),
                     on_select: on_resume.or(on_choose),
                     action_step: if on_resume.is_some() { task.current } else { 0 },
-                    action_label: if on_resume.is_some() { translate("common-resume") } else { translate("common-choose") },
+                    action_label: if on_resume.is_some() { translate("common-resume") } else { Choice::ChangeAgent.label() },
                     message: task.message,
                     icon: task.icon,
                     if let Some(notice) = notice { {notice} }

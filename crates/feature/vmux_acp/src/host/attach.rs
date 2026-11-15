@@ -20,68 +20,103 @@ pub(super) struct AttachPlugin;
 
 impl bevy::prelude::Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, attach.after(vmux_ecs::PageOpenSet::ResolveTarget));
+        app.add_systems(
+            Update,
+            (
+                discard_stale,
+                bevy::ecs::schedule::ApplyDeferred,
+                bind_workspace,
+                prepare_surface,
+                seed,
+                bevy::ecs::schedule::ApplyDeferred,
+                attach,
+                complete,
+            )
+                .chain()
+                .after(vmux_ecs::PageOpenSet::ResolveTarget),
+        );
     }
 }
 
-fn attach(
+fn discard_stale(
+    attachments: Query<(Entity, &StackTarget, &PageNavigation), Added<PendingAcpAgentAttachment>>,
+    navigations: Query<&PageNavigation>,
+    mut commands: Commands,
+) {
+    for (operation, StackTarget(stack), navigation) in &attachments {
+        if !navigations
+            .get(*stack)
+            .is_ok_and(|current| current == navigation)
+        {
+            commands.entity(operation).despawn();
+        }
+    }
+}
+
+fn bind_workspace(
+    attachments: Query<
+        (&StackTarget, &SessionTarget, &WorkingDirectory),
+        Added<PendingAcpAgentAttachment>,
+    >,
+    child_of: Query<&ChildOf>,
+    mut tabs: Query<&mut Tab>,
+    mut workspaces: Query<&mut TabWorkspace>,
+    mut commands: Commands,
+) {
+    for (StackTarget(stack), SessionTarget(session_entity), WorkingDirectory(cwd)) in &attachments {
+        let mut ancestor = *stack;
+        loop {
+            if let Ok(mut tab) = tabs.get_mut(ancestor) {
+                let cwd = cwd.to_string_lossy().into_owned();
+                tab.startup_dir = Some(cwd.clone());
+                if let Ok(mut workspace) = workspaces.get_mut(ancestor) {
+                    workspace.project_dir.clone_from(&cwd);
+                } else {
+                    commands
+                        .entity(ancestor)
+                        .insert(TabWorkspace { project_dir: cwd });
+                }
+                break;
+            }
+            let Ok(parent) = child_of.get(ancestor) else {
+                break;
+            };
+            ancestor = parent.parent();
+        }
+        commands
+            .entity(*stack)
+            .insert(EntityTarget::<vmux_session::Session>::new(*session_entity));
+    }
+}
+
+fn prepare_surface(
     attachments: Query<
         (
             Entity,
-            &SessionTarget,
             &StackTarget,
             &SessionName,
             &AgentName,
-            &AcpId,
             &SessionId,
-            &WorkingDirectory,
             &AcpAttachmentIcon,
-            &AcpResume,
             Option<&EntityTarget<vmux_ecs::PageOpenTask>>,
-            Option<&EntityTarget<vmux_session::host::SessionView>>,
             Option<&PageNavigation>,
-            Option<&DeferredAttachmentPrompt>,
         ),
         Added<PendingAcpAgentAttachment>,
     >,
-    titles: Query<(), With<AgentConversationTitle>>,
-    transcripts: vmux_session::Transcripts,
-    navigations: Query<&PageNavigation>,
     open_tasks: Query<&vmux_ecs::PageOpenTask>,
-    child_of: Query<&ChildOf>,
-    children: Query<&Children>,
-    mut tabs: Query<&mut Tab>,
-    mut workspaces: Query<&mut TabWorkspace>,
-    mut queues: QueuedPrompts,
-    time: Res<Time>,
     mut commands: Commands,
 ) {
     for (
         operation,
-        SessionTarget(session_entity),
         StackTarget(stack),
         SessionName(session_name),
         AgentName(agent_name),
-        AcpId(agent_id),
         SessionId(sid),
-        WorkingDirectory(cwd),
         AcpAttachmentIcon(icon),
-        AcpResume(resume),
         open_task,
-        webview,
         navigation,
-        prompt,
     ) in &attachments
     {
-        if navigation.is_some_and(|navigation| {
-            !navigations
-                .get(*stack)
-                .is_ok_and(|current| current == navigation)
-        }) {
-            commands.entity(operation).despawn();
-            continue;
-        }
-        let agent_id = agent_id.as_str();
         let setup = open_task
             .and_then(|task| open_tasks.get(task.entity()).ok())
             .is_some_and(|task| {
@@ -105,42 +140,51 @@ fn attach(
             bg_color: None,
             icon: icon.clone(),
         };
-        let profile_icon = (!icon.favicon_url().is_empty()).then(|| icon.favicon_url().to_string());
-        let mut ancestor = *stack;
-        loop {
-            if let Ok(mut tab) = tabs.get_mut(ancestor) {
-                let cwd = cwd.to_string_lossy().into_owned();
-                tab.startup_dir = Some(cwd.clone());
-                if let Ok(mut workspace) = workspaces.get_mut(ancestor) {
-                    workspace.project_dir.clone_from(&cwd);
-                } else {
-                    commands
-                        .entity(ancestor)
-                        .insert(TabWorkspace { project_dir: cwd });
-                }
-                break;
-            }
-            let Ok(parent) = child_of.get(ancestor) else {
-                break;
-            };
-            ancestor = parent.parent();
-        }
-        commands
-            .entity(*stack)
-            .insert(EntityTarget::<vmux_session::Session>::new(*session_entity));
         if navigation.is_none() {
             commands.entity(*stack).insert(page_metadata.clone());
         }
-        let transition_view = webview.map(|webview| webview.entity());
-        if transition_view.is_some()
-            && let Ok(stack_children) = children.get(*stack)
-        {
-            for child in stack_children.iter() {
-                if Some(child) != transition_view {
-                    commands.entity(child).despawn();
-                }
-            }
-        }
+        commands.entity(operation).insert(page_metadata);
+    }
+}
+
+fn seed(
+    attachments: Query<
+        (
+            Entity,
+            &SessionTarget,
+            &StackTarget,
+            &SessionName,
+            &AgentName,
+            &AcpId,
+            &SessionId,
+            &WorkingDirectory,
+            &AcpAttachmentIcon,
+            &AcpResume,
+            Option<&DeferredAttachmentPrompt>,
+        ),
+        Added<PendingAcpAgentAttachment>,
+    >,
+    titles: Query<(), With<AgentConversationTitle>>,
+    transcripts: vmux_session::Transcripts,
+    mut queues: QueuedPrompts,
+    mut commands: Commands,
+) {
+    for (
+        operation,
+        SessionTarget(session_entity),
+        StackTarget(stack),
+        SessionName(session_name),
+        AgentName(agent_name),
+        AcpId(agent_id),
+        SessionId(sid),
+        WorkingDirectory(cwd),
+        AcpAttachmentIcon(icon),
+        AcpResume(resume),
+        prompt,
+    ) in &attachments
+    {
+        let agent_id = agent_id.as_str();
+        let profile_icon = (!icon.favicon_url().is_empty()).then(|| icon.favicon_url().to_string());
         let mut prompt_title_inserted = false;
         if let Some(prompt) = prompt {
             let text = prompt.text.clone().unwrap_or_default();
@@ -158,13 +202,16 @@ fn attach(
             }
         }
         let anchor = ProcessId::new();
+        commands.entity(operation).insert(ProcessAnchor(anchor));
         commands
             .entity(*session_entity)
             .remove::<super::navigation_driver::RetryRequested>();
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
             ProcessAnchor(anchor),
-            vmux_session::RunState::Preparing,
+            vmux_session::RunState::Idle,
+            vmux_session::Preparation::starting(),
+            vmux_session::Authentication::default(),
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent { sid: sid.clone() },
         ));
@@ -194,6 +241,52 @@ fn attach(
             commands
                 .entity(*session_entity)
                 .remove::<(AcpSessionId, vmux_session::TranscriptLoading)>();
+        }
+    }
+}
+
+fn attach(
+    attachments: Query<
+        (
+            Entity,
+            &StackTarget,
+            &SessionName,
+            &AcpAttachmentIcon,
+            &PageMetadata,
+            &ProcessAnchor,
+            Option<&EntityTarget<vmux_session::host::SessionView>>,
+            Option<&PageNavigation>,
+        ),
+        Added<PendingAcpAgentAttachment>,
+    >,
+    children: Query<&Children>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    for (
+        operation,
+        StackTarget(stack),
+        SessionName(session_name),
+        AcpAttachmentIcon(icon),
+        metadata,
+        anchor,
+        webview,
+        navigation,
+    ) in &attachments
+    {
+        let page_metadata = metadata.clone();
+        let url = metadata.url.clone();
+        let setup = vmux_session::Route::parse(&url) == Some(vmux_session::Route::Setup);
+        let anchor = anchor.0;
+        let transition_view = webview.map(|webview| webview.entity());
+        if transition_view.is_some()
+            && let Ok(stack_children) = children.get(*stack)
+        {
+            for child in stack_children.iter() {
+                if Some(child) != transition_view {
+                    commands.entity(child).despawn();
+                }
+            }
         }
         let view = if let Some(webview) = webview {
             webview.entity()
@@ -262,6 +355,21 @@ fn attach(
         commands
             .entity(*stack)
             .remove::<vmux_start::StartInlineTransition>();
+        commands.entity(operation).insert(vmux_ecs::PageOpenHandled);
+    }
+}
+
+fn complete(
+    attachments: Query<
+        (Entity, Option<&EntityTarget<vmux_ecs::PageOpenTask>>),
+        (
+            Added<PendingAcpAgentAttachment>,
+            With<vmux_ecs::PageOpenHandled>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (operation, open_task) in &attachments {
         if let Some(open_task) = open_task
             && let Ok(mut task) = commands.get_entity(open_task.entity())
         {

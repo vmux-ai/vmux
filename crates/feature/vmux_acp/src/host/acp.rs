@@ -169,6 +169,12 @@ pub(crate) struct AcpPackageChanged {
     pub(crate) agent_id: String,
 }
 
+impl AcpPackageChanged {
+    fn new(agent_id: String) -> Self {
+        Self { agent_id }
+    }
+}
+
 #[derive(Component)]
 struct AcpInstallJob {
     progress: Receiver<InstallState>,
@@ -199,6 +205,12 @@ struct AcpInstallWaiter {
 #[derive(Component)]
 #[relationship_target(relationship = AcpInstallWaiter)]
 struct AcpInstallWaiters(Vec<Entity>);
+
+impl AcpInstallWaiters {
+    fn snapshot(&self) -> Vec<Entity> {
+        self.0.clone()
+    }
+}
 
 struct AcpInstallRequest {
     agent_id: String,

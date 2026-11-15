@@ -4,11 +4,6 @@ use std::time::Duration;
 #[derive(Component, Default)]
 #[require(AgentTurnMeta)]
 pub enum RunState {
-    Preparing,
-    Installing {
-        detail: String,
-        percent: Option<u8>,
-    },
     #[default]
     Idle,
     Streaming,
@@ -18,23 +13,54 @@ pub enum RunState {
         args: serde_json::Value,
     },
     Errored(String),
-    AuthenticationRequired {
-        methods: Vec<vmux_api::protocol::AuthenticationMethod>,
-        pending: bool,
-    },
+}
+
+#[derive(Component, Clone, Default)]
+pub struct Preparation {
+    pub phase: PreparationPhase,
+    pub detail: String,
+    pub percent: Option<u8>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum PreparationPhase {
+    #[default]
+    Inactive,
+    Preparing,
+    Installing,
+}
+
+impl Preparation {
+    pub fn starting() -> Self {
+        Self {
+            phase: PreparationPhase::Preparing,
+            ..Default::default()
+        }
+    }
+
+    pub fn installing(detail: String, percent: Option<u8>) -> Self {
+        Self {
+            phase: PreparationPhase::Installing,
+            detail,
+            percent,
+        }
+    }
+
+    pub fn active(&self) -> bool {
+        self.phase != PreparationPhase::Inactive
+    }
+}
+
+#[derive(Component, Clone, Default)]
+pub struct Authentication {
+    pub active: bool,
+    pub methods: Vec<vmux_api::protocol::AuthenticationMethod>,
+    pub pending: bool,
 }
 
 impl RunState {
-    pub fn setup_in_progress(&self) -> bool {
-        matches!(
-            self,
-            Self::Preparing | Self::Installing { .. } | Self::AuthenticationRequired { .. }
-        )
-    }
-
     pub fn needs_credentials(&self) -> bool {
         match self {
-            Self::AuthenticationRequired { .. } => true,
             Self::Errored(error) => Failure(error).needs_credentials(),
             _ => false,
         }
@@ -42,13 +68,10 @@ impl RunState {
 
     pub fn status(&self) -> &'static str {
         match self {
-            Self::Preparing => "preparing",
-            Self::Installing { .. } => "installing",
             Self::Idle => "idle",
             Self::Streaming => "streaming",
             Self::AwaitingApproval { .. } => "awaiting",
             Self::Errored(_) => "errored",
-            Self::AuthenticationRequired { .. } => "authentication",
         }
     }
 }

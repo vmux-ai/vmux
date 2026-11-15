@@ -202,8 +202,22 @@ fn project_statuses(
             if session_id.0 != inbound.sid {
                 continue;
             }
+            if !matches!(
+                inbound.status,
+                AgentRunStatus::AuthenticationRequired { .. }
+            ) {
+                commands.entity(session).insert((
+                    vmux_session::Authentication::default(),
+                    vmux_session::Preparation::default(),
+                ));
+            }
             match &inbound.status {
-                AgentRunStatus::Starting => *state = RunState::Preparing,
+                AgentRunStatus::Starting => {
+                    *state = RunState::Idle;
+                    commands
+                        .entity(session)
+                        .insert(vmux_session::Preparation::starting());
+                }
                 AgentRunStatus::Idle => {
                     *state = RunState::Idle;
                     commands
@@ -217,10 +231,17 @@ fn project_statuses(
                         .remove::<vmux_session::SetupPending>();
                 }
                 AgentRunStatus::AuthenticationRequired { methods, pending } => {
-                    *state = RunState::AuthenticationRequired {
-                        methods: methods.as_ref().clone(),
-                        pending: *pending,
-                    };
+                    *state = RunState::Idle;
+                    commands
+                        .entity(session)
+                        .insert(vmux_session::Preparation::default());
+                    commands
+                        .entity(session)
+                        .insert(vmux_session::Authentication {
+                            active: true,
+                            methods: methods.as_ref().clone(),
+                            pending: *pending,
+                        });
                     commands
                         .entity(session)
                         .remove::<vmux_session::TranscriptLoading>();
@@ -287,19 +308,37 @@ mod tests {
                 vmux_session::SetupPending,
             ))
             .id();
-        for status in [
-            AgentRunStatus::Starting,
-            AgentRunStatus::AuthenticationRequired {
-                methods: Box::new(Vec::new()),
-                pending: false,
-            },
-            AgentRunStatus::Errored("setup failed".into()),
+        for (status, preparing, authenticating) in [
+            (AgentRunStatus::Starting, true, false),
+            (
+                AgentRunStatus::AuthenticationRequired {
+                    methods: Box::new(Vec::new()),
+                    pending: false,
+                },
+                false,
+                true,
+            ),
+            (AgentRunStatus::Errored("setup failed".into()), false, false),
         ] {
             app.world_mut().write_message(AgentRunStatusChanged {
                 sid: "setup".into(),
                 status,
             });
             app.update();
+            assert_eq!(
+                app.world()
+                    .get::<vmux_session::Preparation>(session)
+                    .unwrap()
+                    .active(),
+                preparing
+            );
+            assert_eq!(
+                app.world()
+                    .get::<vmux_session::Authentication>(session)
+                    .unwrap()
+                    .active,
+                authenticating
+            );
             assert!(
                 app.world()
                     .get::<vmux_session::SetupPending>(session)
@@ -373,7 +412,7 @@ mod tests {
         app.update();
         assert!(matches!(
             app.world().get::<RunState>(session),
-            Some(RunState::Preparing)
+            Some(RunState::Idle)
         ));
     }
 

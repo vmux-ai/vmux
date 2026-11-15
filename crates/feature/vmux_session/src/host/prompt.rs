@@ -235,7 +235,12 @@ fn submit(
 fn stop(
     trigger: On<UiInput<ChatStop>>,
     targets: super::session::SessionViews,
-    mut sessions: Query<(&mut RunState, &SessionId)>,
+    mut sessions: Query<(
+        &mut RunState,
+        &SessionId,
+        Option<&crate::Preparation>,
+        Option<&crate::Authentication>,
+    )>,
     mut queues: QueuedPrompts,
     mut control: SessionControl,
     mut commands: Commands,
@@ -243,10 +248,13 @@ fn stop(
     let Some(session_entity) = targets.session(trigger.event().webview) else {
         return;
     };
-    let Ok((mut state, session)) = sessions.get_mut(session_entity) else {
+    let Ok((mut state, session, preparation, authentication)) = sessions.get_mut(session_entity)
+    else {
         return;
     };
-    if state.setup_in_progress() {
+    if preparation.is_some_and(crate::Preparation::active)
+        || authentication.is_some_and(|authentication| authentication.active)
+    {
         commands.trigger(UiInput {
             webview: trigger.event().webview,
             payload: crate::onboarding::ChatCancelSetup,
@@ -275,7 +283,11 @@ fn stop(
 fn cancel(
     trigger: On<UiInput<ChatCancel>>,
     targets: super::session::SessionViews,
-    sessions: Query<(&SessionId, Option<&RunState>)>,
+    sessions: Query<(
+        &SessionId,
+        Option<&crate::Preparation>,
+        Option<&crate::Authentication>,
+    )>,
     mut queues: QueuedPrompts,
     mut control: SessionControl,
     mut commands: Commands,
@@ -283,10 +295,12 @@ fn cancel(
     let Some(session_entity) = targets.session(trigger.event().webview) else {
         return;
     };
-    let Ok((session, state)) = sessions.get(session_entity) else {
+    let Ok((session, preparation, authentication)) = sessions.get(session_entity) else {
         return;
     };
-    if state.is_some_and(RunState::setup_in_progress) {
+    if preparation.is_some_and(crate::Preparation::active)
+        || authentication.is_some_and(|authentication| authentication.active)
+    {
         commands.trigger(UiInput {
             webview: trigger.event().webview,
             payload: crate::onboarding::ChatCancelSetup,
@@ -304,7 +318,12 @@ fn escape(
     trigger: On<UiInput<ChatEscape>>,
     targets: super::session::SessionViews,
     mut composers: Query<&mut ComposerState, With<SessionView>>,
-    mut sessions: Query<(&mut RunState, &SessionId)>,
+    mut sessions: Query<(
+        &mut RunState,
+        &SessionId,
+        Option<&crate::Preparation>,
+        Option<&crate::Authentication>,
+    )>,
     mut queues: QueuedPrompts,
     mut commands: Commands,
     mut control: SessionControl,
@@ -313,10 +332,13 @@ fn escape(
     let Some(session_entity) = targets.session(webview) else {
         return;
     };
-    let Ok((mut state, session)) = sessions.get_mut(session_entity) else {
+    let Ok((mut state, session, preparation, authentication)) = sessions.get_mut(session_entity)
+    else {
         return;
     };
-    if state.setup_in_progress() {
+    if preparation.is_some_and(crate::Preparation::active)
+        || authentication.is_some_and(|authentication| authentication.active)
+    {
         commands.trigger(UiInput {
             webview,
             payload: crate::onboarding::ChatCancelSetup,
@@ -1077,20 +1099,25 @@ mod tests {
                 app.add_plugins(ChatPromptInputPlugin)
                     .init_resource::<Interrupted>()
                     .add_observer(record_interruption);
-                let state = match status {
-                    0 => RunState::Preparing,
-                    1 => RunState::Installing {
-                        detail: "Installing".into(),
-                        percent: None,
-                    },
-                    _ => RunState::AuthenticationRequired {
-                        methods: Vec::new(),
-                        pending: true,
-                    },
+                let state = RunState::Idle;
+                let preparation = match status {
+                    0 => crate::Preparation::starting(),
+                    1 => crate::Preparation::installing("Installing".into(), None),
+                    _ => crate::Preparation::default(),
                 };
                 let session = app
                     .world_mut()
-                    .spawn((TestSession::bundle(), crate::PromptQueue::default(), state))
+                    .spawn((
+                        TestSession::bundle(),
+                        crate::PromptQueue::default(),
+                        state,
+                        preparation,
+                        crate::Authentication {
+                            active: status == 2,
+                            pending: status == 2,
+                            ..Default::default()
+                        },
+                    ))
                     .id();
                 app.world_mut()
                     .run_system_once(move |mut queues: QueuedPrompts| {
