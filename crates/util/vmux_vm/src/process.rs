@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, TryRecvError};
@@ -72,6 +73,7 @@ impl Process {
 
     pub(crate) fn supervised(command: &mut Command) -> io::Result<Self> {
         vmux_spawn::Descriptors::isolate(command)?;
+        command.process_group(0);
         Ok(Self(command.stdin(Stdio::piped()).spawn()?, true))
     }
 
@@ -89,11 +91,24 @@ impl Process {
         }
         Ok(())
     }
+
+    pub(crate) fn kill(&mut self) -> io::Result<()> {
+        if self.1 {
+            vmux_spawn::ProcessGroup::of(self.0.id())?.kill()?;
+        } else if !matches!(self.poll(), Ok(Some(_))) {
+            self.0.kill()?;
+        }
+        self.0.wait()?;
+        Ok(())
+    }
 }
 
 impl Drop for Process {
     fn drop(&mut self) {
         if matches!(self.poll(), Ok(Some(_))) {
+            if self.1 {
+                let _ = self.kill();
+            }
             return;
         }
         if self.1 {
@@ -101,13 +116,13 @@ impl Drop for Process {
             let deadline = Instant::now() + Duration::from_secs(3);
             while Instant::now() < deadline {
                 if matches!(self.poll(), Ok(Some(_))) {
+                    let _ = self.kill();
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        let _ = self.kill();
     }
 }
 

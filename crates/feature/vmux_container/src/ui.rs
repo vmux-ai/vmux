@@ -1289,7 +1289,7 @@ impl Pending {
         if snapshot.control_revision == self.revision {
             return false;
         }
-        if !snapshot.control_error.is_empty() {
+        if !snapshot.control_error.is_empty() || !snapshot.inventory_error.is_empty() {
             return true;
         }
         match &self.intent {
@@ -1826,6 +1826,15 @@ mod tests {
         preview.click("account");
         let html = preview.render();
         assert!(html.contains("account:dev"));
+        assert!(html.contains(&format!(
+            "aria-label=\"{}\"",
+            translate("container-description")
+        )));
+        assert_eq!(
+            html.matches(&format!("aria-label=\"{}\"", translate("container-start")))
+                .count(),
+            1
+        );
         assert!(!html.contains(&translate("container-no-selection")));
         preview.click(&translate("container-start-container"));
         assert_eq!(preview.host.starts.get(), 0);
@@ -2002,11 +2011,7 @@ mod tests {
         snapshot.engine_revision = 1;
         snapshot.inventory_error = "fixture refresh failed".into();
         let html = preview.publish(snapshot.clone());
-        assert!(html.contains(&translate("container-phase-stopping")));
-        snapshot.inventory_error.clear();
-        snapshot.inventory_revision = 1;
-        snapshot.containers[0].state = "exited".into();
-        let html = preview.publish(snapshot.clone());
+        assert!(html.contains("fixture refresh failed"));
         assert!(!html.contains(&translate("container-phase-stopping")));
         preview.click(&translate("container-stop"));
         assert_eq!(preview.host.stops.get(), 1);

@@ -10498,6 +10498,7 @@ dependencies = [
 name = "vmux_command"
 version = "0.0.35"
 dependencies = [
+ "async-io",
  "bevy",
  "bevy_cef",
  "bevy_ecs",

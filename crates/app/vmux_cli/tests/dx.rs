@@ -372,6 +372,7 @@ fn cargo_cache_selection_never_combines_sccache_with_incremental_compilation() {
             .args(["internal", "cargo", "--", "build"])
             .env_remove("VMUX_DISABLE_SCCACHE")
             .env_remove("RUSTC_WRAPPER")
+            .env("CI", "false")
             .env("CARGO_INCREMENTAL", incremental)
             .assert()
             .success();

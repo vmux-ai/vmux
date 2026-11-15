@@ -815,6 +815,7 @@ mod tests {
             pin_order_revision: 5,
             ..default()
         });
+        app.world_mut().spawn(BookmarkAutoSave);
         for (order, url) in ["vmux://vm/", "vmux://vm/docker/containers"]
             .into_iter()
             .enumerate()
@@ -831,6 +832,12 @@ mod tests {
         }
         app.world_mut().trigger(SeedBookmarkDefaults);
         app.world_mut().flush();
+        assert_eq!(
+            app.world()
+                .resource::<OfferedBookmarkDefaults>()
+                .vm_root_revision,
+            1
+        );
         let mut urls = app
             .world_mut()
             .query_filtered::<&PageMetadata, With<Pin>>()

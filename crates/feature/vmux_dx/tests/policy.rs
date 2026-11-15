@@ -1251,6 +1251,39 @@ fn binary_module_ownership_requires_the_declared_source_and_one_crate_context() 
 }
 
 #[test]
+fn ordinary_main_and_lib_modules_resolve_children_under_their_stem() {
+    for module in ["main", "lib"] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/util/fixture/src/lib.rs",
+            &format!("mod tools; fn read(rows:Query<&tools::{module}::state::State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,read); }} }}"),
+        );
+        inventory.source(
+            "crates/util/fixture/src/tools.rs",
+            &format!("pub mod {module};"),
+        );
+        inventory.source(
+            &format!("crates/util/fixture/src/tools/{module}.rs"),
+            "pub mod state;",
+        );
+        inventory.source(
+            &format!("crates/util/fixture/src/tools/{module}/state.rs"),
+            "#[derive(Component)] pub struct State { value:u32 }",
+        );
+        inventory.resolve_usage();
+        let key = inventory.key("struct:State");
+        assert!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "ordinary {module}.rs"
+        );
+    }
+}
+
+#[test]
 fn ambiguous_module_files_cannot_prove_ownership_through_a_unique_symbol() {
     let mut inventory = Inventory::default();
     inventory.source("crates/util/fixture/src/main.rs", "use bevy_app::App; use bevy_ecs::prelude::*; mod state; fn read(rows:Query<&state::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }");
@@ -5875,16 +5908,25 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 {
                     let file = Path::new(self.path);
                     let mut directory = file.parent().unwrap().to_path_buf();
-                    let module_root = matches!(
-                        file.file_name().and_then(|name| name.to_str()),
-                        Some("lib.rs" | "main.rs" | "mod.rs")
-                    ) || (directory.file_name().and_then(|name| name.to_str())
-                        == Some("bin")
-                        && directory
-                            .parent()
-                            .and_then(Path::file_name)
-                            .and_then(|name| name.to_str())
-                            == Some("src"));
+                    let crate_root =
+                        match file.components().position(|part| part.as_os_str() == "src") {
+                            Some(root) => {
+                                let relative = file
+                                    .components()
+                                    .skip(root + 1)
+                                    .map(|part| part.as_os_str())
+                                    .collect::<Vec<_>>();
+                                match relative.as_slice() {
+                                    [name] => *name == "lib.rs" || *name == "main.rs",
+                                    [bin, _] => *bin == "bin",
+                                    [bin, _, name] => *bin == "bin" && *name == "main.rs",
+                                    _ => false,
+                                }
+                            }
+                            None => false,
+                        };
+                    let module_root =
+                        file.file_name().is_some_and(|name| name == "mod.rs") || crate_root;
                     if !module_root {
                         directory.push(file.file_stem().unwrap());
                     }

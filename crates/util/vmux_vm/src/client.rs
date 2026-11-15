@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -32,16 +32,48 @@ pub struct Owner {
 
 pub(crate) struct Preparation<'a> {
     owner: Option<&'a Owner>,
+    stop: Option<(PathBuf, Option<File>)>,
 }
 
 impl<'a> Preparation<'a> {
     pub(crate) fn new(owner: Option<&'a Owner>) -> Self {
-        Self { owner }
+        Self { owner, stop: None }
+    }
+
+    fn watch(mut self, directory: &Path) -> io::Result<Self> {
+        let path = directory.join("stop.request");
+        let previous = match File::open(&path) {
+            Ok(file) => Some(file),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        self.stop = Some((path, previous));
+        Ok(self)
     }
 
     pub(crate) fn check(&self) -> io::Result<()> {
         if let Some(owner) = self.owner {
             owner.check()?;
+        }
+        if let Some((path, previous)) = &self.stop {
+            let current = match std::fs::metadata(path) {
+                Ok(metadata) => Some((metadata.dev(), metadata.ino())),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error),
+            };
+            let previous = match previous {
+                Some(file) => {
+                    let metadata = file.metadata()?;
+                    Some((metadata.dev(), metadata.ino()))
+                }
+                None => None,
+            };
+            if current != previous {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "VM startup cancelled by Stop",
+                ));
+            }
         }
         Ok(())
     }
@@ -135,11 +167,10 @@ impl EngineClient {
     }
 
     pub fn prepare(&mut self) -> io::Result<()> {
-        self.prepare_for(None)
+        self.prepare_for(&Preparation::new(None))
     }
 
-    fn prepare_for(&mut self, owner: Option<&Owner>) -> io::Result<()> {
-        let preparation = Preparation::new(owner);
+    fn prepare_for(&mut self, preparation: &Preparation<'_>) -> io::Result<()> {
         preparation.check()?;
         self.settings.validate()?;
         #[cfg(unix)]
@@ -152,8 +183,8 @@ impl EngineClient {
         let _lock = self.lock()?;
         let _machine = self.lock_named("machine.lock")?;
         let _network = self.lock_named("network.lock")?;
-        GuestImage::prepare(&self.settings, &preparation)?;
-        Ssh::prepare(&self.settings, &preparation)?;
+        GuestImage::prepare(&self.settings, preparation)?;
+        Ssh::prepare(&self.settings, preparation)?;
         preparation.check()?;
         self.settings.save()?;
         Ok(())
@@ -188,10 +219,9 @@ impl EngineClient {
             ));
         }
         self.settings.validate()?;
+        let preparation = Preparation::new(owner).watch(&self.settings.directory)?;
         let _start = self.lock_named("start.lock")?;
-        if let Some(owner) = owner {
-            owner.check()?;
-        }
+        preparation.check()?;
         if self.status().running {
             let saved = Settings::load(&self.settings.directory.join("settings.json"))?;
             if saved != self.settings {
@@ -203,7 +233,7 @@ impl EngineClient {
             return self.wait_ready(None, owner);
         }
         self.wait_retired()?;
-        self.prepare_for(owner)?;
+        self.prepare_for(&preparation)?;
         let log = OpenOptions::new()
             .create(true)
             .append(true)
@@ -222,6 +252,7 @@ impl EngineClient {
             owner.check()?;
         }
         vmux_spawn::Descriptors::isolate(&mut command)?;
+        preparation.check()?;
         let mut child = command.spawn()?;
         let result = self.wait_ready(Some(&mut child), owner);
         if result.is_err() {
@@ -251,6 +282,15 @@ impl EngineClient {
 
     pub fn stop(&self) -> io::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(75);
+        match tempfile::NamedTempFile::new_in(&self.settings.directory) {
+            Ok(request) => {
+                request
+                    .persist(self.settings.directory.join("stop.request"))
+                    .map_err(io::Error::other)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         let status = self.status();
         if status.running
             && let Err(error) = self.request_stop()
@@ -258,6 +298,9 @@ impl EngineClient {
                 error.kind(),
                 io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
             ) && (matches!(status.phase, Phase::Created | Phase::NetworkStarting)
+                || self
+                    .lock_named("start.lock")
+                    .is_err_and(|error| error.kind() == io::ErrorKind::WouldBlock)
                 || !self.status().running))
         {
             return Err(error);
@@ -579,6 +622,66 @@ mod tests {
         );
         assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
         assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[test]
+    fn independent_stop_cancels_preparation_before_waiting_for_the_start_lease() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(temp.path().join("engine"), temp.path());
+        settings.validate().unwrap();
+        let client = EngineClient::new(settings.clone());
+        let start = client.lock_named("start.lock").unwrap();
+        let engine = client.lock().unwrap();
+        std::fs::write(
+            settings.directory.join("engine-state.json"),
+            serde_json::to_vec(&State {
+                phase: Phase::Ready,
+                failure: None,
+                owner: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let preparation = Preparation::new(None).watch(&settings.directory).unwrap();
+        let pid_path = temp.path().join("child.pid");
+        let path = pid_path.clone();
+        let worker = std::thread::spawn(move || {
+            let mut command = Command::new("/bin/sh");
+            command
+                .args(["-c", "printf '%s' $$ > \"$1\"; exec sleep 30", "sh"])
+                .arg(path);
+            let result = preparation.run(&mut command);
+            drop(engine);
+            drop(start);
+            result
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let pid: libc::pid_t = loop {
+            if let Ok(value) = std::fs::read_to_string(&pid_path)
+                && let Ok(pid) = value.parse()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline, "preparation child did not start");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        client.stop().unwrap();
+        assert!(
+            Instant::now() < deadline,
+            "Stop waited for preparation instead of cancelling it"
+        );
+        assert_eq!(
+            worker.join().unwrap().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        let retry = Preparation::new(None).watch(&settings.directory).unwrap();
+        retry.check().unwrap();
+        client.stop().unwrap();
+        assert_eq!(
+            retry.check().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
     }
 
     #[test]

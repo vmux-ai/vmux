@@ -139,7 +139,7 @@ impl Settle {
         };
         let deadline = (now + SETTLE_FRAME_INTERVAL).min(until);
         self.timer = Some(IoTaskPool::get().spawn(async move {
-            std::thread::sleep(deadline.saturating_duration_since(std::time::Instant::now()));
+            async_io::Timer::at(deadline).await;
             wake.wake();
         }));
     }

@@ -121,7 +121,7 @@ pub(crate) struct Network;
 pub(crate) struct Machine;
 
 #[derive(Component)]
-struct Terminating;
+struct Terminating(Instant);
 
 #[derive(Component)]
 pub(crate) struct ForcedShutdown;
@@ -347,17 +347,39 @@ fn observe(
     }
 }
 
+type RetiringProcesses<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static ChildOf,
+        &'static mut Process,
+        Option<&'static Machine>,
+        Option<&'static Terminating>,
+    ),
+>;
+
 fn retire(
-    mut processes: Query<(Entity, &ChildOf, &mut Process, Option<&Machine>), Without<Terminating>>,
+    mut processes: RetiringProcesses,
     engines: Query<(&Phase, Option<&ForcedShutdown>), With<Engine>>,
     machines: Query<&ChildOf, (With<Machine>, With<Process>)>,
     mut commands: Commands,
 ) {
-    for (entity, owner, mut process, machine) in &mut processes {
+    for (entity, owner, mut process, machine, terminating) in &mut processes {
         let Ok((phase, forced)) = engines.get(owner.parent()) else {
             continue;
         };
         if !matches!(phase, Phase::Stopping | Phase::Failed) {
+            continue;
+        }
+        if let Some(terminating) = terminating {
+            if Instant::now() >= terminating.0
+                && let Err(error) = process.kill()
+            {
+                commands
+                    .entity(owner.parent())
+                    .insert(Failure(error.to_string()));
+            }
             continue;
         }
         if forced.is_none()
@@ -370,7 +392,9 @@ fn retire(
         }
         match process.terminate() {
             Ok(()) => {
-                commands.entity(entity).insert(Terminating);
+                commands
+                    .entity(entity)
+                    .insert(Terminating(Instant::now() + Duration::from_secs(3)));
             }
             Err(error) => {
                 commands
@@ -647,6 +671,45 @@ mod tests {
         );
         fixture.network("exec sleep 60");
         assert_eq!(fixture.settle(), Phase::Failed);
+        assert!(fixture.retired());
+    }
+
+    #[test]
+    fn an_unresponsive_network_supervisor_is_killed_after_its_grace_deadline() {
+        let mut fixture = Fixture::new(Phase::Stopping, Instant::now() + Duration::from_secs(60));
+        let mut command = Command::new("sh");
+        command.args(["-c", "exec sleep 60"]);
+        let network = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Network,
+                ChildOf(fixture.engine),
+                Process::supervised(&mut command).unwrap(),
+            ))
+            .id();
+        fixture.app.update();
+        assert_eq!(
+            *fixture.app.world().get::<Phase>(fixture.engine).unwrap(),
+            Phase::Stopping
+        );
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .get_mut::<Process>(network)
+                .unwrap()
+                .poll()
+                .unwrap()
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Terminating>(network)
+            .unwrap()
+            .0 = Instant::now();
+        assert_eq!(fixture.settle(), Phase::Stopped);
         assert!(fixture.retired());
     }
 
