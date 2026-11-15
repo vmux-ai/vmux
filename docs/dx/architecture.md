@@ -103,8 +103,11 @@ nonsymlink caches guarded before and after lock acquisition.
 
 The Dylint library is an isolated workspace pinned to a dated nightly; product builds keep
 stable Rust. Its external rustc callbacks resolve actual Bevy registrations and module
-visibility, including aliases and configuration wrappers. Regression programs are compiler
-input data, materialized in a temporary Cargo project with independent expected diagnostics.
+visibility, including aliases and configuration wrappers. Regression programs are ordinary
+Rust files under `ui/`, materialized in a temporary Cargo project with independent
+expected diagnostics. Source audits recognize input data through current content hashes and
+actual inclusion by its test-owned Cargo harness. The same proof is used for ownership and
+conventions, and inputs compiled as product modules or library/binary targets are refused.
 Current ownership checks remain active until equivalent typed checks replace them; VMX-253
 still requires zero migration debt and eventual removal of `ecs-policy.ron`.
 

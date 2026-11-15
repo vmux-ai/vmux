@@ -7,7 +7,7 @@ extern crate rustc_middle;
 use rustc_errors::DiagDecorator;
 use rustc_hir::def::Res;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
-use rustc_hir::{Expr, ExprKind, Node, PatKind};
+use rustc_hir::{Expr, ExprKind, HirId, Node, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind, Visibility};
 use std::collections::HashSet;
@@ -26,6 +26,7 @@ dylint_linting::impl_late_lint! {
 #[derive(Default)]
 struct VmuxExportedSystem {
     reported: HashSet<DefId>,
+    configurations: HashSet<HirId>,
 }
 
 impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
@@ -78,7 +79,15 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
 }
 
 impl VmuxExportedSystem {
-    fn configuration<'tcx>(&mut self, cx: &LateContext<'tcx>, expression: &Expr<'tcx>) {
+    fn configuration<'tcx>(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
+        if !self.configurations.insert(expression.hir_id) {
+            return;
+        }
+        self.visit_configuration(cx, expression);
+        self.configurations.remove(&expression.hir_id);
+    }
+
+    fn visit_configuration<'tcx>(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
         self.system_type(cx, cx.typeck_results().expr_ty(expression));
         match expression.kind {
             ExprKind::Tup(values) => {
@@ -146,6 +155,11 @@ impl VmuxExportedSystem {
             ExprKind::Match(_, arms, _) => {
                 for arm in arms {
                     self.configuration(cx, arm.body);
+                }
+            }
+            ExprKind::Loop(..) => {
+                for value in aliases::Assignments::exits(expression) {
+                    self.configuration(cx, value);
                 }
             }
             _ => {}

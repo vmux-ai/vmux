@@ -108,65 +108,54 @@ impl Fixture {
 fn compiler_resolves_registered_systems_and_ignores_other_contracts() {
     let fixture = Fixture::new();
     for (name, source, expected) in [
-        (
-            "private",
-            include_str!("../inputs/private.rs.input"),
-            &[][..],
-        ),
-        (
-            "unrelated",
-            include_str!("../inputs/unrelated.rs.input"),
-            &[][..],
-        ),
+        ("private", include_str!("../ui/private.rs"), &[][..]),
+        ("unrelated", include_str!("../ui/unrelated.rs"), &[][..]),
         (
             "exported",
-            include_str!("../inputs/exported.rs.input"),
+            include_str!("../ui/exported.rs"),
             &["public", "crate_visible", "parent_visible"][..],
         ),
         (
             "aliases",
-            include_str!("../inputs/aliases.rs.input"),
+            include_str!("../ui/aliases.rs"),
             &["exported"][..],
         ),
         (
             "adapters",
-            include_str!("../inputs/adapters.rs.input"),
+            include_str!("../ui/adapters.rs"),
             &["source", "sink", "mapped"][..],
         ),
         (
             "qualified",
-            include_str!("../inputs/qualified.rs.input"),
+            include_str!("../ui/qualified.rs"),
             &["exported"][..],
         ),
         (
             "reassigned",
-            include_str!("../inputs/reassigned.rs.input"),
+            include_str!("../ui/reassigned.rs"),
             &["exported"][..],
         ),
-        (
-            "overwritten",
-            include_str!("../inputs/overwritten.rs.input"),
-            &[][..],
-        ),
+        ("overwritten", include_str!("../ui/overwritten.rs"), &[][..]),
         (
             "inside_branch",
-            include_str!("../inputs/inside_branch.rs.input"),
+            include_str!("../ui/inside_branch.rs"),
             &[][..],
         ),
-        (
-            "branch_join",
-            include_str!("../inputs/branch_join.rs.input"),
-            &[][..],
-        ),
+        ("branch_join", include_str!("../ui/branch_join.rs"), &[][..]),
         (
             "uninitialized",
-            include_str!("../inputs/uninitialized.rs.input"),
+            include_str!("../ui/uninitialized.rs"),
             &["exported"][..],
         ),
         (
             "block_results",
-            include_str!("../inputs/block_results.rs.input"),
+            include_str!("../ui/block_results.rs"),
             &["exported_block", "exported_if", "exported_match"][..],
+        ),
+        (
+            "loops",
+            include_str!("../ui/loops.rs"),
+            &["carried", "continued", "from_loop"][..],
         ),
     ] {
         fixture.check(name, source, expected);
