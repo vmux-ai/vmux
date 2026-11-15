@@ -69,7 +69,7 @@ Desktop, mobile, the background service, CLI, and MCP server compose the same fe
 behavior instead of reimplementing it behind separate APIs. The host ECS owns durable state;
 pages render typed projections and emit typed intent.
 
-Read [the architecture](docs/architecture.md) for boundaries, invariants, and change routing.
+Read [the UX and DX guides](docs/README.md) for workspace behavior, development setup, architecture, and change routing.
 Exact behavior remains defined by code, tests, typed contracts, and `feature.ron`.
 
 ## Development
@@ -86,7 +86,7 @@ Use `vmux build -b navigation -p local` to build a branch in its existing worktr
 `-P/--platform` selects desktop, ios, android, or web; `-p/--profile` selects dev,
 local, or release. Worktree directory names are accepted as unambiguous aliases.
 Builds seed compatible caches and preserve target locks. See `vmux --help` for
-commands and [AGENTS.md](AGENTS.md) for repository rules.
+commands, [Getting started](docs/dx/getting-started.md) for development, and [AGENTS.md](AGENTS.md) for repository workflow rules.
 
 Standalone CLI releases use the same `stable` (default) and `preview` channels as
 the desktop. `vmux update --channel preview` switches to preview;

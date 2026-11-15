@@ -4,8 +4,8 @@ Use caveman mode: terse, direct, no filler. Execute first, then report.
 
 ## Design
 
-- Read `docs/architecture.md` and its change-routing questions before changing feature design, ownership, composition, state, or boundaries. Code, tests, typed contracts, and `feature.ron` remain authoritative.
-- `docs/architecture.md` is the only file in `docs/` and the only design document. Update durable boundaries in the same PR; do not add specs, plans, dated records, API references, or documentation generators. Relay internals belong to `vmux-cloud`.
+- Start at `docs/README.md`. Read the relevant UX topic, `docs/dx/architecture.md`, and `docs/dx/feature-development.md` before changing behavior or boundaries. Code, tests, typed contracts, and `feature.ron` remain authoritative.
+- Keep docs under `docs/ux/` and `docs/dx/`, with `docs/README.md` as the entry point. Update the relevant topic in the behavior PR. Document durable expectations and design reasons; leave field lists, method details, rule inventories, and debugging history in code and tests. Do not add specs, plans, dated records, or documentation generators. Relay internals belong to `vmux-cloud`.
 - Before implementation, carry the Linear issue beyond UX/acceptance criteria: name crates and dependency direction, root/child plugins and their composition, entities/components/ownership, contracts and sender/receiver, systems and ordering, persistence/adapters, and the end-to-end success/failure/cancellation/retry/rollback/approval flow. Use concrete proposed type/module names. Reject cycles and ownership leaks; distinguish settled decisions, open questions, and non-goals. Update the issue when design changes.
 - For UI, specify typed `UiState` snapshots/patches and `#[vmux_api::ui_event]` payloads, their fields, source entity, projection, sender, and receiver. State carries current values, events carry intent, and versioned effects carry one-shot DOM behavior.
 - When taking a Linear issue, move it to **In Progress before any other work**.
@@ -14,7 +14,7 @@ Use caveman mode: terse, direct, no filler. Execute first, then report.
 
 - Prefer imperative control flow, early returns, `match`, and explicit loops. Small local conversions/defaults are fine; avoid long combinator chains and closures that assemble state.
 - Put behavior on its owning type. Exceptions: framework entry points and a private helper used once by the item above it. Fixtures follow the same rule; a constructor wrapper should be the constructor. Do not nest functions or export loose functions for another module to orchestrate.
-- No Rust comments (`//`, `///`, `//!`) outside vendored `patches/`. Put architectural reasons in the architecture document.
+- No Rust comments (`//`, `///`, `//!`) outside vendored `patches/`. Put durable architectural reasons in the relevant DX topic.
 - No vmux-owned `macro_rules!`, function-like procedural macros, or custom derives. Attribute metadata/framework integration and framework/serialization derives are allowed; vendored code and Rust-required tuple-arity generation are exceptions.
 - Put entry points first, followed by their composed children. Separate declarations with bodies by one blank line; keep imports, attributes, and bodyless declarations together.
 - Crates belong in `crates/app/` (user-started products), `crates/feature/` (user-facing capabilities/pages plus their domain/UI/host behavior), or `crates/util/` (reusable infrastructure/composition). The `host` cfg alias describes compiled code, not directory placement.
@@ -50,7 +50,7 @@ Use caveman mode: terse, direct, no filler. Execute first, then report.
 - Add targeted tests only for plausible regressions or explicit policies, with an independent oracle that survives behavior-preserving refactors. Prefer contracts, state transitions, persistence, typed ECS integration, and packaging behavior. Important UI tests inspect DOM/computed state/interaction/visual output.
 - Do not test CSS literals, constructor fields, constants, enum payloads, derived defaults, framework behavior, or implementation shape. Source scans are limited to explicit repository/packaging policies that cannot be tested behaviorally; name the protected invariant.
 - Avoid duplicate coverage and silently missing fixtures. Use exact-set/table-driven registry checks. Keep unit tests inline; split only reusable integration harnesses, not to reduce line count. Production size audits exclude `#[cfg(test)]`.
-- Install `vmux internal setup-hooks` in every worktree after preparing the development CLI. The required pre-push gate runs DX lifecycle and CLI tests, fmt, diff validation, and source conventions. Run appropriate checks for excluded CEF patches and targeted Clippy when Rust changes warrant it; never claim a check passed unless it ran. Fix failures before committing/pushing.
+- Install `vmux internal setup-hooks` in every worktree after preparing the development CLI. The required pre-push gate runs DX lifecycle and CLI tests, fmt, diff validation, and repository policy/conventions tests. Run appropriate checks for excluded CEF patches and targeted Clippy when Rust changes warrant it; never claim a check passed unless it ran. Fix failures before committing/pushing.
 - Never run concurrent Cargo/build/test commands against the same target. Run workspace-wide local checks only when the user asks.
 
 ## Builds and debugging
