@@ -1,0 +1,18 @@
+name: Restore Cargo source timestamps
+description: Reuse cached workspace artifacts only for identical source contents and modes
+inputs:
+  snapshot:
+    description: Source snapshot included in the compiler cache
+    required: true
+  target:
+    description: Cached Cargo target directory
+    required: true
+  save:
+    description: Record source inputs after successful validation
+    required: false
+    default: "false"
+runs:
+  using: node24
+  main: ../../../scripts/ci-cache.js
+  post: ../../../scripts/ci-cache.js
+  post-if: success()

@@ -38,14 +38,33 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
+    - name: Validate compiler cache locations
+      shell: bash
+      run: node scripts/ci-cache.js validate
+
     - name: Restore development CLI compiler cache
-      if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
+      if: github.ref == 'refs/heads/main' && (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1')
       uses: actions/cache@v4
       with:
         path: .build-tools/cargo
         key: dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
         restore-keys: |
           dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
+
+    - name: Restore shared development CLI compiler cache
+      if: github.ref != 'refs/heads/main' && (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1')
+      uses: actions/cache/restore@v4
+      with:
+        path: .build-tools/cargo
+        key: dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
+        restore-keys: |
+          dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
+
+    - uses: ./.github/actions/cache-workspace
+      if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
+      with:
+        cache-key: dx-cli-compile${{ env.VMUX_CI_FAST_RUST }}
+        target: .build-tools/cargo
 
     - name: Build development CLI
       if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
