@@ -64,6 +64,8 @@ Startup migrations retain their accepted configuration and revision on the ownin
 
 CI sequencing belongs to the GitHub Actions workflow before product composition. Its Git adapter verifies the captured head/base merge and prepares identical checkouts for every runner; CLI artifacts bind their bytes to that checkout and run. PR validation performs no branch-run lookup or polling, so merge verification cannot wait behind a separate push workflow. Required statuses reject failed preparation and unexpected skips of applicable checks. Native distribution work remains outside ordinary PR validation.
 
+Job-result reuse is a bounded read of Git tree entries and Actions job/artifact evidence. The workflow supplies job names, dependency/input paths, and the selected execution scope. Input claims remain runner-owned files and seven-day Actions artifacts; they grant reuse only with the matching successful job attempt in the same PR and base. No result lookup waits, retries, or starts a product operation. Changed inputs and unsuccessful latest attempts require fresh validation, and required statuses distinguish proven reuse from an unexpected skip.
+
 ## Native VM and Docker
 
 `vmux_container` owns the pages, typed CLI/GUI requests, configuration, selection and canonical inventory. `vmux_vm` owns the leased native lifecycle and ECS dependency batches. Docker input becomes entities before dependency decisions or UI projection; the persisted inventory is a restore input, not a second live registry.

@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const Preflight = require('./ci-preflight.js');
 const CliArtifact = require('./ci-cli.js');
+const Checks = require('./ci-checks.js');
 const Sources = require('./ci-cache.js');
 
 class Fixture {
@@ -417,6 +418,18 @@ class Workflow {
     return files.some((file) => !push['paths-ignore'].some((pattern) => path.matchesGlob(file, pattern)));
   }
 
+  async checkProfiles(identity, context) {
+    const captured = {};
+    class Adapter {
+      async plan(_identity, profiles) { captured.profiles = profiles; }
+    }
+    const step = this.jobs.changes.steps.find((step) => step.id === 'checks');
+    const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
+    const execute = new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script);
+    await execute(() => Adapter, {}, context, {}, { env: { VMUX_CHECK_BASE: identity.base, VMUX_CHECK_TREE: identity.tree, VMUX_CHECK_RELEASE: 'false', VMUX_LINT_SCOPE: '-p example', VMUX_TEST_SCOPE: '-p example', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', ImageVersion: 'fixture' } });
+    return captured.profiles;
+  }
+
   gate(name, env) {
     return require('node:child_process').spawnSync('bash', ['-c', this.jobs[name].steps[0].run], { env: { ...process.env, ...env }, encoding: 'utf8' });
   }
@@ -460,7 +473,11 @@ class Workflow {
       filter: { outputs: filter },
       native: { outputs: { native } },
       scope: { outputs: { lean } },
+      checks: { outputs: {} },
     };
+    for (const name of Object.keys(this.jobs.changes.outputs)) {
+      if (name.startsWith('check_') || name.startsWith('reuse_')) steps.checks.outputs[name] = '';
+    }
     const classify = this.jobs.changes.steps.find((step) => step.id === 'native');
     if (!Function('github', 'needs', 'steps', `return (${classify.if});`)(github, needs, steps)) steps.native.outputs.native = '';
     const result = {};
@@ -816,4 +833,185 @@ test('cache locations reject symlink parents before any restoration', (t) => {
     assert.throws(() => Sources.verify({ GITHUB_WORKSPACE: fixture.root }), /symbolic links/);
     assert.deepEqual(fs.readdirSync(external), []);
   }
+});
+
+class CheckFixture {
+  constructor(t) {
+    this.git = new Fixture(t);
+    this.context = structuredClone(this.git.context);
+    this.context.payload.pull_request.number = 1;
+    const common = ['.github/**', 'scripts/**', 'Cargo.toml'];
+    this.profiles = [
+      { key: 'test-rust', name: 'Rust tests', paths: [...common, 'crates/**'], scope: '-p example' },
+      { key: 'website', name: 'Website Build', paths: [...common, 'website/**', 'docs/**'], scope: 'website-release' },
+    ];
+    this.advance({ 'crates/example/src/lib.rs': 'pub struct Example;\n', 'website/src/main.rs': 'web source\n', 'docs/guide.md': 'guide\n' });
+    this.runs = [];
+    this.jobs = {};
+    this.artifacts = {};
+    this.outputs = {};
+    this.github = { rest: { actions: {
+      listWorkflowRuns: async () => ({ data: { workflow_runs: this.runs } }),
+      listJobsForWorkflowRun: async ({ run_id }) => ({ data: { jobs: this.jobs[run_id] } }),
+      listWorkflowRunArtifacts: async ({ run_id }) => ({ data: { artifacts: this.artifacts[run_id] } }),
+    } } };
+    this.checks = new Checks({ github: this.github, context: this.context, root: this.git.root, core: { setOutput: (key, value) => { this.outputs[key] = value; }, info() {}, warning() {} } });
+    this.prove(42);
+  }
+
+  advance(files) {
+    this.git.git('checkout', 'feature');
+    for (const [file, contents] of Object.entries(files)) {
+      const destination = path.join(this.git.root, file);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, contents);
+    }
+    this.git.head = this.git.commit('change inputs');
+    this.identity = { base: this.git.base, tree: this.git.git('merge-tree', '--write-tree', this.git.base, this.git.head).split('\n')[0], branch: 'feature', release: false };
+  }
+
+  prove(id) {
+    const claims = this.checks.inputs(this.identity, this.profiles, 'owner/repo', 1);
+    this.runs.push({ id, event: 'pull_request', head_branch: 'feature', repository: { full_name: 'owner/repo' }, head_repository: { full_name: 'owner/repo' }, path: '.github/workflows/ci.yml', run_attempt: 1, html_url: `https://example.com/run/${id}` });
+    this.jobs[id] = [];
+    this.artifacts[id] = [];
+    for (const profile of this.profiles) {
+      this.jobs[id].push({ name: profile.name, status: 'completed', conclusion: 'success', run_attempt: 1 });
+      this.artifacts[id].push({ name: `${claims[profile.key]}-1`, expired: false });
+    }
+  }
+
+  async plan() {
+    return this.checks.plan(this.identity, this.profiles);
+  }
+}
+
+test('successful job evidence survives unrelated edits and only affected checks run again', async (t) => {
+  const fixture = new CheckFixture(t);
+  fixture.advance({ 'docs/guide.md': 'updated guide\n' });
+  const docs = await fixture.plan();
+  assert.equal(docs['test-rust'].reuse, '42');
+  assert.equal(docs.website.reuse, '');
+  fixture.advance({ 'docs/guide.md': 'guide\n', 'crates/example/src/lib.rs': 'pub struct Changed;\n' });
+  const rust = await fixture.plan();
+  assert.equal(rust['test-rust'].reuse, '');
+  assert.equal(rust.website.reuse, '42');
+});
+
+test('workflow fingerprints include ownership ledgers, native inputs and Cargo configuration', async (t) => {
+  for (const file of ['ecs-policy.ron', 'cef/manifest.toml', 'packaging/Info.plist', '.cargo/config.toml', '.env']) {
+    const fixture = new CheckFixture(t);
+    fixture.profiles = await new Workflow().checkProfiles(fixture.identity, fixture.context);
+    fixture.runs = [];
+    fixture.prove(42);
+    fixture.advance({ [file]: 'changed build or validation input\n' });
+    assert.equal((await fixture.plan()).lint.reuse, '', file);
+  }
+});
+
+test('dependency, CI, execution scope, base, deletion and executable-mode changes invalidate evidence', async (t) => {
+  for (const change of ['dependency', 'workflow', 'scope', 'base', 'delete', 'mode']) {
+    const fixture = new CheckFixture(t);
+    if (change === 'dependency') fixture.advance({ 'Cargo.toml': '[workspace.package]\nversion = "2.0.0"\n' });
+    if (change === 'workflow') fixture.advance({ '.github/workflows/ci.yml': 'changed validation flags\n' });
+    if (change === 'scope') fixture.profiles[0].scope = '--workspace';
+    if (change === 'base') fixture.identity.base = fixture.git.head;
+    if (change === 'delete' || change === 'mode') {
+      fixture.git.git('checkout', 'feature');
+      const file = path.join(fixture.git.root, 'crates/example/src/lib.rs');
+      if (change === 'delete') fs.unlinkSync(file);
+      else fs.chmodSync(file, 0o755);
+      fixture.advance({});
+    }
+    assert.equal((await fixture.plan())['test-rust'].reuse, '', change);
+  }
+});
+
+test('a latest failed or incomplete job blocks older green evidence without discarding other passed jobs', async (t) => {
+  for (const conclusion of ['failure', 'cancelled', 'timed_out', null]) {
+    const fixture = new CheckFixture(t);
+    fixture.prove(43);
+    fixture.jobs[43][0].status = conclusion ? 'completed' : 'in_progress';
+    fixture.jobs[43][0].conclusion = conclusion;
+    const results = await fixture.plan();
+    assert.equal(results['test-rust'].reuse, '', String(conclusion));
+    assert.equal(results.website.reuse, '43');
+  }
+});
+
+test('missing, expired, duplicate, and wrong-attempt evidence never grants reuse', async (t) => {
+  for (const change of ['missing', 'expired', 'duplicate', 'attempt']) {
+    const fixture = new CheckFixture(t);
+    if (change === 'missing') fixture.artifacts[42] = [];
+    if (change === 'expired') fixture.artifacts[42][0].expired = true;
+    if (change === 'duplicate') fixture.jobs[42].push(fixture.jobs[42][0]);
+    if (change === 'attempt') fixture.jobs[42][0].run_attempt = 2;
+    assert.equal((await fixture.plan())['test-rust'].reuse, '', change);
+  }
+});
+
+test('unread job pages cannot prove uniqueness of a successful check', async (t) => {
+  const fixture = new CheckFixture(t);
+  fixture.github.rest.actions.listJobsForWorkflowRun = async () => ({ data: { jobs: fixture.jobs[42], total_count: 101 } });
+  assert.equal((await fixture.plan())['test-rust'].reuse, '');
+});
+
+test('reused or intentionally skipped runs can still refer to an earlier actual successful check', async (t) => {
+  const fixture = new CheckFixture(t);
+  fixture.prove(43);
+  fixture.jobs[43][0].conclusion = 'skipped';
+  fixture.artifacts[43] = [];
+  const results = await fixture.plan();
+  assert.equal(results['test-rust'].reuse, '42');
+  assert.equal(results.website.reuse, '42');
+});
+
+test('foreign run provenance, fork PRs, releases and API failures require fresh checks', async (t) => {
+  for (const change of ['repository', 'head_repository', 'branch', 'workflow', 'event', 'fork', 'release', 'api']) {
+    const fixture = new CheckFixture(t);
+    if (change === 'repository') fixture.runs[0].repository.full_name = 'other/repo';
+    if (change === 'head_repository') fixture.runs[0].head_repository.full_name = 'fork/repo';
+    if (change === 'branch') fixture.runs[0].head_branch = 'other';
+    if (change === 'workflow') fixture.runs[0].path = '.github/workflows/other.yml';
+    if (change === 'event') fixture.runs[0].event = 'push';
+    if (change === 'fork') fixture.context.payload.pull_request.head.repo.full_name = 'fork/repo';
+    if (change === 'release') fixture.identity.release = true;
+    if (change === 'api') fixture.github.rest.actions.listWorkflowRuns = async () => { throw new Error('API unavailable'); };
+    assert.equal((await fixture.plan())['test-rust'].reuse, '', change);
+  }
+});
+
+test('symbolic-link inputs refuse reuse and claim writing preserves external targets', async (t) => {
+  const fixture = new CheckFixture(t);
+  fixture.git.git('checkout', 'feature');
+  const file = path.join(fixture.git.root, 'crates/example/src/lib.rs');
+  fs.unlinkSync(file);
+  fs.symlinkSync('../../../feature.txt', file);
+  fixture.advance({});
+  assert.equal((await fixture.plan())['test-rust'].reuse, '');
+  assert.equal(fixture.outputs.check_test_rust, '');
+  const valid = new CheckFixture(t);
+  const claim = (await valid.plan())['test-rust'].claim;
+  Preflight.checkout({ VMUX_CI_HEAD: valid.git.head, VMUX_CI_BASE: valid.identity.base, VMUX_CI_TREE: valid.identity.tree }, valid.git.root);
+  const env = { VMUX_CHECK_NAME: claim, VMUX_CHECK_TREE: valid.identity.tree, GITHUB_RUN_ID: '99', GITHUB_RUN_ATTEMPT: '1' };
+  Checks.record(env, valid.git.root);
+  const target = path.join(valid.git.root, 'external.json');
+  fs.writeFileSync(target, 'preserve');
+  const record = path.join(valid.git.root, '.ci-check-inputs.json');
+  fs.unlinkSync(record);
+  fs.symlinkSync(target, record);
+  assert.throws(() => Checks.record(env, valid.git.root), /symbolic link/);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'preserve');
+  assert.throws(() => Checks.record({ ...env, VMUX_CHECK_TREE: 'a'.repeat(40) }, valid.git.root), /differs/);
+});
+
+test('Test accepts verified reused children but still rejects fresh failures and failed preparation', () => {
+  const workflow = new Workflow();
+  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', CONTRACTS: 'true', LEAN: 'true', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped', REUSE_RUST_TEST: '42', REUSE_SDK: '42', REUSE_HEADLESS: '42', REUSE_LEAN_TEST: '42' };
+  assert.equal(workflow.gate('test', env).status, 0);
+  for (const key of ['REUSE_RUST_TEST', 'REUSE_SDK', 'REUSE_HEADLESS', 'REUSE_LEAN_TEST']) {
+    assert.equal(workflow.gate('test', { ...env, [key]: '' }).status, 1, key);
+  }
+  assert.equal(workflow.gate('test', { ...env, CHANGES: 'failure' }).status, 1);
+  assert.equal(workflow.lane('test-rust', 'pull_request', 'false', { code: 'true', reuse_test_rust: '42' }), false);
 });

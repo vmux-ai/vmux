@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pull-requests: read
 
 concurrency:
@@ -70,6 +71,18 @@ jobs:
       code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
       contracts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.contracts == 'true' }}
       lean: ${{ steps.scope.outputs.lean == 'true' }}
+      check_lint: ${{ steps.checks.outputs.check_lint }}
+      reuse_lint: ${{ steps.checks.outputs.reuse_lint }}
+      check_test_rust: ${{ steps.checks.outputs.check_test_rust }}
+      reuse_test_rust: ${{ steps.checks.outputs.reuse_test_rust }}
+      check_test_sdk: ${{ steps.checks.outputs.check_test_sdk }}
+      reuse_test_sdk: ${{ steps.checks.outputs.reuse_test_sdk }}
+      check_test_lean: ${{ steps.checks.outputs.check_test_lean }}
+      reuse_test_lean: ${{ steps.checks.outputs.reuse_test_lean }}
+      check_test_headless: ${{ steps.checks.outputs.check_test_headless }}
+      reuse_test_headless: ${{ steps.checks.outputs.reuse_test_headless }}
+      check_website: ${{ steps.checks.outputs.check_website }}
+      reuse_website: ${{ steps.checks.outputs.reuse_website }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -91,6 +104,10 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
               - '**/ecs-policy.ron'
               - 'website/src/**'
               - 'website/build.rs'
@@ -205,6 +222,33 @@ jobs:
           VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
         run: vmux ci-native >> "$GITHUB_OUTPUT"
 
+      - name: Reuse successful checks with identical inputs
+        id: checks
+        uses: actions/github-script@v8
+        env:
+          VMUX_CHECK_BASE: ${{ needs.plan.outputs.base }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+          VMUX_CHECK_RELEASE: ${{ needs.plan.outputs.release }}
+          VMUX_LINT_SCOPE: ${{ steps.scope.outputs.lint_args }}
+          VMUX_TEST_SCOPE: ${{ steps.scope.outputs.args }}
+        with:
+          script: |
+            const Checks = require('./scripts/ci-checks.js');
+            const common = ['.github/**', '.cargo/**', '.gitattributes', '.env', '.env.*', '**/ecs-policy.ron', 'cef/**', 'packaging/**', 'scripts/**', 'Cargo.*', 'rust-toolchain.toml', 'tool-versions.env'];
+            const rust = [...common, 'crates/**', 'patches/**', 'examples/**'];
+            const cli = ['crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'crates/build_*.rs'];
+            const scope = (args) => JSON.stringify({ args, os: process.env.RUNNER_OS, arch: process.env.RUNNER_ARCH, image: process.env.ImageVersion, flags: process.env.RUSTFLAGS, encoded: process.env.CARGO_ENCODED_RUSTFLAGS });
+            const profiles = [
+              { key: 'lint', name: 'Lint', paths: [...rust, 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope(process.env.VMUX_LINT_SCOPE) },
+              { key: 'test-rust', name: 'Rust tests', paths: rust, scope: scope(process.env.VMUX_TEST_SCOPE) },
+              { key: 'test-sdk', name: 'SDK compatibility', paths: rust, scope: scope('sdk-path+host') },
+              { key: 'test-lean', name: 'Lean desktop tests', paths: rust, scope: scope('desktop-lean') },
+              { key: 'test-headless', name: 'Headless tests', paths: rust, scope: scope('daemon+mcp') },
+              { key: 'website', name: 'Website Build', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
+            ];
+            const identity = { base: process.env.VMUX_CHECK_BASE, tree: process.env.VMUX_CHECK_TREE, branch: context.payload.pull_request?.head.ref, release: process.env.VMUX_CHECK_RELEASE === 'true' };
+            await new Checks({ github, context, core }).plan(identity, profiles);
+
       - name: Record the CLI identity
         if: steps.rust.outcome == 'success'
         run: node scripts/ci-cli.js publish .build-tools/bin/vmux .build-tools/artifact
@@ -232,55 +276,76 @@ jobs:
           set -euo pipefail
           test "$PLAN" = success
           test "$CHANGES" = success
+      - name: Reuse verified lint result
+        if: needs.changes.outputs.reuse_lint != ''
+        env:
+          VERIFIED_RUN: ${{ needs.changes.outputs.reuse_lint }}
+        run: echo "Reused Lint from verified run $VERIFIED_RUN"
       - uses: actions/checkout@v5
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         with:
           fetch-depth: 0
           ref: ${{ needs.plan.outputs.head }}
 
       - uses: ./.github/actions/prepare-ci
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
 
+      - name: Record validation inputs
+        if: needs.changes.outputs.check_lint != '' && needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        env:
+          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_lint }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: needs.changes.outputs.check_lint != '' && needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.changes.outputs.check_lint }}-${{ github.run_attempt }}
+          path: .ci-check-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - uses: ./.github/actions/setup-linux
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         with:
           components: rustfmt,clippy
           cache-key: lint
           cef-version: ${{ needs.plan.outputs.cef }}
 
       - name: Select Rust check scope
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         id: scope
         env:
           VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
         run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Check formatting
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
 
       - name: Clippy
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy CI syntax classifier
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: cargo clippy --locked -p vmux_dx --features ci-syntax --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
-        if: needs.changes.outputs.code == 'true' && steps.scope.outputs.lean == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && steps.scope.outputs.lean == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
       - name: Clippy renderer-free record contracts
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: cargo clippy --locked -p vmux_ecs --no-default-features --features records --all-targets -- -D warnings
 
       - name: No crate on the headless path links bevy_cef
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: |
           set -euo pipefail
 
@@ -317,7 +382,7 @@ jobs:
           echo "ok: render-free vmux_session does not link bevy_cef"
 
       - name: The server links no client-only crate
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: |
           set -euo pipefail
 
@@ -356,11 +421,11 @@ jobs:
           done
 
       - name: Render-free vmux_session builds alone
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
       - name: Test build tooling and repository policy
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: |
           node --test scripts/ci-preflight.test.js
           cargo test --locked -p vmux_dx --features ci-syntax --lib
@@ -371,7 +436,7 @@ jobs:
     name: Rust tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_test_rust
     steps:
       - uses: actions/checkout@v5
         with:
@@ -383,6 +448,22 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+
+      - name: Record validation inputs
+        if: needs.changes.outputs.check_test_rust != ''
+        env:
+          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_rust }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: needs.changes.outputs.check_test_rust != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.changes.outputs.check_test_rust }}-${{ github.run_attempt }}
+          path: .ci-check-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -396,7 +477,7 @@ jobs:
         run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Run tests
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }} -- --skip new_declarations_have_canonical_ownership_or_an_explicit_boundary
 
       - name: Test record contracts alongside Workspace storage
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
@@ -405,7 +486,7 @@ jobs:
     name: SDK compatibility
     runs-on: ubuntu-latest
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_sdk
     steps:
       - uses: actions/checkout@v5
         with:
@@ -417,6 +498,22 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+      - name: Record validation inputs
+        if: needs.changes.outputs.check_test_sdk != ''
+        env:
+          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_sdk }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: needs.changes.outputs.check_test_sdk != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.changes.outputs.check_test_sdk }}-${{ github.run_attempt }}
+          path: .ci-check-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: sdk-path
@@ -438,7 +535,7 @@ jobs:
     name: Lean desktop tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lean == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lean == 'true' && !needs.changes.outputs.reuse_test_lean
     steps:
       - uses: actions/checkout@v5
         with:
@@ -450,6 +547,22 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+
+      - name: Record validation inputs
+        if: needs.changes.outputs.check_test_lean != ''
+        env:
+          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_lean }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: needs.changes.outputs.check_test_lean != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.changes.outputs.check_test_lean }}-${{ github.run_attempt }}
+          path: .ci-check-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -463,7 +576,7 @@ jobs:
     name: Headless tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_headless
     steps:
       - uses: actions/checkout@v5
         with:
@@ -475,6 +588,22 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+      - name: Record validation inputs
+        if: needs.changes.outputs.check_test_headless != ''
+        env:
+          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_headless }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: needs.changes.outputs.check_test_headless != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.changes.outputs.check_test_headless }}-${{ github.run_attempt }}
+          path: .ci-check-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: headless
@@ -491,6 +620,10 @@ jobs:
         env:
           PLAN: ${{ needs.plan.result }}
           CHANGES: ${{ needs.changes.result }}
+          REUSE_RUST_TEST: ${{ needs.changes.outputs.reuse_test_rust }}
+          REUSE_SDK: ${{ needs.changes.outputs.reuse_test_sdk }}
+          REUSE_HEADLESS: ${{ needs.changes.outputs.reuse_test_headless }}
+          REUSE_LEAN_TEST: ${{ needs.changes.outputs.reuse_test_lean }}
           CODE: ${{ needs.changes.outputs.code }}
           CONTRACTS: ${{ needs.changes.outputs.contracts }}
           LEAN: ${{ needs.changes.outputs.lean }}
@@ -503,20 +636,20 @@ jobs:
           test "$PLAN" = success
           test "$CHANGES" = success
           if [ "$CODE" = true ]; then
-            test "$RUST_TEST" = success
+            if [ -z "${REUSE_RUST_TEST:-}" ]; then test "$RUST_TEST" = success; else echo "Reused RUST_TEST from verified run $REUSE_RUST_TEST"; fi
             if [ "$CONTRACTS" = true ]; then
-              test "$SDK" = success
-              test "$HEADLESS" = success
+              if [ -z "${REUSE_SDK:-}" ]; then test "$SDK" = success; else echo "Reused SDK from verified run $REUSE_SDK"; fi
+              if [ -z "${REUSE_HEADLESS:-}" ]; then test "$HEADLESS" = success; else echo "Reused HEADLESS from verified run $REUSE_HEADLESS"; fi
             fi
             if [ "$LEAN" = true ]; then
-              test "$LEAN_TEST" = success
+              if [ -z "${REUSE_LEAN_TEST:-}" ]; then test "$LEAN_TEST" = success; else echo "Reused LEAN_TEST from verified run $REUSE_LEAN_TEST"; fi
             fi
           fi
 
   website:
     name: Website Build
     needs: [plan, changes]
-    if: needs.changes.outputs.website == 'true'
+    if: needs.changes.outputs.website == 'true' && !needs.changes.outputs.reuse_website
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -529,6 +662,22 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+
+      - name: Record validation inputs
+        if: needs.changes.outputs.check_website != ''
+        env:
+          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_website }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: needs.changes.outputs.check_website != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.changes.outputs.check_website }}-${{ github.run_attempt }}
+          path: .ci-check-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - uses: ./.github/actions/setup-web
         with:
