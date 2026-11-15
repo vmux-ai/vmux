@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -8,6 +8,26 @@ const Preflight = require('./ci-preflight.js');
 const CliArtifact = require('./ci-cli.js');
 const Checks = require('./ci-checks.js');
 const Sources = require('./ci-cache.js');
+
+test('push formatting works without a prepared CLI and preserves formatter failures', (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmux-push-format-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const checkout = path.join(root, 'checkout with spaces');
+  fs.mkdirSync(checkout);
+  fs.writeFileSync(path.join(checkout, 'cargo'), '#!/bin/sh\n[ "$1" = fmt ] || exit 91\nprintf "%s\\n" "$PWD" > "$VMUX_FORMAT_LOG"\nexit "$VMUX_FORMAT_EXIT"\n', { mode: 0o755 });
+  for (const status of [0, 23]) {
+    const log = path.join(root, 'format.log');
+    const result = spawnSync('/bin/sh', [path.join(__dirname, 'hooks/pre-push')], {
+      cwd: checkout,
+      env: { ...process.env, PATH: checkout, VMUX_FORMAT_LOG: log, VMUX_FORMAT_EXIT: String(status) },
+      encoding: 'utf8',
+      input: 'refs/heads/feature head refs/heads/feature base\n',
+    });
+    assert.equal(result.status, status, result.stderr);
+    assert.equal(fs.readFileSync(log, 'utf8'), `${checkout}\n`);
+    assert.equal(fs.existsSync(path.join(checkout, '.build-tools')), false);
+  }
+});
 
 class Fixture {
   constructor(t) {

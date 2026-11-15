@@ -39,13 +39,15 @@ Open `crates/feature/vmux_terminal/assets/index.css`. Add `font-weight: 700;` in
 
 This first edit uses ordinary CSS. The UI components themselves use Dioxus, whose `rsx!` syntax plays the same role as JSX in React. [Make a change](feature-development.md) follows a screen from its styles into callbacks and application behavior.
 
-Before pushing, run:
+The installed Git hook checks formatting when you push. CI runs the development tooling,
+CLI, Clippy, tests, and repository policies. For explicit local diagnostics, run:
 
 ```sh
 vmux dx test
 ```
 
-This checks the development tooling, CLI, formatting, and repository policies. The Git hook repeats these checks when you push.
+This checks the development tooling, CLI, formatting, and repository policies. Use it when
+investigating a failure; it is not required before every push.
 
 ## Where to go next
 

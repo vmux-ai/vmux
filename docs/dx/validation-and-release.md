@@ -1,6 +1,8 @@
 # Test and share a build
 
-While editing, run the test for the behavior you changed. Before pushing, run the repository checks. Use a complete local bundle when checking packaging or native permissions.
+While editing, run the test for the behavior you changed. The push hook checks formatting;
+CI runs the heavier repository checks. Use a complete local bundle when checking packaging
+or native permissions.
 
 ## During an edit
 
@@ -14,13 +16,17 @@ cargo fmt --all -- --check
 
 Choose the crate and test that cover your change. Run builds and tests one at a time when they use the same workspace output. If you are about to build the app, use the build to catch compile errors instead of running a separate compile check first.
 
-## Before a push
+## Explicit local diagnostics
 
 ```sh
 vmux dx test
 ```
 
-This runs the development-command and CLI tests, formatting, ownership policy, and source conventions. The installed Git hook runs it on push too.
+This runs the development-command and CLI tests, formatting, ownership policy, and source
+conventions. Use it to investigate a failure or validate a tooling change. The installed
+Git hook runs only `cargo fmt --all -- --check`, without compiling or requiring a prepared
+development CLI. Reinstalling the hook is unnecessary for existing checkouts because its
+transport reads the script from the worktree being pushed.
 
 fmt checks formatting. Clippy checks Rust diagnostics. The repository's policy tests check Vmux-specific ownership and source rules. If a check fails, read its file/type diagnostic and fix the code or the actual exception; do not change a frozen fingerprint just to pass.
 
