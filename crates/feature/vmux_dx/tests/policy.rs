@@ -1094,17 +1094,46 @@ fn io_results_require_a_proven_standard_library_binding() {
         &Policy::default(),
         &mut BTreeSet::new()
     ));
+    let inventory = Inventory::fixture(
+        "use std::io; mod domain { pub mod io { pub struct Result<T> { value:T } } } mod consumer { use crate::domain::*; #[derive(Component)] pub struct Work { result:io::Result<()> } fn read(rows:Query<&Work>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } } }",
+    );
+    let key = inventory.key("struct:Work");
+    assert!(!inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
 }
 
 #[test]
 fn query_data_fields_are_valid_registered_boundary_endpoints() {
-    let inventory = Inventory::fixture(
-        "use bevy_ecs::prelude::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:&'static Position } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
-    );
-    let mut boundary = Boundary::fixture(&inventory, "fn:read");
-    boundary.input = format!("ECS: {}", inventory.key("struct:Position"));
-    boundary.output = "external: observed positions".into();
-    assert!(boundary.references_from(&inventory, &Policy::default(), &mut BTreeSet::new()));
+    for field in [
+        "&'static Position",
+        "Option<&'static Position>",
+        "std::option::Option<&'static Position>",
+        "core::option::Option<&'static Position>",
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_ecs::prelude::*; use bevy_app::{{App,Plugin}}; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position {{ x:f32 }} #[derive(QueryData)] struct View {{ position:{field} }} fn read(rows:Query<View>) {{}} struct Root; impl Plugin for Root {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,read); }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "fn:read");
+        boundary.input = format!("ECS: {}", inventory.key("struct:Position"));
+        boundary.output = "external: observed positions".into();
+        assert!(
+            boundary.references_from(&inventory, &Policy::default(), &mut BTreeSet::new()),
+            "{field}"
+        );
+    }
+    for source in [
+        "use bevy_ecs::prelude::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:Option<Position> } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
+        "use bevy_ecs::prelude::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; struct Option<T> { value:T } #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:Option<&'static Position> } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
+    ] {
+        let inventory = Inventory::fixture(source);
+        let mut boundary = Boundary::fixture(&inventory, "fn:read");
+        boundary.input = format!("ECS: {}", inventory.key("struct:Position"));
+        boundary.output = "external: observed positions".into();
+        assert!(!boundary.references_from(&inventory, &Policy::default(), &mut BTreeSet::new()));
+    }
 }
 
 #[test]
@@ -4211,6 +4240,10 @@ impl Inventory {
                         | "bevy::ecs::prelude"
                         | "bevy::prelude"
                 ),
+                "Option" => matches!(
+                    prefix,
+                    "std::option" | "core::option" | "std::prelude::v1" | "core::prelude::v1"
+                ),
                 _ => false,
             };
             return valid.then(|| name.to_string());
@@ -4249,6 +4282,9 @@ impl Inventory {
                 }
             }
             scope = current.rsplit_once("::").map(|(parent, _)| parent);
+        }
+        if found.is_none() && reference == "Option" && !self.local_binding(namespace, "Option") {
+            return Some("Option".into());
         }
         found
     }
@@ -4333,6 +4369,7 @@ impl Inventory {
                     "With" | "Without" | "Added" | "Changed" | "Or" | "Has" | "Ref" | "Mut" => {
                         inside
                     }
+                    "Option" => inside,
                     "ParamSet" => false,
                     _ => return false,
                 };
@@ -4345,10 +4382,14 @@ impl Inventory {
                 let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
                     return false;
                 };
-                let component = !matches!(
-                    handle.as_str(),
-                    "Query" | "Single" | "ParamSet" | "SystemState"
-                );
+                let component = if handle == "Option" {
+                    direct
+                } else {
+                    !matches!(
+                        handle.as_str(),
+                        "Query" | "Single" | "ParamSet" | "SystemState"
+                    )
+                };
                 for argument in &arguments.args {
                     let syn::GenericArgument::Type(value) = argument else {
                         continue;
@@ -4572,6 +4613,9 @@ impl Inventory {
                     }
                     if let Some(target) = imports.aliases.get("io") {
                         return target == "std::io" && !self.local_binding(current, "std");
+                    }
+                    if self.exported_binding(current, "io", &mut BTreeSet::new()) {
+                        return false;
                     }
                 }
                 scope = current.rsplit_once("::").map(|(parent, _)| parent);

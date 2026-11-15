@@ -364,18 +364,20 @@ fn installed_tailwind_pin_is_recognized_when_ci_defaults_to_ansi_colors() {
 #[test]
 #[cfg(unix)]
 fn cargo_cache_selection_never_combines_sccache_with_incremental_compilation() {
-    for incremental in ["0", "1"] {
+    for incremental in [None, Some("0"), Some("1")] {
         let fixture = Fixture::new();
         fixture.script("sccache", "#!/bin/sh\nexit 0\n");
-        fixture
-            .command()
+        let mut command = fixture.command();
+        command
             .args(["internal", "cargo", "--", "build"])
             .env_remove("VMUX_DISABLE_SCCACHE")
             .env_remove("RUSTC_WRAPPER")
-            .env("CI", "false")
-            .env("CARGO_INCREMENTAL", incremental)
-            .assert()
-            .success();
+            .env("CI", "false");
+        match incremental {
+            Some(value) => command.env("CARGO_INCREMENTAL", value),
+            None => command.env_remove("CARGO_INCREMENTAL"),
+        };
+        command.assert().success();
     }
 }
 
