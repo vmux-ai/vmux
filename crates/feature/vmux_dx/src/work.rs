@@ -14,6 +14,7 @@ use crate::storage::Storage;
 use crate::target_lock::TargetLock;
 
 #[derive(Component, Clone)]
+#[require(crate::Step)]
 pub enum Work {
     Acquire,
     Check,
@@ -21,7 +22,6 @@ pub enum Work {
     Preflight,
     Finish(String),
     Native,
-    Codesign,
     Helper,
     PackageTools,
     Dioxus(String),
@@ -29,18 +29,12 @@ pub enum Work {
     Tailwind,
     Tool(OsString, Vec<OsString>),
     Cargo(Vec<OsString>),
-    ClearReady,
-    SignDebug,
-    BundleDebug,
-    PublishDebug,
     Package(String),
     ResourcesIos,
     ReleaseIos,
     VerifyIos(bool),
     Css,
     FlattenWeb,
-    Run(String, String),
-    Stop,
     Simulator,
     Reset,
     Doctor,
@@ -52,11 +46,7 @@ pub enum Work {
     Internal(String, Vec<OsString>),
     CliCompile,
     CliPackage(bool),
-    WorkspaceCompile(String, String, std::path::PathBuf),
-    WorkspaceSnapshot(String),
-    Capacity,
     WorkspaceAcquire,
-    WorkspaceInvoke(Vec<OsString>),
 }
 
 impl Work {
@@ -71,25 +61,18 @@ impl Work {
             Self::Seed => "Seed target cache",
             Self::Finish(_) => "Finish build storage",
             Self::Native => "Prepare native tools",
-            Self::Codesign => "Prepare signing identity",
             Self::Helper => "Prepare CEF helper",
             Self::PackageTools => "Prepare packaging tools",
             Self::Dioxus(_) => "Prepare Dioxus tools",
             Self::Binaryen => "Prepare wasm optimizer",
             Self::Tailwind => "Prepare stylesheet compiler",
             Self::Tool(_, _) | Self::Cargo(_) => "Run tool",
-            Self::ClearReady => "Invalidate old artifact",
-            Self::SignDebug => "Sign debug binaries",
-            Self::BundleDebug => "Bundle debug app",
-            Self::PublishDebug => "Verify and publish debug artifact",
             Self::Package(_) => "Package app",
             Self::ResourcesIos => "Inject iOS resources",
             Self::ReleaseIos => "Sign and package iOS",
             Self::VerifyIos(_) => "Verify iOS bundle",
             Self::Css => "Build stylesheet",
             Self::FlattenWeb => "Publish web artifact",
-            Self::Run(_, _) => "Run artifact",
-            Self::Stop => "Stop development service",
             Self::Simulator => "Prepare simulator",
             Self::Reset => "Reset layout files",
             Self::Doctor => "Inspect tools",
@@ -101,10 +84,6 @@ impl Work {
             Self::Internal(_, _) => "Run external integration",
             Self::CliCompile => "Build standalone release CLI",
             Self::CliPackage(_) => "Verify and package standalone release CLI",
-            Self::WorkspaceCompile(_, _, _) => "Build workspace CLI provider",
-            Self::WorkspaceSnapshot(_) => "Publish workspace CLI executable snapshot",
-            Self::Capacity => "Check available build space",
-            Self::WorkspaceInvoke(_) => "Run workspace CLI provider",
         }
     }
 
@@ -122,11 +101,6 @@ impl Work {
             Self::WorkspaceAcquire => {
                 let lease = Arc::new(TargetLock::acquire(&checkout.root, &checkout.target)?);
                 return Ok(Outcome::Lease(lease));
-            }
-            Self::WorkspaceCompile(_, _, _)
-            | Self::WorkspaceSnapshot(_)
-            | Self::WorkspaceInvoke(_) => {
-                return Err("Workspace commands require their registered ECS systems".into());
             }
             Self::Acquire => {
                 let owner = std::env::var("VMUX_TARGET_LOCK_OWNER_PID")
@@ -176,14 +150,6 @@ impl Work {
             }
             Self::Tool(program, args) => native.tool(program, args)?,
             Self::Cargo(args) => native.cargo(args)?,
-            Self::Codesign
-            | Self::Capacity
-            | Self::ClearReady
-            | Self::SignDebug
-            | Self::BundleDebug
-            | Self::PublishDebug
-            | Self::Run(_, _)
-            | Self::Stop => return Err("Debug work requires its registered ECS systems".into()),
             Self::Package(profile) => return Ok(Outcome::Artifacts(native.package(profile)?)),
             Self::ResourcesIos => native.resources_ios()?,
             Self::ReleaseIos => {

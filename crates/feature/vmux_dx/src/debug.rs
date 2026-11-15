@@ -178,7 +178,8 @@ pub(crate) struct Io;
 struct Admitted;
 
 #[derive(Component, Default)]
-struct Request;
+#[require(crate::Step)]
+pub(crate) struct Request;
 
 #[derive(EntityEvent)]
 pub struct Requested<T: Component> {
@@ -4877,7 +4878,6 @@ mod tests {
     use crate::environment::Environment;
     use crate::policy::Policy;
     use crate::storage::Storage;
-    use crate::work::Work;
     use vmux_ecs::cli::CliResult;
 
     struct Fixture {
@@ -4964,13 +4964,14 @@ mod tests {
             }
         }
 
-        fn run(&mut self, work: Work) -> u8 {
+        fn run<B: bevy_ecs::bundle::Bundle>(&mut self, work: B) -> u8 {
             self.app
                 .world_mut()
                 .entity_mut(self.operation)
                 .remove::<CliResult>()
                 .insert(OperationState::Running);
             self.app.world_mut().spawn((
+                crate::Step,
                 work,
                 crate::Attempt(1),
                 OperationState::Pending,
@@ -5200,7 +5201,13 @@ mod tests {
             settings.0.set("TAILWINDCSS_BIN", tailwind.as_os_str());
             settings.0.set("DX_BIN", server.as_os_str());
         }
-        assert_eq!(fixture.run(Work::Run("dev".into(), "web".into())), 0);
+        assert_eq!(
+            fixture.run(Run {
+                profile: "dev".into(),
+                platform: "web".into()
+            }),
+            0
+        );
         assert_eq!(
             fs::read_to_string(fixture.root.join("served")).unwrap(),
             "serve --platform web"
@@ -5229,7 +5236,7 @@ mod tests {
             .unwrap()
             .0
             .set("RUSTC", rustc.as_os_str());
-        assert_eq!(fixture.run(Work::Stop), 0);
+        assert_eq!(fixture.run(Stop), 0);
         let stopped = fs::read_to_string(fixture.root.join("stopped")).unwrap();
         let mut lines = stopped.lines();
         assert_eq!(lines.next(), Some("service stop"));
@@ -5258,7 +5265,7 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                Work::ClearReady,
+                Clear,
                 crate::Attempt(1),
                 OperationState::Pending,
                 ChildOf(fixture.operation),
@@ -5367,7 +5374,12 @@ mod tests {
         let source = fixture.target.join("debug/provider");
         let bytes = b"#!/bin/sh\nprintf 'independent fixture'\n";
         fixture.executable(&source, bytes);
-        assert_eq!(fixture.run(Work::WorkspaceSnapshot("provider".into())), 0);
+        assert_eq!(
+            fixture.run(Snapshot {
+                binary: "provider".into()
+            }),
+            0
+        );
         let executable = fixture
             .app
             .world()
@@ -5398,7 +5410,7 @@ mod tests {
                 b"vmux_desktop",
             );
         }
-        assert_eq!(fixture.run(Work::PublishDebug), 0);
+        assert_eq!(fixture.run(Publish), 0);
         let stamp = fs::read_to_string(debug.join(".vmux-dev-ready")).unwrap();
         let mut lines = stamp.lines();
         assert_eq!(lines.next(), fixture.root.to_str());
@@ -5413,7 +5425,13 @@ mod tests {
         }
         assert_eq!(count, if cfg!(target_os = "macos") { 4 } else { 3 });
         fixture.executable(&debug.join("vmux_desktop"), b"changed executable");
-        assert_ne!(fixture.run(Work::Run("dev".into(), "desktop".into())), 0);
+        assert_ne!(
+            fixture.run(Run {
+                profile: "dev".into(),
+                platform: "desktop".into()
+            }),
+            0
+        );
         assert!(!fixture.root.join("opened").exists());
     }
 }

@@ -139,6 +139,7 @@ impl bevy_app::Plugin for Plugin {
                 collect,
                 select_local,
                 start,
+                native,
                 finish,
             )
                 .chain()
@@ -180,6 +181,11 @@ enum AdmissionPhase {
     Storage,
     Ready,
 }
+#[derive(Component, Default)]
+pub(crate) struct Step;
+
+#[derive(Component)]
+struct NativeSubmitted;
 
 #[derive(Component, Clone)]
 struct Settings(Environment);
@@ -243,12 +249,12 @@ type Pending<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static Work,
+        Has<debug::Request>,
         &'static ChildOf,
         Option<&'static Predecessor>,
         &'static Attempt,
     ),
-    (Without<Running>, Without<Completed>),
+    (With<Step>, Without<Running>, Without<Completed>),
 >;
 type Inputs<'w, 's> = Query<
     'w,
@@ -571,19 +577,37 @@ struct Plans<'w, 's> {
 }
 
 impl Plans<'_, '_> {
-    fn step(&mut self, owner: Entity, tail: &mut Tail, work: Work) {
+    fn push<B: Bundle>(&mut self, owner: Entity, tail: &mut Tail, bundle: B) -> Entity {
         let mut step = self.commands.spawn((
-            Name::new(work.name()),
+            Step,
             OperationState::Pending,
             CreatedAt::now(),
             ChildOf(owner),
             Attempt(1),
-            work,
+            bundle,
         ));
         if let Some(previous) = tail.0 {
             step.insert(Predecessor(previous));
         }
-        tail.0 = Some(step.id());
+        let entity = step.id();
+        tail.0 = Some(entity);
+        entity
+    }
+
+    fn native(&mut self, owner: Entity, tail: &mut Tail, work: Work) {
+        let name = work.name();
+        self.push(owner, tail, (Name::new(name), work));
+    }
+
+    fn request<T: Component + Clone>(
+        &mut self,
+        owner: Entity,
+        tail: &mut Tail,
+        name: &'static str,
+        request: T,
+    ) {
+        let entity = self.push(owner, tail, Name::new(name));
+        self.commands.trigger(debug::Requested { entity, request });
     }
 }
 
@@ -597,6 +621,7 @@ type Planning<'w, 's> = Query<
         Entity,
         &'static CliInvocation,
         Option<&'static workspace::Dispatch>,
+        &'static Storage,
         &'static mut Tail,
     ),
     (With<Accepted>, Without<Planned>, Without<CliResult>),
@@ -607,84 +632,102 @@ fn plan_provider(
     providers: Query<&workspace::Provider>,
     mut plans: Plans,
 ) {
-    for (entity, _, dispatch, mut tail) in &mut operations {
-        let Some(dispatch) = dispatch else {
+    for (entity, _invocation, dispatch, storage, mut tail) in &mut operations {
+        if dispatch.is_none() {
             continue;
-        };
-        let Ok(provider) = providers.get(dispatch.provider) else {
-            plans.commands.entity(entity).insert((
-                OperationState::Failed,
-                CliResult(Err("Workspace provider is unavailable".into())),
-            ));
-            continue;
-        };
-        for work in [
-            Work::Capacity,
-            Work::WorkspaceAcquire,
-            Work::Capacity,
-            Work::WorkspaceCompile(
-                provider.package.clone(),
-                provider.binary.clone(),
-                provider.cargo.clone(),
-            ),
-            Work::WorkspaceSnapshot(provider.binary.clone()),
-            Work::WorkspaceInvoke(dispatch.arguments.clone()),
-        ] {
-            plans.step(entity, &mut tail, work);
         }
+        let dispatch = dispatch.unwrap();
+        let Ok(provider) = providers.get(dispatch.provider) else {
+            continue;
+        };
+        plans.request(
+            entity,
+            &mut tail,
+            "Check available build space",
+            debug::Capacity {
+                minimum: storage.minimum(),
+            },
+        );
+        plans.native(entity, &mut tail, Work::WorkspaceAcquire);
+        plans.request(
+            entity,
+            &mut tail,
+            "Check available build space",
+            debug::Capacity {
+                minimum: storage.minimum(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Build workspace CLI provider",
+            debug::Compile {
+                package: provider.package.clone(),
+                binary: provider.binary.clone(),
+                manifest: provider.cargo.clone(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Publish workspace CLI executable snapshot",
+            debug::Snapshot {
+                binary: provider.binary.clone(),
+            },
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Run workspace CLI provider",
+            debug::Invoke {
+                arguments: dispatch.arguments.clone(),
+            },
+        );
+
         plans.commands.entity(entity).insert(Planned);
     }
 }
+
 fn prepare_build(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.build")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.build") && tail.0.is_none()) {
             continue;
         }
-
-        for work in [Work::Check, Work::Acquire, Work::Seed, Work::Preflight] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Check);
+        plans.native(entity, &mut tail, Work::Acquire);
+        plans.native(entity, &mut tail, Work::Seed);
+        plans.native(entity, &mut tail, Work::Preflight);
     }
 }
 
 fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some()
-            || !(invocation.is("dx.build") && (platform == "desktop" && profile == "dev"))
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (platform == "desktop" && profile == "dev"))
         {
             continue;
         }
 
-        for work in [
-            Work::Native,
-            Work::Tailwind,
-            Work::Codesign,
-            Work::Helper,
-            Work::ClearReady,
-        ] {
-            plans.step(entity, &mut tail, work);
-        }
-        plans.step(
+        plans.native(entity, &mut tail, Work::Native);
+        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.request(
             entity,
             &mut tail,
-            Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]),
+            "Prepare signing identity",
+            debug::IdentityRequest { print: false },
         );
-        plans.step(
+        plans.native(entity, &mut tail, Work::Helper);
+        plans.request(entity, &mut tail, "Invalidate old artifact", debug::Clear);
+        plans.native(entity, &mut tail, Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]));
+        plans.native(
             entity,
             &mut tail,
             Work::cargo(&[
@@ -716,95 +759,77 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         if cfg!(target_os = "macos") {
             args.extend(["--", "-C", "link-arg=-Wl,-headerpad,1000"].map(OsString::from));
         }
-        plans.step(entity, &mut tail, Work::Cargo(args));
+        plans.native(entity, &mut tail, Work::Cargo(args));
         if cfg!(target_os = "macos") {
-            for work in [Work::SignDebug, Work::BundleDebug] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
+            plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
         }
-        plans.step(entity, &mut tail, Work::PublishDebug);
+        plans.request(
+            entity,
+            &mut tail,
+            "Verify and publish debug artifact",
+            debug::Publish,
+        );
     }
 }
 
 fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some()
-            || !(invocation.is("dx.build") && (platform == "desktop" && profile != "dev"))
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (platform == "desktop" && profile != "dev"))
         {
             continue;
         }
 
-        for work in [
-            Work::Native,
-            Work::Tailwind,
-            Work::PackageTools,
-            Work::Codesign,
-            Work::Package(profile.into()),
-        ] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Native);
+        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.native(entity, &mut tail, Work::PackageTools);
+        plans.request(
+            entity,
+            &mut tail,
+            "Prepare signing identity",
+            debug::IdentityRequest { print: false },
+        );
+        plans.native(entity, &mut tail, Work::Package(profile.into()));
     }
 }
 
 fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some()
-            || !(invocation.is("dx.build") && (platform == "ios" && profile == "release"))
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (platform == "ios" && profile == "release"))
         {
             continue;
         }
 
-        for work in [Work::Dioxus("ios".into()), Work::ReleaseIos] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Dioxus("ios".into()));
+        plans.native(entity, &mut tail, Work::ReleaseIos);
     }
 }
 
 fn plan_mobile(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some()
-            || !(invocation.is("dx.build")
-                && ((platform == "ios" && profile != "release") || platform == "android"))
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && ((platform == "ios" && profile != "release") || platform == "android"))
         {
             continue;
         }
 
-        plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+        plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
         let mut args = vec![
             "build".into(),
             format!("--{platform}").into(),
@@ -815,93 +840,74 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
             args.push("--release".into());
         }
         args.append(&mut forwarded);
-        plans.step(entity, &mut tail, Work::Tool("dx".into(), args));
+        plans.native(entity, &mut tail, Work::Tool("dx".into(), args));
         if platform == "ios" {
-            for work in [Work::ResourcesIos, Work::VerifyIos(false)] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.native(entity, &mut tail, Work::ResourcesIos);
+            plans.native(entity, &mut tail, Work::VerifyIos(false));
         }
     }
 }
 
 fn plan_web(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.build") && (platform == "web")) {
+        if !(dispatch.is_none() && invocation.is("dx.build") && (platform == "web")) {
             continue;
         }
 
-        for work in [
-            Work::Dioxus(platform.into()),
-            Work::Binaryen,
-            Work::Tailwind,
-            Work::Css,
-        ] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
+        plans.native(entity, &mut tail, Work::Binaryen);
+        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.native(entity, &mut tail, Work::Css);
         let mut args = vec!["build".into(), "--platform".into(), "web".into()];
         if profile != "dev" {
             args.extend(["--ssg".into(), "--release".into()]);
         }
         args.append(&mut forwarded);
-        plans.step(entity, &mut tail, Work::Tool("dx".into(), args));
+        plans.native(entity, &mut tail, Work::Tool("dx".into(), args));
         if profile != "dev" {
-            plans.step(entity, &mut tail, Work::FlattenWeb);
+            plans.native(entity, &mut tail, Work::FlattenWeb);
         }
     }
 }
 
 fn refuse_build(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _tail) in &mut operations {
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some()
-            || !invocation.is("dx.build")
-            || matches!(platform, "desktop" | "ios" | "android" | "web")
+    for (entity, invocation, dispatch, _storage, _tail) in &mut operations {
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none()
+            && invocation.is("dx.build")
+            && (!matches!(platform, "desktop" | "ios" | "android" | "web")))
         {
             continue;
         }
+
         plans.commands.entity(entity).insert((
             OperationState::Failed,
             CliResult(Err("Unsupported build platform".into())),
         ));
+        continue;
     }
 }
 
 fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
-        if dispatch.is_some() || !(invocation.is("dx.build")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        if !(dispatch.is_none() && invocation.is("dx.build")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Finish(profile.into()));
+        plans.native(entity, &mut tail, Work::Finish(profile.into()));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_run(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = if invocation.is("dx.serve") {
             "dev"
         } else {
@@ -912,77 +918,70 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
         } else {
             invocation.value("platform").unwrap_or("desktop")
         };
-        if dispatch.is_some() || !(invocation.is("dx.run") || invocation.is("dx.serve")) {
+        if !(dispatch.is_none() && (invocation.is("dx.run") || invocation.is("dx.serve"))) {
             continue;
         }
 
-        plans.step(entity, &mut tail, Work::Acquire);
+        plans.native(entity, &mut tail, Work::Acquire);
         if platform != "desktop" {
-            plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+            plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
             if platform == "web" {
-                for work in [Work::Binaryen, Work::Tailwind, Work::Css] {
-                    plans.step(entity, &mut tail, work);
-                }
+                plans.native(entity, &mut tail, Work::Binaryen);
+                plans.native(entity, &mut tail, Work::Tailwind);
+                plans.native(entity, &mut tail, Work::Css);
             }
             if platform == "ios" {
-                plans.step(entity, &mut tail, Work::Simulator);
+                plans.native(entity, &mut tail, Work::Simulator);
             }
         }
-        if platform == "desktop" && profile == "local" {
-            for work in [Work::LocalEntries, Work::LocalLaunch] {
-                plans.step(entity, &mut tail, work);
-            }
-        } else {
-            plans.step(
-                entity,
-                &mut tail,
-                Work::Run(profile.into(), platform.into()),
-            );
-        }
+        plans.request(
+            entity,
+            &mut tail,
+            "Run artifact",
+            debug::Run {
+                profile: profile.into(),
+                platform: platform.into(),
+            },
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_stop(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.stop")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.stop")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Stop);
+        plans.request(entity, &mut tail, "Stop development service", debug::Stop);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.reset-layout")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.reset-layout")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Reset);
+        plans.native(entity, &mut tail, Work::Reset);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_test(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.test")) {
+        if !(dispatch.is_none() && invocation.is("dx.test")) {
             continue;
         }
 
-        for work in [Work::Acquire, Work::Seed] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Acquire);
+        plans.native(entity, &mut tail, Work::Seed);
         let mut args = vec![
             "test".into(),
             "--workspace".into(),
@@ -996,32 +995,27 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
             args.extend(["--features".into(), features.to_owned()]);
         }
         args.append(&mut forwarded);
-        plans.step(entity, &mut tail, Work::Cargo(args));
+        plans.native(entity, &mut tail, Work::Cargo(args));
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_lint(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let profile = if invocation.is("dx.serve") {
-            "dev"
-        } else {
-            invocation.value("profile").unwrap_or("dev")
-        };
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
         let mut forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.lint")) {
+        if !(dispatch.is_none() && invocation.is("dx.lint")) {
             continue;
         }
 
-        for work in [Work::Acquire, Work::Seed] {
-            plans.step(entity, &mut tail, work);
-        }
-        plans.step(
+        plans.native(entity, &mut tail, Work::Acquire);
+        plans.native(entity, &mut tail, Work::Seed);
+        plans.native(
             entity,
             &mut tail,
             Work::cargo(&["fmt", "--all", "--", "--check"]),
@@ -1039,51 +1033,47 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
         }
         args.append(&mut forwarded);
         args.extend(["--".into(), "-D".into(), "warnings".into()]);
-        plans.step(entity, &mut tail, Work::Cargo(args));
+        plans.native(entity, &mut tail, Work::Cargo(args));
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_doctor(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.doctor")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.doctor")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Doctor);
+        plans.native(entity, &mut tail, Work::Doctor);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_setup(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        let platform = if invocation.is("dx.serve") {
-            "web"
-        } else {
-            invocation.value("platform").unwrap_or("desktop")
-        };
-        if dispatch.is_some() || !(invocation.is("dx.setup")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none() && invocation.is("dx.setup")) {
             continue;
         }
 
         if platform == "desktop" {
-            for work in [
-                Work::Check,
-                Work::Acquire,
-                Work::Native,
-                Work::Tailwind,
-                Work::PackageTools,
-                Work::Codesign,
-                Work::Helper,
-            ] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.native(entity, &mut tail, Work::Check);
+            plans.native(entity, &mut tail, Work::Acquire);
+            plans.native(entity, &mut tail, Work::Native);
+            plans.native(entity, &mut tail, Work::Tailwind);
+            plans.native(entity, &mut tail, Work::PackageTools);
+            plans.request(
+                entity,
+                &mut tail,
+                "Prepare signing identity",
+                debug::IdentityRequest { print: false },
+            );
+            plans.native(entity, &mut tail, Work::Helper);
         } else {
-            plans.step(entity, &mut tail, Work::Dioxus(platform.into()));
+            plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
             if platform == "web" {
-                for work in [Work::Binaryen, Work::Tailwind] {
-                    plans.step(entity, &mut tail, work);
-                }
+                plans.native(entity, &mut tail, Work::Binaryen);
+                plans.native(entity, &mut tail, Work::Tailwind);
             }
         }
 
@@ -1092,79 +1082,73 @@ fn plan_setup(mut operations: Planning, mut plans: Plans) {
 }
 
 fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.cache.status")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.cache.status")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Status);
+        plans.native(entity, &mut tail, Work::Status);
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.cache.clean")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.cache.clean")) {
             continue;
         }
 
-        for work in [Work::Acquire, Work::Clean(invocation.flag("apply"))] {
-            plans.step(entity, &mut tail, work);
-        }
+        plans.native(entity, &mut tail, Work::Acquire);
+        plans.native(entity, &mut tail, Work::Clean(invocation.flag("apply")));
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.ci-scope")) {
+        if !(dispatch.is_none() && invocation.is("dx.ci-scope")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::Scope(forwarded));
+        plans.native(entity, &mut tail, Work::Scope(forwarded));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.ci-native")) {
+        if !(dispatch.is_none() && invocation.is("dx.ci-native")) {
             continue;
         }
-        plans.step(entity, &mut tail, Work::NativeInputs(forwarded));
+        plans.native(entity, &mut tail, Work::NativeInputs(forwarded));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_checks(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.checks.test")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.checks.test")) {
             continue;
         }
-        plans.step(
-            entity,
-            &mut tail,
-            Work::Internal("pre-push".into(), Vec::new()),
-        );
+        plans.native(entity, &mut tail, Work::Internal("pre-push".into(), Vec::new()));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_sdk(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
-        if dispatch.is_some() || !(invocation.is("dx.checks.sdk")) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none() && invocation.is("dx.checks.sdk")) {
             continue;
         }
-
         let mut arguments = Vec::new();
         if invocation.flag("host") {
             arguments.push("--host".into());
@@ -1172,22 +1156,20 @@ fn plan_sdk(mut operations: Planning, mut plans: Plans) {
         if invocation.flag("git") {
             arguments.push("--git".into());
         }
-        for work in [Work::Acquire, Work::Consumer(arguments)] {
-            plans.step(entity, &mut tail, work);
-        }
-
+        plans.native(entity, &mut tail, Work::Acquire);
+        plans.native(entity, &mut tail, Work::Consumer(arguments));
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 fn plan_internal(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if dispatch.is_some() || !(invocation.is("dx.internal")) {
+        if !(dispatch.is_none() && invocation.is("dx.internal")) {
             continue;
         }
 
@@ -1212,35 +1194,52 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
                     continue;
                 }
             };
-            for work in [
-                Work::Check,
-                Work::Acquire,
-                Work::Preflight,
-                Work::CliCompile,
-                Work::CliPackage(preview),
-                Work::Finish("release".into()),
-            ] {
-                plans.step(entity, &mut tail, work);
-            }
+            plans.native(entity, &mut tail, Work::Check);
+            plans.native(entity, &mut tail, Work::Acquire);
+            plans.native(entity, &mut tail, Work::Preflight);
+            plans.native(entity, &mut tail, Work::CliCompile);
+            plans.native(entity, &mut tail, Work::CliPackage(preview));
+            plans.native(entity, &mut tail, Work::Finish("release".into()));
         } else {
             if task == "cargo" {
-                for work in [Work::Acquire, Work::Seed] {
-                    plans.step(entity, &mut tail, work);
+                plans.native(entity, &mut tail, Work::Acquire);
+                plans.native(entity, &mut tail, Work::Seed);
+            }
+            match task {
+                "ensure-signing" => {
+                    plans.request(
+                        entity,
+                        &mut tail,
+                        "Prepare signing identity",
+                        debug::IdentityRequest { print: true },
+                    );
+                }
+                "debug-sign" => {
+                    plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
+                }
+                "debug-bundle" => {
+                    plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
+                }
+                _ => {
+                    plans.native(entity, &mut tail, Work::Internal(task.into(), forwarded));
                 }
             }
-            plans.step(entity, &mut tail, Work::Internal(task.into(), forwarded));
         }
 
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
-fn refuse_plan(operations: Planning, mut plans: Plans) {
-    for (entity, _, _, _) in &operations {
-        plans.commands.entity(entity).insert((
-            OperationState::Failed,
-            CliResult(Err("Unknown development command".into())),
-        ));
+fn refuse_plan(operations: Planning, mut commands: Commands) {
+    for (entity, _, dispatch, _, _) in &operations {
+        let error = if dispatch.is_some() {
+            "Workspace provider is unavailable"
+        } else {
+            "Unknown development command"
+        };
+        commands
+            .entity(entity)
+            .insert((OperationState::Failed, CliResult(Err(error.into()))));
     }
 }
 
@@ -1260,11 +1259,11 @@ fn start(
     {
         return;
     }
-    for (entity, work, parent, predecessor, attempt) in &steps {
+    for (entity, requested, parent, predecessor, attempt) in &steps {
         if predecessor.is_some_and(|previous| !completed.contains(previous.0)) {
             continue;
         }
-        let Ok((checkout, settings, storage, lease, executable, state)) =
+        let Ok((checkout, settings, _storage, lease, executable, state)) =
             operations.get(parent.parent())
         else {
             continue;
@@ -1272,141 +1271,50 @@ fn start(
         if *state != OperationState::Running {
             continue;
         }
-        let requested = match work {
-            Work::Capacity => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Capacity {
-                        minimum: storage.minimum(),
-                    },
-                });
-                true
-            }
-            Work::Codesign => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::IdentityRequest { print: false },
-                });
-                true
-            }
-            Work::ClearReady => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Clear,
-                });
-                true
-            }
-            Work::SignDebug => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Sign,
-                });
-                true
-            }
-            Work::BundleDebug => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Bundle,
-                });
-                true
-            }
-            Work::PublishDebug => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Publish,
-                });
-                true
-            }
-            Work::Run(profile, platform) => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Run {
-                        profile: profile.clone(),
-                        platform: platform.clone(),
-                    },
-                });
-                true
-            }
-            Work::Stop => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Stop,
-                });
-                true
-            }
-            Work::WorkspaceCompile(package, binary, manifest) => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Compile {
-                        package: package.clone(),
-                        binary: binary.clone(),
-                        manifest: manifest.clone(),
-                    },
-                });
-                true
-            }
-            Work::WorkspaceSnapshot(binary) => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Snapshot {
-                        binary: binary.clone(),
-                    },
-                });
-                true
-            }
-            Work::WorkspaceInvoke(arguments) => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Invoke {
-                        arguments: arguments.clone(),
-                    },
-                });
-                true
-            }
-            Work::Internal(task, _) if task == "ensure-signing" => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::IdentityRequest { print: true },
-                });
-                true
-            }
-            Work::Internal(task, _) if task == "debug-sign" => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Sign,
-                });
-                true
-            }
-            Work::Internal(task, _) if task == "debug-bundle" => {
-                commands.trigger(debug::Requested {
-                    entity,
-                    request: debug::Bundle,
-                });
-                true
-            }
-            _ => false,
-        };
-        if requested {
-            let mut captured_settings = settings.clone();
-            if let Some(executable) = executable {
-                captured_settings
-                    .0
-                    .set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
-            }
-            commands.entity(entity).insert((
-                debug::Captured {
-                    root: parent.parent(),
-                    attempt: attempt.0,
-                },
-                checkout.clone(),
-                captured_settings,
-                debug::Lease(lease.map(|lease| lease.0.clone())),
-                Running,
-                OperationState::Running,
-            ));
-            mailbox.wake.unpark();
-            break;
+        let mut captured_settings = settings.clone();
+        if let Some(executable) = executable {
+            captured_settings
+                .0
+                .set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
         }
+        let mut step = commands.entity(entity);
+        step.insert((
+            debug::Captured {
+                root: parent.parent(),
+                attempt: attempt.0,
+            },
+            checkout.clone(),
+            captured_settings,
+            Running,
+            OperationState::Running,
+        ));
+        if requested {
+            step.insert(debug::Lease(lease.map(|lease| lease.0.clone())));
+        }
+        mailbox.wake.unpark();
+        break;
+    }
+}
+
+type NativeReady<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Work,
+        &'static ChildOf,
+        &'static Attempt,
+        &'static Checkout,
+        &'static Settings,
+    ),
+    (With<Running>, Without<NativeSubmitted>),
+>;
+
+fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut commands: Commands) {
+    for (entity, work, parent, attempt, checkout, settings) in &steps {
+        let Ok((_, _, storage, lease, executable, _)) = operations.get(parent.parent()) else {
+            continue;
+        };
         let checkout = checkout.clone();
         let mut environment = settings.0.clone();
         if let Some(executable) = executable {
@@ -1418,9 +1326,7 @@ fn start(
         let sender = mailbox.sender.clone();
         let wake = mailbox.wake.clone();
         let attempt = attempt.0;
-        commands
-            .entity(entity)
-            .insert((Running, OperationState::Running));
+        commands.entity(entity).insert(NativeSubmitted);
         thread::spawn(move || {
             let name = work.name();
             let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
