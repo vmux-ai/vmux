@@ -198,7 +198,7 @@ struct CreateFromPageRequest {
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
-#[require(Save, crate::presentation::Layer)]
+#[require(Save, crate::presentation::Layer, super::worktree::CheckoutObservation)]
 pub struct Tab {
     pub name: String,
     pub startup_dir: Option<String>,
