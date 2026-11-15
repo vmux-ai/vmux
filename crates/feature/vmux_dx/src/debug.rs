@@ -33,7 +33,7 @@ impl bevy_app::Plugin for DebugPlugin {
             .add_plugins((
                 (
                     crate::cargo::CargoPlugin,
-                    crate::compiler_lint::Plugin,
+                    crate::compiler_lint::CompilerLintPlugin,
                     IoPlugin::<CaptureOutput>::default(),
                     IoPlugin::<ProbeProcess>::default(),
                     IoPlugin::<HashInput>::default(),

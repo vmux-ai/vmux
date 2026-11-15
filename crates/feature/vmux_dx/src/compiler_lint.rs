@@ -18,9 +18,9 @@ use crate::repository::Checkout;
 use crate::storage::Storage;
 use crate::work::Outcome;
 
-pub(crate) struct Plugin;
+pub(crate) struct CompilerLintPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for CompilerLintPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
