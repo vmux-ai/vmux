@@ -41,6 +41,16 @@ A local build can be the finished result. Push to your fork if you want a durabl
 
 A distributable release has additional signing, resource, update-verification, and platform requirements. The release workflow defines the current steps and artifact names. Use your own product identity and update settings for an independently branded version; see [Make your own Vmux](customization.md).
 
+## Preview these guides
+
+Run the website for the branch you are editing:
+
+```sh
+vmux serve my-vmux
+```
+
+Open the URL shown in Terminal, then visit `/docs`. This starts the website development server and watches its styles while you edit the guides. For this documentation PR, the branch is `docs-guide`.
+
 ## Give a distributed build its own name
 
 A personal code change can use the normal development build. For an independently named app, create a `.env` file at the root of your worktree:
