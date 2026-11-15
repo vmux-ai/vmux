@@ -2594,6 +2594,9 @@ require the macOS checks without a release build or DMG. On PRs and feature-bran
 run macOS DX/CLI lifecycle and resource/signing fixtures instead of desktop checks or packaging.
 Their native fixture result remains required by `Build macOS`; shared build metadata, dependency
 manifests and actual desktop packaging inputs still retain full package/startup validation.
+For PRs and feature-branch preflights that require packaging, the lean desktop check runs on a
+separate runner alongside the package build. `Build macOS` requires both results; the package
+runner does not repeat the lean check. Main and manual package builds retain the inline check.
 Other CLI integration tests and unknown test paths keep the existing desktop validation.
 Main pushes and manual CI runs retain
 full packaging and startup validation; nightly and release workflows retain signing and

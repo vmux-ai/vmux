@@ -637,13 +637,13 @@ test('required workflow gates reject failed planning and unexpected child skips'
   }
 });
 
-test('feature pushes and PRs use type checks unless packaging inputs changed', () => {
+test('feature pushes and PRs add packaging to macOS checks only for packaging inputs', () => {
   const workflow = new Workflow();
   for (const [event, feature, macos, packaging, check, build] of [
     ['push', 'true', 'true', 'false', true, false],
     ['pull_request', 'false', 'true', 'false', true, false],
-    ['push', 'true', 'true', 'true', false, true],
-    ['pull_request', 'false', 'true', 'true', false, true],
+    ['push', 'true', 'true', 'true', true, true],
+    ['pull_request', 'false', 'true', 'true', true, true],
     ['push', 'false', 'true', 'false', false, true],
     ['workflow_dispatch', 'false', 'true', 'false', false, true],
     ['schedule', 'false', 'false', 'false', false, false],
@@ -654,4 +654,26 @@ test('feature pushes and PRs use type checks unless packaging inputs changed', (
   }
   assert.equal(workflow.selected('changes', 'pull_request', 'false', '', '', '42'), false);
   assert.equal(workflow.selected('cef-version', 'pull_request', 'false', '', '', '42'), false);
+});
+
+test('macOS packaging preflights run lean checks in parallel and require both results', () => {
+  const workflow = new Workflow();
+  const ready = { plan: 'success', changes: 'success', 'cef-version': 'success', 'dx-macos': 'success' };
+  assert.equal(workflow.ready('build-mac', { ...ready, 'check-mac': 'in_progress' }), true);
+  assert.equal(workflow.ready('check-mac', { ...ready, 'build-mac': 'in_progress' }), true);
+  const expression = workflow.jobs['build-macos'].steps[0].env.CHECK_REQUIRED.slice(3, -2);
+  for (const [event, feature, checkRequired] of [['pull_request', 'false', true], ['push', 'true', true], ['push', 'false', false], ['workflow_dispatch', 'false', false]]) {
+    const changes = { macos: 'true', macos_package: 'true' };
+    assert.equal(workflow.step('build-mac', 'Check lean macOS desktop features', event, feature, changes), !checkRequired);
+    assert.equal(workflow.step('check-mac', 'Check desktop, CLI, and daemon', event, feature, changes), false);
+    assert.equal(workflow.step('check-mac', 'Verify generated UI assets', event, feature, changes), false);
+    const required = workflow.lane('build-macos', event, feature, changes, '', expression);
+    assert.equal(required, checkRequired);
+    const valid = { PLAN: 'success', PREFLIGHT: '', CHANGES: 'success', MACOS: 'true', PACKAGE: 'true', CHECK_REQUIRED: String(required), CHECK: 'success', RESULT: 'success' };
+    assert.equal(workflow.gate('build-macos', valid).status, 0);
+    for (const result of ['failure', 'cancelled', 'skipped']) {
+      assert.equal(workflow.gate('build-macos', { ...valid, CHECK: result }).status, checkRequired ? 1 : 0);
+      assert.equal(workflow.gate('build-macos', { ...valid, RESULT: result }).status, 1);
+    }
+  }
 });
