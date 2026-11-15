@@ -26,8 +26,21 @@ impl bevy_app::Plugin for Plugin {
             .add_systems(
                 Update,
                 (
-                    request, seed, locate, inspect, cancel, collect, schedule, normalize, discover,
-                    settle, choose, finish,
+                    request,
+                    seed,
+                    locate,
+                    inspect,
+                    cancel,
+                    collect,
+                    collect_worktrees,
+                    collect_common,
+                    collect_root,
+                    schedule,
+                    normalize,
+                    discover,
+                    settle,
+                    choose,
+                    finish,
                 )
                     .chain()
                     .in_set(Stage::Resolve),
@@ -195,12 +208,20 @@ struct Normalized;
 #[derive(Component)]
 struct Origin(Entity);
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum Field {
-    Worktrees,
-    Common,
-    Root,
-}
+#[derive(Component)]
+struct WorktreesRead;
+
+#[derive(Component)]
+struct CommonRead;
+
+#[derive(Component)]
+struct RootRead;
+
+#[derive(Component)]
+struct Received(String);
+
+#[derive(Component)]
+struct Missing;
 
 type Inspecting<'w, 's> = Query<
     'w,
@@ -309,35 +330,32 @@ fn schedule(
         if parent.parent() != scan.owner || !requests.contains(scan.owner) {
             continue;
         }
-        let (field, arguments) = if listed.is_none() {
-            (
-                Field::Worktrees,
-                vec!["worktree", "list", "--porcelain", "-z"],
-            )
+        let arguments = if listed.is_none() {
+            vec!["worktree", "list", "--porcelain", "-z"]
         } else if common.is_none() {
-            (
-                Field::Common,
-                vec!["rev-parse", "--path-format=absolute", "--git-common-dir"],
-            )
+            vec!["rev-parse", "--path-format=absolute", "--git-common-dir"]
         } else {
-            (
-                Field::Root,
-                vec!["config", "--local", "--get", "core.worktree"],
-            )
+            vec!["config", "--local", "--get", "core.worktree"]
         };
         let read = Read {
             root: cwd.0.clone(),
             arguments,
         };
         let (task, flight) = Task::new(read.clone(), None, Vec::new(), wake.0.clone());
-        commands.spawn((
+        let mut child = commands.spawn((
             Operation::bundle("dx.repository.read").unwrap(),
-            field,
             JobRequest(task),
             flight,
             read,
             ChildOf(entity),
         ));
+        if listed.is_none() {
+            child.insert(WorktreesRead);
+        } else if common.is_none() {
+            child.insert(CommonRead);
+        } else {
+            child.insert(RootRead);
+        }
         wake.0.wake_by_ref();
         break;
     }
@@ -348,7 +366,7 @@ type Receipts<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static Field,
+        Has<RootRead>,
         &'static JobResult<Task<Read>>,
         &'static JobOwner<Task<Read>>,
         &'static ChildOf,
@@ -362,7 +380,7 @@ fn collect(
     requests: Query<Entity, (With<Input>, Without<CliResult>)>,
     mut commands: Commands,
 ) {
-    for (entity, field, result, owner, parent) in &receipts {
+    for (entity, root, result, owner, parent) in &receipts {
         if Signals::pending().is_some() {
             commands
                 .entity(entity)
@@ -405,7 +423,7 @@ fn collect(
                 continue;
             }
         };
-        let missing = *field == Field::Root && output.status.code() == Some(1);
+        let missing = root && output.status.code() == Some(1);
         if !(output.status.success() || missing) {
             commands.entity(scan.owner).insert(CliResult(Err(format!(
                 "Git repository read failed: {}: {}",
@@ -429,50 +447,94 @@ fn collect(
                 continue;
             }
         };
-        match field {
-            Field::Worktrees => {
-                let mut path = None;
-                let mut branch = None;
-                for value in text.split('\0') {
-                    if let Some(value) = value.strip_prefix("worktree ") {
-                        path = Some(PathBuf::from(value));
-                    } else if let Some(value) = value.strip_prefix("branch refs/heads/") {
-                        branch = Some(OsString::from(value));
-                    } else if value.is_empty()
-                        && let Some(path) = path.take()
-                    {
-                        commands.spawn((
-                            Cwd(path),
-                            Worktree {
-                                branch: branch.take(),
-                                cloud: scan.cloud,
-                            },
-                            Origin(parent.parent()),
-                            ChildOf(scan.owner),
-                            Completed,
-                        ));
-                    }
-                }
-                commands.entity(parent.parent()).insert(Listed);
-            }
-            Field::Common => {
-                commands
-                    .entity(parent.parent())
-                    .insert(Common(PathBuf::from(text.trim())));
-            }
-            Field::Root => {
-                let root = if output.status.success() {
-                    Some(PathBuf::from(text.trim()))
-                } else {
-                    None
-                };
-                commands.entity(parent.parent()).insert(RootSetting(root));
+        let mut receipt = commands.entity(entity);
+        receipt
+            .insert(Received(text.to_owned()))
+            .remove::<JobResult<Task<Read>>>();
+        if missing {
+            receipt.insert(Missing);
+        }
+    }
+}
+
+type WorktreeReceipts<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Received, &'static ChildOf),
+    (With<WorktreesRead>, Without<Completed>),
+>;
+type CommonReceipts<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Received, &'static ChildOf),
+    (With<CommonRead>, Without<Completed>),
+>;
+type RootReceipts<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Received, &'static ChildOf, Has<Missing>),
+    (With<RootRead>, Without<Completed>),
+>;
+
+fn collect_worktrees(receipts: WorktreeReceipts, scans: Query<&Scan>, mut commands: Commands) {
+    for (entity, received, parent) in &receipts {
+        let Ok(scan) = scans.get(parent.parent()) else {
+            continue;
+        };
+        let mut path = None;
+        let mut branch = None;
+        for value in received.0.split('\0') {
+            if let Some(value) = value.strip_prefix("worktree ") {
+                path = Some(PathBuf::from(value));
+            } else if let Some(value) = value.strip_prefix("branch refs/heads/") {
+                branch = Some(OsString::from(value));
+            } else if value.is_empty()
+                && let Some(path) = path.take()
+            {
+                commands.spawn((
+                    Cwd(path),
+                    Worktree {
+                        branch: branch.take(),
+                        cloud: scan.cloud,
+                    },
+                    Origin(parent.parent()),
+                    ChildOf(scan.owner),
+                    Completed,
+                ));
             }
         }
+        commands.entity(parent.parent()).insert(Listed);
         commands
             .entity(entity)
             .insert((Completed, OperationState::Succeeded))
-            .remove::<JobResult<Task<Read>>>();
+            .remove::<Received>();
+    }
+}
+
+fn collect_common(receipts: CommonReceipts, mut commands: Commands) {
+    for (entity, received, parent) in &receipts {
+        commands
+            .entity(parent.parent())
+            .insert(Common(PathBuf::from(received.0.trim())));
+        commands
+            .entity(entity)
+            .insert((Completed, OperationState::Succeeded))
+            .remove::<Received>();
+    }
+}
+
+fn collect_root(receipts: RootReceipts, mut commands: Commands) {
+    for (entity, received, parent, missing) in &receipts {
+        let root = if missing {
+            None
+        } else {
+            Some(PathBuf::from(received.0.trim()))
+        };
+        commands.entity(parent.parent()).insert(RootSetting(root));
+        commands
+            .entity(entity)
+            .insert((Completed, OperationState::Succeeded))
+            .remove::<Received>();
     }
 }
 

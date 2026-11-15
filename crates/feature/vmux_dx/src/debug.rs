@@ -99,7 +99,21 @@ impl bevy_app::Plugin for Plugin {
                 )
                     .chain(),
                 (publish_start, publish_check, publish_done).chain(),
-                run,
+                (
+                    prepare_frontend,
+                    serve,
+                    run_start,
+                    inspect_local,
+                    inspect_development,
+                    inspect_package,
+                    collect_local_entries,
+                    verify_development,
+                    run_select,
+                    run_verify,
+                    run_execute,
+                    finish_run,
+                )
+                    .chain(),
                 stop,
                 (
                     read_signature_inputs,
@@ -421,6 +435,9 @@ struct Complete(Outcome);
 
 #[derive(Component)]
 struct Sent;
+
+#[derive(Component)]
+struct Released;
 
 #[derive(Component, Clone)]
 struct Failed(Failure);
@@ -836,7 +853,7 @@ type Finishing<'w, 's> = Query<
         Option<&'static Complete>,
         Option<&'static Failed>,
     ),
-    (With<Request>, Without<Sent>),
+    (With<Request>, With<Released>, Without<Sent>),
 >;
 
 fn accept<T: Component + Clone>(
@@ -2604,375 +2621,676 @@ fn publish_done(mut requests: PublishRequests, facts: Facts, wake: Res<JobWake>,
     }
 }
 
-fn run(
-    mut requests: RunRequests,
-    facts: Facts,
-    targets: Query<&Target>,
-    checks: Query<(&File, &Expected, &Order, &ChildOf)>,
-    entries: Query<(&crate::local::Entry, &ChildOf)>,
-    wake: Res<JobWake>,
-    mut io: IoWriter,
-) {
+fn prepare_frontend(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        let Run { platform, .. } = request;
+        if platform == "desktop" || *phase != RunPhase::Start || facts.pending(entity) {
+            continue;
+        }
+        let mut previous = None;
+        if platform == "web" {
+            let arguments = [
+                "-i",
+                "tailwind.input.css",
+                "-o",
+                "public/style.css",
+                "--watch",
+            ]
+            .map(OsString::from)
+            .to_vec();
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                SpawnProcess::new(
+                    &settings.0,
+                    &checkout.root.join("website"),
+                    settings
+                        .0
+                        .get("TAILWINDCSS_BIN")
+                        .unwrap_or(OsStr::new("tailwindcss"))
+                        .to_owned(),
+                    arguments,
+                ),
+                Tag::None,
+                false,
+            );
+        }
+        *phase = RunPhase::Execute;
+    }
+}
+
+fn serve(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        let Run { platform, .. } = request;
+        if platform == "desktop" || *phase != RunPhase::Execute || facts.pending(entity) {
+            continue;
+        }
+        let mut previous = None;
+        let cwd = if platform == "web" {
+            checkout.root.join("website")
+        } else {
+            checkout.root.clone()
+        };
+        let arguments = if platform == "web" {
+            vec!["serve".into(), "--platform".into(), "web".into()]
+        } else {
+            vec![
+                "serve".into(),
+                "-p".into(),
+                "vmux_mobile".into(),
+                format!("--{platform}").into(),
+            ]
+        };
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            RunProcess::new(
+                &settings.0,
+                &cwd,
+                settings
+                    .0
+                    .get("DX_BIN")
+                    .unwrap_or(OsStr::new("dx"))
+                    .to_owned(),
+                arguments,
+            ),
+            Tag::None,
+            false,
+        );
+        *phase = RunPhase::Done;
+    }
+}
+
+fn finish_run(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
+    for (entity, _, _, _, phase, _) in &mut requests {
+        if *phase != RunPhase::Done || facts.pending(entity) {
+            continue;
+        }
+        io.commands.entity(entity).insert(Complete(Outcome::Done));
+    }
+}
+
+fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Start) {
+            continue;
+        }
+
         let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
         if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
         let mut previous = None;
-        if platform != "desktop" {
-            if *phase == RunPhase::Start {
-                let cwd = if platform == "web" {
-                    checkout.root.join("website")
-                } else {
-                    checkout.root.clone()
-                };
-                if platform == "web" {
-                    let arguments = [
-                        "-i",
-                        "tailwind.input.css",
-                        "-o",
-                        "public/style.css",
-                        "--watch",
-                    ]
-                    .map(OsString::from)
-                    .to_vec();
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        SpawnProcess::new(
-                            &settings.0,
-                            &cwd,
-                            settings
-                                .0
-                                .get("TAILWINDCSS_BIN")
-                                .unwrap_or(OsStr::new("tailwindcss"))
-                                .to_owned(),
-                            arguments,
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                }
-                let arguments = if platform == "web" {
-                    vec!["serve".into(), "--platform".into(), "web".into()]
-                } else {
-                    vec![
-                        "serve".into(),
-                        "-p".into(),
-                        "vmux_mobile".into(),
-                        format!("--{platform}").into(),
-                    ]
-                };
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        match profile.as_str() {
+            "local" => io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                InspectPath(checkout.directory("release")),
+                Tag::Directory,
+                false,
+            ),
+            "dev" => io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
+                Tag::Stamp,
+                false,
+            ),
+            _ => {
+                let target = checkout
+                    .directory("release")
+                    .join(format!("{}.app", product.value("VMUX_HOST_NAME")));
                 io.request(
                     &mut sequence,
                     entity,
                     &mut previous,
-                    RunProcess::new(
-                        &settings.0,
-                        &cwd,
-                        settings
-                            .0
-                            .get("DX_BIN")
-                            .unwrap_or(OsStr::new("dx"))
-                            .to_owned(),
-                        arguments,
-                    ),
-                    Tag::None,
+                    InspectPath(target.clone()),
+                    Tag::Path,
                     false,
                 );
-                *phase = RunPhase::Done;
-            } else {
-                io.commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Target(target));
             }
-        } else {
-            let product = match settings.0.product(&checkout.root) {
-                Ok(product) => product,
+        }
+        *phase = RunPhase::Inspect;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn inspect_local(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Inspect) {
+            continue;
+        }
+
+        let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        if profile != "local" {
+            continue;
+        }
+
+        if !matches!(facts.get(entity, Tag::Directory), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
+        {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "No completed local app; run vmux build -p local first",
+            )));
+            continue;
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            ReadDirectory(checkout.directory("release")),
+            Tag::Entries,
+            false,
+        );
+        *phase = RunPhase::Inputs;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn inspect_development(
+    mut requests: RunRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Inspect) {
+            continue;
+        }
+
+        let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        if profile != "dev" {
+            continue;
+        }
+
+        let Some(stamp) = facts.text(entity, Tag::Stamp) else {
+            continue;
+        };
+        let mut lines = stamp.lines();
+        if lines.next() != checkout.root.to_str() {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "Artifact belongs to another checkout",
+            )));
+            continue;
+        }
+        let mut failed = false;
+        let mut count = 0;
+        for line in lines {
+            let Some((checksum, path)) = line.split_once("  ") else {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message("Invalid readiness stamp")));
+                failed = true;
+                break;
+            };
+            let path = PathBuf::from(path);
+            if !path.starts_with(checkout.directory("debug")) {
+                io.commands.entity(entity).insert(Failed(Failure::message(
+                    "Development artifact is incomplete or has changed; run vmux build",
+                )));
+                failed = true;
+                break;
+            }
+            io.commands.spawn((
+                File(path.clone()),
+                Expected(checksum.into()),
+                Order(count),
+                ChildOf(entity),
+            ));
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                HashFile(path),
+                Tag::Input(count),
+                false,
+            );
+            count += 1;
+        }
+        if failed {
+            continue;
+        }
+        if count != if cfg!(target_os = "macos") { 4 } else { 3 } {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message("Incomplete readiness stamp")));
+            continue;
+        }
+        *phase = RunPhase::Inputs;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn inspect_package(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Inspect) {
+            continue;
+        }
+
+        let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        if !(profile != "local" && profile != "dev") {
+            continue;
+        }
+
+        if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
+        {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "No completed app; run vmux build first",
+            )));
+            continue;
+        }
+        *phase = RunPhase::Verify;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn collect_local_entries(
+    mut requests: RunRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Inputs) {
+            continue;
+        }
+
+        let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        if profile != "local" {
+            continue;
+        }
+
+        let Some(DirectoryEntries(snapshot)) = facts.get(entity, Tag::Entries) else {
+            continue;
+        };
+        let mut failed = false;
+        for (path, metadata) in snapshot {
+            let modified = match metadata.modified() {
+                Ok(modified) => modified,
                 Err(error) => {
                     io.commands
                         .entity(entity)
                         .insert(Failed(Failure::message(error.to_string())));
-                    continue;
+                    failed = true;
+                    break;
                 }
             };
-            match *phase {
-                RunPhase::Start => {
-                    match profile.as_str() {
-                        "local" => io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            InspectPath(checkout.directory("release")),
-                            Tag::Directory,
-                            false,
-                        ),
-                        "dev" => io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
-                            Tag::Stamp,
-                            false,
-                        ),
-                        _ => {
-                            let target = checkout
-                                .directory("release")
-                                .join(format!("{}.app", product.value("VMUX_HOST_NAME")));
-                            io.request(
-                                &mut sequence,
-                                entity,
-                                &mut previous,
-                                InspectPath(target.clone()),
-                                Tag::Path,
-                                false,
-                            );
-                            io.commands.entity(entity).insert(Target(target));
-                        }
-                    }
-                    *phase = RunPhase::Inspect;
-                }
-                RunPhase::Inspect => match profile.as_str() {
-                    "local" => {
-                        if !matches!(facts.get(entity, Tag::Directory), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
-                        {
-                            io.commands.entity(entity).insert(Failed(Failure::message(
-                                "No completed local app; run vmux build -p local first",
-                            )));
-                            continue;
-                        }
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            ReadDirectory(checkout.directory("release")),
-                            Tag::Entries,
-                            false,
-                        );
-                        *phase = RunPhase::Inputs;
-                    }
-                    "dev" => {
-                        let Some(stamp) = facts.text(entity, Tag::Stamp) else {
-                            continue;
-                        };
-                        let mut lines = stamp.lines();
-                        if lines.next() != checkout.root.to_str() {
-                            io.commands.entity(entity).insert(Failed(Failure::message(
-                                "Artifact belongs to another checkout",
-                            )));
-                            continue;
-                        }
-                        let mut failed = false;
-                        let mut count = 0;
-                        for line in lines {
-                            let Some((checksum, path)) = line.split_once("  ") else {
-                                io.commands
-                                    .entity(entity)
-                                    .insert(Failed(Failure::message("Invalid readiness stamp")));
-                                failed = true;
-                                break;
-                            };
-                            let path = PathBuf::from(path);
-                            if !path.starts_with(checkout.directory("debug")) {
-                                io.commands.entity(entity).insert(Failed(Failure::message("Development artifact is incomplete or has changed; run vmux build")));
-                                failed = true;
-                                break;
-                            }
-                            io.commands.spawn((
-                                File(path.clone()),
-                                Expected(checksum.into()),
-                                Order(count),
-                                ChildOf(entity),
-                            ));
-                            io.request(
-                                &mut sequence,
-                                entity,
-                                &mut previous,
-                                HashFile(path),
-                                Tag::Input(count),
-                                false,
-                            );
-                            count += 1;
-                        }
-                        if failed {
-                            continue;
-                        }
-                        if count != if cfg!(target_os = "macos") { 4 } else { 3 } {
-                            io.commands
-                                .entity(entity)
-                                .insert(Failed(Failure::message("Incomplete readiness stamp")));
-                            continue;
-                        }
-                        *phase = RunPhase::Inputs;
-                    }
-                    _ => {
-                        if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
-                        {
-                            io.commands.entity(entity).insert(Failed(Failure::message(
-                                "No completed app; run vmux build first",
-                            )));
-                            continue;
-                        }
-                        *phase = RunPhase::Verify;
-                    }
+            io.commands.spawn((
+                crate::local::Entry {
+                    path: path.clone(),
+                    modified,
+                    directory: metadata.is_dir(),
+                    symlink: metadata.file_type().is_symlink(),
                 },
-                RunPhase::Inputs => {
-                    if profile == "local" {
-                        let Some(DirectoryEntries(snapshot)) = facts.get(entity, Tag::Entries)
-                        else {
-                            continue;
-                        };
-                        let mut failed = false;
-                        for (path, metadata) in snapshot {
-                            let modified = match metadata.modified() {
-                                Ok(modified) => modified,
-                                Err(error) => {
-                                    io.commands
-                                        .entity(entity)
-                                        .insert(Failed(Failure::message(error.to_string())));
-                                    failed = true;
-                                    break;
-                                }
-                            };
-                            io.commands.spawn((
-                                crate::local::Entry {
-                                    path: path.clone(),
-                                    modified,
-                                    directory: metadata.is_dir(),
-                                    symlink: metadata.file_type().is_symlink(),
-                                },
-                                ChildOf(entity),
-                            ));
-                        }
-                        if failed {
-                            continue;
-                        }
-                        *phase = RunPhase::Select;
-                    } else {
-                        let mut valid = true;
-                        for (_, expected, order, parent) in &checks {
-                            if parent.parent() != entity {
-                                continue;
-                            }
-                            if facts.text(entity, Tag::Input(order.0)).as_deref()
-                                != Some(expected.0.as_str())
-                            {
-                                valid = false;
-                                break;
-                            }
-                        }
-                        if !valid {
-                            io.commands.entity(entity).insert(Failed(Failure::message(
-                                "Development artifact is incomplete or has changed; run vmux build",
-                            )));
-                            continue;
-                        }
-                        let path = if cfg!(target_os = "macos") {
-                            checkout
-                                .directory("debug")
-                                .join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")))
-                        } else {
-                            checkout.directory("debug").join("vmux_desktop")
-                        };
-                        io.commands.entity(entity).insert(Target(path));
-                        *phase = if cfg!(target_os = "macos") {
-                            RunPhase::Verify
-                        } else {
-                            RunPhase::Execute
-                        };
-                    }
-                }
-                RunPhase::Select => {
-                    let prefix = format!("{} (", product.value("VMUX_HOST_NAME"));
-                    let mut latest = None;
-                    for (entry, parent) in &entries {
-                        if parent.parent() != entity || !entry.directory || entry.symlink {
-                            continue;
-                        }
-                        let Some(name) = entry.path.file_name().and_then(|name| name.to_str())
-                        else {
-                            continue;
-                        };
-                        if !name.starts_with(&prefix) || !name.ends_with(").app") {
-                            continue;
-                        }
-                        if latest.is_none_or(|previous: &crate::local::Entry| {
-                            entry.modified > previous.modified
-                        }) {
-                            latest = Some(entry);
-                        }
-                    }
-                    let Some(latest) = latest else {
-                        io.commands.entity(entity).insert(Failed(Failure::message(
-                            "No completed local app; run vmux build -p local first",
-                        )));
-                        continue;
-                    };
-                    io.commands
-                        .entity(entity)
-                        .insert(Target(latest.path.clone()));
-                    *phase = RunPhase::Verify;
-                }
-                RunPhase::Verify => {
-                    let target = targets.get(entity).unwrap();
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        CaptureOutput::new(
-                            &settings.0,
-                            &checkout.root,
-                            "codesign".into(),
-                            vec![
-                                "--verify".into(),
-                                "--strict".into(),
-                                target.0.as_os_str().into(),
-                            ],
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                    *phase = RunPhase::Execute;
-                }
-                RunPhase::Execute => {
-                    let target = targets.get(entity).unwrap();
-                    let mut environment = settings.0.clone();
-                    let (program, arguments) = if cfg!(target_os = "macos") || profile != "dev" {
-                        let mut arguments = Vec::new();
-                        for key in [
-                            "VMUX_PROFILE",
-                            "VMUX_TEST",
-                            "VMUX_DATA_DIR",
-                            "VMUX_REMOTE_RELAY_URL",
-                        ] {
-                            if let Some(value) = environment.get(key) {
-                                let mut argument = OsString::from(key);
-                                argument.push("=");
-                                argument.push(value);
-                                arguments.extend(["--env".into(), argument]);
-                            }
-                        }
-                        arguments.push(target.0.as_os_str().into());
-                        (OsString::from("open"), arguments)
-                    } else {
-                        environment.remove("CEF_PATH");
-                        (target.0.as_os_str().to_owned(), Vec::new())
-                    };
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        RunProcess::new(&environment, &checkout.root, program, arguments),
-                        Tag::None,
-                        false,
-                    );
-                    *phase = RunPhase::Done;
-                }
-                RunPhase::Done => {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
-                }
+                ChildOf(entity),
+            ));
+        }
+        if failed {
+            continue;
+        }
+        *phase = RunPhase::Select;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn verify_development(
+    mut requests: RunRequests,
+    facts: Facts,
+    checks: Query<(&File, &Expected, &Order, &ChildOf)>,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Inputs) {
+            continue;
+        }
+
+        let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        if profile == "local" {
+            continue;
+        }
+
+        let mut valid = true;
+        for (_, expected, order, parent) in &checks {
+            if parent.parent() != entity {
+                continue;
+            }
+            if facts.text(entity, Tag::Input(order.0)).as_deref() != Some(expected.0.as_str()) {
+                valid = false;
+                break;
             }
         }
+        if !valid {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "Development artifact is incomplete or has changed; run vmux build",
+            )));
+            continue;
+        }
+        let path = if cfg!(target_os = "macos") {
+            checkout
+                .directory("debug")
+                .join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")))
+        } else {
+            checkout.directory("debug").join("vmux_desktop")
+        };
+        io.commands.entity(entity).insert(Target(path));
+        *phase = if cfg!(target_os = "macos") {
+            RunPhase::Verify
+        } else {
+            RunPhase::Execute
+        };
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn run_select(
+    mut requests: RunRequests,
+    facts: Facts,
+    entries: Query<(&crate::local::Entry, &ChildOf)>,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, _sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Select) {
+            continue;
+        }
+
+        let Run { platform, .. } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        let prefix = format!("{} (", product.value("VMUX_HOST_NAME"));
+        let mut latest = None;
+        for (entry, parent) in &entries {
+            if parent.parent() != entity || !entry.directory || entry.symlink {
+                continue;
+            }
+            let Some(name) = entry.path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !name.starts_with(&prefix) || !name.ends_with(").app") {
+                continue;
+            }
+            if latest
+                .is_none_or(|previous: &crate::local::Entry| entry.modified > previous.modified)
+            {
+                latest = Some(entry);
+            }
+        }
+        let Some(latest) = latest else {
+            io.commands.entity(entity).insert(Failed(Failure::message(
+                "No completed local app; run vmux build -p local first",
+            )));
+            continue;
+        };
+        io.commands
+            .entity(entity)
+            .insert(Target(latest.path.clone()));
+        *phase = RunPhase::Verify;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn run_verify(
+    mut requests: RunRequests,
+    facts: Facts,
+    targets: Query<&Target>,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Verify) {
+            continue;
+        }
+
+        let Run { platform, .. } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        let target = targets.get(entity).unwrap();
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "codesign".into(),
+                vec![
+                    "--verify".into(),
+                    "--strict".into(),
+                    target.0.as_os_str().into(),
+                ],
+            ),
+            Tag::None,
+            false,
+        );
+        *phase = RunPhase::Execute;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn run_execute(
+    mut requests: RunRequests,
+    facts: Facts,
+    targets: Query<&Target>,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Execute) {
+            continue;
+        }
+
+        let Run { profile, platform } = request;
+        if platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+
+        let target = targets.get(entity).unwrap();
+        let mut environment = settings.0.clone();
+        let (program, arguments) = if cfg!(target_os = "macos") || profile != "dev" {
+            let mut arguments = Vec::new();
+            for key in [
+                "VMUX_PROFILE",
+                "VMUX_TEST",
+                "VMUX_DATA_DIR",
+                "VMUX_REMOTE_RELAY_URL",
+            ] {
+                if let Some(value) = environment.get(key) {
+                    let mut argument = OsString::from(key);
+                    argument.push("=");
+                    argument.push(value);
+                    arguments.extend(["--env".into(), argument]);
+                }
+            }
+            arguments.push(target.0.as_os_str().into());
+            (OsString::from("open"), arguments)
+        } else {
+            environment.remove("CEF_PATH");
+            (target.0.as_os_str().to_owned(), Vec::new())
+        };
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            RunProcess::new(&environment, &checkout.root, program, arguments),
+            Tag::None,
+            false,
+        );
+        *phase = RunPhase::Done;
 
         if *phase != previous_phase {
             wake.0.wake_by_ref();
@@ -4324,7 +4642,16 @@ fn submit<J: IoJob>(
     }
 }
 
-type Releasing<'w, 's> = Query<'w, 's, Entity, (With<Request>, Or<(With<Complete>, With<Failed>)>)>;
+type Releasing<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        With<Request>,
+        Without<Released>,
+        Or<(With<Complete>, With<Failed>)>,
+    ),
+>;
 
 fn release(
     requests: Releasing,
@@ -4344,6 +4671,9 @@ fn release(
                 .entity(entity)
                 .remove::<(TemporaryValue, ProcessValue, PendingValue)>();
         }
+    }
+    for entity in &requests {
+        commands.entity(entity).insert(Released);
     }
 }
 
@@ -4579,6 +4909,39 @@ mod tests {
             fs::write(path, bytes).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+    }
+
+    #[test]
+    fn web_run_keeps_the_stylesheet_worker_until_server_exit_and_releases_it_before_completion() {
+        let mut fixture = Fixture::new();
+        fs::create_dir_all(fixture.root.join("website")).unwrap();
+        let tailwind = fixture.root.join("bin/tailwind");
+        let server = fixture.root.join("bin/server");
+        fixture.executable(&tailwind, b"#!/bin/sh\nprintf '%s' $$ > \"$TEST_ROOT/tailwind.pending\"\nmv \"$TEST_ROOT/tailwind.pending\" \"$TEST_ROOT/tailwind.pid\"\nexec sleep 30\n");
+        fixture.executable(&server, b"#!/bin/sh\ni=0\nwhile [ ! -s \"$TEST_ROOT/tailwind.pid\" ]; do i=$((i+1)); [ $i -lt 100 ] || exit 9; sleep 0.01; done\ntest -s \"$TEST_ROOT/tailwind.pid\" || exit 9\nkill -0 \"$(cat \"$TEST_ROOT/tailwind.pid\")\" || exit 10\nprintf '%s' \"$*\" > \"$TEST_ROOT/served\"\n");
+        {
+            let mut settings = fixture
+                .app
+                .world_mut()
+                .get_mut::<Settings>(fixture.operation)
+                .unwrap();
+            settings.0.set("TAILWINDCSS_BIN", tailwind.as_os_str());
+            settings.0.set("DX_BIN", server.as_os_str());
+        }
+        assert_eq!(fixture.run(Work::Run("dev".into(), "web".into())), 0);
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("served")).unwrap(),
+            "serve --platform web"
+        );
+        let pid: i32 = fs::read_to_string(fixture.root.join("tailwind.pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "the stylesheet worker survived completion"
+        );
     }
 
     #[test]
