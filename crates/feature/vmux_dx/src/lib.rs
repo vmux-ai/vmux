@@ -868,7 +868,15 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
             args.push("--release".into());
         }
         args.append(&mut forwarded);
-        plans.native(entity, &mut tail, Work::Tool("dx".into(), args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run tool",
+            debug::Tool {
+                program: "dx".into(),
+                arguments: args,
+            },
+        );
         if platform == "ios" {
             plans.native(entity, &mut tail, Work::ResourcesIos);
             plans.native(entity, &mut tail, Work::VerifyIos(false));
@@ -898,7 +906,15 @@ fn plan_web(mut operations: Planning, mut plans: Plans) {
             args.extend(["--ssg".into(), "--release".into()]);
         }
         args.append(&mut forwarded);
-        plans.native(entity, &mut tail, Work::Tool("dx".into(), args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run tool",
+            debug::Tool {
+                program: "dx".into(),
+                arguments: args,
+            },
+        );
         if profile != "dev" {
             plans.native(entity, &mut tail, Work::FlattenWeb);
         }
@@ -1654,7 +1670,10 @@ mod tests {
         }
 
         fn step(&mut self, command: &str) -> Entity {
-            let work = Work::Tool("/bin/sh".into(), vec!["-c".into(), command.into()]);
+            let work = debug::Tool {
+                program: "/bin/sh".into(),
+                arguments: vec!["-c".into(), command.into()],
+            };
             let mut step = self.app.world_mut().spawn((
                 OperationState::Pending,
                 ChildOf(self.operation),
@@ -1769,6 +1788,11 @@ mod tests {
     fn stale_completion_cannot_advance_the_current_attempt() {
         let mut fixture = Fixture::new();
         let step = fixture.step("exit 99");
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(step)
+            .remove::<debug::Tool>();
         fixture.app.world_mut().entity_mut(step).insert((
             Running,
             NativeSubmitted(debug::Captured {
@@ -1814,6 +1838,11 @@ mod tests {
                 ChildOf(fixture.operation),
             ));
             let step = fixture.step("exit 99");
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(step)
+                .remove::<debug::Tool>();
             fixture.app.world_mut().entity_mut(step).insert((
                 Running,
                 NativeSubmitted(debug::Captured {
@@ -2179,5 +2208,40 @@ mod tests {
         );
         drop(held);
         assert_eq!(fixture.result(), 0);
+    }
+
+    #[test]
+    fn typed_tool_uses_the_selected_program_and_website_working_directory() {
+        let mut fixture = Fixture::new();
+        let root = fixture.directory.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("website")).unwrap();
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set("DX_BIN", "/bin/sh");
+        settings.0.set("VMUX_TOOL_PROBE_ROOT", root.as_os_str());
+        fixture.app.world_mut().spawn((
+            debug::Tool {
+                program: "dx".into(),
+                arguments: vec![
+                    "-c".into(),
+                    "pwd > \"$VMUX_TOOL_PROBE_ROOT/selected-cwd\"".into(),
+                    "--platform".into(),
+                    "web".into(),
+                ],
+            },
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        assert_eq!(fixture.result(), 0);
+        assert_eq!(
+            std::fs::read_to_string(root.join("selected-cwd"))
+                .unwrap()
+                .trim(),
+            root.join("website").display().to_string()
+        );
     }
 }

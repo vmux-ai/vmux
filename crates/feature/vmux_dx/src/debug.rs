@@ -61,6 +61,7 @@ impl bevy_app::Plugin for Plugin {
             )
             .add_observer(accept::<Capacity>)
             .add_observer(accept::<Acquire>)
+            .add_observer(accept::<Tool>)
             .add_observer(accept::<IdentityRequest>)
             .add_observer(accept::<Clear>)
             .add_observer(accept::<Sign>)
@@ -79,6 +80,7 @@ impl bevy_app::Plugin for Plugin {
                     initialize,
                     cancel,
                     acquire,
+                    tool,
                     (
                         identity_start,
                         identity_keychain,
@@ -210,6 +212,20 @@ pub struct Requested<T: Component> {
 #[require(Request, AcquirePhase)]
 pub struct Acquire {
     pub inherit: bool,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, ToolPhase)]
+pub struct Tool {
+    pub program: OsString,
+    pub arguments: Vec<OsString>,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolPhase {
+    #[default]
+    Start,
+    Done,
 }
 
 #[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1121,6 +1137,66 @@ fn acquire(
             }
             AcquirePhase::Done => {
                 io.commands.entity(entity).insert(Complete(Outcome::Done));
+            }
+        }
+        if *phase != previous {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+type Tools<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Tool,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut ToolPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+fn tool(mut requests: Tools, facts: Facts, mut io: IoWriter, wake: Res<JobWake>) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        let previous = *phase;
+        match *phase {
+            ToolPhase::Start => {
+                let key = match request.program.to_str() {
+                    Some("cargo") => Some("CARGO_BIN"),
+                    Some("dx") => Some("DX_BIN"),
+                    _ => None,
+                };
+                let program = match key.and_then(|key| settings.0.get(key)) {
+                    Some(program) => program.to_owned(),
+                    None => request.program.clone(),
+                };
+                let cwd = if request.program == "dx"
+                    && request
+                        .arguments
+                        .windows(2)
+                        .any(|pair| pair[0] == "--platform" && pair[1] == "web")
+                {
+                    checkout.root.join("website")
+                } else {
+                    checkout.root.clone()
+                };
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut None,
+                    RunProcess::new(&settings.0, &cwd, program, request.arguments.clone()),
+                    (),
+                    false,
+                );
+                *phase = ToolPhase::Done;
+            }
+            ToolPhase::Done => {
+                if !facts.pending(entity) {
+                    io.commands.entity(entity).insert(Complete(Outcome::Done));
+                }
             }
         }
         if *phase != previous {

@@ -26,7 +26,6 @@ pub enum Work {
     Dioxus(String),
     Binaryen,
     Tailwind,
-    Tool(OsString, Vec<OsString>),
     Cargo(Vec<OsString>),
     Package(String),
     ResourcesIos,
@@ -63,7 +62,7 @@ impl Work {
             Self::Dioxus(_) => "Prepare Dioxus tools",
             Self::Binaryen => "Prepare wasm optimizer",
             Self::Tailwind => "Prepare stylesheet compiler",
-            Self::Tool(_, _) | Self::Cargo(_) => "Run tool",
+            Self::Cargo(_) => "Run tool",
             Self::Package(_) => "Package app",
             Self::ResourcesIos => "Inject iOS resources",
             Self::ReleaseIos => "Sign and package iOS",
@@ -122,7 +121,6 @@ impl Work {
                     native.tool_path("TAILWINDCSS_BIN", "tailwindcss"),
                 ));
             }
-            Self::Tool(program, args) => native.tool(program, args)?,
             Self::Cargo(args) => native.cargo(args)?,
             Self::Package(profile) => return Ok(Outcome::Artifacts(native.package(profile)?)),
             Self::ResourcesIos => native.resources_ios()?,
