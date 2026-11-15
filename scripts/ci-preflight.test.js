@@ -453,9 +453,9 @@ class Workflow {
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
 
-  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true') {
+  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false') {
     const github = { event_name: event };
-    const needs = { plan: { outputs: { feature, base } } };
+    const needs = { plan: { outputs: { feature, base, release } } };
     const steps = {
       filter: { outputs: filter },
       native: { outputs: { native } },
@@ -571,9 +571,14 @@ test('main and explicit full validation retain native builds and release PRs ret
       assert.equal(workflow.lane(name, event, 'false', changes), true, `${event}: ${name}`);
     }
   }
-  const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths(['Cargo.toml']));
-  for (const name of ['dx-macos', 'build-mac']) {
-    assert.equal(workflow.lane(name, 'pull_request', 'false', changes, '', workflow.jobs[name].if, 'true'), true, name);
+  for (const native of ['true', 'false']) {
+    const changes = workflow.changes('pull_request', 'false', 'base', native, workflow.paths(['Cargo.toml']), 'true', 'true');
+    assert.equal(changes.macos, native === 'true');
+    assert.equal(changes.macos_tooling, native === 'true');
+    assert.equal(changes.ios, false);
+    for (const name of ['dx-macos', 'build-mac']) {
+      assert.equal(workflow.lane(name, 'pull_request', 'false', changes, '', workflow.jobs[name].if, 'true'), native === 'true', `${native}: ${name}`);
+    }
   }
   const scheduled = workflow.changes('schedule', 'false', '', '', workflow.paths([]));
   assert.equal(workflow.lane('ios-build', 'schedule', 'false', scheduled), true);
@@ -587,6 +592,7 @@ test('SDK and headless validation follow contract inputs while Git dependency ch
     ['docs/ux/terminal.md', false],
     ['crates/util/vmux_api/src/lib.rs', true],
     ['crates/util/vmux_app/src/lib.rs', true],
+    ['crates/feature/vmux_acp/src/lib.rs', true],
     ['crates/feature/vmux_layout/src/feature.ron', true],
     ['crates/feature/vmux_extension/Cargo.toml', true],
     ['examples/framework-consumer/src/lib.rs', true],
@@ -595,6 +601,7 @@ test('SDK and headless validation follow contract inputs while Git dependency ch
     const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]), 'false');
     assert.equal(changes.contracts, contracts, file);
     assert.equal(workflow.lane('test-sdk', 'pull_request', 'false', changes), Boolean(changes.code && contracts), file);
+    assert.equal(workflow.lane('test-headless', 'pull_request', 'false', changes), Boolean(changes.code && contracts), file);
     assert.equal(workflow.step('test-sdk', 'Test immutable Git dependencies', 'pull_request', 'false', changes), false);
   }
   assert.equal(workflow.step('test-sdk', 'Test immutable Git dependencies', 'push', 'false', {}), true);

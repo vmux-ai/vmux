@@ -114,6 +114,7 @@ jobs:
               - 'crates/feature/vmux_extension/**'
               - 'crates/feature/vmux_project/**'
               - 'crates/feature/vmux_service/**'
+              - 'crates/feature/vmux_acp/**'
               - 'crates/app/vmux_cli/**'
               - 'crates/**/feature.ron'
               - 'crates/**/Cargo.toml'
