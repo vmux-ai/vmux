@@ -939,7 +939,7 @@ mod tests {
         let path = directory.path().join("staging");
         let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
         let thread = std::thread::spawn(move || {
             sender
                 .send(WriteFile(path, b"replacement".to_vec()).run().is_err())
@@ -947,7 +947,7 @@ mod tests {
         });
         assert!(
             receiver
-                .recv_timeout(std::time::Duration::from_secs(1))
+                .recv_timeout(Duration::from_secs(1))
                 .expect("FIFO open blocked")
         );
         thread.join().unwrap();
