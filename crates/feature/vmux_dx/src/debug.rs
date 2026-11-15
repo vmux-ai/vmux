@@ -1072,7 +1072,7 @@ type Finishing<'w, 's> = Query<
     (
         Entity,
         &'static Captured,
-        Option<&'static Complete>,
+        Option<&'static mut Complete>,
         Option<&'static Failed>,
     ),
     (With<Request>, With<Released>, Without<Sent>),
@@ -5221,14 +5221,14 @@ fn forget_cleanups(witnesses: Drained, mut commands: Commands) {
 }
 
 fn finish(
-    requests: Finishing,
+    mut requests: Finishing,
     parents: Query<&ChildOf>,
     flights: Query<(&Root, &Flight)>,
     mut completions: MessageWriter<Completion>,
     wake: Res<JobWake>,
     mut commands: Commands,
 ) {
-    for (entity, captured, complete, failed) in &requests {
+    for (entity, captured, complete, failed) in &mut requests {
         if complete.is_none() && failed.is_none() {
             continue;
         }
@@ -5244,7 +5244,7 @@ fn finish(
             .is_ok_and(|parent| parent.parent() == captured.root);
         let result = match failed {
             Some(failed) => Err(failed.0.clone()),
-            None if current => Ok(complete.unwrap().0.clone()),
+            None if current => Ok(std::mem::replace(&mut complete.unwrap().0, Outcome::Done)),
             None => Err(Failure::message("Development step ownership changed")),
         };
         completions.write(Completion {
@@ -5339,6 +5339,7 @@ mod tests {
                 .world_mut()
                 .spawn((
                     crate::Accepted,
+                    crate::Planned,
                     checkout,
                     Settings(environment),
                     storage,

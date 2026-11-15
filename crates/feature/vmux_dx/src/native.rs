@@ -16,6 +16,7 @@ mod cache;
 mod cef;
 mod cef_source;
 mod conformance;
+mod debug;
 mod dependencies;
 mod integration;
 mod ios;
@@ -23,6 +24,7 @@ mod keychain;
 mod maintenance;
 mod package;
 mod release;
+mod workspace;
 
 pub struct Native {
     checkout: Checkout,
@@ -65,13 +67,6 @@ impl Native {
 
     fn text(&self, program: impl AsRef<OsStr>, args: &[&OsStr]) -> Result<String> {
         Ok(String::from_utf8(self.output(program, args)?)?)
-    }
-
-    pub(super) fn plist(&self, path: &Path, command: &str) -> Result<()> {
-        self.run_command(
-            self.get("PLIST_BUDDY", "/usr/libexec/PlistBuddy"),
-            &[OsStr::new("-c"), OsStr::new(command), path.as_os_str()],
-        )
     }
 
     fn get(&self, name: &str, default: impl AsRef<OsStr>) -> OsString {

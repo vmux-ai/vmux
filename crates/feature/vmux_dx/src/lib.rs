@@ -44,6 +44,10 @@ mod temporary;
 mod tooling;
 mod update_io;
 pub mod updates;
+#[expect(
+    dead_code,
+    reason = "VMX-253 retains the exact legacy schema until follow-up removal"
+)]
 mod work;
 mod workspace;
 mod workspace_io;
@@ -138,7 +142,6 @@ impl bevy_app::Plugin for Plugin {
                 refuse_plan,
                 receive,
                 collect,
-                select_local,
                 start,
                 native,
                 finish,
@@ -535,7 +538,7 @@ fn configure_settings(mut requests: Preparing) {
 }
 
 fn prepare_storage(mut requests: Preparing, mut commands: Commands) {
-    for (entity, invocation, _, checkout, settings, mut phase, state) in &mut requests {
+    for (entity, _, _, checkout, settings, mut phase, state) in &mut requests {
         if *state != OperationState::Running || *phase != AdmissionPhase::Storage {
             continue;
         }
@@ -553,21 +556,6 @@ fn prepare_storage(mut requests: Preparing, mut commands: Commands) {
                 continue;
             }
         };
-        if invocation.is("dx.run")
-            && invocation.value("platform").unwrap_or("desktop") == "desktop"
-            && invocation.value("profile") == Some("local")
-        {
-            let product = match settings.0.product(&checkout.root) {
-                Ok(product) => product.value("VMUX_HOST_NAME").to_owned(),
-                Err(error) => {
-                    commands
-                        .entity(entity)
-                        .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
-                    continue;
-                }
-            };
-            commands.entity(entity).insert(local::Selection { product });
-        }
         commands.entity(entity).insert(storage);
         *phase = AdmissionPhase::Ready;
     }
@@ -1432,7 +1420,13 @@ type NativeReady<'w, 's> = Query<
     (With<Running>, Without<NativeSubmitted>),
 >;
 
-fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut commands: Commands) {
+fn native(
+    steps: NativeReady,
+    operations: Inputs,
+    mailbox: Res<Mailbox>,
+    mut completions: MessageWriter<Completion>,
+    mut commands: Commands,
+) {
     for (entity, work, parent, attempt, captured, checkout, settings) in &steps {
         if parent.is_none_or(|parent| parent.parent() != captured.root)
             || attempt.0 != captured.attempt
@@ -1452,6 +1446,23 @@ fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut com
         let Ok((_, _, storage, lease, executable, _)) = operations.get(captured.root) else {
             continue;
         };
+        if work.retired() {
+            completions.write(Completion {
+                entity,
+                root: captured.root,
+                attempt: captured.attempt,
+                result: Err(Failure::message(
+                    "Migrated DX work requires its concrete typed request",
+                )),
+            });
+            commands
+                .entity(entity)
+                .insert(NativeSubmitted(debug::Captured {
+                    root: captured.root,
+                    attempt: captured.attempt,
+                }));
+            continue;
+        }
         let checkout = checkout.clone();
         let mut environment = settings.0.clone();
         if let Some(executable) = executable {
@@ -1575,6 +1586,10 @@ fn collect(
                             .remove::<Lease>();
                     }
                     Outcome::Done => {}
+                    Outcome::Lease(lease) => {
+                        commands.entity(completion.root).insert(Lease(lease));
+                    }
+                    Outcome::LocalEntries(entries) => drop(entries),
                     Outcome::Identity(identity) => {
                         settings.0.set("APPLE_SIGNING_IDENTITY", &identity);
                     }
@@ -2147,6 +2162,23 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
     }
 
     #[test]
+    fn migrated_legacy_tool_inputs_are_refused_before_native_execution() {
+        let mut fixture = Fixture::new();
+        fixture.app.world_mut().spawn((
+            Step,
+            Work::Tool(
+                "sh".into(),
+                vec!["-c".into(), "printf unexpected > unexpected".into()],
+            ),
+            OperationState::Pending,
+            ChildOf(fixture.operation),
+            Attempt(1),
+        ));
+        assert_ne!(fixture.result(), 0);
+        assert!(!fixture.directory.path().join("unexpected").exists());
+    }
+
+    #[test]
     fn unplanned_and_failed_operations_cannot_start_their_materialized_children() {
         for planned in [false, true] {
             let mut fixture = Fixture::new();
@@ -2354,6 +2386,7 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
                 .world_mut()
                 .spawn((
                     Accepted,
+                    Planned,
                     Operation::bundle("dx.fixture").unwrap().running(),
                     checkout,
                     settings,
