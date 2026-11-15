@@ -36,6 +36,19 @@ A job can reuse an earlier successful check in the same PR when its target base,
 
 The full ownership audit runs under Lint. Ordinary Rust tests exclude that same expensive audit while retaining the other tests; the required Lint status still gates it.
 
+The CI names describe the validation target:
+
+| Job or step | What it validates |
+|---|---|
+| Build CI tool & select checks | Builds the development CLI used by later jobs and selects affected checks. |
+| Rust unit & integration tests | Runs the selected Rust packages' unit, integration, and documentation tests. |
+| Public API compatibility tests | Uses the public framework and host APIs from independent workspaces. |
+| Desktop feature availability tests | Checks screenshot, recording, and update responses when those features are unavailable. |
+| App configuration tests | Checks plugin selection, dependencies, and core lifecycles without desktop adapters. |
+| ECS Policy check, inside Lint | Checks ECS ownership rules and repository source conventions. |
+
+Lint, Test, and Build macOS retain their required GitHub status names. Lint contains separately named format, Clippy, CI-tool, and policy steps; Test aggregates the applicable test results.
+
 Ordinary PRs do not build macOS/iOS apps or create signed packages. Main and manual validation build affected native products, and release PRs retain macOS release-artifact preparation. The required `Build macOS` status keeps its existing GitHub name and verifies this distribution policy; it does not claim that an ordinary PR compiled on macOS. Platform failures can therefore be detected after an ordinary PR merges. Check CI on the latest commit before merging, and request manual full validation when a change needs native packaging assurance.
 
 ## Check a complete bundle

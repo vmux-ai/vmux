@@ -1,4 +1,4 @@
-name: CI
+name: Code & App quality
 
 on:
   pull_request:
@@ -29,7 +29,7 @@ env:
 
 jobs:
   plan:
-    name: Plan CI
+    name: Verify PR merge & CEF version
     runs-on: ubuntu-latest
     outputs:
       head: ${{ steps.plan.outputs.head }}
@@ -60,7 +60,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   changes:
-    name: Prepare CI
+    name: Build CI tool & select checks
     needs: [plan]
     runs-on: ubuntu-latest
     outputs:
@@ -240,10 +240,10 @@ jobs:
             const scope = (args) => JSON.stringify({ args, os: process.env.RUNNER_OS, arch: process.env.RUNNER_ARCH, image: process.env.ImageVersion, flags: process.env.RUSTFLAGS, encoded: process.env.CARGO_ENCODED_RUSTFLAGS });
             const profiles = [
               { key: 'lint', name: 'Lint', paths: [...rust, 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope(process.env.VMUX_LINT_SCOPE) },
-              { key: 'test-rust', name: 'Rust tests', paths: rust, scope: scope(process.env.VMUX_TEST_SCOPE) },
-              { key: 'test-sdk', name: 'ECS framework tests', paths: rust, scope: scope('sdk-path+host') },
-              { key: 'test-lean', name: 'Lean desktop tests', paths: rust, scope: scope('desktop-lean') },
-              { key: 'test-headless', name: 'Headless tests', paths: rust, scope: scope('daemon+mcp') },
+              { key: 'test-rust', name: 'Rust unit & integration tests', paths: rust, scope: scope(process.env.VMUX_TEST_SCOPE) },
+              { key: 'test-sdk', name: 'Public API compatibility tests', paths: rust, scope: scope('sdk-path+host') },
+              { key: 'test-lean', name: 'Desktop feature availability tests', paths: rust, scope: scope('desktop-lean') },
+              { key: 'test-headless', name: 'App configuration tests', paths: rust, scope: scope('daemon+mcp') },
               { key: 'website', name: 'Website Build', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
             ];
             const identity = { base: process.env.VMUX_CHECK_BASE, tree: process.env.VMUX_CHECK_TREE, branch: context.payload.pull_request?.head.ref, release: process.env.VMUX_CHECK_RELEASE === 'true' };
@@ -425,16 +425,24 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
-      - name: Validate ECS ownership and build tooling
+      - name: CI configuration and cache tests
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
-        run: |
-          node --test scripts/ci-preflight.test.js
-          cargo test --locked -p vmux_dx --features ci-syntax --lib
-          cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
-          cargo test --locked -p vmux_dx --test policy --test conventions
+        run: node --test scripts/ci-preflight.test.js
+
+      - name: CI tool lifecycle tests
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        run: cargo test --locked -p vmux_dx --features ci-syntax --lib
+
+      - name: CLI command and packaging tests
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
+
+      - name: ECS Policy check
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        run: cargo test --locked -p vmux_dx --test policy --test conventions
 
   test-rust:
-    name: Rust tests
+    name: Rust unit & integration tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
     if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_test_rust
@@ -478,14 +486,14 @@ jobs:
           VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
         run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
-      - name: Run tests
+      - name: Run Rust unit and integration tests
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }} -- --skip new_declarations_have_canonical_ownership_or_an_explicit_boundary
 
       - name: Test record contracts alongside Workspace storage
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
 
   test-sdk:
-    name: ECS framework tests
+    name: Public API compatibility tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_sdk
@@ -521,10 +529,10 @@ jobs:
         with:
           cache-key: sdk-path
           cef-version: ${{ needs.plan.outputs.cef }}
-      - name: Test public SDK
+      - name: Verify public APIs from an external workspace
         if: needs.changes.outputs.contracts == 'true'
         run: vmux dx test sdk
-      - name: Test isolated product hosts without a renderer
+      - name: Verify host APIs from an external workspace
         if: needs.changes.outputs.contracts == 'true'
         run: vmux dx test sdk --host
 
@@ -535,7 +543,7 @@ jobs:
           vmux dx test sdk --host --git
 
   test-lean:
-    name: Lean desktop tests
+    name: Desktop feature availability tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lean == 'true' && !needs.changes.outputs.reuse_test_lean
@@ -573,11 +581,11 @@ jobs:
           cache-key: test-lean
           cef-version: ${{ needs.plan.outputs.cef }}
 
-      - name: Test lean desktop features
+      - name: Verify unavailable desktop features
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests
 
   test-headless:
-    name: Headless tests
+    name: App configuration tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_headless
@@ -613,7 +621,8 @@ jobs:
         with:
           cache-key: headless
           cef-version: ${{ needs.plan.outputs.cef }}
-      - run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
+      - name: Verify plugin configuration without desktop adapters
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
 
   test:
     name: Test
@@ -694,7 +703,7 @@ jobs:
         run: dx build --platform web --release
 
   dx-macos:
-    name: Prepare macOS CLI and test build tooling
+    name: Build macOS CI tool & test signing
     needs: [plan, changes]
     if: (github.event_name != 'pull_request' || needs.plan.outputs.release == 'true') && (needs.changes.outputs.macos == 'true' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos_tooling == 'true')
     runs-on: macos-latest
