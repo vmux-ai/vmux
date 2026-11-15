@@ -722,10 +722,21 @@ fn both_branch_option_forms_refuse_a_missing_branch_without_changing_checkout() 
 }
 
 #[test]
+fn desktop_help_exposes_the_branch_without_launching() {
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .args(["desktop", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[BRANCH]"))
+        .stdout(predicate::str::contains("current checkout"));
+}
+
+#[test]
 #[cfg(unix)]
 fn positional_branches_refuse_a_missing_worktree_before_building_or_launching() {
     let fixture = Fixture::new();
-    for command in ["build", "run", "serve"] {
+    for command in ["build", "run", "desktop", "serve"] {
         fixture
             .command()
             .args([command, "missing-dx-fixture-branch"])
@@ -1783,39 +1794,41 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
     );
     let data = fixture.directory.path().join("copied store");
     std::fs::write(fixture.root.join(".env"), "VMUX_PROFILE=from-file\nVMUX_DATA_DIR=/file-data-must-not-win\nVMUX_REMOTE_RELAY_URL=https://production.invalid:443\n").unwrap();
-    fixture
-        .command()
-        .args(["run", "main", "-p", "local"])
-        .env("VMUX_PROFILE", "work")
-        .env_remove("VMUX_TEST")
-        .env("VMUX_DATA_DIR", &data)
-        .env("VMUX_REMOTE_RELAY_URL", "https://localhost:8787")
-        .assert()
-        .success();
-    let output = std::fs::read(fixture.root.join("open.log")).unwrap();
-    let actual = output
-        .split(|byte| *byte == 0)
-        .filter(|value| !value.is_empty())
-        .map(|value| std::str::from_utf8(value).unwrap().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        actual,
-        vec![
-            "--env".to_owned(),
-            "VMUX_PROFILE=work".into(),
-            "--env".into(),
-            format!("VMUX_DATA_DIR={}", data.display()),
-            "--env".into(),
-            "VMUX_REMOTE_RELAY_URL=https://localhost:8787".into(),
-            release
-                .join("Vmux (newer).app")
-                .canonicalize()
-                .unwrap()
-                .display()
-                .to_string(),
-        ]
-    );
-    assert!(!fixture.root.join("build.log").exists());
+    for command in ["run", "desktop"] {
+        fixture
+            .command()
+            .args([command, "main", "-p", "local"])
+            .env("VMUX_PROFILE", "work")
+            .env_remove("VMUX_TEST")
+            .env("VMUX_DATA_DIR", &data)
+            .env("VMUX_REMOTE_RELAY_URL", "https://localhost:8787")
+            .assert()
+            .success();
+        let output = std::fs::read(fixture.root.join("open.log")).unwrap();
+        let actual = output
+            .split(|byte| *byte == 0)
+            .filter(|value| !value.is_empty())
+            .map(|value| std::str::from_utf8(value).unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![
+                "--env".to_owned(),
+                "VMUX_PROFILE=work".into(),
+                "--env".into(),
+                format!("VMUX_DATA_DIR={}", data.display()),
+                "--env".into(),
+                "VMUX_REMOTE_RELAY_URL=https://localhost:8787".into(),
+                release
+                    .join("Vmux (newer).app")
+                    .canonicalize()
+                    .unwrap()
+                    .display()
+                    .to_string(),
+            ]
+        );
+        assert!(!fixture.root.join("build.log").exists());
+    }
 }
 
 #[test]

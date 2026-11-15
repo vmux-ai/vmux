@@ -110,7 +110,10 @@ impl bevy_app::Plugin for DxPlugin {
             )
                 .chain(),
         )
-        .add_systems(Update, initialize.in_set(Stage::Initialize))
+        .add_systems(
+            Update,
+            (normalize, initialize).chain().in_set(Stage::Initialize),
+        )
         .insert_resource(Mailbox::new())
         .add_message::<Completion>()
         .add_systems(
@@ -324,6 +327,15 @@ type Finishing<'w, 's> = Query<
     (Entity, &'static Children, &'static OperationState),
     (With<Accepted>, Without<CliResult>),
 >;
+
+fn normalize(mut requests: Query<&mut CliInvocation, Without<CliResult>>) {
+    for mut invocation in &mut requests {
+        if invocation.is("dx.desktop") {
+            invocation.command = "dx.run".into();
+        }
+    }
+}
+
 fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
     if signals.is_some() {
         return;

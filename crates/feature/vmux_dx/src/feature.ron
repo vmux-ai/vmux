@@ -39,6 +39,14 @@
                 (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
                 (id: "forward", index: Some(2), trailing: true)
             ]),
+        (id: "dx.desktop", name: "desktop", about: Some("Run a prepared desktop app; defaults to the current checkout"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "branch", index: Some(1), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(2), trailing: true)
+            ]),
         (id: "dx.serve", name: "serve", about: Some("Serve the website with live reload"), arguments: [
             (id: "branch", index: Some(1), value_name: Some("BRANCH")),
             (id: "root", long: Some("root"), value_name: Some("PATH")),
