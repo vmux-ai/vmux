@@ -143,7 +143,7 @@ impl Plugin for PagePlugin {
             PageReady,
             vmux_api::address::PageAddressRequest,
         )>::default())
-            .add_plugins(crate::page_location::Plugin)
+            .add_plugins(crate::page_location::PageLocationPlugin)
             .add_plugins(HostHistoryPlugin)
             .add_observer(mark_webview_ready)
             .configure_sets(Startup, PageEmbedSet)

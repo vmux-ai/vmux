@@ -1,4 +1,4 @@
-pub use account::{Plugin, Set};
+pub use account::{AccountPlugin, Set};
 pub use catalog::{
     DirectoryObservation, Error, Loaded, Location, ReadCompleted, ReadRequest, RetryRequest, Root,
     Selection,

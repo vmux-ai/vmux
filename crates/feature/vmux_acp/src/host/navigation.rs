@@ -39,9 +39,9 @@ type ReadyPageOpen = (
     Without<PageOpenDeferred>,
 );
 
-pub(super) struct Plugin;
+pub(super) struct NavigationPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<vmux_git::GitRuntime>()
             .add_message::<vmux_session::preferences::RetryPreferences>()
@@ -1261,7 +1261,7 @@ mod tests {
     #[test]
     fn retry_reopens_the_same_session_and_preserves_its_resume_identity() {
         let mut app = App::new();
-        app.add_plugins(super::Plugin);
+        app.add_plugins(super::NavigationPlugin);
         app.add_message::<vmux_ecs::PageOpenRequest>();
         let session = app
             .world_mut()

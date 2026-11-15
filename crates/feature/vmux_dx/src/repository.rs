@@ -102,7 +102,7 @@ mod tests {
             branch: Option<&OsStr>,
         ) -> std::result::Result<Checkout, String> {
             let mut app = bevy_app::App::new();
-            app.add_plugins(crate::repository_selection::Plugin);
+            app.add_plugins(crate::repository_selection::RepositorySelectionPlugin);
             let entity = app
                 .world_mut()
                 .spawn(crate::repository_selection::Input {
@@ -251,7 +251,7 @@ mod tests {
     fn removing_the_request_cancels_its_git_process_without_blocking_the_schedule() {
         let fixture = Fixture::new();
         let mut app = bevy_app::App::new();
-        app.add_plugins(crate::repository_selection::Plugin);
+        app.add_plugins(crate::repository_selection::RepositorySelectionPlugin);
         let request = app
             .world_mut()
             .spawn(crate::repository_selection::Input {

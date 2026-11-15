@@ -1442,7 +1442,7 @@ mod tests {
                 .init_non_send::<bevy_cef::prelude::Browsers>()
                 .add_plugins((
                     PalettePlugin,
-                    super::super::controller::Plugin,
+                    super::super::controller::ControllerPlugin,
                     super::super::panel::PanelPlugin,
                 ))
                 .add_observer(capture_page_open);

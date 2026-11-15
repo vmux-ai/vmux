@@ -22,6 +22,99 @@ const UPSTREAM_SETS: &[(&str, &str)] = &[
 ];
 
 #[test]
+fn bevy_plugins_use_descriptive_names_with_plugin_suffix() {
+    let inventory = Inventory::workspace(&Workspace::current().0);
+    let violations = inventory.plugin_names();
+    assert!(
+        violations.is_empty(),
+        "Bevy plugin types and aliases must have descriptive names ending in Plugin:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn plugin_names_follow_framework_and_type_aliases() {
+    for (source, expected) in [
+        (
+            "use bevy_app::Plugin; struct HttpPlugin; impl Plugin for HttpPlugin {}",
+            vec![],
+        ),
+        (
+            "struct Plugin; impl bevy_app::Plugin for Plugin {}",
+            vec!["Plugin"],
+        ),
+        (
+            "use bevy_app::Plugin as Engine; struct Http; impl Engine for Http {}",
+            vec!["Http"],
+        ),
+        (
+            "struct Http; type HttpPlugin = Http; impl bevy_app::Plugin for HttpPlugin {}",
+            vec!["Http"],
+        ),
+        (
+            "mod actual { pub struct Http; } use actual::Http as HttpPlugin; impl bevy_app::Plugin for HttpPlugin {}",
+            vec!["Http"],
+        ),
+        (
+            "mod actual { pub struct HttpPlugin; impl bevy_app::Plugin for HttpPlugin {} } pub use actual::HttpPlugin as Plugin;",
+            vec!["Plugin"],
+        ),
+        (
+            "trait Plugin {} struct Http; impl Plugin for Http {}",
+            vec![],
+        ),
+        (
+            "const SOURCE: &str = \"struct Plugin; impl bevy_app::Plugin for Plugin {}\";",
+            vec![],
+        ),
+    ] {
+        let inventory = Inventory::fixture(source);
+        let violations = inventory.plugin_names();
+        let names: Vec<_> = violations
+            .iter()
+            .map(|violation| violation.rsplit_once(": ").unwrap().1)
+            .collect();
+        assert_eq!(names, expected, "{source}");
+    }
+}
+
+#[test]
+fn plugin_naming_covers_owned_source_and_preserves_vendored_types() {
+    for (path, rejected) in [
+        ("crates/sample/src/lib.rs", true),
+        ("examples/sample/src/lib.rs", true),
+        ("website/src/lib.rs", true),
+        ("scripts/sample.rs", true),
+        ("patches/sample/src/lib.rs", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source(path, "struct Http; impl bevy_app::Plugin for Http {}");
+        assert_eq!(!inventory.plugin_names().is_empty(), rejected, "{path}");
+    }
+    for (name, rejected) in [("Plugin", true), ("Http", true), ("HttpPlugin", false)] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "patches/vendor/src/lib.rs",
+            "pub struct Http; impl bevy_app::Plugin for Http {}",
+        );
+        inventory.source(
+            "crates/sample/src/lib.rs",
+            &format!("pub use vendor::Http as {name};"),
+        );
+        assert_eq!(!inventory.plugin_names().is_empty(), rejected, "{name}");
+    }
+    for (name, rejected) in [("Http", true), ("HttpPlugin", false)] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "patches/vendor/src/lib.rs",
+            &format!("pub struct {name}; impl bevy_app::Plugin for {name} {{}}"),
+        );
+        inventory.source("crates/sample/src/lib.rs", "pub use vendor::*;");
+        assert_eq!(!inventory.plugin_names().is_empty(), rejected, "{name}");
+    }
+}
+
+#[test]
 fn renderer_helpers_require_a_current_typed_production_parent() {
     for (attributes, body, expected) in [
         ("#[component]", "rsx! { Child { text: view.text } }", true),
@@ -582,7 +675,7 @@ fn fetched_policy_refuses_the_same_misplaced_fragments_as_the_filesystem() {
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
     let policy = Policy::load(&root.0).expect("valid ownership policy");
-    let architecture = std::fs::read_to_string(root.0.join("docs/architecture.md"))
+    let architecture = std::fs::read_to_string(root.0.join("docs/dx/architecture.md"))
         .expect("architecture boundary contract");
     assert!(
         architecture
@@ -4999,6 +5092,119 @@ impl Inventory {
                 .iter()
                 .any(|body| body.key == key && body.fingerprint == fingerprint)
         })
+    }
+
+    fn plugin_names(&self) -> Vec<String> {
+        let mut owned = BTreeSet::new();
+        let mut namespaces = BTreeSet::new();
+        for (path, usage) in &self.usage {
+            if path.starts_with("crates/")
+                || path.starts_with("examples/")
+                || path.starts_with("website/")
+                || path.starts_with("scripts/")
+                || path == "fixture.rs"
+            {
+                owned.insert(path.clone());
+                namespaces.insert(usage.namespace.clone());
+            }
+        }
+        let mut plugins = BTreeSet::new();
+        for entry in self.entries.values() {
+            if let Some(path) = entry.plugin_path.as_deref()
+                && self
+                    .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("Plugin")
+                && let Some(path) = entry.owner.as_deref()
+                && let Some(owner) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                && let Some(owner) = self.nominal(owner)
+            {
+                plugins.insert(owner.key.clone());
+            }
+            if entry.contract_paths.iter().any(|path| {
+                self.contract_kind(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("app_plugin")
+            }) {
+                plugins.insert(entry.key.clone());
+            }
+        }
+        let mut violations = BTreeSet::new();
+        for key in &plugins {
+            let owner = &self.entries[key];
+            if owned.contains(&owner.path)
+                && (owner.name == "Plugin" || !owner.name.ends_with("Plugin"))
+            {
+                violations.insert(format!("{}: {}", owner.path, owner.name));
+            }
+        }
+        for alias in self.entries.values() {
+            if !owned.contains(&alias.path) || !matches!(alias.kind, Kind::Alias) {
+                continue;
+            }
+            if let Some(owner) = self.nominal(alias)
+                && plugins.contains(&owner.key)
+                && (alias.name == "Plugin" || !alias.name.ends_with("Plugin"))
+            {
+                violations.insert(format!("{}: {}", alias.path, alias.name));
+            }
+        }
+        for (namespace, imports) in &self.imports {
+            if !namespaces
+                .iter()
+                .any(|root| namespace == root || namespace.starts_with(&format!("{root}::")))
+            {
+                continue;
+            }
+            for name in imports.aliases.keys() {
+                if name != "Plugin" && name.ends_with("Plugin") {
+                    continue;
+                }
+                if let Some(owner) = self.resolve(namespace, name, &mut BTreeSet::new())
+                    && let Some(owner) = self.nominal(owner)
+                    && plugins.contains(&owner.key)
+                {
+                    violations.insert(format!("{namespace}: {name}"));
+                }
+            }
+            if imports.globs.is_empty() {
+                continue;
+            }
+            for key in &plugins {
+                let name = &self.entries[key].name;
+                if name != "Plugin" && name.ends_with("Plugin") {
+                    continue;
+                }
+                if let Some(owner) = self.resolve(namespace, name, &mut BTreeSet::new())
+                    && let Some(owner) = self.nominal(owner)
+                    && owner.key == *key
+                {
+                    violations.insert(format!("{namespace}: {name}"));
+                }
+            }
+        }
+        violations.into_iter().collect()
+    }
+
+    fn nominal<'a>(&'a self, mut entry: &'a Declaration) -> Option<&'a Declaration> {
+        let mut visiting = BTreeSet::new();
+        while matches!(entry.kind, Kind::Alias) {
+            if !visiting.insert(entry.key.clone()) {
+                return None;
+            }
+            let Type::Path(path) = entry.field_types.first()? else {
+                return None;
+            };
+            let path = path
+                .path
+                .segments
+                .iter()
+                .map(|part| part.ident.unraw().to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            entry = self.resolve(&entry.namespace, &path, &mut BTreeSet::new())?;
+        }
+        Some(entry)
     }
 
     fn workspace(root: &Path) -> Self {

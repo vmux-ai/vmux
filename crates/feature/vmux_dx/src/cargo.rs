@@ -17,9 +17,9 @@ use crate::execution::Failure;
 use crate::repository::Checkout;
 use crate::work::Outcome;
 
-pub struct Plugin;
+pub struct CargoPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for CargoPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,

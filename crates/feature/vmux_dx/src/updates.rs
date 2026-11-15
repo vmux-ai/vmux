@@ -14,16 +14,16 @@ use crate::execution::Failure;
 use crate::signals::Signals;
 use crate::update_io::{Guard, Installation, Published, Verified};
 
-pub struct Plugin;
+pub struct UpdatesPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for UpdatesPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Receipt>()
             .add_systems(Update, (accept, receive, collect, select, start).chain());
     }
 }
 
-impl Plugin {
+impl UpdatesPlugin {
     pub fn automatic() -> Option<u8> {
         let mut arguments = std::env::args_os().skip(1);
         for argument in &mut arguments {
@@ -687,7 +687,7 @@ esac
 
         fn run(&self, request: Request) -> bool {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(UpdatesPlugin);
             let operation = app
                 .world_mut()
                 .spawn((request, self.installation.clone()))

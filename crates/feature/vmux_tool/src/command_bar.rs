@@ -10,9 +10,9 @@ use vmux_ui::i18n::translate;
 
 use crate::connection::McpSnapshotRequest;
 
-pub(crate) struct Plugin;
+pub(crate) struct CommandBarPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(query)
             .add_observer(receive)
@@ -123,7 +123,7 @@ mod tests {
     impl Palette {
         fn create() -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin).add_observer(capture);
+            app.add_plugins(CommandBarPlugin).add_observer(capture);
             app.world_mut()
                 .spawn(FeatureManifest::of::<crate::Feature>());
             app.world_mut().spawn(FeatureManifest::parse(r#"(

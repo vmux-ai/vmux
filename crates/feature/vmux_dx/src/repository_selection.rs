@@ -14,9 +14,9 @@ use crate::repository::Checkout;
 use crate::repository_io::Read;
 use crate::signals::Signals;
 
-pub struct Plugin;
+pub struct RepositorySelectionPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for RepositorySelectionPlugin {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<JobWake>() {
             app.insert_resource(JobWake(std::sync::Arc::new(CliWake::current()).into()));

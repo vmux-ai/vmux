@@ -66,7 +66,7 @@ mod workspace_io;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-pub struct Plugin;
+pub struct DxPlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 enum Stage {
@@ -74,7 +74,7 @@ enum Stage {
     Execute,
 }
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for DxPlugin {
     fn build(&self, app: &mut App) {
         if !app
             .world()
@@ -89,17 +89,17 @@ impl bevy_app::Plugin for Plugin {
         app.register_required_components::<Work, Step>();
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
-            updates::Plugin,
-            workspace::Plugin,
-            repository_selection::Plugin,
-            debug::Plugin,
-            storage_runtime::Plugin,
-            process_observation::Plugin,
-            publication::Plugin,
-            cli_package::Plugin,
-            package::Plugin,
-            reset::Plugin,
-            tooling::Plugin,
+            updates::UpdatesPlugin,
+            workspace::WorkspacePlugin,
+            repository_selection::RepositorySelectionPlugin,
+            debug::DebugPlugin,
+            storage_runtime::StorageRuntimePlugin,
+            process_observation::ProcessObservationPlugin,
+            publication::PublicationPlugin,
+            cli_package::CliPackagePlugin,
+            package::PackagePlugin,
+            reset::ResetPlugin,
+            tooling::ToolingPlugin,
         ))
         .configure_sets(
             Update,
@@ -174,7 +174,7 @@ impl bevy_app::Plugin for Plugin {
     }
 }
 
-impl Plugin {
+impl DxPlugin {
     pub fn selected(arguments: impl Iterator<Item = OsString>) -> bool {
         workspace::Host::selected(arguments.collect())
     }
@@ -2037,7 +2037,7 @@ mod tests {
             };
             let storage = Storage::new(policy::Policy::environment().unwrap());
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(DxPlugin);
             let operation = app
                 .world_mut()
                 .spawn((

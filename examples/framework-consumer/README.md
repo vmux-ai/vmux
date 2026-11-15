@@ -35,4 +35,4 @@ accepted tickets, or opts into the filesystem adapter. It does not need Editor o
 Profile. Native plugins added to Vmux use the same components and operations, with their
 presentation and platform adapters composed at the host boundary.
 
-The supported surface and compatibility rules are in `docs/architecture.md`.
+The supported surface and compatibility rules are in the [framework guide](../../docs/dx/framework.md).

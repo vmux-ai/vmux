@@ -8,9 +8,9 @@ use vmux_api::command_bar::{CommandBarUiState, StartBranchesRequest, StartProjec
 use vmux_api::space::ProjectBranch;
 use vmux_git::{GitRuntime, GitTask};
 
-pub(crate) struct Plugin;
+pub(crate) struct BranchesPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for BranchesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GitRuntime>()
             .add_plugins(UiEventPlugin::<(StartBranchesRequest,)>::default())
@@ -221,7 +221,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(runtime)
             .insert_non_send(Browsers::default())
-            .add_plugins(Plugin);
+            .add_plugins(BranchesPlugin);
         let first = app.world_mut().spawn_empty().id();
         let second = app.world_mut().spawn_empty().id();
         let third = app.world_mut().spawn_empty().id();

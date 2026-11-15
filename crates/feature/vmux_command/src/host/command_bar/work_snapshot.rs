@@ -10,9 +10,9 @@ const WORK_DIR_ENTRIES_CAP: usize = 40;
 const RECENT_FILES_CAP: usize = 20;
 type RecentPageChange = Or<(Added<Url>, Changed<LastVisitedAt>)>;
 
-pub(super) struct Plugin;
+pub(super) struct WorkSnapshotPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for WorkSnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn).add_systems(
             Update,
@@ -182,7 +182,7 @@ mod tests {
         let cwd = root.to_string_lossy().to_string();
 
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(WorkSnapshotPlugin);
         app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
@@ -209,7 +209,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(WorkSnapshotPlugin);
         app.world_mut()
             .spawn(CommandBarWorkDirectory(root.to_string_lossy().into_owned()));
         app.update();
@@ -232,7 +232,7 @@ mod tests {
         let cwd = root.to_string_lossy().to_string();
 
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(WorkSnapshotPlugin);
         app.world_mut().spawn(CommandBarWorkDirectory(cwd.clone()));
         app.update();
 
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn recent_files_only_file_urls_ranked() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(WorkSnapshotPlugin);
         app.world_mut().spawn((
             Url,
             PageMetadata {
@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn search_engines_are_ordered_by_most_recent_visit() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(WorkSnapshotPlugin);
         app.world_mut().spawn(WorkSnapshot::search_manifest());
         for (url, visited) in [
             ("https://www.google.com/search?q=old", 1000),

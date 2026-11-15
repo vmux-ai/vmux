@@ -25,16 +25,16 @@ impl Plugin for EditorPlugin {
             app_key::KeyPlugin,
             search::SearchPlugin,
             directory::DirectoryPlugin,
-            command_bar::Plugin,
+            command_bar::CommandBarPlugin,
         ))
         .add_plugins(panel::PanelPlugin)
         .add_plugins((
             page_open::PageOpenPlugin,
             project::ProjectPagePlugin,
             file_lifecycle::FileLifecyclePlugin,
-            fold_store::Plugin,
+            fold_store::FoldStorePlugin,
             workspace_edit::WorkspaceEditPlugin,
-            feedback::Plugin,
+            feedback::FeedbackPlugin,
             status::StatusPlugin,
             address::AddressPlugin,
             viewport::ViewportPlugin,

@@ -14,9 +14,9 @@ use vmux_ecs::{
 };
 use vmux_profile::Profile as Directory;
 
-pub(crate) struct Plugin;
+pub(crate) struct CatalogPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ReadRequest>()
             .add_message::<ReadCompleted>()

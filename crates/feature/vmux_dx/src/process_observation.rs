@@ -15,9 +15,9 @@ use crate::signals::Signals;
 use crate::storage_io::{Capture, ToolOutput};
 use crate::{Attempt, Lease, Settings};
 
-pub(crate) struct Plugin;
+pub(crate) struct ProcessObservationPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for ProcessObservationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JobPlugin::<Task<Read>>::default())
             .configure_sets(

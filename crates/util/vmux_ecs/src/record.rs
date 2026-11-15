@@ -15,9 +15,9 @@ use uuid::Uuid;
 
 pub use crate::{Revision, Uuid as Id};
 
-pub struct Plugin;
+pub struct RecordPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for RecordPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AppTypeRegistry>()
             .configure_sets(
@@ -758,7 +758,7 @@ mod tests {
             version: 2,
             value: expected.clone(),
         }];
-        let mut app = Plugin::fixture();
+        let mut app = RecordPlugin::fixture();
         let request = app
             .world_mut()
             .spawn(RestoreRequest(Graph(vec![record])))
@@ -831,10 +831,10 @@ mod tests {
         }
     }
 
-    impl Plugin {
+    impl RecordPlugin {
         fn fixture() -> App {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(RecordPlugin);
             let registry = app.world().resource::<AppTypeRegistry>();
             let mut registry = registry.write();
             registry.register::<ChildOf>();
@@ -852,7 +852,7 @@ mod tests {
         let scope = Uuid::new_v4();
         let root = Uuid::new_v4();
         let child = Uuid::new_v4();
-        let mut app = Plugin::fixture();
+        let mut app = RecordPlugin::fixture();
         let request = app
             .world_mut()
             .spawn(RestoreRequest(Graph(vec![
@@ -974,7 +974,7 @@ mod tests {
             vec![Record::fixture(scope, a, "A", None), wrong_version],
             vec![Record::fixture(scope, a, "A", None), invalid_value],
         ] {
-            let mut app = Plugin::fixture();
+            let mut app = RecordPlugin::fixture();
             let request = app.world_mut().spawn(RestoreRequest(Graph(records))).id();
             app.update();
             assert!(matches!(
@@ -993,7 +993,7 @@ mod tests {
     #[test]
     fn ambiguous_storage_keys_refuse_restore_and_capture_without_partial_entities() {
         let scope = Uuid::new_v4();
-        let mut app = Plugin::fixture();
+        let mut app = RecordPlugin::fixture();
         let original = app
             .world_mut()
             .spawn(RestoreRequest(Graph(vec![Record::fixture(

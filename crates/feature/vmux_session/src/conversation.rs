@@ -2565,7 +2565,7 @@ mod tests {
         let observed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let writes = observed.clone();
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin).add_systems(
+        app.add_plugins(crate::history::HistoryPlugin).add_systems(
             PostUpdate,
             move |changed: Query<Entity, Changed<TranscriptCache>>| {
                 writes.fetch_add(changed.iter().count(), std::sync::atomic::Ordering::SeqCst);
@@ -2636,7 +2636,7 @@ mod tests {
     #[test]
     fn duplicate_session_ids_refuse_events_and_recover_after_removal() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let id = SessionId("shared".into());
         let first = app.world_mut().spawn((Session, id.clone())).id();
         let duplicate = app.world_mut().spawn((Session, id.clone())).id();
@@ -2684,7 +2684,7 @@ mod tests {
                 TaskPoolPlugin::default(),
                 AssetPlugin::default(),
                 vmux_ecs::PrimitivesPlugin,
-                crate::history::Plugin,
+                crate::history::HistoryPlugin,
             ))
             .register_stored::<Session>()
             .register_stored::<SessionId>()
@@ -2721,7 +2721,7 @@ mod tests {
                 TaskPoolPlugin::default(),
                 AssetPlugin::default(),
                 vmux_ecs::PrimitivesPlugin,
-                crate::history::Plugin,
+                crate::history::HistoryPlugin,
             ))
             .register_stored::<Session>()
             .register_stored::<SessionId>()
@@ -2760,7 +2760,7 @@ mod tests {
     #[test]
     fn snapshot_materializes_ordered_events_under_session() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session = app
             .world_mut()
             .spawn((Session, SessionId("session-1".into())))
@@ -2799,7 +2799,7 @@ mod tests {
     #[test]
     fn agent_added_after_session_gets_a_member() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session = app
             .world_mut()
             .spawn((Session, SessionId("session-1".into())))
@@ -2835,7 +2835,7 @@ mod tests {
     #[test]
     fn committed_operation_replaces_the_pending_client_operation() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session_id = SessionId("session-1".into());
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         let client_op_id = ClientOpId::new("op-1");
@@ -2892,7 +2892,7 @@ mod tests {
     #[test]
     fn snapshot_does_not_remove_operation_events() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session_id = SessionId("session-1".into());
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
@@ -2927,7 +2927,7 @@ mod tests {
     #[test]
     fn append_preserves_the_snapshot_and_orders_new_messages() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session_id = SessionId("session-1".into());
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
@@ -2970,7 +2970,7 @@ mod tests {
     #[test]
     fn operation_replaces_stale_snapshot_event_in_the_same_update() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session_id = SessionId("session-1".into());
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
@@ -3011,7 +3011,7 @@ mod tests {
     #[test]
     fn operation_replacement_survives_a_later_snapshot() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session_id = SessionId("session-1".into());
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
@@ -3053,7 +3053,7 @@ mod tests {
     #[test]
     fn repeated_snapshot_preserves_existing_timestamp() {
         let mut app = App::new();
-        app.add_plugins(crate::history::Plugin);
+        app.add_plugins(crate::history::HistoryPlugin);
         let session_id = SessionId("session-1".into());
         app.world_mut().spawn((Session, session_id.clone()));
         app.world_mut()

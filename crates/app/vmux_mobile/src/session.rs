@@ -19,9 +19,9 @@ use crate::remote::{Api, ApiError, ClientOperationIds};
 use crate::runtime::RuntimeHandle;
 use crate::transition;
 
-pub struct Plugin;
+pub struct SessionPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for SessionPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenSession>()
             .add_message::<LeaveSession>()

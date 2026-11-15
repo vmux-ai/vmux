@@ -25,12 +25,12 @@ use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, SessionView};
 use crate::state::ChatUiState;
 
-pub(super) struct Plugin;
+pub(super) struct ResumePlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for ResumePlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::provider::Plugin>() {
-            app.add_plugins(crate::provider::Plugin);
+        if !app.is_plugin_added::<crate::provider::ProviderPlugin>() {
+            app.add_plugins(crate::provider::ProviderPlugin);
         }
         app.init_resource::<ProviderSessionTombstones>()
             .add_plugins(UiEventPlugin::<(
@@ -466,7 +466,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Responses>()
             .add_message::<PageOpenRequest>()
-            .add_plugins(Plugin)
+            .add_plugins(ResumePlugin)
             .add_observer(Responses::command_bar);
         let stack = app.world_mut().spawn_empty().id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
@@ -537,7 +537,7 @@ mod tests {
     fn dismissed_provider_sessions_stay_out_of_resume_results() {
         let mut app = App::new();
         app.init_resource::<Responses>()
-            .add_plugins((crate::DomainPlugin, Plugin))
+            .add_plugins((crate::DomainPlugin, ResumePlugin))
             .add_observer(Responses::command_bar);
         let source = app
             .world_mut()
@@ -606,7 +606,7 @@ mod tests {
     fn chat_resume_query_uses_the_same_local_session_catalog() {
         let mut app = App::new();
         app.init_resource::<Responses>()
-            .add_plugins(Plugin)
+            .add_plugins(ResumePlugin)
             .add_observer(Responses::chat);
         spawn_session(app.world_mut());
         let webview = app.world_mut().spawn(SessionView).id();

@@ -16,9 +16,9 @@ use vmux_layout::worktree::{
 };
 use vmux_ui::i18n::translate;
 
-pub(crate) struct Plugin;
+pub(crate) struct WorkspacePlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GitRuntime>()
             .init_resource::<ManagedWorktreeRoot>()
@@ -401,7 +401,7 @@ mod tests {
             let original = tempfile::tempdir().unwrap();
             let other = tempfile::tempdir().unwrap();
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, Plugin))
+            app.add_plugins((MinimalPlugins, WorkspacePlugin))
                 .insert_resource(ManagedWorktreeRoot(other.path().join("worktrees")))
                 .init_resource::<Published>()
                 .add_observer(Published::record);

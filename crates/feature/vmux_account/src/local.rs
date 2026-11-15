@@ -14,9 +14,9 @@ use crate::{
     WriteCompleted, WriteFailure, WriteRequest,
 };
 
-pub struct Plugin;
+pub struct LocalPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for LocalPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             JobPlugin::<ReadJob>::default(),

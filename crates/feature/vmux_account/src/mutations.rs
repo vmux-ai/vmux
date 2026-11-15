@@ -13,9 +13,9 @@ use vmux_ecs::{
 };
 use vmux_profile::Profile as Directory;
 
-pub(crate) struct Plugin;
+pub(crate) struct MutationsPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for MutationsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CreateRequest>()
             .add_message::<RenameRequest>()

@@ -17,9 +17,9 @@ use crate::tooling_io::CreateDirectory;
 use crate::work::Outcome;
 use crate::{Attempt, Completion, Lease, Settings};
 
-pub(crate) struct Plugin;
+pub(crate) struct CliPackagePlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for CliPackagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             IoPlugin::<Capture>::default(),
@@ -1115,7 +1115,7 @@ mod tests {
         fs::set_permissions(&worker, fs::Permissions::from_mode(0o755)).unwrap();
         let environment = crate::environment::Environment::current();
         let mut app = App::new();
-        app.add_plugins(crate::Plugin);
+        app.add_plugins(crate::DxPlugin);
         let context = app
             .world_mut()
             .spawn((
@@ -1209,7 +1209,7 @@ mod tests {
         let archive = target.join("release/vmux-cli-v9.0.0-aarch64-apple-darwin.tar.gz");
         fs::write(&archive, "previous release").unwrap();
         let mut app = App::new();
-        app.add_plugins(crate::Plugin);
+        app.add_plugins(crate::DxPlugin);
         let operation = app
             .world_mut()
             .spawn((

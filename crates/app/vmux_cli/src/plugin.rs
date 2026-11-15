@@ -22,7 +22,7 @@ impl Plugin for CliPlugin {
             vmux_app::VmuxPlugin::builder().cli().build(),
         ));
         #[cfg(feature = "dx")]
-        app.add_plugins(vmux_dx::Plugin);
+        app.add_plugins(vmux_dx::DxPlugin);
         app.add_plugins(CliRuntimePlugin).add_systems(Update, open);
     }
 }

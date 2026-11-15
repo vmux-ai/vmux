@@ -3,9 +3,9 @@ use crate::launch::TerminalLaunch;
 use bevy::prelude::*;
 use vmux_command::CommandBarWorkDirectory;
 
-pub struct Plugin;
+pub struct SnapshotPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,

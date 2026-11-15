@@ -97,35 +97,14 @@ impl Plugin for ExtensionPlugin {
         app.add_plugins(FilesystemPlugin);
         let profile = vmux_ecs::profile::Profile::current().into_id();
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
-        let registrations = prepared
-            .0
-            .iter()
-            .map(|runtime| bridge::BridgeRegistration {
-                extension_id: runtime.extension_id.clone(),
-                authorization: bridge::BridgeAuthorization {
-                    permissions: runtime.granted_permissions.iter().cloned().collect(),
-                    host_permissions: runtime
-                        .granted_host_permissions
-                        .iter()
-                        .map(|pattern| {
-                            crate::match_pattern::ExtensionMatchPattern::parse(pattern)
-                                .unwrap_or_else(|error| {
-                                    panic!("invalid stored host permission: {error}")
-                                })
-                        })
-                        .collect(),
-                    conformance: conformance_extension.as_deref()
-                        == Some(runtime.extension_id.as_str()),
-                },
-            })
-            .collect();
+        let registrations = prepared.registrations(conformance_extension.as_deref());
         app.world_mut().spawn((Name::new("Extensions"), prepared));
         app.add_agent_request::<AgentBrowserInstallExtension>()
             .add_plugins((
                 crate::catalog::ExtensionCatalogPlugin,
                 vmux_ecs::UiStatePlugin::<vmux_api::extension::ExtensionsUiState>::default(),
                 bridge::ExtensionBridgePlugin::new(profile, registrations),
-                access::Plugin,
+                access::AccessPlugin,
                 bridge_page::ExtensionBridgePagePlugin,
                 broker::ExtensionBrokerPlugin,
                 project::ExtensionProjectPlugin,
@@ -134,6 +113,29 @@ impl Plugin for ExtensionPlugin {
             ))
             .add_systems(Update, request_install.after(AgentRequestRouteSet))
             .add_systems(Update, encode_install.in_set(ToolDispatchSet));
+    }
+}
+
+impl PreparedExtensions {
+    fn registrations(&self, conformance: Option<&str>) -> Vec<bridge::BridgeRegistration> {
+        let mut registrations = Vec::new();
+        for runtime in &self.0 {
+            let mut host_permissions = Vec::new();
+            for pattern in &runtime.granted_host_permissions {
+                let pattern = crate::match_pattern::ExtensionMatchPattern::parse(pattern)
+                    .unwrap_or_else(|error| panic!("invalid stored host permission: {error}"));
+                host_permissions.push(pattern);
+            }
+            registrations.push(bridge::BridgeRegistration {
+                extension_id: runtime.extension_id.clone(),
+                authorization: bridge::BridgeAuthorization {
+                    permissions: runtime.granted_permissions.iter().cloned().collect(),
+                    host_permissions,
+                    conformance: conformance == Some(runtime.extension_id.as_str()),
+                },
+            });
+        }
+        registrations
     }
 }
 

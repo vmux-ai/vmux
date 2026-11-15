@@ -11,18 +11,18 @@ pub struct AcpPlugin;
 
 impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((super::acp::ConfigPlugin, super::runtime::Plugin));
+        app.add_plugins((super::acp::ConfigPlugin, super::runtime::RuntimePlugin));
         super::command_bar::add(app);
-        app.add_plugins(super::approval::Plugin);
-        app.add_plugins(super::attach::Plugin);
+        app.add_plugins(super::approval::ApprovalPlugin);
+        app.add_plugins(super::attach::AttachPlugin);
         super::attention::add(app);
-        app.add_plugins(super::command::Plugin);
+        app.add_plugins(super::command::CommandPlugin);
         super::continuation::add(app);
-        app.add_plugins(super::external::Plugin);
+        app.add_plugins(super::external::ExternalPlugin);
         super::follow::add(app);
         super::handoff::add(app);
-        app.add_plugins(super::ingress::Plugin);
-        app.add_plugins(super::navigation::Plugin);
+        app.add_plugins(super::ingress::IngressPlugin);
+        app.add_plugins(super::navigation::NavigationPlugin);
         super::tidy::add(app);
         super::toast::add(app);
         app.register_stored::<AcpSessionId>()

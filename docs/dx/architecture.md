@@ -79,6 +79,8 @@ conventions, and platform checks. Targeted local tests cover the changed behavio
 
 Give independent operations separate typed requests and phases, and keep handlers focused on one stage. This makes ownership and failure paths visible when a feature grows. An adapter's exception describes its actual outside interface; it does not move the feature's decisions out of Bevy.
 
+Cloud release snapshots become canonical ECS before consumers read decisions; unavailable input uses the declared default. Native extension bridge setup translates granted catalog permissions into initialization parameters; permission decisions stay in the catalog.
+
 Startup migrations retain their accepted configuration and revision on the owning store until completion. Bookmark default seeding materializes pending pins as entities before ordering and publication, preserves custom pins and folders, and advances autosave when the same deferred-command drain completes.
 
 CI sequencing belongs to the GitHub Actions workflow before product composition. Its Git adapter verifies the captured head/base merge and prepares identical checkouts for every runner; CLI artifacts bind their bytes to that checkout and run. PR validation performs no branch-run lookup or polling, so merge verification cannot wait behind a separate push workflow. Required statuses reject failed preparation and unexpected skips of applicable checks. Native distribution work remains outside ordinary PR validation. Heavy validation remains applicable after preparation failures but cancels when a PR run is superseded, so it cannot hold the concurrency slot for the new head.

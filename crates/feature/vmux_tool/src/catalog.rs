@@ -11,9 +11,9 @@ use crate::state::{
     ToolsSnapshot,
 };
 
-pub(crate) struct Plugin;
+pub(crate) struct CatalogPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(replace)
             .add_observer(remove)
@@ -279,7 +279,7 @@ mod tests {
 
     impl bevy::prelude::Plugin for FixturePlugin {
         fn build(&self, app: &mut App) {
-            app.add_plugins(Plugin)
+            app.add_plugins(CatalogPlugin)
                 .init_resource::<Published>()
                 .add_systems(PostUpdate, publish);
         }

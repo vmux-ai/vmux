@@ -9,14 +9,14 @@ use vmux_session::{AgentId, RunState, Session, SessionId};
 use crate::approval::{Grants, Remember, StoreRequested};
 use crate::host::event::{AgentApprovalReply, ApprovalDecision};
 
-pub(super) struct Plugin;
+pub(super) struct ApprovalPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for ApprovalPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::approval::Plugin>() {
-            app.add_plugins(crate::approval::Plugin);
+        if !app.is_plugin_added::<crate::approval::ApprovalPlugin>() {
+            app.add_plugins(crate::approval::ApprovalPlugin);
         }
-        app.add_plugins(super::approval_io::Plugin)
+        app.add_plugins(super::approval_io::ApprovalIoPlugin)
             .add_message::<ServiceRequest>()
             .add_systems(Startup, spawn)
             .add_observer(receive)
@@ -163,7 +163,7 @@ mod tests {
         fn install(&mut self) {
             self.app = App::new();
             self.app
-                .add_plugins((bevy::app::TaskPoolPlugin::default(), super::Plugin));
+                .add_plugins((bevy::app::TaskPoolPlugin::default(), super::ApprovalPlugin));
             self.app
                 .world_mut()
                 .write_message(StoreRequested(self.path.clone()));

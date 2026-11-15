@@ -19,9 +19,9 @@ use crate::storage_io::{
 use crate::work::Outcome;
 use crate::{Attempt, Completion, Lease, Settings};
 
-pub(crate) struct Plugin;
+pub(crate) struct ResetPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for ResetPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             IoPlugin::<Inspect>::default(),
@@ -949,7 +949,7 @@ mod tests {
             environment.set("VMUX_BUILD_PROFILE", profile);
             let policy = crate::policy::Policy::configured(&environment).unwrap();
             let mut app = App::new();
-            app.add_plugins(crate::Plugin);
+            app.add_plugins(crate::DxPlugin);
             let operation = app
                 .world_mut()
                 .spawn((

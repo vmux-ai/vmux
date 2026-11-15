@@ -18,9 +18,9 @@ use crate::{
     SessionId, SourceUpdatedAt,
 };
 
-pub struct Plugin;
+pub struct ProviderPlugin;
 
-impl BevyPlugin for Plugin {
+impl BevyPlugin for ProviderPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
@@ -1249,7 +1249,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(ProviderPlugin);
             let source = app
                 .world_mut()
                 .spawn((

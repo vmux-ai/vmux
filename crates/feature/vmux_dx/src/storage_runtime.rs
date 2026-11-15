@@ -23,9 +23,9 @@ use crate::storage_io::{
 use crate::work::Outcome;
 use crate::{Completion, Settings};
 
-pub(crate) struct Plugin;
+pub(crate) struct StorageRuntimePlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for StorageRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             IoPlugin::<Inspect>::default(),
@@ -2356,7 +2356,7 @@ mod tests {
             );
             environment.set("PATH", path);
             let mut app = App::new();
-            app.add_plugins(crate::Plugin);
+            app.add_plugins(crate::DxPlugin);
             let operation = app
                 .world_mut()
                 .spawn((

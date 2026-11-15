@@ -16,9 +16,9 @@ use crate::signals::Signals;
 use crate::storage_io::{Done, Inspect, PathMetadata, Remove, StorageJob};
 use crate::temporary::Temporary;
 
-pub(crate) struct Plugin;
+pub(crate) struct PublicationPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for PublicationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             IoPlugin::<Inspect>::default(),
@@ -833,7 +833,7 @@ mod tests {
             fs::create_dir(&destination).unwrap();
             let staging = Arc::new(Temporary::create(&destination, ".publication").unwrap());
             let mut app = App::new();
-            app.add_plugins(crate::Plugin);
+            app.add_plugins(crate::DxPlugin);
             let context = app
                 .world_mut()
                 .spawn(

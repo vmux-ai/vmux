@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::{ExplorerNotice, ExplorerNoticeDismissRequest, FileEditNotice};
 
-pub(super) struct Plugin;
+pub(super) struct FeedbackPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for FeedbackPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ExplorerNoticeDismissRequest,)>::default())
             .add_observer(show_edit_failure)

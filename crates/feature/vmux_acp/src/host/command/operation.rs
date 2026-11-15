@@ -12,9 +12,9 @@ use super::CommandSet;
 use crate::host::acp::registry::RegistryAgent;
 use vmux_session::Route as SessionRoute;
 
-pub(super) struct Plugin;
+pub(super) struct OperationPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for OperationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingSessionCreations>()
             .add_observer(open_created_session)
