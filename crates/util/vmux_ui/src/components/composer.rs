@@ -2,9 +2,7 @@ use dioxus::prelude::*;
 pub use vmux_api::prompt_media::PromptComposerAttachment;
 
 use crate::cn::cn;
-use crate::components::avatar::AgentThumbnail;
 use crate::components::popup::Dismissal;
-use crate::components::progress::TaskStep;
 use crate::components::prompt_box::{PromptBox, PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
@@ -366,62 +364,6 @@ pub fn ComposerFrame(
 }
 
 #[component]
-pub fn ComposerTask(
-    title: String,
-    steps: Vec<String>,
-    #[props(default)] completed_steps: Vec<usize>,
-    #[props(default)] pending_step: Option<usize>,
-    #[props(default)] message: String,
-    #[props(default)] icon: Option<String>,
-    #[props(default)] on_select: Option<EventHandler<()>>,
-    #[props(default)] action_step: usize,
-    #[props(default = translate("common-continue"))] action_label: String,
-    #[props(default)] detail_step: Option<usize>,
-    #[props(default = rsx! {})] children: Element,
-) -> Element {
-    let completed = !steps.is_empty() && completed_steps.len() == steps.len();
-    let current =
-        pending_step.or_else(|| (0..steps.len()).find(|index| !completed_steps.contains(index)));
-    let heading = rsx! {
-        AgentThumbnail { src: icon, seed: "vmux-setup-agent".to_string(), background: String::new(), class: "size-5".to_string() }
-        span {
-            class: "min-w-0 flex-1 bg-[linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end))] bg-clip-text text-transparent",
-            {title}
-        }
-        if completed { LineIconView { icon: LineIcon::Check, class: "size-4".to_string() } }
-    };
-    rsx! {
-        div { class: "p-2 text-inherit", "data-slot": "composer-task",
-            h3 { class: "flex h-8 items-center gap-2 px-2 text-sm font-medium", {heading} }
-            ol { role: "list", class: "ml-8 list-none",
-                for (index, label) in steps.into_iter().enumerate() {
-                    TaskStep {
-                        number: index + 1,
-                        label,
-                        completed: completed_steps.contains(&index),
-                        pending: pending_step == Some(index),
-                        current: current == Some(index),
-                        on_select: if index == action_step { on_select } else { None },
-                        action_label: action_label.clone(),
-                        if detail_step == Some(index) {
-                            div { class: "composer-task-details ml-6 grid",
-                                div { class: "min-h-0 overflow-hidden px-2 pb-2 pt-1", {children.clone()} }
-                            }
-                        }
-                    }
-                }
-            }
-            if !message.is_empty() { p { role: "status", aria_live: "polite", class: "px-2 pb-1 pt-2 text-xs leading-relaxed opacity-70", {message} } }
-            if detail_step.is_none() {
-                div { class: "composer-task-details grid",
-                    div { class: "min-h-0 overflow-hidden", {children} }
-                }
-            }
-        }
-    }
-}
-
-#[component]
 pub fn ComposerNotice(
     #[props(default)] content: Option<Element>,
     #[props(default)] class: String,
@@ -441,30 +383,6 @@ pub fn ComposerNotice(
             aria_hidden: (!expanded).to_string(),
             inert: (!expanded).then_some("true"),
             div { class: "composer-notice-content min-h-0 overflow-hidden", {shown} }
-        }
-    }
-}
-
-#[component]
-pub fn DisabledComposer(placeholder: String) -> Element {
-    rsx! {
-        PromptComposer {
-            value: String::new(),
-            placeholder,
-            input_disabled: true,
-            accent_color: "var(--muted-foreground)".to_string(),
-            accent_gradient: String::new(),
-            footer: Some(rsx! {}),
-            show_add_button: false,
-            show_send_button: false,
-            action_title: String::new(),
-            action_enabled: false,
-            on_input: move |_| {},
-            on_keydown: move |_| {},
-            on_action: move |_| {},
-            on_paste: move |_| {},
-            on_attach: move |_| {},
-            on_remove_attachment: move |_| {},
         }
     }
 }
@@ -489,8 +407,7 @@ mod tests {
     #[component]
     fn TaskFixture() -> Element {
         rsx! {
-            ComposerTask {
-                title: "Setup Agent".to_string(),
+            crate::components::progress::TaskSteps {
                 steps: vec!["Choose ACP".to_string(), "Install ACP".to_string(), "Connect ACP".to_string()],
                 completed_steps: vec![0],
                 pending_step: Some(1),

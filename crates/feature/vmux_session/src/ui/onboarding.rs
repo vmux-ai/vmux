@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::composer::DisabledComposer;
 use vmux_ui::components::manager::{ManagerSearch, ManagerSearchRow};
 use vmux_ui::components::prompt::{
     ConversationPrompt, PromptConfirmation, PromptOption, PromptSelection, PromptSelectionChange,
@@ -28,8 +27,7 @@ fn Conversation(state: OnboardingUiState) -> Element {
     rsx! {
         super::surface::Page { accent: Identity::COLOR.to_string(), setup: true, onboarding_entry: true,
             super::surface::Transcript { id: "setup-scroll".to_string(), at_bottom: false,
-                super::setup::Welcome {
-                    p { class: "onboarding-detail text-sm leading-relaxed text-muted-foreground", {translate("onboarding-setup-intro")} }
+                super::setup::Welcome { onboarding: state.clone(),
                     if state.failed {
                         p { class: "text-sm leading-relaxed", {translate("onboarding-setup-failed")} }
                     }
@@ -42,9 +40,7 @@ fn Conversation(state: OnboardingUiState) -> Element {
                     notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1",
                         AgentSelector { state }
                     } }),
-                DisabledComposer {
-                    placeholder: translate("onboarding-composer-wait"),
-                }
+
                 }
             }
         }
@@ -95,7 +91,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
     let agent = state.agents.iter().find(|agent| agent.id == chosen);
     let confirm_label = match agent {
         Some(agent) if (state.paused || state.failed) && agent.id == state.agent_id => {
-            translate("common-retry")
+            translate("common-resume")
         }
         Some(agent) => translate_with(
             "onboarding-continue-agent",
@@ -116,7 +112,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     }
                 },
             } }),
-            ManagerSearchRow {
+            ManagerSearchRow { compact: true,
                 ManagerSearch {
                     value: query(),
                     placeholder: translate("onboarding-search-agents"),
@@ -436,10 +432,13 @@ mod tests {
     fn agent_selection_stays_editable_and_only_confirmation_starts_setup() {
         let mut fixture = Fixture::new(false);
         let html = dioxus_ssr::render(&fixture.dom);
-        let intro = translate("onboarding-setup-intro");
-        assert!(fixture.initial.edits.iter().any(|edit| {
-            matches!(edit, Mutation::CreateTextNode { value, .. } if value == &intro)
-        }));
+        let progress = html.find("<ol ").expect("conversation progress");
+        let composer = html
+            .find("data-slot=\"composer-frame\"")
+            .expect("response composer");
+        assert!(progress < composer);
+        assert!(!html[composer..].contains("<ol "));
+        assert!(!html.contains("<textarea"));
         assert!(html.contains("role=\"radiogroup\""));
         for prompt in vmux_ui::components::starter_prompts::StarterPrompt::all() {
             assert!(!html.contains(&prompt.text()));
@@ -462,17 +461,7 @@ mod tests {
     fn choice_keyboard_activation_works_while_the_normal_composer_stays_disabled() {
         let mut fixture = Fixture::new(false);
         let html = dioxus_ssr::render(&fixture.dom);
-        let input = html
-            .split("<textarea")
-            .nth(1)
-            .unwrap()
-            .split('>')
-            .next()
-            .unwrap();
-        assert!(input.contains("disabled"));
-        let composer = fixture.element("id", vmux_ui::components::composer::PROMPT_INPUT_ID);
-        fixture.press(composer, Key::Enter, Code::Enter);
-        assert!(fixture.host.0.borrow().is_empty());
+        assert!(!html.contains("<textarea"));
         let search = fixture.element("aria-label", &translate("onboarding-search-agents"));
         let confirm = fixture.element("aria-label", &translate("common-continue"));
         fixture.press(search, Key::Enter, Code::Enter);

@@ -5,6 +5,28 @@ use dioxus::prelude::*;
 use dioxus_primitives::progress::{self, ProgressIndicatorProps, ProgressProps};
 
 #[component]
+pub fn TaskSteps(
+    steps: Vec<String>,
+    #[props(default)] completed_steps: Vec<usize>,
+    #[props(default)] pending_step: Option<usize>,
+    #[props(default)] current_step: Option<usize>,
+    #[props(default)] on_select: Option<EventHandler<()>>,
+    #[props(default)] action_step: usize,
+    #[props(default = translate("common-continue"))] action_label: String,
+) -> Element {
+    let current = current_step
+        .or(pending_step)
+        .or_else(|| (0..steps.len()).find(|index| !completed_steps.contains(index)));
+    rsx! {
+        ol { class: "task-steps flex max-w-sm list-none flex-col gap-0.5", role: "list",
+            for (index, label) in steps.into_iter().enumerate() {
+                TaskStep { number: index + 1, label, completed: completed_steps.contains(&index), pending: pending_step == Some(index), current: current == Some(index), on_select: if index == action_step { on_select } else { None }, action_label: action_label.clone() }
+            }
+        }
+    }
+}
+
+#[component]
 pub fn TaskStep(
     number: usize,
     label: String,

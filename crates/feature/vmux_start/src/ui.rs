@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::composer::{
-    ComposerFrame, ComposerNotice, ComposerTask, DisabledComposer,
-};
+use vmux_ui::components::composer::ComposerFrame;
 use vmux_ui::components::manager::ManagerPage;
 use vmux_ui::components::message::{MessageFrame, WelcomeLayout};
+use vmux_ui::components::progress::TaskSteps;
+use vmux_ui::components::prompt::PromptConfirmation;
 
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
@@ -79,26 +79,18 @@ fn SetupWelcome() -> Element {
                     name: translate("onboarding-guide"),
                     seed: "vmux-setup-agent".to_string(),
                     p { class: "text-sm leading-relaxed", {translate("onboarding-start-description")} }
+                    TaskSteps { steps: vec![translate("onboarding-checklist-select"), translate("onboarding-checklist-install"), translate("onboarding-checklist-connect")] }
                 }
             }
             div { class: "h-[var(--vmux-welcome-composer-height)] shrink-0",
                 ComposerFrame {
-                    borderless: true,
-                    content_class: "h-12".to_string(),
-                    notice: Some(rsx! { ComposerNotice {
-                        content: Some(rsx! { ComposerTask {
-                            title: translate("onboarding-setup"),
-                            action_label: translate("common-continue"),
-                            steps: vec![translate("onboarding-checklist-select"), translate("onboarding-checklist-install"), translate("onboarding-checklist-connect")],
-                            on_select: Some(EventHandler::new(move |_| {
-                                let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest {
-                                    value: "vmux://start/onboarding/agent".to_string(),
-                                    open: Some(vmux_api::open_target::OpenTarget::InPlace),
-                                });
-                            })),
-                        } }),
-                    } }),
-                    DisabledComposer { placeholder: translate("onboarding-composer-wait") }
+                    content_class: "rounded-[14px] bg-muted px-3 py-2".to_string(),
+                    PromptConfirmation {
+                        confirm_label: translate("common-continue"),
+                        on_confirm: move |_| {
+                            let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest { value: "vmux://start/onboarding/agent".to_string(), open: Some(vmux_api::open_target::OpenTarget::InPlace) });
+                        },
+                    }
                 }
             }
         }

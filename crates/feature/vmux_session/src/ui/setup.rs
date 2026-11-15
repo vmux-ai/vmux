@@ -5,11 +5,9 @@ use crate::onboarding::{
 };
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::composer::{
-    ComposerFrame, ComposerNotice, ComposerTask, PromptComposer, PromptComposerMode, ShortcutHint,
-};
+use vmux_ui::components::composer::{ComposerFrame, ComposerNotice, ShortcutHint};
 use vmux_ui::components::message::MessageFrame;
-use vmux_ui::components::progress::{Progress, ProgressIndicator};
+use vmux_ui::components::progress::{Progress, ProgressIndicator, TaskSteps};
 use vmux_ui::components::prompt::{ConversationPrompt, PromptConfirmation};
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -20,6 +18,7 @@ pub(super) fn Turn(#[props(default)] agent_name: String, children: Element) -> E
         MessageFrame {
             name: if agent_name.is_empty() { Identity::name() } else { translate_with("onboarding-setup-agent", &[("agent", TranslationValue::String(&agent_name))]) },
             seed: "vmux-setup-agent".to_string(),
+            reserve_metadata: false,
             {children}
         }
     }
@@ -28,16 +27,30 @@ pub(super) fn Turn(#[props(default)] agent_name: String, children: Element) -> E
 #[component]
 pub(super) fn Welcome(
     #[props(default)] agent_name: String,
+    #[props(default)] chat: Option<Chat>,
+    #[props(default)] onboarding: OnboardingUiState,
     #[props(default = rsx! {})] children: Element,
 ) -> Element {
+    let task = Task::of(chat, &onboarding);
     rsx! {
-        div { class: "onboarding-origin min-h-24",
+        div { class: "onboarding-origin",
             Turn { agent_name: agent_name.clone(),
                 p { class: "text-sm leading-relaxed", {if agent_name.is_empty() { translate("onboarding-start-description") } else { translate_with("onboarding-start-agent-description", &[("agent", TranslationValue::String(&agent_name))]) }} }
+                TaskSteps { steps: task.steps, completed_steps: task.completed, pending_step: task.pending, current_step: Some(task.current) }
+                if onboarding.paused { p { role: "status", class: "text-sm text-muted-foreground", {task.message} } }
                 {children}
             }
         }
     }
+}
+
+#[component]
+pub(super) fn ConnectedWelcome(chat: Chat) -> Element {
+    let state = vmux_ui::hooks::use_ui_state::<OnboardingUiState>()
+        .state
+        .read()
+        .clone();
+    rsx! { Welcome { agent_name: chat.header_name(), chat: Some(chat), onboarding: state } }
 }
 
 #[component]
@@ -53,9 +66,9 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .clone();
     let resumable = onboarding.paused || chat.status() == "errored";
     let notice = if resumable {
-        Some(rsx! { RecoveryControls { pending: keys.pending, show_retry: false } })
+        Some(rsx! { RecoveryControls { pending: keys.pending } })
     } else if chat.authentication_pending() {
-        Some(rsx! { RecoveryControls { pending: keys.pending, allow_change: false } })
+        Some(rsx! { CancelControl {} })
     } else if chat.setup_busy() && chat.status() != "authentication" {
         Some(rsx! { CancelControl {} })
     } else if chat.status() == "authentication" {
@@ -69,9 +82,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
     };
     let on_choose = (!keys.pending && !chat.authentication_pending())
         .then_some(EventHandler::new(move |_| Choice::ChangeAgent.choose()));
-    let on_resume =
-        (resumable && !keys.pending).then_some(EventHandler::new(move |_| Choice::Retry.choose()));
-    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, on_resume, SetupComposer { chat, keys } } }
+    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, SetupComposer { chat, keys } } }
 }
 
 #[component]
@@ -81,27 +92,23 @@ pub(super) fn Frame(
     #[props(default)] chat: Option<Chat>,
     #[props(default)] onboarding: OnboardingUiState,
     #[props(default)] on_choose: Option<EventHandler<()>>,
-    #[props(default)] on_resume: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
-    let task = Task::of(chat, &onboarding);
+    let name = chat.as_ref().map(Chat::header_name).unwrap_or_default();
+    let notice = notice.or_else(|| on_choose.map(|_| rsx! {}));
     rsx! {
         ComposerFrame {
             borderless: true,
-            content_class: if compact { "h-12".to_string() } else { String::new() },
-            notice: Some(rsx! { ComposerNotice {
-                content: Some(rsx! { ComposerTask {
-                    title: task.title,
-                    steps: task.steps,
-                    completed_steps: task.completed,
-                    pending_step: task.pending,
-                    detail_step: Some(task.current),
-                    on_select: on_resume.or(on_choose),
-                    action_step: if on_resume.is_some() { task.current } else { 0 },
-                    action_label: if on_resume.is_some() { translate("common-resume") } else { Choice::ChangeAgent.label() },
-                    message: task.message,
-                    icon: task.icon,
-                    if let Some(notice) = notice { {notice} }
+            content_class: if compact { "p-0".to_string() } else { String::new() },
+            notice: notice.map(|notice| rsx! { ComposerNotice {
+                content: Some(rsx! { div { class: "setup-reply p-2",
+                    if !onboarding.starting && let Some(on_choose) = on_choose {
+                        Button { variant: ButtonVariant::Ghost, size: ButtonSize::Sm, aria_label: Choice::ChangeAgent.label(), class: "mb-1 text-muted-foreground", onclick: move |_| on_choose.call(()),
+                            {name.clone()}
+                            vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::ChevronDown, class: "size-3.5".to_string() }
+                        }
+                    }
+                    {notice}
                 } }),
                 class: "setup-notice".to_string(),
             } }),
@@ -111,13 +118,11 @@ pub(super) fn Frame(
 }
 
 struct Task {
-    title: String,
     steps: Vec<String>,
     completed: Vec<usize>,
     pending: Option<usize>,
     current: usize,
     message: String,
-    icon: Option<String>,
 }
 
 impl Task {
@@ -138,14 +143,6 @@ impl Task {
         {
             name = chat.header_name();
         }
-        let title = if name.is_empty() {
-            translate("onboarding-setup")
-        } else {
-            translate_with(
-                "onboarding-setup-agent",
-                &[("agent", TranslationValue::String(&name))],
-            )
-        };
         let mut steps = Vec::new();
         for (generic, named) in [
             (
@@ -203,15 +200,11 @@ impl Task {
         let current =
             pending.unwrap_or_else(|| (0..3).find(|index| !completed.contains(index)).unwrap_or(2));
         Self {
-            title,
             steps,
             completed,
             pending,
             current,
             message,
-            icon: agent
-                .filter(|agent| !agent.icon.is_empty())
-                .map(|agent| agent.icon.clone()),
         }
     }
     fn message(key: &str, name: &str) -> String {
@@ -236,7 +229,7 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
         div { "data-slot": "composer-notice", class: "px-1 pt-2",
             ConversationPrompt {
                 actions: Some(rsx! { PromptConfirmation {
-                    confirm_label: translate("onboarding-connect"),
+                    confirm_label: translate_with("onboarding-connect-agent", &[("agent", TranslationValue::String(&chat.header_name()))]),
                     enabled: available,
                     pending,
                     cancel_label: Some(translate("common-cancel")),
@@ -302,33 +295,18 @@ impl Connection {
 }
 
 #[component]
-fn RecoveryControls(
-    pending: bool,
-    #[props(default = true)] allow_change: bool,
-    #[props(default = true)] show_retry: bool,
-) -> Element {
+fn RecoveryControls(pending: bool, #[props(default = true)] show_retry: bool) -> Element {
     rsx! {
         div { "data-slot": "composer-notice", class: "px-1 pt-2",
             ConversationPrompt {
                 actions: Some(rsx! { if show_retry { PromptConfirmation {
-                    confirm_label: Choice::Retry.label(),
+                    confirm_label: translate("common-resume"),
                     pending,
                     cancel_label: Some(Choice::Cancel.label()),
                     on_confirm: move |_| Choice::Retry.choose(),
                     on_cancel: move |_| Choice::Cancel.choose(),
                 } } else { CancelControl {} } }),
-                if allow_change {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    disabled: pending,
-                    style: "color:inherit;",
-                    class: "[&:hover]:bg-background/5",
-                    aria_label: Choice::ChangeAgent.label(),
-                    onclick: move |_| Choice::ChangeAgent.choose(),
-                    {Choice::ChangeAgent.label()}
-                }
-                }
+
             }
         }
     }
@@ -351,24 +329,7 @@ fn SetupComposer(chat: Chat, keys: KeyEntryUiState) -> Element {
             }
         };
     }
-    let busy = chat.setup_busy() || keys.pending;
-    let footer = if chat.status() == "errored" {
-        rsx! {}
-    } else {
-        rsx! { ShortcutHint { shortcut: "Esc", label: translate("common-cancel") } }
-    };
-    rsx! {
-        PromptComposer {
-            value: chat.draft(), input_disabled: true,
-            placeholder: translate("onboarding-composer-wait"), accent_color: chat.accent().css,
-            accent_gradient: "from-indigo-500 to-violet-600".to_string(), footer: Some(footer),
-            show_add_button: false, show_send_button: false,
-            mode: if busy { PromptComposerMode::Stop } else { PromptComposerMode::Send },
-            action_title: translate("common-stop"), action_enabled: busy,
-            on_input: move |_| {}, on_keydown: move |_| {}, on_paste: move |_| {}, on_attach: move |_| {},
-            on_remove_attachment: move |_| {}, on_action: move |_| chat.stop_or_flush(),
-        }
-    }
+    rsx! {}
 }
 
 #[component]
@@ -583,6 +544,8 @@ mod tests {
             state.set(ChatUiState {
                 snapshot: ChatSnapshot {
                     status,
+                    agent_name: "Test ACP".into(),
+                    header_name: "Test ACP".into(),
                     authentication_pending: pending,
                     authentication_methods: vec![
                         vmux_api::protocol::AuthenticationMethod {
@@ -662,7 +625,14 @@ mod tests {
                     value: AttributeValue::Text(value),
                     id,
                     ..
-                } if value == &translate("onboarding-connect") => Some(*id),
+                } if value
+                    == &translate_with(
+                        "onboarding-connect-agent",
+                        &[("agent", TranslationValue::String("Test ACP"))],
+                    ) =>
+                {
+                    Some(*id)
+                }
                 _ => None,
             })
             .expect("the provider sign-in method is selectable in the composer");
@@ -679,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_setup_uses_standard_stop_and_disables_only_unneeded_text_input() {
+    fn busy_setup_offers_cancel_without_a_work_textarea() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         for (status, pending, key_available) in [
             ("preparing", false, false),
@@ -701,12 +671,9 @@ mod tests {
             let initial = dom.rebuild_to_vec();
             let html = dioxus_ssr::render(&dom);
             assert!(html.contains(&translate("common-cancel")));
-            assert!(html.contains("Esc"));
             assert!(initial.edits.iter().any(|edit| matches!(edit,
                 Mutation::SetAttribute { name: "aria-label" | "title", value: AttributeValue::Text(value), .. } if value == &translate("common-cancel"))));
-            if status == "authentication" {
-                assert!(html.contains(&translate("common-retry")));
-            }
+            assert!(!html.contains(&translate("common-retry")));
             let choose_label = format!("aria-label=\"{}\"", translate("composer-choose-agent"));
             for button in html.split("<button").skip(1) {
                 let attributes = button.split('>').next().unwrap();
@@ -721,29 +688,20 @@ mod tests {
                 assert!(!html.contains("role=\"listbox\""));
             }
             assert!(!html.contains("type=\"password\""));
-            {
-                let textarea = html
-                    .split("<textarea")
-                    .nth(1)
-                    .unwrap()
-                    .split('>')
-                    .next()
-                    .unwrap();
-                assert!(textarea.contains("disabled"));
-            }
+            assert!(!html.contains("<textarea"));
             let stop = initial
                 .edits
                 .iter()
                 .find_map(|edit| match edit {
                     Mutation::SetAttribute {
-                        name: "title",
+                        name: "aria-label",
                         value: AttributeValue::Text(value),
                         id,
                         ..
-                    } if value == &translate("common-stop") => Some(*id),
+                    } if value == &translate("common-cancel") => Some(*id),
                     _ => None,
                 })
-                .expect("busy setup must show the normal stop control");
+                .expect("busy setup must expose Cancel");
             assert!(!initial.edits.iter().any(|edit| matches!(edit,
                 Mutation::SetAttribute { name: "disabled", value: AttributeValue::Bool(true), id, .. } if *id == stop)));
             let keyboard = SerializedKeyboardData::new(
@@ -770,7 +728,7 @@ mod tests {
                 stop,
             );
             dom.render_immediate_to_vec();
-            assert_eq!(*host.0.borrow(), ["stop"]);
+            assert_eq!(*host.0.borrow(), ["cancel"]);
         }
     }
 
@@ -944,23 +902,9 @@ mod tests {
         dom.provide_root_context(HostBinding(host.clone()));
         let initial = dom.rebuild_to_vec();
         let html = dioxus_ssr::render(&dom);
-        let textarea = html
-            .split("<textarea")
-            .nth(1)
-            .unwrap()
-            .split('>')
-            .next()
-            .unwrap();
-        assert!(textarea.contains(" disabled="));
-        assert!(
-            html.find("data-slot=\"composer-notice\"").unwrap() < html.find("<fieldset").unwrap()
-        );
+        assert!(!html.contains("<textarea"));
+        assert!(!html.contains("<ol "));
         let label = translate("common-resume");
-        assert!(html.split("<li ").skip(1).any(|row| {
-            let row = row.split("</li>").next().unwrap();
-            row.contains("aria-current=\"step\"")
-                && row.contains(&format!("aria-label=\"{label}\""))
-        }));
         let retry = initial
             .edits
             .iter()

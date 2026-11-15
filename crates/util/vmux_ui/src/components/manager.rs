@@ -198,8 +198,8 @@ pub fn WorkspaceLayout(
 }
 
 #[component]
-pub fn ManagerSearchRow(children: Element) -> Element {
-    rsx! { PageToolbarRow { class: "relative w-full min-h-11 px-2 py-2".to_string(), {children} } }
+pub fn ManagerSearchRow(#[props(default)] compact: bool, children: Element) -> Element {
+    rsx! { PageToolbarRow { class: if compact { "relative w-full min-h-8 px-2 py-0.5".to_string() } else { "relative w-full min-h-11 px-2 py-2".to_string() }, {children} } }
 }
 
 #[component]

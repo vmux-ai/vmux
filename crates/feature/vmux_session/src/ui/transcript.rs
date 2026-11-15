@@ -106,7 +106,7 @@ pub(super) fn ChatTranscript(
             on_resize: move |_| {
                 if *chat.transcript.initial_follow.peek() || *at_bottom.peek() { chat.transcript.follow(); }
             },
-                if setup { super::setup::Welcome { agent_name: chat.header_name() } }
+                if setup { super::setup::ConnectedWelcome { chat } }
                 if transcript_loading {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 || has_older {

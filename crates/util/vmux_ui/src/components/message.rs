@@ -48,9 +48,9 @@ pub fn MessageFrame(
 pub struct WelcomeLayout;
 
 impl WelcomeLayout {
-    pub const GUIDE_HEIGHT: u32 = 96;
+    pub const GUIDE_HEIGHT: u32 = 160;
     pub const GAP: u32 = 16;
-    pub const NOTICE_HEIGHT: u32 = 144;
+    pub const NOTICE_HEIGHT: u32 = 0;
     pub const COMPOSER_HEIGHT: u32 = Self::NOTICE_HEIGHT + 48;
     pub const HEIGHT: u32 = Self::GUIDE_HEIGHT + Self::GAP + Self::COMPOSER_HEIGHT;
 

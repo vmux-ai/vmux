@@ -13,7 +13,7 @@ pub fn ConversationPrompt(
     children: Element,
 ) -> Element {
     rsx! {
-        section { class: "flex min-w-0 flex-col gap-3 text-inherit",
+        section { class: "flex min-w-0 flex-col gap-2 text-inherit",
             if let Some(question) = question {
                 p { class: "text-sm font-medium leading-relaxed", {question} }
             }
@@ -89,7 +89,7 @@ pub fn PromptSelection(
             class: "min-w-0 border-0 p-0",
             role: if mode == PromptSelectionMode::Single { "radiogroup" } else { "group" },
             aria_label: label,
-            div { class: "flex flex-col gap-1 overflow-y-auto overscroll-contain {viewport_class}",
+            div { class: "flex flex-col gap-0.5 overflow-y-auto overscroll-contain {viewport_class}",
                 for (index, option) in options.into_iter().enumerate() {
                     {
                         let checked = selected.contains(&option.value);
@@ -99,11 +99,11 @@ pub fn PromptSelection(
                             label {
                                 key: "prompt-{option.value}",
                                 class: if unavailable {
-                                    "flex min-h-10 shrink-0 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 opacity-45"
+                                    "flex min-h-9 shrink-0 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-1.5 opacity-45"
                                 } else if checked {
-                                    "flex min-h-10 shrink-0 cursor-pointer items-center gap-3 rounded-lg bg-background/[0.06] px-3 py-2 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
+                                    "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg bg-background/[0.06] px-3 py-1.5 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
                                 } else {
-                                    "flex min-h-10 shrink-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-background/[0.04] focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
+                                    "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 transition-colors hover:bg-background/[0.04] focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
                                 },
                                 input {
                                     r#type: mode.input_type(),
@@ -146,7 +146,7 @@ pub fn PromptConfirmation(
     #[props(default)] on_cancel: Option<EventHandler<()>>,
 ) -> Element {
     rsx! {
-        div { class: "flex flex-wrap items-center justify-end gap-2 pt-1",
+        div { class: if on_cancel.is_some() { "flex flex-wrap items-center justify-between gap-2" } else { "flex flex-wrap items-center justify-end gap-2" },
             if let (Some(label), Some(on_cancel)) = (cancel_label, on_cancel) {
                 Button {
                     variant: ButtonVariant::Ghost,
