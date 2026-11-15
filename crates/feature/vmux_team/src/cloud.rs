@@ -130,7 +130,7 @@ impl Projection<'_, '_> {
             }
         }
         for (id, directory, owner, enabled) in &self.profiles {
-            if owner.0 != account || !active.is_some_and(|active| active.id == directory.0) {
+            if owner.0 != account || active.is_none_or(|active| active.id != directory.0) {
                 continue;
             }
             state.profile_id = Some(id.0.clone());
