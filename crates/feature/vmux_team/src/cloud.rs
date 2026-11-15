@@ -15,9 +15,9 @@ use vmux_ecs::{Active, ProfileId, Ready, Revision, Uuid as Id};
 
 use crate::host::Team;
 
-pub(crate) struct Plugin;
+pub(crate) struct AccountLinkPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for AccountLinkPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             TeamAccountConnectRequest,

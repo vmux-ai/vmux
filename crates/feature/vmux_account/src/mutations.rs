@@ -284,8 +284,8 @@ fn select_sync(
     mut requests: MessageReader<SyncRequest>,
     mut queue: Queue,
     catalog: Catalog,
-    bindings: Query<&Binding, With<Account>>,
-    revisions: Query<&Revision, With<Account>>,
+    available: Query<(), With<crate::CloudAvailable>>,
+    states: Query<(&Revision, Option<&Binding>), With<Account>>,
     mut replies: MessageWriter<MutationCompleted>,
     mut commands: Commands,
 ) {
@@ -293,11 +293,17 @@ fn select_sync(
         let result = match catalog.account(request.root) {
             Some((account, id))
                 if id == request.account_id
-                    && revisions
+                    && states
                         .get(account)
-                        .is_ok_and(|revision| revision.0 == request.binding_revision) =>
+                        .is_ok_and(|(revision, _)| revision.0 == request.binding_revision) =>
             {
-                if request.enabled && !bindings.get(account).is_ok_and(Binding::is_linked) {
+                if request.enabled && !available.contains(request.root) {
+                    Err(Failure::AccessDenied)
+                } else if request.enabled
+                    && !states
+                        .get(account)
+                        .is_ok_and(|(_, binding)| binding.is_some_and(Binding::is_linked))
+                {
                     Err(Failure::NotLinked)
                 } else {
                     queue.reserve(request.root, request.operation_id)

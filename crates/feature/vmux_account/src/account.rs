@@ -15,7 +15,7 @@ impl bevy_app::Plugin for AccountPlugin {
         app.add_plugins((
             crate::catalog::CatalogPlugin,
             crate::mutations::MutationsPlugin,
-            crate::connection::Plugin,
+            crate::connection::ConnectionPlugin,
         ))
         .configure_sets(
             Update,
@@ -578,6 +578,143 @@ mod tests {
     }
 
     #[test]
+    fn a_disabled_cloud_gate_refuses_sync_enable_without_rewriting_local_preferences() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        let (account, _, generation) = fixture.account();
+        fixture.app.world_mut().entity_mut(account).insert(Binding {
+            server: "accounts.example:8788".into(),
+            account_id: Some(Uuid::from_u128(99).to_string()),
+            credential_generation: generation,
+        });
+        let profile = fixture.profile("personal").0;
+        assert_eq!(
+            fixture.select(profile, true).result.unwrap_err(),
+            Failure::AccessDenied
+        );
+        let entity = fixture.entity("personal");
+        assert!(fixture.app.world().get::<SyncEnabled>(entity).is_none());
+        fixture.select(profile, false).result.unwrap();
+        assert!(!fixture.app.world().get::<SyncEnabled>(entity).unwrap().0);
+    }
+
+    #[cfg(feature = "cloud")]
+    #[test]
+    fn a_current_off_cancels_cloud_work_and_preserves_accepted_local_writes_after_restart() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.app.add_plugins((
+            vmux_feature::FeaturePlugin,
+            crate::availability::AvailabilityPlugin,
+        ));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.root)
+            .insert(crate::availability::SecureCredentials);
+        let provider = fixture
+            .app
+            .world_mut()
+            .spawn(vmux_feature::Provider::bundle("production"))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_feature::Tick(1000));
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_feature::Receive {
+                provider,
+                generation: 0,
+                document: vmux_feature::snapshot::Document {
+                    schema_version: 1,
+                    environment: "production".into(),
+                    revision: 1,
+                    issued_at: 1000,
+                    valid_until: 1100,
+                    flags: std::collections::BTreeMap::from([("account.cloud".into(), true)]),
+                },
+            });
+        fixture.app.update();
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let (account, account_id, _) = fixture.account();
+        let profile_id = fixture.profile("personal").0;
+        fixture.select(profile_id, true).result.unwrap();
+        let rename = Uuid::new_v4();
+        fixture.app.world_mut().write_message(RenameRequest {
+            root: fixture.root,
+            operation_id: rename,
+            profile_id,
+            name: "Still local".into(),
+        });
+        fixture.app.update();
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_feature::Receive {
+                provider,
+                generation: 0,
+                document: vmux_feature::snapshot::Document {
+                    schema_version: 1,
+                    environment: "production".into(),
+                    revision: 2,
+                    issued_at: 1000,
+                    valid_until: 1100,
+                    flags: std::collections::BTreeMap::from([("account.cloud".into(), false)]),
+                },
+            });
+        fixture.result(rename).result.unwrap();
+        assert!(fixture.connection().is_none());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::CloudAvailable>(fixture.root)
+                .is_none()
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Binding>(account)
+                .unwrap()
+                .account_id,
+            Some(Uuid::from_u128(99).to_string())
+        );
+        assert_eq!(
+            fixture.select(profile_id, true).result.unwrap_err(),
+            Failure::AccessDenied
+        );
+        drop(fixture);
+        let mut restored = Fixture::at(data.path());
+        assert_eq!(restored.account().1, account_id);
+        assert_eq!(restored.profile("personal").0, profile_id);
+        assert_eq!(restored.profile("personal").1, "Still local");
+        let entity = restored.entity("personal");
+        assert!(restored.app.world().get::<SyncEnabled>(entity).unwrap().0);
+        let account = restored.account().0;
+        assert_eq!(
+            restored
+                .app
+                .world()
+                .get::<Binding>(account)
+                .unwrap()
+                .account_id,
+            Some(Uuid::from_u128(99).to_string())
+        );
+        assert!(
+            restored
+                .app
+                .world()
+                .get::<crate::CloudAvailable>(restored.root)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn failed_binding_and_sync_writes_preserve_committed_settings_and_allow_retry() {
         let data = tempfile::tempdir().unwrap();
         let mut fixture = Fixture::at(data.path());
@@ -609,6 +746,11 @@ mod tests {
             binding: binding.clone(),
         });
         fixture.result(operation_id).result.unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.root)
+            .insert(crate::CloudAvailable);
         let profile = fixture.profile("personal").0;
         held.execute_batch("begin immediate").unwrap();
         assert!(matches!(

@@ -4,9 +4,9 @@ use bevy_ecs::prelude::*;
 use crate::connection::{KeyRequest, Rejected};
 use crate::{Connection, Failure, Set};
 
-pub(crate) struct Plugin;
+pub(crate) struct UnavailablePlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for UnavailablePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, refuse.in_set(Set::Dispatch));
     }

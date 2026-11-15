@@ -13,9 +13,9 @@ use crate::catalog::Catalog;
 use crate::wire::Request;
 use crate::{Account, Binding, Failure, LinkRequest, Location, MutationCompleted, Root, Set};
 
-pub(crate) struct Plugin;
+pub(crate) struct ConnectionPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for ConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConnectRequest>()
             .add_message::<CancelConnectRequest>()
@@ -49,7 +49,7 @@ impl bevy_app::Plugin for Plugin {
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Flow {
+pub(crate) enum Flow {
     Intent,
     Progress,
 }
@@ -297,6 +297,9 @@ fn connect(
             continue;
         }
         let Ok((server, location)) = roots.get(request.root) else {
+            commands
+                .entity(request.root)
+                .insert(ConnectionError(Failure::AccessDenied));
             continue;
         };
         for (entity, owner) in &connections {

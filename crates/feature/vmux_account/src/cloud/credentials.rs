@@ -7,12 +7,13 @@ use vmux_ecs::{
 };
 use zeroize::Zeroizing;
 
+use crate::availability::SecureCredentials;
 use crate::connection::{DeviceKey, KeyPrepared, KeyRequest, Rejected};
-use crate::{CloudAvailable, Connection, Failure, Root, Set};
+use crate::{Connection, Failure, Root, Set};
 
-pub(crate) struct Plugin;
+pub(crate) struct CredentialsPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for CredentialsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JobPlugin::<ReadKey>::default())
             .add_systems(Update, read.in_set(Set::Dispatch))
@@ -21,9 +22,9 @@ impl bevy_app::Plugin for Plugin {
     }
 }
 
-fn offer(roots: Query<Entity, (With<Root>, Without<CloudAvailable>)>, mut commands: Commands) {
+fn offer(roots: Query<Entity, (With<Root>, Without<SecureCredentials>)>, mut commands: Commands) {
     for root in &roots {
-        commands.entity(root).insert(CloudAvailable);
+        commands.entity(root).insert(SecureCredentials);
     }
 }
 

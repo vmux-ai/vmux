@@ -14,7 +14,12 @@ pub use mutations::{
 pub use profile::Failure;
 pub use profile::{Account, Binding, Owner, Profile, SyncEnabled};
 
+#[cfg(feature = "cloud")]
+pub use availability::AccountCloudFlag;
+
 mod account;
+#[cfg(feature = "cloud")]
+mod availability;
 mod catalog;
 mod connection;
 mod mutations;

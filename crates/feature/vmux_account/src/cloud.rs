@@ -6,14 +6,17 @@ mod transport;
 #[cfg(not(target_os = "macos"))]
 mod unavailable;
 
-pub struct Plugin;
+pub struct AccountCloudPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for AccountCloudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(transport::Plugin);
+        app.add_plugins((
+            crate::availability::AvailabilityPlugin,
+            transport::TransportPlugin,
+        ));
         #[cfg(target_os = "macos")]
-        app.add_plugins(credentials::Plugin);
+        app.add_plugins(credentials::CredentialsPlugin);
         #[cfg(not(target_os = "macos"))]
-        app.add_plugins(unavailable::Plugin);
+        app.add_plugins(unavailable::UnavailablePlugin);
     }
 }

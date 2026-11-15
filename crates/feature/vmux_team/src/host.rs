@@ -49,7 +49,7 @@ impl Plugin for TeamPlugin {
             ProjectionPlugin,
             IntentPlugin,
             crate::TeamToolPlugin,
-            crate::cloud::Plugin,
+            crate::cloud::AccountLinkPlugin,
         ))
         .add_agent_request::<AgentRenameProfile>()
         .add_systems(Startup, spawn_user_profile);

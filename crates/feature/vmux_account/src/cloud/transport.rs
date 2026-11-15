@@ -19,9 +19,9 @@ use crate::connection::{
 use crate::wire::{Request, Response};
 use crate::{Connection, Failure, Server, Set};
 
-pub(crate) struct Plugin;
+pub(crate) struct TransportPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for TransportPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             JobPlugin::<Open>::default(),
