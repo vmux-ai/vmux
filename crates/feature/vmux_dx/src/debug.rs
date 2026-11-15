@@ -961,7 +961,7 @@ type Canceling<'w, 's> = Query<
     (
         Entity,
         &'static Root,
-        &'static ChildOf,
+        &'static Owner,
         Option<&'static Failed>,
     ),
     (With<Request>, Without<Complete>),
@@ -1082,7 +1082,7 @@ fn cancel(
     mut commands: Commands,
 ) {
     for (entity, root, owner, failure) in &requests {
-        let parent_failure = owners.get(owner.parent()).ok();
+        let parent_failure = owners.get(owner.0).ok();
         if scope.live(entity)
             && roots
                 .get(root.0)
@@ -4988,18 +4988,17 @@ fn finish(
         {
             continue;
         }
-        if !parents
+        let current = parents
             .get(entity)
-            .is_ok_and(|parent| parent.parent() == captured.root)
-        {
-            continue;
-        }
+            .is_ok_and(|parent| parent.parent() == captured.root);
         let result = match failed {
             Some(failed) => Err(failed.0.clone()),
-            None => Ok(complete.unwrap().0.clone()),
+            None if current => Ok(complete.unwrap().0.clone()),
+            None => Err(Failure::message("Development step ownership changed")),
         };
         completions.write(Completion {
             entity,
+            root: captured.root,
             attempt: captured.attempt,
             result,
         });

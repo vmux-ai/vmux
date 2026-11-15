@@ -185,7 +185,7 @@ enum AdmissionPhase {
 pub(crate) struct Step;
 
 #[derive(Component)]
-struct NativeSubmitted;
+struct NativeSubmitted(debug::Captured);
 
 #[derive(Component, Clone)]
 struct Settings(Environment);
@@ -229,6 +229,7 @@ impl Mailbox {
 #[derive(Message)]
 struct Completion {
     entity: Entity,
+    root: Entity,
     attempt: u64,
     result: std::result::Result<Outcome, Failure>,
 }
@@ -294,6 +295,23 @@ type Preparing<'w, 's> = Query<
         &'static OperationState,
     ),
     (With<Admission>, Without<Accepted>, Without<CliResult>),
+>;
+type Receiving<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static ChildOf>,
+        &'static Attempt,
+        &'static debug::Captured,
+        Option<&'static NativeSubmitted>,
+    ),
+    With<Running>,
+>;
+type Adopting<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Settings, &'static mut OperationState),
+    (With<Accepted>, Without<CliResult>),
 >;
 
 fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
@@ -1139,7 +1157,11 @@ fn plan_checks(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.checks.test")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Internal("pre-push".into(), Vec::new()));
+        plans.native(
+            entity,
+            &mut tail,
+            Work::Internal("pre-push".into(), Vec::new()),
+        );
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1302,8 +1324,9 @@ type NativeReady<'w, 's> = Query<
     (
         Entity,
         &'static Work,
-        &'static ChildOf,
+        Option<&'static ChildOf>,
         &'static Attempt,
+        &'static debug::Captured,
         &'static Checkout,
         &'static Settings,
     ),
@@ -1311,8 +1334,23 @@ type NativeReady<'w, 's> = Query<
 >;
 
 fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut commands: Commands) {
-    for (entity, work, parent, attempt, checkout, settings) in &steps {
-        let Ok((_, _, storage, lease, executable, _)) = operations.get(parent.parent()) else {
+    for (entity, work, parent, attempt, captured, checkout, settings) in &steps {
+        if parent.is_none_or(|parent| parent.parent() != captured.root)
+            || attempt.0 != captured.attempt
+        {
+            commands.entity(entity).despawn();
+            if operations
+                .get(captured.root)
+                .is_ok_and(|(_, _, _, _, _, state)| *state == OperationState::Running)
+            {
+                commands.entity(captured.root).remove::<Lease>().insert((
+                    OperationState::Failed,
+                    CliResult(Err("Development step ownership changed".into())),
+                ));
+            }
+            continue;
+        }
+        let Ok((_, _, storage, lease, executable, _)) = operations.get(captured.root) else {
             continue;
         };
         let checkout = checkout.clone();
@@ -1325,8 +1363,11 @@ fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut com
         let work = work.clone();
         let sender = mailbox.sender.clone();
         let wake = mailbox.wake.clone();
+        let root = captured.root;
         let attempt = attempt.0;
-        commands.entity(entity).insert(NativeSubmitted);
+        commands
+            .entity(entity)
+            .insert(NativeSubmitted(debug::Captured { root, attempt }));
         thread::spawn(move || {
             let name = work.name();
             let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1338,6 +1379,7 @@ fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut com
             };
             let _ = sender.send(Completion {
                 entity,
+                root,
                 attempt,
                 result,
             });
@@ -1357,7 +1399,7 @@ fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
 fn cancel(
     signals: Option<Res<signals::Signals>>,
     mut operations: Cancellations,
-    running: Query<&ChildOf, With<Running>>,
+    running: Query<(&debug::Captured, Option<&NativeSubmitted>), With<Running>>,
     mut commands: Commands,
 ) {
     if signals.is_none() {
@@ -1368,7 +1410,12 @@ fn cancel(
     };
     for (entity, mut state) in &mut operations {
         *state = OperationState::Canceled;
-        if !running.iter().any(|parent| parent.parent() == entity) {
+        if !running.iter().any(|(captured, submitted)| {
+            submitted
+                .map(|submitted| submitted.0.root)
+                .unwrap_or(captured.root)
+                == entity
+        }) {
             commands
                 .entity(entity)
                 .insert(CliResult(Ok((128 + signal) as u8)));
@@ -1377,19 +1424,38 @@ fn cancel(
 }
 
 fn collect(
-    mut completions: MessageReader<Completion>,
-    steps: Query<(&ChildOf, &Attempt), With<Running>>,
-    mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
+    mut completions: ResMut<Messages<Completion>>,
+    steps: Receiving,
+    mut operations: Adopting,
     mut commands: Commands,
 ) {
-    for completion in completions.read() {
-        let Ok((parent, attempt)) = steps.get(completion.entity) else {
+    for completion in completions.drain() {
+        let Ok((parent, attempt, captured, submitted)) = steps.get(completion.entity) else {
             continue;
         };
-        if attempt.0 != completion.attempt {
+        let accepted = submitted.map(|submitted| &submitted.0).unwrap_or(captured);
+        if accepted.root != completion.root || accepted.attempt != completion.attempt {
             continue;
         }
-        let Ok((mut settings, mut state)) = operations.get_mut(parent.parent()) else {
+        if parent.is_none_or(|parent| parent.parent() != accepted.root)
+            || attempt.0 != accepted.attempt
+            || captured.root != accepted.root
+            || captured.attempt != accepted.attempt
+        {
+            commands.entity(completion.entity).despawn();
+            if let Ok((_, mut state)) = operations.get_mut(accepted.root) {
+                commands.entity(accepted.root).remove::<Lease>();
+                if *state == OperationState::Running {
+                    *state = OperationState::Failed;
+                    commands
+                        .entity(accepted.root)
+                        .insert(CliResult(Err("Development step ownership changed".into())));
+                }
+            }
+            continue;
+        }
+        let Ok((mut settings, mut state)) = operations.get_mut(completion.root) else {
+            commands.entity(completion.entity).despawn();
             continue;
         };
         if *state == OperationState::Canceled {
@@ -1399,39 +1465,37 @@ fn collect(
                 .insert((Completed, OperationState::Canceled));
             continue;
         }
-        match &completion.result {
+        match completion.result {
             Ok(outcome) => {
                 match outcome {
                     Outcome::Executable(executable) => {
                         commands
-                            .entity(parent.parent())
-                            .insert(executable.clone())
+                            .entity(completion.root)
+                            .insert(executable)
                             .remove::<Lease>();
                     }
                     Outcome::Done => {}
                     Outcome::Lease(lease) => {
-                        commands
-                            .entity(parent.parent())
-                            .insert(Lease(lease.clone()));
+                        commands.entity(completion.root).insert(Lease(lease));
                     }
                     Outcome::Identity(identity) => {
-                        settings.0.set("APPLE_SIGNING_IDENTITY", identity);
+                        settings.0.set("APPLE_SIGNING_IDENTITY", &identity);
                     }
                     Outcome::Artifacts(paths) => {
                         for path in paths {
                             commands.spawn((
                                 Name::new(path.display().to_string()),
-                                Artifact(path.clone()),
+                                Artifact(path),
                                 CreatedAt::now(),
                                 vmux_ecs::Ready,
                                 Completed,
-                                ChildOf(parent.parent()),
+                                ChildOf(completion.root),
                             ));
                         }
                     }
                     Outcome::ToolPath(key, path) => {
                         let key = key.to_str().expect("tool configuration key");
-                        settings.0.set(key, path);
+                        settings.0.set(key, &path);
                     }
                 }
                 commands
@@ -1451,7 +1515,7 @@ fn collect(
                     .remove::<Running>()
                     .insert((Completed, OperationState::Failed));
                 commands
-                    .entity(parent.parent())
+                    .entity(completion.root)
                     .insert(CliResult(Ok(error.code() as u8)));
             }
         }
@@ -1461,11 +1525,20 @@ fn collect(
 fn finish(
     operations: Finishing,
     completed: Query<Entity, With<Completed>>,
+    running: Query<(&debug::Captured, Option<&NativeSubmitted>), With<Running>>,
     artifacts: Query<&Artifact, With<vmux_ecs::Ready>>,
     mut commands: Commands,
 ) {
     for (entity, children, state) in &operations {
         if *state == OperationState::Canceled {
+            continue;
+        }
+        if running.iter().any(|(captured, submitted)| {
+            submitted
+                .map(|submitted| submitted.0.root)
+                .unwrap_or(captured.root)
+                == entity
+        }) {
             continue;
         }
         if children.iter().all(|child| completed.contains(child)) {
@@ -1643,9 +1716,20 @@ mod tests {
     fn stale_completion_cannot_advance_the_current_attempt() {
         let mut fixture = Fixture::new();
         let step = fixture.step("exit 99");
-        fixture.app.world_mut().entity_mut(step).insert(Running);
+        fixture.app.world_mut().entity_mut(step).insert((
+            Running,
+            NativeSubmitted(debug::Captured {
+                root: fixture.operation,
+                attempt: 1,
+            }),
+            debug::Captured {
+                root: fixture.operation,
+                attempt: 1,
+            },
+        ));
         fixture.app.world_mut().write_message(Completion {
             entity: step,
+            root: fixture.operation,
             attempt: 0,
             result: Ok(Outcome::Done),
         });
@@ -1660,9 +1744,123 @@ mod tests {
         );
         fixture.app.world_mut().write_message(Completion {
             entity: step,
+            root: fixture.operation,
             attempt: 1,
             result: Ok(Outcome::Done),
         });
         assert_eq!(fixture.result(), 0);
+    }
+
+    #[test]
+    fn native_receipts_cannot_cross_their_captured_operation_when_a_step_is_reparented() {
+        for detached in [false, true] {
+            let mut fixture = Fixture::new();
+            fixture.app.world_mut().spawn((
+                Completed,
+                OperationState::Succeeded,
+                ChildOf(fixture.operation),
+            ));
+            let step = fixture.step("exit 99");
+            fixture.app.world_mut().entity_mut(step).insert((
+                Running,
+                NativeSubmitted(debug::Captured {
+                    root: fixture.operation,
+                    attempt: 1,
+                }),
+                debug::Captured {
+                    root: fixture.operation,
+                    attempt: 1,
+                },
+            ));
+            let mut environment = Environment::current();
+            environment.remove("VMUX_DX_OWNER_ORACLE");
+            let other = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Accepted,
+                    Operation::bundle("dx.fixture").unwrap().running(),
+                    Settings(environment),
+                ))
+                .id();
+            if detached {
+                fixture.app.world_mut().entity_mut(step).remove::<ChildOf>();
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(step)
+                    .insert(ChildOf(other));
+            }
+            fixture.app.update();
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<CliResult>(fixture.operation)
+                    .is_none()
+            );
+            fixture.app.world_mut().write_message(Completion {
+                entity: step,
+                root: fixture.operation,
+                attempt: 1,
+                result: Ok(Outcome::ToolPath(
+                    "VMUX_DX_OWNER_ORACLE".into(),
+                    "wrong-owner".into(),
+                )),
+            });
+            fixture.app.update();
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(other)
+                    .unwrap()
+                    .0
+                    .get("VMUX_DX_OWNER_ORACLE")
+                    .is_none()
+            );
+            assert!(fixture.app.world().get_entity(step).is_err());
+            assert_eq!(
+                fixture.app.world().get::<OperationState>(fixture.operation),
+                Some(&OperationState::Failed)
+            );
+            let checkout = fixture
+                .app
+                .world()
+                .get::<Checkout>(fixture.operation)
+                .unwrap()
+                .clone();
+            let settings = fixture
+                .app
+                .world()
+                .get::<Settings>(fixture.operation)
+                .unwrap()
+                .clone();
+            let storage = fixture
+                .app
+                .world()
+                .get::<Storage>(fixture.operation)
+                .unwrap()
+                .clone();
+            fixture.operation = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Accepted,
+                    Operation::bundle("dx.fixture").unwrap().running(),
+                    checkout,
+                    settings,
+                    storage,
+                ))
+                .id();
+            fixture.previous = None;
+            fixture.step("printf recovered > recovered");
+            assert_eq!(fixture.result(), 0);
+            assert_eq!(
+                std::fs::read_to_string(fixture.directory.path().join("recovered")).unwrap(),
+                "recovered"
+            );
+        }
     }
 }
