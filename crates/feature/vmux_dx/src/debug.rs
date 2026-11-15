@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use bevy_app::{App, PreUpdate, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::relationship::Relationship;
 use bevy_ecs::system::SystemParam;
 use sha2::{Digest, Sha256};
 use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
@@ -128,6 +129,7 @@ impl bevy_app::Plugin for Plugin {
                     signature_format,
                     signature_done,
                     signature_rpaths,
+                    signature_libraries,
                     signature_bindings,
                 )
                     .chain(),
@@ -372,6 +374,7 @@ enum SignaturePhase {
     Record,
     Done,
     Rpaths,
+    Libraries,
     Bindings,
 }
 
@@ -399,20 +402,20 @@ struct IoWriter<'w, 's> {
 }
 
 impl IoWriter<'_, '_> {
-    fn request<J: IoJob>(
+    fn request<J: IoJob, R: bevy_ecs::bundle::Bundle>(
         &mut self,
         sequence: &mut Sequence,
         owner: Entity,
         previous: &mut Option<Entity>,
         job: J,
-        tag: Tag,
+        role: R,
         optional: bool,
     ) {
         let mut child = self.commands.spawn((
             Operation::bundle("dx.debug.io").unwrap(),
             Io,
             job,
-            tag,
+            role,
             Order(sequence.0),
             ChildOf(owner),
         ));
@@ -448,33 +451,81 @@ struct After(Entity);
 #[derive(Component)]
 struct Optional;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-enum Tag {
-    None,
-    Capacity,
-    Keychain,
-    Identities,
-    Temporary,
-    Password,
-    Config,
-    Partition,
-    Manifest,
-    Branch,
-    Commit,
-    Stdlib,
-    Rpaths,
-    Libraries,
-    Stamp,
-    Binary,
-    Path,
-    Directory,
-    Entries,
-    Signature,
-    Format,
-    Entitlements,
-    Input(u32),
-    Library(u32),
-}
+#[derive(Component)]
+struct CapacitySlot;
+
+#[derive(Component)]
+struct KeychainSlot;
+
+#[derive(Component)]
+struct IdentitiesSlot;
+
+#[derive(Component)]
+struct TemporarySlot;
+
+#[derive(Component)]
+struct PasswordSlot;
+
+#[derive(Component)]
+struct PartitionSlot;
+
+#[derive(Component)]
+struct ManifestSlot;
+
+#[derive(Component)]
+struct BranchSlot;
+
+#[derive(Component)]
+struct CommitSlot;
+
+#[derive(Component)]
+struct StdlibSlot;
+
+#[derive(Component)]
+struct RpathsSlot;
+
+#[derive(Component)]
+struct LibrariesSlot;
+
+#[derive(Component)]
+struct StampSlot;
+
+#[derive(Component)]
+struct BinarySlot;
+
+#[derive(Component)]
+struct PathSlot;
+
+#[derive(Component)]
+struct DirectorySlot;
+
+#[derive(Component)]
+struct EntriesSlot;
+
+#[derive(Component)]
+struct SignatureSlot;
+
+#[derive(Component)]
+struct FormatSlot;
+
+#[derive(Component)]
+struct EntitlementsSlot;
+
+#[derive(Component)]
+#[relationship(relationship_target = InputReads)]
+struct ForInput(Entity);
+
+#[derive(Component, Default)]
+#[relationship_target(relationship = ForInput)]
+struct InputReads(Vec<Entity>);
+
+#[derive(Component)]
+#[relationship(relationship_target = LibraryReads)]
+struct ForLibrary(Entity);
+
+#[derive(Component, Default)]
+#[relationship_target(relationship = ForLibrary)]
+struct LibraryReads(Vec<Entity>);
 
 #[derive(Component)]
 struct Input(PathBuf);
@@ -555,13 +606,40 @@ type NativeResults<'w, 's> = Query<
     's,
     (
         EntityRef<'static>,
-        &'static Tag,
         &'static Order,
         &'static ChildOf,
         &'static OperationState,
     ),
     (
         With<Io>,
+        Or<(
+            Or<(
+                With<CapacitySlot>,
+                With<KeychainSlot>,
+                With<IdentitiesSlot>,
+                With<TemporarySlot>,
+                With<PasswordSlot>,
+                With<PartitionSlot>,
+                With<ManifestSlot>,
+                With<BranchSlot>,
+                With<CommitSlot>,
+                With<StdlibSlot>,
+                With<RpathsSlot>,
+            )>,
+            Or<(
+                With<LibrariesSlot>,
+                With<StampSlot>,
+                With<BinarySlot>,
+                With<PathSlot>,
+                With<DirectorySlot>,
+                With<EntriesSlot>,
+                With<SignatureSlot>,
+                With<FormatSlot>,
+                With<EntitlementsSlot>,
+                With<ForInput>,
+                With<ForLibrary>,
+            )>,
+        )>,
         Or<(
             With<ToolOutput>,
             With<FileBytes>,
@@ -622,10 +700,13 @@ impl Scope<'_, '_> {
 }
 
 impl Facts<'_, '_> {
-    fn get<T: Component>(&self, owner: Entity, tag: Tag) -> Option<&T> {
+    fn get<T: Component, R: Component>(&self, owner: Entity) -> Option<&T> {
         let mut latest = None;
-        for (entity, key, order, parent, state) in &self.values {
-            if parent.parent() != owner || *key != tag || *state != OperationState::Succeeded {
+        for (entity, order, parent, state) in &self.values {
+            if parent.parent() != owner
+                || !entity.contains::<R>()
+                || *state != OperationState::Succeeded
+            {
                 continue;
             }
             if latest.is_none_or(|(_, previous)| order.0 > previous) {
@@ -635,14 +716,38 @@ impl Facts<'_, '_> {
         latest.and_then(|(entity, _)| entity.get::<T>())
     }
 
-    fn text(&self, owner: Entity, tag: Tag) -> Option<String> {
-        if let Some(FileBytes(bytes)) = self.get::<FileBytes>(owner, tag) {
+    fn text<R: Component>(&self, owner: Entity) -> Option<String> {
+        if let Some(FileBytes(bytes)) = self.get::<FileBytes, R>(owner) {
             return std::str::from_utf8(bytes).ok().map(String::from);
         }
-        if let Some(ToolOutput(output)) = self.get::<ToolOutput>(owner, tag) {
+        if let Some(ToolOutput(output)) = self.get::<ToolOutput, R>(owner) {
             return std::str::from_utf8(&output.stdout).ok().map(String::from);
         }
-        self.get::<FileDigest>(owner, tag)
+        self.get::<FileDigest, R>(owner)
+            .map(|digest| digest.0.clone())
+    }
+
+    fn related<T: Component, R: Relationship>(&self, owner: Entity, source: Entity) -> Option<&T> {
+        let mut latest = None;
+        for (entity, order, parent, state) in &self.values {
+            if parent.parent() != owner || *state != OperationState::Succeeded {
+                continue;
+            }
+            let Some(relationship) = entity.get::<R>() else {
+                continue;
+            };
+            if relationship.get() != source {
+                continue;
+            }
+            if latest.is_none_or(|(_, previous)| order.0 > previous) {
+                latest = Some((entity, order.0));
+            }
+        }
+        latest.and_then(|(entity, _)| entity.get::<T>())
+    }
+
+    fn digest(&self, owner: Entity, source: Entity) -> Option<String> {
+        self.related::<FileDigest, ForInput>(owner, source)
             .map(|digest| digest.0.clone())
     }
 
@@ -1045,7 +1150,7 @@ fn identity_start(mut requests: IdentityRequests, facts: Facts, mut io: IoWriter
                         .map(OsString::from)
                         .into(),
                 ),
-                Tag::Keychain,
+                KeychainSlot,
                 false,
             );
         }
@@ -1073,7 +1178,7 @@ fn identity_keychain(
         let keychain = match keychains.get(entity) {
             Ok(keychain) => keychain.0.clone(),
             Err(_) => {
-                let Some(value) = facts.text(entity, Tag::Keychain) else {
+                let Some(value) = facts.text::<KeychainSlot>(entity) else {
                     continue;
                 };
                 let keychain = OsString::from(value.trim().trim_matches('"'));
@@ -1098,7 +1203,7 @@ fn identity_keychain(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-            Tag::Identities,
+            IdentitiesSlot,
             false,
         );
         *phase = IdentityPhase::Lookup;
@@ -1124,7 +1229,7 @@ fn identity_lookup(
         let mut previous = None;
 
         let identity = identities.get(entity).unwrap();
-        let Some(found) = facts.text(entity, Tag::Identities) else {
+        let Some(found) = facts.text::<IdentitiesSlot>(entity) else {
             continue;
         };
         if found.contains(&format!("\"{}\"", identity.0)) {
@@ -1141,7 +1246,7 @@ fn identity_lookup(
             entity,
             &mut previous,
             CreateTemporary,
-            Tag::Temporary,
+            TemporarySlot,
             false,
         );
         io.request(
@@ -1149,7 +1254,7 @@ fn identity_lookup(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "uuidgen".into(), Vec::new()),
-            Tag::Password,
+            PasswordSlot,
             false,
         );
         *phase = IdentityPhase::Provision;
@@ -1174,7 +1279,7 @@ fn create_certificate(
         let mut previous = None;
 
         let identity = &identities.get(entity).unwrap().0;
-        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+        let Some(TemporaryValue(temporary)) = facts.get::<_, TemporarySlot>(entity) else {
             continue;
         };
         let config = temporary.path().join("openssl.cnf");
@@ -1188,7 +1293,7 @@ fn create_certificate(
             entity,
             &mut previous,
             WriteFile(config.clone(), text.into_bytes()),
-            Tag::Config,
+            (),
             false,
         );
         let mut arguments = [
@@ -1209,7 +1314,7 @@ fn create_certificate(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
-            Tag::None,
+            (),
             false,
         );
         *phase = IdentityPhase::Export;
@@ -1234,10 +1339,10 @@ fn import_identity(
         let mut previous = None;
 
         let keychain = &keychains.get(entity).unwrap().0;
-        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+        let Some(TemporaryValue(temporary)) = facts.get::<_, TemporarySlot>(entity) else {
             continue;
         };
-        let Some(password) = facts.text(entity, Tag::Password) else {
+        let Some(password) = facts.text::<PasswordSlot>(entity) else {
             continue;
         };
         let password = password.trim();
@@ -1267,7 +1372,7 @@ fn import_identity(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
-            Tag::None,
+            (),
             false,
         );
         let arguments = vec![
@@ -1287,7 +1392,7 @@ fn import_identity(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-            Tag::None,
+            (),
             false,
         );
         *phase = IdentityPhase::Trust;
@@ -1314,7 +1419,7 @@ fn trust_identity(
 
         let identity = &identities.get(entity).unwrap().0;
         let keychain = &keychains.get(entity).unwrap().0;
-        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+        let Some(TemporaryValue(temporary)) = facts.get::<_, TemporarySlot>(entity) else {
             continue;
         };
         let cert = temporary.path().join("cert.pem");
@@ -1333,7 +1438,7 @@ fn trust_identity(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-            Tag::None,
+            (),
             false,
         );
         let arguments = vec![
@@ -1350,7 +1455,7 @@ fn trust_identity(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-            Tag::Partition,
+            PartitionSlot,
             true,
         );
         let arguments = vec![
@@ -1365,7 +1470,7 @@ fn trust_identity(
             entity,
             &mut previous,
             CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
-            Tag::Identities,
+            IdentitiesSlot,
             false,
         );
         *phase = IdentityPhase::Confirm;
@@ -1390,7 +1495,7 @@ fn identity_confirm(
         let _environment = &settings.0;
 
         let identity = identities.get(entity).unwrap();
-        let Some(found) = facts.text(entity, Tag::Identities) else {
+        let Some(found) = facts.text::<IdentitiesSlot>(entity) else {
             continue;
         };
         if !found.contains(&format!("\"{}\"", identity.0)) {
@@ -1399,7 +1504,7 @@ fn identity_confirm(
             )));
             continue;
         }
-        if let Some(ToolOutput(output)) = facts.get(entity, Tag::Partition)
+        if let Some(ToolOutput(output)) = facts.get::<_, PartitionSlot>(entity)
             && !output.status.success()
         {
             eprintln!("codesign may request keychain access");
@@ -1436,12 +1541,12 @@ fn capacity(
                     entity,
                     &mut previous,
                     InspectPath(checkout.target.clone()),
-                    Tag::Path,
+                    PathSlot,
                     false,
                 );
             }
             CapacityPhase::Inspect => {
-                let Some(PathMetadata(metadata)) = facts.get(entity, Tag::Path) else {
+                let Some(PathMetadata(metadata)) = facts.get::<_, PathSlot>(entity) else {
                     continue;
                 };
                 let Ok(target) = targets.get(entity) else {
@@ -1459,7 +1564,7 @@ fn capacity(
                             "df".into(),
                             vec!["-Pk".into(), target.0.clone().into_os_string()],
                         ),
-                        Tag::Capacity,
+                        CapacitySlot,
                         false,
                     );
                 } else if let Some(parent) = target.0.parent() {
@@ -1470,7 +1575,7 @@ fn capacity(
                         entity,
                         &mut previous,
                         InspectPath(parent),
-                        Tag::Path,
+                        PathSlot,
                         false,
                     );
                 } else {
@@ -1480,7 +1585,7 @@ fn capacity(
                 }
             }
             CapacityPhase::Read => {
-                let Some(text) = facts.text(entity, Tag::Capacity) else {
+                let Some(text) = facts.text::<CapacitySlot>(entity) else {
                     continue;
                 };
                 let free = match text.lines().nth(1) {
@@ -1537,7 +1642,7 @@ fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
                     entity,
                     &mut previous,
                     CreateDirectory(debug.clone()),
-                    Tag::None,
+                    (),
                     false,
                 );
                 io.request(
@@ -1545,7 +1650,7 @@ fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
                     entity,
                     &mut previous,
                     InspectPath(debug.join(".vmux-dev-ready")),
-                    Tag::Stamp,
+                    StampSlot,
                     false,
                 );
                 let alias = checkout
@@ -1556,7 +1661,7 @@ fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
                     entity,
                     &mut previous,
                     InspectPath(alias),
-                    Tag::Path,
+                    PathSlot,
                     false,
                 );
                 *phase = ClearPhase::Inspect;
@@ -1571,17 +1676,17 @@ fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
                         continue;
                     }
                 };
-                if let Some(PathMetadata(Some(_))) = facts.get(entity, Tag::Stamp) {
+                if let Some(PathMetadata(Some(_))) = facts.get::<_, StampSlot>(entity) {
                     io.request(
                         &mut sequence,
                         entity,
                         &mut previous,
                         RemoveFile(checkout.directory("debug").join(".vmux-dev-ready")),
-                        Tag::None,
+                        (),
                         false,
                     );
                 }
-                if let Some(PathMetadata(Some(metadata))) = facts.get(entity, Tag::Path)
+                if let Some(PathMetadata(Some(metadata))) = facts.get::<_, PathSlot>(entity)
                     && metadata.file_type().is_symlink()
                 {
                     io.request(
@@ -1593,7 +1698,7 @@ fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
                                 .directory("release")
                                 .join(format!("{} Dev.app", product.value("VMUX_HOST_NAME"))),
                         ),
-                        Tag::None,
+                        (),
                         false,
                     );
                 }
@@ -1718,7 +1823,7 @@ fn bundle_start(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, 
             entity,
             &mut previous,
             ReadFile(checkout.root.join("Cargo.toml")),
-            Tag::Manifest,
+            ManifestSlot,
             false,
         );
         io.request(
@@ -1733,7 +1838,7 @@ fn bundle_start(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, 
                     .map(OsString::from)
                     .into(),
             ),
-            Tag::Branch,
+            BranchSlot,
             true,
         );
         *phase = BundlePhase::Branch;
@@ -1766,10 +1871,10 @@ fn bundle_branch(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>,
         let _debug = checkout.directory("debug");
         let mut previous = None;
 
-        let Some(ToolOutput(output)) = facts.get(entity, Tag::Branch) else {
+        let Some(ToolOutput(output)) = facts.get::<_, BranchSlot>(entity) else {
             continue;
         };
-        let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
+        let branch = facts.text::<BranchSlot>(entity).unwrap_or_default();
         if !output.status.success() || branch.trim().is_empty() {
             io.request(
                 &mut sequence,
@@ -1783,7 +1888,7 @@ fn bundle_branch(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>,
                         .map(OsString::from)
                         .into(),
                 ),
-                Tag::Commit,
+                CommitSlot,
                 true,
             );
         }
@@ -1816,7 +1921,7 @@ fn bundle_plan(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, m
         };
         let debug = checkout.directory("debug");
 
-        let Some(manifest) = facts.text(entity, Tag::Manifest) else {
+        let Some(manifest) = facts.text::<ManifestSlot>(entity) else {
             continue;
         };
         let manifest: toml::Table = match manifest.parse() {
@@ -1839,8 +1944,8 @@ fn bundle_plan(mut requests: BundleRequests, facts: Facts, wake: Res<JobWake>, m
                 .insert(Failed(Failure::message("Missing workspace version")));
             continue;
         };
-        let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
-        let commit = facts.text(entity, Tag::Commit).unwrap_or_default();
+        let branch = facts.text::<BranchSlot>(entity).unwrap_or_default();
+        let commit = facts.text::<CommitSlot>(entity).unwrap_or_default();
         let source = if !branch.trim().is_empty() {
             branch.trim()
         } else if !commit.trim().is_empty() {
@@ -1927,7 +2032,7 @@ fn bundle_directories(
                 entity,
                 &mut previous,
                 CreateDirectory(directory),
-                Tag::None,
+                (),
                 false,
             );
         }
@@ -1939,7 +2044,7 @@ fn bundle_directories(
                 checkout.root.join("packaging/macos/Info.plist"),
                 plist.clone(),
             ),
-            Tag::None,
+            (),
             false,
         );
         *phase = BundlePhase::AppPlist;
@@ -2011,7 +2116,7 @@ fn configure_app(
                         .to_owned(),
                     vec!["-c".into(), update.into(), plist.as_os_str().into()],
                 ),
-                Tag::None,
+                (),
                 false,
             );
         }
@@ -2061,7 +2166,7 @@ fn copy_resources(
                 product.value("VMUX_HOST_ICON").into(),
                 contents.join("Resources/Vmux.icns"),
             ),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -2072,7 +2177,7 @@ fn copy_resources(
                 product.value("VMUX_HOST_TRAY_ICON").into(),
                 contents.join("Resources/tray.png"),
             ),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -2080,7 +2185,7 @@ fn copy_resources(
             entity,
             &mut previous,
             CopyFile(debug.join("vmux"), contents.join("MacOS/vmux")),
-            Tag::None,
+            (),
             false,
         );
         *phase = BundlePhase::ServicePlist;
@@ -2127,7 +2232,7 @@ fn configure_service(
             entity,
             &mut previous,
             CopyFile(plist.clone(), service_plist.clone()),
-            Tag::None,
+            (),
             false,
         );
         for key in ["CFBundleExecutable", "CFBundleName", "CFBundleDisplayName"] {
@@ -2149,7 +2254,7 @@ fn configure_service(
                         .to_owned(),
                     vec!["-c".into(), update.into(), service_plist.as_os_str().into()],
                 ),
-                Tag::None,
+                (),
                 false,
             );
         }
@@ -2174,7 +2279,7 @@ fn configure_service(
                         .to_owned(),
                     vec!["-c".into(), update.into(), service_plist.as_os_str().into()],
                 ),
-                Tag::None,
+                (),
                 false,
             );
         }
@@ -2315,7 +2420,7 @@ fn bundle_wait(
                     .to_owned(),
                 ["--print", "target-libdir"].map(OsString::from).into(),
             ),
-            Tag::Stdlib,
+            StdlibSlot,
             false,
         );
         *phase = BundlePhase::Desktop;
@@ -2354,7 +2459,7 @@ fn bundle_desktop(
         };
         let debug = checkout.directory("debug");
 
-        let Some(stdlib) = facts.text(entity, Tag::Stdlib) else {
+        let Some(stdlib) = facts.text::<StdlibSlot>(entity) else {
             continue;
         };
         let (layout, _, _) = layouts.get(entity).unwrap();
@@ -2446,19 +2551,21 @@ fn publish_start(
                 entity,
                 &mut previous,
                 InspectPath(checkout.directory("release").join(name)),
-                Tag::Path,
+                PathSlot,
                 false,
             );
         }
         for (order, path) in paths.into_iter().enumerate() {
-            io.commands
-                .spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
+            let source = io
+                .commands
+                .spawn((File(path.clone()), Order(order as u32), ChildOf(entity)))
+                .id();
             io.request(
                 &mut sequence,
                 entity,
                 &mut previous,
                 InspectPath(path.clone()),
-                Tag::Library(order as u32),
+                ForLibrary(source),
                 false,
             );
             io.request(
@@ -2466,7 +2573,7 @@ fn publish_start(
                 entity,
                 &mut previous,
                 HashFile(path),
-                Tag::Input(order as u32),
+                ForInput(source),
                 false,
             );
         }
@@ -2481,7 +2588,7 @@ fn publish_start(
 fn publish_check(
     mut requests: PublishRequests,
     facts: Facts,
-    files: Query<(&File, &Order, &ChildOf)>,
+    files: Query<(Entity, &File, &Order, &ChildOf)>,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
@@ -2499,13 +2606,13 @@ fn publish_check(
 
         let mut sources = files
             .iter()
-            .filter(|(_, _, parent)| parent.parent() == entity)
+            .filter(|(_, _, _, parent)| parent.parent() == entity)
             .collect::<Vec<_>>();
-        sources.sort_by_key(|(_, order, _)| order.0);
+        sources.sort_by_key(|(_, _, order, _)| order.0);
         let mut stamp = format!("{}\n", checkout.root.display());
         let mut failed = false;
-        for (file, order, _) in sources {
-            let valid = matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
+        for (source, file, _, _) in sources {
+            let valid = matches!(facts.related::<PathMetadata, ForLibrary>(entity, source), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
             if !valid {
                 io.commands
                     .entity(entity)
@@ -2516,7 +2623,7 @@ fn publish_check(
                 failed = true;
                 break;
             }
-            let Some(checksum) = facts.text(entity, Tag::Input(order.0)) else {
+            let Some(checksum) = facts.digest(entity, source) else {
                 failed = true;
                 break;
             };
@@ -2526,7 +2633,7 @@ fn publish_check(
             continue;
         }
         if cfg!(target_os = "macos") {
-            if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(None))) {
+            if !matches!(facts.get::<_, PathSlot>(entity), Some(PathMetadata(None))) {
                 io.commands.entity(entity).insert(Failed(Failure::message(
                     "Cannot publish debug app over existing artifact",
                 )));
@@ -2547,7 +2654,7 @@ fn publish_check(
                 entity,
                 &mut previous,
                 CreateDirectory(checkout.directory("release")),
-                Tag::None,
+                (),
                 false,
             );
             io.request(
@@ -2555,7 +2662,7 @@ fn publish_check(
                 entity,
                 &mut previous,
                 LinkPath(debug.join(&name), checkout.directory("release").join(name)),
-                Tag::None,
+                (),
                 false,
             );
         }
@@ -2565,7 +2672,7 @@ fn publish_check(
             entity,
             &mut previous,
             WriteFile(temporary.clone(), stamp.into_bytes()),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -2573,7 +2680,7 @@ fn publish_check(
             entity,
             &mut previous,
             RenamePath(temporary, debug.join(".vmux-dev-ready")),
-            Tag::None,
+            (),
             false,
         );
         *phase = PublishPhase::Done;
@@ -2652,7 +2759,7 @@ fn prepare_frontend(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
                         .to_owned(),
                     arguments,
                 ),
-                Tag::None,
+                (),
                 false,
             );
         }
@@ -2696,7 +2803,7 @@ fn serve(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
                     .to_owned(),
                 arguments,
             ),
-            Tag::None,
+            (),
             false,
         );
         *phase = RunPhase::Done;
@@ -2743,7 +2850,7 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
                 entity,
                 &mut previous,
                 InspectPath(checkout.directory("release")),
-                Tag::Directory,
+                DirectorySlot,
                 false,
             ),
             "dev" => io.request(
@@ -2751,7 +2858,7 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
                 entity,
                 &mut previous,
                 ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
-                Tag::Stamp,
+                StampSlot,
                 false,
             ),
             _ => {
@@ -2763,7 +2870,7 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
                     entity,
                     &mut previous,
                     InspectPath(target.clone()),
-                    Tag::Path,
+                    PathSlot,
                     false,
                 );
                 io.commands.entity(entity).insert(Target(target));
@@ -2806,7 +2913,7 @@ fn inspect_local(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mu
             continue;
         }
 
-        if !matches!(facts.get(entity, Tag::Directory), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
+        if !matches!(facts.get::<_, DirectorySlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
         {
             io.commands.entity(entity).insert(Failed(Failure::message(
                 "No completed local app; run vmux build -p local first",
@@ -2818,7 +2925,7 @@ fn inspect_local(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mu
             entity,
             &mut previous,
             ReadDirectory(checkout.directory("release")),
-            Tag::Entries,
+            EntriesSlot,
             false,
         );
         *phase = RunPhase::Inputs;
@@ -2863,7 +2970,7 @@ fn inspect_development(
             continue;
         }
 
-        let Some(stamp) = facts.text(entity, Tag::Stamp) else {
+        let Some(stamp) = facts.text::<StampSlot>(entity) else {
             continue;
         };
         let mut lines = stamp.lines();
@@ -2891,18 +2998,21 @@ fn inspect_development(
                 failed = true;
                 break;
             }
-            io.commands.spawn((
-                File(path.clone()),
-                Expected(checksum.into()),
-                Order(count),
-                ChildOf(entity),
-            ));
+            let source = io
+                .commands
+                .spawn((
+                    File(path.clone()),
+                    Expected(checksum.into()),
+                    Order(count),
+                    ChildOf(entity),
+                ))
+                .id();
             io.request(
                 &mut sequence,
                 entity,
                 &mut previous,
                 HashFile(path),
-                Tag::Input(count),
+                ForInput(source),
                 false,
             );
             count += 1;
@@ -2952,7 +3062,7 @@ fn inspect_package(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, 
             continue;
         }
 
-        if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
+        if !matches!(facts.get::<_, PathSlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
         {
             io.commands.entity(entity).insert(Failed(Failure::message(
                 "No completed app; run vmux build first",
@@ -3000,7 +3110,7 @@ fn collect_local_entries(
             continue;
         }
 
-        let Some(DirectoryEntries(snapshot)) = facts.get(entity, Tag::Entries) else {
+        let Some(DirectoryEntries(snapshot)) = facts.get::<_, EntriesSlot>(entity) else {
             continue;
         };
         let mut failed = false;
@@ -3039,7 +3149,7 @@ fn collect_local_entries(
 fn verify_development(
     mut requests: RunRequests,
     facts: Facts,
-    checks: Query<(&File, &Expected, &Order, &ChildOf)>,
+    checks: Query<(Entity, &File, &Expected, &Order, &ChildOf)>,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
@@ -3071,11 +3181,11 @@ fn verify_development(
         }
 
         let mut valid = true;
-        for (_, expected, order, parent) in &checks {
+        for (source, _, expected, _, parent) in &checks {
             if parent.parent() != entity {
                 continue;
             }
-            if facts.text(entity, Tag::Input(order.0)).as_deref() != Some(expected.0.as_str()) {
+            if facts.digest(entity, source).as_deref() != Some(expected.0.as_str()) {
                 valid = false;
                 break;
             }
@@ -3217,7 +3327,7 @@ fn run_verify(
                     target.0.as_os_str().into(),
                 ],
             ),
-            Tag::None,
+            (),
             false,
         );
         *phase = RunPhase::Execute;
@@ -3287,7 +3397,7 @@ fn run_execute(
             entity,
             &mut previous,
             RunProcess::new(&environment, &checkout.root, program, arguments),
-            Tag::None,
+            (),
             false,
         );
         *phase = RunPhase::Done;
@@ -3321,13 +3431,13 @@ fn stop(mut requests: StopRequests, facts: Facts, wake: Res<JobWake>, mut io: Io
                             .to_owned(),
                         ["--print", "target-libdir"].map(OsString::from).into(),
                     ),
-                    Tag::Stdlib,
+                    StdlibSlot,
                     false,
                 );
                 *phase = StopPhase::Execute;
             }
             StopPhase::Execute => {
-                let Some(stdlib) = facts.text(entity, Tag::Stdlib) else {
+                let Some(stdlib) = facts.text::<StdlibSlot>(entity) else {
                     continue;
                 };
                 let debug = checkout.directory("debug");
@@ -3356,7 +3466,7 @@ fn stop(mut requests: StopRequests, facts: Facts, wake: Res<JobWake>, mut io: Io
                         debug.join("vmux").into_os_string(),
                         ["service", "stop"].map(OsString::from).into(),
                     ),
-                    Tag::None,
+                    (),
                     false,
                 );
                 *phase = StopPhase::Done;
@@ -3372,9 +3482,21 @@ fn stop(mut requests: StopRequests, facts: Facts, wake: Res<JobWake>, mut io: Io
     }
 }
 
+type SignatureLinks<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Option<&'static Rpath>,
+        Option<&'static Binding>,
+        &'static Order,
+        &'static ChildOf,
+    ),
+>;
+
 #[derive(SystemParam)]
 struct SignatureData<'w, 's> {
-    inputs: Query<'w, 's, (&'static Input, &'static Order, &'static ChildOf)>,
+    inputs: Query<'w, 's, (Entity, &'static Input, &'static Order, &'static ChildOf)>,
     expected: Query<'w, 's, &'static Expected>,
     preparation: Query<
         'w,
@@ -3385,16 +3507,7 @@ struct SignatureData<'w, 's> {
             Option<&'static Linking>,
         ),
     >,
-    links: Query<
-        'w,
-        's,
-        (
-            Option<&'static Rpath>,
-            Option<&'static Binding>,
-            &'static Order,
-            &'static ChildOf,
-        ),
-    >,
+    links: SignatureLinks<'w, 's>,
 }
 
 fn read_signature_inputs(
@@ -3430,22 +3543,22 @@ fn read_signature_inputs(
             entity,
             &mut previous,
             HashFile(product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()),
-            Tag::Entitlements,
+            EntitlementsSlot,
             false,
         );
         let mut sources = spec
             .inputs
             .iter()
-            .filter(|(_, _, parent)| parent.parent() == entity)
+            .filter(|(_, _, _, parent)| parent.parent() == entity)
             .collect::<Vec<_>>();
-        sources.sort_by_key(|(_, order, _)| order.0);
-        for (input, order, _) in sources {
+        sources.sort_by_key(|(_, _, order, _)| order.0);
+        for (source, input, _, _) in sources {
             io.request(
                 &mut sequence,
                 entity,
                 &mut previous,
                 HashFile(input.0.clone()),
-                Tag::Input(order.0),
+                ForInput(source),
                 false,
             );
         }
@@ -3455,7 +3568,7 @@ fn read_signature_inputs(
                 entity,
                 &mut previous,
                 InspectPath(stamp.clone()),
-                Tag::Stamp,
+                StampSlot,
                 false,
             );
             io.request(
@@ -3463,7 +3576,7 @@ fn read_signature_inputs(
                 entity,
                 &mut previous,
                 InspectPath(binary.clone()),
-                Tag::Binary,
+                BinarySlot,
                 false,
             );
             *phase = SignaturePhase::Inputs;
@@ -3473,7 +3586,7 @@ fn read_signature_inputs(
                 entity,
                 &mut previous,
                 HashFile(binary.clone()),
-                Tag::Binary,
+                BinarySlot,
                 false,
             );
             *phase = SignaturePhase::Record;
@@ -3523,19 +3636,19 @@ fn hash_inputs(
         };
         let mut hash = Sha256::new();
         hash.update(identity.as_encoded_bytes());
-        let Some(entitlements) = facts.text(entity, Tag::Entitlements) else {
+        let Some(entitlements) = facts.text::<EntitlementsSlot>(entity) else {
             continue;
         };
         hash.update(entitlements.as_bytes());
         let mut sources = spec
             .inputs
             .iter()
-            .filter(|(_, _, parent)| parent.parent() == entity)
+            .filter(|(_, _, _, parent)| parent.parent() == entity)
             .collect::<Vec<_>>();
-        sources.sort_by_key(|(_, order, _)| order.0);
+        sources.sort_by_key(|(_, _, order, _)| order.0);
         let mut pending = false;
-        for (_, order, _) in sources {
-            let Some(input) = facts.text(entity, Tag::Input(order.0)) else {
+        for (source, _, _, _) in sources {
+            let Some(input) = facts.digest(entity, source) else {
                 pending = true;
                 break;
             };
@@ -3590,15 +3703,15 @@ fn inspect_cache(
             }
         };
         let mut previous = None;
-        let exists = matches!(facts.get(entity, Tag::Stamp), Some(PathMetadata(Some(metadata))) if metadata.is_file())
-            && matches!(facts.get(entity, Tag::Binary), Some(PathMetadata(Some(metadata))) if metadata.is_file());
+        let exists = matches!(facts.get::<_, StampSlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_file())
+            && matches!(facts.get::<_, BinarySlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_file());
         if exists {
             io.request(
                 &mut sequence,
                 entity,
                 &mut previous,
                 ReadFile(stamp.clone()),
-                Tag::Stamp,
+                StampSlot,
                 false,
             );
             io.request(
@@ -3606,7 +3719,7 @@ fn inspect_cache(
                 entity,
                 &mut previous,
                 HashFile(binary.clone()),
-                Tag::Binary,
+                BinarySlot,
                 false,
             );
             io.request(
@@ -3623,7 +3736,7 @@ fn inspect_cache(
                         path.as_os_str().into(),
                     ],
                 ),
-                Tag::Signature,
+                SignatureSlot,
                 true,
             );
             *phase = SignaturePhase::Cache;
@@ -3666,7 +3779,7 @@ fn write_stamp(
         let mut previous = None;
 
         let value = &spec.expected.get(entity).unwrap().0;
-        let Some(checksum) = facts.text(entity, Tag::Binary) else {
+        let Some(checksum) = facts.text::<BinarySlot>(entity) else {
             continue;
         };
         let temporary = stamp.with_extension("tmp");
@@ -3678,7 +3791,7 @@ fn write_stamp(
                 temporary.clone(),
                 format!("{value}\n{checksum}\n").into_bytes(),
             ),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -3686,7 +3799,7 @@ fn write_stamp(
             entity,
             &mut previous,
             RenamePath(temporary, stamp.clone()),
-            Tag::None,
+            (),
             false,
         );
         *phase = SignaturePhase::Done;
@@ -3723,13 +3836,13 @@ fn signature_cache(
             }
         };
 
-        let Some(actual) = facts.text(entity, Tag::Stamp) else {
+        let Some(actual) = facts.text::<StampSlot>(entity) else {
             continue;
         };
-        let Some(checksum) = facts.text(entity, Tag::Binary) else {
+        let Some(checksum) = facts.text::<BinarySlot>(entity) else {
             continue;
         };
-        let Some(ToolOutput(output)) = facts.get(entity, Tag::Signature) else {
+        let Some(ToolOutput(output)) = facts.get::<_, SignatureSlot>(entity) else {
             continue;
         };
         if actual == format!("{}\n{checksum}\n", spec.expected.get(entity).unwrap().0)
@@ -3826,7 +3939,7 @@ fn copy_binary(
             entity,
             &mut previous,
             CreateDirectory(binary.parent().unwrap().to_owned()),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -3834,7 +3947,7 @@ fn copy_binary(
             entity,
             &mut previous,
             CopyFile(copy.0.clone(), binary.clone()),
-            Tag::None,
+            (),
             false,
         );
         io.commands.entity(entity).insert(Copied);
@@ -3849,7 +3962,7 @@ fn copy_binary(
                     "otool".into(),
                     vec!["-l".into(), binary.as_os_str().into()],
                 ),
-                Tag::Rpaths,
+                RpathsSlot,
                 false,
             );
             io.request(
@@ -3862,7 +3975,7 @@ fn copy_binary(
                     "otool".into(),
                     vec!["-L".into(), binary.as_os_str().into()],
                 ),
-                Tag::Libraries,
+                LibrariesSlot,
                 false,
             );
             *phase = SignaturePhase::Rpaths;
@@ -3913,7 +4026,7 @@ fn inspect_format(
                 "file".into(),
                 vec![binary.as_os_str().into()],
             ),
-            Tag::Format,
+            FormatSlot,
             false,
         );
         *phase = SignaturePhase::Format;
@@ -3977,7 +4090,7 @@ fn sign_bundle(
             entity,
             &mut previous,
             CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -3994,7 +4107,7 @@ fn sign_bundle(
                     path.as_os_str().into(),
                 ],
             ),
-            Tag::None,
+            (),
             false,
         );
         *phase = SignaturePhase::Refresh;
@@ -4034,7 +4147,7 @@ fn signature_format(
         };
         let mut previous = None;
 
-        let Some(format) = facts.text(entity, Tag::Format) else {
+        let Some(format) = facts.text::<FormatSlot>(entity) else {
             continue;
         };
         if !format.contains("Mach-O") {
@@ -4074,7 +4187,7 @@ fn signature_format(
             entity,
             &mut previous,
             CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
-            Tag::None,
+            (),
             false,
         );
         io.request(
@@ -4091,7 +4204,7 @@ fn signature_format(
                     path.as_os_str().into(),
                 ],
             ),
-            Tag::None,
+            (),
             false,
         );
         *phase = SignaturePhase::Refresh;
@@ -4163,15 +4276,10 @@ fn signature_rpaths(
         };
         let mut previous = None;
 
-        let Some(rpaths) = facts.text(entity, Tag::Rpaths) else {
+        let Some(rpaths) = facts.text::<RpathsSlot>(entity) else {
             continue;
         };
-        let Some(libraries) = facts.text(entity, Tag::Libraries) else {
-            continue;
-        };
-        let (_, _, linking) = spec.preparation.get(entity).unwrap();
-        let directory = &linking.unwrap().0;
-        for (rpath, _, _, parent) in &spec.links {
+        for (_, rpath, _, _, parent) in &spec.links {
             let Some(rpath) = rpath else {
                 continue;
             };
@@ -4194,10 +4302,50 @@ fn signature_rpaths(
                         binary.as_os_str().into(),
                     ],
                 ),
-                Tag::None,
+                (),
                 false,
             );
         }
+        *phase = SignaturePhase::Libraries;
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn signature_libraries(
+    mut requests: SignatureRequests,
+    facts: Facts,
+    spec: SignatureData,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, _request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, SignaturePhase::Libraries) {
+            continue;
+        }
+
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let _product = match settings.0.product(&checkout.root) {
+            Ok(product) => product,
+            Err(error) => {
+                io.commands
+                    .entity(entity)
+                    .insert(Failed(Failure::message(error.to_string())));
+                continue;
+            }
+        };
+        let mut previous = None;
+
+        let Some(libraries) = facts.text::<LibrariesSlot>(entity) else {
+            continue;
+        };
+        let (_, _, linking) = spec.preparation.get(entity).unwrap();
+        let directory = &linking.unwrap().0;
         let mut order = 0;
         for line in libraries.lines() {
             if !line.contains("libbevy_dylib") {
@@ -4217,20 +4365,23 @@ fn signature_rpaths(
             };
             let replacement = format!("@rpath/{}", name.to_string_lossy());
             let path = directory.join(name);
-            io.commands.spawn((
-                Binding {
-                    original: original.into(),
-                    replacement,
-                },
-                Order(order),
-                ChildOf(entity),
-            ));
+            let source = io
+                .commands
+                .spawn((
+                    Binding {
+                        original: original.into(),
+                        replacement,
+                    },
+                    Order(order),
+                    ChildOf(entity),
+                ))
+                .id();
             io.request(
                 &mut sequence,
                 entity,
                 &mut previous,
                 InspectPath(path),
-                Tag::Library(order),
+                ForLibrary(source),
                 false,
             );
             order += 1;
@@ -4271,14 +4422,14 @@ fn signature_bindings(
         };
         let mut previous = None;
 
-        for (_, binding, order, parent) in &spec.links {
+        for (source, _, binding, _, parent) in &spec.links {
             let Some(binding) = binding else {
                 continue;
             };
             if parent.parent() != entity {
                 continue;
             }
-            if !matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file())
+            if !matches!(facts.related::<PathMetadata, ForLibrary>(entity, source), Some(PathMetadata(Some(metadata))) if metadata.is_file())
             {
                 io.commands
                     .entity(entity)
@@ -4301,7 +4452,7 @@ fn signature_bindings(
                             binary.as_os_str().into(),
                         ],
                     ),
-                    Tag::None,
+                    (),
                     false,
                 );
             }
@@ -4371,7 +4522,7 @@ fn compile(mut requests: CompileRequests, facts: Facts, wake: Res<JobWake>, mut 
                 entity,
                 &mut previous,
                 RunProcess::new(&environment, &checkout.root, "cargo".into(), arguments),
-                Tag::None,
+                (),
                 false,
             );
             *phase = CompilePhase::Done;
@@ -4402,13 +4553,13 @@ fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mu
                     entity,
                     &mut previous,
                     InspectPath(source),
-                    Tag::Path,
+                    PathSlot,
                     false,
                 );
                 *phase = SnapshotPhase::Inspect;
             }
             SnapshotPhase::Inspect => {
-                let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
+                let valid = matches!(facts.get::<_, PathSlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
                 if !valid {
                     io.commands.entity(entity).insert(Failed(Failure::message(
                         "Workspace provider build produced no bounded executable",
@@ -4420,13 +4571,13 @@ fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mu
                     entity,
                     &mut previous,
                     CreateTemporary,
-                    Tag::Temporary,
+                    TemporarySlot,
                     false,
                 );
                 *phase = SnapshotPhase::Copy;
             }
             SnapshotPhase::Copy => {
-                let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+                let Some(TemporaryValue(temporary)) = facts.get::<_, TemporarySlot>(entity) else {
                     continue;
                 };
                 let path = temporary.path().join("provider");
@@ -4435,7 +4586,7 @@ fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mu
                     entity,
                     &mut previous,
                     CopyFile(source, path.clone()),
-                    Tag::None,
+                    (),
                     false,
                 );
                 io.request(
@@ -4443,20 +4594,20 @@ fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mu
                     entity,
                     &mut previous,
                     InspectPath(path),
-                    Tag::Path,
+                    PathSlot,
                     false,
                 );
                 *phase = SnapshotPhase::Check;
             }
             SnapshotPhase::Check => {
-                let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
+                let valid = matches!(facts.get::<_, PathSlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
                 if !valid {
                     io.commands.entity(entity).insert(Failed(Failure::message(
                         "Workspace executable snapshot is incomplete",
                     )));
                     continue;
                 }
-                let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+                let Some(TemporaryValue(temporary)) = facts.get::<_, TemporarySlot>(entity) else {
                     continue;
                 };
                 let executable = crate::workspace_io::Executable::new(
@@ -4503,7 +4654,7 @@ fn invoke(mut requests: InvokeRequests, facts: Facts, wake: Res<JobWake>, mut io
                     program.to_owned(),
                     arguments.clone(),
                 ),
-                Tag::None,
+                (),
                 false,
             );
             *phase = InvokePhase::Done;
@@ -4912,6 +5063,127 @@ mod tests {
     }
 
     #[test]
+    fn replaced_signature_inputs_do_not_adopt_an_old_entitys_digest_at_the_same_order() {
+        let mut fixture = Fixture::new();
+        let first = fixture.root.join("first");
+        let current = fixture.root.join("current");
+        let stamp = fixture.root.join("current.signed");
+        fs::write(&first, b"old input").unwrap();
+        fs::write(&current, b"current input").unwrap();
+        fixture.executable(
+            &fixture.root.join("bin/codesign"),
+            b"#!/bin/sh\nprintf signed > \"$TEST_ROOT/signed\"\n",
+        );
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        let mut settings = fixture
+            .app
+            .world()
+            .get::<Settings>(fixture.operation)
+            .unwrap()
+            .clone();
+        settings.0.set("APPLE_SIGNING_IDENTITY", "fixture");
+        let owner = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Signature {
+                    path: current.clone(),
+                    binary: current.clone(),
+                    stamp: stamp.clone(),
+                    identifier: None,
+                    suffix: String::new(),
+                },
+                Captured {
+                    root: fixture.operation,
+                    attempt: 1,
+                },
+                Root(fixture.operation),
+                Owner(fixture.operation),
+                SignaturePhase::Inputs,
+                Sequence(2),
+                Sources,
+                checkout,
+                settings,
+                ChildOf(fixture.operation),
+            ))
+            .id();
+        let previous = fixture
+            .app
+            .world_mut()
+            .spawn((Input(first.clone()), Order(0), ChildOf(owner)))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(previous)
+            .remove::<Input>();
+        let input = fixture
+            .app
+            .world_mut()
+            .spawn((Input(current.clone()), Order(0), ChildOf(owner)))
+            .id();
+        let old = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("dx.debug.io").unwrap(),
+                Io,
+                HashFile(first),
+                ForInput(previous),
+                Order(0),
+                ChildOf(owner),
+            ))
+            .id();
+        let entitlements = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("dx.debug.io").unwrap(),
+                Io,
+                HashFile(fixture.root.join("packaging/macos/VmuxDev.entitlements")),
+                EntitlementsSlot,
+                Order(1),
+                ChildOf(owner),
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if [old, entitlements].into_iter().all(|entity| {
+                fixture.app.world().get::<OperationState>(entity)
+                    == Some(&OperationState::Succeeded)
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "old input receipt did not settle"
+            );
+            std::thread::park_timeout(Duration::from_millis(10));
+        }
+        assert!(
+            !fixture.root.join("signed").exists(),
+            "an old digest started signing the replacement input"
+        );
+        fixture.app.world_mut().spawn((
+            Operation::bundle("dx.debug.io").unwrap(),
+            Io,
+            HashFile(current),
+            ForInput(input),
+            Order(2),
+            ChildOf(owner),
+        ));
+        fixture.settle_io(owner);
+        assert!(fixture.root.join("signed").exists());
+        assert!(stamp.is_file());
+    }
+
+    #[test]
     fn web_run_keeps_the_stylesheet_worker_until_server_exit_and_releases_it_before_completion() {
         let mut fixture = Fixture::new();
         fs::create_dir_all(fixture.root.join("website")).unwrap();
@@ -5045,7 +5317,7 @@ mod tests {
                 Operation::bundle("dx.debug.io").unwrap(),
                 Io,
                 WriteFile(path.clone(), b"updated".to_vec()),
-                Tag::Config,
+                (),
                 Order(0),
                 ChildOf(owner),
             ))
@@ -5055,7 +5327,7 @@ mod tests {
                 Operation::bundle("dx.debug.io").unwrap(),
                 Io,
                 ReadFile(path.clone()),
-                Tag::Config,
+                (),
                 Order(1),
                 ChildOf(owner),
                 After(write),
@@ -5066,7 +5338,7 @@ mod tests {
                 Operation::bundle("dx.debug.io").unwrap(),
                 Io,
                 HashFile(path.clone()),
-                Tag::Binary,
+                BinarySlot,
                 Order(2),
                 ChildOf(owner),
                 After(read),
