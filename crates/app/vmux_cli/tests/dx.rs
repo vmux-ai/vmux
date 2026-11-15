@@ -979,6 +979,7 @@ done
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
+    #[cfg(any(target_os = "macos", not(feature = "runtime")))]
     fn native(&self, program: &str) -> std::process::Command {
         let mut command = std::process::Command::new(program);
         command.current_dir(&self.root).env(
