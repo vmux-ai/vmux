@@ -92,6 +92,9 @@ pub(crate) struct Projection<'w, 's> {
 impl Projection<'_, '_> {
     pub(crate) fn state(&self, active: Option<&ProfileRow>) -> Option<TeamAccountState> {
         let (root, error, disconnecting, pending_sync, available) = self.roots.single().ok()?;
+        if !available {
+            return None;
+        }
         let (account, _, id, revision, binding) = self
             .accounts
             .iter()
