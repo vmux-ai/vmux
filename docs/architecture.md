@@ -4,11 +4,6 @@ The guides are now organized by [UX and DX](README.md).
 
 Read [How Vmux works](dx/architecture.md) for composition, ownership, and runtime boundaries, [Make a change](dx/feature-development.md) to route a change, or [Getting started](dx/getting-started.md) for the development workflow.
 
-Plugin types use descriptive names ending in `Plugin`, including private, platform, DX and test
-plugins. Type aliases and re-exports preserve that naming. The DX policy tests enforce it in
-the pre-push hook and CI across crates, examples, website and scripts, resolving framework and
-type aliases. Vendored types keep their upstream names.
-
 ### ECS ownership boundaries
 
 The [DX architecture guide](dx/architecture.md#ecs-ownership-boundaries) describes the repository policy's bounded adapter contracts and canonical ownership model.
@@ -34,28 +29,3 @@ Provider snapshots open the source once, validate that handle, and copy at most 
 Development command admission captures configuration before target selection and tooling preparation. Registered systems own phase changes and native operation ordering; their query capabilities perform synchronous lookup, selection, and scoped state mutation. Native format conversion produces plist bytes from accepted inputs without running a workflow. IO routing discriminators belong to their canonical operation components, and the unchanged compatibility schema remains migration debt until its last callers are removed.
 
 Packaging waits for process observations, publication journals, and keychain restoration to drain. The reactive CLI sleeps while those children are pending and resumes from their completion wakes. Bundle verification requires the VM helper as well as the desktop, service, and CLI binaries before publication.
-
-`vmux_feature` owns global boolean release decisions. Provider roots compose environment `Name`,
-`Revision`, generation and lease facts. Published values are individual children; definitions
-project `Current` and emit typed `Changed` messages. `Receive` owns a temporary versioned JSON
-document, which is materialized before consumers evaluate it. Missing, expired and failed input
-uses the definition's default; Account cloud linking declares false. Malformed input cannot
-replace accepted content, and older revisions or context completions cannot replace newer state.
-Configuration content is immutable within a revision; lease renewal may change its timestamps.
-Disabling the default `ecs` Cargo feature exposes only the serialized snapshot contract, so
-Cloud readers can compile it without Bevy, Profile, page or native UI dependencies.
-
-The optional `HttpPlugin` composes `FeaturePlugin`, native `ClockPlugin` sampling and the shared bounded job lane.
-`Endpoint` selects HTTPS `/v1/flags/snapshot`; loopback HTTP exists for integration tests.
-Requests capture provider generation and one conditional validator. Registered systems own
-admission, cancellation, validation and jittered polling. Only accepted content installs its
-ETag, and a 304 preserves the existing validity deadline. Failure closes admission and requests
-a fresh document on retry. The HTTP adapter limits requests to five seconds and responses to
-64 KiB. A provider-owned native timer binds the host's `JobWake` for polling and lease expiry;
-provider removal cancels timers and invalidates outstanding jobs. Bevy fixtures drive production
-plugins without launching a GUI. This foundation does not migrate manifests or enable a product
-capability; application composition and the private Cloud Control remain separate consumers.
-
-Native extension bridge initialization translates already-granted WebExtension permission
-strings into immutable bridge registrations before CEF starts. Host-pattern parsing preserves
-those grants; the catalog remains responsible for granting and persisting access.

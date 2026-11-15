@@ -675,7 +675,7 @@ fn fetched_policy_refuses_the_same_misplaced_fragments_as_the_filesystem() {
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
     let policy = Policy::load(&root.0).expect("valid ownership policy");
-    let architecture = std::fs::read_to_string(root.0.join("docs/architecture.md"))
+    let architecture = std::fs::read_to_string(root.0.join("docs/dx/architecture.md"))
         .expect("architecture boundary contract");
     assert!(
         architecture
