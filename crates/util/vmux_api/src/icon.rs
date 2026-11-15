@@ -34,6 +34,11 @@ pub enum BuiltinIcon {
     Archive,
     GitCommit,
     Branch,
+    Container,
+    Computer,
+    Docker,
+    Containers,
+    Info,
 }
 
 impl BuiltinIcon {

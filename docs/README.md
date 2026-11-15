@@ -23,6 +23,7 @@ Start with [Start with Vmux](ux/getting-things-done.md), written for someone com
 - [Agents](ux/agents.md): give a task, follow tool activity, and review the result.
 - [Code and Git](ux/code-and-git.md): edit files, inspect a diff, and share changes.
 - [Terminal](ux/terminal.md): run commands and return to processes.
+- [VM and Docker](ux/containers.md): manage the Linux VM, containers and Compose groups.
 - [Remote access](ux/remote.md): continue supported host work from the phone.
 
 ## DX: build and change Vmux

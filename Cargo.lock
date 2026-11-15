@@ -10370,6 +10370,7 @@ dependencies = [
  "vmux_bookmark",
  "vmux_browser",
  "vmux_command",
+ "vmux_container",
  "vmux_ecs",
  "vmux_editor",
  "vmux_extension",
@@ -10497,6 +10498,7 @@ dependencies = [
 name = "vmux_command"
 version = "0.0.35"
 dependencies = [
+ "async-io",
  "bevy",
  "bevy_cef",
  "bevy_ecs",
@@ -10516,6 +10518,31 @@ dependencies = [
  "vmux_path",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_container"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_app",
+ "bevy_cef",
+ "bevy_ecs",
+ "bevy_tasks",
+ "dioxus",
+ "dioxus-ssr",
+ "percent-encoding",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "url",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_page",
+ "vmux_profile",
+ "vmux_ui",
+ "vmux_vm",
 ]
 
 [[package]]
@@ -11496,6 +11523,25 @@ dependencies = [
  "vmux_tool",
  "vmux_ui",
  "zeroize",
+]
+
+[[package]]
+name = "vmux_vm"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "flate2",
+ "libc",
+ "libloading 0.8.9",
+ "ring",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "url",
+ "vmux_spawn",
 ]
 
 [[package]]

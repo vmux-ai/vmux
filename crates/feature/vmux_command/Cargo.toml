@@ -25,6 +25,7 @@ vmux_macro = { path = "../../util/vmux_macro" }
 vmux_path = { path = "../../util/vmux_path" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
+async-io = "2"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }

@@ -1,12 +1,13 @@
 use std::{collections::HashMap, rc::Rc};
 
+use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 use vmux_api::address::{
     AddressCrumb, AddressIntent, AddressOption, PageAddress, PageAddressRequest,
 };
 
 use crate::components::avatar::IdentityOrb;
-use crate::components::breadcrumb::{BreadcrumbDropdown, BreadcrumbSeparator};
+use crate::components::breadcrumb::{BreadcrumbDropdown, BreadcrumbItem, BreadcrumbSeparator};
 use crate::components::dropdown::DropdownOption;
 use crate::components::manager::{ManagerAddButton, ManagerIconButton};
 use crate::file_icon::TypeIcon;
@@ -45,15 +46,34 @@ pub fn AddressTrail(
     let mut available = use_signal(|| 0.0);
     let mut widths = use_signal(HashMap::<String, f64>::new);
     let measurement_open = use_signal(|| None::<String>);
+    let root_id = format!("vmux-address-{}", current_scope_id().0);
+    let motion_id = root_id.clone();
+    use_effect(move || {
+        let script = include_str!("address_motion.js")
+            .replace("__VMUX_ADDRESS_ROOT__", &format!("{motion_id:?}"))
+            .replace(
+                "__VMUX_ADDRESS_DURATION__",
+                &crate::motion::Motion::LAYOUT_MS.to_string(),
+            );
+        crate::transport::Host::run_script(script);
+    });
+    let motion_id = root_id.clone();
+    use_drop(move || {
+        crate::transport::Host::run_script(format!(
+            "globalThis.__vmuxAddressMotion?.get({motion_id:?})?.();"
+        ));
+    });
     let visible = PathVisibility::start(&state.paths, available(), &widths.read());
     let requests = AddressSender::new(&state);
     let current_is_parent = matches!(&state.current.intent, Some(AddressIntent::Navigate { url }) if url.trim_end_matches('/') != state.document_url().trim_end_matches('/'));
     rsx! {
         nav {
+            id: root_id,
             class: "relative flex h-7 min-w-0 flex-1 items-center gap-1 text-xs",
             aria_label: translate("editor-breadcrumb"),
             onclick: move |event: MouseEvent| event.stop_propagation(),
-            AddressMenu {
+            span { class: "flex min-w-0 shrink items-center", "data-vmux-crumb-key": "page",
+              AddressMenu {
                 id: "page".to_string(),
                 crumb: AddressCrumb {
                     entry: state.current.clone(), options: state.views.clone(),
@@ -61,9 +81,11 @@ pub fn AddressTrail(
                 },
                 requests: requests.clone(), open,
                 navigate_on_click: current_is_parent,
+              }
             }
             for (index, crumb) in state.fixed.iter().enumerate() {
                 span { key: "fixed-{index}", class: "flex min-w-0 shrink items-center gap-1",
+                    "data-vmux-crumb-key": "fixed-{index}",
                     BreadcrumbSeparator {}
                     AddressMenu { id: format!("fixed-{index}"), crumb: crumb.clone(), requests: requests.clone(), open }
                 }
@@ -86,7 +108,8 @@ pub fn AddressTrail(
                     {
                         rsx! {
                             span {
-                                key: "{crumb.entry.path}", class: "flex shrink-0 items-center",
+                                key: "path-{index}", class: "flex shrink-0 items-center",
+                                "data-vmux-crumb-key": "path-{index}",
                                 AddressMenu { id: format!("path-{}", crumb.entry.path), crumb: crumb.clone(), requests: requests.clone(), open, preserve_name: true }
                                 if index + 1 < state.paths.len() { BreadcrumbSeparator {} }
                             }
@@ -96,6 +119,7 @@ pub fn AddressTrail(
             }
             for (index, crumb) in state.symbols.iter().enumerate() {
                 span { key: "symbol-{index}", class: "flex min-w-0 shrink items-center gap-1",
+                    "data-vmux-crumb-key": "symbol-{index}",
                     BreadcrumbSeparator {}
                     AddressMenu { id: format!("symbol-{index}"), crumb: crumb.clone(), requests: requests.clone(), open }
                 }
@@ -156,15 +180,30 @@ fn AddressMenu(
     #[props(default)] preserve_name: bool,
     #[props(default)] navigate_on_click: bool,
 ) -> Element {
-    if crumb.options.is_empty()
+    let direct = !crumb
+        .options
+        .iter()
+        .any(|option| option.intent.is_some() && option.intent != crumb.entry.intent)
         && crumb.tabs.is_empty()
         && crumb.on_open.is_none()
-        && crumb.on_more.is_none()
-        && crumb.entry.intent.is_none()
-    {
-        return rsx! { span { class: "flex h-7 min-w-0 items-center gap-1", title: crumb.entry.title.clone(),
-            AddressIcon { entry: crumb.entry.clone() }
-            span { class: "truncate", {AddressLabel(&crumb.entry).text()} }
+        && crumb.on_more.is_none();
+    let direct_id = id.clone();
+    use_effect(use_reactive!(|(direct, direct_id)| {
+        if direct && open.peek().as_ref() == Some(&direct_id) {
+            open.set(None);
+        }
+    }));
+    if direct {
+        let intent = crumb.entry.intent.clone();
+        let onclick = intent.map(|intent| {
+            EventHandler::new(move |_| {
+                open.set(None);
+                requests.send(intent.clone());
+            })
+        });
+        return rsx! { BreadcrumbItem {
+            label: AddressLabel(&crumb.entry).text(), title: crumb.entry.title.clone(), active: crumb.active, onclick,
+            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone() } } },
         } };
     }
     let active = open.read().as_ref() == Some(&id);
@@ -357,6 +396,7 @@ mod tests {
     struct TrailProbe {
         requests: RefCell<Vec<PageAddressRequest>>,
         popup: RefCell<Vec<bool>>,
+        scripts: RefCell<Vec<String>>,
     }
 
     impl PageHost for TrailProbe {
@@ -372,6 +412,30 @@ mod tests {
         fn listen(&self, _id: &str, _listener: BytesListener) -> Result<(), EventListenerError> {
             Ok(())
         }
+
+        fn run_script(&self, script: String) {
+            self.scripts.borrow_mut().push(script);
+        }
+    }
+
+    #[test]
+    fn mounted_trail_installs_and_releases_motion_through_its_page_host() {
+        let probe = Rc::new(TrailProbe::default());
+        let _host = HostScope::enter(probe.clone());
+        let mut dom = VirtualDom::new(MotionTrail);
+        dom.rebuild_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(probe.scripts.borrow().len(), 1);
+        dom.render_immediate_to_vec();
+        assert_eq!(probe.scripts.borrow().len(), 1);
+        drop(dom);
+        assert_eq!(probe.scripts.borrow().len(), 2);
+    }
+
+    #[component]
+    fn MotionTrail() -> Element {
+        let state = PageAddress::default();
+        rsx! { AddressTrail { state } }
     }
 
     #[component]
@@ -385,6 +449,19 @@ mod tests {
                 views: vec![AddressOption {
                     label: "Projects".into(),
                     intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }),
+                    ..Default::default()
+                }],
+                fixed: vec![AddressCrumb {
+                    entry: AddressOption {
+                        label: "Docker".into(),
+                        intent: Some(AddressIntent::Navigate { url: "vmux://vm/docker".into() }),
+                        ..Default::default()
+                    },
+                    options: vec![AddressOption {
+                        label: "Docker".into(),
+                        intent: Some(AddressIntent::Navigate { url: "vmux://vm/docker".into() }),
+                        ..Default::default()
+                    }],
                     ..Default::default()
                 }],
                 checkout: Some(AddressOption { label: "Checkout".into(), ..Default::default() }),
@@ -403,7 +480,7 @@ mod tests {
             state: PageAddress {
                 owner: 17, revision: 9, url: "vmux://projects/one".into(),
                 current: AddressOption { label: "Projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() },
-                views: vec![AddressOption { label: "All projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() }],
+                views: vec![AddressOption { label: "All projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() }, AddressOption { label: "Recent projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/recent".into() }), ..Default::default() }],
                 ..Default::default()
             }
         } }
@@ -449,6 +526,48 @@ mod tests {
         assert!(
             matches!(probe.requests.borrow().as_slice(), [PageAddressRequest { owner: 17, revision: 9, url, intent: AddressIntent::Navigate { url: target } }] if url == "vmux://projects/one" && target == "vmux://projects/")
         );
+    }
+
+    #[test]
+    fn single_destination_breadcrumb_navigates_without_an_empty_popup() {
+        dioxus::html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let probe = Rc::new(TrailProbe::default());
+        let _host = HostScope::enter(probe.clone());
+        let mut dom = VirtualDom::new(RoutedTrail);
+        dom.provide_root_context(probe.clone());
+        let initial = dom.rebuild_to_vec();
+        let target = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "title",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == "Docker" => Some(*id),
+                _ => None,
+            })
+            .expect("parent breadcrumb link");
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            target,
+        );
+        dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(probe.requests.borrow().len(), 1);
+        assert_eq!(
+            probe.requests.borrow()[0].intent,
+            AddressIntent::Navigate {
+                url: "vmux://vm/docker".into(),
+            }
+        );
+        assert!(!probe.popup.borrow().contains(&true));
+        assert!(!dioxus_ssr::render(&dom).contains(&translate("editor-breadcrumb-empty")));
     }
 
     #[test]

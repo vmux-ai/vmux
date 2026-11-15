@@ -14,6 +14,7 @@ contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layou
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",
+    "dep:vmux_container",
     "acp",
     "bookmark",
     "browser",
@@ -33,6 +34,7 @@ cli = [
 ]
 mcp = ["cli"]
 desktop = [
+    "container",
     "acp",
     "bookmark",
     "browser",
@@ -74,6 +76,7 @@ daemon = [
 ]
 tool = ["layout-runtime", "dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
+container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
@@ -119,6 +122,7 @@ start = ["runtime", "dep:vmux_start"]
 vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
+vmux_container = { path = "../../feature/vmux_container", optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_account = { path = "../../feature/vmux_account", optional = true }

@@ -66,14 +66,10 @@
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||const:VAULT_AUTO_SYNC_DELAY", fingerprint: "01920bc5fb733082", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||const:VAULT_REMOTE_SYNC_INTERVAL", fingerprint: "33ed664b4df52120", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||fn:drain_scan", fingerprint: "4899471e29b7493c", issue: "VMX-253"),
-    (key: "crates/feature/vmux_vault/src/host/runtime.rs||fn:drain_watch", fingerprint: "60b77ecc1503d2e4", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||fn:queue_auto_sync", fingerprint: "ac5a9cb200899773", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||fn:spawn", fingerprint: "893cc94996d7560c", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||fn:start_scan", fingerprint: "4ed0fd94faf36183", issue: "VMX-253"),
-    (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:Plugin for RuntimePlugin", fingerprint: "cc2cb8d11a77d18b", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:VaultSnapshot", fingerprint: "574c6968adcbb62e", issue: "VMX-253"),
-    (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:VaultWatch", fingerprint: "bd55b88f74947f72", issue: "VMX-253"),
-    (key: "crates/feature/vmux_vault/src/host/runtime.rs||struct:VaultWatch", fingerprint: "c0afd88dcac0363c", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/workflow.rs||fn:confirm_recovery", fingerprint: "53489b9631189761", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/workflow.rs||fn:connect", fingerprint: "d17f5768bf5b87e4", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/host/workflow.rs||fn:create", fingerprint: "95cd03a6493a50fc", issue: "VMX-253"),
@@ -250,4 +246,9 @@
     (key: "crates/feature/vmux_vault/src/ui.rs||fn:VaultPanel", fingerprint: "05260ea6d45dce20", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/ui.rs||fn:copy_recovery_key", fingerprint: "55d07ba5c4ce299a", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/ui.rs||struct:VaultPage", fingerprint: "8ac286b6ac093df6", issue: "VMX-253"),
+], boundaries: [
+    (key: "crates/feature/vmux_vault/src/host/runtime.rs||struct:VaultWatch", fingerprint: "6892f270a972248a", interface: "notify filesystem callbacks and native event-loop wake", input: "external: filesystem notification kinds and paths beneath the configured Vault root", output: "ECS: crates/feature/vmux_vault/src/host/runtime.rs||struct:Notification", lifetime: "one RuntimePlugin profile watch generation", bounds: "raw notification/channel handles only; ignored runtime/project paths and access events are excluded before queueing or waking; ECS owns scan and sync decisions", teardown: "watcher and receiver Drop release callbacks and stop senders", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:VaultWatch", fingerprint: "d046930d28d7ec59", interface: "notify filesystem callbacks and native event-loop wake", input: "external: filesystem notification kinds and paths beneath the configured Vault root", output: "ECS: crates/feature/vmux_vault/src/host/runtime.rs||struct:Notification", lifetime: "one RuntimePlugin profile watch generation", bounds: "raw notification/channel handles only; ignored runtime/project paths and access events are excluded before queueing or waking; ECS owns scan and sync decisions", teardown: "watcher and receiver Drop release callbacks and stop senders", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:Plugin for RuntimePlugin", fingerprint: "f270d695ae2a7aeb", interface: "Bevy registration of the notify callback and Vault runtime schedule", input: "ECS: crates/feature/vmux_vault/src/host/runtime.rs||struct:Notification", output: "external: scoped watcher channels and production system registration", lifetime: "one RuntimePlugin installation", bounds: "registers the canonical notification message, receiving systems and one native watcher; scan and sync decisions stay in ECS systems", teardown: "App teardown drops the watcher and notification channels", architecture: "ECS ownership boundaries"),
+], values: [
 ])

@@ -255,6 +255,7 @@ before-each-package-command = "\"$VMUX_DX_BIN\" internal before-package"
 binaries = [
     { path = "vmux_desktop", main = true },
     { path = "vmux" },
+    { path = "vmux_vm" },
     { path = "Vmux Service" },
 ]
 

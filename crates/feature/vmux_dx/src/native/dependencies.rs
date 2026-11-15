@@ -422,6 +422,11 @@ impl Native {
             fs::create_dir_all(&cache)?;
             self.environment.set("CEF_PATH", cache.as_os_str());
         }
+        if self.environment.get("VMUX_BUILD_PROFILE") == Some(OsStr::new("dev"))
+            && !self.environment.present("CARGO_INCREMENTAL")
+        {
+            self.environment.set("CARGO_INCREMENTAL", "1");
+        }
         let mut probe = self.command("sccache");
         probe.arg("--version");
         if self.environment.get("VMUX_DISABLE_SCCACHE") != Some(OsStr::new("1"))
@@ -443,6 +448,7 @@ impl Native {
                 }
                 if self.environment.get("CI") != Some(OsStr::new("true"))
                     && !self.environment.present("RUSTC_WRAPPER")
+                    && self.environment.get("CARGO_INCREMENTAL") != Some(OsStr::new("1"))
                 {
                     self.environment.set("RUSTC_WRAPPER", "sccache");
                 }

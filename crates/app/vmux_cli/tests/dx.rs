@@ -4,6 +4,8 @@ use assert_cmd::Command;
 #[cfg(not(feature = "runtime"))]
 use assert_cmd::assert::OutputAssertExt;
 use predicates::prelude::*;
+#[cfg(target_os = "macos")]
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -360,6 +362,26 @@ fn installed_tailwind_pin_is_recognized_when_ci_defaults_to_ansi_colors() {
 }
 
 #[test]
+#[cfg(unix)]
+fn cargo_cache_selection_never_combines_sccache_with_incremental_compilation() {
+    for incremental in [None, Some("0"), Some("1")] {
+        let fixture = Fixture::new();
+        fixture.script("sccache", "#!/bin/sh\nexit 0\n");
+        let mut command = fixture.command();
+        command
+            .args(["internal", "cargo", "--", "build"])
+            .env_remove("VMUX_DISABLE_SCCACHE")
+            .env_remove("RUSTC_WRAPPER")
+            .env("CI", "false");
+        match incremental {
+            Some(value) => command.env("CARGO_INCREMENTAL", value),
+            None => command.env_remove("CARGO_INCREMENTAL"),
+        };
+        command.assert().success();
+    }
+}
+
+#[test]
 #[cfg(target_os = "macos")]
 fn custom_packages_preserve_product_identity_assets_and_service_namespace() {
     let fixture = Fixture::new();
@@ -713,6 +735,7 @@ impl Fixture {
             "packaging/macos/usage-descriptions.plist",
             "packaging/macos/VmuxDev.entitlements",
             "packaging/macos/Vmux.entitlements",
+            "crates/util/vmux_vm/hypervisor.entitlements",
             "packaging/macos/Vmux.icns",
             "packaging/macos/tray.png",
             "packaging/macos/dmg-background.png",
@@ -749,6 +772,7 @@ impl Fixture {
         assert!(git.status.success());
         fixture.script("git", "#!/bin/sh\ncase \"$*\" in *'rev-parse --short=7 HEAD'*) printf '9999999\\n';; *) exec /usr/bin/git \"$@\";; esac\n");
         fixture.script("cargo", r#"#!/bin/sh
+[ "${RUSTC_WRAPPER:-}" != sccache ] || [ "${CARGO_INCREMENTAL:-0}" != 1 ] || exit 73
 case "$1" in
   -V|--version) printf 'cargo 1.90.0\n'; exit 0 ;;
   build|rustc)
@@ -756,7 +780,7 @@ case "$1" in
     case "$*" in *--release*) profile=release;; *cef-helper*) profile=cef-helper;; *) profile=debug;; esac
     output="$CARGO_TARGET_DIR/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}$profile"
     mkdir -p "$output"
-    for binary in vmux vmux_service vmux_desktop bevy_cef_debug_render_process; do
+    for binary in vmux vmux_vm vmux_service vmux_desktop bevy_cef_debug_render_process; do
       printf '#!/bin/sh\nexit 0\n' > "$output/$binary"
       chmod +x "$output/$binary"
     done
@@ -793,7 +817,7 @@ esac
         );
         fixture.script("file", "#!/bin/sh\nprintf 'Mach-O fixture\\n'\n");
         fixture.script("install_name_tool", "#!/bin/sh\nexit 0\n");
-        fixture.script("codesign", "#!/bin/sh\n[ \"${FAIL_SIGNATURE:-0}\" != 1 ] || exit 44\n[ \"$1\" != --display ] || printf certificate > codesign0\n");
+        fixture.script("codesign", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_SIGN_LOG\"\n[ \"${FAIL_SIGNATURE:-0}\" != 1 ] || exit 44\n[ \"$1\" != --display ] || printf certificate > codesign0\n");
         fixture.script(
             "security",
             r#"#!/bin/sh
@@ -954,6 +978,7 @@ else:
             .env("SKIP_NOTARIZE", "1")
             .env("TEST_BUILD_LOG", self.root.join("build.log"))
             .env("TEST_SECURITY_LOG", self.root.join("security.log"))
+            .env("TEST_SIGN_LOG", self.root.join("signing.log"))
             .env("TEST_OPEN_LOG", self.root.join("open.log"));
         for key in [
             "VMUX_TARGET_LOCK_OWNER_PID",
@@ -1062,6 +1087,14 @@ fn packaged_artifacts_are_verified_before_publication_and_failed_builds_preserve
         .assert()
         .success();
     assert!(!app.join("sentinel").exists());
+    assert!(app.join("Contents/MacOS/vmux_vm").is_file());
+    let signing = std::fs::read_to_string(fixture.root.join("signing.log")).unwrap();
+    assert!(
+        signing
+            .lines()
+            .any(|line| line.contains("hypervisor.entitlements")
+                && line.ends_with("Contents/MacOS/vmux_vm"))
+    );
     assert!(
         app.join("Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service")
             .is_file()
@@ -1076,6 +1109,53 @@ fn packaged_artifacts_are_verified_before_publication_and_failed_builds_preserve
         std::fs::read(fixture.root.join("build.log")).unwrap(),
         build_log
     );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn debug_vm_helpers_are_verified_and_rebundling_preserves_open_executables() {
+    let fixture = Fixture::new();
+    fixture.command().args(["build"]).assert().success();
+    let debug = fixture.target.join("debug");
+    let app = debug.join("Vmux Dev.app");
+    for (source, relative) in [
+        ("vmux_vm", "Contents/MacOS/vmux_vm"),
+        (
+            "vmux_service",
+            "Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
+        ),
+        ("vmux_desktop", "Contents/MacOS/vmux_desktop"),
+    ] {
+        let bundled = app.join(relative);
+        let previous = std::fs::read(&bundled).unwrap();
+        let mut mapped = std::fs::File::open(&bundled).unwrap();
+        let changed = format!("changed {source}\n");
+        std::fs::write(debug.join(source), changed.as_bytes()).unwrap();
+        fixture
+            .command()
+            .args(["internal", "debug-sign"])
+            .assert()
+            .success();
+        fixture
+            .command()
+            .args(["internal", "debug-bundle"])
+            .assert()
+            .success();
+        let mut retained = Vec::new();
+        mapped.read_to_end(&mut retained).unwrap();
+        assert_eq!(retained, previous);
+        assert_eq!(std::fs::read(bundled).unwrap(), changed.as_bytes());
+    }
+    let missing = Fixture::new();
+    missing.command().args(["build"]).assert().success();
+    std::fs::remove_file(
+        missing
+            .target
+            .join("debug/Vmux Dev.app/Contents/MacOS/vmux_vm"),
+    )
+    .unwrap();
+    missing.command().args(["run"]).assert().failure();
+    assert!(!missing.root.join("open.log").exists());
 }
 
 #[test]
@@ -1291,7 +1371,7 @@ fn package_executables_have_one_main_binary_and_no_case_insensitive_name_collisi
     assert_eq!(main, Some("vmux_desktop"));
     assert_eq!(
         names,
-        ["vmux", "vmux_desktop", "vmux service"]
+        ["vmux", "vmux_desktop", "vmux_vm", "vmux service"]
             .into_iter()
             .map(String::from)
             .collect()

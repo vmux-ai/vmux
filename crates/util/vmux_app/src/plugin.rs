@@ -69,6 +69,8 @@ pub enum VmuxPlugin {
     Knowledge(vmux_knowledge::KnowledgePlugin),
     #[plugin(feature = "history", desktop, requires(runtime))]
     History(vmux_history::HistoryPlugin),
+    #[plugin(feature = "container", desktop, requires(layout_runtime))]
+    Container(vmux_container::ContainerPlugin),
     #[plugin(feature = "simulator", desktop, requires(layout_runtime))]
     Simulator(vmux_simulator::SimulatorPlugin),
     #[plugin(feature = "shortcut", desktop, requires(runtime))]
@@ -231,7 +233,10 @@ mod profile_tests {
             }
             catalog.sort();
             if tools {
-                assert_eq!(catalog, ["mcp", "remote.pair", "service", "tool"]);
+                assert_eq!(
+                    catalog,
+                    ["container", "mcp", "remote.pair", "service", "tool"]
+                );
             } else {
                 assert!(catalog.is_empty());
             }

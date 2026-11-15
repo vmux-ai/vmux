@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_ecs::page::{
     HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed, HostsPage, PageManifest,
-    PageMetadataCatalog, PageReady,
+    PageMetadataCatalog, PagePlacementCatalog, PageReady,
 };
 use vmux_ecs::{
     PageMetadata, PageNavigation, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest,
@@ -309,8 +309,8 @@ impl Surface {
         Self(url.to_string())
     }
 
-    fn belongs_to(&self, page: &HostedPage) -> bool {
-        page.answers_for(&self.0)
+    fn belongs_to(&self, page: &HostedPage, url: &str, placements: &PagePlacementCatalog) -> bool {
+        page.answers_for(&self.0) || placements.reuses(url, &self.0)
     }
 }
 
@@ -399,6 +399,7 @@ fn handoff_state_changed(
 fn open(
     pages: Query<&HostedPage>,
     metadata: PageMetadataCatalog,
+    placements: PagePlacementCatalog,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     navigations: Query<&PageNavigation>,
     histories: Query<(), With<HostHistory>>,
@@ -443,7 +444,9 @@ fn open(
                         .iter()
                         .filter_map(|child| {
                             let (surface, pending) = hosted_browsers.get(child).ok()?;
-                            surface.belongs_to(page).then_some((child, pending))
+                            surface
+                                .belongs_to(page, &task.url, &placements)
+                                .then_some((child, pending))
                         })
                         .max_by_key(|(_, pending)| *pending)
                 })
@@ -1180,6 +1183,93 @@ mod tests {
             "vmux://sessions/codex/session-1"
         );
         assert!(app.world().get::<vmux_ecs::PageIdentity>(second).is_none());
+    }
+
+    #[test]
+    fn hosted_page_group_reuses_one_surface_across_parent_and_child_routes() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::page::PagePlugin, HostedPagePlugin));
+        for (url, title, icon, subtree) in [
+            ("vmux://vm/", "VM", BuiltinIcon::Computer, false),
+            ("vmux://vm/docker", "Docker", BuiltinIcon::Docker, false),
+            (
+                "vmux://vm/docker/containers",
+                "Containers",
+                BuiltinIcon::Containers,
+                true,
+            ),
+        ] {
+            app.world_mut().spawn((
+                HostedPage {
+                    url,
+                    title,
+                    owns_subtree: subtree,
+                },
+                PageManifest {
+                    route: url,
+                    url,
+                    asset_host: "vm",
+                    owns_subtree: subtree,
+                    title,
+                    title_message_id: None,
+                    replaces_command: None,
+                    keywords: &[],
+                    icon: Some(icon),
+                    command_bar: false,
+                    startup: false,
+                    reports_title: false,
+                    placement: vmux_ecs::page::PagePlacement {
+                        group: "vm",
+                        reuse: vmux_ecs::page::PageReuse::Group,
+                        ..Default::default()
+                    },
+                },
+            ));
+        }
+        let stack = app.world_mut().spawn(crate::stack::Stack::default()).id();
+        let mut first = None;
+        for url in [
+            "vmux://vm/",
+            "vmux://vm/docker",
+            "vmux://vm/docker/containers",
+            "vmux://vm/docker/containers/groups/cloud/containers/account/info",
+            "vmux://vm/docker",
+            "vmux://vm/",
+        ] {
+            let navigation = PageOpenId::new();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(PageNavigation::new(navigation));
+            app.world_mut().spawn(PageOpenTask {
+                id: navigation,
+                stack,
+                url: url.into(),
+                request_id: None,
+            });
+            app.update();
+            let surfaces = app
+                .world()
+                .get::<Children>(stack)
+                .unwrap()
+                .iter()
+                .filter(|child| app.world().get::<Browser>(*child).is_some())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                surfaces.len(),
+                1,
+                "navigation recreated a VM surface for {url}"
+            );
+            let surface = surfaces[0];
+            assert_eq!(*first.get_or_insert(surface), surface);
+            assert_eq!(app.world().get::<PageMetadata>(surface).unwrap().url, url);
+            app.world_mut().entity_mut(surface).insert((
+                PageReady {},
+                SurfacePaintReady,
+                SurfacePresentationReady,
+            ));
+            app.update();
+            app.update();
+        }
     }
 
     #[test]

@@ -28,6 +28,25 @@ pub struct AddressProjectionSet;
 #[derive(Component)]
 struct RouteAddress(PageAddress);
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AddressScope(vmux_api::RoutePattern<'static>);
+
+impl AddressScope {
+    pub fn subtree(url: &'static str) -> Self {
+        Self(vmux_api::RoutePattern::new(url, true))
+    }
+
+    fn advance(&self, address: &PageAddress, url: &str) -> Option<PageAddress> {
+        if !self.0.matches(&address.url) || !self.0.matches(url) {
+            return None;
+        }
+        let mut next = address.clone();
+        next.url = url.to_string();
+        next.revision = next.revision.saturating_add(1);
+        Some(next)
+    }
+}
+
 type Sources<'w, 's> = Query<
     'w,
     's,
@@ -36,12 +55,13 @@ type Sources<'w, 's> = Query<
         &'static PageMetadata,
         Option<&'static AddressContribution>,
         Option<&'static RouteAddress>,
+        Option<&'static AddressScope>,
     ),
     With<HostsPage>,
 >;
 
 fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands) {
-    for (owner, metadata, current, automatic) in &pages {
+    for (owner, metadata, current, automatic, scope) in &pages {
         if let Some(current) = current
             && current.0.url != metadata.url
             && let Some(address) = current.0.for_navigation(&metadata.url)
@@ -49,7 +69,31 @@ fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands)
             commands
                 .entity(owner)
                 .remove::<RouteAddress>()
-                .insert(AddressContribution(address));
+                .insert(AddressContribution(address.clone()));
+            commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
+                owner,
+                &PageAddressUiStatePatch {
+                    address: Some(address),
+                    ..Default::default()
+                },
+            ));
+            continue;
+        }
+        if let Some(current) = current
+            && automatic.is_none()
+            && current.0.url != metadata.url
+            && let Some(address) = scope.and_then(|scope| scope.advance(&current.0, &metadata.url))
+        {
+            commands
+                .entity(owner)
+                .insert(AddressContribution(address.clone()));
+            commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
+                owner,
+                &PageAddressUiStatePatch {
+                    address: Some(address),
+                    ..Default::default()
+                },
+            ));
             continue;
         }
         if let Some(current) = current
@@ -397,6 +441,44 @@ mod tests {
         trail.app.update();
         assert_eq!(trail.address().current.label, "Projects");
         assert!(trail.address().revision > revision);
+    }
+
+    #[test]
+    fn scoped_navigation_keeps_the_feature_trail_until_its_next_projection() {
+        let mut trail = Trail::new();
+        trail.declare("vmux://projects/", "Projects", true);
+        trail.declare("vmux://vm/docker/containers", "Containers", true);
+        let account = "vmux://vm/docker/containers/groups/cloud/containers/account/info";
+        let postgres = "vmux://vm/docker/containers/groups/cloud/containers/postgres/info";
+        trail.app.world_mut().entity_mut(trail.page).insert((
+            PageMetadata {
+                url: account.into(),
+                ..Default::default()
+            },
+            AddressScope::subtree("vmux://vm/"),
+        ));
+        trail.publish(account, "account");
+        let revision = trail.address().revision;
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = postgres.into();
+        trail.app.update();
+        assert_eq!(trail.address().current.label, "account");
+        assert_eq!(trail.address().url, postgres);
+        assert!(trail.address().revision > revision);
+        trail.publish(postgres, "postgres");
+        assert_eq!(trail.address().current.label, "postgres");
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = "vmux://projects/two".into();
+        trail.app.update();
+        assert_eq!(trail.address().current.label, "Projects");
     }
 
     #[test]
