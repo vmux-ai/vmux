@@ -862,7 +862,7 @@ class CheckFixture {
     this.context.payload.pull_request.number = 1;
     const common = ['.github/**', 'scripts/**', 'Cargo.toml'];
     this.profiles = [
-      { key: 'test-rust', name: 'Rust tests', paths: [...common, 'crates/**'], scope: '-p example' },
+      { key: 'test-rust', name: 'Rust unit & integration tests', paths: [...common, 'crates/**'], scope: '-p example' },
       { key: 'website', name: 'Website Build', paths: [...common, 'website/**', 'docs/**'], scope: 'website-release' },
     ];
     this.advance({ 'crates/example/src/lib.rs': 'pub struct Example;\n', 'website/src/main.rs': 'web source\n', 'docs/guide.md': 'guide\n' });
@@ -916,6 +916,19 @@ test('successful job evidence survives unrelated edits and only affected checks 
   const rust = await fixture.plan();
   assert.equal(rust['test-rust'].reuse, '');
   assert.equal(rust.website.reuse, '42');
+});
+
+test('successful configured workflow jobs remain reusable through their displayed names', async (t) => {
+  const fixture = new CheckFixture(t);
+  const workflow = new Workflow();
+  fixture.profiles = await workflow.checkProfiles(fixture.identity, fixture.context);
+  fixture.runs = [];
+  fixture.prove(42);
+  for (let index = 0; index < fixture.profiles.length; index++) {
+    fixture.jobs[42][index].name = workflow.jobs[fixture.profiles[index].key].name;
+  }
+  const result = await fixture.plan();
+  for (const profile of fixture.profiles) assert.equal(result[profile.key].reuse, '42', profile.key);
 });
 
 test('workflow fingerprints include ownership ledgers, native inputs and Cargo configuration', async (t) => {
