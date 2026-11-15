@@ -2,37 +2,248 @@ pub struct Doc {
     pub slug: &'static str,
     pub title: &'static str,
     pub group: &'static str,
+    pub section: &'static str,
     pub content: &'static str,
 }
 
-pub const DOCS: &[Doc] = &[Doc {
-    slug: "architecture",
-    title: "Architecture",
-    group: "Overview",
-    content: include_str!("../../docs/architecture.md"),
-}];
+pub const DOCS: &[Doc] = &[
+    Doc {
+        slug: "getting-things-done",
+        title: "Start with Vmux",
+        group: "UX",
+        section: "Start here",
+        content: include_str!("../../docs/ux/getting-things-done.md"),
+    },
+    Doc {
+        slug: "book-a-flight",
+        title: "Find and book a flight",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/book-a-flight.md"),
+    },
+    Doc {
+        slug: "shopping",
+        title: "Buy something",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/shopping.md"),
+    },
+    Doc {
+        slug: "cooking",
+        title: "Cook dinner",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/cooking.md"),
+    },
+    Doc {
+        slug: "make-a-pr",
+        title: "Fix a bug and make a PR",
+        group: "UX",
+        section: "Examples",
+        content: include_str!("../../docs/ux/make-a-pr.md"),
+    },
+    Doc {
+        slug: "layout",
+        title: "Layout",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/layout.md"),
+    },
+    Doc {
+        slug: "workspace",
+        title: "Projects and Sessions",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/workspace.md"),
+    },
+    Doc {
+        slug: "browser",
+        title: "Browser",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/browser.md"),
+    },
+    Doc {
+        slug: "bookmarks",
+        title: "Bookmarks",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/bookmarks.md"),
+    },
+    Doc {
+        slug: "knowledge",
+        title: "Knowledge",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/knowledge.md"),
+    },
+    Doc {
+        slug: "agents",
+        title: "Agents",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/agents.md"),
+    },
+    Doc {
+        slug: "code-and-git",
+        title: "Code and Git",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/code-and-git.md"),
+    },
+    Doc {
+        slug: "terminal",
+        title: "Terminal",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/terminal.md"),
+    },
+    Doc {
+        slug: "remote",
+        title: "Remote access",
+        group: "UX",
+        section: "Features",
+        content: include_str!("../../docs/ux/remote.md"),
+    },
+    Doc {
+        slug: "getting-started",
+        title: "Getting started",
+        group: "DX",
+        section: "Start here",
+        content: include_str!("../../docs/dx/getting-started.md"),
+    },
+    Doc {
+        slug: "architecture",
+        title: "How Vmux works",
+        group: "DX",
+        section: "Start here",
+        content: include_str!("../../docs/dx/architecture.md"),
+    },
+    Doc {
+        slug: "feature-development",
+        title: "Make a change",
+        group: "DX",
+        section: "Start here",
+        content: include_str!("../../docs/dx/feature-development.md"),
+    },
+    Doc {
+        slug: "validation-and-release",
+        title: "Test and share a build",
+        group: "DX",
+        section: "Start here",
+        content: include_str!("../../docs/dx/validation-and-release.md"),
+    },
+    Doc {
+        slug: "customization",
+        title: "Keep your own version",
+        group: "DX",
+        section: "Your version",
+        content: include_str!("../../docs/dx/customization.md"),
+    },
+    Doc {
+        slug: "framework",
+        title: "Reuse features in another app",
+        group: "DX",
+        section: "Optional",
+        content: include_str!("../../docs/dx/framework.md"),
+    },
+];
 
-pub fn find(slug: &str) -> Option<&'static Doc> {
-    DOCS.iter().find(|d| d.slug == slug)
-}
+impl Doc {
+    pub fn find(slug: &str) -> Option<&'static Self> {
+        DOCS.iter().find(|doc| doc.slug == slug)
+    }
 
-pub fn neighbors(slug: &str) -> (Option<&'static Doc>, Option<&'static Doc>) {
-    match DOCS.iter().position(|d| d.slug == slug) {
-        Some(i) => {
-            let prev = if i > 0 { Some(&DOCS[i - 1]) } else { None };
-            (prev, DOCS.get(i + 1))
+    pub fn neighbors(slug: &str) -> (Option<&'static Self>, Option<&'static Self>) {
+        let Some(index) = DOCS.iter().position(|doc| doc.slug == slug) else {
+            return (None, None);
+        };
+        let previous = index.checked_sub(1).and_then(|index| DOCS.get(index));
+        (previous, DOCS.get(index + 1))
+    }
+
+    pub fn groups() -> Vec<(&'static str, Vec<usize>)> {
+        let mut groups: Vec<(&'static str, Vec<usize>)> = Vec::new();
+        for (index, doc) in DOCS.iter().enumerate() {
+            if let Some((_, entries)) = groups.iter_mut().find(|(group, _)| *group == doc.group) {
+                entries.push(index);
+            } else {
+                groups.push((doc.group, vec![index]));
+            }
         }
-        None => (None, None),
+        groups
+    }
+
+    pub fn sections(group: &str) -> Vec<(&'static str, Vec<usize>)> {
+        let mut sections: Vec<(&'static str, Vec<usize>)> = Vec::new();
+        for (index, doc) in DOCS.iter().enumerate() {
+            if doc.group != group {
+                continue;
+            }
+            if let Some((_, entries)) = sections
+                .iter_mut()
+                .find(|(section, _)| *section == doc.section)
+            {
+                entries.push(index);
+            } else {
+                sections.push((doc.section, vec![index]));
+            }
+        }
+        sections
+    }
+
+    pub fn target(href: &str) -> String {
+        if href.starts_with("http") || href.starts_with('#') || href.starts_with('/') {
+            return href.to_string();
+        }
+        let (path, fragment) = match href.split_once('#') {
+            Some((path, fragment)) => (path, Some(fragment)),
+            None => (href, None),
+        };
+        let Some(path) = path.strip_suffix(".md") else {
+            return href.to_string();
+        };
+        let slug = path.rsplit('/').next().unwrap_or(path);
+        let route = if slug == "README" {
+            "/docs".to_string()
+        } else if let Some(doc) = Self::find(slug) {
+            format!("/docs/{}", doc.slug)
+        } else {
+            return href.to_string();
+        };
+        match fragment {
+            Some(fragment) => format!("{route}#{fragment}"),
+            None => route,
+        }
     }
 }
 
-pub fn groups() -> Vec<(&'static str, Vec<usize>)> {
-    let mut out: Vec<(&'static str, Vec<usize>)> = Vec::new();
-    for (i, d) in DOCS.iter().enumerate() {
-        match out.iter_mut().find(|(g, _)| *g == d.group) {
-            Some((_, idxs)) => idxs.push(i),
-            None => out.push((d.group, vec![i])),
+#[cfg(test)]
+mod tests {
+    use super::Doc;
+
+    #[test]
+    fn guide_links_resolve_across_categories_without_losing_fragments() {
+        for (source, expected) in [
+            (
+                "../dx/architecture.md#invariants",
+                "/docs/architecture#invariants",
+            ),
+            ("../ux/workspace.md", "/docs/workspace"),
+            ("../README.md", "/docs"),
+            ("#design-vocabulary", "#design-vocabulary"),
+            ("/docs/getting-started", "/docs/getting-started"),
+            (
+                "https://github.com/vmux-ai/vmux/blob/main/AGENTS.md",
+                "https://github.com/vmux-ai/vmux/blob/main/AGENTS.md",
+            ),
+            ("../not-published.md", "../not-published.md"),
+            (
+                "../../crates/app/vmux_cli/src/main.rs",
+                "../../crates/app/vmux_cli/src/main.rs",
+            ),
+        ] {
+            assert_eq!(Doc::target(source), expected, "{source}");
         }
     }
-    out
 }

@@ -173,14 +173,14 @@ fn LearningPath() -> Element {
                 p { class: "text-sm font-semibold uppercase tracking-[0.2em] text-accent", "Learning path" }
                 h2 { class: "mt-3 text-3xl font-bold tracking-tight sm:text-5xl", "Learn the model in order." }
                 p { class: "mt-5 text-lg leading-relaxed text-text-muted",
-                    "One architecture document. Read it once in sequence, then use it as a map while designing changes."
+                    "Start with a running build, learn the UI and state model, then follow one feature change."
                 }
                 ol { class: "mt-10 divide-y divide-border border-y border-border",
-                    LearningStep { number: "01", title: "Understand Plugin + ECS composition", href: "/docs/architecture#applications-as-plugin-graphs" }
-                    LearningStep { number: "02", title: "Learn the eight design primitives", href: "/docs/architecture#design-vocabulary" }
-                    LearningStep { number: "03", title: "Trace the default feature flow", href: "/docs/architecture#feature-design-flow" }
-                    LearningStep { number: "04", title: "Apply the durable invariants", href: "/docs/architecture#invariants" }
-                    LearningStep { number: "05", title: "Route a concrete change", href: "/docs/architecture#change-routing" }
+                    LearningStep { number: "01", title: "Build and run Vmux", href: "/docs/getting-started" }
+                    LearningStep { number: "02", title: "Connect React ideas to Dioxus and Bevy", href: "/docs/architecture#from-react-to-vmux" }
+                    LearningStep { number: "03", title: "Follow a request through the app", href: "/docs/architecture#follow-one-interaction" }
+                    LearningStep { number: "04", title: "Find and change a feature", href: "/docs/feature-development#find-the-feature" }
+                    LearningStep { number: "05", title: "Test and share the build", href: "/docs/validation-and-release" }
                 }
             }
         }

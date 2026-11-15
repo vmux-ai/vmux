@@ -10,9 +10,8 @@ const USE_CASES_TITLE: &str = "Vmux Use Cases — Four prompts. Four things done
 const USE_CASES_DESCRIPTION: &str = "Fix software, find a flight, ship a client PoC, or launch a restaurant website with a browser, any ACP agent, and a full IDE.";
 const FRAMEWORK_TITLE: &str = "Vmux Framework — Flexible by composition";
 const FRAMEWORK_DESCRIPTION: &str = "Build extensible cross-platform applications with ECS composition and a predictable architecture for people and coding agents.";
-const DOCS_TITLE: &str = "Vmux Architecture";
-const DOCS_DESCRIPTION: &str =
-    "The stable architecture, ownership, state flow, and trust boundaries behind Vmux.";
+const DOCS_TITLE: &str = "Vmux Docs — UX and DX";
+const DOCS_DESCRIPTION: &str = "Understand the Vmux workspace experience and start developing with its architecture, tooling, and validation guides.";
 const SITE_URL: &str = "https://vmux.ai/";
 const USE_CASES_URL: &str = "https://vmux.ai/use-cases";
 const FRAMEWORK_URL: &str = "https://vmux.ai/framework";
@@ -147,7 +146,7 @@ fn DocsLayout() -> Element {
     };
     let active_slug = match route {
         Route::DocPage { slug } => slug,
-        Route::DocsIndex {} => "architecture".to_string(),
+        Route::DocsIndex {} => "getting-things-done".to_string(),
         _ => String::new(),
     };
     let active_heading = use_signal(String::new);
@@ -161,7 +160,7 @@ fn DocsLayout() -> Element {
         Metadata {
             title: DOCS_TITLE.to_string(),
             description: DOCS_DESCRIPTION.to_string(),
-            keywords: "vmux architecture, Bevy ECS, feature plugins, typed contracts, ACP".to_string(),
+            keywords: "vmux docs, UX, DX, development, Bevy ECS, feature plugins, ACP".to_string(),
             url: canonical_url,
         }
         div { class: "h-screen flex flex-col overflow-hidden",
@@ -180,7 +179,7 @@ fn DocsLayout() -> Element {
             }
             div { class: "flex-1 min-h-0 flex max-w-6xl mx-auto w-full",
                 nav { class: "w-64 shrink-0 border-r border-border overflow-y-auto py-6 px-3 hidden md:block",
-                    {sidebar(active_slug.clone(), active_heading)}
+                    Sidebar { active_slug: active_slug.clone(), active_heading }
                 }
                 main {
                     id: "doc-main",
@@ -194,20 +193,26 @@ fn DocsLayout() -> Element {
     }
 }
 
-fn sidebar(active_slug: String, active_heading: Signal<String>) -> Element {
+#[component]
+fn Sidebar(active_slug: String, active_heading: Signal<String>) -> Element {
     rsx! {
-        for (group , idxs) in docs::groups() {
-            div { class: "mb-4",
-                div { class: "px-3 mb-1 text-xs uppercase tracking-wide text-text-muted", "{group}" }
-                for i in idxs {
-                    Link {
-                        class: "block px-3 py-1.5 rounded-md text-sm text-text no-underline hover:bg-surface",
-                        active_class: "bg-surface text-accent",
-                        to: Route::DocPage { slug: docs::DOCS[i].slug.to_string() },
-                        "{docs::DOCS[i].title}"
-                    }
-                    if docs::DOCS[i].slug == active_slug {
-                        {toc(docs::DOCS[i].content, active_heading)}
+        for (group, _) in docs::Doc::groups() {
+            div { class: "mb-6",
+                div { class: "px-3 mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted", "{group}" }
+                for (section, idxs) in docs::Doc::sections(group) {
+                    div { class: "mt-4",
+                        div { class: "px-3 mb-1 text-xs text-text-muted", "{section}" }
+                        for i in idxs {
+                            Link {
+                                class: "block px-3 py-1.5 rounded-md text-sm text-text no-underline hover:bg-surface",
+                                active_class: "bg-surface text-accent",
+                                to: Route::DocPage { slug: docs::DOCS[i].slug.to_string() },
+                                "{docs::DOCS[i].title}"
+                            }
+                            if docs::DOCS[i].slug == active_slug {
+                                {toc(docs::DOCS[i].content, active_heading)}
+                            }
+                        }
                     }
                 }
             }
@@ -318,7 +323,7 @@ fn DocsIndex() -> Element {
         #[cfg(target_arch = "wasm32")]
         scroll_doc_position();
     });
-    doc_body("architecture")
+    rsx! { DocBody { slug: "getting-things-done".to_string() } }
 }
 
 #[component]
@@ -329,7 +334,7 @@ fn DocPage(slug: String) -> Element {
         #[cfg(target_arch = "wasm32")]
         scroll_doc_position();
     }));
-    doc_body(&slug)
+    rsx! { DocBody { slug } }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -356,10 +361,11 @@ fn scroll_doc_position() {
     main.set_scroll_top(0);
 }
 
-fn doc_body(slug: &str) -> Element {
-    match docs::find(slug) {
+#[component]
+fn DocBody(slug: String) -> Element {
+    match docs::Doc::find(&slug) {
         Some(doc) => {
-            let (previous, next) = docs::neighbors(doc.slug);
+            let (previous, next) = docs::Doc::neighbors(doc.slug);
             rsx! {
                 markdown::Markdown { content: doc.content.to_string() }
                 nav { class: "mt-16 grid grid-cols-2 gap-4 border-t border-border pt-8",

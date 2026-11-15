@@ -351,7 +351,7 @@ fn render_node(n: &Node) -> Element {
             rsx! { s { class: "line-through opacity-70", {render_nodes(ch)} } }
         }
         Node::Link(href, ch) => {
-            let resolved = resolve_link(href);
+            let resolved = crate::docs::Doc::target(href);
             let external = resolved.starts_with("http");
             rsx! {
                 a {
@@ -390,26 +390,6 @@ fn CopyLink(id: String) -> Element {
                 path { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }
             }
         }
-    }
-}
-
-fn resolve_link(href: &str) -> String {
-    if href.starts_with("http") || href.starts_with('#') || href.starts_with('/') {
-        return href.to_string();
-    }
-    let (path, frag) = match href.split_once('#') {
-        Some((p, f)) => (p, Some(f)),
-        None => (href, None),
-    };
-    match path.strip_suffix(".md") {
-        Some(stripped) => {
-            let slug = stripped.rsplit('/').next().unwrap_or(stripped);
-            match frag {
-                Some(f) => format!("/docs/{slug}#{f}"),
-                None => format!("/docs/{slug}"),
-            }
-        }
-        None => href.to_string(),
     }
 }
 

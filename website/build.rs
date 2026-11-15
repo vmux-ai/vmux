@@ -11,7 +11,7 @@ fn main() {
     println!("cargo::rerun-if-changed={}", docs.display());
 
     let mut rendered: BTreeMap<String, String> = BTreeMap::new();
-    for source in sources(&docs) {
+    for source in Sources::all(&docs) {
         let markdown = std::fs::read_to_string(&source)
             .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
         for diagram in Diagram::all(&markdown) {
@@ -30,20 +30,26 @@ fn main() {
     std::fs::write(&out, generated).unwrap_or_else(|error| panic!("write {out:?}: {error}"));
 }
 
-fn sources(docs: &Path) -> Vec<PathBuf> {
-    let entries =
-        std::fs::read_dir(docs).unwrap_or_else(|error| panic!("read {}: {error}", docs.display()));
-    let mut found = Vec::new();
-    for entry in entries {
-        let entry =
-            entry.unwrap_or_else(|error| panic!("read an entry in {}: {error}", docs.display()));
-        let path = entry.path();
-        if path.extension().is_some_and(|extension| extension == "md") {
-            found.push(path);
+struct Sources;
+
+impl Sources {
+    fn all(docs: &Path) -> Vec<PathBuf> {
+        let entries = std::fs::read_dir(docs)
+            .unwrap_or_else(|error| panic!("read {}: {error}", docs.display()));
+        let mut found = Vec::new();
+        for entry in entries {
+            let entry = entry
+                .unwrap_or_else(|error| panic!("read an entry in {}: {error}", docs.display()));
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(Self::all(&path));
+            } else if path.extension().is_some_and(|extension| extension == "md") {
+                found.push(path);
+            }
         }
+        found.sort();
+        found
     }
-    found.sort();
-    found
 }
 
 struct Theme;

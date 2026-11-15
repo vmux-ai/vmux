@@ -439,6 +439,7 @@ jobs:
               - '.github/workflows/build-cef.yml'
             website:
               - 'website/**'
+              - 'docs/**'
             macos:
               - 'crates/**'
               - 'cef/**'
