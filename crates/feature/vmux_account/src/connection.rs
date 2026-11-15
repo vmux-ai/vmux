@@ -132,7 +132,9 @@ pub(crate) struct OpenRequest {
 #[cfg_attr(not(feature = "cloud"), allow(dead_code))]
 pub(crate) struct KeyRequest {
     pub entity: Entity,
+    #[cfg_attr(all(feature = "cloud", not(target_os = "macos")), expect(dead_code))]
     pub data: std::path::PathBuf,
+    #[cfg_attr(all(feature = "cloud", not(target_os = "macos")), expect(dead_code))]
     pub scope: String,
 }
 
