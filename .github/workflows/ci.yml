@@ -1,4 +1,4 @@
-name: Rust validation & app builds
+name: Code & App quality
 
 on:
   pull_request:
