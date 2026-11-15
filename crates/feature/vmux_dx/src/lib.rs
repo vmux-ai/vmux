@@ -1272,41 +1272,121 @@ fn start(
         if *state != OperationState::Running {
             continue;
         }
-        let request = match work {
-            Work::Capacity => Some(debug::Request::Capacity {
-                minimum: storage.minimum(),
-            }),
-            Work::Codesign => Some(debug::Request::Identity { print: false }),
-            Work::ClearReady => Some(debug::Request::Clear),
-            Work::SignDebug => Some(debug::Request::Sign),
-            Work::BundleDebug => Some(debug::Request::Bundle),
-            Work::PublishDebug => Some(debug::Request::Publish),
-            Work::Run(profile, platform) => Some(debug::Request::Run {
-                profile: profile.clone(),
-                platform: platform.clone(),
-            }),
-            Work::Stop => Some(debug::Request::Stop),
+        let requested = match work {
+            Work::Capacity => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Capacity {
+                        minimum: storage.minimum(),
+                    },
+                });
+                true
+            }
+            Work::Codesign => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::IdentityRequest { print: false },
+                });
+                true
+            }
+            Work::ClearReady => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Clear,
+                });
+                true
+            }
+            Work::SignDebug => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Sign,
+                });
+                true
+            }
+            Work::BundleDebug => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Bundle,
+                });
+                true
+            }
+            Work::PublishDebug => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Publish,
+                });
+                true
+            }
+            Work::Run(profile, platform) => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Run {
+                        profile: profile.clone(),
+                        platform: platform.clone(),
+                    },
+                });
+                true
+            }
+            Work::Stop => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Stop,
+                });
+                true
+            }
             Work::WorkspaceCompile(package, binary, manifest) => {
-                Some(debug::Request::ProviderCompile {
-                    package: package.clone(),
-                    binary: binary.clone(),
-                    manifest: manifest.clone(),
-                })
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Compile {
+                        package: package.clone(),
+                        binary: binary.clone(),
+                        manifest: manifest.clone(),
+                    },
+                });
+                true
             }
-            Work::WorkspaceSnapshot(binary) => Some(debug::Request::ProviderSnapshot {
-                binary: binary.clone(),
-            }),
-            Work::WorkspaceInvoke(arguments) => Some(debug::Request::ProviderInvoke {
-                arguments: arguments.clone(),
-            }),
+            Work::WorkspaceSnapshot(binary) => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Snapshot {
+                        binary: binary.clone(),
+                    },
+                });
+                true
+            }
+            Work::WorkspaceInvoke(arguments) => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Invoke {
+                        arguments: arguments.clone(),
+                    },
+                });
+                true
+            }
             Work::Internal(task, _) if task == "ensure-signing" => {
-                Some(debug::Request::Identity { print: true })
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::IdentityRequest { print: true },
+                });
+                true
             }
-            Work::Internal(task, _) if task == "debug-sign" => Some(debug::Request::Sign),
-            Work::Internal(task, _) if task == "debug-bundle" => Some(debug::Request::Bundle),
-            _ => None,
+            Work::Internal(task, _) if task == "debug-sign" => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Sign,
+                });
+                true
+            }
+            Work::Internal(task, _) if task == "debug-bundle" => {
+                commands.trigger(debug::Requested {
+                    entity,
+                    request: debug::Bundle,
+                });
+                true
+            }
+            _ => false,
         };
-        if let Some(request) = request {
+        if requested {
             let mut captured_settings = settings.clone();
             if let Some(executable) = executable {
                 captured_settings
@@ -1314,7 +1394,6 @@ fn start(
                     .set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
             }
             commands.entity(entity).insert((
-                request,
                 debug::Captured {
                     root: parent.parent(),
                     attempt: attempt.0,

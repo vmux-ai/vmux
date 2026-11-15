@@ -54,12 +54,24 @@ impl bevy_app::Plugin for Plugin {
                 .in_set(JobSet::Apply)
                 .after(crate::Stage::Execute),
         )
+        .add_observer(accept::<Capacity>)
+        .add_observer(accept::<IdentityRequest>)
+        .add_observer(accept::<Clear>)
+        .add_observer(accept::<Sign>)
+        .add_observer(accept::<Bundle>)
+        .add_observer(accept::<Publish>)
+        .add_observer(accept::<Run>)
+        .add_observer(accept::<Stop>)
+        .add_observer(accept::<Compile>)
+        .add_observer(accept::<Snapshot>)
+        .add_observer(accept::<Invoke>)
+        .add_observer(accept::<Signature>)
         .add_systems(PreUpdate, cancel)
         .add_systems(
             Update,
             (
                 initialize, cancel, identity, capacity, clear, sign, bundle, publish, run, stop,
-                signature, provider, wake,
+                signature, compile, snapshot, invoke, wake,
             )
                 .chain()
                 .in_set(Stage::Decide),
@@ -100,41 +112,193 @@ pub(crate) struct Io;
 #[derive(Component)]
 struct Admitted;
 
+#[derive(Component, Default)]
+struct Request;
+
+#[derive(EntityEvent)]
+pub struct Requested<T: Component> {
+    pub entity: Entity,
+    pub request: T,
+}
+
 #[derive(Component, Clone)]
-pub enum Request {
-    Capacity {
-        minimum: u64,
-    },
-    Identity {
-        print: bool,
-    },
-    Clear,
-    Sign,
-    Bundle,
-    Publish,
-    Run {
-        profile: String,
-        platform: String,
-    },
-    Stop,
-    ProviderCompile {
-        package: String,
-        binary: String,
-        manifest: PathBuf,
-    },
-    ProviderSnapshot {
-        binary: String,
-    },
-    ProviderInvoke {
-        arguments: Vec<OsString>,
-    },
-    Signature {
-        path: PathBuf,
-        binary: PathBuf,
-        stamp: PathBuf,
-        identifier: Option<String>,
-        suffix: String,
-    },
+#[require(Request, CapacityPhase)]
+pub struct Capacity {
+    pub minimum: u64,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum CapacityPhase {
+    #[default]
+    Start,
+    Inspect,
+    Read,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, IdentityPhase)]
+pub struct IdentityRequest {
+    pub print: bool,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum IdentityPhase {
+    #[default]
+    Start,
+    Keychain,
+    Lookup,
+    Provision,
+    Confirm,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, ClearPhase)]
+pub struct Clear;
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum ClearPhase {
+    #[default]
+    Start,
+    Inspect,
+    Finish,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, SignPhase)]
+pub struct Sign;
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum SignPhase {
+    #[default]
+    Start,
+    Waiting,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, BundlePhase)]
+pub struct Bundle;
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum BundlePhase {
+    #[default]
+    Start,
+    Branch,
+    Plan,
+    Service,
+    ServiceWait,
+    Desktop,
+    Wait,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, PublishPhase)]
+pub struct Publish;
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum PublishPhase {
+    #[default]
+    Start,
+    Check,
+    Done,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, RunPhase)]
+pub struct Run {
+    pub profile: String,
+    pub platform: String,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum RunPhase {
+    #[default]
+    Start,
+    Inspect,
+    Inputs,
+    Select,
+    Verify,
+    Execute,
+    Done,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, StopPhase)]
+pub struct Stop;
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum StopPhase {
+    #[default]
+    Start,
+    Execute,
+    Done,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, CompilePhase)]
+pub struct Compile {
+    pub package: String,
+    pub binary: String,
+    pub manifest: PathBuf,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum CompilePhase {
+    #[default]
+    Start,
+    Done,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, SnapshotPhase)]
+pub struct Snapshot {
+    pub binary: String,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotPhase {
+    #[default]
+    Start,
+    Inspect,
+    Copy,
+    Check,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, InvokePhase)]
+pub struct Invoke {
+    pub arguments: Vec<OsString>,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum InvokePhase {
+    #[default]
+    Start,
+    Done,
+}
+
+#[derive(Component, Clone)]
+#[require(Request, SignaturePhase)]
+pub struct Signature {
+    pub path: PathBuf,
+    pub binary: PathBuf,
+    pub stamp: PathBuf,
+    pub identifier: Option<String>,
+    pub suffix: String,
+}
+
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum SignaturePhase {
+    #[default]
+    Start,
+    Inputs,
+    Cache,
+    Prepare,
+    Format,
+    Refresh,
+    Record,
+    Done,
+    Rpaths,
+    Bindings,
 }
 
 #[derive(Component)]
@@ -151,50 +315,6 @@ struct Root(Entity);
 
 #[derive(Component, Clone, Copy)]
 struct Owner(Entity);
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase {
-    Start,
-    CapacityInspect,
-    CapacityRead,
-    IdentityKeychain,
-    IdentityLookup,
-    IdentityProvision,
-    IdentityConfirm,
-    ClearInspect,
-    ClearFinish,
-    SignWaiting,
-    BundleBranch,
-    BundlePlan,
-    BundleService,
-    BundleServiceWait,
-    BundleDesktop,
-    BundleWait,
-    PublishCheck,
-    PublishDone,
-    LaunchInspect,
-    LaunchInputs,
-    LaunchSelect,
-    LaunchVerify,
-    LaunchExecute,
-    LaunchDone,
-    StopExecute,
-    StopDone,
-    SignatureInputs,
-    SignatureCache,
-    SignaturePrepare,
-    SignatureFormat,
-    SignatureRefresh,
-    SignatureRecord,
-    SignatureDone,
-    SignatureRpaths,
-    SignatureBindings,
-    ProviderCompiled,
-    SnapshotInspect,
-    SnapshotCopy,
-    SnapshotCheck,
-    ProviderInvoked,
-}
 
 #[derive(Component)]
 struct Sequence(u32);
@@ -430,22 +550,175 @@ impl Facts<'_, '_> {
     }
 }
 
-type Requests<'w, 's> = Query<
+type CapacityRequests<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
-        &'static Request,
+        &'static Capacity,
         &'static Checkout,
         &'static Settings,
-        &'static mut Phase,
+        &'static mut CapacityPhase,
         &'static mut Sequence,
     ),
-    (Without<Io>, Without<Complete>, Without<Failed>),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type IdentityRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static IdentityRequest,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut IdentityPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type ClearRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Clear,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut ClearPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type SignRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Sign,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut SignPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type BundleRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Bundle,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut BundlePhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type PublishRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Publish,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut PublishPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type RunRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Run,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut RunPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type StopRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Stop,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut StopPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type CompileRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Compile,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut CompilePhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type SnapshotRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Snapshot,
+        &'static Checkout,
+        &'static mut SnapshotPhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type InvokeRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Invoke,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut InvokePhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
+>;
+
+type SignatureRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Signature,
+        &'static Checkout,
+        &'static Settings,
+        &'static mut SignaturePhase,
+        &'static mut Sequence,
+    ),
+    (With<Root>, Without<Io>, Without<Complete>, Without<Failed>),
 >;
 
 type Initializing<'w, 's> =
-    Query<'w, 's, (Entity, &'static Captured), (With<Request>, Without<Phase>)>;
+    Query<'w, 's, (Entity, &'static Captured), (With<Request>, Without<Root>)>;
 type Canceling<'w, 's> = Query<
     'w,
     's,
@@ -479,14 +752,24 @@ type Finishing<'w, 's> = Query<
     (With<Request>, Without<Sent>),
 >;
 
+fn accept<T: Component + Clone>(
+    request: On<Requested<T>>,
+    requests: Query<(), With<Request>>,
+    mut commands: Commands,
+) {
+    if requests.contains(request.entity) {
+        return;
+    }
+    commands
+        .entity(request.entity)
+        .insert(request.request.clone());
+}
+
 fn initialize(requests: Initializing, mut commands: Commands) {
     for (entity, captured) in &requests {
-        commands.entity(entity).insert((
-            Root(captured.root),
-            Owner(captured.root),
-            Phase::Start,
-            Sequence(0),
-        ));
+        commands
+            .entity(entity)
+            .insert((Root(captured.root), Owner(captured.root), Sequence(0)));
     }
 }
 
@@ -592,23 +875,21 @@ fn cancel(
 }
 
 fn identity(
-    mut requests: Requests,
+    mut requests: IdentityRequests,
     facts: Facts,
     identities: Query<&Identity>,
     keychains: Query<&Keychain>,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        let Request::Identity { print } = request else {
-            continue;
-        };
+        let IdentityRequest { print } = request;
         if facts.pending(entity) {
             continue;
         }
         let environment = &settings.0;
         let mut previous = None;
         match *phase {
-            Phase::Start => {
+            IdentityPhase::Start => {
                 if environment.present("APPLE_SIGNING_IDENTITY") || !cfg!(target_os = "macos") {
                     let identity = match environment.get("APPLE_SIGNING_IDENTITY") {
                         Some(value) => match value.to_str() {
@@ -667,9 +948,9 @@ fn identity(
                         false,
                     );
                 }
-                *phase = Phase::IdentityKeychain;
+                *phase = IdentityPhase::Keychain;
             }
-            Phase::IdentityKeychain => {
+            IdentityPhase::Keychain => {
                 let keychain = match keychains.get(entity) {
                     Ok(keychain) => keychain.0.clone(),
                     Err(_) => {
@@ -701,9 +982,9 @@ fn identity(
                     Tag::Identities,
                     false,
                 );
-                *phase = Phase::IdentityLookup;
+                *phase = IdentityPhase::Lookup;
             }
-            Phase::IdentityLookup => {
+            IdentityPhase::Lookup => {
                 let identity = identities.get(entity).unwrap();
                 let Some(found) = facts.text(entity, Tag::Identities) else {
                     continue;
@@ -733,9 +1014,9 @@ fn identity(
                     Tag::Password,
                     false,
                 );
-                *phase = Phase::IdentityProvision;
+                *phase = IdentityPhase::Provision;
             }
-            Phase::IdentityProvision => {
+            IdentityPhase::Provision => {
                 let identity = &identities.get(entity).unwrap().0;
                 let keychain = &keychains.get(entity).unwrap().0;
                 let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
@@ -877,9 +1158,9 @@ fn identity(
                     Tag::Identities,
                     false,
                 );
-                *phase = Phase::IdentityConfirm;
+                *phase = IdentityPhase::Confirm;
             }
-            Phase::IdentityConfirm => {
+            IdentityPhase::Confirm => {
                 let identity = identities.get(entity).unwrap();
                 let Some(found) = facts.text(entity, Tag::Identities) else {
                     continue;
@@ -902,26 +1183,28 @@ fn identity(
                     .entity(entity)
                     .insert(Complete(Outcome::Identity(identity.0.clone())));
             }
-            _ => {}
         }
     }
 }
 
-fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut io: IoWriter) {
+fn capacity(
+    mut requests: CapacityRequests,
+    facts: Facts,
+    targets: Query<&Target>,
+    mut io: IoWriter,
+) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        let Request::Capacity { minimum } = request else {
-            continue;
-        };
+        let Capacity { minimum } = request;
         if facts.pending(entity) {
             continue;
         }
         let mut previous = None;
         match *phase {
-            Phase::Start => {
+            CapacityPhase::Start => {
                 io.commands
                     .entity(entity)
                     .insert(Target(checkout.target.clone()));
-                *phase = Phase::CapacityInspect;
+                *phase = CapacityPhase::Inspect;
                 io.request(
                     &mut sequence,
                     entity,
@@ -931,7 +1214,7 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut i
                     false,
                 );
             }
-            Phase::CapacityInspect => {
+            CapacityPhase::Inspect => {
                 let Some(PathMetadata(metadata)) = facts.get(entity, Tag::Path) else {
                     continue;
                 };
@@ -939,7 +1222,7 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut i
                     continue;
                 };
                 if metadata.is_some() {
-                    *phase = Phase::CapacityRead;
+                    *phase = CapacityPhase::Read;
                     io.request(
                         &mut sequence,
                         entity,
@@ -970,7 +1253,7 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut i
                         .insert(Failed(Failure::message("Cannot find target filesystem")));
                 }
             }
-            Phase::CapacityRead => {
+            CapacityPhase::Read => {
                 let Some(text) = facts.text(entity, Tag::Capacity) else {
                     continue;
                 };
@@ -1001,19 +1284,18 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut i
                     }
                 }
             }
-            _ => {}
         }
     }
 }
 
-fn clear(mut requests: Requests, facts: Facts, mut io: IoWriter) {
-    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        if !matches!(request, Request::Clear) || facts.pending(entity) {
+fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if facts.pending(entity) {
             continue;
         }
         let mut previous = None;
         match *phase {
-            Phase::Start => {
+            ClearPhase::Start => {
                 let product = match settings.0.product(&checkout.root) {
                     Ok(product) => product,
                     Err(error) => {
@@ -1051,9 +1333,9 @@ fn clear(mut requests: Requests, facts: Facts, mut io: IoWriter) {
                     Tag::Path,
                     false,
                 );
-                *phase = Phase::ClearInspect;
+                *phase = ClearPhase::Inspect;
             }
-            Phase::ClearInspect => {
+            ClearPhase::Inspect => {
                 let product = match settings.0.product(&checkout.root) {
                     Ok(product) => product,
                     Err(error) => {
@@ -1089,22 +1371,23 @@ fn clear(mut requests: Requests, facts: Facts, mut io: IoWriter) {
                         false,
                     );
                 }
-                *phase = Phase::ClearFinish;
+                *phase = ClearPhase::Finish;
             }
-            Phase::ClearFinish => {
+            ClearPhase::Finish => {
                 io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
-            _ => {}
         }
     }
 }
 
-fn sign(mut requests: Requests, roots: Query<&Root>, children: Signatures, mut commands: Commands) {
-    for (entity, request, checkout, settings, mut phase, _) in &mut requests {
-        if !matches!(request, Request::Sign) {
-            continue;
-        }
-        if *phase == Phase::Start {
+fn sign(
+    mut requests: SignRequests,
+    roots: Query<&Root>,
+    children: Signatures,
+    mut commands: Commands,
+) {
+    for (entity, _, checkout, settings, mut phase, _) in &mut requests {
+        if *phase == SignPhase::Start {
             let product = match settings.0.product(&checkout.root) {
                 Ok(product) => product,
                 Err(error) => {
@@ -1142,7 +1425,7 @@ fn sign(mut requests: Requests, roots: Query<&Root>, children: Signatures, mut c
             ] {
                 let signature = commands
                     .spawn((
-                        Request::Signature {
+                        Signature {
                             path: path.clone(),
                             binary: path.clone(),
                             stamp: path.with_extension("dev-signed"),
@@ -1152,7 +1435,7 @@ fn sign(mut requests: Requests, roots: Query<&Root>, children: Signatures, mut c
                         checkout.clone(),
                         settings.clone(),
                         Root(roots.get(entity).unwrap().0),
-                        Phase::Start,
+                        SignaturePhase::Start,
                         Sequence(0),
                         Sources,
                         Owner(entity),
@@ -1161,7 +1444,7 @@ fn sign(mut requests: Requests, roots: Query<&Root>, children: Signatures, mut c
                     .id();
                 commands.spawn((Input(path), Order(0), ChildOf(signature)));
             }
-            *phase = Phase::SignWaiting;
+            *phase = SignPhase::Waiting;
         } else {
             let mut pending = false;
             for (parent, complete, failed) in &children {
@@ -1183,7 +1466,7 @@ fn sign(mut requests: Requests, roots: Query<&Root>, children: Signatures, mut c
 }
 
 fn bundle(
-    mut requests: Requests,
+    mut requests: BundleRequests,
     facts: Facts,
     roots: Query<&Root>,
     layouts: Query<&Layout>,
@@ -1191,8 +1474,8 @@ fn bundle(
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
-    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        if !matches!(request, Request::Bundle) || facts.pending(entity) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
@@ -1208,7 +1491,7 @@ fn bundle(
         let debug = checkout.directory("debug");
         let mut previous = None;
         match *phase {
-            Phase::Start => {
+            BundlePhase::Start => {
                 io.request(
                     &mut sequence,
                     entity,
@@ -1232,9 +1515,9 @@ fn bundle(
                     Tag::Branch,
                     true,
                 );
-                *phase = Phase::BundleBranch;
+                *phase = BundlePhase::Branch;
             }
-            Phase::BundleBranch => {
+            BundlePhase::Branch => {
                 let Some(ToolOutput(output)) = facts.get(entity, Tag::Branch) else {
                     continue;
                 };
@@ -1256,9 +1539,9 @@ fn bundle(
                         true,
                     );
                 }
-                *phase = Phase::BundlePlan;
+                *phase = BundlePhase::Plan;
             }
-            Phase::BundlePlan => {
+            BundlePhase::Plan => {
                 let Some(manifest) = facts.text(entity, Tag::Manifest) else {
                     continue;
                 };
@@ -1459,14 +1742,14 @@ fn bundle(
                     binary,
                     plist,
                 });
-                *phase = Phase::BundleService;
+                *phase = BundlePhase::Service;
             }
-            Phase::BundleService => {
+            BundlePhase::Service => {
                 let layout = layouts.get(entity).unwrap();
                 let signature = io
                     .commands
                     .spawn((
-                        Request::Signature {
+                        Signature {
                             path: layout.service.clone(),
                             binary: layout.binary.clone(),
                             stamp: debug.join(".vmux-dev-service-signed"),
@@ -1477,7 +1760,7 @@ fn bundle(
                         checkout.clone(),
                         settings.clone(),
                         Root(roots.get(entity).unwrap().0),
-                        Phase::Start,
+                        SignaturePhase::Start,
                         Sequence(0),
                         Sources,
                         Owner(entity),
@@ -1494,9 +1777,9 @@ fn bundle(
                     io.commands
                         .spawn((Input(path), Order(order as u32), ChildOf(signature)));
                 }
-                *phase = Phase::BundleServiceWait;
+                *phase = BundlePhase::ServiceWait;
             }
-            Phase::BundleServiceWait | Phase::BundleWait => {
+            BundlePhase::ServiceWait | BundlePhase::Wait => {
                 let mut pending = false;
                 for (parent, complete, failed) in &signatures {
                     if parent.parent() != entity {
@@ -1512,7 +1795,7 @@ fn bundle(
                 if pending {
                     continue;
                 }
-                if *phase == Phase::BundleWait {
+                if *phase == BundlePhase::Wait {
                     io.commands.entity(entity).insert(Complete(Outcome::Done));
                     continue;
                 }
@@ -1533,9 +1816,9 @@ fn bundle(
                     Tag::Stdlib,
                     false,
                 );
-                *phase = Phase::BundleDesktop;
+                *phase = BundlePhase::Desktop;
             }
-            Phase::BundleDesktop => {
+            BundlePhase::Desktop => {
                 let Some(stdlib) = facts.text(entity, Tag::Stdlib) else {
                     continue;
                 };
@@ -1544,7 +1827,7 @@ fn bundle(
                 let signature = io
                     .commands
                     .spawn((
-                        Request::Signature {
+                        Signature {
                             path: layout.app.clone(),
                             binary,
                             stamp: debug.join(".vmux-dev-desktop-signed"),
@@ -1560,7 +1843,7 @@ fn bundle(
                         checkout.clone(),
                         settings.clone(),
                         Root(roots.get(entity).unwrap().0),
-                        Phase::Start,
+                        SignaturePhase::Start,
                         Sequence(0),
                         Sources,
                         Owner(entity),
@@ -1584,9 +1867,8 @@ fn bundle(
                     io.commands
                         .spawn((Input(path), Order(order as u32), ChildOf(signature)));
                 }
-                *phase = Phase::BundleWait;
+                *phase = BundlePhase::Wait;
             }
-            _ => {}
         }
 
         if *phase != previous_phase {
@@ -1596,21 +1878,21 @@ fn bundle(
 }
 
 fn publish(
-    mut requests: Requests,
+    mut requests: PublishRequests,
     facts: Facts,
     files: Query<(&File, &Order, &ChildOf)>,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
-    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        if !matches!(request, Request::Publish) || facts.pending(entity) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
         let debug = checkout.directory("debug");
         let mut previous = None;
         match *phase {
-            Phase::Start => {
+            PublishPhase::Start => {
                 let mut paths = vec![
                     debug.join("vmux"),
                     debug.join("vmux_service"),
@@ -1657,9 +1939,9 @@ fn publish(
                         false,
                     );
                 }
-                *phase = Phase::PublishCheck;
+                *phase = PublishPhase::Check;
             }
-            Phase::PublishCheck => {
+            PublishPhase::Check => {
                 let mut sources = files
                     .iter()
                     .filter(|(_, _, parent)| parent.parent() == entity)
@@ -1739,9 +2021,9 @@ fn publish(
                     Tag::None,
                     false,
                 );
-                *phase = Phase::PublishDone;
+                *phase = PublishPhase::Done;
             }
-            Phase::PublishDone => {
+            PublishPhase::Done => {
                 println!("Debug build ready: {}\nRun: vmux run", debug.display());
                 let path = if cfg!(target_os = "macos") {
                     let product = match settings.0.product(&checkout.root) {
@@ -1761,7 +2043,6 @@ fn publish(
                     .entity(entity)
                     .insert(Complete(Outcome::Artifacts(vec![path])));
             }
-            _ => {}
         }
 
         if *phase != previous_phase {
@@ -1771,7 +2052,7 @@ fn publish(
 }
 
 fn run(
-    mut requests: Requests,
+    mut requests: RunRequests,
     facts: Facts,
     targets: Query<&Target>,
     checks: Query<(&File, &Expected, &Order, &ChildOf)>,
@@ -1780,16 +2061,14 @@ fn run(
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        let Request::Run { profile, platform } = request else {
-            continue;
-        };
+        let Run { profile, platform } = request;
         if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
         let mut previous = None;
         if platform != "desktop" {
-            if *phase == Phase::Start {
+            if *phase == RunPhase::Start {
                 let cwd = if platform == "web" {
                     checkout.root.join("website")
                 } else {
@@ -1850,7 +2129,7 @@ fn run(
                     Tag::None,
                     false,
                 );
-                *phase = Phase::LaunchDone;
+                *phase = RunPhase::Done;
             } else {
                 io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
@@ -1865,7 +2144,7 @@ fn run(
                 }
             };
             match *phase {
-                Phase::Start => {
+                RunPhase::Start => {
                     match profile.as_str() {
                         "local" => io.request(
                             &mut sequence,
@@ -1898,9 +2177,9 @@ fn run(
                             io.commands.entity(entity).insert(Target(target));
                         }
                     }
-                    *phase = Phase::LaunchInspect;
+                    *phase = RunPhase::Inspect;
                 }
-                Phase::LaunchInspect => match profile.as_str() {
+                RunPhase::Inspect => match profile.as_str() {
                     "local" => {
                         if !matches!(facts.get(entity, Tag::Directory), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
                         {
@@ -1917,7 +2196,7 @@ fn run(
                             Tag::Entries,
                             false,
                         );
-                        *phase = Phase::LaunchInputs;
+                        *phase = RunPhase::Inputs;
                     }
                     "dev" => {
                         let Some(stamp) = facts.text(entity, Tag::Stamp) else {
@@ -1971,7 +2250,7 @@ fn run(
                                 .insert(Failed(Failure::message("Incomplete readiness stamp")));
                             continue;
                         }
-                        *phase = Phase::LaunchInputs;
+                        *phase = RunPhase::Inputs;
                     }
                     _ => {
                         if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
@@ -1981,10 +2260,10 @@ fn run(
                             )));
                             continue;
                         }
-                        *phase = Phase::LaunchVerify;
+                        *phase = RunPhase::Verify;
                     }
                 },
-                Phase::LaunchInputs => {
+                RunPhase::Inputs => {
                     if profile == "local" {
                         let Some(DirectoryEntries(snapshot)) = facts.get(entity, Tag::Entries)
                         else {
@@ -2015,7 +2294,7 @@ fn run(
                         if failed {
                             continue;
                         }
-                        *phase = Phase::LaunchSelect;
+                        *phase = RunPhase::Select;
                     } else {
                         let mut valid = true;
                         for (_, expected, order, parent) in &checks {
@@ -2044,13 +2323,13 @@ fn run(
                         };
                         io.commands.entity(entity).insert(Target(path));
                         *phase = if cfg!(target_os = "macos") {
-                            Phase::LaunchVerify
+                            RunPhase::Verify
                         } else {
-                            Phase::LaunchExecute
+                            RunPhase::Execute
                         };
                     }
                 }
-                Phase::LaunchSelect => {
+                RunPhase::Select => {
                     let prefix = format!("{} (", product.value("VMUX_HOST_NAME"));
                     let mut latest = None;
                     for (entry, parent) in &entries {
@@ -2079,9 +2358,9 @@ fn run(
                     io.commands
                         .entity(entity)
                         .insert(Target(latest.path.clone()));
-                    *phase = Phase::LaunchVerify;
+                    *phase = RunPhase::Verify;
                 }
-                Phase::LaunchVerify => {
+                RunPhase::Verify => {
                     let target = targets.get(entity).unwrap();
                     io.request(
                         &mut sequence,
@@ -2100,9 +2379,9 @@ fn run(
                         Tag::None,
                         false,
                     );
-                    *phase = Phase::LaunchExecute;
+                    *phase = RunPhase::Execute;
                 }
-                Phase::LaunchExecute => {
+                RunPhase::Execute => {
                     let target = targets.get(entity).unwrap();
                     let mut environment = settings.0.clone();
                     let (program, arguments) = if cfg!(target_os = "macos") || profile != "dev" {
@@ -2134,12 +2413,11 @@ fn run(
                         Tag::None,
                         false,
                     );
-                    *phase = Phase::LaunchDone;
+                    *phase = RunPhase::Done;
                 }
-                Phase::LaunchDone => {
+                RunPhase::Done => {
                     io.commands.entity(entity).insert(Complete(Outcome::Done));
                 }
-                _ => {}
             }
         }
 
@@ -2149,15 +2427,15 @@ fn run(
     }
 }
 
-fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
-    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        if !matches!(request, Request::Stop) || facts.pending(entity) {
+fn stop(mut requests: StopRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
         let mut previous = None;
         match *phase {
-            Phase::Start => {
+            StopPhase::Start => {
                 io.request(
                     &mut sequence,
                     entity,
@@ -2175,9 +2453,9 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut io: IoWrit
                     Tag::None,
                     false,
                 );
-                *phase = Phase::StopExecute;
+                *phase = StopPhase::Execute;
             }
-            Phase::StopExecute => {
+            StopPhase::Execute => {
                 let Some(stdlib) = facts.text(entity, Tag::Stdlib) else {
                     continue;
                 };
@@ -2210,12 +2488,11 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut io: IoWrit
                     Tag::None,
                     false,
                 );
-                *phase = Phase::StopDone;
+                *phase = StopPhase::Done;
             }
-            Phase::StopDone => {
+            StopPhase::Done => {
                 io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
-            _ => {}
         }
 
         if *phase != previous_phase {
@@ -2250,23 +2527,20 @@ struct SignatureData<'w, 's> {
 }
 
 fn signature(
-    mut requests: Requests,
+    mut requests: SignatureRequests,
     facts: Facts,
     spec: SignatureData,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
-        let Request::Signature {
+        let Signature {
             path,
             binary,
             stamp,
             identifier,
             suffix,
-        } = request
-        else {
-            continue;
-        };
+        } = request;
         if facts.pending(entity) {
             continue;
         }
@@ -2282,7 +2556,7 @@ fn signature(
         };
         let mut previous = None;
         match *phase {
-            Phase::Start | Phase::SignatureRefresh => {
+            SignaturePhase::Start | SignaturePhase::Refresh => {
                 io.request(
                     &mut sequence,
                     entity,
@@ -2307,7 +2581,7 @@ fn signature(
                         false,
                     );
                 }
-                if *phase == Phase::Start {
+                if *phase == SignaturePhase::Start {
                     io.request(
                         &mut sequence,
                         entity,
@@ -2324,7 +2598,7 @@ fn signature(
                         Tag::Binary,
                         false,
                     );
-                    *phase = Phase::SignatureInputs;
+                    *phase = SignaturePhase::Inputs;
                 } else {
                     io.request(
                         &mut sequence,
@@ -2334,10 +2608,10 @@ fn signature(
                         Tag::Binary,
                         false,
                     );
-                    *phase = Phase::SignatureRecord;
+                    *phase = SignaturePhase::Record;
                 }
             }
-            Phase::SignatureInputs | Phase::SignatureRecord => {
+            SignaturePhase::Inputs | SignaturePhase::Record => {
                 let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
                     Ok(identity) => identity,
                     Err(error) => {
@@ -2372,7 +2646,7 @@ fn signature(
                 }
                 let value = format!("{:x}{suffix}", hash.finalize());
                 io.commands.entity(entity).insert(Expected(value.clone()));
-                if *phase == Phase::SignatureRecord {
+                if *phase == SignaturePhase::Record {
                     let Some(checksum) = facts.text(entity, Tag::Binary) else {
                         continue;
                     };
@@ -2396,7 +2670,7 @@ fn signature(
                         Tag::None,
                         false,
                     );
-                    *phase = Phase::SignatureDone;
+                    *phase = SignaturePhase::Done;
                 } else {
                     let exists = matches!(facts.get(entity, Tag::Stamp), Some(PathMetadata(Some(metadata))) if metadata.is_file())
                         && matches!(facts.get(entity, Tag::Binary), Some(PathMetadata(Some(metadata))) if metadata.is_file());
@@ -2434,13 +2708,13 @@ fn signature(
                             Tag::Signature,
                             true,
                         );
-                        *phase = Phase::SignatureCache;
+                        *phase = SignaturePhase::Cache;
                     } else {
-                        *phase = Phase::SignaturePrepare;
+                        *phase = SignaturePhase::Prepare;
                     }
                 }
             }
-            Phase::SignatureCache => {
+            SignaturePhase::Cache => {
                 let Some(actual) = facts.text(entity, Tag::Stamp) else {
                     continue;
                 };
@@ -2456,9 +2730,9 @@ fn signature(
                     io.commands.entity(entity).insert(Complete(Outcome::Done));
                     continue;
                 }
-                *phase = Phase::SignaturePrepare;
+                *phase = SignaturePhase::Prepare;
             }
-            Phase::SignaturePrepare => {
+            SignaturePhase::Prepare => {
                 let (copy, copied, linking) = spec.preparation.get(entity).unwrap();
                 if let Some(copy) = copy
                     && copied.is_none()
@@ -2507,7 +2781,7 @@ fn signature(
                             Tag::Libraries,
                             false,
                         );
-                        *phase = Phase::SignatureRpaths;
+                        *phase = SignaturePhase::Rpaths;
                     }
                 } else if identifier.is_some() {
                     io.request(
@@ -2523,7 +2797,7 @@ fn signature(
                         Tag::Format,
                         false,
                     );
-                    *phase = Phase::SignatureFormat;
+                    *phase = SignaturePhase::Format;
                 } else {
                     let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
                         Ok(identity) => identity,
@@ -2577,10 +2851,10 @@ fn signature(
                         Tag::None,
                         false,
                     );
-                    *phase = Phase::SignatureRefresh;
+                    *phase = SignaturePhase::Refresh;
                 }
             }
-            Phase::SignatureFormat => {
+            SignaturePhase::Format => {
                 let Some(format) = facts.text(entity, Tag::Format) else {
                     continue;
                 };
@@ -2641,12 +2915,12 @@ fn signature(
                     Tag::None,
                     false,
                 );
-                *phase = Phase::SignatureRefresh;
+                *phase = SignaturePhase::Refresh;
             }
-            Phase::SignatureDone => {
+            SignaturePhase::Done => {
                 io.commands.entity(entity).insert(Complete(Outcome::Done));
             }
-            Phase::SignatureRpaths => {
+            SignaturePhase::Rpaths => {
                 let Some(rpaths) = facts.text(entity, Tag::Rpaths) else {
                     continue;
                 };
@@ -2719,9 +2993,9 @@ fn signature(
                     );
                     order += 1;
                 }
-                *phase = Phase::SignatureBindings;
+                *phase = SignaturePhase::Bindings;
             }
-            Phase::SignatureBindings => {
+            SignaturePhase::Bindings => {
                 for (_, binding, order, parent) in &spec.links {
                     let Some(binding) = binding else {
                         continue;
@@ -2757,9 +3031,8 @@ fn signature(
                         );
                     }
                 }
-                *phase = Phase::SignaturePrepare;
+                *phase = SignaturePhase::Prepare;
             }
-            _ => {}
         }
 
         if *phase != previous_phase {
@@ -2768,160 +3041,201 @@ fn signature(
     }
 }
 
-type WakeChanges<'w, 's> =
-    Query<'w, 's, Entity, Or<(Changed<Phase>, Added<Complete>, Added<Failed>)>>;
+type WakeChanges<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    Or<(
+        Changed<CapacityPhase>,
+        Changed<IdentityPhase>,
+        Changed<ClearPhase>,
+        Changed<SignPhase>,
+        Changed<BundlePhase>,
+        Changed<PublishPhase>,
+        Changed<RunPhase>,
+        Changed<StopPhase>,
+        Changed<CompilePhase>,
+        Changed<SnapshotPhase>,
+        Changed<InvokePhase>,
+        Changed<SignaturePhase>,
+        Added<Complete>,
+        Added<Failed>,
+    )>,
+>;
 
-fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+fn compile(mut requests: CompileRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
     for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        let Compile {
+            package,
+            binary,
+            manifest,
+        } = request;
         if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
         let mut previous = None;
-        match request {
-            Request::ProviderCompile {
-                package,
-                binary,
-                manifest,
-            } => {
-                if *phase == Phase::Start {
-                    let mut environment = settings.0.clone();
-                    environment.remove("CARGO_BUILD_TARGET");
-                    let arguments = vec![
-                        "build".into(),
-                        "--locked".into(),
-                        "--manifest-path".into(),
-                        manifest.as_os_str().into(),
-                        "-p".into(),
-                        package.as_str().into(),
-                        "--bin".into(),
-                        binary.as_str().into(),
-                        "--target".into(),
-                        env!("VMUX_DX_HOST_TARGET").into(),
-                        "--target-dir".into(),
-                        checkout.target.as_os_str().into(),
-                    ];
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        RunProcess::new(&environment, &checkout.root, "cargo".into(), arguments),
-                        Tag::None,
-                        false,
-                    );
-                    *phase = Phase::ProviderCompiled;
-                } else {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
-                }
+
+        if *phase == CompilePhase::Start {
+            let mut environment = settings.0.clone();
+            environment.remove("CARGO_BUILD_TARGET");
+            let arguments = vec![
+                "build".into(),
+                "--locked".into(),
+                "--manifest-path".into(),
+                manifest.as_os_str().into(),
+                "-p".into(),
+                package.as_str().into(),
+                "--bin".into(),
+                binary.as_str().into(),
+                "--target".into(),
+                env!("VMUX_DX_HOST_TARGET").into(),
+                "--target-dir".into(),
+                checkout.target.as_os_str().into(),
+            ];
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                RunProcess::new(&environment, &checkout.root, "cargo".into(), arguments),
+                Tag::None,
+                false,
+            );
+            *phase = CompilePhase::Done;
+        } else {
+            io.commands.entity(entity).insert(Complete(Outcome::Done));
+        }
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, mut phase, mut sequence) in &mut requests {
+        let Snapshot { binary } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+
+        let source = checkout.directory("debug").join(binary);
+        match *phase {
+            SnapshotPhase::Start => {
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    InspectPath(source),
+                    Tag::Path,
+                    false,
+                );
+                *phase = SnapshotPhase::Inspect;
             }
-            Request::ProviderSnapshot { binary } => {
-                let source = checkout.directory("debug").join(binary);
-                match *phase {
-                    Phase::Start => {
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            InspectPath(source),
-                            Tag::Path,
-                            false,
-                        );
-                        *phase = Phase::SnapshotInspect;
-                    }
-                    Phase::SnapshotInspect => {
-                        let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
-                        if !valid {
-                            io.commands.entity(entity).insert(Failed(Failure::message(
-                                "Workspace provider build produced no bounded executable",
-                            )));
-                            continue;
-                        }
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            CreateTemporary,
-                            Tag::Temporary,
-                            false,
-                        );
-                        *phase = Phase::SnapshotCopy;
-                    }
-                    Phase::SnapshotCopy => {
-                        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary)
-                        else {
-                            continue;
-                        };
-                        let path = temporary.path().join("provider");
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            CopyFile(source, path.clone()),
-                            Tag::None,
-                            false,
-                        );
-                        io.request(
-                            &mut sequence,
-                            entity,
-                            &mut previous,
-                            InspectPath(path),
-                            Tag::Path,
-                            false,
-                        );
-                        *phase = Phase::SnapshotCheck;
-                    }
-                    Phase::SnapshotCheck => {
-                        let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
-                        if !valid {
-                            io.commands.entity(entity).insert(Failed(Failure::message(
-                                "Workspace executable snapshot is incomplete",
-                            )));
-                            continue;
-                        }
-                        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary)
-                        else {
-                            continue;
-                        };
-                        let executable = crate::workspace_io::Executable::new(
-                            temporary.path().join("provider"),
-                            temporary.clone(),
-                        );
-                        io.commands
-                            .entity(entity)
-                            .insert(Complete(Outcome::Executable(executable)));
-                    }
-                    _ => {}
+            SnapshotPhase::Inspect => {
+                let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
+                if !valid {
+                    io.commands.entity(entity).insert(Failed(Failure::message(
+                        "Workspace provider build produced no bounded executable",
+                    )));
+                    continue;
                 }
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    CreateTemporary,
+                    Tag::Temporary,
+                    false,
+                );
+                *phase = SnapshotPhase::Copy;
             }
-            Request::ProviderInvoke { arguments } => {
-                if *phase == Phase::Start {
-                    let Some(program) = settings.0.get("VMUX_DX_PROVIDER_EXECUTABLE") else {
-                        io.commands.entity(entity).insert(Failed(Failure::message(
-                            "Workspace executable snapshot is missing",
-                        )));
-                        continue;
-                    };
-                    let mut environment = settings.0.clone();
-                    environment.set("VMUX_DX_PROVIDER_CHILD", "1");
-                    io.request(
-                        &mut sequence,
-                        entity,
-                        &mut previous,
-                        RunProcess::new(
-                            &environment,
-                            &checkout.root,
-                            program.to_owned(),
-                            arguments.clone(),
-                        ),
-                        Tag::None,
-                        false,
-                    );
-                    *phase = Phase::ProviderInvoked;
-                } else {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
+            SnapshotPhase::Copy => {
+                let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+                    continue;
+                };
+                let path = temporary.path().join("provider");
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    CopyFile(source, path.clone()),
+                    Tag::None,
+                    false,
+                );
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    InspectPath(path),
+                    Tag::Path,
+                    false,
+                );
+                *phase = SnapshotPhase::Check;
+            }
+            SnapshotPhase::Check => {
+                let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
+                if !valid {
+                    io.commands.entity(entity).insert(Failed(Failure::message(
+                        "Workspace executable snapshot is incomplete",
+                    )));
+                    continue;
                 }
+                let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
+                    continue;
+                };
+                let executable = crate::workspace_io::Executable::new(
+                    temporary.path().join("provider"),
+                    temporary.clone(),
+                );
+                io.commands
+                    .entity(entity)
+                    .insert(Complete(Outcome::Executable(executable)));
             }
-            _ => continue,
+        }
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn invoke(mut requests: InvokeRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        let Invoke { arguments } = request;
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+
+        if *phase == InvokePhase::Start {
+            let Some(program) = settings.0.get("VMUX_DX_PROVIDER_EXECUTABLE") else {
+                io.commands.entity(entity).insert(Failed(Failure::message(
+                    "Workspace executable snapshot is missing",
+                )));
+                continue;
+            };
+            let mut environment = settings.0.clone();
+            environment.set("VMUX_DX_PROVIDER_CHILD", "1");
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                RunProcess::new(
+                    &environment,
+                    &checkout.root,
+                    program.to_owned(),
+                    arguments.clone(),
+                ),
+                Tag::None,
+                false,
+            );
+            *phase = InvokePhase::Done;
+        } else {
+            io.commands.entity(entity).insert(Complete(Outcome::Done));
         }
 
         if *phase != previous_phase {
@@ -3253,14 +3567,14 @@ mod tests {
             self.app
                 .world_mut()
                 .spawn((
-                    Request::Clear,
+                    Clear,
                     Captured {
                         root: self.operation,
                         attempt: 1,
                     },
                     Root(self.operation),
                     Owner(self.operation),
-                    Phase::ClearFinish,
+                    ClearPhase::Finish,
                     Sequence(0),
                     checkout,
                     settings,
@@ -3286,6 +3600,71 @@ mod tests {
             fs::write(path, bytes).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+    }
+
+    #[test]
+    fn a_second_typed_request_cannot_replace_an_accepted_workflow() {
+        let mut fixture = Fixture::new();
+        let ready = fixture.target.join("debug/.vmux-dev-ready");
+        fs::write(&ready, b"old readiness").unwrap();
+        let original = fixture
+            .app
+            .world()
+            .get::<Settings>(fixture.operation)
+            .unwrap()
+            .0
+            .get("APPLE_SIGNING_IDENTITY")
+            .map(OsString::from);
+        let step = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Work::ClearReady,
+                crate::Attempt(1),
+                OperationState::Pending,
+                ChildOf(fixture.operation),
+            ))
+            .id();
+        fixture.app.update();
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(step)
+            .unwrap()
+            .0
+            .set("APPLE_SIGNING_IDENTITY", "injected-second-request");
+        fixture.app.world_mut().trigger(Requested {
+            entity: step,
+            request: IdentityRequest { print: false },
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if let Some(result) = fixture.app.world().get::<CliResult>(fixture.operation) {
+                assert_eq!(result.0.as_ref().copied().unwrap(), 0);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "accepted workflow did not finish"
+            );
+            std::thread::park_timeout(Duration::from_millis(10));
+        }
+        assert!(
+            !ready.exists(),
+            "the original readiness invalidation was bypassed"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Settings>(fixture.operation)
+                .unwrap()
+                .0
+                .get("APPLE_SIGNING_IDENTITY")
+                .map(OsString::from),
+            original
+        );
     }
 
     #[test]
