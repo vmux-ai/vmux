@@ -306,6 +306,7 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.check_lint }}-${{ github.run_attempt }}
           path: .ci-check-inputs.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -461,6 +462,7 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.check_test_rust }}-${{ github.run_attempt }}
           path: .ci-check-inputs.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -510,6 +512,7 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.check_test_sdk }}-${{ github.run_attempt }}
           path: .ci-check-inputs.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -560,6 +563,7 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.check_test_lean }}-${{ github.run_attempt }}
           path: .ci-check-inputs.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -600,6 +604,7 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.check_test_headless }}-${{ github.run_attempt }}
           path: .ci-check-inputs.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -675,6 +680,7 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.check_website }}-${{ github.run_attempt }}
           path: .ci-check-inputs.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
