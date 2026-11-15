@@ -14,7 +14,6 @@ impl Native {
                 println!("{}", self.product()?.json());
                 Ok(())
             }
-            "cargo" => self.cargo(args),
             "package-binaries" => self.package_binaries(),
             "before-package" => self.before_package(),
             "install-cef" => self.install_cef(),

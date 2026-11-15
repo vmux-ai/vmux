@@ -26,7 +26,6 @@ pub enum Work {
     Dioxus(String),
     Binaryen,
     Tailwind,
-    Cargo(Vec<OsString>),
     Package(String),
     ResourcesIos,
     ReleaseIos,
@@ -47,10 +46,6 @@ pub enum Work {
 }
 
 impl Work {
-    pub(crate) fn cargo(args: &[&str]) -> Self {
-        Self::Cargo(args.iter().map(OsString::from).collect())
-    }
-
     pub fn name(&self) -> &'static str {
         match self {
             Self::Check | Self::Preflight => "Check build storage",
@@ -62,7 +57,6 @@ impl Work {
             Self::Dioxus(_) => "Prepare Dioxus tools",
             Self::Binaryen => "Prepare wasm optimizer",
             Self::Tailwind => "Prepare stylesheet compiler",
-            Self::Cargo(_) => "Run tool",
             Self::Package(_) => "Package app",
             Self::ResourcesIos => "Inject iOS resources",
             Self::ReleaseIos => "Sign and package iOS",
@@ -121,7 +115,6 @@ impl Work {
                     native.tool_path("TAILWINDCSS_BIN", "tailwindcss"),
                 ));
             }
-            Self::Cargo(args) => native.cargo(args)?,
             Self::Package(profile) => return Ok(Outcome::Artifacts(native.package(profile)?)),
             Self::ResourcesIos => native.resources_ios()?,
             Self::ReleaseIos => {

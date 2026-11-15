@@ -13,9 +13,9 @@ use vmux_ecs::{Operation, OperationState, Order};
 use crate::debug_io::{
     AcquireTarget, AcquiredLock, CaptureOutput, CleanupFlight, CleanupQueue, CopyFile,
     CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes, FileDigest, Flight,
-    HashFile, InspectPath, IoJob, IoValue, LinkPath, PathMetadata, PendingValue, ProcessValue,
-    ReadDirectory, ReadFile, ReapRequest, RemoveFile, RenamePath, RunProcess, SpawnProcess, Task,
-    TemporaryValue, ToolOutput, WriteFile,
+    HashFile, HashInput, InspectPath, IoJob, IoValue, LinkPath, PathMetadata, PendingValue,
+    ProbeOutput, ProbeProcess, ProcessValue, ReadDirectory, ReadFile, ReapRequest, RemoveDirectory,
+    RemoveFile, RenamePath, RunProcess, SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
 };
 use crate::execution::Failure;
 use crate::repository::Checkout;
@@ -30,7 +30,13 @@ impl bevy_app::Plugin for Plugin {
         app.init_resource::<CleanupQueue>()
             .init_resource::<Inheritance>()
             .add_plugins((
-                IoPlugin::<CaptureOutput>::default(),
+                (
+                    crate::cargo::Plugin,
+                    IoPlugin::<CaptureOutput>::default(),
+                    IoPlugin::<ProbeProcess>::default(),
+                    IoPlugin::<HashInput>::default(),
+                    IoPlugin::<RemoveDirectory>::default(),
+                ),
                 IoPlugin::<SpawnProcess>::default(),
                 IoPlugin::<RunProcess>::default(),
                 IoPlugin::<ReadFile>::default(),
@@ -62,6 +68,7 @@ impl bevy_app::Plugin for Plugin {
             .add_observer(accept::<Capacity>)
             .add_observer(accept::<Acquire>)
             .add_observer(accept::<Tool>)
+            .add_observer(accept::<crate::cargo::Run>)
             .add_observer(accept::<IdentityRequest>)
             .add_observer(accept::<Clear>)
             .add_observer(accept::<Sign>)
@@ -168,7 +175,7 @@ impl bevy_app::Plugin for Plugin {
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Stage {
+pub(crate) enum Stage {
     Collect,
     Decide,
     Admit,
@@ -471,21 +478,21 @@ pub struct Captured {
 pub struct Lease(pub Option<std::sync::Arc<crate::target_lock::TargetLock>>);
 
 #[derive(Component, Clone, Copy)]
-struct Root(Entity);
+pub(crate) struct Root(Entity);
 
 #[derive(Component, Clone, Copy)]
 struct Owner(Entity);
 
 #[derive(Component)]
-struct Sequence(u32);
+pub(crate) struct Sequence(u32);
 
 #[derive(SystemParam)]
-struct IoWriter<'w, 's> {
-    commands: Commands<'w, 's>,
+pub(crate) struct IoWriter<'w, 's> {
+    pub commands: Commands<'w, 's>,
 }
 
 impl IoWriter<'_, '_> {
-    fn request<J: IoJob, R: bevy_ecs::bundle::Bundle>(
+    pub fn request<J: IoJob, R: bevy_ecs::bundle::Bundle>(
         &mut self,
         sequence: &mut Sequence,
         owner: Entity,
@@ -517,7 +524,7 @@ impl IoWriter<'_, '_> {
 struct Submitted;
 
 #[derive(Component)]
-struct Complete(Outcome);
+pub(crate) struct Complete(pub Outcome);
 
 #[derive(Component)]
 struct Sent;
@@ -535,7 +542,7 @@ struct CleanupWitness;
 struct Reaping(vmux_ecs::blocking::BlockingTask<()>);
 
 #[derive(Component, Clone)]
-struct Failed(Failure);
+pub(crate) struct Failed(pub Failure);
 
 #[derive(Component)]
 struct After(Entity);
@@ -708,6 +715,7 @@ type NativeResults<'w, 's> = Query<
     (
         With<Io>,
         Or<(
+            With<crate::cargo::Slot>,
             Or<(
                 With<CapacitySlot>,
                 With<KeychainSlot>,
@@ -736,6 +744,7 @@ type NativeResults<'w, 's> = Query<
             )>,
         )>,
         Or<(
+            With<ProbeOutput>,
             With<ToolOutput>,
             With<FileBytes>,
             With<FileDigest>,
@@ -750,7 +759,7 @@ type NativeResults<'w, 's> = Query<
 >;
 
 #[derive(SystemParam)]
-struct Facts<'w, 's> {
+pub(crate) struct Facts<'w, 's> {
     values: NativeResults<'w, 's>,
     states: Query<'w, 's, (&'static OperationState, &'static ChildOf), With<Io>>,
 }
@@ -795,7 +804,7 @@ impl Scope<'_, '_> {
 }
 
 impl Facts<'_, '_> {
-    fn get<T: Component, R: Component>(&self, owner: Entity) -> Option<&T> {
+    pub fn get<T: Component, R: Component>(&self, owner: Entity) -> Option<&T> {
         let mut latest = None;
         for (entity, order, parent, state) in &self.values {
             if parent.parent() != owner
@@ -846,7 +855,7 @@ impl Facts<'_, '_> {
             .map(|digest| digest.0.clone())
     }
 
-    fn pending(&self, owner: Entity) -> bool {
+    pub fn pending(&self, owner: Entity) -> bool {
         self.states.iter().any(|(state, parent)| {
             parent.parent() == owner
                 && matches!(state, OperationState::Pending | OperationState::Running)
@@ -4926,7 +4935,12 @@ type Pending<'w, 's> = Query<
         Without<Submitted>,
         Without<Admitted>,
         Or<(
-            With<CaptureOutput>,
+            Or<(
+                With<ProbeProcess>,
+                With<HashInput>,
+                With<RemoveDirectory>,
+                With<CaptureOutput>,
+            )>,
             With<AcquireTarget>,
             With<RunProcess>,
             With<SpawnProcess>,

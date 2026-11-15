@@ -348,6 +348,83 @@ impl IoValue for Done {}
 
 #[derive(Component, Clone)]
 #[require(crate::debug::Io)]
+pub struct ProbeOutput(pub Result<std::process::Output, Failure>);
+
+impl IoValue for ProbeOutput {}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct ProbeProcess {
+    pub environment: Environment,
+    pub cwd: PathBuf,
+    pub program: OsString,
+    pub arguments: Vec<OsString>,
+}
+
+impl IoJob for ProbeProcess {
+    type Data = ProbeOutput;
+}
+
+impl Job for ProbeProcess {
+    type Output = Result<ProbeOutput, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let mut command = self.environment.command(self.program, &self.cwd);
+        command.args(self.arguments);
+        let output = Execution::new(command)
+            .output_any(None)
+            .map_err(Failure::from_error);
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        Signals::check().map_err(Failure::from_error)?;
+        Ok(ProbeOutput(output))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct HashInput {
+    pub environment: Environment,
+    pub cwd: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
+impl IoJob for HashInput {
+    type Data = ToolOutput;
+}
+
+impl Job for HashInput {
+    type Output = Result<ToolOutput, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let mut command = self.environment.command("git", &self.cwd);
+        command.args(["hash-object", "--stdin"]);
+        let output = Execution::new(command)
+            .output_any(Some(&self.bytes))
+            .map_err(Failure::from_error)?;
+        Ok(ToolOutput(output))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
 pub struct AcquiredLock(pub Arc<TargetLock>);
 
 impl IoValue for AcquiredLock {}
@@ -769,6 +846,31 @@ impl Job for CopyFile {
 #[component(immutable)]
 #[require(crate::debug::Io)]
 pub struct RemoveFile(pub PathBuf);
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct RemoveDirectory(pub PathBuf);
+
+impl IoJob for RemoveDirectory {
+    type Data = Done;
+}
+
+impl Job for RemoveDirectory {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        fs::remove_dir_all(self.0).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
 
 impl IoJob for RemoveFile {
     type Data = Done;

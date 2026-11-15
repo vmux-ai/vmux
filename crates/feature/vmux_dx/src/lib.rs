@@ -16,6 +16,7 @@ use storage::Storage;
 use target_lock::TargetLock;
 use work::{Outcome, Work};
 
+mod cargo;
 #[cfg(feature = "ci-syntax")]
 mod ci_native;
 mod ci_scope;
@@ -754,11 +755,17 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         );
         plans.native(entity, &mut tail, Work::Helper);
         plans.request(entity, &mut tail, "Invalidate old artifact", debug::Clear);
-        plans.native(entity, &mut tail, Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]));
-        plans.native(
+        plans.request(
             entity,
             &mut tail,
-            Work::cargo(&[
+            "Run Cargo",
+            cargo::Run::new(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]),
+        );
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run::new(&[
                 "build",
                 "-p",
                 "vmux_app",
@@ -787,7 +794,12 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         if cfg!(target_os = "macos") {
             args.extend(["--", "-C", "link-arg=-Wl,-headerpad,1000"].map(OsString::from));
         }
-        plans.native(entity, &mut tail, Work::Cargo(args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run { arguments: args },
+        );
         if cfg!(target_os = "macos") {
             plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
             plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
@@ -1049,7 +1061,12 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
             args.extend(["--features".into(), features.to_owned()]);
         }
         args.append(&mut forwarded);
-        plans.native(entity, &mut tail, Work::Cargo(args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run { arguments: args },
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
@@ -1074,10 +1091,11 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
             debug::Acquire { inherit: true },
         );
         plans.native(entity, &mut tail, Work::Seed);
-        plans.native(
+        plans.request(
             entity,
             &mut tail,
-            Work::cargo(&["fmt", "--all", "--", "--check"]),
+            "Run Cargo",
+            cargo::Run::new(&["fmt", "--all", "--", "--check"]),
         );
         let mut args = vec![
             "clippy".into(),
@@ -1092,7 +1110,12 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
         }
         args.append(&mut forwarded);
         args.extend(["--".into(), "-D".into(), "warnings".into()]);
-        plans.native(entity, &mut tail, Work::Cargo(args));
+        plans.request(
+            entity,
+            &mut tail,
+            "Run Cargo",
+            cargo::Run { arguments: args },
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
@@ -1294,6 +1317,16 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
                 plans.native(entity, &mut tail, Work::Seed);
             }
             match task {
+                "cargo" => {
+                    plans.request(
+                        entity,
+                        &mut tail,
+                        "Run Cargo",
+                        cargo::Run {
+                            arguments: forwarded,
+                        },
+                    );
+                }
                 "ensure-signing" => {
                     plans.request(
                         entity,
@@ -1626,6 +1659,7 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
     struct Fixture {
@@ -1699,6 +1733,396 @@ mod tests {
                 std::thread::park_timeout(Duration::from_millis(10));
             }
         }
+
+        fn program(&self, name: &str, script: &str) -> std::path::PathBuf {
+            let directory = self.directory.path().join("tools");
+            std::fs::create_dir_all(&directory).unwrap();
+            let path = directory.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn cargo(&mut self, arguments: &[&str]) -> Entity {
+            let program = self.program("cargo", r#"
+if [ "$1" = '-V' ]; then
+    printf 'cargo fixture 1\n'
+    exit 0
+fi
+printf '%s\n' "$@" > "$VMUX_CARGO_FIXTURE/arguments"
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' "$CARGO_INCREMENTAL" "$CEF_PATH" "$CMAKE_C_COMPILER_LAUNCHER" "$CMAKE_CXX_COMPILER_LAUNCHER" "$RUSTC_WRAPPER" "$TAILWINDCSS" "$VMUX_TARGET_LOCK_TARGET" "$VMUX_BUILD_STORAGE_ROOT" "$VMUX_TARGET_LOCK_OWNER_PID" "$VMUX_DX_BIN" > "$VMUX_CARGO_FIXTURE/environment"
+exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
+"#);
+            let rustc = self.program("rustc", "printf 'rustc fixture 1\\nhost: fixture-host\\n'");
+            let root = self.directory.path().canonicalize().unwrap();
+            let mut settings = self
+                .app
+                .world_mut()
+                .get_mut::<Settings>(self.operation)
+                .unwrap();
+            for name in [
+                "RUSTC_WRAPPER",
+                "RUSTC_WORKSPACE_WRAPPER",
+                "CMAKE_C_COMPILER_LAUNCHER",
+                "CMAKE_CXX_COMPILER_LAUNCHER",
+                "CARGO_INCREMENTAL",
+                "RUSTFLAGS",
+                "CARGO_ENCODED_RUSTFLAGS",
+                "CARGO_BUILD_TARGET",
+                "MACOSX_DEPLOYMENT_TARGET",
+                "VMUX_DX_PLATFORM",
+                "VMUX_CARGO_FIXTURE_EXIT",
+            ] {
+                settings.0.remove(name);
+            }
+            settings.0.set("CARGO_BIN", program.as_os_str());
+            settings.0.set("RUSTC", rustc.as_os_str());
+            settings.0.set(
+                "PATH",
+                format!("{}:/usr/bin:/bin", root.join("tools").display()),
+            );
+            settings.0.set("VMUX_CARGO_FIXTURE", root.as_os_str());
+            settings
+                .0
+                .set("VMUX_CEF_SDK_CACHE", root.join("cef-sdk").as_os_str());
+            settings.0.set("VMUX_DISABLE_SCCACHE", "1");
+            settings.0.set("VMUX_BUILD_PROFILE", "dev");
+            settings.0.set("CI", "true");
+            self.app
+                .world_mut()
+                .spawn((
+                    cargo::Run::new(arguments),
+                    OperationState::Pending,
+                    ChildOf(self.operation),
+                    Attempt(1),
+                ))
+                .id()
+        }
+    }
+
+    #[test]
+    fn typed_cargo_preserves_arguments_environment_overrides_and_probe_fallbacks() {
+        for probe in [
+            None,
+            Some("exit 7"),
+            Some("[ \"$1\" = '--version' ]"),
+            Some("printf '\\377'; exit 0"),
+        ] {
+            let mut fixture = Fixture::new();
+            let step = fixture.cargo(&["fmt", "--", "space in argument"]);
+            if let Some(probe) = probe {
+                fixture.program("sccache", probe);
+            }
+            let mut settings = fixture
+                .app
+                .world_mut()
+                .get_mut::<Settings>(fixture.operation)
+                .unwrap();
+            settings.0.set("VMUX_DISABLE_SCCACHE", "0");
+            settings.0.set("CI", "false");
+            settings.0.set("CARGO_INCREMENTAL", "custom");
+            settings.0.set("CMAKE_C_COMPILER_LAUNCHER", "custom-c");
+            settings.0.set("TAILWINDCSS_BIN", "selected-tailwind");
+            assert_eq!(fixture.result(), 0);
+            assert_eq!(
+                std::fs::read_to_string(fixture.directory.path().join("arguments")).unwrap(),
+                "fmt\n--\nspace in argument\n"
+            );
+            let environment =
+                std::fs::read_to_string(fixture.directory.path().join("environment")).unwrap();
+            let values: Vec<_> = environment.split('|').collect();
+            assert_eq!(values[0], "custom");
+            assert!(values[1].ends_with("/cef-sdk"));
+            assert_eq!(values[2], "custom-c");
+            assert_eq!(
+                values[3],
+                if probe == Some("printf '\\377'; exit 0") {
+                    "sccache"
+                } else {
+                    ""
+                }
+            );
+            assert_eq!(
+                values[4],
+                if probe == Some("printf '\\377'; exit 0") {
+                    "sccache"
+                } else {
+                    ""
+                }
+            );
+            assert_eq!(values[5], "selected-tailwind");
+            assert_eq!(
+                std::path::Path::new(values[6]),
+                fixture
+                    .directory
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .join("target")
+            );
+            assert_eq!(
+                std::path::Path::new(values[7]),
+                fixture.directory.path().canonicalize().unwrap()
+            );
+            assert_eq!(values[8], std::process::id().to_string());
+            assert_eq!(
+                std::path::Path::new(values[9]),
+                std::env::current_exe().unwrap()
+            );
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(step)
+                    .unwrap()
+                    .0
+                    .get("CARGO_INCREMENTAL"),
+                Some(std::ffi::OsStr::new("custom"))
+            );
+        }
+    }
+
+    #[test]
+    fn typed_cargo_records_the_existing_git_seed_contract_and_replaces_old_markers() {
+        for original in [None, Some(""), Some("0")] {
+            let mut fixture = Fixture::new();
+            let step = fixture.cargo(&["build", "--package", "fixture"]);
+            let root = fixture.directory.path().canonicalize().unwrap();
+            std::fs::create_dir_all(root.join(".cargo")).unwrap();
+            std::fs::create_dir_all(root.join("nested")).unwrap();
+            std::fs::create_dir_all(root.join("target/.vmux-seed")).unwrap();
+            std::fs::write(root.join("target/.vmux-seed/obsolete"), "").unwrap();
+            let files = [
+                ".cargo/config.toml",
+                "Cargo.lock",
+                "Cargo.toml",
+                "nested/Cargo.toml",
+            ];
+            for file in files {
+                std::fs::write(root.join(file), format!("fixture: {file}\n")).unwrap();
+            }
+            let mut settings = fixture
+                .app
+                .world_mut()
+                .get_mut::<Settings>(fixture.operation)
+                .unwrap();
+            settings.0.set("CI", "false");
+            settings.0.set("RUSTFLAGS", "-C debuginfo=0");
+            if let Some(original) = original {
+                settings.0.set("CARGO_INCREMENTAL", original);
+            }
+            let incremental = if original == Some("0") { "0" } else { "1" };
+            let mut input = format!(
+                "cargo=cargo fixture 1\nrustc=rustc fixture 1\nhost: fixture-host\nrustc-wrapper=\nrustc-workspace-wrapper=\ncargo-incremental={incremental}\nrustflags=-C debuginfo=0\ncargo-encoded-rustflags=\ncargo-build-target=\nmacosx-deployment-target=\n"
+            );
+            for file in files {
+                input.push_str(&format!("file={file}\n"));
+            }
+            let output = std::process::Command::new("/usr/bin/git")
+                .current_dir(&root)
+                .arg("hash-object")
+                .args(files)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            input.push_str(std::str::from_utf8(&output.stdout).unwrap());
+            std::fs::write(root.join("seed-input"), input).unwrap();
+            let output = std::process::Command::new("/usr/bin/git")
+                .current_dir(&root)
+                .args(["hash-object", "seed-input"])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let expected = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(fixture.result(), 0);
+            let markers: Vec<_> = std::fs::read_dir(root.join("target/.vmux-seed"))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect();
+            assert_eq!(markers, vec![OsString::from(expected.trim())]);
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(step)
+                    .unwrap()
+                    .0
+                    .get("CARGO_INCREMENTAL"),
+                original.map(std::ffi::OsStr::new)
+            );
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Settings>(fixture.operation)
+                    .unwrap()
+                    .0
+                    .get("CARGO_INCREMENTAL"),
+                original.map(std::ffi::OsStr::new)
+            );
+        }
+    }
+
+    #[test]
+    fn typed_cargo_failure_preserves_exit_code_and_skips_seed_publication() {
+        let mut fixture = Fixture::new();
+        let step = fixture.cargo(&["build"]);
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set("CI", "false");
+        settings.0.set("VMUX_CARGO_FIXTURE_EXIT", "37");
+        assert_eq!(fixture.result(), 37);
+        assert!(!fixture.directory.path().join("target/.vmux-seed").exists());
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Settings>(step)
+                .unwrap()
+                .0
+                .get("CARGO_INCREMENTAL"),
+            None
+        );
+    }
+
+    #[test]
+    fn typed_cargo_seed_failure_preserves_the_marker_and_reports_failure_after_the_tool_succeeds() {
+        let mut fixture = Fixture::new();
+        fixture.cargo(&["build"]);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap()
+            .0
+            .set("CI", "false");
+        let target = fixture.directory.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join(".vmux-seed"), "protected marker").unwrap();
+        assert_eq!(fixture.result(), 1);
+        assert_eq!(
+            std::fs::read_to_string(fixture.directory.path().join("arguments")).unwrap(),
+            "build\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join(".vmux-seed")).unwrap(),
+            "protected marker"
+        );
+    }
+
+    #[test]
+    fn typed_cargo_in_ci_clears_inherited_cef_and_preserves_the_selected_wrapper() {
+        let mut fixture = Fixture::new();
+        fixture.cargo(&["build"]);
+        fixture.program("sccache", "exit 0");
+        let mut settings = fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap();
+        settings.0.set("VMUX_DISABLE_SCCACHE", "0");
+        settings.0.remove("VMUX_CEF_SDK_CACHE");
+        settings.0.set("CEF_PATH", "inherited-sdk");
+        settings.0.set("RUSTC_WRAPPER", "selected-wrapper");
+        assert_eq!(fixture.result(), 0);
+        let environment =
+            std::fs::read_to_string(fixture.directory.path().join("environment")).unwrap();
+        let values: Vec<_> = environment.split('|').collect();
+        assert_eq!(values[0], "0");
+        assert_eq!(values[1], "");
+        assert_eq!(values[2], "sccache");
+        assert_eq!(values[3], "sccache");
+        assert_eq!(values[4], "selected-wrapper");
+        assert!(!fixture.directory.path().join("target/.vmux-seed").exists());
+    }
+
+    #[test]
+    fn canceled_cargo_probe_drains_its_process_and_retains_the_target_until_completion() {
+        let mut fixture = Fixture::new();
+        let step = fixture.cargo(&["build"]);
+        fixture.program(
+            "sccache",
+            "printf '%s' \"$$\" > \"$VMUX_CARGO_FIXTURE/probe-pid\"; exec /bin/sleep 30",
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Settings>(fixture.operation)
+            .unwrap()
+            .0
+            .set("VMUX_DISABLE_SCCACHE", "0");
+        let checkout = fixture
+            .app
+            .world()
+            .get::<Checkout>(fixture.operation)
+            .unwrap()
+            .clone();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .insert(Lease(Arc::new(
+                TargetLock::acquire(&checkout.root, &checkout.target).unwrap(),
+            )));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            fixture.app.update();
+            if let Ok(text) = std::fs::read_to_string(fixture.directory.path().join("probe-pid"))
+                && let Ok(pid) = text.parse::<u32>()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline, "Cargo probe did not start");
+            std::thread::park_timeout(Duration::from_millis(5));
+        };
+        assert!(signals::Signals::alive(pid));
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .insert(OperationState::Canceled);
+        loop {
+            fixture.app.update();
+            if fixture.app.world().get::<Completed>(step).is_some() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Canceled Cargo probe did not drain"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        assert!(!signals::Signals::alive(pid));
+        assert!(!fixture.directory.path().join("arguments").exists());
+        assert!(!fixture.directory.path().join("target/.vmux-seed").exists());
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Settings>(step)
+                .unwrap()
+                .0
+                .get("CARGO_INCREMENTAL"),
+            None
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.operation)
+            .remove::<Lease>();
+        assert!(
+            TargetLock::try_acquire(&checkout.root, &checkout.target)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
