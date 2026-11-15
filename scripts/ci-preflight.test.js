@@ -463,7 +463,7 @@ class Workflow {
     return files.some((file) => !push['paths-ignore'].some((pattern) => path.matchesGlob(file, pattern)));
   }
 
-  async checkProfiles(identity, context) {
+  async checkProfiles(identity, context, inputs = {}) {
     const captured = {};
     class Adapter {
       async plan(_identity, profiles) { captured.profiles = profiles; }
@@ -471,7 +471,7 @@ class Workflow {
     const step = this.jobs.changes.steps.find((step) => step.id === 'checks');
     const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
     const execute = new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script);
-    await execute(() => Adapter, {}, context, {}, { env: { VMUX_CHECK_BASE: identity.base, VMUX_CHECK_TREE: identity.tree, VMUX_CHECK_RELEASE: 'false', VMUX_LINT_SCOPE: '-p example', VMUX_TEST_SCOPE: '-p example', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', ImageVersion: 'fixture' } });
+    await execute(() => Adapter, {}, context, {}, { env: { VMUX_CHECK_BASE: identity.base, VMUX_CHECK_TREE: identity.tree, VMUX_CHECK_RELEASE: 'false', VMUX_LINT_SCOPE: '-p example', VMUX_TEST_SCOPE: '-p example', VMUX_CHECK_INPUTS: JSON.stringify(inputs), VMUX_RECORDS: 'false', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', ImageVersion: 'fixture' } });
     return captured.profiles;
   }
 
@@ -511,13 +511,13 @@ class Workflow {
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
 
-  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false') {
+  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false', selection = {}) {
     const github = { event_name: event };
     const needs = { plan: { outputs: { feature, base, release } } };
     const steps = {
       filter: { outputs: filter },
       native: { outputs: { native } },
-      scope: { outputs: { lean } },
+      scope: { outputs: { lean, sdk: "true", headless: "true", rust: "true", records: "true", render_free: "true", tooling: "true", ...selection } },
       checks: { outputs: {} },
     };
     for (const name of Object.keys(this.jobs.changes.outputs)) {
@@ -773,27 +773,11 @@ test('main and explicit full validation retain native builds and release PRs ret
   assert.equal(workflow.lane('ios-build', 'schedule', 'false', scheduled), true);
 });
 
-test('SDK and headless validation follow contract inputs while Git dependency checks stay outside PRs', () => {
+test('immutable Git SDK consumer validation stays outside ordinary PRs', () => {
   const workflow = new Workflow();
-  for (const [file, contracts] of [
-    ['crates/feature/vmux_terminal/assets/index.css', false],
-    ['crates/feature/vmux_editor/src/ui.rs', false],
-    ['docs/ux/terminal.md', false],
-    ['crates/util/vmux_api/src/lib.rs', true],
-    ['crates/util/vmux_app/src/lib.rs', true],
-    ['crates/feature/vmux_acp/src/lib.rs', true],
-    ['crates/feature/vmux_layout/src/feature.ron', true],
-    ['crates/feature/vmux_extension/Cargo.toml', true],
-    ['examples/framework-consumer/src/lib.rs', true],
-    ['Cargo.lock', true],
-  ]) {
-    const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]), 'false');
-    assert.equal(changes.contracts, contracts, file);
-    assert.equal(workflow.lane('test-sdk', 'pull_request', 'false', changes), Boolean(changes.code && contracts), file);
-    assert.equal(workflow.lane('test-headless', 'pull_request', 'false', changes), Boolean(changes.code && contracts), file);
-    assert.equal(workflow.step('test-sdk', 'Test immutable Git dependencies', 'pull_request', 'false', changes), false);
+  for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
+    assert.equal(workflow.step('test-sdk', 'Test immutable Git dependencies', event, 'false', {}), event !== 'pull_request', event);
   }
-  assert.equal(workflow.step('test-sdk', 'Test immutable Git dependencies', 'push', 'false', {}), true);
 });
 
 test('feature variants remain parallel with ordinary tests and required when selected', () => {
@@ -803,7 +787,7 @@ test('feature variants remain parallel with ordinary tests and required when sel
   }
   assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', contracts: 'false', lean: 'true' }), true);
   assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', contracts: 'false', lean: 'false' }), false);
-  const valid = { PLAN: 'success', CHANGES: 'success', CODE: 'true', CONTRACTS: 'false', LEAN: 'true', RUST_TEST: 'success', SDK: 'success', HEADLESS: 'success', LEAN_TEST: 'success' };
+  const valid = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'true', HEADLESS_REQUIRED: 'true', CONTRACTS: 'false', LEAN: 'true', RUST_TEST: 'success', SDK: 'success', HEADLESS: 'success', LEAN_TEST: 'success' };
   assert.equal(workflow.gate('test', valid).status, 0);
   for (const result of ['failure', 'cancelled', 'skipped']) {
     assert.equal(workflow.gate('test', { ...valid, LEAN_TEST: result }).status, 1, result);
@@ -812,7 +796,7 @@ test('feature variants remain parallel with ordinary tests and required when sel
 
 test('required statuses fail on preparation errors and applicable child failures or unexpected skips', () => {
   const workflow = new Workflow();
-  const valid = { PLAN: 'success', CHANGES: 'success', CODE: 'true', CONTRACTS: 'true', LEAN: 'false', RUST_TEST: 'success', SDK: 'success', HEADLESS: 'success', LEAN_TEST: 'success', DISTRIBUTION: 'true', MACOS: 'true', RESULT: 'success' };
+  const valid = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'true', HEADLESS_REQUIRED: 'true', CONTRACTS: 'true', LEAN: 'false', RUST_TEST: 'success', SDK: 'success', HEADLESS: 'success', LEAN_TEST: 'success', DISTRIBUTION: 'true', MACOS: 'true', RESULT: 'success' };
   for (const name of ['lint', 'test', 'build-macos']) {
     assert.equal(workflow.gate(name, valid).status, 0, name);
     for (const key of ['PLAN', 'CHANGES']) {
@@ -1266,11 +1250,87 @@ test('every validation artifact discovers its recorded claim with the default hi
 
 test('Test accepts verified reused children but still rejects fresh failures and failed preparation', () => {
   const workflow = new Workflow();
-  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', CONTRACTS: 'true', LEAN: 'true', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped', REUSE_RUST_TEST: '42', REUSE_SDK: '42', REUSE_HEADLESS: '42', REUSE_LEAN_TEST: '42' };
+  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'true', HEADLESS_REQUIRED: 'true', CONTRACTS: 'true', LEAN: 'true', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped', REUSE_RUST_TEST: '42', REUSE_SDK: '42', REUSE_HEADLESS: '42', REUSE_LEAN_TEST: '42' };
   assert.equal(workflow.gate('test', env).status, 0);
   for (const key of ['REUSE_RUST_TEST', 'REUSE_SDK', 'REUSE_HEADLESS', 'REUSE_LEAN_TEST']) {
     assert.equal(workflow.gate('test', { ...env, [key]: '' }).status, 1, key);
   }
   assert.equal(workflow.gate('test', { ...env, CHANGES: 'failure' }).status, 1);
-  assert.equal(workflow.lane('test-rust', 'pull_request', 'false', { code: 'true', reuse_test_rust: '42' }), false);
+  assert.equal(workflow.lane('test-rust', 'pull_request', 'false', { code: 'true', rust: 'true', reuse_test_rust: '42' }), false);
+});
+
+test('SDK, headless and ordinary Rust requirements reject skips independently', () => {
+  const workflow = new Workflow();
+  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'false', HEADLESS_REQUIRED: 'false', CONTRACTS: 'false', LEAN: 'false', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped' };
+  assert.equal(workflow.gate('test', env).status, 0);
+  for (const [required, result, job, selected] of [
+    ['RUST_REQUIRED', 'RUST_TEST', 'test-rust', { rust: 'true' }],
+    ['CONTRACTS', 'SDK', 'test-sdk', { contracts: 'true' }],
+    ['HEADLESS_REQUIRED', 'HEADLESS', 'test-headless', { headless: 'true' }],
+    ['LEAN', 'LEAN_TEST', 'test-lean', { lean: 'true' }],
+  ]) {
+    assert.equal(workflow.lane(job, 'pull_request', 'false', { code: 'true', ...selected }), true, job);
+    assert.equal(workflow.gate('test', { ...env, [required]: 'true' }).status, 1, job);
+    assert.equal(workflow.gate('test', { ...env, [required]: 'true', [result]: 'success' }).status, 0, job);
+  }
+});
+
+test('shared build inputs select website and Rust validation while website manifests keep policy coverage', () => {
+  const workflow = new Workflow();
+  for (const file of ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/config.toml', '.github/workflows/ci.yml', 'scripts/ci-checks.js', 'website/Cargo.toml', 'website/Cargo.lock']) {
+    const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]));
+    assert.equal(changes.website, true, file);
+    assert.equal(changes.code, true, file);
+  }
+  const policy = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths(['website/Cargo.toml']), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
+  for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, 'pull_request', 'false', policy), false, job);
+  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'false', HEADLESS_REQUIRED: 'false', CONTRACTS: 'false', LEAN: 'false' };
+  assert.equal(workflow.gate('test', env).status, 0);
+});
+
+test('main and explicit runs keep full Rust validation even for documentation-only changes', () => {
+  const workflow = new Workflow();
+  for (const event of ['push', 'schedule', 'workflow_dispatch']) {
+    const changes = workflow.changes(event, 'false', 'base', 'true', workflow.paths(['docs/ux/terminal.md']));
+    assert.equal(changes.code, true, event);
+    for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, event, 'false', changes), true, `${event}: ${job}`);
+  }
+  const scope = workflow.jobs.changes.steps.find((step) => step.id === 'scope');
+  for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
+    const comparison = Function('github', 'needs', `return (${scope.env.VMUX_CI_BASE.slice(3, -2)});`)({ event_name: event }, { plan: { outputs: { base: 'captured-base' } } });
+    assert.equal(comparison, event === 'pull_request' ? 'captured-base' : '', event);
+  }
+});
+
+test('empty package scopes cannot invoke Cargo default targets during deletion-only validation', () => {
+  const workflow = new Workflow();
+  for (const title of ['Check formatting', 'Clippy']) {
+    assert.equal(workflow.step('lint', title, 'pull_request', 'false', { code: 'true', lint_args: '' }), false, title);
+    assert.equal(workflow.step('lint', title, 'pull_request', 'false', { code: 'true', lint_args: '-p vmux_ecs' }), true, title);
+  }
+});
+
+test('workflow reuse claims invalidate each variant only when its complete inputs change', async (t) => {
+  for (const [file, expectedFresh] of [
+    ['crates/unrelated/src/lib.rs', ['lint']],
+    ['crates/util/vmux_mcp/src/lib.rs', ['lint', 'test-headless']],
+    ['crates/util/vmux_app/src/lib.rs', ['lint', 'test-headless', 'test-sdk', 'test-lean']],
+    ['crates/example/src/lib.rs', ['lint', 'test-rust']],
+    ['website/src/main.rs', ['lint', 'website']],
+    ['.github/workflows/ci.yml', ['lint', 'test-rust', 'test-sdk', 'test-lean', 'test-headless', 'website']],
+  ]) {
+    const fixture = new CheckFixture(t);
+    fixture.advance({ 'crates/unrelated/src/lib.rs': 'unrelated', 'crates/util/vmux_mcp/src/lib.rs': 'mcp', 'crates/util/vmux_app/src/lib.rs': 'app' });
+    fixture.profiles = await new Workflow().checkProfiles(fixture.identity, fixture.context, {
+      'test-rust': ['crates/example/**'],
+      'test-sdk': ['crates/util/vmux_app/**'],
+      'test-headless': ['crates/util/vmux_app/**', 'crates/util/vmux_mcp/**'],
+      'test-lean': ['crates/util/vmux_app/**'],
+    });
+    fixture.runs = [];
+    fixture.prove(42);
+    fixture.advance({ [file]: 'changed input' });
+    const results = await fixture.plan();
+    for (const profile of fixture.profiles) assert.equal(results[profile.key].reuse, expectedFresh.includes(profile.key) ? '' : '42', `${file}: ${profile.key}`);
+  }
 });
