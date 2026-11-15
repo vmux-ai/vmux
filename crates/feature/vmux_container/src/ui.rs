@@ -522,7 +522,7 @@ fn EngineToolbar(
                     size: if icon_only { ButtonSize::Icon } else { ButtonSize::Xs }, variant: ButtonVariant::Ghost,
                     class: if icon_only { "p-0" } else { "h-7 gap-2 whitespace-nowrap px-1.5" },
                     title: translate("container-stop"), aria_label: translate("container-stop"),
-                    disabled: controls.engine_busy() && !snapshot.starting,
+                    disabled: controls.engine_busy() && !controls.starting(),
                     onclick: move |_| controls.request(Intent::Stop),
                     LineIconView { icon: LineIcon::Pause, class: "size-3.5" }
                     if !icon_only { span { {translate("container-stop-vm")} } }
@@ -1232,18 +1232,7 @@ impl Controls {
     }
 
     fn request(mut self, intent: Intent) {
-        let replace = matches!(intent, Intent::Stop)
-            && (self.state.peek().starting
-                || self.pending.peek().as_ref().is_some_and(|pending| {
-                    matches!(
-                        pending.intent,
-                        Intent::Start
-                            | Intent::Containers {
-                                operation: ContainerOperation::Start,
-                                ..
-                            }
-                    )
-                }));
+        let replace = matches!(intent, Intent::Stop) && self.starting();
         if !replace && (self.pending.peek().is_some() || self.state.peek().busy) {
             return;
         }
@@ -1265,6 +1254,20 @@ impl Controls {
                 .read()
                 .as_ref()
                 .is_some_and(|pending| matches!(pending.intent, Intent::Start | Intent::Stop))
+    }
+
+    fn starting(self) -> bool {
+        self.state.read().starting
+            || self.pending.read().as_ref().is_some_and(|pending| {
+                matches!(
+                    pending.intent,
+                    Intent::Start
+                        | Intent::Containers {
+                            operation: ContainerOperation::Start,
+                            ..
+                        }
+                )
+            })
     }
 
     fn containers(self, ids: Vec<String>, operation: ContainerOperation) {
@@ -1579,6 +1582,54 @@ mod tests {
             );
             self.render();
         }
+    }
+
+    #[test]
+    fn pausing_the_vm_supersedes_a_group_start_after_docker_is_ready() {
+        let mut preview = Preview::new();
+        preview.publish(ContainerUiState {
+            supported: true,
+            running: true,
+            ready: true,
+            phase: "ready".into(),
+            inventory_ready: true,
+            data_directory: "/fixtures/data".into(),
+            containers: vec![ContainerEntry {
+                id: "aaaaaaaaaaaa".into(),
+                name: "account".into(),
+                project: "vmux-cloud".into(),
+                state: "exited".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        preview.click(&translate_with(
+            "container-start-group",
+            &[("group", TranslationValue::String("vmux-cloud"))],
+        ));
+        assert_eq!(preview.host.commands.borrow().len(), 1);
+        let label = format!("aria-label=\"{}\"", translate("container-stop"));
+        let html = preview.render();
+        let mut enabled = false;
+        for button in html.split("<button").skip(1) {
+            let Some((attributes, _)) = button.split_once('>') else {
+                continue;
+            };
+            if !attributes.contains(&label) {
+                continue;
+            }
+            enabled =
+                !attributes.contains(" disabled=") && !attributes.trim_end().ends_with(" disabled");
+            break;
+        }
+        assert!(enabled, "VM Pause must remain usable during group Start");
+        preview.click(&translate("container-stop"));
+        assert_eq!(preview.host.stops.get(), 1);
+        assert!(
+            preview
+                .render()
+                .contains(&translate("container-phase-stopping"))
+        );
     }
 
     #[test]

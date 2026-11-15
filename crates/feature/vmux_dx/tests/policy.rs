@@ -5875,16 +5875,17 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 {
                     let file = Path::new(self.path);
                     let mut directory = file.parent().unwrap().to_path_buf();
-                    if !matches!(
+                    let module_root = matches!(
                         file.file_name().and_then(|name| name.to_str()),
                         Some("lib.rs" | "main.rs" | "mod.rs")
-                    ) && !(directory.file_name().and_then(|name| name.to_str()) == Some("bin")
+                    ) || (directory.file_name().and_then(|name| name.to_str())
+                        == Some("bin")
                         && directory
                             .parent()
                             .and_then(Path::file_name)
                             .and_then(|name| name.to_str())
-                            == Some("src"))
-                    {
+                            == Some("src"));
+                    if !module_root {
                         directory.push(file.file_stem().unwrap());
                     }
                     for scope in &self.scope {

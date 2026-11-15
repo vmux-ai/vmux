@@ -7,6 +7,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::QueryData;
 use bevy_ecs::system::SystemParam;
 
+use crate::Owner;
 use crate::docker::{Client, Condition, Container, Dependency, Operation, RunState};
 
 struct BatchPlugin;
@@ -16,7 +17,7 @@ impl Plugin for BatchPlugin {
         app.add_message::<Container>().add_systems(
             Update,
             (
-                ingest, link, select, expand, order, inspect, advance, apply, finish,
+                cancel, ingest, link, select, expand, order, inspect, advance, apply, finish,
             )
                 .chain(),
         );
@@ -26,7 +27,10 @@ impl Plugin for BatchPlugin {
 pub(crate) struct Runtime;
 
 impl Runtime {
-    pub(crate) fn run(client: Client, ids: &[String]) -> io::Result<()> {
+    pub(crate) fn run(client: Client, ids: &[String], owner: Option<&Owner>) -> io::Result<()> {
+        if let Some(owner) = owner {
+            owner.check()?;
+        }
         let containers = client.list()?;
         let mut app = App::new();
         app.add_plugins(BatchPlugin);
@@ -42,6 +46,11 @@ impl Runtime {
                 Sequence::default(),
             ))
             .id();
+        if let Some(owner) = owner {
+            app.world_mut()
+                .entity_mut(root)
+                .insert(Cancellation(owner.clone()));
+        }
         app.world_mut().write_message_batch(containers);
         let mut finished = app.world_mut().query_filtered::<Entity, With<Finished>>();
         let mut completed = 0;
@@ -64,6 +73,32 @@ impl Runtime {
 
 #[derive(Component)]
 struct Scope;
+
+#[derive(Component)]
+struct Cancellation(Owner);
+
+fn cancel(
+    mut roots: Query<(Entity, &Cancellation, &mut Stage), With<Scope>>,
+    effects: Query<(Entity, &ChildOf), With<Effect>>,
+    mut commands: Commands,
+) {
+    for (root, cancellation, mut stage) in &mut roots {
+        if *stage == Stage::Done {
+            continue;
+        }
+        if let Err(error) = cancellation.0.check() {
+            *stage = Stage::Done;
+            commands
+                .entity(root)
+                .insert(Completion(Err((error.kind(), error.to_string()))));
+            for (entity, parent) in &effects {
+                if parent.parent() == root {
+                    commands.entity(entity).remove::<(Effect, RetryAt)>();
+                }
+            }
+        }
+    }
+}
 
 #[derive(Component, PartialEq, Eq)]
 enum Stage {
@@ -501,7 +536,12 @@ fn order(mut roots: Roots, rows: Rows, mut commands: Commands) {
     *stage = Stage::Execute;
 }
 
-fn inspect(roots: Roots, rows: Rows, mut commands: Commands) {
+fn inspect(
+    roots: Roots,
+    rows: Rows,
+    cancellations: Query<&Cancellation, With<Scope>>,
+    mut commands: Commands,
+) {
     let Ok((root, stage, endpoint, _, deadline, _)) = roots.single() else {
         return;
     };
@@ -517,8 +557,11 @@ fn inspect(roots: Roots, rows: Rows, mut commands: Commands) {
     let Some(links) = row.links else {
         return;
     };
+    let cancellation = cancellations.get(root).ok();
     for (target, _) in &links.0 {
-        if Instant::now() >= deadline.0 {
+        if Instant::now() >= deadline.0
+            || cancellation.is_some_and(|cancellation| cancellation.0.check().is_err())
+        {
             return;
         }
         let Ok((_, _, poll, failure)) = rows.observations.get(*target) else {
@@ -617,16 +660,25 @@ fn advance(roots: Roots, rows: Rows, mut commands: Commands) {
     commands.entity(candidate).insert(Effect);
 }
 
-fn apply(roots: Roots, effects: Effects, mut commands: Commands) {
+fn apply(
+    roots: Roots,
+    effects: Effects,
+    cancellations: Query<&Cancellation, With<Scope>>,
+    mut commands: Commands,
+) {
     let Ok((root, stage, endpoint, _, deadline, _)) = roots.single() else {
         return;
     };
     if *stage != Stage::Execute {
         return;
     }
+    let cancellation = cancellations.get(root).ok();
     for (entity, id, operation, parent, retry) in &effects {
         if parent.parent() != root {
             continue;
+        }
+        if cancellation.is_some_and(|cancellation| cancellation.0.check().is_err()) {
+            return;
         }
         if Instant::now() >= deadline.0 {
             commands.entity(entity).remove::<Effect>().insert((
@@ -691,6 +743,75 @@ fn finish(mut roots: Roots, rows: Rows, mut commands: Commands) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancelling_an_authorized_start_retires_its_effect_before_more_io() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Owner::new(directory.path().join("profile"));
+        let mut app = App::new();
+        app.add_plugins(BatchPlugin);
+        let root = app
+            .world_mut()
+            .spawn((
+                Scope,
+                Stage::Execute,
+                Endpoint(Client::new(&directory.path().join("missing.sock"))),
+                Requested(vec!["aaaaaaaaaaaa".into()]),
+                Deadline(Instant::now() + Duration::from_secs(1)),
+                Sequence::default(),
+                Cancellation(owner.clone()),
+            ))
+            .id();
+        let entry = app
+            .world_mut()
+            .spawn((
+                Entry,
+                Identifier("aaaaaaaaaaaa".into()),
+                Name::new("account"),
+                Project("vmux-cloud".into()),
+                Service("account".into()),
+                SourceOrder(0),
+                Operation::Start,
+                Position(0),
+                Rank(0),
+                Links(Vec::new()),
+                ChildOf(root),
+                Effect,
+                RetryAt(Instant::now()),
+            ))
+            .id();
+        owner.cancel();
+        app.update();
+        let completion = app.world().get::<Completion>(root).unwrap();
+        let Err((kind, _)) = &completion.0 else {
+            panic!("cancelled Start completed successfully");
+        };
+        assert_eq!(*kind, io::ErrorKind::Interrupted);
+        assert!(app.world().get::<Effect>(entry).is_none());
+        assert!(app.world().get::<RetryAt>(entry).is_none());
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<Completion>(root)
+                .unwrap()
+                .0
+                .as_ref()
+                .unwrap_err()
+                .0,
+            io::ErrorKind::Interrupted
+        );
+    }
+
+    #[test]
+    fn a_cancelled_owner_refuses_inventory_io_before_creating_a_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Owner::new(directory.path().join("profile"));
+        owner.cancel();
+        let error = Client::new(&directory.path().join("missing.sock"))
+            .start_many_owned(&["aaaaaaaaaaaa".into()], &owner)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    }
 
     #[test]
     fn missing_required_dependency_is_refused_before_execution() {

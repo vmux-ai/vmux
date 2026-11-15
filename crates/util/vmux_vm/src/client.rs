@@ -103,7 +103,7 @@ impl Owner {
         self.cancelled.store(true, Ordering::Release);
     }
 
-    fn check(&self) -> io::Result<()> {
+    pub(crate) fn check(&self) -> io::Result<()> {
         if self.cancelled.load(Ordering::Acquire)
             || self
                 .lifetime

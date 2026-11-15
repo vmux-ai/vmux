@@ -61,7 +61,11 @@ impl Client {
     }
 
     pub fn start_many(&self, ids: &[String]) -> io::Result<()> {
-        crate::batch::Runtime::run(self.clone(), ids)
+        crate::batch::Runtime::run(self.clone(), ids, None)
+    }
+
+    pub fn start_many_owned(&self, ids: &[String], owner: &crate::Owner) -> io::Result<()> {
+        crate::batch::Runtime::run(self.clone(), ids, Some(owner))
     }
 
     pub(crate) fn inspect(&self, id: &str) -> io::Result<RunState> {

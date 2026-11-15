@@ -132,7 +132,7 @@ impl Command {
                     ContainerOperation::Remove => DockerOperation::Remove,
                 };
                 if matches!(operation, DockerOperation::Start) {
-                    docker.start_many(&ids)?;
+                    docker.start_many_owned(&ids, owner)?;
                     return Ok(Reply::Changed);
                 }
                 let mut errors = Vec::new();
