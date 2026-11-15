@@ -7,6 +7,10 @@ inputs:
   target:
     description: Cached Cargo target directory
     required: true
+  receipt:
+    description: Target-specific restore receipt retained until cache publication
+    required: false
+    default: ""
   save:
     description: Record source inputs after successful validation
     required: false

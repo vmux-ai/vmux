@@ -441,6 +441,12 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         run: cargo test --locked -p vmux_dx --test policy --test conventions
 
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        with:
+          cache-key: lint
+
   test-rust:
     name: Rust unit & integration tests
     runs-on: ubuntu-latest
@@ -492,6 +498,11 @@ jobs:
       - name: Test record contracts alongside Workspace storage
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
 
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: test
+
   test-sdk:
     name: Public API compatibility tests
     runs-on: ubuntu-latest
@@ -542,6 +553,11 @@ jobs:
           vmux dx test sdk --git
           vmux dx test sdk --host --git
 
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: sdk-path
+
   test-lean:
     name: Desktop feature availability tests
     runs-on: ubuntu-latest
@@ -584,6 +600,11 @@ jobs:
       - name: Verify unavailable desktop features
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests
 
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: test-lean
+
   test-headless:
     name: App configuration tests
     runs-on: ubuntu-latest
@@ -623,6 +644,11 @@ jobs:
           cef-version: ${{ needs.plan.outputs.cef }}
       - name: Verify plugin configuration without desktop adapters
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: headless
 
   test:
     name: Test
@@ -701,6 +727,11 @@ jobs:
       - name: Build website
         working-directory: website
         run: dx build --platform web --release
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: website
 
   dx-macos:
     name: Build macOS CI tool & test signing
@@ -804,6 +835,11 @@ jobs:
           dioxus-web vmux_mobile dioxus
           bevy_cef vmux_desktop bevy_cef
           FORBIDDEN
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: ios
 
   build-mac:
     name: Build macOS App
@@ -1023,6 +1059,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: vmux internal update-release-metadata -- --check
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: build-mac
 
   build-macos:
     name: Build macOS

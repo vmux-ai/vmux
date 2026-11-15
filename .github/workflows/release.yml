@@ -108,6 +108,11 @@ jobs:
       - name: Verify bundle layout
         run: vmux internal ios-verify -- --signed
 
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: ios-release
+
   publish:
     name: Publish Release
     needs: detect-version

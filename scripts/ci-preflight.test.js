@@ -119,6 +119,31 @@ class Fixture {
     return path.join(this.root, target, 'debug/cache-fixture');
   }
 
+  cliCache() {
+    const files = {
+      '.gitignore': '.build-tools/\ntarget/\n',
+      'Cargo.toml': '[workspace]\nresolver = "3"\nmembers = ["crates/app/vmux_cli", "crates/support", "crates/extra", "crates/app/gui"]\n',
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.95.0"\n',
+      'tool-versions.env': 'NODE_VERSION=24\n',
+      'crates/app/vmux_cli/Cargo.toml': '[package]\nname = "vmux_cli"\nversion = "0.1.0"\nedition = "2024"\n[features]\ndefault = ["runtime"]\nruntime = ["dep:gui"]\ndx = []\nci-syntax = ["dx"]\n[dependencies]\nsupport = { path = "../../support" }\ngui = { path = "../gui", optional = true }\n[[bin]]\nname = "vmux"\npath = "src/main.rs"\n',
+      'crates/app/vmux_cli/src/main.rs': 'fn main() { println!("{}", support::value()); }\n',
+      'crates/support/Cargo.toml': '[package]\nname = "support"\nversion = "0.1.0"\nedition = "2024"\n[dependencies]\nextra = { path = "../extra", optional = true }\n',
+      'crates/support/src/lib.rs': 'pub fn value() -> &\'static str { "original" }\n',
+      'crates/extra/Cargo.toml': '[package]\nname = "extra"\nversion = "0.1.0"\nedition = "2024"\n',
+      'crates/extra/src/lib.rs': 'pub fn value() -> &\'static str { "extra" }\n',
+      'crates/app/gui/Cargo.toml': '[package]\nname = "gui"\nversion = "0.1.0"\nedition = "2024"\n',
+      'crates/app/gui/src/lib.rs': 'pub fn render() {}\n',
+    };
+    for (const [name, contents] of Object.entries(files)) {
+      const file = path.join(this.root, name);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, contents);
+    }
+    execFileSync('cargo', ['generate-lockfile', '--offline'], { cwd: this.root, stdio: 'pipe' });
+    this.commit('CLI compile fixture');
+    return { GITHUB_WORKSPACE: this.root, GITHUB_RUN_ID: '123', GITHUB_REPOSITORY: 'owner/repo', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', GITHUB_OUTPUT: path.join(this.root, 'action-output'), VMUX_CI_FAST_RUST: '1' };
+  }
+
   restoreCache(snapshot, target, save = 'true') {
     const state = path.join(this.root, `action-state-${require('node:crypto').randomUUID()}`);
     Sources.run({ GITHUB_WORKSPACE: this.root, GITHUB_STATE: state, INPUT_SNAPSHOT: snapshot, INPUT_TARGET: target, INPUT_SAVE: save });
@@ -546,6 +571,86 @@ test('development CLI artifacts bind executable bytes to the exact run, source a
   assert.throws(() => CliArtifact.install(directory, env, fixture.root), /Invalid/);
 });
 
+test('unchanged CLI compile inputs reuse executable bytes across runs and unrelated app edits', (t) => {
+  const fixture = new Fixture(t);
+  const env = fixture.cliCache();
+  const directory = path.join(fixture.root, '.build-tools/cli-cache');
+  CliArtifact.prepareCache(env, fixture.root);
+  execFileSync('cargo', ['build', '--offline', '-p', 'vmux_cli', '--no-default-features', '--features', 'dx,ci-syntax'], { cwd: fixture.root, stdio: 'pipe' });
+  CliArtifact.installBinary(path.join(fixture.root, 'target/debug/vmux'), fixture.root);
+  CliArtifact.publishCache(directory, env, fixture.root);
+  fs.writeFileSync(path.join(fixture.root, 'crates/app/gui/src/lib.rs'), 'pub fn render() { panic!("unrelated"); }\n');
+  fs.writeFileSync(path.join(fixture.root, 'readme.md'), 'unrelated documentation\n');
+  fixture.commit('unrelated inputs');
+  env.GITHUB_RUN_ID = '124';
+  CliArtifact.prepareCache(env, fixture.root);
+  fs.rmSync(path.join(fixture.root, 'target'), { recursive: true });
+  fs.rmSync(path.join(fixture.root, '.build-tools/bin'), { recursive: true });
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), true);
+  const binary = path.join(fixture.root, '.build-tools/bin/vmux');
+  assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'original\n');
+  const artifact = path.join(fixture.root, '.build-tools/current-run');
+  CliArtifact.publish(binary, artifact, env, fixture.root);
+  assert.throws(() => CliArtifact.install(artifact, { ...env, GITHUB_RUN_ID: '123' }, fixture.root), /run does not match/);
+  CliArtifact.install(artifact, env, fixture.root);
+});
+
+test('CLI reuse rejects changed dependencies, modes, tool inputs, platform, flags and corrupt bytes', (t) => {
+  const fixture = new Fixture(t);
+  const env = fixture.cliCache();
+  const directory = path.join(fixture.root, '.build-tools/cli-cache');
+  const source = path.join(fixture.root, 'crates/support/src/lib.rs');
+  CliArtifact.prepareCache(env, fixture.root);
+  const binary = path.join(fixture.root, '.build-tools/bin/vmux');
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(binary, '#!/bin/sh\necho original\n');
+  CliArtifact.publishCache(directory, env, fixture.root);
+  for (const [key, value] of Object.entries({ GITHUB_REPOSITORY: 'other/repo', RUNNER_OS: 'macOS', RUNNER_ARCH: 'ARM64', VMUX_CI_FAST_RUST: '0', CARGO_PROFILE_DEV_LTO: 'off' })) {
+    CliArtifact.prepareCache({ ...env, [key]: value }, fixture.root);
+    assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false, key);
+  }
+  for (const name of ['crates/support/src/lib.rs', 'tool-versions.env', 'Cargo.lock']) {
+    const file = path.join(fixture.root, name);
+    const original = fs.readFileSync(file);
+    fs.appendFileSync(file, '\n');
+    CliArtifact.prepareCache(env, fixture.root);
+    assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false, name);
+    fs.writeFileSync(file, original);
+  }
+  fs.chmodSync(source, 0o755);
+  CliArtifact.prepareCache(env, fixture.root);
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false);
+  fs.chmodSync(source, 0o644);
+  CliArtifact.prepareCache(env, fixture.root);
+  fs.appendFileSync(path.join(directory, 'vmux'), 'corrupt');
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false);
+  fs.unlinkSync(path.join(directory, 'vmux'));
+  fs.symlinkSync(binary, path.join(directory, 'vmux'));
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false);
+  const before = fs.readFileSync(binary);
+  CliArtifact.publishCache(directory, env, fixture.root);
+  assert.equal(fs.lstatSync(path.join(directory, 'vmux')).isSymbolicLink(), false);
+  assert.deepEqual(fs.readFileSync(binary), before);
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), true);
+});
+
+test('newly enabled local dependencies join the CLI input closure', (t) => {
+  const fixture = new Fixture(t);
+  const env = fixture.cliCache();
+  const manifest = path.join(fixture.root, 'crates/support/Cargo.toml');
+  fs.appendFileSync(manifest, '[features]\ndefault = ["dep:extra"]\n');
+  fixture.commit('enable new CLI dependency');
+  const directory = path.join(fixture.root, '.build-tools/cli-cache');
+  CliArtifact.prepareCache(env, fixture.root);
+  const binary = path.join(fixture.root, '.build-tools/bin/vmux');
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(binary, '#!/bin/sh\necho extra\n');
+  CliArtifact.publishCache(directory, env, fixture.root);
+  fs.writeFileSync(path.join(fixture.root, 'crates/extra/src/lib.rs'), 'pub fn value() -> &\'static str { "changed" }\n');
+  CliArtifact.prepareCache(env, fixture.root);
+  assert.equal(CliArtifact.reuseCache(directory, env, fixture.root), false);
+});
+
 test('CI-only Rust settings preserve existing flags and encoded-flag precedence', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmux-rust-settings-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -679,6 +784,24 @@ test('required statuses fail on preparation errors and applicable child failures
   assert.equal(workflow.gate('build-macos', { ...valid, DISTRIBUTION: 'false', RESULT: 'skipped' }).status, 0);
 });
 
+test('compiler-cache policy pairs each workflow restore with a successful explicit save', () => {
+  const files = fs.readdirSync(path.join(__dirname, '../.github/workflows')).filter((name) => name.endsWith('.yml'));
+  for (const file of files) {
+    const workflow = JSON.parse(execFileSync('ruby', ['-ryaml', '-rjson', '-e', 'puts JSON.generate(YAML.load_file(ARGV[0]))', path.join(__dirname, '../.github/workflows', file)], { encoding: 'utf8' }));
+    for (const [name, job] of Object.entries(workflow.jobs)) {
+      const steps = job.steps || [];
+      const setup = steps.filter((step) => ['./.github/actions/setup-linux', './.github/actions/setup-macos', './.github/actions/setup-ios', './.github/actions/setup-web'].includes(step.uses));
+      const saves = steps.filter((step) => step.uses === './.github/actions/save-workspace');
+      assert.deepEqual(saves.map((step) => step.with['cache-key']).sort(), setup.map((step) => step.with['cache-key']).sort(), `${file}: ${name}`);
+      for (const restore of setup) {
+        const save = saves.find((step) => step.with['cache-key'] === restore.with['cache-key']);
+        assert.ok(steps.indexOf(save) > steps.indexOf(restore));
+        assert.equal(save.if, restore.if, `${file}: ${name}: save must require successful applicable preparation`);
+      }
+    }
+  }
+});
+
 test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
   for (const save of ['true', 'false']) {
     const fixture = new Fixture(t);
@@ -692,6 +815,34 @@ test('post-job snapshots preserve inputs when Actions clears action inputs', (t)
       assert.equal(record.files['feature.txt'].hash, require('node:crypto').createHash('sha256').update('final job contents\n').digest('hex'));
     }
   }
+});
+
+test('explicit cache publication retains restore identity and snapshots before post cleanup', (t) => {
+  const fixture = new Fixture(t);
+  fixture.compilerCache();
+  const env = { GITHUB_WORKSPACE: fixture.root, GITHUB_SHA: fixture.merge, GITHUB_OUTPUT: path.join(fixture.root, 'outputs'), VMUX_CACHE_PARTITION: 'test', VMUX_CACHE_TARGET: 'target', VMUX_CACHE_SAVE: 'true', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64' };
+  Sources.configure(env);
+  const snapshot = '.build-tools/source-cache-test.json';
+  const inputs = JSON.parse(fs.readFileSync(path.join(fixture.root, `${snapshot}.inputs`), 'utf8'));
+  const state = path.join(fixture.root, 'state');
+  Sources.run({ GITHUB_WORKSPACE: fixture.root, GITHUB_STATE: state, INPUT_SNAPSHOT: snapshot, INPUT_TARGET: 'target', INPUT_RECEIPT: inputs.receipt, INPUT_SAVE: 'true' });
+  const binary = fixture.compile();
+  const modified = fs.statSync(binary, { bigint: true }).mtimeNs;
+  env.RUSTFLAGS = '-C opt-level=1';
+  env.GITHUB_SHA = 'b'.repeat(40);
+  fs.writeFileSync(env.GITHUB_OUTPUT, '');
+  Sources.checkpoint(env);
+  const output = fs.readFileSync(env.GITHUB_OUTPUT, 'utf8');
+  assert.ok(output.includes(inputs.key));
+  assert.ok(output.includes(inputs.paths));
+  assert.equal(fs.existsSync(path.join(fixture.root, inputs.receipt)), false);
+  const sources = new Sources(fixture.root, snapshot, 'target');
+  fs.utimesSync(path.join(fixture.root, 'src/main.rs'), new Date(), new Date());
+  sources.restore();
+  fixture.compile();
+  assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'original\n');
+  assert.equal(fs.statSync(binary, { bigint: true }).mtimeNs, modified);
+  assert.throws(() => Sources.checkpoint(env), /Missing.*receipt/);
 });
 
 test('identical sources restored from a compiler snapshot remain fresh to Cargo', (t) => {

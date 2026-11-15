@@ -299,6 +299,8 @@ class Sources {
     if (post) {
       if (inputs.save) {
         const receipt = sources.contained(inputs.receipt);
+        sources.validate(receipt);
+        if (!fs.existsSync(receipt)) return;
         try {
           sources.save(sources.read(receipt));
         } finally {
@@ -310,7 +312,7 @@ class Sources {
     }
     const result = sources.restore();
     if (inputs.save) {
-      inputs.receipt = `${inputs.snapshot}.${crypto.randomUUID()}.restore`;
+      inputs.receipt = env.INPUT_RECEIPT || `${inputs.snapshot}.${crypto.randomUUID()}.restore`;
       sources.write(inputs.receipt, sources.restored);
     }
     fs.appendFileSync(env.GITHUB_STATE, `cache_sources_post=true\ncache_sources_inputs=${JSON.stringify(inputs)}\n`);
@@ -319,7 +321,31 @@ class Sources {
 
   static configure(env = process.env) {
     const sources = new Sources(env.GITHUB_WORKSPACE || process.cwd(), `.build-tools/source-cache-${env.VMUX_CACHE_PARTITION}.json`, env.VMUX_CACHE_TARGET);
-    const inputs = sources.inputs(env);
+    const inputs = { ...sources.inputs(env), receipt: `${path.relative(sources.root, sources.snapshot)}.${crypto.randomUUID()}.restore`, save: env.VMUX_CACHE_SAVE === 'true' };
+    sources.write(`${sources.snapshot}.inputs`, inputs);
+    this.output(inputs, env);
+  }
+
+  static checkpoint(env = process.env) {
+    const partition = env.VMUX_CACHE_PARTITION;
+    if (!/^[a-zA-Z0-9_-]+$/.test(partition)) throw new Error('Invalid Cargo cache partition');
+    const root = env.GITHUB_WORKSPACE || process.cwd();
+    const record = `.build-tools/source-cache-${partition}.json.inputs`;
+    const guard = new Sources(root, record, 'target');
+    guard.validate(guard.snapshot);
+    const inputs = JSON.parse(fs.readFileSync(guard.snapshot, 'utf8'));
+    const sources = new Sources(root, inputs.snapshot, inputs.target);
+    if (inputs.save) {
+      const receipt = sources.contained(inputs.receipt);
+      sources.validate(receipt);
+      if (!fs.existsSync(receipt)) throw new Error('Missing source-cache restore receipt');
+      sources.save(sources.read(receipt));
+      fs.rmSync(receipt);
+    }
+    this.output(inputs, env);
+  }
+
+  static output(inputs, env) {
     for (const [name, value] of Object.entries(inputs)) {
       const delimiter = crypto.randomUUID();
       fs.appendFileSync(env.GITHUB_OUTPUT, `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
@@ -339,5 +365,6 @@ module.exports = Sources;
 if (require.main === module) {
   if (process.argv[2] === 'inputs') Sources.configure();
   else if (process.argv[2] === 'validate') Sources.verify();
+  else if (process.argv[2] === 'checkpoint') Sources.checkpoint();
   else Sources.run();
 }
