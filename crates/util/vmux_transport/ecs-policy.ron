@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_transport/src/device.rs||impl:DeviceId", fingerprint: "100de7140462aa8c", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/device.rs||impl:From < & str > for DeviceId", fingerprint: "8d6767984f1a5586", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/device.rs||impl:From < String > for DeviceId", fingerprint: "d288b0632f4f6492", issue: "VMX-253"),
@@ -84,4 +85,15 @@
     (key: "crates/util/vmux_transport/tests/quic_handshake.rs||struct:AcceptAnything", fingerprint: "3c802c8377ed4581", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/tests/tunnel_recv.rs||fn:a_closed_control_connection_reports_an_error_quinn_will_not_swallow", fingerprint: "1df64a5dedf238b2", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/tests/tunnel_recv.rs||fn:relay", fingerprint: "94e03bab138f9e65", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_transport/src/quic/endpoint.rs||enum:Trust", fingerprint: "d2e8074935008428", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_transport/src/quic.rs||enum:Protocol", fingerprint: "6e27a780d9a8bdbf", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_transport/src/quic.rs||enum:PeerRole", fingerprint: "7281b931503d8425", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_transport/src/quic.rs||enum:ClientCredential", fingerprint: "6e593d092399e73d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_transport/src/quic.rs||enum:CloseCode", fingerprint: "6a2899ca1c4b4ce0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_transport/src/framing.rs||enum:FrameError", fingerprint: "8ff5c1236dfc6837", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_path/src/executable.rs||impl:Executable", fingerprint: "e19ab8dd2e14b113", issue: "VMX-253"),
     (key: "crates/util/vmux_path/src/executable.rs||struct:Executable", fingerprint: "7ccb77feb9d62329", issue: "VMX-253"),
     (key: "crates/util/vmux_path/src/file_url.rs|tests|fn:path_of", fingerprint: "9aae7ab3e2a25f86", issue: "VMX-253"),
@@ -24,4 +25,10 @@
     (key: "crates/util/vmux_path/src/url_presentation.rs||impl:UrlPresentation < \'a >", fingerprint: "6d80eb93dd70a0a9", issue: "VMX-253"),
     (key: "crates/util/vmux_path/src/url_presentation.rs||struct:Segment", fingerprint: "ecc026f80d72b883", issue: "VMX-253"),
     (key: "crates/util/vmux_path/src/url_presentation.rs||struct:UrlPresentation", fingerprint: "dd2044583e36a004", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_path/src/lib.rs||enum:ScopedPathError", fingerprint: "b5beffa8629749ae", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

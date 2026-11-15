@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_bookmark/src/lib.rs||impl:vmux_ecs :: manifest :: FeatureManifestSource for Feature", fingerprint: "8b1e4ef84e98893a", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/lib.rs||struct:Feature", fingerprint: "46638b0ef6a78408", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|alias:BookmarkMenuEntries", fingerprint: "68b9e7397b9904de", issue: "VMX-253"),
@@ -25,10 +26,7 @@
     (key: "crates/feature/vmux_bookmark/src/store.rs||fn:seed_defaults", fingerprint: "ba4ae22d0f83d34a", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||fn:spawn", fingerprint: "7a91bc8d2d79f8d1", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||impl:Command for BookmarkWrite", fingerprint: "36e391026c6ce96e", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/store.rs||impl:Plugin for BookmarkStorePlugin", fingerprint: "8f43009629cb46c0", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkSeed", fingerprint: "301585b27275e238", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkStore", fingerprint: "69e2fa996059e2cd", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkStorePlugin", fingerprint: "8832592b1511eae0", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkWrite", fingerprint: "559773ad07c216e5", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store_driver.rs||alias:BookmarkFilter", fingerprint: "fafff810dd28446b", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/tool.rs||enum:BookmarkPinTool", fingerprint: "4de7ed55f5b1ed42", issue: "VMX-253"),
@@ -46,6 +44,21 @@
     (key: "crates/feature/vmux_bookmark/src/tool.rs||struct:ExistingPin", fingerprint: "4d0dde5846986d12", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/tool.rs||struct:PagePin", fingerprint: "870ae2a3a0b18974", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/tool.rs||struct:RequiredText", fingerprint: "1d17323dc138895f", issue: "VMX-253"),
-], boundaries: [
-], values: [
-])
+],
+boundaries: [
+    (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkStorePlugin", fingerprint: "8832592b1511eae0", interface: "Bevy bookmark store plugin composition and typed default-seeding registration", input: "external: Bevy App plugin installation", output: "ECS: crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkAutoSave", lifetime: "one plugin installation; default-seeding state belongs to the canonical store entity", bounds: "only schema registration, loaded/default-seeding events and the store systems; no retained configuration engine", teardown: "installation metadata drops after registration; seeding completion removes transient store components and publishes canonical pins", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_bookmark/src/store.rs||impl:Plugin for BookmarkStorePlugin", fingerprint: "565f967150f3a16f", interface: "Bevy bookmark store plugin composition and typed default-seeding registration", input: "external: Bevy App plugin installation", output: "ECS: crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkAutoSave", lifetime: "one plugin installation; default-seeding state belongs to the canonical store entity", bounds: "only schema registration, loaded/default-seeding events and the store systems; no retained configuration engine", teardown: "installation metadata drops after registration; seeding completion removes transient store components and publishes canonical pins", architecture: "ECS ownership boundaries"),
+],
+values: [
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|fn:folder_menu", fingerprint: "ea11be3cabd1baef", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_bookmark/src/tool.rs||enum:BookmarkPinTool", fingerprint: "4de7ed55f5b1ed42", issue: "VMX-253", finding: "AU-13"),
+  ],
+  enums: [
+  ],
+  bodies: [
+  ],
+),
+)

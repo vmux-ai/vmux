@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_command/src/host/command_bar.rs||fn:spawn", fingerprint: "a3686042d809a668", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/host/command_bar.rs||impl:CommandBarDismiss", fingerprint: "902990e12001f9f1", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/host/command_bar.rs||impl:Plugin for CommandBarPlugin", fingerprint: "94bd6d121a7eabf2", issue: "VMX-253"),
@@ -465,7 +466,8 @@
     (key: "crates/feature/vmux_command/src/ui/row.rs||fn:SectionRow", fingerprint: "dd06b3245746af7b", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||impl:AgentRow", fingerprint: "a639099c186dc594", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||struct:AgentRow", fingerprint: "afc7726d387b4662", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_command/src/ui.rs|tests|struct:FocusPage", fingerprint: "86ab22f35b16e84b", interface: "Mounted Start VirtualDom and current typed FocusHost frame source", input: "ECS: crates/util/vmux_api/src/command_bar/state.rs||struct:CommandBarUiState", output: "external: mounted DOM or isolated fixture observation", lifetime: "One isolated Start document fixture", bounds: "Two test-owned DOMs at most; serialized UI frames, listener/focus IDs and observed DOM edits only", teardown: "VirtualDom and host drop release listeners, focus observations and retained frames", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/ui.rs|tests|impl:FocusPage", fingerprint: "79cf9c128ec0a396", interface: "Mounted Start VirtualDom and current typed FocusHost frame source", input: "ECS: crates/util/vmux_api/src/command_bar/state.rs||struct:CommandBarUiState", output: "external: mounted DOM or isolated fixture observation", lifetime: "One isolated Start document fixture", bounds: "Two test-owned DOMs at most; serialized UI frames, listener/focus IDs and observed DOM edits only", teardown: "VirtualDom and host drop release listeners, focus observations and retained frames", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/host/command_bar/driver.rs||impl:Composer", fingerprint: "5b234bef3b67779d", interface: "Read-only command palette composer presentation from published prompt context", input: "ECS: crates/util/vmux_api/src/command_bar/palette.rs||struct:CommandPaletteComposer", output: "external: scoped projection, native IO or framework registration output", lifetime: "One canonical prompt-context projection", bounds: "Projects labels, identicons, model choices and navigation descriptions; no workspace assignment or prompt acceptance", teardown: "Projection is replaced with its current context", architecture: "ECS ownership boundaries"),
@@ -484,7 +486,30 @@
     (key: "crates/feature/vmux_command/src/host/plugin.rs|tests|struct:SettleWake", fingerprint: "b9802ad70021309f", interface: "standard task Waker observation fixture", input: "ECS: crates/util/vmux_ecs/src/jobs.rs||struct:JobWake", output: "external: counted production settlement timer wake notifications", lifetime: "one isolated headless CommandPlugin test", bounds: "atomic observations only; no alternative command logic or native UI", teardown: "test drops its Waker and scoped App", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/host/plugin.rs|tests|impl:std :: task :: Wake for SettleWake", fingerprint: "18451dcda428138b", interface: "standard task Waker observation fixture", input: "ECS: crates/util/vmux_ecs/src/jobs.rs||struct:JobWake", output: "external: counted production settlement timer wake notifications", lifetime: "one isolated headless CommandPlugin test", bounds: "atomic observations only; no alternative command logic or native UI", teardown: "test drops its Waker and scoped App", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/host/plugin.rs|tests|impl:SettleWake", fingerprint: "ee819614e9bdb2ee", interface: "standard task Waker observation fixture", input: "ECS: crates/util/vmux_ecs/src/jobs.rs||struct:JobWake", output: "external: counted production settlement timer wake notifications", lifetime: "one isolated headless CommandPlugin test", bounds: "atomic observations only; no alternative command logic or native UI", teardown: "test drops its Waker and scoped App", architecture: "ECS ownership boundaries"),
-], values: [
-    (key: "crates/feature/vmux_command/src/host/plugin.rs||const:SETTLE_FRAME_INTERVAL", owner: "crates/feature/vmux_command/src/host/plugin.rs||struct:Settle", lifetime: "immutable deadline and pacing of the canonical global command settlement resource"),
+],
+values: [
     (key: "crates/feature/vmux_command/src/host/plugin.rs||const:COMMAND_SETTLE_WINDOW", owner: "crates/feature/vmux_command/src/host/plugin.rs||struct:Settle", lifetime: "immutable deadline and pacing of the canonical global command settlement resource"),
-])
+    (key: "crates/feature/vmux_command/src/host/plugin.rs||const:SETTLE_FRAME_INTERVAL", owner: "crates/feature/vmux_command/src/host/plugin.rs||struct:Settle", lifetime: "immutable deadline and pacing of the canonical global command settlement resource"),
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_command/src/host/command_bar/driver/decision.rs||enum:PaletteDecision", fingerprint: "3f8f2e5a8054e90b", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/host/command_bar/driver/results.rs||enum:CommandBarResultItem", fingerprint: "54d3f1bd3bc5540f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/host/command_bar/driver/results.rs||impl:CommandBarResultItem::projection", fingerprint: "b5f6cf984bef830f", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_command/src/host/command_bar/driver/results.rs||impl:SearchRows::filter", fingerprint: "341dbe3ef4d9c36c", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_command/src/host/command_bar/palette.rs||fn:project", fingerprint: "4fe380521d423ea9", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_command/src/host/definition.rs||enum:AgentAccess", fingerprint: "6c16b9299ad03d08", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/host/definition.rs||enum:CommandStartupSet", fingerprint: "46b82374e9613023", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/host/definition.rs||enum:ShortcutDefinition", fingerprint: "ae68bbf9088e033b", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/host/payload.rs||impl:CommandBarProjector < \'_ , \'_ >::project", fingerprint: "de492610d1960d14", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_command/src/host/shortcut_driver.rs||enum:Shortcut", fingerprint: "d9675e3f0199ac17", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/host/shortcut_driver.rs||enum:Source", fingerprint: "42335dba7e7f8804", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/palette_surface.rs||enum:CommandPaletteSurface", fingerprint: "fe0c3faca64b63f6", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_command/src/ui/readline_driver.rs||enum:TextEditCommand", fingerprint: "81b1de8e96da0104", issue: "VMX-253", finding: "AU-13"),
+  ],
+  enums: [
+  ],
+  bodies: [
+  ],
+),
+)

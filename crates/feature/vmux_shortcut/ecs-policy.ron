@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_shortcut/src/claim.rs|tests|const:CTRL", fingerprint: "396343cd48c16b6b", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/claim.rs|tests|impl:Pushed", fingerprint: "1cfebfa12bb25687", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/claim.rs|tests|impl:Seam", fingerprint: "0d5d4108fa88cf4b", issue: "VMX-253"),
@@ -70,6 +71,13 @@
     (key: "crates/feature/vmux_shortcut/src/ui.rs||fn:shortcut_key_class", fingerprint: "00075ca2445b5f73", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||impl:ShortcutStroke", fingerprint: "6d2e19d4a1ad7e94", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||struct:ShortcutPage", fingerprint: "53630a675443821f", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:test_settings_with_leader", fingerprint: "4628e272c0bfdfc2", interface: "Rust test harness configuration adapter", input: "ECS: crates/feature/vmux_setting/src/host/runtime.rs||struct:AppSettings", output: "external: Controlled test App, DOM, configuration or protocol observations", lifetime: "One isolated fixture invocation", bounds: "One generated settings value for an isolated production-plugin fixture", teardown: "App, DOM listeners, captured results, temporary files and native handles drop with the fixture", architecture: "ECS ownership boundaries"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_shortcut/src/lib.rs||enum:ShortcutProbeStatus", fingerprint: "df067690e1a0c844", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

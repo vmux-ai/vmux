@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_page/build.rs||fn:main", fingerprint: "b6f63ea5350e6b18", issue: "VMX-253"),
     (key: "crates/util/vmux_page/src/event_request.rs||enum:EventRequestError", fingerprint: "1388b38532d743cf", issue: "VMX-253"),
     (key: "crates/util/vmux_page/src/event_request.rs||impl:EventOutcome", fingerprint: "ae87f91a7efd5009", issue: "VMX-253"),
@@ -213,7 +214,8 @@
     (key: "crates/util/vmux_page/src/webview/route.rs||impl:Route", fingerprint: "a79ad6bc1ec24a19", issue: "VMX-253"),
     (key: "crates/util/vmux_page/src/webview/route.rs||struct:PageRoutes", fingerprint: "1cd174259d3ed481", issue: "VMX-253"),
     (key: "crates/util/vmux_page/src/webview/scroll_retention_test.js||script", fingerprint: "62a287bd2a4cd76a", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/util/vmux_page/src/webview/shim.rs|tests|fn:closing_a_middle_tab_fades_that_tab_and_moves_its_successor_without_delaying_layout", fingerprint: "1db8db2133b91e26", interface: "Fixed Node test invocation of the current registered-page document runtime", input: "ECS: crates/util/vmux_page/src/page.rs||struct:Page", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One isolated Node test invocation", bounds: "One current finite script/runtime source and deterministic DOM/IPC/animation input sequence; no native app or product state", teardown: "Node completion joins the child and drops captured fixture IO", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_page/src/webview/layout_movement_test.js||script", fingerprint: "11821d77ce700897", interface: "Current document runtime DOM/IPC/animation behavior fixture", input: "ECS: crates/util/vmux_page/src/page.rs||struct:Page", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One fixed-script Node invocation", bounds: "Finite synthetic DOM/IPC events supplied by the exact including Rust fixture; no production document uses this script", teardown: "Node completion releases the synthetic document, listeners and captured output", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_page/src/webview/shim.rs|tests|fn:closing_a_middle_tab_fades_that_tab_and_moves_its_successor_without_delaying_layout")),
     (key: "crates/util/vmux_page/src/webview/shim.rs|tests|fn:scroll_notifications_do_not_wait_for_native_replies_and_coalesce_per_frame", fingerprint: "9c26a7e40a457dcc", interface: "Fixed Node test invocation of the current registered-page document runtime", input: "ECS: crates/util/vmux_page/src/page.rs||struct:Page", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One isolated Node test invocation", bounds: "One current finite script/runtime source and deterministic DOM/IPC/animation input sequence; no native app or product state", teardown: "Node completion joins the child and drops captured fixture IO", architecture: "ECS ownership boundaries"),
@@ -239,11 +241,34 @@
     (key: "crates/util/vmux_page/src/webview/report.rs||impl:PageMessage", fingerprint: "3179650a31f856db", interface: "Native document IPC envelope decoding and page lifecycle reporting", input: "ECS: crates/util/vmux_page/src/page.rs||struct:Page", output: "external: native document, context/IPC handle or isolated fixture observation", lifetime: "One mounted WebView, current page and IPC generation", bounds: "Raw wire envelope, epoch/revision validation, native measurement/reply handles and typed lifecycle delivery only", teardown: "Document teardown drops IPC handles and outstanding measurements; stale revisions are rejected", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_page/src/webview/report.rs|tests|static:SESSION_PAGE", fingerprint: "4fae219df6844b9b", interface: "Immutable registered-page template for isolated IPC report fixtures", input: "ECS: crates/util/vmux_page/src/page.rs||struct:Page", output: "external: native document, context/IPC handle or isolated fixture observation", lifetime: "One static test descriptor and its isolated document fixture", bounds: "One route, component entry point and immutable display/permission metadata", teardown: "Per-test document and IPC handles drop with the fixture; static descriptor holds no live state", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_page/src/shell.rs||impl:InterpreterShell", fingerprint: "a9039bd8350db7e4", interface: "native HTML document shell construction from registered page metadata", input: "ECS: crates/util/vmux_page/src/registration.rs||struct:PageRegistration", output: "external: bounded native HTML shell and IPC bootstrapping", lifetime: "one registered native document generation", bounds: "metadata, styles and initialization frames of the registered page; no route mutation authority", teardown: "shell buffers drop after native response construction", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_page/src/page.rs||struct:Page")),
-], values: [
+],
+values: [
     (key: "crates/util/vmux_page/src/page.rs||struct:Page", owner: "crates/util/vmux_page/src/registration.rs||struct:PageRegistration", lifetime: "Immutable route/render/permission descriptor retained by the canonical PageRegistration entity; no live page or domain registry"),
     (key: "crates/util/vmux_page/src/page_dom.rs||alias:PageComponent", owner: "crates/util/vmux_page/src/page.rs||struct:Page", lifetime: "Stateless Dioxus component entry-point pointer in the registered immutable Page descriptor"),
-    (key: "crates/util/vmux_page/src/registration.rs||alias:ReadInstance", owner: "crates/util/vmux_page/src/registration.rs||struct:PageRegistration", lifetime: "Immutable framework callback metadata read from canonical entity state during registered page lookup; replaced with its registration"),
     (key: "crates/util/vmux_page/src/registration.rs||alias:ClaimsPage", owner: "crates/util/vmux_page/src/registration.rs||struct:PageRegistration", lifetime: "Immutable framework callback metadata read from canonical entity state during registered page lookup; replaced with its registration"),
     (key: "crates/util/vmux_page/src/registration.rs||alias:InstanceChanged", owner: "crates/util/vmux_page/src/registration.rs||struct:PageRegistration", lifetime: "Immutable framework callback metadata read from canonical entity state during registered page lookup; replaced with its registration"),
+    (key: "crates/util/vmux_page/src/registration.rs||alias:ReadInstance", owner: "crates/util/vmux_page/src/registration.rs||struct:PageRegistration", lifetime: "Immutable framework callback metadata read from canonical entity state during registered page lookup; replaced with its registration"),
     (key: "crates/util/vmux_page/src/registration.rs||enum:PagePlacement", owner: "crates/util/vmux_page/src/registration.rs||struct:PageRegistration", lifetime: "Immutable native surface placement metadata retained by one canonical page registration"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_page/src/event_request.rs||enum:EventRequestError", fingerprint: "1388b38532d743cf", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/history_swipe.rs||enum:HistoryDirection", fingerprint: "10eea80c6db53c4f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/menu.rs||enum:OsMenuSet", fingerprint: "e246680a99fd9c5f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/registration.rs||enum:PagePlacement", fingerprint: "09e60c9f3d6674f3", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview.rs||enum:Appearance", fingerprint: "378a6ed878105855", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview.rs||enum:SiblingOrder", fingerprint: "6be4c24ff8353140", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/dom.rs||enum:EventAdmission", fingerprint: "1325792bf5c4ad26", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/dom_request.rs||enum:DomRequest", fingerprint: "3365049fd59bcd3c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/dom_request.rs||enum:Measure", fingerprint: "610b8bfa82f4f01c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/embed.rs||enum:LifecycleUpdate", fingerprint: "f6d9ea2893cf1d30", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/measurement.rs||enum:Slot", fingerprint: "271b310aea9557b5", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/report.rs||enum:PageReport", fingerprint: "25015c4ce5bde73e", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_page/src/webview/route.rs||enum:Route", fingerprint: "6a18ecc48a95e8a3", issue: "VMX-253", finding: "AU-13"),
+  ],
+  enums: [
+  ],
+  bodies: [
+  ],
+),
+)

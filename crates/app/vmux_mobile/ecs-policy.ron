@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/app/vmux_mobile/src/host.rs||const:MODEL_FETCH_ATTEMPTS", fingerprint: "c48dc3f1f761888d", issue: "VMX-253"),
     (key: "crates/app/vmux_mobile/src/host.rs||const:MODEL_RETRY_INTERVAL_MS", fingerprint: "a697a2a1f3e149bb", issue: "VMX-253"),
     (key: "crates/app/vmux_mobile/src/host.rs||const:TEAM_POLL_INTERVAL_MS", fingerprint: "e0c84776b260633e", issue: "VMX-253"),
@@ -128,7 +129,8 @@
     (key: "crates/app/vmux_mobile/src/transition.rs|platform|struct:Dismissing#2", fingerprint: "2ca1438b746b6ece", issue: "VMX-253"),
     (key: "crates/app/vmux_mobile/src/transition.rs|platform|struct:NativeSheet", fingerprint: "285f6f7a1df000e5", issue: "VMX-253"),
     (key: "crates/app/vmux_mobile/src/transition.rs|platform|struct:NativeSheet#2", fingerprint: "8a84ea9eb8a0b15a", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/app/vmux_mobile/src/host.rs||impl:MobileHost", fingerprint: "30b5267502103ede", interface: "Native mobile PageHost, typed UI-frame and remote service API transport bridge", input: "ECS: crates/feature/vmux_session/src/event.rs||struct:ChatSubmit", output: "external: bounded native/protocol/framework output", lifetime: "One installed PageHost epoch and current remote session/request", bounds: "Wire IDs/bytes, listener handles, bounded model retry and native DOM effects; accepted state is delivered through typed runtime messages", teardown: "Superseded host epochs stop polling/adopt no late replies; request completion drops transport callbacks", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_mobile/src/main.rs||fn:AppBody", fingerprint: "16542772ccd4b7af", interface: "Dioxus mobile root head/header/page rendering and typed native UI publication", input: "external: mounted connection/session projections and compiled product metadata", output: "ECS: crates/feature/vmux_start/src/roster.rs||struct:Roster", lifetime: "one mounted mobile root", bounds: "DOM rendering and existing typed UI requests; no second mutable roster or connection authority", teardown: "root unmount releases its hooks and native subscriptions", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_mobile/src/main.rs||impl:MobileRunner", fingerprint: "bae27d78d221dbc1", interface: "Bevy runner to Dioxus/Tao URL and application lifecycle bridge", input: "external: native URL/lifecycle events and compiled window configuration", output: "ECS: crates/app/vmux_mobile/src/pairing.rs||struct:PairRequest", lifetime: "one mobile application runner", bounds: "bounded native events and original App transfer; no parallel feature world", teardown: "event-loop exit drops window handlers and the runtime bridge", architecture: "ECS ownership boundaries"),
@@ -139,4 +141,15 @@
     (key: "crates/app/vmux_mobile/src/qr_scanner.rs|platform|impl:ScannerSupport", fingerprint: "f54b2f146b51c171", interface: "AVFoundation camera availability or unsupported-platform conversion", input: "ECS: crates/app/vmux_mobile/src/pairing.rs||struct:ScanRequest", output: "external: immutable scanner availability text", lifetime: "one requested scanner availability query", bounds: "compiled permission then bounded OS availability queries; no retained normalized pairing model", teardown: "query return drops temporary native availability values", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_mobile/src/qr_scanner.rs|platform|impl:UnsupportedScanner", fingerprint: "03055db31e3873cc", interface: "AVFoundation camera availability or unsupported-platform conversion", input: "ECS: crates/app/vmux_mobile/src/pairing.rs||struct:ScanRequest", output: "external: immutable scanner availability text", lifetime: "one requested scanner availability query", bounds: "compiled permission then bounded OS availability queries; no retained normalized pairing model", teardown: "query return drops temporary native availability values", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_mobile/src/qr_scanner.rs|platform|struct:UnsupportedScanner", fingerprint: "918d4c070ece8e12", interface: "AVFoundation camera availability or unsupported-platform conversion", input: "ECS: crates/app/vmux_mobile/src/pairing.rs||struct:ScanRequest", output: "external: immutable scanner availability text", lifetime: "one requested scanner availability query", bounds: "compiled permission then bounded OS availability queries; no retained normalized pairing model", teardown: "query return drops temporary native availability values", architecture: "ECS ownership boundaries"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/app/vmux_mobile/src/pairing.rs||impl:Credentials::parse", fingerprint: "4df97210dba1290b", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/app/vmux_mobile/src/pairing.rs||enum:AuthState", fingerprint: "df88a7e42c7f292b", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_mobile/src/remote.rs||enum:ApiError", fingerprint: "8a5deddc210bba85", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_mobile/src/session.rs||enum:SessionStreamOutput", fingerprint: "2b2708ec71efbfd0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_mobile/src/quic.rs||enum:QuicError", fingerprint: "142c8a52098aefce", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_mobile/src/pairing.rs||enum:ConnectionSource", fingerprint: "34cfef2333bbf980", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

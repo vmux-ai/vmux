@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_vault/src/agent.rs||enum:VaultProvider", fingerprint: "be1e29d44c0b51c5", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/agent.rs||fn:answer_queries", fingerprint: "1510ea7fdaf3f16e", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/agent.rs||fn:open", fingerprint: "d94fa5402a30d807", issue: "VMX-253"),
@@ -246,9 +247,32 @@
     (key: "crates/feature/vmux_vault/src/ui.rs||fn:VaultPanel", fingerprint: "05260ea6d45dce20", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/ui.rs||fn:copy_recovery_key", fingerprint: "55d07ba5c4ce299a", issue: "VMX-253"),
     (key: "crates/feature/vmux_vault/src/ui.rs||struct:VaultPage", fingerprint: "8ac286b6ac093df6", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||struct:VaultWatch", fingerprint: "6892f270a972248a", interface: "notify filesystem callbacks and native event-loop wake", input: "external: filesystem notification kinds and paths beneath the configured Vault root", output: "ECS: crates/feature/vmux_vault/src/host/runtime.rs||struct:Notification", lifetime: "one RuntimePlugin profile watch generation", bounds: "raw notification/channel handles only; ignored runtime/project paths and access events are excluded before queueing or waking; ECS owns scan and sync decisions", teardown: "watcher and receiver Drop release callbacks and stop senders", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:VaultWatch", fingerprint: "d046930d28d7ec59", interface: "notify filesystem callbacks and native event-loop wake", input: "external: filesystem notification kinds and paths beneath the configured Vault root", output: "ECS: crates/feature/vmux_vault/src/host/runtime.rs||struct:Notification", lifetime: "one RuntimePlugin profile watch generation", bounds: "raw notification/channel handles only; ignored runtime/project paths and access events are excluded before queueing or waking; ECS owns scan and sync decisions", teardown: "watcher and receiver Drop release callbacks and stop senders", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_vault/src/host/runtime.rs||impl:Plugin for RuntimePlugin", fingerprint: "f270d695ae2a7aeb", interface: "Bevy registration of the notify callback and Vault runtime schedule", input: "ECS: crates/feature/vmux_vault/src/host/runtime.rs||struct:Notification", output: "external: scoped watcher channels and production system registration", lifetime: "one RuntimePlugin installation", bounds: "registers the canonical notification message, receiving systems and one native watcher; scan and sync decisions stay in ECS systems", teardown: "App teardown drops the watcher and notification channels", architecture: "ECS ownership boundaries"),
-], values: [
-])
+],
+values: [
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_vault/src/agent.rs||enum:VaultProvider", fingerprint: "be1e29d44c0b51c5", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/host.rs||enum:VaultOperationTarget", fingerprint: "a1ebac5d27e7673f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/host/operation.rs||fn:launch", fingerprint: "959124f00b012143", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_vault/src/state.rs||enum:VaultConnectionProvider", fingerprint: "3da0609269c48054", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/state.rs||enum:VaultDestination", fingerprint: "5ba0f72d16623c47", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/state.rs||enum:VaultOperationKind", fingerprint: "2a5336f7b82d675d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/state.rs||enum:VaultOperationState", fingerprint: "c175970e785fb3f1", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/state.rs||enum:VaultOwnerKind", fingerprint: "197b771347923c0c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/state.rs||enum:VaultSyncStatus", fingerprint: "5c56530d754332c8", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/storage/connect.rs||enum:RepositoryVisibility", fingerprint: "56f5a4bc8a3e765a", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/storage/snapshot.rs||enum:EntryKind", fingerprint: "97ab80e696d3e871", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_vault/src/storage/sync.rs||enum:TextMergeStrategy", fingerprint: "9308866db11ea4a3", issue: "VMX-253", finding: "AU-13"),
+  ],
+  enums: [
+  ],
+  bodies: [
+  ],
+),
+)

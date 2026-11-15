@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "patches/bevy_cef_core-0.5.2/build.rs||fn:main", fingerprint: "1bbcd25fc41ffb95", issue: "VMX-253"),
     (key: "patches/bevy_cef_core-0.5.2/build.rs||fn:write_cef_embedded_scheme", fingerprint: "68ba4b4321a7c952", issue: "VMX-253"),
     (key: "patches/bevy_cef_core-0.5.2/src/browser_process/app.rs||impl:BrowserProcessAppBuilder", fingerprint: "5b4577f60d314115", issue: "VMX-253"),
@@ -308,7 +309,21 @@
     (key: "patches/bevy_cef_core-0.5.2/src/util.rs||struct:CefEmbeddedHosts", fingerprint: "42d98fa53eee488d", issue: "VMX-253"),
     (key: "patches/bevy_cef_core-0.5.2/src/util.rs||struct:CefEmbeddedPageConfig", fingerprint: "19d2ae3c439a95f3", issue: "VMX-253"),
     (key: "patches/bevy_cef_core-0.5.2/src/util.rs||struct:RawMediaResponse", fingerprint: "1cd5803cbd37c426", issue: "VMX-253"),
-], values: [
+],
+values: [
     (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||enum:PointerButton", owner: "crates/util/vmux_browser/src/input.rs||enum:PointerEffect", lifetime: "immutable CEF button encoding of one accepted canonical pointer dispatch effect"),
     (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||struct:NativeMouseButtons", owner: "crates/feature/vmux_input/src/pointer.rs||struct:PointerState", lifetime: "physical native mouse-button value held by each canonical Window input component or its immutable ingress event"),
-])
+],
+shape: (
+  debt: [
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/load_handler/transition.rs||enum:CefTransitionCore", fingerprint: "b10c899bab447241", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||enum:PointerButton", fingerprint: "11bec1f27b9ee2d9", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/permission_handler.rs||enum:PendingCallback", fingerprint: "fee32c8103efaec3", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/client_handler/history_swipe_handler.rs||enum:HistorySwipeDirection", fingerprint: "cf6f21d57dace229", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/keepalive.rs||enum:RealIoSurfaceOps", fingerprint: "9c929bf7898430b0", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||impl:Browsers::create_browser", fingerprint: "ea1060d82d5a7618", issue: "VMX-253", finding: "AU-14"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||enum:CefColorMode", fingerprint: "82426ee7ec12ee94", issue: "VMX-253", finding: "AU-13"),
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||impl:Browsers::host_in_child_window", fingerprint: "a0b54c490d4cd4e3", issue: "VMX-253", finding: "AU-14"),
+  ],
+),
+)

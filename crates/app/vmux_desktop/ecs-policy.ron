@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/app/vmux_desktop/src/boot_status.rs|tests|fn:inputs", fingerprint: "35ad29bb21227b4e", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/boot_status.rs||enum:BootPhase", fingerprint: "03176e2adcf01c96", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/boot_status.rs||fn:spawn", fingerprint: "3208d4c86768b93a", issue: "VMX-253"),
@@ -275,7 +276,8 @@
     (key: "crates/app/vmux_desktop/tests/blank_line_between_items.rs||fn:starts_an_item", fingerprint: "14ba2a9604eb4ff8", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/tests/blank_line_between_items.rs||fn:walk", fingerprint: "f59fe15d5f104dd8", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/tests/no_window_despawn.rs||fn:walk", fingerprint: "6d0ef5132d484eac", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/app/vmux_desktop/src/window.rs||struct:WindowPlugin", fingerprint: "559ee584b86b3183", interface: "Bevy registration of canonical native-window creation and lifecycle systems", input: "ECS: crates/feature/vmux_layout/src/host/window.rs||struct:NewWindowRequest", output: "external: bounded native/protocol/framework output", lifetime: "One desktop App installation", bounds: "Stateless registration metadata, typed window requests and ordered private ECS systems only", teardown: "App teardown ends registrations and window-owned lifecycle components", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_desktop/src/window.rs||impl:Plugin for WindowPlugin", fingerprint: "21293c187c0dd679", interface: "Bevy registration of canonical native-window creation and lifecycle systems", input: "ECS: crates/feature/vmux_layout/src/host/window.rs||struct:NewWindowRequest", output: "external: bounded native/protocol/framework output", lifetime: "One desktop App installation", bounds: "Stateless registration metadata, typed window requests and ordered private ECS systems only", teardown: "App teardown ends registrations and window-owned lifecycle components", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_desktop/src/lib.rs||impl:VmuxPlugin", fingerprint: "44781f9f2da817e5", interface: "Native Bevy/winit window configuration and build-title metadata factory", input: "ECS: crates/feature/vmux_layout/src/host/window.rs||struct:NewWindowRequest", output: "external: bounded native/protocol/framework output", lifetime: "One primary/secondary native-window configuration from the installed WindowPlugin", bounds: "Immutable native window properties, fixed default geometry and current build-title source only; registered systems own placement and selection", teardown: "Configuration is consumed by the native window and retains no independent vmux state", architecture: "ECS ownership boundaries", owner: Some("crates/app/vmux_desktop/src/window.rs||impl:Plugin for WindowPlugin")),
@@ -307,10 +309,11 @@
     (key: "crates/app/vmux_desktop/src/macos.rs||impl:Drop for NativeInputHandles", fingerprint: "34b2d54dc726f69c", interface: "AppKit NSEvent monitor and NSNotificationCenter registration tokens", input: "ECS: crates/feature/vmux_input/src/pointer.rs||struct:PointerInbox", output: "external: installed pointer/window event monitoring", lifetime: "one native host adapter installation", bounds: "native monitor and observer tokens only; callbacks enqueue typed facts into canonical input", teardown: "Drop disables ingress, removes monitor tokens and unregisters notification observers", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_desktop/src/window_input.rs||struct:WindowInputPlugin", fingerprint: "19adb519ddc226d5", interface: "Bevy registration of Window-owned native gestures and effect dispatch", input: "ECS: crates/app/vmux_desktop/src/window_input.rs||struct:WindowInput", output: "ECS: crates/app/vmux_desktop/src/window_input.rs||struct:WindowEffect", lifetime: "one native host input plugin installation", bounds: "registration and input/effect ordering only; canonical Window components own gesture decisions", teardown: "monitor teardown/reset/Window removal cancels captures and releases retained handles", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_desktop/src/window_input.rs||impl:Plugin for WindowInputPlugin", fingerprint: "3409f2c947c403de", interface: "Bevy registration of Window-owned native gestures and effect dispatch", input: "ECS: crates/app/vmux_desktop/src/window_input.rs||struct:WindowInput", output: "ECS: crates/app/vmux_desktop/src/window_input.rs||struct:WindowEffect", lifetime: "one native host input plugin installation", bounds: "registration and input/effect ordering only; canonical Window components own gesture decisions", teardown: "monitor teardown/reset/Window removal cancels captures and releases retained handles", architecture: "ECS ownership boundaries"),
-     (key: "crates/app/vmux_desktop/src/macos.rs||fn:key", fingerprint: "ec007c513e6f8c9f", interface: "AppKit key-window native effect application", input: "ECS: crates/app/vmux_desktop/src/macos.rs||struct:KeyWindowRequest", output: "external: current NSWindow/AppKit activation acknowledgement", lifetime: "one accepted canonical key-window effect", bounds: "typed Window entity lookup through current winit handles only; no pane selection or capture policy", teardown: "expired Window/native handles refuse effect delivery", architecture: "ECS ownership boundaries"),
+    (key: "crates/app/vmux_desktop/src/macos.rs||fn:key", fingerprint: "ec007c513e6f8c9f", interface: "AppKit key-window native effect application", input: "ECS: crates/app/vmux_desktop/src/macos.rs||struct:KeyWindowRequest", output: "external: current NSWindow/AppKit activation acknowledgement", lifetime: "one accepted canonical key-window effect", bounds: "typed Window entity lookup through current winit handles only; no pane selection or capture policy", teardown: "expired Window/native handles refuse effect delivery", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_desktop/src/window_input.rs|tests|struct:NativeInputFixture", fingerprint: "ae8f152f12ebe08a", interface: "isolated production-plugin canonical input regression fixture", input: "ECS: crates/app/vmux_desktop/src/window_input.rs||struct:WindowInput", output: "external: observed Window state, source refusal and ordered native effects", lifetime: "one isolated headless input test", bounds: "fixture-owned App and typed input only; production plugins perform routing/capture transitions", teardown: "isolated World/input handles drop after the oracle", architecture: "ECS ownership boundaries"),
     (key: "crates/app/vmux_desktop/src/window_input.rs|tests|impl:NativeInputFixture", fingerprint: "2e21918129eff166", interface: "isolated production-plugin canonical input regression fixture", input: "ECS: crates/app/vmux_desktop/src/window_input.rs||struct:WindowInput", output: "external: observed Window state, source refusal and ordered native effects", lifetime: "one isolated headless input test", bounds: "fixture-owned App and typed input only; production plugins perform routing/capture transitions", teardown: "isolated World/input handles drop after the oracle", architecture: "ECS ownership boundaries"),
-], values: [
+],
+values: [
     (key: "crates/app/vmux_desktop/src/permission.rs||struct:OriginPermissions", owner: "crates/app/vmux_desktop/src/permission.rs||struct:MediaPermissionStore", lifetime: "canonical per-origin permission decisions on the MediaPermissionStore entity"),
     (key: "crates/app/vmux_desktop/src/permission.rs||enum:PermissionDecision", owner: "crates/app/vmux_desktop/src/permission.rs||struct:OriginPermissions", lifetime: "one canonical stored per-category permission decision"),
     (key: "crates/app/vmux_desktop/src/permission.rs||struct:RequestCategories", owner: "crates/app/vmux_desktop/src/permission.rs||struct:MediaPermissionStore", lifetime: "immutable requested categories evaluated by the canonical permission store"),
@@ -321,4 +324,24 @@
     (key: "crates/app/vmux_desktop/src/window_interaction.rs||struct:TitlebarClick", owner: "crates/app/vmux_desktop/src/window_interaction.rs||struct:TitlebarClicks", lifetime: "one Window-owned native gesture input/geometry value; no independent registry or lifecycle"),
     (key: "crates/app/vmux_desktop/src/window_interaction.rs||enum:WindowTitlebarGesture", owner: "crates/app/vmux_desktop/src/window_input.rs||struct:WindowEffect", lifetime: "immutable native effect intent of the registered Window gesture receiver"),
     (key: "crates/app/vmux_desktop/src/window_input.rs||enum:WindowInputKind", owner: "crates/app/vmux_desktop/src/window_input.rs||struct:WindowInput", lifetime: "raw AppKit event kind or canonical cancellation intent of one Window input event"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/app/vmux_desktop/src/splash.rs||enum:SplashDismissDecision", fingerprint: "c7329d24178e6503", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/window_input.rs||fn:gestures", fingerprint: "e3320b2c79397d03", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/app/vmux_desktop/src/boot_status.rs||enum:BootPhase", fingerprint: "03176e2adcf01c96", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/window_interaction.rs||enum:WindowTitlebarGesture", fingerprint: "845fe001a5501970", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/recording.rs||enum:RecordingStatus", fingerprint: "6650f26c92cc4e2e", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/updater.rs||fn:poll_update_result", fingerprint: "13668edd8ff0a3a9", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/app/vmux_desktop/src/permission.rs||enum:CategoryState", fingerprint: "d45772e7ca894c8d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/recording_capture_macos.rs||impl:CaptureRuntime#2::setup", fingerprint: "746aab5c938ccc70", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/app/vmux_desktop/src/permission.rs||enum:PermissionDecision", fingerprint: "0328bf31aa9721d0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/macos.rs||fn:install_input_wake_monitor", fingerprint: "fb6168fddce26059", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/app/vmux_desktop/src/updater.rs||enum:UpdateResult", fingerprint: "7b5d177f2f6332ae", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/splash.rs||fn:show", fingerprint: "fd49c88f50ac4a86", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/app/vmux_desktop/src/permission.rs||enum:Resolution", fingerprint: "537c45f0a7e34b42", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/recording.rs||enum:RecordingControl", fingerprint: "55e3c04852168cb5", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/app/vmux_desktop/src/window_input.rs||enum:WindowInputKind", fingerprint: "91498f1db590e4d3", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

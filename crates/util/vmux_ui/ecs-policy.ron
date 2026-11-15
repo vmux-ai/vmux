@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_ui/src/agent_accent.rs||impl:AgentAccent", fingerprint: "8387671e7423d75f", issue: "VMX-253"),
     (key: "crates/util/vmux_ui/src/agent_accent.rs||struct:AgentAccent", fingerprint: "ea878a5fcefe95b7", issue: "VMX-253"),
     (key: "crates/util/vmux_ui/src/animation.rs||impl:Height", fingerprint: "fcdd7c6eff048057", issue: "VMX-253"),
@@ -594,7 +595,8 @@
     (key: "crates/util/vmux_ui/src/transport/event_listener.rs||impl:fmt :: Display for EventListenerError", fingerprint: "31ccef7462d5b1b2", issue: "VMX-253"),
     (key: "crates/util/vmux_ui/src/transport/event_listener.rs||struct:DeferredSend", fingerprint: "5059c836d6e12a3c", issue: "VMX-253"),
     (key: "crates/util/vmux_ui/src/transport/native.rs||impl:Host", fingerprint: "47a101d409708c69", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/util/vmux_ui/src/components/manager.rs|tests|fn:sidebar_search_is_interactive_while_open_and_inert_only_while_closed", fingerprint: "12b6e0214c3df644", interface: "Dioxus VirtualDom fixture", input: "pre-world: isolated DOM/transport fixture inputs", output: "pre-world: mounted production component and observable DOM/host interactions", lifetime: "One isolated test invocation and its actual VirtualDom generation", bounds: "Known production renderer, immutable fixture props and DOM event/measurement recording only; no product ECS authority", teardown: "VirtualDom/fixture drop releases host listeners, DOM handles and recorded edits", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_ui/src/components/manager.rs|tests|struct:SidebarInert", fingerprint: "168aabd724d46c07", interface: "Dioxus VirtualDom fixture", input: "pre-world: isolated DOM/transport fixture inputs", output: "pre-world: mounted production component and observable DOM/host interactions", lifetime: "One isolated test invocation and its actual VirtualDom generation", bounds: "Known production renderer, immutable fixture props and DOM event/measurement recording only; no product ECS authority", teardown: "VirtualDom/fixture drop releases host listeners, DOM handles and recorded edits", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_ui/src/components/manager.rs|tests|fn:sidebar_search_is_interactive_while_open_and_inert_only_while_closed")),
     (key: "crates/util/vmux_ui/src/components/manager.rs|tests|impl:SidebarInert", fingerprint: "42ca55751ee4ade7", interface: "Dioxus VirtualDom fixture", input: "pre-world: isolated DOM/transport fixture inputs", output: "pre-world: mounted production component and observable DOM/host interactions", lifetime: "One isolated test invocation and its actual VirtualDom generation", bounds: "Known production renderer, immutable fixture props and DOM event/measurement recording only; no product ECS authority", teardown: "VirtualDom/fixture drop releases host listeners, DOM handles and recorded edits", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_ui/src/components/manager.rs|tests|fn:sidebar_search_is_interactive_while_open_and_inert_only_while_closed")),
@@ -642,6 +644,51 @@
     (key: "crates/util/vmux_ui/src/components/address.rs|tests|fn:MotionTrail", fingerprint: "ad1d8052a4bdc5d5", interface: "Dioxus AddressTrail lifecycle fixture", input: "ECS: crates/util/vmux_api/src/address.rs||struct:PageAddress", output: "external: isolated mounted AddressTrail DOM and PageHost script capture", lifetime: "one VirtualDom test invocation", bounds: "production component rendering only; no navigation authority", teardown: "VirtualDom drop runs the production unmount hooks", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_ui/src/components/address_motion.js||script", owner: Some("crates/util/vmux_ui/src/components/address.rs||fn:AddressTrail"), fingerprint: "bd1c4d3d4a033bac", interface: "browser DOM, MutationObserver, ResizeObserver and Web Animations", input: "ECS: crates/util/vmux_api/src/address.rs||struct:PageAddress", output: "external: breadcrumb positions, inert exit copies and bounded visual transitions", lifetime: "one mounted AddressTrail; each animation ends within the shared layout duration", bounds: "geometry and visual feedback only; no route selection or independent navigation state; reduced motion disables transitions", teardown: "AddressTrail unmount disconnects observers, cancels animations and removes inert copies", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_ui/src/components/address.rs|tests|fn:RoutedTrail", fingerprint: "cee17edcd8f615a8", interface: "Dioxus virtual DOM test component", input: "ECS: crates/util/vmux_api/src/address.rs||struct:PageAddress", output: "external: isolated virtual DOM observations", lifetime: "one isolated virtual DOM test", bounds: "mock host and synthetic addresses only; no native app or user data", teardown: "VirtualDom drop releases the fixture", architecture: "ECS ownership boundaries"),
-], values: [
+],
+values: [
     (key: "crates/util/vmux_ui/src/i18n.rs||struct:Locale", owner: "crates/feature/vmux_command/src/host/settings.rs||struct:ResolvedLocale", lifetime: "Immutable locale resolved by the canonical global locale resource and replaced with that preference"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_ui/src/components/button.rs||enum:ButtonSize", fingerprint: "f2dcd6983466d05c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/button.rs||enum:ButtonVariant", fingerprint: "2f5d7189fff92f37", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/card.rs||enum:CardVariant", fingerprint: "27ed821f05499188", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/checkbox.rs||enum:CheckboxTone", fingerprint: "6f58d16399cc52ca", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/code.rs||enum:ShellTone", fingerprint: "801478b7086ef166", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/composer.rs||enum:PromptComposerMode", fingerprint: "a8d018b99884944a", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/composer_bar.rs||enum:ComposerChipVisual", fingerprint: "c107e0d55bb24639", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/composer_bar.rs||enum:ComposerMenuKind", fingerprint: "58ab94b837b80cc3", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/dropdown.rs||enum:DropdownAlign", fingerprint: "f9de11d5363b6145", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/dropdown.rs||enum:DropdownOpenMode", fingerprint: "fb3fce674e0340a2", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/dropdown.rs||enum:DropdownPlacement", fingerprint: "00fea31e307b91e6", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/manager.rs||enum:ManagerButtonVariant", fingerprint: "498aa99212c1d06e", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/manager.rs||enum:ManagerGridSize", fingerprint: "289ece65cc5a5869", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/manager.rs||enum:ManagerTone", fingerprint: "b1e3323f435a8abe", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/manager.rs||enum:ManagerView", fingerprint: "8267d6ee51c8c1e8", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/notice.rs||enum:NoticeKind", fingerprint: "8915b6ee95220bf4", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/page_address.rs||enum:ControlKind", fingerprint: "891a10a2318df86a", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/popup.rs||enum:Surface", fingerprint: "f75059b99df51151", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/prompt_box.rs||enum:PromptPopupPlacement", fingerprint: "9a013b65c54db9de", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/textarea.rs||enum:TextareaVariant", fingerprint: "25ddd7feeecf98ae", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/components/tree_row.rs||enum:TreeRowAccent", fingerprint: "d57778607763de41", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/diff.rs||enum:DiffTone", fingerprint: "3d70b1be9a99489d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/favicon.rs||enum:AgentBrand", fingerprint: "136611f7df65e7ac", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/file_icon.rs||enum:FileIcon", fingerprint: "42f0c740b868d5ff", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/focus.rs||enum:Caret", fingerprint: "ff7322b2e550a02c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/hooks/use_key_claim.rs||enum:KeyVerdict", fingerprint: "c24270708983adf7", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/hooks/use_key_claim.rs||enum:Unclaimed", fingerprint: "891e5fd0cf2c6441", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/i18n.rs||enum:TranslationValue", fingerprint: "dda4c82eca59e352", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/icon.rs||enum:GitSymbol", fingerprint: "f6171547ef7e763d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/ime.rs||enum:ImeVerdict", fingerprint: "38075b5b42babc4f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/prompt_recall.rs||enum:PromptHistoryDirection", fingerprint: "420f150df9f967a0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/theme.rs||enum:ThemeScheme", fingerprint: "755b100378e65d3e", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_ui/src/transport/event_listener.rs||enum:EventListenerError", fingerprint: "06e2c0e1be12ef79", issue: "VMX-253", finding: "AU-13"),
+  ],
+  enums: [
+    (key: "crates/util/vmux_ui/src/icon.rs||enum:LineIcon", fingerprint: "b732513f991f1d4e", role: Boundary, owner: "crates/util/vmux_ui/src/icon.rs|wasm|fn:LineIconView", reason: "Immutable glyph vocabulary for fixed SVG path rendering; each value selects presentation geometry only."),
+  ],
+  bodies: [
+    (key: "crates/util/vmux_ui/src/icon.rs||impl:LineIcon::paths", fingerprint: "8d5a5b731529bcfa", boundary: "crates/util/vmux_ui/src/icon.rs||impl:LineIcon", reason: "Exact static SVG glyph-to-path codec table; every arm returns immutable geometry and performs no domain selection or mutation."),
+  ],
+),
+)

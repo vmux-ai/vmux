@@ -133,31 +133,12 @@ impl Context {
             "share project directory",
         )?;
 
-        let network = self
-            .function::<unsafe extern "C" fn(u32, *const i8, i32, *mut u8, u32, u32) -> i32>(
-                b"krun_add_net_unixgram\0",
-            )?;
-        let network_path = Self::string(settings.network_socket())?;
-        let mut mac = [0x5a, 0x94, 0xef, 0xe4, 0x0c, 0xee];
-        Self::check(
-            unsafe { network(self.id, network_path.as_ptr(), -1, mac.as_mut_ptr(), 0, 1) },
-            "attach network",
-        )?;
+        self.network(settings)?;
 
-        let vsock = self.function::<unsafe extern "C" fn(u32, u32, *const i8, bool) -> i32>(
-            b"krun_add_vsock_port2\0",
-        )?;
-        let socket_path = Self::string(settings.transport_socket())?;
-        Self::check(
-            unsafe { vsock(self.id, 2375, socket_path.as_ptr(), true) },
-            "attach Docker socket",
-        )?;
-        let control_path = Self::string(settings.guest_control())?;
-        Self::check(
-            unsafe { vsock(self.id, 2376, control_path.as_ptr(), true) },
-            "attach guest control socket",
-        )?;
+        self.init(settings)
+    }
 
+    fn init(&self, settings: &Settings) -> io::Result<()> {
         let execute = self.function::<unsafe extern "C" fn(
             u32,
             *const i8,
@@ -192,6 +173,35 @@ impl Context {
             },
             "configure guest init",
         )
+    }
+
+    fn network(&self, settings: &Settings) -> io::Result<()> {
+        let network = self
+            .function::<unsafe extern "C" fn(u32, *const i8, i32, *mut u8, u32, u32) -> i32>(
+                b"krun_add_net_unixgram\0",
+            )?;
+        let network_path = Self::string(settings.network_socket())?;
+        let mut mac = [0x5a, 0x94, 0xef, 0xe4, 0x0c, 0xee];
+        Self::check(
+            unsafe { network(self.id, network_path.as_ptr(), -1, mac.as_mut_ptr(), 0, 1) },
+            "attach network",
+        )?;
+
+        let vsock = self.function::<unsafe extern "C" fn(u32, u32, *const i8, bool) -> i32>(
+            b"krun_add_vsock_port2\0",
+        )?;
+        let socket_path = Self::string(settings.transport_socket())?;
+        Self::check(
+            unsafe { vsock(self.id, 2375, socket_path.as_ptr(), true) },
+            "attach Docker socket",
+        )?;
+        let control_path = Self::string(settings.guest_control())?;
+        Self::check(
+            unsafe { vsock(self.id, 2376, control_path.as_ptr(), true) },
+            "attach guest control socket",
+        )?;
+
+        Ok(())
     }
 
     fn kernel_image(&self, settings: &Settings) -> io::Result<PathBuf> {

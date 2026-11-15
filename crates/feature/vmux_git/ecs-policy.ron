@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_git/src/event.rs||enum:GitOperation", fingerprint: "cd3cf0febb3285bd", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/event.rs||impl:GitBranchFileEntry", fingerprint: "c549365e8ee50c3f", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/event.rs||impl:GitDiffRevealRequest", fingerprint: "da01f9cffb88570b", issue: "VMX-253"),
@@ -665,7 +666,8 @@
     (key: "crates/feature/vmux_git/src/ui/state.rs||struct:GitPageState", fingerprint: "e3d1e75788b28f13", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/ui/state.rs||struct:PendingRepository", fingerprint: "5ebc0b0620b98d9d", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/ui/status.rs||fn:RepositoryHeader", fingerprint: "6849684e99cfaa34", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:SubmoduleCheckout", fingerprint: "d3697455f4f68dda", interface: "Git submodule checkout metadata read for a canonical repository", input: "ECS: crates/feature/vmux_git/src/host/repository.rs||struct:GitRepository", output: "external: bounded native IO, raw byte correlation or isolated fixture result", lifetime: "One repository-bound native Git read", bounds: "Finite git command output and raw submodule checkout/base-reference translation; no mutable repository registry", teardown: "Command completion drops buffers and path scratch", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_git/src/host/repository.rs||struct:GitRepository")),
     (key: "crates/feature/vmux_git/src/host/watch.rs||struct:GitWatch", fingerprint: "93842197e5838bfb", interface: "Native notify filesystem subscriptions and bounded repository metadata IO maintenance", input: "ECS: crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache", output: "external: Native watch handles, path subscriptions, retry wakes and IO eviction mechanics", lifetime: "One App watcher generation and its canonical cache/owner leases", bounds: "Only native path/handle reference counts, rollback, retries and four pending repository watch requests per maintenance frame; canonical Project/Session selection stays in registered domain consumers", teardown: "Released leases unwatch native paths; inactive metadata is evicted by cache TTL and capacity; native handles drop with the adapter", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache")),
     (key: "crates/feature/vmux_git/src/host/watch.rs||impl:GitWatch", fingerprint: "d45447395c3049b4", interface: "Native notify filesystem subscriptions and bounded repository metadata IO maintenance", input: "ECS: crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache", output: "external: Native watch handles, path subscriptions, retry wakes and IO eviction mechanics", lifetime: "One App watcher generation and its canonical cache/owner leases", bounds: "Only native path/handle reference counts, rollback, retries and four pending repository watch requests per maintenance frame; canonical Project/Session selection stays in registered domain consumers", teardown: "Released leases unwatch native paths; inactive metadata is evicted by cache TTL and capacity; native handles drop with the adapter", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache")),
@@ -688,9 +690,52 @@
     (key: "crates/feature/vmux_git/src/ui/shared.rs||fn:DiffView", fingerprint: "2ec8046232a5408b", interface: "Dioxus DiffView component props, DOM presentation and typed UI intent", input: "ECS: crates/util/vmux_api/src/git.rs||enum:GitDiffRow", output: "external: mounted Dioxus DOM and user interaction output", lifetime: "one mounted DiffView component scope and its immutable projected props", bounds: "rendering and DOM interaction for current props; no canonical catalog, conversation or operation mutation authority", teardown: "props, listeners, geometry and disclosure state drop with component unmount", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_git/src/ui/shared.rs||fn:DiffVirtualRows", fingerprint: "bb8a654b6278450c", interface: "Dioxus DiffVirtualRows component props, DOM presentation and typed UI intent", input: "ECS: crates/util/vmux_api/src/git.rs||enum:GitDiffRow", output: "external: mounted Dioxus DOM and user interaction output", lifetime: "one mounted DiffVirtualRows component scope and its immutable projected props", bounds: "rendering and DOM interaction for current props; no canonical catalog, conversation or operation mutation authority", teardown: "props, listeners, geometry and disclosure state drop with component unmount", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_git/src/ui/shared.rs||fn:DiffView")),
     (key: "crates/feature/vmux_git/src/ui/shared.rs||fn:DiffVirtualSpacer", fingerprint: "7fabe875da0cd0dd", interface: "Dioxus DiffVirtualSpacer component props, DOM presentation and typed UI intent", input: "ECS: crates/util/vmux_api/src/git.rs||enum:GitDiffRow", output: "external: mounted Dioxus DOM and user interaction output", lifetime: "one mounted DiffVirtualSpacer component scope and its immutable projected props", bounds: "rendering and DOM interaction for current props; no canonical catalog, conversation or operation mutation authority", teardown: "props, listeners, geometry and disclosure state drop with component unmount", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_git/src/ui/shared.rs||fn:DiffView")),
-], values: [
+],
+values: [
     (key: "crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCacheEntry", owner: "crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache", lifetime: "Read-only Git IO metadata or watch lease bookkeeping retained by its canonical cache/projection owner; eviction and task cancellation follow that owner"),
     (key: "crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoLease", owner: "crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache", lifetime: "Read-only Git IO metadata or watch lease bookkeeping retained by its canonical cache/projection owner; eviction and task cancellation follow that owner"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:RepoInfo", owner: "crates/feature/vmux_start/src/host.rs||struct:GitProjection", lifetime: "Read-only Git IO metadata or watch lease bookkeeping retained by its canonical cache/projection owner; eviction and task cancellation follow that owner"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:BranchHolder", owner: "crates/feature/vmux_git/src/host/worktree.rs||struct:RepoInfo", lifetime: "Read-only Git IO metadata or watch lease bookkeeping retained by its canonical cache/projection owner; eviction and task cancellation follow that owner"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_git/src/host/catalog.rs||fn:sync_catalogs", fingerprint: "f7d6f1da188c5063", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/ui/history.rs||fn:HistoryCard", fingerprint: "8579943170e17aca", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/ui/branches.rs||enum:BranchFileNode", fingerprint: "db46f44a0b8f0abd", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||enum:GitCatalogPage", fingerprint: "a63c4e127bca206d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitCommand::output_raw", fingerprint: "72791bcf49c63e85", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/job_runner.rs||fn:start_diff_jobs", fingerprint: "218f0442dc0e9ce8", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||enum:ReviewDiffText", fingerprint: "606748e32f6d74d9", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/ui/empty.rs||enum:RepositoryEmpty", fingerprint: "c536aa8fb50b1f6d", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/status.rs||enum:GitStatusBatchKey", fingerprint: "12b137b4bace3167", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/controller.rs||fn:dispatch_git_key", fingerprint: "ff4cc0c9e2cfef86", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/state.rs||enum:GitBranchPrompt", fingerprint: "b1a9a6d38208ce96", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/ui/state.rs||enum:DiffSelection", fingerprint: "4245c7ee8e5d5bd6", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/event.rs||enum:GitPathChange", fingerprint: "9029e8554a6430b5", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||enum:DiffSource", fingerprint: "bcc2caacbb4ed3e0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/state.rs||enum:GitBranchCollection", fingerprint: "25da0b41ae5a43aa", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||impl:ReviewDiffDocument::read", fingerprint: "40863d535b25359f", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/changes.rs||enum:FileMutation", fingerprint: "32305a8074cf007c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/ui/changes.rs||fn:ChangesCard", fingerprint: "918851016999bbb5", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/watch.rs||enum:GitSubscriptionKind", fingerprint: "43226047fc85d401", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/ui/shared.rs||fn:DiffView", fingerprint: "2ec8046232a5408b", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||enum:DiffFileContent", fingerprint: "607f42b648eb77b0", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/watch.rs||enum:GitWatchDeadlineOwner", fingerprint: "f0d09a74fe8d9802", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/controller.rs||enum:SelectionDirection", fingerprint: "2fd04c289db67ccc", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/controller.rs||fn:ui_state_write", fingerprint: "21f3ef09c99f5b8c", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/parse.rs||impl:ParsedStatuses#2::parse", fingerprint: "61ef006d2540c750", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/event.rs||enum:GitOperation", fingerprint: "cd3cf0febb3285bd", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/watch.rs||enum:GitWatchKind", fingerprint: "ea201a33dcdf2c18", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/state.rs||enum:GitCatalogEntries", fingerprint: "a45f89f53516bbd8", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/ui/status.rs||fn:RepositoryHeader", fingerprint: "6849684e99cfaa34", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host.rs||enum:GitUpdateSet", fingerprint: "fdf179331a770100", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/repository_provision.rs||enum:RepositoryProvisionOperation", fingerprint: "091951e02fa889e7", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/state.rs||enum:GitPanel", fingerprint: "fd74de8746b04a04", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/repository.rs||enum:GitCatalogSnapshot", fingerprint: "c81ac90238f598a4", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/job_runner.rs||fn:deliver_catalog_outputs", fingerprint: "8aae5c3853abe985", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/feature/vmux_git/src/host/watch.rs||enum:GitFileWatcher", fingerprint: "31f7fab02ead1067", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/job.rs||enum:DiffScope", fingerprint: "56a5508221ffa784", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_git/src/host/controller.rs||enum:ControllerSet", fingerprint: "99d83fc448a763f7", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

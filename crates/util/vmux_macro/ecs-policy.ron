@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/util/vmux_macro/src/app_plugin.rs||fn:collect_dependencies", fingerprint: "3c5b408593b29d50", issue: "VMX-253"),
     (key: "crates/util/vmux_macro/src/app_plugin.rs||fn:dependency_closure", fingerprint: "4dde7aff1ac7e452", issue: "VMX-253"),
     (key: "crates/util/vmux_macro/src/app_plugin.rs||fn:dependent_closure", fingerprint: "06b7441ff3a65b29", issue: "VMX-253"),
@@ -83,4 +84,18 @@
     (key: "crates/util/vmux_macro/src/ui_state.rs||fn:derive_state", fingerprint: "28b3845c9a0a9644", issue: "VMX-253"),
     (key: "crates/util/vmux_macro/src/ui_state.rs||fn:option_inner", fingerprint: "ceff44e224fa680e", issue: "VMX-253"),
     (key: "crates/util/vmux_macro/src/variant_names.rs||fn:expand", fingerprint: "b33e59ff0412d471", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/util/vmux_macro/src/page.rs||enum:Placement", fingerprint: "7de03f88a2c6e5ad", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_macro/src/page.rs||fn:expand_native", fingerprint: "e2b11777092acf10", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_macro/src/page.rs||enum:PageReuseFile", fingerprint: "c67c351adea82710", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_macro/src/page.rs||impl:PageManifestFile::manifest", fingerprint: "a6a66c38c2d53e2a", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_macro/src/page.rs||enum:PageSplitAxisFile", fingerprint: "eebc575a155d9306", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_macro/src/page.rs||impl:Parse for Args::parse", fingerprint: "2bc7a5d38bc2b74b", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_macro/src/bin_event.rs||enum:Direction", fingerprint: "453882f842a7cb58", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/util/vmux_macro/src/app_plugin.rs||fn:expand", fingerprint: "df75fae55a6bc42b", issue: "VMX-253", finding: "AU-14"),
+    (key: "crates/util/vmux_macro/src/command.rs||fn:expand", fingerprint: "9619fe23059aeb14", issue: "VMX-253", finding: "AU-14"),
+  ],
+),
+)

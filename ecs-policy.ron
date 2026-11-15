@@ -1,4 +1,6 @@
-(revision: "a59db6addc6195f4673b5aacd2d604a96b50272c", upstream: [
+(
+revision: "a59db6addc6195f4673b5aacd2d604a96b50272c",
+upstream: [
     (package: "bevy_cef", version: "0.5.2", archive_sha256: "2ed50adc61d6cd487cd04b0da14799bcf7adfafbfe7f46f5af010d1c795228d0", entries: {
         "patches/bevy_cef-0.5.2/src/common/components.rs||enum:WebviewSource": "26055a2015a488dc",
         "patches/bevy_cef-0.5.2/src/common/components.rs||impl:Default for WebviewSize": "6a7f16dec54ab10a",
@@ -756,4 +758,6 @@
     (package: "bevy_cef_debug_render_process", version: "0.5.2", archive_sha256: "4545e07767a3716da4bff2b83dc97d203b216cf2435b3ec1334865559c1de64e", entries: {
         "patches/bevy_cef_debug_render_process-0.5.2/src/main.rs||fn:main": "ff88d93c55b91012",
     }),
-])
+],
+shape: (revision: "963f3f40e33c78f61bc55ead5e9a6a9f01b65081"),
+)

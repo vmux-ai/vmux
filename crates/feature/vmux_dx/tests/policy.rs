@@ -441,6 +441,144 @@ fn policy_fragments_refuse_symlinks_instead_of_reading_another_location() {
 }
 
 #[test]
+fn shape_fragments_compare_debt_with_the_fetched_tree_instead_of_local_files() {
+    let repository = Repository::new();
+    repository.write(
+        "ecs-policy.ron",
+        &format!(
+            "(revision: \"{FROZEN_REVISION}\", shape: (revision: \"{FROZEN_SHAPE_REVISION}\"))"
+        ),
+    );
+    let path = "crates/util/alpha/src/lib.rs";
+    let mut inventory = Inventory::default();
+    inventory.source(path, "enum A { One, Two } enum B { One, Two }");
+    let a = inventory.key("enum:A");
+    let b = inventory.key("enum:B");
+    let mut fragment = Policy {
+        shape: ShapePolicy {
+            debt: vec![ShapeDebt {
+                key: a.clone(),
+                fingerprint: inventory.entries[&a].fingerprint.clone(),
+                issue: "VMX-253".into(),
+                finding: "AU-13".into(),
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    repository.write(
+        "crates/util/alpha/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    repository.snapshot();
+    let unchanged = Policy::load(repository.0.path()).unwrap();
+    assert!(
+        unchanged
+            .shape
+            .monotonic_from(&Policy::fetched(repository.0.path()).shape)
+    );
+    fragment.shape.debt.push(ShapeDebt {
+        key: b.clone(),
+        fingerprint: inventory.entries[&b].fingerprint.clone(),
+        issue: "VMX-253".into(),
+        finding: "AU-13".into(),
+    });
+    repository.write(
+        "crates/util/alpha/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    let restored = Policy::load(repository.0.path()).unwrap();
+    let panic = std::panic::catch_unwind(|| restored.shape.prove(repository.0.path()))
+        .expect_err("restored debt must be refused before historical lookup");
+    let message = if let Some(message) = panic.downcast_ref::<String>() {
+        message.as_str()
+    } else {
+        panic.downcast_ref::<&str>().unwrap()
+    };
+    assert!(message.contains("retired shape debt"), "{message}");
+    fragment.shape.debt.pop();
+    fragment.shape.debt.push(ShapeDebt {
+        key: a.clone(),
+        fingerprint: inventory.entries[&a].fingerprint.clone(),
+        issue: "VMX-253".into(),
+        finding: "AU-13".into(),
+    });
+    repository.write(
+        "crates/util/alpha/ecs-policy.ron",
+        &ron::to_string(&fragment).unwrap(),
+    );
+    let duplicate = Policy::load(repository.0.path()).unwrap();
+    assert!(
+        duplicate
+            .shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("stale/invalid shape debt"))
+    );
+}
+
+#[test]
+fn shape_fragments_refuse_foreign_records_and_fragment_provenance() {
+    let debt = "debt: [(key: \"crates/util/alpha/src/lib.rs||enum:State\", fingerprint: \"fixed\", issue: \"VMX-253\", finding: \"AU-13\")]";
+    let purpose = "enums: [(key: \"crates/util/alpha/src/lib.rs||enum:State\", fingerprint: \"fixed\", role: Scalar, owner: \"crates/util/alpha/src/lib.rs||struct:Owner\", reason: \"canonical scalar\")]";
+    let body = "bodies: [(key: \"crates/util/alpha/src/lib.rs||impl:Reader::read\", fingerprint: \"fixed\", boundary: \"crates/util/alpha/src/lib.rs||impl:Reader\", reason: \"bounded input\")]";
+    for records in [debt, purpose, body] {
+        let repository = Repository::new();
+        repository.write("website/ecs-policy.ron", &format!("(shape: ({records}))"));
+        let error = Policy::load(repository.0.path()).err().unwrap();
+        assert!(error.contains("Foreign policy record"), "{error}");
+        repository.snapshot();
+        let error = Policy::from_git(repository.0.path(), "origin/main")
+            .err()
+            .unwrap();
+        assert!(error.contains("Foreign policy record"), "{error}");
+        std::fs::remove_file(repository.0.path().join("website/ecs-policy.ron")).unwrap();
+        repository.write("ecs-policy.ron", &format!("(shape: ({records}))"));
+        let error = Policy::load(repository.0.path()).err().unwrap();
+        assert!(error.contains("Root policy holds only"), "{error}");
+    }
+    let repository = Repository::new();
+    repository.write("website/ecs-policy.ron", "(shape: (revision: \"changed\"))");
+    let error = Policy::load(repository.0.path()).err().unwrap();
+    assert!(error.contains("Global provenance"), "{error}");
+    repository.snapshot();
+    let error = Policy::from_git(repository.0.path(), "origin/main")
+        .err()
+        .unwrap();
+    assert!(error.contains("Global provenance"), "{error}");
+}
+
+#[test]
+#[cfg(unix)]
+fn fetched_policy_refuses_symlink_fragments_in_its_own_tree() {
+    let repository = Repository::new();
+    repository.write("website/source.ron", "()");
+    std::os::unix::fs::symlink(
+        "source.ron",
+        repository.0.path().join("website/ecs-policy.ron"),
+    )
+    .unwrap();
+    repository.snapshot();
+    let error = Policy::from_git(repository.0.path(), "origin/main")
+        .err()
+        .expect("Git tree symlinks must not be decoded as policy");
+    assert!(error.contains("regular file"), "{error}");
+}
+
+#[test]
+fn fetched_policy_refuses_the_same_misplaced_fragments_as_the_filesystem() {
+    let repository = Repository::new();
+    repository.write("crates/misc/ecs-policy.ron", "()");
+    let error = Policy::load(repository.0.path()).err().unwrap();
+    assert!(error.contains("Misplaced policy fragment"), "{error}");
+    repository.snapshot();
+    let error = Policy::from_git(repository.0.path(), "origin/main")
+        .err()
+        .unwrap();
+    assert!(error.contains("Misplaced policy fragment"), "{error}");
+}
+
+#[test]
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
     let policy = Policy::load(&root.0).expect("valid ownership policy");
@@ -460,6 +598,7 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
         errors.join("\n")
     );
     policy.prove_legacy(&root.0);
+    policy.shape.prove(&root.0);
 }
 
 #[test]
@@ -2768,6 +2907,40 @@ impl Repository {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, source).unwrap();
     }
+
+    fn snapshot(&self) {
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["add", "."],
+            vec![
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                "Policy fixture",
+            ],
+            vec!["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(self.0.path())
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_AUTHOR_NAME", "Policy fixture")
+                .env("GIT_AUTHOR_EMAIL", "policy@example.invalid")
+                .env("GIT_COMMITTER_NAME", "Policy fixture")
+                .env("GIT_COMMITTER_EMAIL", "policy@example.invalid")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
 
 impl Workspace {
@@ -2790,16 +2963,14 @@ struct Policy {
     boundaries: Vec<Boundary>,
     values: Vec<ValueOwner>,
     upstream: Vec<Upstream>,
+    #[serde(default)]
+    shape: ShapePolicy,
 }
 
 impl Policy {
     fn load(root: &Path) -> Result<Self, String> {
         let mut policy = Self::read(&root.join("ecs-policy.ron"))?;
-        if !policy.legacy.is_empty() || !policy.boundaries.is_empty() || !policy.values.is_empty() {
-            return Err(
-                "Root policy holds only historical revision and upstream references".into(),
-            );
-        }
+        policy.check_root()?;
         let mut files = Vec::new();
         for directory in ["crates", "examples", "website", "patches", "scripts"] {
             Self::paths(&root.join(directory), &mut files)?;
@@ -2807,33 +2978,67 @@ impl Policy {
         files.sort();
         for path in files {
             let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-            let directory = relative
-                .parent()
-                .ok_or("Policy fragment needs a directory")?;
-            if Self::directory(relative).as_deref() != Some(directory) {
-                return Err(format!("Misplaced policy fragment {}", relative.display()));
-            }
-            let fragment = Self::read(&path)?;
-            if !fragment.revision.is_empty() || !fragment.upstream.is_empty() {
-                return Err(format!(
-                    "Global provenance belongs in root policy: {}",
-                    relative.display()
-                ));
-            }
-            for record in &fragment.legacy {
-                Self::check_record(directory, &record.key)?;
-            }
-            for record in &fragment.boundaries {
-                Self::check_record(directory, &record.key)?;
-            }
-            for record in &fragment.values {
-                Self::check_record(directory, &record.key)?;
-            }
-            policy.legacy.extend(fragment.legacy);
-            policy.boundaries.extend(fragment.boundaries);
-            policy.values.extend(fragment.values);
+            policy.append(relative, Self::read(&path)?)?;
         }
         Ok(policy)
+    }
+
+    fn check_root(&self) -> Result<(), String> {
+        if !self.legacy.is_empty()
+            || !self.boundaries.is_empty()
+            || !self.values.is_empty()
+            || !self.shape.debt.is_empty()
+            || !self.shape.enums.is_empty()
+            || !self.shape.bodies.is_empty()
+        {
+            return Err(
+                "Root policy holds only historical revisions and upstream references".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn append(&mut self, relative: &Path, fragment: Self) -> Result<(), String> {
+        let directory = relative
+            .parent()
+            .ok_or("Policy fragment needs a directory")?;
+        if Self::directory(relative).as_deref() != Some(directory) {
+            return Err(format!("Misplaced policy fragment {}", relative.display()));
+        }
+        if !fragment.revision.is_empty()
+            || !fragment.upstream.is_empty()
+            || !fragment.shape.revision.is_empty()
+        {
+            return Err(format!(
+                "Global provenance belongs in root policy: {}",
+                relative.display()
+            ));
+        }
+        for record in &fragment.legacy {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.boundaries {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.values {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.shape.debt {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.shape.enums {
+            Self::check_record(directory, &record.key)?;
+        }
+        for record in &fragment.shape.bodies {
+            Self::check_record(directory, &record.key)?;
+        }
+        self.legacy.extend(fragment.legacy);
+        self.boundaries.extend(fragment.boundaries);
+        self.values.extend(fragment.values);
+        self.shape.debt.extend(fragment.shape.debt);
+        self.shape.enums.extend(fragment.shape.enums);
+        self.shape.bodies.extend(fragment.shape.bodies);
+        Ok(())
     }
 
     fn check_record(directory: &Path, key: &str) -> Result<(), String> {
@@ -3011,7 +3216,99 @@ impl Policy {
                 ));
             }
         }
+        errors.extend(self.shape.audit(inventory, self));
         errors
+    }
+
+    fn fetched(root: &Path) -> Self {
+        Self::from_git(root, "origin/main")
+            .expect("fetch valid origin main before policy validation")
+    }
+
+    fn from_git(root: &Path, revision: &str) -> Result<Self, String> {
+        let output = Command::new("git")
+            .args(["rev-parse", "--verify", &format!("{revision}^{{commit}}")])
+            .current_dir(root)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!("Cannot resolve policy revision {revision}"));
+        }
+        let captured = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        let revision = captured.trim();
+        let output = Command::new("git")
+            .args(["ls-tree", "-r", "-z", revision])
+            .current_dir(root)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!("Cannot read policy tree {revision}"));
+        }
+        let source = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        let mut paths = BTreeSet::new();
+        for entry in source.split('\0') {
+            if entry.is_empty() {
+                continue;
+            }
+            let (header, path) = entry.split_once('\t').ok_or("Invalid Git tree entry")?;
+            let path = Path::new(path);
+            if path.file_name().is_none_or(|name| name != "ecs-policy.ron") {
+                continue;
+            }
+            if path != Path::new("ecs-policy.ron")
+                && (!["crates", "examples", "website", "patches", "scripts"]
+                    .iter()
+                    .any(|directory| path.starts_with(directory))
+                    || path.components().any(|part| {
+                        matches!(
+                            part.as_os_str().to_str(),
+                            Some(
+                                "target"
+                                    | "node_modules"
+                                    | ".git"
+                                    | ".worktrees"
+                                    | "dist"
+                                    | ".build-tools"
+                            )
+                        )
+                    }))
+            {
+                continue;
+            }
+            if header
+                .split_whitespace()
+                .next()
+                .is_none_or(|mode| !matches!(mode, "100644" | "100755"))
+            {
+                return Err(format!("Policy must be a regular file: {}", path.display()));
+            }
+            paths.insert(path.to_path_buf());
+        }
+        if !paths.remove(Path::new("ecs-policy.ron")) {
+            return Err("Missing root policy in Git tree".into());
+        }
+        let mut policy = Self::read_git(root, revision, Path::new("ecs-policy.ron"))?;
+        policy.check_root()?;
+        for path in paths {
+            policy.append(&path, Self::read_git(root, revision, &path)?)?;
+        }
+        Ok(policy)
+    }
+
+    fn read_git(root: &Path, revision: &str, path: &Path) -> Result<Self, String> {
+        let output = Command::new("git")
+            .args(["show", &format!("{revision}:{}", path.display())])
+            .current_dir(root)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!(
+                "Cannot read policy {} at {revision}",
+                path.display()
+            ));
+        }
+        ron::from_str(&String::from_utf8(output.stdout).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("{}: {error}", path.display()))
     }
 
     fn prove_legacy(&self, root: &Path) {
@@ -3049,6 +3346,1040 @@ impl Policy {
                 legacy.key
             );
         }
+    }
+}
+
+#[test]
+fn domain_signal_enums_require_explicit_external_interface_purposes() {
+    let inventory = Inventory::fixture(
+        "#[derive(Message)] enum Commands { Build(String), Run(String) } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Commands>(); } }",
+    );
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(errors.iter().any(|error| error.contains("enum:Commands")));
+}
+
+#[test]
+fn canonical_phase_purposes_require_real_owners_and_cannot_cover_signal_enums() {
+    for signal in [false, true] {
+        let derive = if signal { "Message" } else { "Clone" };
+        let source = format!(
+            "#[derive({derive})] enum Phase {{ Pending, Complete }} #[derive(Component)] struct State {{ phase: Phase }} fn read(states: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let key = inventory.key("enum:Phase");
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::Phase,
+            owner: inventory.key("struct:State"),
+            reason: "One state owner's pending/completed lifecycle".into(),
+        };
+        let policy = Policy {
+            values: vec![ValueOwner {
+                key: key.clone(),
+                owner: inventory.key("struct:State"),
+                lifetime: "One canonical state lifecycle".into(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            purpose.valid(&inventory.entries[&key], &inventory, &policy),
+            !signal
+        );
+        let mut bogus = purpose;
+        bogus.owner = key.clone();
+        assert!(!bogus.valid(&inventory.entries[&key], &inventory, &policy));
+    }
+}
+
+#[test]
+fn required_phase_purposes_follow_used_bevy_components_and_production_metadata() {
+    for (owner, attributes, phase, import, consumers, expected) in [
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            true,
+        ),
+        (
+            "Component",
+            "#[require(Phase = Phase::Start)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            true,
+        ),
+        (
+            "Component",
+            "#[require(Other)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[fake::require(Phase)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[cfg_attr(test, require(Phase))]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Resource",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Message",
+            "",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "struct Component;",
+            "&Input, &mut Phase",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&Input",
+            false,
+        ),
+        (
+            "Component",
+            "#[require(Phase)]",
+            "Component",
+            "",
+            "&mut Phase",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; {import} #[derive({phase}, Default)] enum Phase {{ #[default] Start, Done }} #[derive({owner})] {attributes} struct Input; fn advance(state: Query<({consumers})>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, advance); }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let key = inventory.key("enum:Phase");
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::Phase,
+            owner: inventory.key("struct:Input"),
+            reason: "One accepted input requires its own coherent lifecycle state".into(),
+        };
+        assert_eq!(
+            purpose.valid(&inventory.entries[&key], &inventory, &Policy::default()),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn scalar_vocabularies_are_owned_values_rather_than_command_payloads() {
+    let inventory = Inventory::fixture(
+        "enum Tone { Plain, Strong, Quiet } #[derive(Component)] struct State { tone: Tone } fn read(states: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    let key = inventory.key("enum:Tone");
+    let purpose = EnumPurpose {
+        key: key.clone(),
+        fingerprint: inventory.entries[&key].fingerprint.clone(),
+        role: EnumRole::Scalar,
+        owner: inventory.key("struct:State"),
+        reason: "One canonical state's display tone".into(),
+    };
+    let policy = Policy {
+        values: vec![ValueOwner {
+            key: key.clone(),
+            owner: inventory.key("struct:State"),
+            lifetime: "One canonical display tone".into(),
+        }],
+        ..Default::default()
+    };
+    assert!(purpose.valid(&inventory.entries[&key], &inventory, &policy));
+    let changed = Inventory::fixture(
+        "enum Tone { Build(String), Run(String) } #[derive(Component)] struct State { tone: Tone } fn read(states: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    assert!(!purpose.valid(&changed.entries[&key], &changed, &Policy::default()));
+}
+
+#[test]
+fn body_budget_counts_code_tokens_and_excludes_comments_and_test_only_blocks() {
+    let source = "fn read() {\n let value = 1;\n // ignored comment\n\n #[cfg(test)] {\n  let a = 2;\n  let b = 3;\n }\n let other = 4;\n}\n";
+    let inventory = Inventory::fixture(source);
+    let entry = &inventory.entries[&inventory.key("fn:read")];
+    assert_eq!(entry.bodies[0].lines, 4);
+    let changed = Inventory::fixture(
+        "fn read() {\n let value = 1;\n /* many\n comment\n lines */\n let other = 4;\n}\n",
+    );
+    assert_eq!(changed.entries[&changed.key("fn:read")].bodies[0].lines, 4);
+}
+
+#[test]
+fn body_budget_rejects_oversized_registered_systems_and_associated_dispatchers() {
+    let statements = " let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "fn read(state: Query<&State>) {{\n{statements}}}\n#[derive(Component)] struct State; struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }} impl State {{ fn dispatch(&self) {{\n{statements}}} }}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(errors.iter().any(|error| error.contains("fn:read: body")));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("::dispatch: body"))
+    );
+}
+
+#[test]
+fn plugin_and_renderer_names_do_not_bypass_body_budgets_without_framework_bindings() {
+    let statements = " let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "trait Plugin {{}} struct Root; impl Plugin for Root {{ fn build(&self) {{\n{statements}}} }} #[component] fn Screen() {{\n{statements}}}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &Policy::default());
+    assert!(errors.iter().any(|error| error.contains("::build: body")));
+    assert!(errors.iter().any(|error| error.contains("fn:Screen: body")));
+}
+
+#[test]
+fn shape_debt_is_exact_and_cannot_cover_changed_or_deleted_items() {
+    let source = "enum Commands { Build, Run }";
+    let inventory = Inventory::fixture(source);
+    let key = inventory.key("enum:Commands");
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![ShapeDebt {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            issue: "VMX-253".into(),
+            finding: "AU-13".into(),
+        }],
+        ..Default::default()
+    };
+    assert!(shape.audit(&inventory, &Policy::default()).is_empty());
+    assert!(
+        shape
+            .audit(
+                &Inventory::fixture("enum Commands { Build, Run, Stop }"),
+                &Policy::default()
+            )
+            .iter()
+            .any(|error| error.contains("stale/invalid shape debt"))
+    );
+    assert!(
+        shape
+            .audit(&Inventory::fixture(""), &Policy::default())
+            .iter()
+            .any(|error| error.contains("stale/invalid shape debt"))
+    );
+}
+
+#[test]
+fn shape_debt_fingerprints_are_proven_against_the_fixed_git_snapshot() {
+    let root = Workspace::current();
+    let path = "crates/feature/vmux_dx/src/work.rs";
+    let output = Command::new("git")
+        .args(["show", &format!("{FROZEN_SHAPE_REVISION}:{path}")])
+        .current_dir(&root.0)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "required frozen Git fixture is missing"
+    );
+    let source = String::from_utf8(output.stdout).unwrap();
+    let mut inventory = Inventory::default();
+    inventory.source(path, &source);
+    let key = inventory.key("enum:Work");
+    let mut shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![ShapeDebt {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            issue: "VMX-253".into(),
+            finding: "AU-13".into(),
+        }],
+        ..Default::default()
+    };
+    shape.prove(&root.0);
+    shape.debt[0].fingerprint = "0000000000000000".into();
+    assert!(std::panic::catch_unwind(|| shape.prove(&root.0)).is_err());
+    inventory.source("new.rs", "enum NewCommand { Build, Run }");
+    let key = inventory.key("enum:NewCommand");
+    shape.debt[0].key = key.clone();
+    shape.debt[0].fingerprint = inventory.entries[&key].fingerprint.clone();
+    assert!(std::panic::catch_unwind(|| shape.prove(&root.0)).is_err());
+}
+
+#[test]
+fn real_plugin_build_only_exempts_framework_installation_statements() {
+    let installations = "app.init_resource::<State>();\n".repeat(101);
+    let business = "let value = 1;\n".repeat(101);
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    for (body, rejected) in [(installations, false), (business, true)] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::Plugin; struct Root; struct State; impl Plugin for Root {{ fn build(&self, app: &mut bevy_app::App) {{\n{body}}} }}"
+        ));
+        assert_eq!(
+            shape
+                .audit(&inventory, &Policy::default())
+                .iter()
+                .any(|error| error.contains("::build: body")),
+            rejected
+        );
+    }
+}
+
+#[test]
+fn inline_system_closures_cannot_hide_inside_large_plugin_installation_bodies() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "use bevy_app::Plugin; struct Root; impl Plugin for Root {{ fn build(&self, app: &mut bevy_app::App) {{ app.add_systems(Update, || {{\n{statements}}}); }} }}"
+    ));
+    let shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        ..Default::default()
+    };
+    assert!(
+        shape
+            .audit(&inventory, &Policy::default())
+            .iter()
+            .any(|error| error.contains("::build: body"))
+    );
+}
+
+#[test]
+fn mechanical_body_exceptions_are_exact_not_global_or_stale_waivers() {
+    let statements = "let value = 1;\n".repeat(101);
+    let inventory = Inventory::fixture(&format!(
+        "fn read() {{\n{statements}}}\nfn other() {{\n{statements}}}"
+    ));
+    let key = inventory.key("fn:read");
+    let boundary = Boundary::fixture(&inventory, "fn:read");
+    let policy = Policy {
+        boundaries: vec![boundary],
+        ..Default::default()
+    };
+    let mut shape = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        bodies: vec![BodyException {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].bodies[0].fingerprint.clone(),
+            boundary: key.clone(),
+            reason: "one bounded native format operation".into(),
+        }],
+        ..Default::default()
+    };
+    let errors = shape.audit(&inventory, &policy);
+    assert!(!errors.iter().any(|error| error.contains("fn:read")));
+    assert!(errors.iter().any(|error| error.contains("fn:other: body")));
+    shape.bodies[0].fingerprint = "stale".into();
+    assert!(
+        shape
+            .audit(&inventory, &policy)
+            .iter()
+            .any(|error| error.contains("invalid mechanical body exception"))
+    );
+    shape.bodies[0].fingerprint = inventory.entries[&key].bodies[0].fingerprint.clone();
+    shape.bodies[0].boundary = inventory.key("fn:other");
+    assert!(
+        shape
+            .audit(&inventory, &policy)
+            .iter()
+            .any(|error| error.contains("invalid mechanical body exception"))
+    );
+}
+
+#[test]
+fn ui_encoder_purposes_require_the_real_framework_attribute_and_exact_boundary() {
+    for fake in [false, true] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/util/vmux_api/src/lib.rs",
+            "pub use vmux_macro::ui_event_variants;",
+        );
+        let local = if fake {
+            "mod vmux_api { pub use fake_macros::ui_event_variants; }"
+        } else {
+            ""
+        };
+        inventory.source(
+            "fixture.rs",
+            &format!("{local} #[vmux_api::ui_event_variants] enum Operation {{ Read, Write }}"),
+        );
+        inventory.resolve_usage();
+        let key = inventory.key("enum:Operation");
+        let boundary = Boundary::fixture(&inventory, "enum:Operation");
+        let policy = Policy {
+            boundaries: vec![boundary],
+            ..Default::default()
+        };
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::UiEncoder,
+            owner: key.clone(),
+            reason: "fixed translation to separately typed UI events".into(),
+        };
+        assert_eq!(
+            purpose.valid(&inventory.entries[&key], &inventory, &policy),
+            !fake
+        );
+    }
+}
+
+#[test]
+fn retired_shape_debt_cannot_return_even_if_the_old_declaration_still_exists() {
+    let inventory = Inventory::fixture("enum A { One, Two } enum B { One, Two }");
+    let a = inventory.key("enum:A");
+    let b = inventory.key("enum:B");
+    let make = |key: &str| ShapeDebt {
+        key: key.into(),
+        fingerprint: inventory.entries[key].fingerprint.clone(),
+        issue: "VMX-253".into(),
+        finding: "AU-13".into(),
+    };
+    let main = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![make(&a)],
+        ..Default::default()
+    };
+    let mut branch = ShapePolicy {
+        revision: FROZEN_SHAPE_REVISION.into(),
+        debt: vec![make(&a)],
+        ..Default::default()
+    };
+    assert!(branch.monotonic_from(&main));
+    branch.debt.push(make(&b));
+    assert!(!branch.monotonic_from(&main));
+    branch.debt.pop();
+    branch.debt[0].fingerprint = "changed".into();
+    assert!(!branch.monotonic_from(&main));
+}
+
+#[test]
+fn io_component_multiplexers_cannot_claim_a_foreign_format_boundary_without_format_evidence() {
+    let inventory = Inventory::fixture(
+        "#[derive(Component)] enum Effect { Read(String), Copy(String, String) }",
+    );
+    let key = inventory.key("enum:Effect");
+    let boundary = Boundary::fixture(&inventory, "enum:Effect");
+    let policy = Policy {
+        boundaries: vec![boundary],
+        ..Default::default()
+    };
+    let purpose = EnumPurpose {
+        key: key.clone(),
+        fingerprint: inventory.entries[&key].fingerprint.clone(),
+        role: EnumRole::Boundary,
+        owner: key.clone(),
+        reason: "generic IO dispatcher".into(),
+    };
+    assert!(!purpose.valid(&inventory.entries[&key], &inventory, &policy));
+}
+
+const FROZEN_SHAPE_REVISION: &str = "963f3f40e33c78f61bc55ead5e9a6a9f01b65081";
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+struct ShapePolicy {
+    revision: String,
+    debt: Vec<ShapeDebt>,
+    enums: Vec<EnumPurpose>,
+    bodies: Vec<BodyException>,
+}
+
+impl ShapePolicy {
+    fn audit(&self, inventory: &Inventory, policy: &Policy) -> Vec<String> {
+        if self.revision.is_empty() {
+            return Vec::new();
+        }
+        let mut errors = Vec::new();
+        let mut covered = BTreeSet::new();
+        for debt in &self.debt {
+            let kind_matches = match debt.finding.as_str() {
+                "AU-13" => inventory
+                    .entries
+                    .get(&debt.key)
+                    .is_some_and(|entry| entry.enum_shape.is_some()),
+                "AU-14" => inventory.body_owner(&debt.key).is_some(),
+                _ => false,
+            };
+            if !kind_matches
+                || !covered.insert(debt.key.clone())
+                || debt.issue != "VMX-253"
+                || !matches!(debt.finding.as_str(), "AU-13" | "AU-14")
+                || !inventory.shape_matches(&debt.key, &debt.fingerprint)
+            {
+                errors.push(format!("remove stale/invalid shape debt {}", debt.key));
+            }
+        }
+        for purpose in &self.enums {
+            let valid = inventory.entries.get(&purpose.key).is_some_and(|entry| {
+                entry.fingerprint == purpose.fingerprint && purpose.valid(entry, inventory, policy)
+            });
+            if !covered.insert(purpose.key.clone()) || !valid {
+                errors.push(format!("invalid enum purpose {}", purpose.key));
+            }
+        }
+        for exception in &self.bodies {
+            let valid = inventory.shape_matches(&exception.key, &exception.fingerprint)
+                && !exception.reason.trim().is_empty()
+                && policy.boundaries.iter().any(|boundary| {
+                    boundary.key == exception.boundary
+                        && boundary.valid()
+                        && inventory.matches(&boundary.key, &boundary.fingerprint)
+                        && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                        && inventory.body_owner(&exception.key).is_some_and(|entry| {
+                            entry.key == boundary.key
+                                || inventory
+                                    .entries
+                                    .get(&boundary.key)
+                                    .is_some_and(|owner| inventory.owner_references(owner, entry))
+                        })
+                });
+            if !covered.insert(exception.key.clone()) || !valid {
+                errors.push(format!(
+                    "invalid mechanical body exception {}",
+                    exception.key
+                ));
+            }
+        }
+        for entry in inventory.entries.values() {
+            if !entry.shape_source()
+                || policy
+                    .upstream
+                    .iter()
+                    .any(|upstream| upstream.entries.get(&entry.key) == Some(&entry.fingerprint))
+            {
+                continue;
+            }
+            if let Some(shape) = &entry.enum_shape
+                && !covered.contains(&entry.key)
+            {
+                errors.push(format!(
+                    "{}: declare its enum purpose ({} variants) [fingerprint: {}]",
+                    entry.key, shape.variants, entry.fingerprint
+                ));
+            }
+            if entry.renderer
+                && !inventory.registered_keys.contains(&entry.key)
+                && entry.contract_paths.iter().any(|path| {
+                    inventory
+                        .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("component")
+                })
+            {
+                continue;
+            }
+            for body in &entry.bodies {
+                if !body.production
+                    || body.lines <= 100
+                    || covered.contains(&body.key)
+                    || body.composition
+                        && body.name == "build"
+                        && entry.plugin_path.as_deref().is_some_and(|path| {
+                            inventory
+                                .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                                .as_deref()
+                                == Some("Plugin")
+                        })
+                {
+                    continue;
+                }
+                errors.push(format!(
+                    "{}: body has {} production token lines; maximum is 100 [fingerprint: {}]",
+                    body.key, body.lines, body.fingerprint
+                ));
+            }
+        }
+        errors
+    }
+
+    fn monotonic_from(&self, main: &Self) -> bool {
+        if main.revision.is_empty() {
+            return true;
+        }
+        let allowed: BTreeMap<_, _> = main
+            .debt
+            .iter()
+            .map(|debt| (&debt.key, &debt.fingerprint))
+            .collect();
+        self.debt.iter().all(|debt| {
+            allowed
+                .get(&debt.key)
+                .is_some_and(|fingerprint| *fingerprint == &debt.fingerprint)
+        })
+    }
+
+    fn prove(&self, root: &Path) {
+        assert_eq!(
+            self.revision, FROZEN_SHAPE_REVISION,
+            "shape debt revision is immutable"
+        );
+        let main = Policy::fetched(root);
+        assert!(
+            self.monotonic_from(&main.shape),
+            "retired shape debt cannot be restored or refreshed"
+        );
+        let mut paths = BTreeSet::new();
+        for debt in &self.debt {
+            paths.insert(debt.key.split('|').next().unwrap());
+        }
+        let mut historical = Inventory::default();
+        for path in paths {
+            let output = Command::new("git")
+                .args(["show", &format!("{}:{path}", self.revision)])
+                .current_dir(root)
+                .output()
+                .expect("frozen shape source must be available");
+            assert!(
+                output.status.success(),
+                "missing frozen shape source {path}"
+            );
+            historical.source(
+                path,
+                &String::from_utf8(output.stdout).expect("UTF-8 shape source"),
+            );
+        }
+        for debt in &self.debt {
+            assert!(
+                historical.shape_matches(&debt.key, &debt.fingerprint),
+                "shape debt cannot grow or be refreshed: {}",
+                debt.key
+            );
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ShapeDebt {
+    key: String,
+    fingerprint: String,
+    issue: String,
+    finding: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EnumPurpose {
+    key: String,
+    fingerprint: String,
+    role: EnumRole,
+    owner: String,
+    reason: String,
+}
+
+impl EnumPurpose {
+    fn valid(&self, entry: &Declaration, inventory: &Inventory, policy: &Policy) -> bool {
+        let Some(shape) = &entry.enum_shape else {
+            return false;
+        };
+        if self.fingerprint != entry.fingerprint
+            || self.reason.trim().is_empty()
+            || !entry.shape_source()
+        {
+            return false;
+        }
+        match self.role {
+            EnumRole::UiEncoder => {
+                entry.contract_paths.iter().any(|path| {
+                    inventory
+                        .contract_kind(&entry.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("ui_event_variants")
+                }) && policy.boundaries.iter().any(|boundary| {
+                    boundary.key == self.owner
+                        && boundary.valid()
+                        && inventory.matches(&boundary.key, &boundary.fingerprint)
+                        && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                        && inventory.entries.get(&boundary.key).is_some_and(|owner| {
+                            owner.key == entry.key || inventory.owner_references(owner, entry)
+                        })
+                })
+            }
+            EnumRole::Boundary => {
+                (!(shape.component || shape.signal || inventory.enum_job(entry))
+                    || shape.fixed_format)
+                    && policy.boundaries.iter().any(|boundary| {
+                        boundary.key == self.owner
+                            && boundary.valid()
+                            && inventory.matches(&boundary.key, &boundary.fingerprint)
+                            && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                            && inventory.entries.get(&boundary.key).is_some_and(|owner| {
+                                owner.key == entry.key || inventory.owner_references(owner, entry)
+                            })
+                    })
+            }
+            EnumRole::Phase | EnumRole::Scalar | EnumRole::Projection => {
+                if shape.signal || self.role != EnumRole::Projection && shape.payloads > 0 {
+                    return false;
+                }
+                let Some(owner) = inventory.entries.get(&self.owner) else {
+                    return false;
+                };
+                if !matches!(owner.kind, Kind::Struct)
+                    || owner.key == entry.key
+                    || !(inventory.owner_references(owner, entry)
+                        || self.role == EnumRole::Phase
+                            && inventory.required_component(owner, entry))
+                    || !inventory.canonical(owner, policy, &mut BTreeSet::new())
+                {
+                    return false;
+                }
+                if self.role == EnumRole::Projection {
+                    return owner.projection && !entry.ecs;
+                }
+                owner.ecs && inventory.used(owner)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+enum EnumRole {
+    Phase,
+    Scalar,
+    Projection,
+    UiEncoder,
+    Boundary,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BodyException {
+    key: String,
+    fingerprint: String,
+    boundary: String,
+    reason: String,
+}
+
+struct EnumShape {
+    variants: usize,
+    payloads: usize,
+    signal: bool,
+    component: bool,
+    fixed_format: bool,
+}
+
+impl EnumShape {
+    fn of(value: &syn::ItemEnum) -> Self {
+        let mut variants = 0;
+        let mut payloads = 0;
+        for variant in &value.variants {
+            if Usage::test_only(&variant.attrs) {
+                continue;
+            }
+            variants += 1;
+            if !matches!(variant.fields, syn::Fields::Unit) {
+                payloads += 1;
+            }
+        }
+        let mut signal = false;
+        let mut component = false;
+        let mut fixed_format = false;
+        for attribute in Declarations::metadata(&value.attrs, true) {
+            if attribute.path().segments.last().is_some_and(|part| {
+                matches!(
+                    part.ident.to_string().as_str(),
+                    "ui_event" | "service_message" | "agent"
+                )
+            }) {
+                signal = true;
+            }
+            fixed_format |= attribute.path().is_ident("repr") || attribute.path().is_ident("serde");
+            if !attribute.path().is_ident("derive") {
+                continue;
+            }
+            let syn::Meta::List(list) = attribute else {
+                continue;
+            };
+            let parser = syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated;
+            let Ok(paths) = parser.parse2(list.tokens) else {
+                continue;
+            };
+            for path in paths {
+                component |= path
+                    .segments
+                    .last()
+                    .is_some_and(|part| part.ident == "Component");
+                fixed_format |= path.segments.last().is_some_and(|part| {
+                    matches!(
+                        part.ident.to_string().as_str(),
+                        "Serialize" | "Deserialize" | "Archive"
+                    )
+                });
+                signal |= path.segments.last().is_some_and(|part| {
+                    matches!(
+                        part.ident.to_string().as_str(),
+                        "Message" | "Event" | "EntityEvent"
+                    )
+                });
+            }
+        }
+        Self {
+            variants,
+            payloads,
+            signal,
+            component,
+            fixed_format,
+        }
+    }
+}
+
+struct BodyShape {
+    key: String,
+    name: String,
+    fingerprint: String,
+    lines: usize,
+    production: bool,
+    composition: bool,
+}
+
+impl BodyShape {
+    fn items(key: &str, item: Option<&Item>) -> Vec<Self> {
+        let mut bodies = Vec::new();
+        match item {
+            Some(Item::Fn(value)) => bodies.push(Self::of(
+                key.to_string(),
+                value.sig.ident.to_string(),
+                &value,
+                &value.block,
+                &value.attrs,
+            )),
+            Some(Item::Impl(value)) => {
+                for item in &value.items {
+                    let syn::ImplItem::Fn(method) = item else {
+                        continue;
+                    };
+                    let mut body_key = format!("{key}::{}", method.sig.ident);
+                    let mut ordinal = 2;
+                    while bodies.iter().any(|body| body.key == body_key) {
+                        body_key = format!("{key}::{}#{ordinal}", method.sig.ident);
+                        ordinal += 1;
+                    }
+                    bodies.push(Self::of(
+                        body_key,
+                        method.sig.ident.to_string(),
+                        method,
+                        &method.block,
+                        &method.attrs,
+                    ));
+                }
+            }
+            _ => {}
+        }
+        bodies
+    }
+
+    fn registration(block: &syn::Block, argument: &str) -> bool {
+        let mut footprint = Footprint::default();
+        footprint.visit_block(block);
+        !footprint.closure
+            && block.stmts.iter().all(|statement| match statement {
+                syn::Stmt::Expr(expression, _) => Self::installation(expression, argument),
+                _ => false,
+            })
+    }
+
+    fn installation(expression: &syn::Expr, argument: &str) -> bool {
+        match expression {
+            syn::Expr::Block(value) => Self::registration(&value.block, argument),
+            syn::Expr::If(value) => {
+                Self::condition(&value.cond, argument)
+                    && Self::registration(&value.then_branch, argument)
+                    && value
+                        .else_branch
+                        .as_ref()
+                        .is_none_or(|(_, branch)| Self::installation(branch, argument))
+            }
+            syn::Expr::MethodCall(value) => {
+                if !matches!(
+                    value.method.to_string().as_str(),
+                    "add_plugins"
+                        | "add_systems"
+                        | "add_observer"
+                        | "add_message"
+                        | "add_event"
+                        | "init_resource"
+                        | "insert_resource"
+                        | "register_type"
+                        | "configure_sets"
+                        | "register_required_components"
+                ) {
+                    return false;
+                }
+                match value.receiver.as_ref() {
+                    syn::Expr::Path(path) => path.path.is_ident(argument),
+                    other => Self::installation(other, argument),
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn condition(expression: &syn::Expr, argument: &str) -> bool {
+        match expression {
+            syn::Expr::Lit(_) | syn::Expr::Path(_) | syn::Expr::Field(_) => true,
+            syn::Expr::Unary(value) => Self::condition(&value.expr, argument),
+            syn::Expr::Binary(value) => {
+                Self::condition(&value.left, argument) && Self::condition(&value.right, argument)
+            }
+            syn::Expr::Paren(value) => Self::condition(&value.expr, argument),
+            syn::Expr::Macro(value) => value.mac.path.is_ident("cfg"),
+            syn::Expr::MethodCall(value) => {
+                value.method == "is_plugin_added"
+                    && matches!(value.receiver.as_ref(), syn::Expr::Path(path) if path.path.is_ident(argument))
+            }
+            _ => false,
+        }
+    }
+
+    fn of(
+        key: String,
+        name: String,
+        item: &impl ToTokens,
+        block: &syn::Block,
+        attributes: &[Attribute],
+    ) -> Self {
+        let mut footprint = Footprint::default();
+        footprint.tokens(block.to_token_stream());
+        footprint.visit_block(block);
+        footprint
+            .lines
+            .retain(|line| !footprint.test_lines.contains(line));
+        let tokens = item.to_token_stream();
+        let method = syn::parse2::<syn::ImplItemFn>(tokens.clone()).ok();
+        let argument = method.as_ref().and_then(|method| {
+            method.sig.inputs.iter().find_map(|input| {
+                let syn::FnArg::Typed(input) = input else {
+                    return None;
+                };
+                let syn::Pat::Ident(pattern) = input.pat.as_ref() else {
+                    return None;
+                };
+                Some(pattern.ident.to_string())
+            })
+        });
+        Self {
+            key,
+            name,
+            composition: argument.is_some_and(|argument| Self::registration(block, &argument)),
+            fingerprint: Declaration::fingerprint(&tokens.to_string()),
+            lines: footprint.lines.len(),
+            production: !Usage::test_only(attributes)
+                && !Declarations::metadata(attributes, false)
+                    .iter()
+                    .any(|meta| meta.path().is_ident("test")),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Footprint {
+    lines: BTreeSet<usize>,
+    test_lines: BTreeSet<usize>,
+    closure: bool,
+}
+
+impl Footprint {
+    fn tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        for token in tokens {
+            match token {
+                proc_macro2::TokenTree::Group(group) => {
+                    self.lines.insert(group.span_open().start().line);
+                    self.lines.insert(group.span_close().start().line);
+                    self.tokens(group.stream());
+                }
+                other => {
+                    self.lines
+                        .extend(other.span().start().line..=other.span().end().line);
+                }
+            }
+        }
+    }
+
+    fn ignore(&mut self, value: &impl syn::spanned::Spanned) {
+        self.test_lines
+            .extend(value.span().start().line..=value.span().end().line);
+    }
+}
+
+impl<'ast> Visit<'ast> for Footprint {
+    fn visit_expr_closure(&mut self, value: &'ast syn::ExprClosure) {
+        self.closure = true;
+        visit::visit_expr_closure(self, value);
+    }
+
+    fn visit_item(&mut self, value: &'ast Item) {
+        if Usage::test_only(Usage::item_attributes(value)) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_item(self, value);
+    }
+
+    fn visit_expr(&mut self, value: &'ast syn::Expr) {
+        if Usage::test_only(Usage::expression_attributes(value)) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_expr(self, value);
+    }
+
+    fn visit_local(&mut self, value: &'ast syn::Local) {
+        if Usage::test_only(&value.attrs) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_local(self, value);
+    }
+
+    fn visit_arm(&mut self, value: &'ast syn::Arm) {
+        if Usage::test_only(&value.attrs) {
+            self.ignore(value);
+            return;
+        }
+        visit::visit_arm(self, value);
     }
 }
 
@@ -3378,6 +4709,8 @@ struct Declaration {
     name: String,
     kind: Kind,
     fingerprint: String,
+    enum_shape: Option<EnumShape>,
+    bodies: Vec<BodyShape>,
     ecs: bool,
     parameter: bool,
     plugin: bool,
@@ -3389,6 +4722,8 @@ struct Declaration {
     relation_target: Option<String>,
     relation_source: Option<String>,
     component_hooks: BTreeSet<String>,
+    component_path: Option<String>,
+    required_components: BTreeSet<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
     projection: bool,
@@ -3414,6 +4749,10 @@ struct Declaration {
 }
 
 impl Declaration {
+    fn shape_source(&self) -> bool {
+        self.production && !self.test && !self.path.contains("/tests/")
+    }
+
     fn unit_mutex(value: &Type) -> bool {
         let Type::Path(value) = value else {
             return false;
@@ -3464,6 +4803,51 @@ struct Inventory {
 }
 
 impl Inventory {
+    fn enum_job(&self, entry: &Declaration) -> bool {
+        self.entries.values().any(|implementation| {
+            matches!(implementation.kind, Kind::Impl)
+                && implementation
+                    .owner
+                    .as_deref()
+                    .and_then(|owner| {
+                        self.resolve(&implementation.namespace, owner, &mut BTreeSet::new())
+                    })
+                    .is_some_and(|owner| owner.key == entry.key)
+                && implementation.reference_paths.iter().any(|path| {
+                    self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|target| {
+                            target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                        })
+                })
+        })
+    }
+
+    fn body_owner(&self, key: &str) -> Option<&Declaration> {
+        if let Some(entry) = self.entries.get(key)
+            && entry.bodies.iter().any(|body| body.key == key)
+        {
+            return Some(entry);
+        }
+        let (owner, _) = key.rsplit_once("::")?;
+        self.entries
+            .get(owner)
+            .filter(|entry| entry.bodies.iter().any(|body| body.key == key))
+    }
+
+    fn shape_matches(&self, key: &str, fingerprint: &str) -> bool {
+        if let Some(entry) = self.entries.get(key)
+            && entry.enum_shape.is_some()
+        {
+            return entry.fingerprint == fingerprint;
+        }
+        self.body_owner(key).is_some_and(|entry| {
+            entry
+                .bodies
+                .iter()
+                .any(|body| body.key == key && body.fingerprint == fingerprint)
+        })
+    }
+
     fn workspace(root: &Path) -> Self {
         let mut inventory = Self::default();
         for directory in ["crates", "examples", "website", "patches", "scripts"] {
@@ -3578,6 +4962,8 @@ impl Inventory {
                 name: path.into(),
                 kind: Kind::Script,
                 fingerprint: Declaration::fingerprint(source),
+                enum_shape: None,
+                bodies: Vec::new(),
                 ecs: false,
                 parameter: false,
                 plugin: false,
@@ -3589,6 +4975,8 @@ impl Inventory {
                 relation_target: None,
                 relation_source: None,
                 component_hooks: BTreeSet::new(),
+                component_path: None,
+                required_components: BTreeSet::new(),
                 contract: false,
                 contract_paths: BTreeSet::new(),
                 projection: false,
@@ -3996,6 +5384,33 @@ impl Inventory {
         self.used_keys.contains(&entry.key)
     }
 
+    fn required_component(&self, owner: &Declaration, value: &Declaration) -> bool {
+        if !self.used(owner) || !self.used(value) {
+            return false;
+        }
+        for component in [owner, value] {
+            let Some(path) = &component.component_path else {
+                return false;
+            };
+            if self
+                .framework_handle(&component.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+                != Some("Component")
+            {
+                return false;
+            }
+        }
+        for path in &owner.required_components {
+            if self
+                .resolve(&owner.namespace, path, &mut BTreeSet::new())
+                .is_some_and(|required| required.key == value.key)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     fn owner_references(&self, owner: &Declaration, value: &Declaration) -> bool {
         let key = (owner.key.clone(), value.key.clone());
         if let Some(referenced) = self.owner_reference_cache.borrow().get(&key) {
@@ -4248,6 +5663,7 @@ impl Inventory {
             let canonical = format!("{root}::{suffix}");
             let (prefix, name) = canonical.rsplit_once("::")?;
             let valid = match name {
+                "component" => matches!(prefix, "dioxus" | "dioxus::prelude" | "dioxus_core_macro"),
                 "App" | "Plugin" => matches!(
                     prefix,
                     "bevy_app" | "bevy_app::prelude" | "bevy::app" | "bevy::prelude"
@@ -4263,6 +5679,15 @@ impl Inventory {
                             | "bevy::prelude"
                     )
                 }
+                "Component" => matches!(
+                    prefix,
+                    "bevy_ecs::component"
+                        | "bevy_ecs::prelude"
+                        | "bevy_ecs_macros"
+                        | "bevy::ecs::component"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
                 "On" => matches!(
                     prefix,
                     "bevy_ecs::observer"
@@ -4601,6 +6026,7 @@ impl Inventory {
                     | "string_id"
                     | "app_plugin"
                     | "service_message"
+                    | "ui_event_variants"
             )
         {
             return None;
@@ -5584,6 +7010,8 @@ impl Declarations<'_> {
         let mut relation_source = None;
         let mut component = false;
         let mut component_hooks = BTreeSet::new();
+        let mut component_path = None;
+        let mut required_components = BTreeSet::new();
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
             .iter()
@@ -5594,6 +7022,28 @@ impl Declarations<'_> {
                 attribute.push(segment.ident.unraw().to_string());
             }
             contract_paths.insert(attribute.join("::"));
+            if attr.path().is_ident("require")
+                && let syn::Meta::List(list) = &attr
+            {
+                let parser =
+                    syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
+                if let Ok(inputs) = parser.parse2(list.tokens.clone()) {
+                    for input in inputs {
+                        let path = match input {
+                            syn::Expr::Path(path) => path,
+                            syn::Expr::Assign(value) => {
+                                let syn::Expr::Path(path) = *value.left else {
+                                    continue;
+                                };
+                                path
+                            }
+                            _ => continue,
+                        };
+                        required_components
+                            .insert(path.path.to_token_stream().to_string().replace(' ', ""));
+                    }
+                }
+            }
             if attr.path().is_ident("component")
                 && let syn::Meta::List(list) = &attr
             {
@@ -5662,10 +7112,14 @@ impl Declarations<'_> {
                     continue;
                 };
                 for path in paths {
-                    component |= path
+                    if path
                         .segments
                         .last()
-                        .is_some_and(|segment| segment.ident == "Component");
+                        .is_some_and(|segment| segment.ident == "Component")
+                    {
+                        component = true;
+                        component_path = Some(path.to_token_stream().to_string().replace(' ', ""));
+                    }
                     if path.segments.last().is_some_and(|segment| {
                         matches!(
                             segment.ident.to_string().as_str(),
@@ -5722,6 +7176,7 @@ impl Declarations<'_> {
             key = format!("{base}#{ordinal}");
             ordinal += 1;
         }
+        let parsed_item = syn::parse2::<Item>(tokens.to_token_stream()).ok();
         let declaration = Declaration {
             key: key.clone(),
             path: self.path.into(),
@@ -5729,6 +7184,11 @@ impl Declarations<'_> {
             name,
             kind,
             fingerprint: Declaration::fingerprint(&tokens.to_string()),
+            enum_shape: match &parsed_item {
+                Some(Item::Enum(value)) => Some(EnumShape::of(value)),
+                _ => None,
+            },
+            bodies: BodyShape::items(&key, parsed_item.as_ref()),
             ecs,
             parameter,
             plugin,
@@ -5736,14 +7196,14 @@ impl Declarations<'_> {
             parameter_path,
             plugin_children: references.plugins,
             registered_systems: references.registered_systems,
-            field_types: match syn::parse2::<Item>(tokens.to_token_stream()) {
-                Ok(Item::Struct(value)) => value
+            field_types: match &parsed_item {
+                Some(Item::Struct(value)) => value
                     .fields
                     .iter()
                     .filter(|field| !Usage::test_only(&field.attrs))
                     .map(|field| field.ty.clone())
                     .collect(),
-                Ok(Item::Enum(value)) => value
+                Some(Item::Enum(value)) => value
                     .variants
                     .iter()
                     .filter(|variant| !Usage::test_only(&variant.attrs))
@@ -5751,8 +7211,8 @@ impl Declarations<'_> {
                     .filter(|field| !Usage::test_only(&field.attrs))
                     .map(|field| field.ty.clone())
                     .collect(),
-                Ok(Item::Type(value)) => vec![*value.ty],
-                Ok(Item::Fn(value)) => value
+                Some(Item::Type(value)) => vec![*value.ty.clone()],
+                Some(Item::Fn(value)) => value
                     .sig
                     .inputs
                     .iter()
@@ -5768,6 +7228,8 @@ impl Declarations<'_> {
             relation_target,
             relation_source,
             component_hooks,
+            component_path,
+            required_components,
             contract: false,
             contract_paths,
             projection: false,

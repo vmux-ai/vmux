@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_knowledge/src/driver/agent_config.rs|impl AgentConfigAccess|static:ACCESS", fingerprint: "880ca8594237c094", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/driver/agent_config.rs|tests|fn:paths", fingerprint: "7fd130f101da2b3e", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/driver/agent_config.rs||const:CODEX_PROJECT_DOC_HEADROOM", fingerprint: "2d14ee17f91507e2", issue: "VMX-253"),
@@ -132,4 +133,11 @@
     (key: "crates/feature/vmux_knowledge/src/tool.rs||fn:write", fingerprint: "7a63eb7d7e382092", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/tool.rs||impl:Plugin for KnowledgeToolPlugin", fingerprint: "663027d7c185d62d", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/tool.rs||struct:KnowledgeToolPlugin", fingerprint: "420174ba23add61d", issue: "VMX-253"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||enum:Privacy", fingerprint: "cb6dadcfdf46464c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||enum:PropertySlot", fingerprint: "0b00ebb24877f299", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

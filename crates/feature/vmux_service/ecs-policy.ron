@@ -1,4 +1,5 @@
-(legacy: [
+(
+legacy: [
     (key: "crates/feature/vmux_service/src/host/bundle.rs||impl:AppBundle", fingerprint: "7e25dfd2e6b04039", issue: "VMX-253"),
     (key: "crates/feature/vmux_service/src/host/bundle.rs||impl:TryFrom < & Path > for AppBundle", fingerprint: "91c63429ed16fe34", issue: "VMX-253"),
     (key: "crates/feature/vmux_service/src/host/bundle.rs||struct:AppBundle", fingerprint: "671bb1bf79298600", issue: "VMX-253"),
@@ -264,11 +265,28 @@
     (key: "crates/feature/vmux_service/tests/selection.rs||static:PTY_TEST_LOCK", fingerprint: "37fe00f854b72cce", issue: "VMX-253"),
     (key: "crates/feature/vmux_service/tests/selection.rs||struct:TestProcess", fingerprint: "db4721dd1b9aaeff", issue: "VMX-253"),
     (key: "crates/feature/vmux_service/tests/selection.rs||struct:ViewportPatchProbe", fingerprint: "2cd1a9a169d8e2c7", issue: "VMX-253"),
-], boundaries: [
+],
+boundaries: [
     (key: "crates/feature/vmux_service/src/host/plugin.rs||fn:register", fingerprint: "ecf62dba516123f4", interface: "macOS launchd/SMAppService registration IO", input: "ECS: crates/feature/vmux_service/src/host/plugin.rs||struct:ServiceRegistration", output: "ECS: crates/feature/vmux_service/src/host/daemon.rs||struct:DaemonBinary", lifetime: "one typed service registration invocation", bounds: "execute the existing canonical registration plan against native service handles and filesystem entries", teardown: "native IO results return to the existing registration lifecycle; temporary path scans drop on completion", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_service/src/host/cleanup.rs||struct:LegacyRegistrations", owner: Some("crates/feature/vmux_service/src/host/plugin.rs||fn:register"), fingerprint: "0517cfd5087ba09e", interface: "native LaunchAgents filesystem scan and launchctl cleanup", input: "ECS: crates/feature/vmux_service/src/host/daemon.rs||struct:DaemonBinary", output: "external: removed legacy registrations in the selected product namespace", lifetime: "one bounded legacy registration scan during service registration", bounds: "native path entries and launchctl handles only; the owning registration plan chooses when cleanup runs", teardown: "path entries are consumed by removal or drop when the scan returns", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_service/src/host/cleanup.rs||impl:LegacyRegistrations", owner: Some("crates/feature/vmux_service/src/host/plugin.rs||fn:register"), fingerprint: "5e337a0b5936ec42", interface: "native LaunchAgents filesystem scan and launchctl cleanup", input: "ECS: crates/feature/vmux_service/src/host/daemon.rs||struct:DaemonBinary", output: "external: removed legacy registrations in the selected product namespace", lifetime: "one bounded legacy registration scan during service registration", bounds: "native path entries and launchctl handles only; the owning registration plan chooses when cleanup runs", teardown: "path entries are consumed by removal or drop when the scan returns", architecture: "ECS ownership boundaries"),
-], values: [
+],
+values: [
     (key: "crates/feature/vmux_service/src/host/launch_agent.rs||struct:LaunchAgent", owner: "crates/feature/vmux_service/src/host/plugin.rs||struct:Lifetime", lifetime: "one native service lifetime and its launchd handle identity"),
     (key: "crates/feature/vmux_service/src/host/bundle.rs||const:EMBEDDED_AGENT_PLIST", owner: "crates/feature/vmux_service/src/host/daemon.rs||struct:DaemonBinary", lifetime: "compiled bundle filename used to register the selected daemon binary"),
-])
+],
+shape: (
+  debt: [
+    (key: "crates/feature/vmux_service/src/host/supervisor.rs||enum:ReplaceOutcome", fingerprint: "26b9666ee286a031", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/host/registry.rs||enum:RegistrationStep", fingerprint: "8039987f90085b88", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/remote/quic_dialer.rs||enum:SessionEnd", fingerprint: "d4a7ea0fab06ba9a", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/remote/quic.rs||enum:Rejection", fingerprint: "5cdbcaa01a0653a1", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/host/registry.rs||enum:RegistrationError", fingerprint: "dc56ad1769e3c78c", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/host/runner.rs||enum:ParkOutcome", fingerprint: "9ed6bc0972d2369a", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/host/sm_app_service.rs||enum:Status", fingerprint: "564cfcf750c4a53b", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/host/registry.rs||enum:Backend", fingerprint: "ea592177ea14f447", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/remote/authorization_driver.rs||enum:AuthorizationOutcome", fingerprint: "5971a165c554799f", issue: "VMX-253", finding: "AU-13"),
+    (key: "crates/feature/vmux_service/src/host/sm_app_service.rs||enum:SmError", fingerprint: "7214daa76b244deb", issue: "VMX-253", finding: "AU-13"),
+  ],
+),
+)

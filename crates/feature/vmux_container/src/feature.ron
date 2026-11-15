@@ -12,7 +12,7 @@
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
-            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+            "ContainerSettingsRequest", "ContainerChangeStartRequest", "ContainerChangeStopRequest", "ContainerChangeRestartRequest", "ContainerChangeRemoveRequest", "ContainerInspectRequest",
         ],
     ), (
         name: "docker",
@@ -26,7 +26,7 @@
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
-            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+            "ContainerSettingsRequest", "ContainerChangeStartRequest", "ContainerChangeStopRequest", "ContainerChangeRestartRequest", "ContainerChangeRemoveRequest", "ContainerInspectRequest",
         ],
     ), (
         name: "containers",
@@ -41,7 +41,7 @@
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
-            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+            "ContainerSettingsRequest", "ContainerChangeStartRequest", "ContainerChangeStopRequest", "ContainerChangeRestartRequest", "ContainerChangeRemoveRequest", "ContainerInspectRequest",
         ],
     )],
     cli: Some((commands: [(
