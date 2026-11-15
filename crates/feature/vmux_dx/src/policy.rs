@@ -7,6 +7,7 @@ pub struct Policy {
     pub minimum: u64,
     pub warning: u64,
     pub cache_limit: u64,
+    pub incremental_limit: u64,
     pub local_keep: usize,
 }
 
@@ -24,11 +25,15 @@ impl Policy {
         let keep = environment
             .get("VMUX_BUILD_STORAGE_LOCAL_KEEP")
             .unwrap_or(std::ffi::OsStr::new("3"));
+        let incremental = environment
+            .get("VMUX_BUILD_STORAGE_INCREMENTAL_GIB")
+            .unwrap_or(std::ffi::OsStr::new("8"));
         Self::parse(
             minimum.to_str().ok_or("Invalid storage minimum")?,
             warning.to_str().ok_or("Invalid storage warning")?,
             cache.to_str().ok_or("Invalid cache budget")?,
             keep.to_str().ok_or("Invalid artifact retention")?,
+            incremental.to_str().ok_or("Invalid incremental budget")?,
         )
     }
 
@@ -45,13 +50,22 @@ impl Policy {
         let warning = std::env::var("VMUX_BUILD_STORAGE_WARN_GIB").unwrap_or_else(|_| "50".into());
         let cache = std::env::var("VMUX_BUILD_STORAGE_CACHE_GIB").unwrap_or_else(|_| "50".into());
         let keep = std::env::var("VMUX_BUILD_STORAGE_LOCAL_KEEP").unwrap_or_else(|_| "3".into());
-        Self::parse(&minimum, &warning, &cache, &keep)
+        let incremental =
+            std::env::var("VMUX_BUILD_STORAGE_INCREMENTAL_GIB").unwrap_or_else(|_| "8".into());
+        Self::parse(&minimum, &warning, &cache, &keep, &incremental)
     }
 
-    fn parse(minimum: &str, warning: &str, cache: &str, keep: &str) -> Result<Self> {
+    fn parse(
+        minimum: &str,
+        warning: &str,
+        cache: &str,
+        keep: &str,
+        incremental: &str,
+    ) -> Result<Self> {
         let minimum = Self::bytes(minimum)?;
         let warning = Self::bytes(warning)?;
         let cache_limit = Self::bytes(cache)?;
+        let incremental_limit = Self::bytes(incremental)?;
         let local_keep = keep.parse()?;
         if local_keep < 1 || warning < minimum {
             return Err("Keep at least one local app and set warning >= minimum".into());
@@ -60,6 +74,7 @@ impl Policy {
             minimum,
             warning,
             cache_limit,
+            incremental_limit,
             local_keep,
         })
     }
@@ -87,13 +102,16 @@ mod tests {
             ["20", "50", "50", "0"],
             ["inf", "inf", "50", "3"],
         ] {
-            assert!(Policy::parse(values[0], values[1], values[2], values[3]).is_err());
+            assert!(Policy::parse(values[0], values[1], values[2], values[3], "8").is_err());
+        }
+        for incremental in ["-1", "NaN", "inf", "invalid"] {
+            assert!(Policy::parse("20", "50", "50", "3", incremental).is_err());
         }
     }
 
     #[test]
     fn warning_threshold_does_not_refuse_a_build() {
-        let policy = Policy::parse("20", "50", "50", "3").unwrap();
+        let policy = Policy::parse("20", "50", "50", "3", "8").unwrap();
         assert!(policy.check(10 * super::GIB).is_err());
         assert!(policy.check(30 * super::GIB).is_ok());
     }

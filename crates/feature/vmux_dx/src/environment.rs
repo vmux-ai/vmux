@@ -89,6 +89,26 @@ impl Environment {
         self.get(name).is_some_and(|value| !value.is_empty())
     }
 
+    pub fn incremental(&self, command: Option<&OsStr>) -> &OsStr {
+        if let Some(value) = self.get("CARGO_INCREMENTAL")
+            && !value.is_empty()
+        {
+            return value;
+        }
+        if self.get("CI") == Some(OsStr::new("true"))
+            || matches!(
+                command.and_then(OsStr::to_str),
+                Some("check" | "clippy" | "test" | "bench")
+            )
+        {
+            return OsStr::new("0");
+        }
+        if self.get("VMUX_BUILD_PROFILE") == Some(OsStr::new("dev")) {
+            return OsStr::new("1");
+        }
+        OsStr::new("0")
+    }
+
     pub fn required(&self, name: &str) -> Result<&OsStr> {
         match self.get(name) {
             Some(value) if !value.is_empty() => Ok(value),
@@ -113,5 +133,45 @@ impl Environment {
         self.apply(&mut command);
         command.current_dir(root);
         command
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Environment;
+    use std::collections::BTreeMap;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn cargo_incremental_defaults_follow_command_purpose_and_explicit_override() {
+        let mut environment = Environment {
+            values: BTreeMap::new(),
+        };
+        environment.set("VMUX_BUILD_PROFILE", "dev");
+        assert_eq!(
+            environment.incremental(Some(OsStr::new("build"))),
+            OsStr::new("1")
+        );
+        for command in ["test", "clippy", "check", "bench"] {
+            assert_eq!(
+                environment.incremental(Some(OsStr::new(command))),
+                OsStr::new("0")
+            );
+        }
+        environment.set("CI", "true");
+        assert_eq!(
+            environment.incremental(Some(OsStr::new("build"))),
+            OsStr::new("0")
+        );
+        environment.set("CARGO_INCREMENTAL", "1");
+        assert_eq!(
+            environment.incremental(Some(OsStr::new("test"))),
+            OsStr::new("1")
+        );
+        environment.set("CARGO_INCREMENTAL", "0");
+        assert_eq!(
+            environment.incremental(Some(OsStr::new("build"))),
+            OsStr::new("0")
+        );
     }
 }

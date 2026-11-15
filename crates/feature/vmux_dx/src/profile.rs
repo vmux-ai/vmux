@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 
 use crate::Result;
@@ -46,5 +46,29 @@ impl Profile {
             }
         }
         Ok(paths)
+    }
+
+    pub fn incremental(&self) -> Result<Option<Directory>> {
+        Directory::open(self.path().join("incremental"))
+    }
+
+    pub fn lock(&self) -> Result<Option<File>> {
+        let lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(self.path().join(".cargo-lock"))?;
+        match lock.try_lock() {
+            Ok(()) => Ok(Some(lock)),
+            Err(TryLockError::WouldBlock) => {
+                println!(
+                    "Build storage: keeping locked profile {}",
+                    self.path().display()
+                );
+                Ok(None)
+            }
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
     }
 }
