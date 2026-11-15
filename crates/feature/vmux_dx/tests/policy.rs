@@ -1124,9 +1124,17 @@ fn query_data_fields_are_valid_registered_boundary_endpoints() {
             "{field}"
         );
     }
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; mod model { #[derive(bevy_ecs::prelude::Component)] pub struct Position { x:f32 } } use model::*; #[derive(QueryData)] struct View { position:Option<&'static Position> } fn read(rows:bevy_ecs::system::Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(bevy_app::Update,read); } }",
+    );
+    let mut boundary = Boundary::fixture(&inventory, "fn:read");
+    boundary.input = format!("ECS: {}", inventory.key("struct:Position"));
+    boundary.output = "external: observed positions".into();
+    assert!(boundary.references_from(&inventory, &Policy::default(), &mut BTreeSet::new()));
     for source in [
         "use bevy_ecs::prelude::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:Option<Position> } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
         "use bevy_ecs::prelude::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; struct Option<T> { value:T } #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:Option<&'static Position> } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
+        "use foreign::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; #[derive(bevy_ecs::prelude::Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:Option<&'static Position> } fn read(rows:bevy_ecs::system::Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(bevy_app::Update,read); } }",
     ] {
         let inventory = Inventory::fixture(source);
         let mut boundary = Boundary::fixture(&inventory, "fn:read");
@@ -1192,6 +1200,45 @@ fn a_nested_bin_directory_preserves_ordinary_child_module_resolution() {
         &Policy::default(),
         &mut BTreeSet::new()
     ));
+}
+
+#[test]
+fn outlined_binary_children_use_their_resolved_logical_parent() {
+    for (path, expected) in [
+        ("crates/util/fixture/src/bin/alpha/state.rs", true),
+        ("crates/util/fixture/src/bin/state.rs", false),
+    ] {
+        for reverse in [false, true] {
+            let mut sources = [
+                ("crates/util/fixture/src/bin/alpha.rs", "pub mod state;"),
+                (
+                    "crates/util/fixture/src/bin/zeta.rs",
+                    "use bevy_app::App; use bevy_ecs::prelude::*; mod alpha; fn read(rows:Query<&alpha::state::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }",
+                ),
+                (
+                    path,
+                    "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+                ),
+            ];
+            if reverse {
+                sources.reverse();
+            }
+            let mut inventory = Inventory::default();
+            for (path, source) in sources {
+                inventory.source(path, source);
+            }
+            inventory.resolve_usage();
+            assert_eq!(
+                inventory.canonical(
+                    &inventory.entries[&inventory.key("struct:State")],
+                    &Policy::default(),
+                    &mut BTreeSet::new()
+                ),
+                expected,
+                "{path}, reverse={reverse}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -4277,6 +4324,14 @@ impl Inventory {
                             | "bevy_ecs::prelude"
                             | "bevy_app::prelude"
                     ) {
+                        if reference == "Option"
+                            && !self.local_binding(namespace, "Option")
+                            && self
+                                .glob_namespace(current, prefix, &mut BTreeSet::new())
+                                .is_some()
+                        {
+                            continue;
+                        }
                         return None;
                     }
                 }
@@ -5969,6 +6024,9 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                             }
                             None => false,
                         };
+                    let crate_root = crate_root
+                        && self.inventory.namespace(self.path, &[]).0
+                            == Namespace::of(self.path, &[]).0;
                     let module_root =
                         file.file_name().is_some_and(|name| name == "mod.rs") || crate_root;
                     if !module_root {
