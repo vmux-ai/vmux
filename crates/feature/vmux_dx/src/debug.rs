@@ -18,6 +18,7 @@ use crate::debug_io::{
     RemoveFile, RenamePath, RunProcess, SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
 };
 use crate::execution::Failure;
+use crate::product::ProductMetadata;
 use crate::repository::Checkout;
 use crate::signals::Signals;
 use crate::work::Outcome;
@@ -445,6 +446,17 @@ pub struct Signature {
     pub stamp: PathBuf,
     pub identifier: Option<String>,
     pub suffix: String,
+}
+
+impl Signature {
+    fn entitlements(&self, checkout: &Checkout, product: &ProductMetadata) -> PathBuf {
+        if self.path.file_name() == Some(OsStr::new("vmux_vm")) {
+            return checkout
+                .root
+                .join("crates/util/vmux_vm/hypervisor.entitlements");
+        }
+        product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()
+    }
 }
 
 #[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1985,6 +1997,10 @@ fn sign(
                     checkout.directory("debug").join("vmux_desktop"),
                     format!("{}.dev", product.value("VMUX_HOST_BUNDLE_ID")),
                 ),
+                (
+                    checkout.directory("debug").join("vmux_vm"),
+                    format!("{}.dev.vm", product.value("VMUX_HOST_NAMESPACE")),
+                ),
             ] {
                 let signature = commands
                     .spawn((
@@ -2005,6 +2021,17 @@ fn sign(
                         ChildOf(entity),
                     ))
                     .id();
+                if path.file_name() == Some(OsStr::new("vmux_vm")) {
+                    commands.spawn((
+                        Input(
+                            checkout
+                                .root
+                                .join("crates/util/vmux_vm/hypervisor.entitlements"),
+                        ),
+                        Order(1),
+                        ChildOf(signature),
+                    ));
+                }
                 commands.spawn((Input(path), Order(0), ChildOf(signature)));
             }
             *phase = SignPhase::Waiting;
@@ -2420,6 +2447,14 @@ fn copy_resources(
             (),
             false,
         );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CopyFile(debug.join("vmux_vm"), contents.join("MacOS/vmux_vm")),
+            (),
+            false,
+        );
         *phase = BundlePhase::ServicePlist;
 
         if *phase != previous_phase {
@@ -2725,6 +2760,7 @@ fn bundle_desktop(
         for (order, path) in [
             debug.join("vmux_desktop"),
             layout.app.join("Contents/MacOS/vmux"),
+            layout.app.join("Contents/MacOS/vmux_vm"),
             layout.plist.clone(),
             layout.app.join("Contents/Resources/Vmux.icns"),
             debug.join(".vmux-dev-service-signed"),
@@ -2763,6 +2799,7 @@ fn publish_start(
 
         let mut paths = vec![
             debug.join("vmux"),
+            debug.join("vmux_vm"),
             debug.join("vmux_service"),
             debug.join("vmux_desktop"),
         ];
@@ -2778,6 +2815,7 @@ fn publish_start(
             };
             let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
             paths.push(debug.join(&name).join("Contents/MacOS/vmux_desktop"));
+            paths.push(debug.join(&name).join("Contents/MacOS/vmux_vm"));
             io.request(
                 &mut sequence,
                 entity,
@@ -3252,7 +3290,7 @@ fn inspect_development(
         if failed {
             continue;
         }
-        if count != if cfg!(target_os = "macos") { 4 } else { 3 } {
+        if count != if cfg!(target_os = "macos") { 6 } else { 4 } {
             io.commands
                 .entity(entity)
                 .insert(Failed(Failure::message("Incomplete readiness stamp")));
@@ -4331,7 +4369,7 @@ fn sign_bundle(
             "--options".into(),
             "runtime".into(),
             "--entitlements".into(),
-            product.value("VMUX_HOST_DEV_ENTITLEMENTS").into(),
+            request.entitlements(checkout, &product).into_os_string(),
         ];
         if let Some(keychain) = settings.0.get("CODESIGN_KEYCHAIN") {
             arguments.extend(["--keychain".into(), keychain.to_owned()]);
@@ -4424,7 +4462,7 @@ fn signature_format(
             "--options".into(),
             "runtime".into(),
             "--entitlements".into(),
-            product.value("VMUX_HOST_DEV_ENTITLEMENTS").into(),
+            request.entitlements(checkout, &product).into_os_string(),
         ];
         if let Some(keychain) = settings.0.get("CODESIGN_KEYCHAIN") {
             arguments.extend(["--keychain".into(), keychain.to_owned()]);
@@ -5848,13 +5886,17 @@ exit 0
     fn published_readiness_covers_all_binaries_and_refuses_tampering_before_launch() {
         let mut fixture = Fixture::new();
         let debug = fixture.target.join("debug");
-        for name in ["vmux", "vmux_service", "vmux_desktop"] {
+        for name in ["vmux", "vmux_vm", "vmux_service", "vmux_desktop"] {
             fixture.executable(&debug.join(name), name.as_bytes());
         }
         if cfg!(target_os = "macos") {
             fixture.executable(
                 &debug.join("Vmux Dev.app/Contents/MacOS/vmux_desktop"),
                 b"vmux_desktop",
+            );
+            fixture.executable(
+                &debug.join("Vmux Dev.app/Contents/MacOS/vmux_vm"),
+                b"vmux_vm",
             );
         }
         assert_eq!(fixture.run(Publish), 0);
@@ -5870,7 +5912,7 @@ exit 0
             );
             count += 1;
         }
-        assert_eq!(count, if cfg!(target_os = "macos") { 4 } else { 3 });
+        assert_eq!(count, if cfg!(target_os = "macos") { 6 } else { 4 });
         fixture.executable(&debug.join("vmux_desktop"), b"changed executable");
         assert_ne!(
             fixture.run(Run {

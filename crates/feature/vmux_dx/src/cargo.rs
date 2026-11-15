@@ -188,13 +188,18 @@ impl Outputs<'_, '_> {
 }
 
 fn prepare(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
-    for (entity, _, checkout, mut settings, mut phase, _) in &mut requests {
+    for (entity, request, checkout, mut settings, mut phase, _) in &mut requests {
         if *phase != Phase::Start {
             continue;
         }
         io.commands.entity(entity).insert(Original(
             settings.0.get("CARGO_INCREMENTAL").map(OsStr::to_owned),
         ));
+        let incremental = settings
+            .0
+            .incremental(request.arguments.first().map(OsString::as_os_str))
+            .to_owned();
+        settings.0.set("CARGO_INCREMENTAL", incremental);
         settings
             .0
             .set("VMUX_TARGET_LOCK_TARGET", checkout.target.as_os_str());
@@ -340,6 +345,7 @@ fn probe_compiler(mut requests: Requests, facts: Facts, wake: Res<JobWake>) {
             }
             if settings.0.get("CI") != Some(OsStr::new("true"))
                 && !settings.0.present("RUSTC_WRAPPER")
+                && settings.0.get("CARGO_INCREMENTAL") != Some(OsStr::new("1"))
             {
                 settings.0.set("RUSTC_WRAPPER", "sccache");
             }

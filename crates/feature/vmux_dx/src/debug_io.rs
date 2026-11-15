@@ -832,7 +832,17 @@ impl Job for CopyFile {
                         .canonicalize()
                         .map_err(|error| Failure::message(error.to_string()))?)
         {
-            fs::copy(self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
+            let parent = self
+                .1
+                .parent()
+                .ok_or_else(|| Failure::message("Copy destination has no parent"))?;
+            let temporary = Temporary::create(parent, ".vmux-copy").map_err(Failure::from_error)?;
+            let staging = temporary.path().join("file");
+            fs::copy(self.0, &staging).map_err(|error| Failure::message(error.to_string()))?;
+            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+                return Err(Failure::message("Debug IO canceled"));
+            }
+            fs::rename(staging, self.1).map_err(|error| Failure::message(error.to_string()))?;
         }
         Ok(Done)
     }

@@ -1410,7 +1410,7 @@ fn debug_bundle_preserves_metadata_and_reuses_signatures_until_inputs_change() {
     let fixture = Fixture::new();
     let debug = fixture.target.join("debug");
     std::fs::create_dir_all(&debug).unwrap();
-    for name in ["vmux", "vmux_service", "vmux_desktop"] {
+    for name in ["vmux", "vmux_vm", "vmux_service", "vmux_desktop"] {
         std::fs::write(debug.join(name), format!("#!/bin/sh\nprintf '{name}'\n")).unwrap();
         std::fs::set_permissions(debug.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
