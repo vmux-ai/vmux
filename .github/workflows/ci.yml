@@ -64,12 +64,19 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     outputs:
-      website: ${{ steps.filter.outputs.website }}
+      website: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.website == 'true' }}
       macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' || (github.event_name == 'push' && steps.filter.outputs.macos_main == 'true')) && steps.native.outputs.native != 'false' }}
       macos_tooling: ${{ steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false' }}
       ios: ${{ github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false' }}
-      code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
-      contracts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.contracts == 'true' }}
+      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+      contracts: ${{ steps.scope.outputs.sdk == 'true' }}
+      headless: ${{ steps.scope.outputs.headless == 'true' }}
+      rust: ${{ steps.scope.outputs.rust == 'true' }}
+      records: ${{ steps.scope.outputs.records == 'true' }}
+      render_free: ${{ steps.scope.outputs.render_free == 'true' }}
+      tooling: ${{ steps.scope.outputs.tooling == 'true' }}
+      args: ${{ steps.scope.outputs.args }}
+      lint_args: ${{ steps.scope.outputs.lint_args }}
       lean: ${{ steps.scope.outputs.lean == 'true' }}
       check_lint: ${{ steps.checks.outputs.check_lint }}
       reuse_lint: ${{ steps.checks.outputs.reuse_lint }}
@@ -104,6 +111,10 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
+              - '.github/**'
+              - 'packaging/**'
+              - 'docs/architecture.md'
+              - 'docs/dx/architecture.md'
               - '.cargo/**'
               - '.gitattributes'
               - '.env'
@@ -111,6 +122,8 @@ jobs:
               - '**/ecs-policy.ron'
               - 'website/src/**'
               - 'website/build.rs'
+              - 'website/Cargo.toml'
+              - 'website/Cargo.lock'
               - 'crates/**'
               - 'examples/framework-consumer/**'
               - 'examples/host-consumer/**'
@@ -125,30 +138,25 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/workflows/nightly.yml'
               - '.github/workflows/build-cef.yml'
-            contracts:
-              - 'crates/util/**'
-              - 'crates/feature/vmux_layout/**'
-              - 'crates/feature/vmux_extension/**'
-              - 'crates/feature/vmux_project/**'
-              - 'crates/feature/vmux_service/**'
-              - 'crates/feature/vmux_acp/**'
-              - 'crates/app/vmux_cli/**'
-              - 'crates/**/feature.ron'
-              - 'crates/**/Cargo.toml'
-              - 'crates/**/build.rs'
-              - 'crates/build_*.rs'
-              - 'examples/**'
+            website:
+              - 'website/**'
+              - 'docs/**'
+              - '.github/**'
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
               - 'tool-versions.env'
-              - '.github/actions/**'
-              - '.github/workflows/ci.yml'
               - 'scripts/**'
-            website:
-              - 'website/**'
-              - 'docs/**'
             macos:
+              - '.github/**'
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
               - 'crates/**'
               - 'cef/**'
               - 'patches/**'
@@ -171,6 +179,11 @@ jobs:
               - 'crates/feature/vmux_dx/src/native/ios.rs'
               - 'crates/app/vmux_cli/tests/dx.rs'
             macos_tooling:
+              - '.github/**'
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
               - 'crates/app/vmux_cli/**'
               - 'crates/feature/vmux_dx/**'
               - 'crates/build_product.rs'
@@ -184,6 +197,11 @@ jobs:
               - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
             ios:
+              - '.github/**'
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
               - 'crates/**'
               - 'packaging/ios/**'
               - 'Cargo.toml'
@@ -203,13 +221,13 @@ jobs:
         with:
           cli: build
           fast-rust: "false"
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' || steps.filter.outputs.website == 'true' || steps.filter.outputs.macos == 'true' || steps.filter.outputs.macos_main == 'true' || steps.filter.outputs.macos_tooling == 'true' || steps.filter.outputs.ios == 'true'
+        if: github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' || steps.filter.outputs.website == 'true' || steps.filter.outputs.macos == 'true' || steps.filter.outputs.macos_main == 'true' || steps.filter.outputs.macos_tooling == 'true' || steps.filter.outputs.ios == 'true'
 
       - name: Select Rust validation scope
         id: scope
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true'
+        if: github.event_name != 'pull_request' || steps.filter.outputs.code == 'true'
         env:
-          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && needs.plan.outputs.base || '' }}
         run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Classify native build inputs
@@ -231,6 +249,8 @@ jobs:
           VMUX_CHECK_RELEASE: ${{ needs.plan.outputs.release }}
           VMUX_LINT_SCOPE: ${{ steps.scope.outputs.lint_args }}
           VMUX_TEST_SCOPE: ${{ steps.scope.outputs.args }}
+          VMUX_CHECK_INPUTS: ${{ steps.scope.outputs.inputs }}
+          VMUX_RECORDS: ${{ steps.scope.outputs.records }}
         with:
           script: |
             const Checks = require('./scripts/ci-checks.js');
@@ -238,12 +258,14 @@ jobs:
             const rust = [...common, 'crates/**', 'patches/**', 'examples/**'];
             const cli = ['crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'crates/build_*.rs'];
             const scope = (args) => JSON.stringify({ args, os: process.env.RUNNER_OS, arch: process.env.RUNNER_ARCH, image: process.env.ImageVersion, flags: process.env.RUSTFLAGS, encoded: process.env.CARGO_ENCODED_RUSTFLAGS });
+            const inputs = JSON.parse(process.env.VMUX_CHECK_INPUTS || '{}');
+            const paths = (key) => [...common, ...(inputs[key] || ['crates/**', 'patches/**']), ...(key === 'test-sdk' ? ['examples/**', ...cli] : [])];
             const profiles = [
-              { key: 'lint', name: 'Lint', paths: [...rust, 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope(process.env.VMUX_LINT_SCOPE) },
-              { key: 'test-rust', name: 'Rust unit & integration tests', paths: rust, scope: scope(process.env.VMUX_TEST_SCOPE) },
-              { key: 'test-sdk', name: 'Public API compatibility tests', paths: rust, scope: scope('sdk-path+host') },
-              { key: 'test-lean', name: 'Desktop feature availability tests', paths: rust, scope: scope('desktop-lean') },
-              { key: 'test-headless', name: 'App configuration tests', paths: rust, scope: scope('daemon+mcp') },
+              { key: 'lint', name: 'Lint', paths: [...rust, 'website/**', 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope(process.env.VMUX_LINT_SCOPE) },
+              { key: 'test-rust', name: 'Rust unit & integration tests', paths: [...paths('test-rust'), ...(process.env.VMUX_RECORDS === 'true' ? paths('records') : [])], scope: scope(JSON.stringify({ args: process.env.VMUX_TEST_SCOPE, records: process.env.VMUX_RECORDS })) },
+              { key: 'test-sdk', name: 'Public API compatibility tests', paths: paths('test-sdk'), scope: scope('sdk-path+host') },
+              { key: 'test-lean', name: 'Desktop feature availability tests', paths: paths('test-lean'), scope: scope('desktop-lean') },
+              { key: 'test-headless', name: 'App configuration tests', paths: paths('test-headless'), scope: scope('daemon+mcp') },
               { key: 'website', name: 'Website Build', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
             ];
             const identity = { base: process.env.VMUX_CHECK_BASE, tree: process.env.VMUX_CHECK_TREE, branch: context.payload.pull_request?.head.ref, release: process.env.VMUX_CHECK_RELEASE === 'true' };
@@ -318,35 +340,28 @@ jobs:
           cache-key: lint
           cef-version: ${{ needs.plan.outputs.cef }}
 
-      - name: Select Rust check scope
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
-        id: scope
-        env:
-          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
-        run: vmux ci-scope >> "$GITHUB_OUTPUT"
-
       - name: Check formatting
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
-        run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lint_args != ''
+        run: cargo fmt ${{ needs.changes.outputs.lint_args }} -- --check
 
       - name: Clippy
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
-        run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lint_args != ''
+        run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ needs.changes.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy CI syntax classifier
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: cargo clippy --locked -p vmux_dx --features ci-syntax --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && steps.scope.outputs.lean == 'true'
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lean == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
       - name: Clippy renderer-free record contracts
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.records == 'true'
         run: cargo clippy --locked -p vmux_ecs --no-default-features --features records --all-targets -- -D warnings
 
       - name: No crate on the headless path links bevy_cef
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.render_free == 'true'
         run: |
           set -euo pipefail
 
@@ -383,7 +398,7 @@ jobs:
           echo "ok: render-free vmux_session does not link bevy_cef"
 
       - name: The server links no client-only crate
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.headless == 'true'
         run: |
           set -euo pipefail
 
@@ -422,19 +437,19 @@ jobs:
           done
 
       - name: Render-free vmux_session builds alone
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.render_free == 'true'
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
       - name: CI configuration and cache tests
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: node --test scripts/ci-preflight.test.js
 
       - name: CI tool lifecycle tests
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: cargo test --locked -p vmux_dx --features ci-syntax --lib
 
       - name: CLI command and packaging tests
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
 
       - name: ECS Policy check
@@ -451,7 +466,7 @@ jobs:
     name: Rust unit & integration tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_test_rust
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.rust == 'true' && !needs.changes.outputs.reuse_test_rust
     steps:
       - uses: actions/checkout@v5
         with:
@@ -486,16 +501,11 @@ jobs:
           cache-key: test
           cef-version: ${{ needs.plan.outputs.cef }}
 
-      - name: Select Rust test scope
-        id: scope
-        env:
-          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
-        run: vmux ci-scope >> "$GITHUB_OUTPUT"
-
       - name: Run Rust unit and integration tests
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }} -- --skip new_declarations_have_canonical_ownership_or_an_explicit_boundary
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ needs.changes.outputs.args }}
 
       - name: Test record contracts alongside Workspace storage
+        if: needs.changes.outputs.records == 'true'
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
 
       - name: Save validated compiler artifacts
@@ -609,7 +619,7 @@ jobs:
     name: App configuration tests
     runs-on: ubuntu-latest
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_headless
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.headless == 'true' && !needs.changes.outputs.reuse_test_headless
     steps:
       - uses: actions/checkout@v5
         with:
@@ -666,6 +676,8 @@ jobs:
           REUSE_LEAN_TEST: ${{ needs.changes.outputs.reuse_test_lean }}
           CODE: ${{ needs.changes.outputs.code }}
           CONTRACTS: ${{ needs.changes.outputs.contracts }}
+          HEADLESS_REQUIRED: ${{ needs.changes.outputs.headless }}
+          RUST_REQUIRED: ${{ needs.changes.outputs.rust }}
           LEAN: ${{ needs.changes.outputs.lean }}
           RUST_TEST: ${{ needs.test-rust.result }}
           SDK: ${{ needs.test-sdk.result }}
@@ -676,9 +688,13 @@ jobs:
           test "$PLAN" = success
           test "$CHANGES" = success
           if [ "$CODE" = true ]; then
-            if [ -z "${REUSE_RUST_TEST:-}" ]; then test "$RUST_TEST" = success; else echo "Reused RUST_TEST from verified run $REUSE_RUST_TEST"; fi
+            if [ "$RUST_REQUIRED" = true ]; then
+              if [ -z "${REUSE_RUST_TEST:-}" ]; then test "$RUST_TEST" = success; else echo "Reused RUST_TEST from verified run $REUSE_RUST_TEST"; fi
+            fi
             if [ "$CONTRACTS" = true ]; then
               if [ -z "${REUSE_SDK:-}" ]; then test "$SDK" = success; else echo "Reused SDK from verified run $REUSE_SDK"; fi
+            fi
+            if [ "$HEADLESS_REQUIRED" = true ]; then
               if [ -z "${REUSE_HEADLESS:-}" ]; then test "$HEADLESS" = success; else echo "Reused HEADLESS from verified run $REUSE_HEADLESS"; fi
             fi
             if [ "$LEAN" = true ]; then
