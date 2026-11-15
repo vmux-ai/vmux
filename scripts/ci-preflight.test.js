@@ -90,12 +90,23 @@ class Fixture {
     return new Sources(this.root, '.source-cache.json', 'target');
   }
 
-  compile() {
+  compile(target = 'target') {
     const env = Preflight.gitEnvironment();
     for (const key of ['CARGO_TARGET_DIR', 'CARGO_BUILD_TARGET', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTFLAGS']) delete env[key];
     env.CARGO_INCREMENTAL = '0';
-    execFileSync('cargo', ['build', '--offline'], { cwd: this.root, env, stdio: 'pipe' });
-    return path.join(this.root, 'target/debug/cache-fixture');
+    execFileSync('cargo', ['build', '--offline', '--target-dir', target], { cwd: this.root, env, stdio: 'pipe' });
+    return path.join(this.root, target, 'debug/cache-fixture');
+  }
+
+  restoreCache(snapshot, target, save = 'true') {
+    const state = path.join(this.root, `action-state-${require('node:crypto').randomUUID()}`);
+    Sources.run({ GITHUB_WORKSPACE: this.root, GITHUB_STATE: state, INPUT_SNAPSHOT: snapshot, INPUT_TARGET: target, INPUT_SAVE: save });
+    const post = { GITHUB_WORKSPACE: this.root, INPUT_SNAPSHOT: '', INPUT_TARGET: '', INPUT_SAVE: '' };
+    for (const line of fs.readFileSync(state, 'utf8').trim().split('\n')) {
+      const separator = line.indexOf('=');
+      post[`STATE_${line.slice(0, separator)}`] = line.slice(separator + 1);
+    }
+    return post;
   }
 }
 
@@ -707,15 +718,9 @@ test('macOS packaging preflights run lean checks in parallel and require both re
 test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
   for (const save of ['true', 'false']) {
     const fixture = new Fixture(t);
-    const state = path.join(fixture.root, 'action-state');
     const snapshot = path.join(fixture.root, '.source-cache.json');
-    Sources.run({ GITHUB_WORKSPACE: fixture.root, GITHUB_STATE: state, INPUT_SNAPSHOT: '.source-cache.json', INPUT_TARGET: 'target', INPUT_SAVE: save });
+    const post = fixture.restoreCache('.source-cache.json', 'target', save);
     fs.writeFileSync(path.join(fixture.root, 'feature.txt'), 'final job contents\n');
-    const post = { GITHUB_WORKSPACE: fixture.root, INPUT_SNAPSHOT: '', INPUT_TARGET: '', INPUT_SAVE: '' };
-    for (const line of fs.readFileSync(state, 'utf8').trim().split('\n')) {
-      const separator = line.indexOf('=');
-      post[`STATE_${line.slice(0, separator)}`] = line.slice(separator + 1);
-    }
     Sources.run(post);
     assert.equal(fs.existsSync(snapshot), save === 'true');
     if (save === 'true') {
@@ -739,7 +744,7 @@ test('identical sources restored from a compiler snapshot remain fresh to Cargo'
 });
 
 test('changed source older than cached compiler artifacts cannot reuse stale code', (t) => {
-  for (const snapshot of ['valid', 'missing', 'corrupt']) {
+  for (const snapshot of ['valid', 'missing', 'corrupt', 'legacy']) {
     const fixture = new Fixture(t);
     const sources = fixture.compilerCache();
     fixture.compile();
@@ -748,9 +753,47 @@ test('changed source older than cached compiler artifacts cannot reuse stale cod
     if (snapshot === 'corrupt') fs.writeFileSync(sources.snapshot, '{bad snapshot');
     fs.writeFileSync(path.join(fixture.root, 'src/main.rs'), 'fn main() { println!("changed"); }\n');
     fs.utimesSync(path.join(fixture.root, 'src/main.rs'), 1, 1);
+    if (snapshot === 'legacy') {
+      const record = JSON.parse(fs.readFileSync(sources.snapshot, 'utf8'));
+      record.version = 1;
+      record.files['src/main.rs'].hash = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(fixture.root, 'src/main.rs'))).digest('hex');
+      record.files['src/main.rs'].mtime = '1000000000';
+      fs.writeFileSync(sources.snapshot, JSON.stringify(record));
+    }
     sources.restore();
     const binary = fixture.compile();
     assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'changed\n', snapshot);
+  }
+});
+
+test('restoring another target preserves fresh artifacts and rebuilds stale code', (t) => {
+  for (const mode of ['instance', 'action']) {
+    for (const changed of [false, true]) {
+      const fixture = new Fixture(t);
+      const first = fixture.compilerCache();
+      const second = new Sources(fixture.root, '.alternate-cache.json', 'alternate-target');
+      const file = path.join(fixture.root, 'src/main.rs');
+      fs.writeFileSync(file, 'fn main() { println!("changed"); }\n');
+      fs.utimesSync(file, 1, 1);
+      fixture.compile('alternate-target');
+      second.save();
+      if (changed) fs.writeFileSync(file, 'fn main() { println!("original"); }\n');
+      else fs.utimesSync(file, new Date(), new Date());
+      const initial = fixture.compile();
+      const modified = fs.statSync(initial, { bigint: true }).mtimeNs;
+      first.save();
+      fs.writeFileSync(file, 'fn main() { println!("changed"); }\n');
+      let post;
+      if (mode === 'action') post = fixture.restoreCache('.source-cache.json', 'target');
+      else first.restore();
+      second.restore();
+      if (post) Sources.run(post);
+      else first.save();
+      first.restore();
+      const binary = fixture.compile();
+      assert.equal(execFileSync(binary, { encoding: 'utf8' }), 'changed\n', mode);
+      if (!changed) assert.equal(fs.statSync(binary, { bigint: true }).mtimeNs, modified, mode);
+    }
   }
 });
 

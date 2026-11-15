@@ -117,13 +117,15 @@ class Sources {
     }
   }
 
-  read() {
-    if (!fs.existsSync(this.snapshot)) return { files: {}, directories: {} };
-    if (!fs.lstatSync(this.snapshot).isFile()) throw new Error('Source snapshot must be a regular file');
-    if (!fs.realpathSync(this.snapshot).startsWith(`${this.root}${path.sep}`)) throw new Error('Source snapshot escapes the checkout');
+  read(file = this.snapshot) {
+    file = this.contained(file);
+    this.validate(file);
+    if (!fs.existsSync(file)) return { files: {}, directories: {} };
+    if (!fs.lstatSync(file).isFile()) throw new Error('Source snapshot must be a regular file');
+    if (!fs.realpathSync(file).startsWith(`${this.root}${path.sep}`)) throw new Error('Source snapshot escapes the checkout');
     try {
-      const record = JSON.parse(fs.readFileSync(this.snapshot, 'utf8'));
-      if (record.version !== 1 || !record.files || Array.isArray(record.files) || typeof record.files !== 'object') return { files: {}, directories: {} };
+      const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (record.version !== 2 || !record.files || Array.isArray(record.files) || typeof record.files !== 'object') return { files: {}, directories: {} };
       if (!record.directories || Array.isArray(record.directories) || typeof record.directories !== 'object') record.directories = {};
       return record;
     } catch {
@@ -171,10 +173,11 @@ class Sources {
       if (!stat.isFile()) continue;
       fs.utimesSync(file, Number(stat.atimeNs) / 1e9, Number(changedAt) / 1e9);
     }
+    this.restored = this.capture();
     return { restored, changed };
   }
 
-  save() {
+  capture() {
     const current = this.files();
     const files = Object.create(null);
     for (const [name, file] of current) {
@@ -182,16 +185,46 @@ class Sources {
     }
     const directories = Object.create(null);
     for (const [name, directory] of this.directories(current)) directories[name] = { hash: directory.hash, mtime: String(directory.stat.mtimeNs) };
-    let parent = path.dirname(this.snapshot);
+    return { version: 2, files, directories };
+  }
+
+  save(restored = this.restored) {
+    const record = this.capture();
+    if (restored) {
+      const compiledAt = this.compiledAt() + 1000000000n;
+      const now = BigInt(Date.now()) * 1000000n;
+      const changedAt = String(now > compiledAt ? now : compiledAt);
+      for (const [name, file] of Object.entries(record.files)) {
+        const previous = Object.hasOwn(restored.files, name) ? restored.files[name] : undefined;
+        file.mtime = previous?.hash === file.hash && previous.mode === file.mode ? previous.mtime : changedAt;
+      }
+      for (const [name, directory] of Object.entries(record.directories)) {
+        const previous = Object.hasOwn(restored.directories, name) ? restored.directories[name] : undefined;
+        directory.mtime = directory.hash && previous?.hash === directory.hash ? previous.mtime : changedAt;
+      }
+    }
+    this.write(this.snapshot, record);
+  }
+
+  write(file, record) {
+    file = this.contained(file);
+    this.validate(file);
+    let parent = path.dirname(file);
     while (!fs.existsSync(parent)) parent = path.dirname(parent);
     const existingParent = fs.realpathSync(parent);
     if (existingParent !== this.root && !existingParent.startsWith(`${this.root}${path.sep}`)) throw new Error('Snapshot directory escapes the checkout');
-    fs.mkdirSync(path.dirname(this.snapshot), { recursive: true });
-    const directory = fs.realpathSync(path.dirname(this.snapshot));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const directory = fs.realpathSync(path.dirname(file));
     if (directory !== this.root && !directory.startsWith(`${this.root}${path.sep}`)) throw new Error('Snapshot directory escapes the checkout');
-    const temporary = `${this.snapshot}.${crypto.randomUUID()}`;
-    fs.writeFileSync(temporary, `${JSON.stringify({ version: 1, files, directories })}\n`, { flag: 'wx' });
-    fs.renameSync(temporary, this.snapshot);
+    const temporary = `${file}.${crypto.randomUUID()}`;
+    let owned = false;
+    try {
+      fs.writeFileSync(temporary, `${JSON.stringify(record)}\n`, { flag: 'wx' });
+      owned = true;
+      fs.renameSync(temporary, file);
+    } finally {
+      if (owned) fs.rmSync(temporary, { force: true });
+    }
   }
 
   inputs(env) {
@@ -251,7 +284,7 @@ class Sources {
       const location = this.contained(file);
       if (fs.existsSync(location)) hash.update(fs.readFileSync(location));
     }
-    const prefix = `vmux-source-v1-${env.RUNNER_OS}-${env.RUNNER_ARCH}-${partition}-${hash.digest('hex')}`;
+    const prefix = `vmux-source-v2-${env.RUNNER_OS}-${env.RUNNER_ARCH}-${partition}-${hash.digest('hex')}`;
     return { prefix, key: `${prefix}-${env.GITHUB_SHA}`, paths: [...paths].join('\n'), snapshot: path.relative(this.root, this.snapshot), target };
   }
 
@@ -264,11 +297,23 @@ class Sources {
     };
     const sources = new Sources(env.GITHUB_WORKSPACE || process.cwd(), inputs.snapshot, inputs.target);
     if (post) {
-      if (inputs.save) sources.save();
+      if (inputs.save) {
+        const receipt = sources.contained(inputs.receipt);
+        try {
+          sources.save(sources.read(receipt));
+        } finally {
+          sources.validate(receipt);
+          fs.rmSync(receipt, { force: true });
+        }
+      }
       return;
     }
-    fs.appendFileSync(env.GITHUB_STATE, `cache_sources_post=true\ncache_sources_inputs=${JSON.stringify(inputs)}\n`);
     const result = sources.restore();
+    if (inputs.save) {
+      inputs.receipt = `${inputs.snapshot}.${crypto.randomUUID()}.restore`;
+      sources.write(inputs.receipt, sources.restored);
+    }
+    fs.appendFileSync(env.GITHUB_STATE, `cache_sources_post=true\ncache_sources_inputs=${JSON.stringify(inputs)}\n`);
     process.stdout.write(`Cargo source cache: ${result.restored} unchanged, ${result.changed} invalidated\n`);
   }
 

@@ -13,7 +13,9 @@ PR-only release profiles retain isolated branch caches. Cache keys include compi
 target, profile, and manifest identity; packaged apps and distribution archives are excluded.
 Source timestamps are restored only when tracked contents, modes, and directory membership
 match. Changed inputs and Git build identity are invalidated, tracked symlinks invalidate
-compiler fingerprints, and cache paths reject symlink parents. Action state retains cache
-inputs until successful job teardown, which
+compiler fingerprints, and cache paths reject symlink parents. Each cache keeps its own
+restore receipt so another target cannot lower the timestamps saved for its artifacts.
+Snapshots from the earlier format are invalidated.
+Action state retains cache inputs and the receipt until successful job teardown, which
 records the source snapshot before cache upload. A main-only macOS check warms the profile
 used by ordinary PRs without changing required checks.
