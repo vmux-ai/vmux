@@ -110,76 +110,110 @@ impl Flight {
     }
 }
 
+pub trait IoJob: Job<Output = Result<Self::Data, Failure>> + Component {
+    type Data: IoValue;
+}
+
+pub trait IoValue: Component + Clone {
+    fn validate(&self, _optional: bool) -> Result<(), Failure> {
+        Ok(())
+    }
+}
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct ToolOutput(pub std::process::Output);
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct FileBytes(pub Vec<u8>);
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct FileDigest(pub String);
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct PathMetadata(pub Option<fs::Metadata>);
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct DirectoryEntries(pub Vec<(PathBuf, fs::Metadata)>);
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct TemporaryValue(pub Arc<Temporary>);
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct ProcessValue {
+    _lease: Arc<Process>,
+}
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct PendingValue {
+    _lease: Arc<Pending>,
+}
+
+#[derive(Component, Clone)]
+#[require(crate::debug::Io)]
+pub struct Done;
+
+impl IoValue for ToolOutput {
+    fn validate(&self, optional: bool) -> Result<(), Failure> {
+        if !self.0.status.success() && !optional {
+            let mut failure = Failure::status(self.0.status);
+            let diagnostic = String::from_utf8_lossy(&self.0.stderr);
+            if !diagnostic.trim().is_empty() {
+                failure = failure.context(diagnostic.trim());
+            }
+            return Err(failure);
+        }
+        std::str::from_utf8(&self.0.stdout).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(())
+    }
+}
+
+impl IoValue for FileBytes {
+    fn validate(&self, _optional: bool) -> Result<(), Failure> {
+        std::str::from_utf8(&self.0).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(())
+    }
+}
+
+impl IoValue for FileDigest {}
+
+impl IoValue for PathMetadata {}
+
+impl IoValue for DirectoryEntries {}
+
+impl IoValue for TemporaryValue {}
+
+impl IoValue for ProcessValue {}
+
+impl IoValue for PendingValue {}
+
+impl IoValue for Done {}
+
 #[derive(Component, Clone)]
 #[component(immutable)]
-pub enum Effect {
-    Command {
-        environment: Environment,
-        cwd: PathBuf,
-        program: OsString,
-        arguments: Vec<OsString>,
-    },
-    Spawn {
-        environment: Environment,
-        cwd: PathBuf,
-        program: OsString,
-        arguments: Vec<OsString>,
-    },
-    Run {
-        environment: Environment,
-        cwd: PathBuf,
-        program: OsString,
-        arguments: Vec<OsString>,
-    },
-    Read(PathBuf),
-    Hash(PathBuf),
-    Inspect(PathBuf),
-    Directory(PathBuf),
-    Create(PathBuf),
-    Copy(PathBuf, PathBuf),
-    Remove(PathBuf),
-    Link(PathBuf, PathBuf),
-    Write(PathBuf, Vec<u8>),
-    Rename(PathBuf, PathBuf),
-    Temporary,
+#[require(crate::debug::Io)]
+pub struct CaptureOutput {
+    pub environment: Environment,
+    pub cwd: PathBuf,
+    pub program: OsString,
+    pub arguments: Vec<OsString>,
 }
 
-impl Effect {
-    pub fn command(
+impl CaptureOutput {
+    pub fn new(
         environment: &Environment,
         cwd: &Path,
         program: OsString,
         arguments: Vec<OsString>,
     ) -> Self {
-        Self::Command {
-            environment: environment.clone(),
-            cwd: cwd.to_owned(),
-            program,
-            arguments,
-        }
-    }
-
-    pub fn spawn(
-        environment: &Environment,
-        cwd: &Path,
-        program: OsString,
-        arguments: Vec<OsString>,
-    ) -> Self {
-        Self::Spawn {
-            environment: environment.clone(),
-            cwd: cwd.to_owned(),
-            program,
-            arguments,
-        }
-    }
-
-    pub fn process(
-        environment: &Environment,
-        cwd: &Path,
-        program: OsString,
-        arguments: Vec<OsString>,
-    ) -> Self {
-        Self::Run {
+        Self {
             environment: environment.clone(),
             cwd: cwd.to_owned(),
             program,
@@ -188,170 +222,244 @@ impl Effect {
     }
 }
 
-impl Job for Effect {
-    type Output = Result<Observation, Failure>;
+impl IoJob for CaptureOutput {
+    type Data = ToolOutput;
+}
+
+impl Job for CaptureOutput {
+    type Output = Result<ToolOutput, Failure>;
 
     fn run(self) -> Self::Output {
         if vmux_ecs::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
-        match self {
-            Self::Run {
-                environment,
-                cwd,
-                program,
-                arguments,
-            } => {
-                let mut command = environment.command(program, &cwd);
-                command.args(arguments);
-                Execution::new(command).run().map_err(Failure::from_error)?;
-                Ok(Observation::Done)
+        let mut command = self.environment.command(self.program, &self.cwd);
+        command.args(self.arguments);
+        let output = Execution::new(command)
+            .output_any(None)
+            .map_err(Failure::from_error)?;
+        Ok(ToolOutput(output))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct RunProcess {
+    pub environment: Environment,
+    pub cwd: PathBuf,
+    pub program: OsString,
+    pub arguments: Vec<OsString>,
+}
+
+impl RunProcess {
+    pub fn new(
+        environment: &Environment,
+        cwd: &Path,
+        program: OsString,
+        arguments: Vec<OsString>,
+    ) -> Self {
+        Self {
+            environment: environment.clone(),
+            cwd: cwd.to_owned(),
+            program,
+            arguments,
+        }
+    }
+}
+
+impl IoJob for RunProcess {
+    type Data = Done;
+}
+
+impl Job for RunProcess {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let mut command = self.environment.command(self.program, &self.cwd);
+        command.args(self.arguments);
+        Execution::new(command).run().map_err(Failure::from_error)?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct SpawnProcess {
+    pub environment: Environment,
+    pub cwd: PathBuf,
+    pub program: OsString,
+    pub arguments: Vec<OsString>,
+}
+
+impl SpawnProcess {
+    pub fn new(
+        environment: &Environment,
+        cwd: &Path,
+        program: OsString,
+        arguments: Vec<OsString>,
+    ) -> Self {
+        Self {
+            environment: environment.clone(),
+            cwd: cwd.to_owned(),
+            program,
+            arguments,
+        }
+    }
+}
+
+impl IoJob for SpawnProcess {
+    type Data = ProcessValue;
+}
+
+impl Job for SpawnProcess {
+    type Output = Result<ProcessValue, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let mut command = self.environment.command(self.program, &self.cwd);
+        command.args(self.arguments).process_group(0);
+        let child = command
+            .spawn()
+            .map_err(|error| Failure::message(error.to_string()))?;
+        Ok(ProcessValue {
+            _lease: Arc::new(Process(Mutex::new(child))),
+        })
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct ReadFile(pub PathBuf);
+
+impl IoJob for ReadFile {
+    type Data = FileBytes;
+}
+
+impl Job for ReadFile {
+    type Output = Result<FileBytes, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(self.0)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        if !file
+            .metadata()
+            .map_err(|error| Failure::message(error.to_string()))?
+            .is_file()
+        {
+            return Err(Failure::message("Debug input must be a regular file"));
+        }
+        let mut bytes = Vec::new();
+        file.take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(Failure::message("Debug metadata exceeds 1 MiB"));
+        }
+        Ok(FileBytes(bytes))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct HashFile(pub PathBuf);
+
+impl IoJob for HashFile {
+    type Data = FileDigest;
+}
+
+impl Job for HashFile {
+    type Output = Result<FileDigest, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(self.0)
+            .map_err(|error| Failure::message(error.to_string()))?;
+        if !file
+            .metadata()
+            .map_err(|error| Failure::message(error.to_string()))?
+            .is_file()
+        {
+            return Err(Failure::message("Debug input must be a regular file"));
+        }
+        let mut file = file;
+        let mut hash = Sha256::new();
+        let mut bytes = [0; 65536];
+        loop {
+            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+                return Err(Failure::message("Debug IO canceled"));
             }
-            Self::Command {
-                environment,
-                cwd,
-                program,
-                arguments,
-            } => {
-                let mut command = environment.command(program, &cwd);
-                command.args(arguments);
-                let output = Execution::new(command)
-                    .output_any(None)
-                    .map_err(Failure::from_error)?;
-                Ok(Observation::Output(output))
+            let count = file
+                .read(&mut bytes)
+                .map_err(|error| Failure::message(error.to_string()))?;
+            if count == 0 {
+                break;
             }
-            Self::Spawn {
-                environment,
-                cwd,
-                program,
-                arguments,
-            } => {
-                let mut command = environment.command(program, &cwd);
-                command.args(arguments).process_group(0);
-                let child = command
-                    .spawn()
-                    .map_err(|error| Failure::message(error.to_string()))?;
-                Ok(Observation::Process {
-                    _lease: Arc::new(Process(Mutex::new(child))),
-                })
-            }
-            Self::Read(path) => {
-                let file = fs::OpenOptions::new()
-                    .read(true)
-                    .custom_flags(libc::O_NONBLOCK)
-                    .open(path)
-                    .map_err(|error| Failure::message(error.to_string()))?;
-                if !file
-                    .metadata()
-                    .map_err(|error| Failure::message(error.to_string()))?
-                    .is_file()
-                {
-                    return Err(Failure::message("Debug input must be a regular file"));
-                }
-                let mut bytes = Vec::new();
-                file.take(1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)
-                    .map_err(|error| Failure::message(error.to_string()))?;
-                if bytes.len() > 1024 * 1024 {
-                    return Err(Failure::message("Debug metadata exceeds 1 MiB"));
-                }
-                Ok(Observation::Bytes(bytes))
-            }
-            Self::Hash(path) => {
-                let mut file = fs::OpenOptions::new()
-                    .read(true)
-                    .custom_flags(libc::O_NONBLOCK)
-                    .open(path)
-                    .map_err(|error| Failure::message(error.to_string()))?;
-                if !file
-                    .metadata()
-                    .map_err(|error| Failure::message(error.to_string()))?
-                    .is_file()
-                {
-                    return Err(Failure::message("Debug input must be a regular file"));
-                }
-                let mut hash = Sha256::new();
-                let mut bytes = [0; 65536];
-                loop {
-                    if vmux_ecs::blocking::BlockingCancellation::canceled() {
-                        return Err(Failure::message("Debug IO canceled"));
-                    }
-                    let count = file
-                        .read(&mut bytes)
-                        .map_err(|error| Failure::message(error.to_string()))?;
-                    if count == 0 {
-                        break;
-                    }
-                    hash.update(&bytes[..count]);
-                }
-                Ok(Observation::Digest(format!("{:x}", hash.finalize())))
-            }
-            Self::Inspect(path) => match fs::symlink_metadata(path) {
-                Ok(metadata) => Ok(Observation::Metadata(Some(metadata))),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    Ok(Observation::Metadata(None))
-                }
-                Err(error) => Err(Failure::message(error.to_string())),
-            },
-            Self::Directory(path) => {
-                let mut entries = Vec::new();
-                for entry in
-                    fs::read_dir(path).map_err(|error| Failure::message(error.to_string()))?
-                {
-                    if entries.len() == 4096 {
-                        return Err(Failure::message(
-                            "Local artifact directory exceeds its metadata bounds",
-                        ));
-                    }
-                    let entry = entry.map_err(|error| Failure::message(error.to_string()))?;
-                    let metadata = fs::symlink_metadata(entry.path())
-                        .map_err(|error| Failure::message(error.to_string()))?;
-                    entries.push((entry.path(), metadata));
-                }
-                Ok(Observation::Entries(entries))
-            }
-            Self::Create(path) => {
-                fs::create_dir_all(path).map_err(|error| Failure::message(error.to_string()))?;
-                Ok(Observation::Done)
-            }
-            Self::Copy(source, destination) => {
-                if source != destination
-                    && (!destination.exists()
-                        || source
-                            .canonicalize()
-                            .map_err(|error| Failure::message(error.to_string()))?
-                            != destination
-                                .canonicalize()
-                                .map_err(|error| Failure::message(error.to_string()))?)
-                {
-                    fs::copy(source, destination)
-                        .map_err(|error| Failure::message(error.to_string()))?;
-                }
-                Ok(Observation::Done)
-            }
-            Self::Remove(path) => {
-                fs::remove_file(path).map_err(|error| Failure::message(error.to_string()))?;
-                Ok(Observation::Done)
-            }
-            Self::Link(source, destination) => {
-                symlink(source, destination)
-                    .map_err(|error| Failure::message(error.to_string()))?;
-                Ok(Observation::Done)
-            }
-            Self::Write(path, bytes) => {
-                fs::write(&path, bytes).map_err(|error| Failure::message(error.to_string()))?;
-                Ok(Observation::Pending {
-                    _lease: Arc::new(Pending(path)),
-                })
-            }
-            Self::Rename(source, destination) => {
-                fs::rename(source, destination)
-                    .map_err(|error| Failure::message(error.to_string()))?;
-                Ok(Observation::Done)
-            }
-            Self::Temporary => Temporary::create(&std::env::temp_dir(), "vmux-local-codesign")
-                .map(|directory| Observation::Temporary(Arc::new(directory)))
-                .map_err(|error| Failure::message(error.to_string())),
+            hash.update(&bytes[..count]);
+        }
+        Ok(FileDigest(format!("{:x}", hash.finalize())))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct InspectPath(pub PathBuf);
+
+impl IoJob for InspectPath {
+    type Data = PathMetadata;
+}
+
+impl Job for InspectPath {
+    type Output = Result<PathMetadata, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        match fs::symlink_metadata(self.0) {
+            Ok(metadata) => Ok(PathMetadata(Some(metadata))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(PathMetadata(None)),
+            Err(error) => Err(Failure::message(error.to_string())),
         }
     }
 
@@ -361,16 +469,229 @@ impl Job for Effect {
 }
 
 #[derive(Component, Clone)]
-pub enum Observation {
-    Output(std::process::Output),
-    Bytes(Vec<u8>),
-    Digest(String),
-    Metadata(Option<fs::Metadata>),
-    Entries(Vec<(PathBuf, fs::Metadata)>),
-    Temporary(Arc<Temporary>),
-    Process { _lease: Arc<Process> },
-    Pending { _lease: Arc<Pending> },
-    Done,
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct ReadDirectory(pub PathBuf);
+
+impl IoJob for ReadDirectory {
+    type Data = DirectoryEntries;
+}
+
+impl Job for ReadDirectory {
+    type Output = Result<DirectoryEntries, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(self.0).map_err(|error| Failure::message(error.to_string()))? {
+            if entries.len() == 4096 {
+                return Err(Failure::message(
+                    "Local artifact directory exceeds its metadata bounds",
+                ));
+            }
+            let entry = entry.map_err(|error| Failure::message(error.to_string()))?;
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| Failure::message(error.to_string()))?;
+            entries.push((entry.path(), metadata));
+        }
+        Ok(DirectoryEntries(entries))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct CreateDirectory(pub PathBuf);
+
+impl IoJob for CreateDirectory {
+    type Data = Done;
+}
+
+impl Job for CreateDirectory {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        fs::create_dir_all(self.0).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct CopyFile(pub PathBuf, pub PathBuf);
+
+impl IoJob for CopyFile {
+    type Data = Done;
+}
+
+impl Job for CopyFile {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        if self.0 != self.1
+            && (!self.1.exists()
+                || self
+                    .0
+                    .canonicalize()
+                    .map_err(|error| Failure::message(error.to_string()))?
+                    != self
+                        .1
+                        .canonicalize()
+                        .map_err(|error| Failure::message(error.to_string()))?)
+        {
+            fs::copy(self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
+        }
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct RemoveFile(pub PathBuf);
+
+impl IoJob for RemoveFile {
+    type Data = Done;
+}
+
+impl Job for RemoveFile {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        fs::remove_file(self.0).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct LinkPath(pub PathBuf, pub PathBuf);
+
+impl IoJob for LinkPath {
+    type Data = Done;
+}
+
+impl Job for LinkPath {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        symlink(self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct WriteFile(pub PathBuf, pub Vec<u8>);
+
+impl IoJob for WriteFile {
+    type Data = PendingValue;
+}
+
+impl Job for WriteFile {
+    type Output = Result<PendingValue, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        fs::write(&self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(PendingValue {
+            _lease: Arc::new(Pending(self.0)),
+        })
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct RenamePath(pub PathBuf, pub PathBuf);
+
+impl IoJob for RenamePath {
+    type Data = Done;
+}
+
+impl Job for RenamePath {
+    type Output = Result<Done, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        fs::rename(self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
+        Ok(Done)
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct CreateTemporary;
+
+impl IoJob for CreateTemporary {
+    type Data = TemporaryValue;
+}
+
+impl Job for CreateTemporary {
+    type Output = Result<TemporaryValue, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let directory = Temporary::create(&std::env::temp_dir(), "vmux-local-codesign")
+            .map_err(|error| Failure::message(error.to_string()))?;
+        Ok(TemporaryValue(Arc::new(directory)))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
 }
 
 pub struct Process(Mutex<std::process::Child>);
@@ -429,7 +750,7 @@ mod tests {
         let (guard, flight) = Guard::new(None, Vec::new(), wake.clone().into());
         *wake.flight.lock().unwrap() = Some(flight.clone());
         let report = Task {
-            job: Effect::Write(path.clone(), b"temporary result".to_vec()),
+            job: WriteFile(path.clone(), b"temporary result".to_vec()),
             guard,
         }
         .run();

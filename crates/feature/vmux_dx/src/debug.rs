@@ -9,7 +9,12 @@ use sha2::{Digest, Sha256};
 use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
 use vmux_ecs::{Operation, OperationState, Order};
 
-use crate::debug_io::{Effect, Flight, Observation, Task};
+use crate::debug_io::{
+    CaptureOutput, CopyFile, CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes,
+    FileDigest, Flight, HashFile, InspectPath, IoJob, IoValue, LinkPath, PathMetadata,
+    PendingValue, ProcessValue, ReadDirectory, ReadFile, RemoveFile, RenamePath, RunProcess,
+    SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
+};
 use crate::execution::Failure;
 use crate::repository::Checkout;
 use crate::signals::Signals;
@@ -20,26 +25,80 @@ pub struct Plugin;
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(JobPlugin::<Task<Effect>>::default())
-            .configure_sets(
-                Update,
-                Stage.in_set(JobSet::Apply).after(crate::Stage::Execute),
+        app.add_plugins((
+            IoPlugin::<CaptureOutput>::default(),
+            IoPlugin::<SpawnProcess>::default(),
+            IoPlugin::<RunProcess>::default(),
+            IoPlugin::<ReadFile>::default(),
+            IoPlugin::<HashFile>::default(),
+            IoPlugin::<InspectPath>::default(),
+            IoPlugin::<ReadDirectory>::default(),
+            IoPlugin::<CreateDirectory>::default(),
+            IoPlugin::<CopyFile>::default(),
+            IoPlugin::<RemoveFile>::default(),
+            IoPlugin::<LinkPath>::default(),
+            IoPlugin::<WriteFile>::default(),
+            IoPlugin::<RenamePath>::default(),
+            IoPlugin::<CreateTemporary>::default(),
+        ))
+        .configure_sets(
+            Update,
+            (
+                Stage::Collect,
+                Stage::Decide,
+                Stage::Admit,
+                Stage::Submit,
+                Stage::Release,
             )
-            .add_systems(PreUpdate, cancel)
-            .add_systems(
-                Update,
-                (
-                    initialize, collect, cancel, identity, capacity, clear, sign, bundle, publish,
-                    run, stop, signature, provider, wake, schedule, release, finish,
-                )
-                    .chain()
-                    .in_set(Stage),
-            );
+                .chain()
+                .in_set(JobSet::Apply)
+                .after(crate::Stage::Execute),
+        )
+        .add_systems(PreUpdate, cancel)
+        .add_systems(
+            Update,
+            (
+                initialize, cancel, identity, capacity, clear, sign, bundle, publish, run, stop,
+                signature, provider, wake,
+            )
+                .chain()
+                .in_set(Stage::Decide),
+        )
+        .add_systems(Update, (admit, ApplyDeferred).chain().in_set(Stage::Admit))
+        .add_systems(Update, (release, finish).chain().in_set(Stage::Release));
     }
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Stage;
+enum Stage {
+    Collect,
+    Decide,
+    Admit,
+    Submit,
+    Release,
+}
+
+struct IoPlugin<J: IoJob>(std::marker::PhantomData<fn() -> J>);
+
+impl<J: IoJob> Default for IoPlugin<J> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<J: IoJob> bevy_app::Plugin for IoPlugin<J> {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(JobPlugin::<Task<J>>::default())
+            .add_systems(Update, collect::<J>.in_set(Stage::Collect))
+            .add_systems(Update, submit::<J>.in_set(Stage::Submit));
+    }
+}
+
+#[derive(Component, Default)]
+pub(crate) struct Io;
+
+#[derive(Component)]
+struct Admitted;
 
 #[derive(Component, Clone)]
 pub enum Request {
@@ -140,6 +199,35 @@ enum Phase {
 #[derive(Component)]
 struct Sequence(u32);
 
+impl Sequence {
+    fn request<J: IoJob>(
+        &mut self,
+        commands: &mut Commands,
+        owner: Entity,
+        previous: &mut Option<Entity>,
+        job: J,
+        tag: Tag,
+        optional: bool,
+    ) {
+        let mut child = commands.spawn((
+            Operation::bundle("dx.debug.io").unwrap(),
+            Io,
+            job,
+            tag,
+            Order(self.0),
+            ChildOf(owner),
+        ));
+        self.0 += 1;
+        if let Some(previous) = *previous {
+            child.insert(After(previous));
+        }
+        if optional {
+            child.insert(Optional);
+        }
+        *previous = Some(child.id());
+    }
+}
+
 #[derive(Component)]
 struct Submitted;
 
@@ -233,19 +321,36 @@ struct Layout {
     plist: PathBuf,
 }
 
+type NativeResults<'w, 's> = Query<
+    'w,
+    's,
+    (
+        EntityRef<'static>,
+        &'static Tag,
+        &'static Order,
+        &'static ChildOf,
+        &'static OperationState,
+    ),
+    (
+        With<Io>,
+        Or<(
+            With<ToolOutput>,
+            With<FileBytes>,
+            With<FileDigest>,
+            With<PathMetadata>,
+            With<DirectoryEntries>,
+            With<TemporaryValue>,
+            With<ProcessValue>,
+            With<PendingValue>,
+            With<Done>,
+        )>,
+    ),
+>;
+
 #[derive(SystemParam)]
 struct Facts<'w, 's> {
-    values: Query<
-        'w,
-        's,
-        (
-            &'static Tag,
-            &'static Observation,
-            &'static Order,
-            &'static ChildOf,
-        ),
-    >,
-    states: Query<'w, 's, (&'static OperationState, &'static ChildOf), With<Effect>>,
+    values: NativeResults<'w, 's>,
+    states: Query<'w, 's, (&'static OperationState, &'static ChildOf), With<Io>>,
 }
 
 #[derive(SystemParam)]
@@ -261,7 +366,7 @@ struct Scope<'w, 's> {
         ),
         With<Request>,
     >,
-    roots: Query<'w, 's, &'static OperationState, Without<Effect>>,
+    roots: Query<'w, 's, &'static OperationState, Without<Io>>,
 }
 
 impl Scope<'_, '_> {
@@ -288,27 +393,28 @@ impl Scope<'_, '_> {
 }
 
 impl Facts<'_, '_> {
-    fn get(&self, owner: Entity, tag: Tag) -> Option<&Observation> {
+    fn get<T: Component>(&self, owner: Entity, tag: Tag) -> Option<&T> {
         let mut latest = None;
-        for (key, value, order, parent) in &self.values {
-            if parent.parent() != owner || *key != tag {
+        for (entity, key, order, parent, state) in &self.values {
+            if parent.parent() != owner || *key != tag || *state != OperationState::Succeeded {
                 continue;
             }
             if latest.is_none_or(|(_, previous)| order.0 > previous) {
-                latest = Some((value, order.0));
+                latest = Some((entity, order.0));
             }
         }
-        latest.map(|(value, _)| value)
+        latest.and_then(|(entity, _)| entity.get::<T>())
     }
 
     fn text(&self, owner: Entity, tag: Tag) -> Option<String> {
-        let bytes = match self.get(owner, tag) {
-            Some(Observation::Bytes(bytes)) => bytes,
-            Some(Observation::Output(output)) => &output.stdout,
-            Some(Observation::Digest(digest)) => return Some(digest.clone()),
-            _ => return None,
-        };
-        std::str::from_utf8(bytes).ok().map(String::from)
+        if let Some(FileBytes(bytes)) = self.get::<FileBytes>(owner, tag) {
+            return std::str::from_utf8(bytes).ok().map(String::from);
+        }
+        if let Some(ToolOutput(output)) = self.get::<ToolOutput>(owner, tag) {
+            return std::str::from_utf8(&output.stdout).ok().map(String::from);
+        }
+        self.get::<FileDigest>(owner, tag)
+            .map(|digest| digest.0.clone())
     }
 
     fn pending(&self, owner: Entity) -> bool {
@@ -330,7 +436,7 @@ type Requests<'w, 's> = Query<
         &'static mut Phase,
         &'static mut Sequence,
     ),
-    (Without<Complete>, Without<Failed>),
+    (Without<Io>, Without<Complete>, Without<Failed>),
 >;
 
 type Initializing<'w, 's> =
@@ -379,23 +485,23 @@ fn initialize(requests: Initializing, mut commands: Commands) {
     }
 }
 
-type Receipts<'w, 's> = Query<
+type Receipts<'w, 's, J> = Query<
     'w,
     's,
     (
         Entity,
-        &'static JobResult<Task<Effect>>,
-        &'static JobOwner<Task<Effect>>,
+        &'static JobResult<Task<J>>,
+        &'static JobOwner<Task<J>>,
         &'static ChildOf,
-        Option<&'static Optional>,
+        Has<Optional>,
     ),
-    Without<Observation>,
+    Without<<J as IoJob>::Data>,
 >;
 
-fn collect(
-    receipts: Receipts,
+fn collect<J: IoJob>(
+    receipts: Receipts<J>,
     roots: Query<(Entity, &Root, Option<&Failed>), With<Request>>,
-    states: Query<&OperationState, Without<Effect>>,
+    states: Query<&OperationState, Without<Io>>,
     scope: Scope,
     mut commands: Commands,
 ) {
@@ -423,54 +529,32 @@ fn collect(
                 continue;
             }
         };
-        let observation = match &report.result {
-            Ok(observation) => observation,
+        let value = match &report.result {
+            Ok(value) => value,
             Err(error) => {
                 commands.entity(request).insert(Failed(error.clone()));
                 commands.entity(entity).insert(OperationState::Failed);
                 continue;
             }
         };
-        if let Observation::Output(output) = observation
-            && !output.status.success()
-            && optional.is_none()
-        {
-            let mut failure = Failure::status(output.status);
-            let diagnostic = String::from_utf8_lossy(&output.stderr);
-            if !diagnostic.trim().is_empty() {
-                failure = failure.context(diagnostic.trim());
-            }
-            commands.entity(request).insert(Failed(failure));
-            commands.entity(entity).insert(OperationState::Failed);
-            continue;
-        }
-        let bytes = match observation {
-            Observation::Output(output) => Some(output.stdout.as_slice()),
-            Observation::Bytes(bytes) => Some(bytes.as_slice()),
-            _ => None,
-        };
-        if let Some(bytes) = bytes
-            && let Err(error) = std::str::from_utf8(bytes)
-        {
-            commands
-                .entity(request)
-                .insert(Failed(Failure::message(error.to_string())));
+        if let Err(error) = value.validate(optional) {
+            commands.entity(request).insert(Failed(error));
             commands.entity(entity).insert(OperationState::Failed);
             continue;
         }
         commands
             .entity(entity)
-            .insert((observation.clone(), OperationState::Succeeded))
-            .remove::<JobResult<Task<Effect>>>();
+            .insert((value.clone(), OperationState::Succeeded))
+            .remove::<JobResult<Task<J>>>();
     }
 }
 
 fn cancel(
     requests: Canceling,
-    roots: Query<&OperationState, Without<Effect>>,
+    roots: Query<&OperationState, Without<Io>>,
     owners: Query<&Failed, With<Request>>,
     scope: Scope,
-    mut effects: Query<(&ChildOf, &mut OperationState), With<Effect>>,
+    mut effects: Query<(&ChildOf, &mut OperationState), With<Io>>,
     mut commands: Commands,
 ) {
     for (entity, root, owner, failure) in &requests {
@@ -517,7 +601,7 @@ fn identity(
             continue;
         }
         let environment = &settings.0;
-        let mut actions = Vec::new();
+        let mut previous = None;
         match *phase {
             Phase::Start => {
                 if environment.present("APPLE_SIGNING_IDENTITY") || !cfg!(target_os = "macos") {
@@ -562,8 +646,11 @@ fn identity(
                         .entity(entity)
                         .insert(Keychain(keychain.to_owned()));
                 } else {
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             environment,
                             &checkout.root,
                             "security".into(),
@@ -573,7 +660,7 @@ fn identity(
                         ),
                         Tag::Keychain,
                         false,
-                    ));
+                    );
                 }
                 *phase = Phase::IdentityKeychain;
             }
@@ -599,11 +686,14 @@ fn identity(
                     .map(OsString::from)
                     .to_vec();
                 arguments.push(keychain);
-                actions.push((
-                    Effect::command(environment, &checkout.root, "security".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
                     Tag::Identities,
                     false,
-                ));
+                );
                 *phase = Phase::IdentityLookup;
             }
             Phase::IdentityLookup => {
@@ -620,19 +710,28 @@ fn identity(
                         .insert(Complete(Outcome::Identity(identity.0.clone())));
                     continue;
                 }
-                actions.push((Effect::Temporary, Tag::Temporary, false));
-                actions.push((
-                    Effect::command(environment, &checkout.root, "uuidgen".into(), Vec::new()),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CreateTemporary,
+                    Tag::Temporary,
+                    false,
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "uuidgen".into(), Vec::new()),
                     Tag::Password,
                     false,
-                ));
+                );
                 *phase = Phase::IdentityProvision;
             }
             Phase::IdentityProvision => {
                 let identity = &identities.get(entity).unwrap().0;
                 let keychain = &keychains.get(entity).unwrap().0;
-                let Some(Observation::Temporary(temporary)) = facts.get(entity, Tag::Temporary)
-                else {
+                let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary) else {
                     continue;
                 };
                 let Some(password) = facts.text(entity, Tag::Password) else {
@@ -646,11 +745,14 @@ fn identity(
                 let text = format!(
                     "[req]\ndistinguished_name=req_distinguished_name\nx509_extensions=v3_codesign\nprompt=no\n[req_distinguished_name]\nCN={identity}\n[v3_codesign]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n"
                 );
-                actions.push((
-                    Effect::Write(config.clone(), text.into_bytes()),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    WriteFile(config.clone(), text.into_bytes()),
                     Tag::Config,
                     false,
-                ));
+                );
                 let mut arguments = [
                     "req", "-new", "-newkey", "rsa:2048", "-nodes", "-x509", "-days", "3650",
                     "-sha256", "-config",
@@ -664,11 +766,14 @@ fn identity(
                     "-out".into(),
                     cert.clone().into_os_string(),
                 ]);
-                actions.push((
-                    Effect::command(environment, &checkout.root, "openssl".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
                     Tag::None,
                     false,
-                ));
+                );
                 let arguments = vec![
                     "pkcs12".into(),
                     "-export".into(),
@@ -687,11 +792,14 @@ fn identity(
                     "-macalg".into(),
                     "sha1".into(),
                 ];
-                actions.push((
-                    Effect::command(environment, &checkout.root, "openssl".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "openssl".into(), arguments),
                     Tag::None,
                     false,
-                ));
+                );
                 let arguments = vec![
                     "import".into(),
                     p12.into_os_string(),
@@ -704,11 +812,14 @@ fn identity(
                     "-T".into(),
                     "/usr/bin/codesign".into(),
                 ];
-                actions.push((
-                    Effect::command(environment, &checkout.root, "security".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
                     Tag::None,
                     false,
-                ));
+                );
                 let arguments = vec![
                     "add-trusted-cert".into(),
                     "-r".into(),
@@ -719,11 +830,14 @@ fn identity(
                     keychain.clone(),
                     cert.into_os_string(),
                 ];
-                actions.push((
-                    Effect::command(environment, &checkout.root, "security".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
                     Tag::None,
                     false,
-                ));
+                );
                 let arguments = vec![
                     "set-key-partition-list".into(),
                     "-S".into(),
@@ -733,11 +847,14 @@ fn identity(
                     identity.into(),
                     keychain.clone(),
                 ];
-                actions.push((
-                    Effect::command(environment, &checkout.root, "security".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
                     Tag::Partition,
                     true,
-                ));
+                );
                 let arguments = vec![
                     "find-identity".into(),
                     "-v".into(),
@@ -745,11 +862,14 @@ fn identity(
                     "codesigning".into(),
                     keychain.clone(),
                 ];
-                actions.push((
-                    Effect::command(environment, &checkout.root, "security".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(environment, &checkout.root, "security".into(), arguments),
                     Tag::Identities,
                     false,
-                ));
+                );
                 *phase = Phase::IdentityConfirm;
             }
             Phase::IdentityConfirm => {
@@ -763,7 +883,7 @@ fn identity(
                     )));
                     continue;
                 }
-                if let Some(Observation::Output(output)) = facts.get(entity, Tag::Partition)
+                if let Some(ToolOutput(output)) = facts.get(entity, Tag::Partition)
                     && !output.status.success()
                 {
                     eprintln!("codesign may request keychain access");
@@ -777,24 +897,6 @@ fn identity(
             }
             _ => {}
         }
-        let mut previous = None;
-        for (effect, tag, optional) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            if optional {
-                child.insert(Optional);
-            }
-            previous = Some(child.id());
-        }
     }
 }
 
@@ -806,16 +908,24 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
         if facts.pending(entity) {
             continue;
         }
-        let effect = match *phase {
+        let mut previous = None;
+        match *phase {
             Phase::Start => {
                 commands
                     .entity(entity)
                     .insert(Target(checkout.target.clone()));
                 *phase = Phase::CapacityInspect;
-                Some((Effect::Inspect(checkout.target.clone()), Tag::Path))
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    InspectPath(checkout.target.clone()),
+                    Tag::Path,
+                    false,
+                );
             }
             Phase::CapacityInspect => {
-                let Some(Observation::Metadata(metadata)) = facts.get(entity, Tag::Path) else {
+                let Some(PathMetadata(metadata)) = facts.get(entity, Tag::Path) else {
                     continue;
                 };
                 let Ok(target) = targets.get(entity) else {
@@ -823,24 +933,34 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
                 };
                 if metadata.is_some() {
                     *phase = Phase::CapacityRead;
-                    Some((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             "df".into(),
                             vec!["-Pk".into(), target.0.clone().into_os_string()],
                         ),
                         Tag::Capacity,
-                    ))
+                        false,
+                    );
                 } else if let Some(parent) = target.0.parent() {
                     let parent = parent.to_owned();
                     commands.entity(entity).insert(Target(parent.clone()));
-                    Some((Effect::Inspect(parent), Tag::Path))
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        InspectPath(parent),
+                        Tag::Path,
+                        false,
+                    );
                 } else {
                     commands
                         .entity(entity)
                         .insert(Failed(Failure::message("Cannot find target filesystem")));
-                    None
                 }
             }
             Phase::CapacityRead => {
@@ -873,19 +993,8 @@ fn capacity(mut requests: Requests, facts: Facts, targets: Query<&Target>, mut c
                             .insert(Failed(Failure::message("Invalid filesystem capacity")));
                     }
                 }
-                None
             }
-            _ => None,
-        };
-        if let Some((effect, tag)) = effect {
-            commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
+            _ => {}
         }
     }
 }
@@ -895,7 +1004,7 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
         if !matches!(request, Request::Clear) || facts.pending(entity) {
             continue;
         }
-        let mut actions = Vec::new();
+        let mut previous = None;
         match *phase {
             Phase::Start => {
                 let product = match settings.0.product(&checkout.root) {
@@ -908,12 +1017,33 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                     }
                 };
                 let debug = checkout.directory("debug");
-                actions.push((Effect::Create(debug.clone()), Tag::None));
-                actions.push((Effect::Inspect(debug.join(".vmux-dev-ready")), Tag::Stamp));
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CreateDirectory(debug.clone()),
+                    Tag::None,
+                    false,
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    InspectPath(debug.join(".vmux-dev-ready")),
+                    Tag::Stamp,
+                    false,
+                );
                 let alias = checkout
                     .directory("release")
                     .join(format!("{} Dev.app", product.value("VMUX_HOST_NAME")));
-                actions.push((Effect::Inspect(alias), Tag::Path));
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    InspectPath(alias),
+                    Tag::Path,
+                    false,
+                );
                 *phase = Phase::ClearInspect;
             }
             Phase::ClearInspect => {
@@ -926,23 +1056,31 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                         continue;
                     }
                 };
-                if let Some(Observation::Metadata(Some(_))) = facts.get(entity, Tag::Stamp) {
-                    actions.push((
-                        Effect::Remove(checkout.directory("debug").join(".vmux-dev-ready")),
+                if let Some(PathMetadata(Some(_))) = facts.get(entity, Tag::Stamp) {
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        RemoveFile(checkout.directory("debug").join(".vmux-dev-ready")),
                         Tag::None,
-                    ));
+                        false,
+                    );
                 }
-                if let Some(Observation::Metadata(Some(metadata))) = facts.get(entity, Tag::Path)
+                if let Some(PathMetadata(Some(metadata))) = facts.get(entity, Tag::Path)
                     && metadata.file_type().is_symlink()
                 {
-                    actions.push((
-                        Effect::Remove(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        RemoveFile(
                             checkout
                                 .directory("release")
                                 .join(format!("{} Dev.app", product.value("VMUX_HOST_NAME"))),
                         ),
                         Tag::None,
-                    ));
+                        false,
+                    );
                 }
                 *phase = Phase::ClearFinish;
             }
@@ -950,21 +1088,6 @@ fn clear(mut requests: Requests, facts: Facts, mut commands: Commands) {
                 commands.entity(entity).insert(Complete(Outcome::Done));
             }
             _ => {}
-        }
-        let mut previous = None;
-        for (effect, tag) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            previous = Some(child.id());
         }
     }
 }
@@ -1076,16 +1199,22 @@ fn bundle(
             }
         };
         let debug = checkout.directory("debug");
-        let mut actions = Vec::new();
+        let mut previous = None;
         match *phase {
             Phase::Start => {
-                actions.push((
-                    Effect::Read(checkout.root.join("Cargo.toml")),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    ReadFile(checkout.root.join("Cargo.toml")),
                     Tag::Manifest,
                     false,
-                ));
-                actions.push((
-                    Effect::command(
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(
                         &settings.0,
                         &checkout.root,
                         "git".into(),
@@ -1095,17 +1224,20 @@ fn bundle(
                     ),
                     Tag::Branch,
                     true,
-                ));
+                );
                 *phase = Phase::BundleBranch;
             }
             Phase::BundleBranch => {
-                let Some(Observation::Output(output)) = facts.get(entity, Tag::Branch) else {
+                let Some(ToolOutput(output)) = facts.get(entity, Tag::Branch) else {
                     continue;
                 };
                 let branch = facts.text(entity, Tag::Branch).unwrap_or_default();
                 if !output.status.success() || branch.trim().is_empty() {
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             "git".into(),
@@ -1115,7 +1247,7 @@ fn bundle(
                         ),
                         Tag::Commit,
                         true,
-                    ));
+                    );
                 }
                 *phase = Phase::BundlePlan;
             }
@@ -1171,16 +1303,26 @@ fn bundle(
                     contents.join("Frameworks"),
                     service_contents.join("MacOS"),
                 ] {
-                    actions.push((Effect::Create(directory), Tag::None, false));
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CreateDirectory(directory),
+                        Tag::None,
+                        false,
+                    );
                 }
-                actions.push((
-                    Effect::Copy(
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CopyFile(
                         checkout.root.join("packaging/macos/Info.plist"),
                         plist.clone(),
                     ),
                     Tag::None,
                     false,
-                ));
+                );
                 let mut updates = vec![
                     format!(
                         "Set :CFBundleIdentifier {}.dev",
@@ -1197,8 +1339,11 @@ fn bundle(
                     format!("Set :CFBundleVersion {version}"),
                 ];
                 for update in updates.drain(..) {
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             settings
@@ -1210,41 +1355,56 @@ fn bundle(
                         ),
                         Tag::None,
                         false,
-                    ));
+                    );
                 }
-                actions.push((
-                    Effect::Copy(
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CopyFile(
                         product.value("VMUX_HOST_ICON").into(),
                         contents.join("Resources/Vmux.icns"),
                     ),
                     Tag::None,
                     false,
-                ));
-                actions.push((
-                    Effect::Copy(
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CopyFile(
                         product.value("VMUX_HOST_TRAY_ICON").into(),
                         contents.join("Resources/tray.png"),
                     ),
                     Tag::None,
                     false,
-                ));
-                actions.push((
-                    Effect::Copy(debug.join("vmux"), contents.join("MacOS/vmux")),
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CopyFile(debug.join("vmux"), contents.join("MacOS/vmux")),
                     Tag::None,
                     false,
-                ));
-                actions.push((
-                    Effect::Copy(plist.clone(), service_plist.clone()),
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CopyFile(plist.clone(), service_plist.clone()),
                     Tag::None,
                     false,
-                ));
+                );
                 for key in ["CFBundleExecutable", "CFBundleName", "CFBundleDisplayName"] {
                     let update = format!(
                         "Set :{key} {}",
                         serde_json::to_string(product.value("VMUX_HOST_SERVICE_NAME")).unwrap()
                     );
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             settings
@@ -1256,7 +1416,7 @@ fn bundle(
                         ),
                         Tag::None,
                         false,
-                    ));
+                    );
                 }
                 for update in [
                     format!(
@@ -1265,8 +1425,11 @@ fn bundle(
                     ),
                     "Set :LSUIElement true".into(),
                 ] {
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             settings
@@ -1278,7 +1441,7 @@ fn bundle(
                         ),
                         Tag::None,
                         false,
-                    ));
+                    );
                 }
                 let binary = service_contents
                     .join("MacOS")
@@ -1344,8 +1507,11 @@ fn bundle(
                     commands.entity(entity).insert(Complete(Outcome::Done));
                     continue;
                 }
-                actions.push((
-                    Effect::command(
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(
                         &settings.0,
                         &checkout.root,
                         settings
@@ -1357,7 +1523,7 @@ fn bundle(
                     ),
                     Tag::Stdlib,
                     false,
-                ));
+                );
                 *phase = Phase::BundleDesktop;
             }
             Phase::BundleDesktop => {
@@ -1410,24 +1576,7 @@ fn bundle(
             }
             _ => {}
         }
-        let mut previous = None;
-        for (effect, tag, optional) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            if optional {
-                child.insert(Optional);
-            }
-            previous = Some(child.id());
-        }
+
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
@@ -1447,7 +1596,7 @@ fn publish(
         }
         let previous_phase = *phase;
         let debug = checkout.directory("debug");
-        let mut actions = Vec::new();
+        let mut previous = None;
         match *phase {
             Phase::Start => {
                 let mut paths = vec![
@@ -1467,15 +1616,33 @@ fn publish(
                     };
                     let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
                     paths.push(debug.join(&name).join("Contents/MacOS/vmux_desktop"));
-                    actions.push((
-                        Effect::Inspect(checkout.directory("release").join(name)),
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        InspectPath(checkout.directory("release").join(name)),
                         Tag::Path,
-                    ));
+                        false,
+                    );
                 }
                 for (order, path) in paths.into_iter().enumerate() {
                     commands.spawn((File(path.clone()), Order(order as u32), ChildOf(entity)));
-                    actions.push((Effect::Inspect(path.clone()), Tag::Library(order as u32)));
-                    actions.push((Effect::Hash(path), Tag::Input(order as u32)));
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        InspectPath(path.clone()),
+                        Tag::Library(order as u32),
+                        false,
+                    );
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        HashFile(path),
+                        Tag::Input(order as u32),
+                        false,
+                    );
                 }
                 *phase = Phase::PublishCheck;
             }
@@ -1488,7 +1655,7 @@ fn publish(
                 let mut stamp = format!("{}\n", checkout.root.display());
                 let mut failed = false;
                 for (file, order, _) in sources {
-                    let valid = matches!(facts.get(entity, Tag::Library(order.0)), Some(Observation::Metadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
+                    let valid = matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
                     if !valid {
                         commands
                             .entity(entity)
@@ -1509,10 +1676,7 @@ fn publish(
                     continue;
                 }
                 if cfg!(target_os = "macos") {
-                    if !matches!(
-                        facts.get(entity, Tag::Path),
-                        Some(Observation::Metadata(None))
-                    ) {
+                    if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(None))) {
                         commands.entity(entity).insert(Failed(Failure::message(
                             "Cannot publish debug app over existing artifact",
                         )));
@@ -1528,21 +1692,40 @@ fn publish(
                         }
                     };
                     let name = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
-                    actions.push((Effect::Create(checkout.directory("release")), Tag::None));
-                    actions.push((
-                        Effect::Link(debug.join(&name), checkout.directory("release").join(name)),
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CreateDirectory(checkout.directory("release")),
                         Tag::None,
-                    ));
+                        false,
+                    );
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        LinkPath(debug.join(&name), checkout.directory("release").join(name)),
+                        Tag::None,
+                        false,
+                    );
                 }
                 let temporary = debug.join(".vmux-dev-ready.tmp");
-                actions.push((
-                    Effect::Write(temporary.clone(), stamp.into_bytes()),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    WriteFile(temporary.clone(), stamp.into_bytes()),
                     Tag::None,
-                ));
-                actions.push((
-                    Effect::Rename(temporary, debug.join(".vmux-dev-ready")),
+                    false,
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    RenamePath(temporary, debug.join(".vmux-dev-ready")),
                     Tag::None,
-                ));
+                    false,
+                );
                 *phase = Phase::PublishDone;
             }
             Phase::PublishDone => {
@@ -1567,21 +1750,7 @@ fn publish(
             }
             _ => {}
         }
-        let mut previous = None;
-        for (effect, tag) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            previous = Some(child.id());
-        }
+
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
@@ -1605,7 +1774,7 @@ fn run(
             continue;
         }
         let previous_phase = *phase;
-        let mut actions = Vec::new();
+        let mut previous = None;
         if platform != "desktop" {
             if *phase == Phase::Start {
                 let cwd = if platform == "web" {
@@ -1623,8 +1792,11 @@ fn run(
                     ]
                     .map(OsString::from)
                     .to_vec();
-                    actions.push((
-                        Effect::spawn(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        SpawnProcess::new(
                             &settings.0,
                             &cwd,
                             settings
@@ -1635,7 +1807,8 @@ fn run(
                             arguments,
                         ),
                         Tag::None,
-                    ));
+                        false,
+                    );
                 }
                 let arguments = if platform == "web" {
                     vec!["serve".into(), "--platform".into(), "web".into()]
@@ -1647,8 +1820,11 @@ fn run(
                         format!("--{platform}").into(),
                     ]
                 };
-                actions.push((
-                    Effect::process(
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    RunProcess::new(
                         &settings.0,
                         &cwd,
                         settings
@@ -1659,7 +1835,8 @@ fn run(
                         arguments,
                     ),
                     Tag::None,
-                ));
+                    false,
+                );
                 *phase = Phase::LaunchDone;
             } else {
                 commands.entity(entity).insert(Complete(Outcome::Done));
@@ -1677,19 +1854,34 @@ fn run(
             match *phase {
                 Phase::Start => {
                     match profile.as_str() {
-                        "local" => actions.push((
-                            Effect::Inspect(checkout.directory("release")),
+                        "local" => sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            InspectPath(checkout.directory("release")),
                             Tag::Directory,
-                        )),
-                        "dev" => actions.push((
-                            Effect::Read(checkout.directory("debug").join(".vmux-dev-ready")),
+                            false,
+                        ),
+                        "dev" => sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
                             Tag::Stamp,
-                        )),
+                            false,
+                        ),
                         _ => {
                             let target = checkout
                                 .directory("release")
                                 .join(format!("{}.app", product.value("VMUX_HOST_NAME")));
-                            actions.push((Effect::Inspect(target.clone()), Tag::Path));
+                            sequence.request(
+                                &mut commands,
+                                entity,
+                                &mut previous,
+                                InspectPath(target.clone()),
+                                Tag::Path,
+                                false,
+                            );
                             commands.entity(entity).insert(Target(target));
                         }
                     }
@@ -1697,17 +1889,21 @@ fn run(
                 }
                 Phase::LaunchInspect => match profile.as_str() {
                     "local" => {
-                        if !matches!(facts.get(entity, Tag::Directory), Some(Observation::Metadata(Some(metadata))) if metadata.is_dir())
+                        if !matches!(facts.get(entity, Tag::Directory), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
                         {
                             commands.entity(entity).insert(Failed(Failure::message(
                                 "No completed local app; run vmux build -p local first",
                             )));
                             continue;
                         }
-                        actions.push((
-                            Effect::Directory(checkout.directory("release")),
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            ReadDirectory(checkout.directory("release")),
                             Tag::Entries,
-                        ));
+                            false,
+                        );
                         *phase = Phase::LaunchInputs;
                     }
                     "dev" => {
@@ -1743,7 +1939,14 @@ fn run(
                                 Order(count),
                                 ChildOf(entity),
                             ));
-                            actions.push((Effect::Hash(path), Tag::Input(count)));
+                            sequence.request(
+                                &mut commands,
+                                entity,
+                                &mut previous,
+                                HashFile(path),
+                                Tag::Input(count),
+                                false,
+                            );
                             count += 1;
                         }
                         if failed {
@@ -1758,7 +1961,7 @@ fn run(
                         *phase = Phase::LaunchInputs;
                     }
                     _ => {
-                        if !matches!(facts.get(entity, Tag::Path), Some(Observation::Metadata(Some(metadata))) if metadata.is_dir())
+                        if !matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
                         {
                             commands.entity(entity).insert(Failed(Failure::message(
                                 "No completed app; run vmux build first",
@@ -1770,7 +1973,7 @@ fn run(
                 },
                 Phase::LaunchInputs => {
                     if profile == "local" {
-                        let Some(Observation::Entries(snapshot)) = facts.get(entity, Tag::Entries)
+                        let Some(DirectoryEntries(snapshot)) = facts.get(entity, Tag::Entries)
                         else {
                             continue;
                         };
@@ -1865,8 +2068,11 @@ fn run(
                 }
                 Phase::LaunchVerify => {
                     let target = targets.get(entity).unwrap();
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             "codesign".into(),
@@ -1877,7 +2083,8 @@ fn run(
                             ],
                         ),
                         Tag::None,
-                    ));
+                        false,
+                    );
                     *phase = Phase::LaunchExecute;
                 }
                 Phase::LaunchExecute => {
@@ -1904,10 +2111,14 @@ fn run(
                         environment.remove("CEF_PATH");
                         (target.0.as_os_str().to_owned(), Vec::new())
                     };
-                    actions.push((
-                        Effect::process(&environment, &checkout.root, program, arguments),
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        RunProcess::new(&environment, &checkout.root, program, arguments),
                         Tag::None,
-                    ));
+                        false,
+                    );
                     *phase = Phase::LaunchDone;
                 }
                 Phase::LaunchDone => {
@@ -1916,21 +2127,7 @@ fn run(
                 _ => {}
             }
         }
-        let mut previous = None;
-        for (effect, tag) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            previous = Some(child.id());
-        }
+
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
@@ -1943,19 +2140,26 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: 
             continue;
         }
         let previous_phase = *phase;
-        let mut actions = Vec::new();
+        let mut previous = None;
         match *phase {
             Phase::Start => {
-                actions.push(Effect::command(
-                    &settings.0,
-                    &checkout.root,
-                    settings
-                        .0
-                        .get("RUSTC")
-                        .unwrap_or(OsStr::new("rustc"))
-                        .to_owned(),
-                    ["--print", "target-libdir"].map(OsString::from).into(),
-                ));
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(
+                        &settings.0,
+                        &checkout.root,
+                        settings
+                            .0
+                            .get("RUSTC")
+                            .unwrap_or(OsStr::new("rustc"))
+                            .to_owned(),
+                        ["--print", "target-libdir"].map(OsString::from).into(),
+                    ),
+                    Tag::None,
+                    false,
+                );
                 *phase = Phase::StopExecute;
             }
             Phase::StopExecute => {
@@ -1978,12 +2182,19 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: 
                             .to_string_lossy()
                     ),
                 );
-                actions.push(Effect::process(
-                    &environment,
-                    &checkout.root,
-                    debug.join("vmux").into_os_string(),
-                    ["service", "stop"].map(OsString::from).into(),
-                ));
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    RunProcess::new(
+                        &environment,
+                        &checkout.root,
+                        debug.join("vmux").into_os_string(),
+                        ["service", "stop"].map(OsString::from).into(),
+                    ),
+                    Tag::None,
+                    false,
+                );
                 *phase = Phase::StopDone;
             }
             Phase::StopDone => {
@@ -1991,21 +2202,7 @@ fn stop(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut commands: 
             }
             _ => {}
         }
-        let mut previous = None;
-        for effect in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                Tag::Stdlib,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            previous = Some(child.id());
-        }
+
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
@@ -2068,14 +2265,17 @@ fn signature(
                 continue;
             }
         };
-        let mut actions = Vec::new();
+        let mut previous = None;
         match *phase {
             Phase::Start | Phase::SignatureRefresh => {
-                actions.push((
-                    Effect::Hash(product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    HashFile(product.value("VMUX_HOST_DEV_ENTITLEMENTS").into()),
                     Tag::Entitlements,
                     false,
-                ));
+                );
                 let mut sources = spec
                     .inputs
                     .iter()
@@ -2083,14 +2283,42 @@ fn signature(
                     .collect::<Vec<_>>();
                 sources.sort_by_key(|(_, order, _)| order.0);
                 for (input, order, _) in sources {
-                    actions.push((Effect::Hash(input.0.clone()), Tag::Input(order.0), false));
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        HashFile(input.0.clone()),
+                        Tag::Input(order.0),
+                        false,
+                    );
                 }
                 if *phase == Phase::Start {
-                    actions.push((Effect::Inspect(stamp.clone()), Tag::Stamp, false));
-                    actions.push((Effect::Inspect(binary.clone()), Tag::Binary, false));
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        InspectPath(stamp.clone()),
+                        Tag::Stamp,
+                        false,
+                    );
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        InspectPath(binary.clone()),
+                        Tag::Binary,
+                        false,
+                    );
                     *phase = Phase::SignatureInputs;
                 } else {
-                    actions.push((Effect::Hash(binary.clone()), Tag::Binary, false));
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        HashFile(binary.clone()),
+                        Tag::Binary,
+                        false,
+                    );
                     *phase = Phase::SignatureRecord;
                 }
             }
@@ -2134,24 +2362,51 @@ fn signature(
                         continue;
                     };
                     let temporary = stamp.with_extension("tmp");
-                    actions.push((
-                        Effect::Write(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        WriteFile(
                             temporary.clone(),
                             format!("{value}\n{checksum}\n").into_bytes(),
                         ),
                         Tag::None,
                         false,
-                    ));
-                    actions.push((Effect::Rename(temporary, stamp.clone()), Tag::None, false));
+                    );
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        RenamePath(temporary, stamp.clone()),
+                        Tag::None,
+                        false,
+                    );
                     *phase = Phase::SignatureDone;
                 } else {
-                    let exists = matches!(facts.get(entity, Tag::Stamp), Some(Observation::Metadata(Some(metadata))) if metadata.is_file())
-                        && matches!(facts.get(entity, Tag::Binary), Some(Observation::Metadata(Some(metadata))) if metadata.is_file());
+                    let exists = matches!(facts.get(entity, Tag::Stamp), Some(PathMetadata(Some(metadata))) if metadata.is_file())
+                        && matches!(facts.get(entity, Tag::Binary), Some(PathMetadata(Some(metadata))) if metadata.is_file());
                     if exists {
-                        actions.push((Effect::Read(stamp.clone()), Tag::Stamp, false));
-                        actions.push((Effect::Hash(binary.clone()), Tag::Binary, false));
-                        actions.push((
-                            Effect::command(
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            ReadFile(stamp.clone()),
+                            Tag::Stamp,
+                            false,
+                        );
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            HashFile(binary.clone()),
+                            Tag::Binary,
+                            false,
+                        );
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            CaptureOutput::new(
                                 &settings.0,
                                 &checkout.root,
                                 "codesign".into(),
@@ -2163,7 +2418,7 @@ fn signature(
                             ),
                             Tag::Signature,
                             true,
-                        ));
+                        );
                         *phase = Phase::SignatureCache;
                     } else {
                         *phase = Phase::SignaturePrepare;
@@ -2177,7 +2432,7 @@ fn signature(
                 let Some(checksum) = facts.text(entity, Tag::Binary) else {
                     continue;
                 };
-                let Some(Observation::Output(output)) = facts.get(entity, Tag::Signature) else {
+                let Some(ToolOutput(output)) = facts.get(entity, Tag::Signature) else {
                     continue;
                 };
                 if actual == format!("{}\n{checksum}\n", spec.expected.get(entity).unwrap().0)
@@ -2193,20 +2448,29 @@ fn signature(
                 if let Some(copy) = copy
                     && copied.is_none()
                 {
-                    actions.push((
-                        Effect::Create(binary.parent().unwrap().to_owned()),
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CreateDirectory(binary.parent().unwrap().to_owned()),
                         Tag::None,
                         false,
-                    ));
-                    actions.push((
-                        Effect::Copy(copy.0.clone(), binary.clone()),
+                    );
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CopyFile(copy.0.clone(), binary.clone()),
                         Tag::None,
                         false,
-                    ));
+                    );
                     commands.entity(entity).insert(Copied);
                     if linking.is_some() {
-                        actions.push((
-                            Effect::command(
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            CaptureOutput::new(
                                 &settings.0,
                                 &checkout.root,
                                 "otool".into(),
@@ -2214,9 +2478,12 @@ fn signature(
                             ),
                             Tag::Rpaths,
                             false,
-                        ));
-                        actions.push((
-                            Effect::command(
+                        );
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            CaptureOutput::new(
                                 &settings.0,
                                 &checkout.root,
                                 "otool".into(),
@@ -2224,12 +2491,15 @@ fn signature(
                             ),
                             Tag::Libraries,
                             false,
-                        ));
+                        );
                         *phase = Phase::SignatureRpaths;
                     }
                 } else if identifier.is_some() {
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             "file".into(),
@@ -2237,7 +2507,7 @@ fn signature(
                         ),
                         Tag::Format,
                         false,
-                    ));
+                    );
                     *phase = Phase::SignatureFormat;
                 } else {
                     let identity = match settings.0.required("APPLE_SIGNING_IDENTITY") {
@@ -2262,13 +2532,24 @@ fn signature(
                         arguments.extend(["--keychain".into(), keychain.to_owned()]);
                     }
                     arguments.push(path.as_os_str().into());
-                    actions.push((
-                        Effect::command(&settings.0, &checkout.root, "codesign".into(), arguments),
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
+                            &settings.0,
+                            &checkout.root,
+                            "codesign".into(),
+                            arguments,
+                        ),
                         Tag::None,
                         false,
-                    ));
-                    actions.push((
-                        Effect::command(
+                    );
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             "codesign".into(),
@@ -2280,7 +2561,7 @@ fn signature(
                         ),
                         Tag::None,
                         false,
-                    ));
+                    );
                     *phase = Phase::SignatureRefresh;
                 }
             }
@@ -2320,13 +2601,19 @@ fn signature(
                     identifier.as_ref().unwrap().as_str().into(),
                     path.as_os_str().into(),
                 ]);
-                actions.push((
-                    Effect::command(&settings.0, &checkout.root, "codesign".into(), arguments),
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(&settings.0, &checkout.root, "codesign".into(), arguments),
                     Tag::None,
                     false,
-                ));
-                actions.push((
-                    Effect::command(
+                );
+                sequence.request(
+                    &mut commands,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(
                         &settings.0,
                         &checkout.root,
                         "codesign".into(),
@@ -2338,7 +2625,7 @@ fn signature(
                     ),
                     Tag::None,
                     false,
-                ));
+                );
                 *phase = Phase::SignatureRefresh;
             }
             Phase::SignatureDone => {
@@ -2362,8 +2649,11 @@ fn signature(
                     {
                         continue;
                     }
-                    actions.push((
-                        Effect::command(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        CaptureOutput::new(
                             &settings.0,
                             &checkout.root,
                             "install_name_tool".into(),
@@ -2375,7 +2665,7 @@ fn signature(
                         ),
                         Tag::None,
                         false,
-                    ));
+                    );
                 }
                 let mut order = 0;
                 for line in libraries.lines() {
@@ -2404,7 +2694,14 @@ fn signature(
                         Order(order),
                         ChildOf(entity),
                     ));
-                    actions.push((Effect::Inspect(path), Tag::Library(order), false));
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        InspectPath(path),
+                        Tag::Library(order),
+                        false,
+                    );
                     order += 1;
                 }
                 *phase = Phase::SignatureBindings;
@@ -2417,7 +2714,7 @@ fn signature(
                     if parent.parent() != entity {
                         continue;
                     }
-                    if !matches!(facts.get(entity, Tag::Library(order.0)), Some(Observation::Metadata(Some(metadata))) if metadata.is_file())
+                    if !matches!(facts.get(entity, Tag::Library(order.0)), Some(PathMetadata(Some(metadata))) if metadata.is_file())
                     {
                         commands
                             .entity(entity)
@@ -2425,8 +2722,11 @@ fn signature(
                         break;
                     }
                     if binding.original != binding.replacement {
-                        actions.push((
-                            Effect::command(
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            CaptureOutput::new(
                                 &settings.0,
                                 &checkout.root,
                                 "install_name_tool".into(),
@@ -2439,31 +2739,14 @@ fn signature(
                             ),
                             Tag::None,
                             false,
-                        ));
+                        );
                     }
                 }
                 *phase = Phase::SignaturePrepare;
             }
             _ => {}
         }
-        let mut previous = None;
-        for (effect, tag, optional) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            if optional {
-                child.insert(Optional);
-            }
-            previous = Some(child.id());
-        }
+
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
@@ -2479,7 +2762,7 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
             continue;
         }
         let previous_phase = *phase;
-        let mut actions = Vec::new();
+        let mut previous = None;
         match request {
             Request::ProviderCompile {
                 package,
@@ -2503,10 +2786,14 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                         "--target-dir".into(),
                         checkout.target.as_os_str().into(),
                     ];
-                    actions.push((
-                        Effect::process(&environment, &checkout.root, "cargo".into(), arguments),
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        RunProcess::new(&environment, &checkout.root, "cargo".into(), arguments),
                         Tag::None,
-                    ));
+                        false,
+                    );
                     *phase = Phase::ProviderCompiled;
                 } else {
                     commands.entity(entity).insert(Complete(Outcome::Done));
@@ -2516,41 +2803,67 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                 let source = checkout.directory("debug").join(binary);
                 match *phase {
                     Phase::Start => {
-                        actions.push((Effect::Inspect(source), Tag::Path));
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            InspectPath(source),
+                            Tag::Path,
+                            false,
+                        );
                         *phase = Phase::SnapshotInspect;
                     }
                     Phase::SnapshotInspect => {
-                        let valid = matches!(facts.get(entity, Tag::Path), Some(Observation::Metadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
+                        let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
                         if !valid {
                             commands.entity(entity).insert(Failed(Failure::message(
                                 "Workspace provider build produced no bounded executable",
                             )));
                             continue;
                         }
-                        actions.push((Effect::Temporary, Tag::Temporary));
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            CreateTemporary,
+                            Tag::Temporary,
+                            false,
+                        );
                         *phase = Phase::SnapshotCopy;
                     }
                     Phase::SnapshotCopy => {
-                        let Some(Observation::Temporary(temporary)) =
-                            facts.get(entity, Tag::Temporary)
+                        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary)
                         else {
                             continue;
                         };
                         let path = temporary.path().join("provider");
-                        actions.push((Effect::Copy(source, path.clone()), Tag::None));
-                        actions.push((Effect::Inspect(path), Tag::Path));
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            CopyFile(source, path.clone()),
+                            Tag::None,
+                            false,
+                        );
+                        sequence.request(
+                            &mut commands,
+                            entity,
+                            &mut previous,
+                            InspectPath(path),
+                            Tag::Path,
+                            false,
+                        );
                         *phase = Phase::SnapshotCheck;
                     }
                     Phase::SnapshotCheck => {
-                        let valid = matches!(facts.get(entity, Tag::Path), Some(Observation::Metadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
+                        let valid = matches!(facts.get(entity, Tag::Path), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 && metadata.permissions().mode() & 0o111 != 0);
                         if !valid {
                             commands.entity(entity).insert(Failed(Failure::message(
                                 "Workspace executable snapshot is incomplete",
                             )));
                             continue;
                         }
-                        let Some(Observation::Temporary(temporary)) =
-                            facts.get(entity, Tag::Temporary)
+                        let Some(TemporaryValue(temporary)) = facts.get(entity, Tag::Temporary)
                         else {
                             continue;
                         };
@@ -2575,15 +2888,19 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
                     };
                     let mut environment = settings.0.clone();
                     environment.set("VMUX_DX_PROVIDER_CHILD", "1");
-                    actions.push((
-                        Effect::process(
+                    sequence.request(
+                        &mut commands,
+                        entity,
+                        &mut previous,
+                        RunProcess::new(
                             &environment,
                             &checkout.root,
                             program.to_owned(),
                             arguments.clone(),
                         ),
                         Tag::None,
-                    ));
+                        false,
+                    );
                     *phase = Phase::ProviderInvoked;
                 } else {
                     commands.entity(entity).insert(Complete(Outcome::Done));
@@ -2591,21 +2908,7 @@ fn provider(mut requests: Requests, facts: Facts, wake: Res<JobWake>, mut comman
             }
             _ => continue,
         }
-        let mut previous = None;
-        for (effect, tag) in actions {
-            let mut child = commands.spawn((
-                Operation::bundle("dx.debug.io").unwrap(),
-                effect,
-                tag,
-                Order(sequence.0),
-                ChildOf(entity),
-            ));
-            sequence.0 += 1;
-            if let Some(previous) = previous {
-                child.insert(After(previous));
-            }
-            previous = Some(child.id());
-        }
+
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
@@ -2621,18 +2924,33 @@ fn wake(changes: WakeChanges, wake: Res<JobWake>) {
 type Pending<'w, 's> = Query<
     'w,
     's,
+    (Entity, &'static ChildOf, Option<&'static After>),
     (
-        Entity,
-        &'static Effect,
-        &'static ChildOf,
-        Option<&'static After>,
+        With<Io>,
+        Without<Submitted>,
+        Without<Admitted>,
+        Or<(
+            With<CaptureOutput>,
+            With<RunProcess>,
+            With<SpawnProcess>,
+            With<ReadFile>,
+            With<HashFile>,
+            With<InspectPath>,
+            With<ReadDirectory>,
+            With<CreateDirectory>,
+            With<CopyFile>,
+            With<RemoveFile>,
+            With<LinkPath>,
+            With<WriteFile>,
+            With<RenamePath>,
+            With<CreateTemporary>,
+        )>,
     ),
-    (Without<Submitted>, Without<Observation>),
 >;
 
 #[derive(SystemParam)]
 struct Readiness<'w, 's> {
-    active: Query<'w, 's, &'static OperationState, With<Effect>>,
+    active: Query<'w, 's, &'static OperationState, With<Io>>,
     owners: Query<'w, 's, (Option<&'static Failed>, Option<&'static Complete>), With<Request>>,
     states: Query<'w, 's, &'static OperationState>,
 }
@@ -2640,17 +2958,10 @@ struct Readiness<'w, 's> {
 #[derive(SystemParam)]
 struct Loans<'w, 's> {
     leases: Query<'w, 's, &'static Lease>,
-    observations: Query<'w, 's, (&'static Observation, &'static ChildOf)>,
+    temporary: Query<'w, 's, (&'static TemporaryValue, &'static ChildOf)>,
 }
 
-fn schedule(
-    pending: Pending,
-    readiness: Readiness,
-    scope: Scope,
-    loans: Loans,
-    wake: Res<JobWake>,
-    mut commands: Commands,
-) {
+fn admit(pending: Pending, readiness: Readiness, scope: Scope, mut commands: Commands) {
     if readiness
         .active
         .iter()
@@ -2658,7 +2969,7 @@ fn schedule(
     {
         return;
     }
-    for (entity, effect, parent, predecessor) in &pending {
+    for (entity, parent, predecessor) in &pending {
         let Ok((failed, complete)) = readiness.owners.get(parent.parent()) else {
             continue;
         };
@@ -2673,6 +2984,31 @@ fn schedule(
         }) {
             continue;
         }
+        commands
+            .entity(entity)
+            .insert((Admitted, OperationState::Running));
+        break;
+    }
+}
+
+type Accepted<'w, 's, J> = Query<
+    'w,
+    's,
+    (Entity, &'static J, &'static ChildOf),
+    (With<Io>, With<Admitted>, Without<Submitted>),
+>;
+
+fn submit<J: IoJob>(
+    pending: Accepted<J>,
+    scope: Scope,
+    loans: Loans,
+    wake: Res<JobWake>,
+    mut commands: Commands,
+) {
+    for (entity, job, parent) in &pending {
+        if !scope.live(parent.parent()) {
+            continue;
+        }
         let mut current = parent.parent();
         let mut target = None;
         let mut temporary = Vec::new();
@@ -2680,11 +3016,9 @@ fn schedule(
             if let Ok(lease) = loans.leases.get(current) {
                 target = lease.0.clone();
             }
-            for (observation, owner) in &loans.observations {
-                if owner.parent() == current
-                    && let Observation::Temporary(directory) = observation
-                {
-                    temporary.push(directory.clone());
+            for (directory, owner) in &loans.temporary {
+                if owner.parent() == current {
+                    temporary.push(directory.0.clone());
                 }
             }
             let Ok((root, owner, _, _)) = scope.requests.get(current) else {
@@ -2695,7 +3029,7 @@ fn schedule(
             }
             current = owner.0;
         }
-        let (task, flight) = Task::new(effect.clone(), target, temporary, wake.0.clone());
+        let (task, flight) = Task::new(job.clone(), target, temporary, wake.0.clone());
         commands.entity(entity).insert((
             Submitted,
             Root(scope.requests.get(parent.parent()).unwrap().0.0),
@@ -2703,7 +3037,6 @@ fn schedule(
             JobRequest(task),
         ));
         wake.0.wake_by_ref();
-        break;
     }
 }
 
@@ -2711,7 +3044,7 @@ type Releasing<'w, 's> = Query<'w, 's, Entity, (With<Request>, Or<(With<Complete
 
 fn release(
     requests: Releasing,
-    observations: Query<(Entity, &ChildOf, &Observation)>,
+    results: Query<(Entity, &ChildOf), With<Io>>,
     flights: Query<&Flight>,
     mut commands: Commands,
 ) {
@@ -2721,16 +3054,11 @@ fn release(
     for entity in &requests {
         commands.entity(entity).remove::<Lease>();
     }
-    for (entity, parent, observation) in &observations {
-        if requests.contains(parent.parent())
-            && matches!(
-                observation,
-                Observation::Temporary(_)
-                    | Observation::Process { .. }
-                    | Observation::Pending { .. }
-            )
-        {
-            commands.entity(entity).remove::<Observation>();
+    for (entity, parent) in &results {
+        if requests.contains(parent.parent()) {
+            commands
+                .entity(entity)
+                .remove::<(TemporaryValue, ProcessValue, PendingValue)>();
         }
     }
 }
@@ -2894,11 +3222,110 @@ mod tests {
             }
         }
 
+        fn io_owner(&mut self) -> Entity {
+            let checkout = self
+                .app
+                .world()
+                .get::<Checkout>(self.operation)
+                .unwrap()
+                .clone();
+            let settings = self
+                .app
+                .world()
+                .get::<Settings>(self.operation)
+                .unwrap()
+                .clone();
+            self.app
+                .world_mut()
+                .spawn((
+                    Request::Clear,
+                    Captured {
+                        root: self.operation,
+                        attempt: 1,
+                    },
+                    Root(self.operation),
+                    Owner(self.operation),
+                    Phase::ClearFinish,
+                    Sequence(0),
+                    checkout,
+                    settings,
+                    ChildOf(self.operation),
+                ))
+                .id()
+        }
+
+        fn settle_io(&mut self, owner: Entity) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if self.app.world().get::<Sent>(owner).is_some() {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "typed IO did not finish");
+                std::thread::park_timeout(Duration::from_millis(10));
+            }
+        }
+
         fn executable(&self, path: &Path, bytes: &[u8]) {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, bytes).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+    }
+
+    #[test]
+    fn typed_io_preserves_dependency_order_and_releases_temporary_files_before_completion() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.io_owner();
+        let path = fixture.root.join("ordered-io");
+        let world = fixture.app.world_mut();
+        let write = world
+            .spawn((
+                Operation::bundle("dx.debug.io").unwrap(),
+                Io,
+                WriteFile(path.clone(), b"updated".to_vec()),
+                Tag::Config,
+                Order(0),
+                ChildOf(owner),
+            ))
+            .id();
+        let read = world
+            .spawn((
+                Operation::bundle("dx.debug.io").unwrap(),
+                Io,
+                ReadFile(path.clone()),
+                Tag::Config,
+                Order(1),
+                ChildOf(owner),
+                After(write),
+            ))
+            .id();
+        let hash = world
+            .spawn((
+                Operation::bundle("dx.debug.io").unwrap(),
+                Io,
+                HashFile(path.clone()),
+                Tag::Binary,
+                Order(2),
+                ChildOf(owner),
+                After(read),
+            ))
+            .id();
+        fixture.settle_io(owner);
+        let world = fixture.app.world();
+        assert_eq!(world.get::<FileBytes>(read).unwrap().0, b"updated");
+        assert_eq!(
+            world.get::<FileDigest>(hash).unwrap().0,
+            format!("{:x}", Sha256::digest(b"updated"))
+        );
+        for entity in [write, read, hash] {
+            assert_eq!(
+                world.get::<OperationState>(entity),
+                Some(&OperationState::Succeeded)
+            );
+            assert!(!world.get::<Flight>(entity).unwrap().pending());
+        }
+        assert!(!path.exists());
     }
 
     #[test]
