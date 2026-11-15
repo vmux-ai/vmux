@@ -1,0 +1,2 @@
+[alias]
+lint = ["run", "--locked", "--package", "vmux_cli", "--no-default-features", "--features", "dx,ci-syntax", "--target-dir", ".build-tools/cargo", "--", "lint"]

@@ -1,0 +1,219 @@
+#![feature(rustc_private)]
+
+extern crate rustc_errors;
+extern crate rustc_hir;
+extern crate rustc_middle;
+
+use rustc_errors::DiagDecorator;
+use rustc_hir::def::Res;
+use rustc_hir::def_id::{DefId, LOCAL_CRATE};
+use rustc_hir::{Expr, ExprKind, Node, PatKind};
+use rustc_lint::{LateContext, LateLintPass};
+use rustc_middle::ty::{Ty, TyKind, Visibility};
+use std::collections::HashSet;
+
+mod aliases;
+#[cfg(test)]
+mod registrations;
+
+dylint_linting::impl_late_lint! {
+    pub VMUX_EXPORTED_SYSTEM,
+    Deny,
+    "registered Vmux systems must remain private to their defining module",
+    VmuxExportedSystem::default()
+}
+
+#[derive(Default)]
+struct VmuxExportedSystem {
+    reported: HashSet<DefId>,
+}
+
+impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
+        let package = std::env::var("CARGO_PKG_NAME")
+            .unwrap_or_else(|_| cx.tcx.crate_name(LOCAL_CRATE).as_str().to_owned());
+        if !package.starts_with("vmux_") {
+            return;
+        }
+        let (method, systems) = match expression.kind {
+            ExprKind::MethodCall(_, _, arguments, _) => {
+                let Some(method) = cx.typeck_results().type_dependent_def_id(expression.hir_id)
+                else {
+                    return;
+                };
+                (method, arguments.get(1))
+            }
+            ExprKind::Call(function, arguments) => {
+                let TyKind::FnDef(method, _) = cx.typeck_results().expr_ty(function).kind() else {
+                    return;
+                };
+                (*method, arguments.get(2))
+            }
+            _ => return,
+        };
+        if cx.tcx.crate_name(method.krate).as_str() != "bevy_app"
+            || cx.tcx.item_name(method).as_str() != "add_systems"
+        {
+            return;
+        }
+        let Some(implementation) = cx.tcx.impl_of_assoc(method) else {
+            return;
+        };
+        let TyKind::Adt(owner, _) = cx
+            .tcx
+            .type_of(implementation)
+            .instantiate_identity()
+            .skip_norm_wip()
+            .kind()
+        else {
+            return;
+        };
+        if !matches!(cx.tcx.item_name(owner.did()).as_str(), "App" | "SubApp") {
+            return;
+        }
+        if let Some(systems) = systems {
+            self.configuration(cx, systems);
+        }
+    }
+}
+
+impl VmuxExportedSystem {
+    fn configuration<'tcx>(&mut self, cx: &LateContext<'tcx>, expression: &Expr<'tcx>) {
+        self.system_type(cx, cx.typeck_results().expr_ty(expression));
+        match expression.kind {
+            ExprKind::Tup(values) => {
+                for value in values {
+                    self.configuration(cx, value);
+                }
+            }
+            ExprKind::MethodCall(_, receiver, arguments, _) => {
+                let Some(method) = cx.typeck_results().type_dependent_def_id(expression.hir_id)
+                else {
+                    return;
+                };
+                if Self::configuration_method(cx, method) {
+                    self.configuration(cx, receiver);
+                    if cx.tcx.item_name(method).as_str() == "pipe" {
+                        for system in arguments {
+                            self.configuration(cx, system);
+                        }
+                    }
+                }
+            }
+            ExprKind::Path(ref path) => {
+                if let Res::Local(binding) = cx.qpath_res(path, expression.hir_id)
+                    && let Node::Pat(pattern) = cx.tcx.hir_node(binding)
+                    && matches!(pattern.kind, PatKind::Binding(_, _, _, None))
+                    && let Some((_, Node::LetStmt(statement))) =
+                        cx.tcx.hir_parent_iter(binding).next()
+                {
+                    let assignments =
+                        aliases::Assignments::of(cx, expression, binding, statement.init);
+                    for value in assignments.values {
+                        self.configuration(cx, value);
+                    }
+                }
+            }
+            ExprKind::Call(function, arguments) => {
+                let TyKind::FnDef(method, _) = cx.typeck_results().expr_ty(function).kind() else {
+                    return;
+                };
+                if Self::configuration_method(cx, *method) {
+                    if let Some(system) = arguments.first() {
+                        self.configuration(cx, system);
+                    }
+                    if cx.tcx.item_name(*method).as_str() == "pipe"
+                        && let Some(system) = arguments.get(1)
+                    {
+                        self.configuration(cx, system);
+                    }
+                }
+            }
+            ExprKind::Cast(value, _) | ExprKind::DropTemps(value) => {
+                self.configuration(cx, value);
+            }
+            ExprKind::Block(block, _) => {
+                if let Some(value) = block.expr {
+                    self.configuration(cx, value);
+                }
+            }
+            ExprKind::If(_, then, otherwise) => {
+                self.configuration(cx, then);
+                if let Some(otherwise) = otherwise {
+                    self.configuration(cx, otherwise);
+                }
+            }
+            ExprKind::Match(_, arms, _) => {
+                for arm in arms {
+                    self.configuration(cx, arm.body);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn configuration_method(cx: &LateContext<'_>, method: DefId) -> bool {
+        let trait_id = match cx.tcx.trait_of_assoc(method) {
+            Some(owner) => owner,
+            None => {
+                let Some(method) = cx.tcx.trait_item_of(method) else {
+                    return false;
+                };
+                let Some(owner) = cx.tcx.trait_of_assoc(method) else {
+                    return false;
+                };
+                owner
+            }
+        };
+        cx.tcx.crate_name(trait_id.krate).as_str() == "bevy_ecs"
+            && matches!(
+                cx.tcx.item_name(trait_id).as_str(),
+                "IntoScheduleConfigs" | "IntoSystem"
+            )
+    }
+
+    fn system_type<'tcx>(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>) {
+        match ty.kind() {
+            TyKind::FnDef(function, _) => self.system(cx, *function),
+            TyKind::Tuple(values) => {
+                for value in values.iter() {
+                    self.system_type(cx, value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn system(&mut self, cx: &LateContext<'_>, function: DefId) {
+        let Some(local) = function.as_local() else {
+            return;
+        };
+        let Visibility::Restricted(scope) = cx.tcx.visibility(function) else {
+            self.report(cx, function);
+            return;
+        };
+        if scope != cx.tcx.parent_module_from_def_id(local).to_mod_id() {
+            self.report(cx, function);
+        }
+    }
+
+    fn report(&mut self, cx: &LateContext<'_>, function: DefId) {
+        if !self.reported.insert(function) {
+            return;
+        }
+        cx.tcx.emit_node_span_lint(
+            VMUX_EXPORTED_SYSTEM,
+            cx.tcx.local_def_id_to_hir_id(function.expect_local()),
+            cx.tcx.def_span(function),
+            DiagDecorator(|diagnostic| {
+                diagnostic.primary_message(format!(
+                    "registered system `{}` must be private to its defining module",
+                    cx.tcx.item_name(function)
+                ));
+                diagnostic.help(
+                    "register the system inside its owning plugin and remove the wider visibility",
+                );
+            }),
+        );
+    }
+}

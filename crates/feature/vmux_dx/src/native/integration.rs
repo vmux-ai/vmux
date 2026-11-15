@@ -109,6 +109,8 @@ impl Native {
                 "dx,ci-syntax",
                 "--test",
                 "dx",
+                "--",
+                "--test-threads=1",
             ],
             vec!["fmt", "--all", "--", "--check"],
             vec![

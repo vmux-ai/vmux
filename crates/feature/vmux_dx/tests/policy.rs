@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use syn::ext::IdentExt;
 use syn::parse::Parser;
 use syn::visit::{self, Visit};
+use syn::visit_mut::{self, VisitMut};
 use syn::{Attribute, Item, Type};
 
 const FROZEN_REVISION: &str = "a59db6addc6195f4673b5aacd2d604a96b50272c";
@@ -692,6 +693,158 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     );
     policy.prove_legacy(&root.0);
     policy.shape.prove(&root.0);
+}
+
+#[test]
+fn generic_plugin_arguments_need_actual_registered_ecs_parameters() {
+    for (interface, app, body, constructor, production, expected) in [
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "app.add_observer(receive::<J>);",
+            "crate::jobs::Bridge",
+            true,
+            true,
+        ),
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "app.add_observer(receive::<J>);",
+            "crate::jobs::Alias",
+            true,
+            true,
+        ),
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "app.add_systems(Update, read::<J>.in_set(Stage));",
+            "crate::jobs::Bridge",
+            true,
+            true,
+        ),
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "let _ = std::marker::PhantomData::<J>;",
+            "crate::jobs::Bridge",
+            true,
+            false,
+        ),
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "app.add_observer(phantom::<J>);",
+            "crate::jobs::Bridge",
+            true,
+            false,
+        ),
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "app.add_systems(Update, fake::<J>);",
+            "crate::jobs::Bridge",
+            true,
+            false,
+        ),
+        (
+            "crate::jobs::Plugin",
+            "bevy_app::App",
+            "app.add_observer(receive::<J>);",
+            "crate::jobs::Bridge",
+            true,
+            false,
+        ),
+        (
+            "bevy_app::Plugin",
+            "crate::jobs::App",
+            "app.add_observer(receive::<J>);",
+            "crate::jobs::Bridge",
+            true,
+            false,
+        ),
+        (
+            "bevy_app::Plugin",
+            "bevy_app::App",
+            "app.add_observer(receive::<J>);",
+            "crate::jobs::Bridge",
+            false,
+            false,
+        ),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/fixture/src/values.rs", "use bevy_ecs::prelude::*; #[derive(Component)] pub struct Registered; #[derive(Component)] pub struct Unused;");
+        inventory.source("crates/util/fixture/src/jobs.rs", &format!("use bevy_ecs::prelude::*; pub trait Plugin {{}} pub struct App; struct FakeQuery<T>(std::marker::PhantomData<T>); pub struct Bridge<J,N>(std::marker::PhantomData<(J,N)>); pub use Bridge as Alias; impl<J,N> {interface} for Bridge<J,N> {{ fn build(&self, app: &mut {app}) {{ {body} }} }} fn receive<T>(event: On<Add,T>) {{}} fn read<T>(values: Query<&T>) {{}} fn phantom<T>(marker: std::marker::PhantomData<T>) {{}} fn fake<T>(values: FakeQuery<T>) {{}}"));
+        let attribute = if production { "" } else { "#[cfg(test)]" };
+        inventory.source("crates/util/fixture/src/lib.rs", &format!("mod jobs; mod values; struct Root; {attribute} impl bevy_app::Plugin for Root {{ fn build(&self, app: &mut bevy_app::App) {{ app.add_plugins({constructor}::<crate::values::Registered,crate::values::Unused>::default()); }} }}"));
+        inventory.resolve_usage();
+        for (name, used) in [("Registered", expected), ("Unused", false)] {
+            let key = format!("crates/util/fixture/src/values.rs||struct:{name}");
+            assert_eq!(
+                inventory.used(&inventory.entries[&key]),
+                used,
+                "{interface} {app} {body} {production} {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_generic_plugins_preserve_argument_positions_and_boundary_edges() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/fixture/src/values.rs", "use bevy_ecs::prelude::*; #[derive(Component)] pub struct Registered; #[derive(Component)] pub struct Unused;");
+    inventory.source("crates/util/fixture/src/jobs.rs", "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; pub struct Outer<A,B>(std::marker::PhantomData<(A,B)>); pub struct Inner<A,B>(std::marker::PhantomData<(A,B)>); impl<J,N> Plugin for Outer<J,N> { fn build(&self,app:&mut App) { app.add_plugins(Inner::<N,J>::default()); } } impl<J,N> Plugin for Inner<N,J> { fn build(&self,app:&mut App) { app.add_observer(receive::<J>); } } fn receive<T>(event: On<Add,T>) {}");
+    inventory.source("crates/util/fixture/src/lib.rs", "mod jobs; mod values; struct Root; impl bevy_app::Plugin for Root { fn build(&self,app:&mut bevy_app::App) { app.add_plugins(crate::jobs::Outer::<crate::values::Registered,crate::values::Unused>::default()); } }");
+    inventory.resolve_usage();
+    let registered = &inventory.entries["crates/util/fixture/src/values.rs||struct:Registered"];
+    let unused = &inventory.entries["crates/util/fixture/src/values.rs||struct:Unused"];
+    assert!(inventory.used(registered));
+    assert!(!inventory.used(unused));
+    let receiver = &inventory.entries["crates/util/fixture/src/jobs.rs||struct:Inner"];
+    assert!(inventory.boundary_references(receiver, registered, &mut BTreeSet::new()));
+    assert!(!inventory.boundary_references(receiver, unused, &mut BTreeSet::new()));
+}
+
+#[test]
+fn generic_example_registrations_resolve_hyphenated_package_directories() {
+    let mut inventory = Inventory::default();
+    let path = "examples/framework-consumer/tests/generic.rs";
+    inventory.source(path, "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; struct Bridge<T>(std::marker::PhantomData<T>); impl<J> Plugin for Bridge<J> { fn build(&self,app:&mut App) { app.add_observer(receive::<J>); } } fn receive<T>(event:On<Add,T>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_plugins(Bridge::<State>::default()); } }");
+    inventory.resolve_usage();
+    assert!(inventory.used(&inventory.entries[&format!("{path}||struct:State")]));
+}
+
+#[test]
+fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
+    for (source, accepted) in [
+        (
+            "use rustc_lint::LateLintPass as Pass; struct Adapter; impl Pass for Adapter {}",
+            true,
+        ),
+        (
+            "use rustc_hir::intravisit::Visitor; struct Adapter; impl Visitor for Adapter {}",
+            true,
+        ),
+        (
+            "trait LateLintPass {} struct Adapter; impl LateLintPass for Adapter {}",
+            false,
+        ),
+        (
+            "mod rustc_lint { pub trait LateLintPass {} } struct Adapter; impl rustc_lint::LateLintPass for Adapter {}",
+            false,
+        ),
+        (
+            "struct Adapter { data: Vec<String> } impl Adapter { fn choose(&self) {} }",
+            false,
+        ),
+        (
+            "use std::process::Command; #[cfg(test)] struct Adapter { directory: tempfile::TempDir } #[cfg(test)] impl Adapter { fn check(&self) { Command::new(\"cargo\"); } } #[test] fn fixture() { let _ = include_str!(\"case.rs.input\"); Adapter::check(); }",
+            true,
+        ),
+    ] {
+        let inventory = Inventory::fixture(source);
+        let adapter = &inventory.entries["fixture.rs||struct:Adapter"];
+        assert_eq!(inventory.compiler_boundary(adapter), accepted, "{source}");
+    }
 }
 
 #[test]
@@ -4830,18 +4983,20 @@ impl Boundary {
             return false;
         }
         let path = self.key.split('|').next().unwrap();
-        (!adapter.production
-            && self.interface == "Dioxus VirtualDom fixture"
-            && !adapter.local
-            && !adapter.dynamic
-            && !adapter.opaque
-            && ((adapter.renderer
-                && adapter.rendered.iter().any(|path| {
-                    inventory
-                        .resolve(&adapter.namespace, path, &mut BTreeSet::new())
-                        .is_some_and(|child| child.production && child.renderer)
-                }))
-                || adapter.test && inventory.fixture_dom_mount(adapter)))
+        (self.interface == "Rust compiler callback and Cargo regression interface"
+            && inventory.compiler_boundary(adapter))
+            || (!adapter.production
+                && self.interface == "Dioxus VirtualDom fixture"
+                && !adapter.local
+                && !adapter.dynamic
+                && !adapter.opaque
+                && ((adapter.renderer
+                    && adapter.rendered.iter().any(|path| {
+                        inventory
+                            .resolve(&adapter.namespace, path, &mut BTreeSet::new())
+                            .is_some_and(|child| child.production && child.renderer)
+                    }))
+                    || adapter.test && inventory.fixture_dom_mount(adapter)))
             || inventory.manifest_source(adapter)
             || inventory.fixture_lock(adapter)
             || path == "fixture.rs"
@@ -4963,6 +5118,8 @@ struct Declaration {
     plugin_path: Option<String>,
     parameter_path: Option<String>,
     plugin_children: BTreeSet<String>,
+    plugin_arguments: BTreeSet<(String, Vec<String>)>,
+    system_arguments: BTreeSet<(String, String, Vec<String>)>,
     registered_systems: BTreeSet<(String, String)>,
     field_types: Vec<Type>,
     relation_target: Option<String>,
@@ -4988,6 +5145,8 @@ struct Declaration {
     fields: BTreeSet<String>,
     field_paths: BTreeSet<String>,
     generic_bindings: BTreeSet<String>,
+    generic_parameters: Vec<String>,
+    plugin_parameters: Vec<String>,
     component_bindings: BTreeMap<String, String>,
     local: bool,
     dynamic: bool,
@@ -5043,6 +5202,7 @@ struct Inventory {
     roots: BTreeSet<String>,
     functions: BTreeMap<String, Vec<String>>,
     registered_keys: BTreeSet<String>,
+    instantiated_systems: BTreeMap<String, BTreeSet<String>>,
     lookup_depth: Cell<usize>,
     root_bindings: RefCell<BTreeMap<(String, String), Option<String>>>,
     owner_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
@@ -5329,6 +5489,8 @@ impl Inventory {
                 plugin_path: None,
                 parameter_path: None,
                 plugin_children: BTreeSet::new(),
+                plugin_arguments: BTreeSet::new(),
+                system_arguments: BTreeSet::new(),
                 registered_systems: BTreeSet::new(),
                 field_types: Vec::new(),
                 relation_target: None,
@@ -5354,6 +5516,8 @@ impl Inventory {
                 fields: BTreeSet::new(),
                 field_paths: BTreeSet::new(),
                 generic_bindings: BTreeSet::new(),
+                generic_parameters: Vec::new(),
+                plugin_parameters: Vec::new(),
                 component_bindings: BTreeMap::new(),
                 local: false,
                 dynamic: false,
@@ -5571,6 +5735,120 @@ impl Inventory {
             scope = namespace.rsplit_once("::").map(|(parent, _)| parent);
         }
         false
+    }
+
+    fn compiler_boundary(&self, adapter: &Declaration) -> bool {
+        if matches!(adapter.kind, Kind::Macro) {
+            let name = adapter.name.replace(' ', "");
+            return self
+                .external_path(&adapter.namespace, &name, &mut BTreeSet::new())
+                .as_deref()
+                == Some("dylint_linting::impl_late_lint");
+        }
+        let source = match &adapter.owner {
+            Some(owner) => self.resolve(&adapter.namespace, owner, &mut BTreeSet::new()),
+            None => Some(adapter),
+        };
+        let Some(source) = source else {
+            return false;
+        };
+        if !matches!(source.kind, Kind::Struct) || source.dynamic || source.local || source.opaque {
+            return false;
+        }
+        let mut cargo = false;
+        let mut temporary = false;
+        for field in &source.field_paths {
+            if self
+                .external_path(&source.namespace, field, &mut BTreeSet::new())
+                .as_deref()
+                == Some("tempfile::TempDir")
+            {
+                temporary = true;
+            }
+        }
+        for implementation in self.entries.values() {
+            let Some(owner) = &implementation.owner else {
+                continue;
+            };
+            if self
+                .resolve(&implementation.namespace, owner, &mut BTreeSet::new())
+                .is_none_or(|owner| owner.key != source.key)
+            {
+                continue;
+            }
+            if let Some((interface, _)) = implementation.name.split_once(" for ") {
+                let interface = interface.split('<').next().unwrap().replace(' ', "");
+                if matches!(
+                    self.external_path(&implementation.namespace, &interface, &mut BTreeSet::new())
+                        .as_deref(),
+                    Some("rustc_lint::LateLintPass" | "rustc_hir::intravisit::Visitor")
+                ) {
+                    return true;
+                }
+            }
+            for reference in &implementation.reference_paths {
+                if self
+                    .external_path(&implementation.namespace, reference, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("std::process::Command::new")
+                {
+                    cargo = true;
+                }
+            }
+        }
+        if source.production || !temporary || !cargo {
+            return false;
+        }
+        self.entries.values().any(|test| {
+            test.test
+                && test
+                    .included_sources
+                    .iter()
+                    .any(|input| input.ends_with(".rs.input"))
+                && self.owner_references(test, source)
+        })
+    }
+
+    fn external_path(
+        &self,
+        namespace: &str,
+        path: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<String> {
+        if !visiting.insert(format!("{namespace}|{path}"))
+            || self
+                .resolve(namespace, path, &mut BTreeSet::new())
+                .is_some()
+        {
+            return None;
+        }
+        let (root, suffix) = path.split_once("::").unwrap_or((path, ""));
+        let mut scope = Some(namespace);
+        while let Some(current) = scope {
+            if let Some(imports) = self.imports.get(current) {
+                if imports.ambiguous.contains(root)
+                    || imports.modules.contains(root)
+                    || imports.opaque_modules.contains(root)
+                {
+                    return None;
+                }
+                if let Some(target) = imports.aliases.get(root)
+                    && target != root
+                {
+                    let target = if suffix.is_empty() {
+                        target.clone()
+                    } else {
+                        format!("{target}::{suffix}")
+                    };
+                    return self.external_path(current, &target, visiting);
+                }
+            }
+            scope = current.rsplit_once("::").map(|(parent, _)| parent);
+        }
+        if !path.contains("::") || !self.external_root(namespace, root) {
+            return None;
+        }
+        Some(path.into())
     }
 
     fn fixture_lock(&self, adapter: &Declaration) -> bool {
@@ -6251,6 +6529,13 @@ impl Inventory {
     }
 
     fn borrowed_endpoint(&self, source: &Declaration, endpoint: &Declaration) -> bool {
+        if self
+            .instantiated_systems
+            .get(&source.key)
+            .is_some_and(|values| values.contains(&endpoint.key))
+        {
+            return true;
+        }
         for value in &source.field_types {
             if self.borrowed_type(
                 &source.namespace,
@@ -6868,8 +7153,164 @@ impl Inventory {
                 }
             }
         }
+        self.used_keys = keys.clone();
+        self.registered_keys = registered.clone();
+        self.instantiated_systems = self.generic_system_usage();
+        for (system, endpoints) in &self.instantiated_systems {
+            registered.insert(system.clone());
+            keys.extend(endpoints.iter().cloned());
+        }
         self.used_keys = keys;
         self.registered_keys = registered;
+    }
+
+    fn actual_plugin(&self, implementation: &Declaration) -> bool {
+        implementation.production
+            && implementation.plugin
+            && implementation
+                .plugin_path
+                .as_deref()
+                .and_then(|path| {
+                    self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+                })
+                .as_deref()
+                == Some("Plugin")
+    }
+
+    fn type_bindings(
+        &self,
+        namespace: &str,
+        parameters: &[String],
+        arguments: &[String],
+        inherited: &BTreeMap<String, Type>,
+    ) -> Option<BTreeMap<String, Type>> {
+        if parameters.len() != arguments.len() {
+            return None;
+        }
+        let mut bindings = BTreeMap::new();
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            let parameter = syn::parse_str::<syn::Ident>(parameter).ok()?;
+            let value = syn::parse_str::<Type>(argument).ok()?;
+            let value = Bindings::apply(self, namespace, inherited, &value);
+            bindings.insert(parameter.unraw().to_string(), value);
+        }
+        Some(bindings)
+    }
+
+    fn generic_system_endpoints(
+        &self,
+        implementation: &Declaration,
+        bindings: &BTreeMap<String, Type>,
+        systems: &mut BTreeMap<String, BTreeSet<String>>,
+    ) {
+        for (app, callback, arguments) in &implementation.system_arguments {
+            if self
+                .framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                .as_deref()
+                != Some("App")
+            {
+                continue;
+            }
+            let Some(function) =
+                self.function_reference(&implementation.namespace, callback, &mut BTreeSet::new())
+            else {
+                continue;
+            };
+            if !function.production || !function.private || function.generic_parameters.is_empty() {
+                continue;
+            }
+            let Some(values) = self.type_bindings(
+                &implementation.namespace,
+                &function.generic_parameters,
+                arguments,
+                &bindings,
+            ) else {
+                continue;
+            };
+            let mut references = References::default();
+            for value in values.values() {
+                references.visit_type(value);
+            }
+            for path in references.paths {
+                let Some(endpoint) =
+                    self.resolve(&implementation.namespace, &path, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                if !endpoint.ecs {
+                    continue;
+                }
+                for parameter in &function.field_types {
+                    let parameter = Bindings::apply(self, &function.namespace, &values, parameter);
+                    if self.borrowed_type(
+                        &function.namespace,
+                        &parameter,
+                        endpoint,
+                        false,
+                        false,
+                        &mut BTreeSet::new(),
+                    ) {
+                        systems
+                            .entry(function.key.clone())
+                            .or_default()
+                            .insert(endpoint.key.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn generic_system_usage(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut pending: Vec<(String, BTreeMap<String, Type>)> = Vec::new();
+        for implementation in self.entries.values() {
+            if self.actual_plugin(implementation) && implementation.generic_parameters.is_empty() {
+                pending.push((implementation.key.clone(), BTreeMap::new()));
+            }
+        }
+        let mut visited = BTreeSet::new();
+        let mut systems: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        while let Some((key, bindings)) = pending.pop() {
+            let signature: Vec<_> = bindings
+                .iter()
+                .map(|(name, value)| (name.clone(), value.to_token_stream().to_string()))
+                .collect();
+            if !visited.insert((key.clone(), signature)) {
+                continue;
+            }
+            let implementation = &self.entries[&key];
+            self.generic_system_endpoints(implementation, &bindings, &mut systems);
+            for (constructor, arguments) in &implementation.plugin_arguments {
+                let Some(owner) =
+                    self.resolve(&implementation.namespace, constructor, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                for child in self.entries.values() {
+                    if !self.actual_plugin(child)
+                        || child
+                            .owner
+                            .as_deref()
+                            .and_then(|path| {
+                                self.resolve(&child.namespace, path, &mut BTreeSet::new())
+                            })
+                            .is_none_or(|value| value.key != owner.key)
+                    {
+                        continue;
+                    }
+                    let Some(values) = self.type_bindings(
+                        &implementation.namespace,
+                        &child.plugin_parameters,
+                        arguments,
+                        &bindings,
+                    ) else {
+                        continue;
+                    };
+                    pending.push((child.key.clone(), values));
+                }
+            }
+        }
+        systems
     }
 
     fn resolve_function(
@@ -7145,7 +7586,11 @@ impl Namespace {
                 }
             }
         } else {
-            module.push(path.trim_end_matches(".rs").replace('/', "::"));
+            module.push(
+                path.trim_end_matches(".rs")
+                    .replace('/', "::")
+                    .replace('-', "_"),
+            );
         }
         for part in scope {
             if !part.starts_with("fn ") && !part.starts_with("impl ") {
@@ -7153,6 +7598,60 @@ impl Namespace {
             }
         }
         Self(module.join("::"))
+    }
+}
+
+struct Bindings<'a> {
+    inventory: &'a Inventory,
+    namespace: &'a str,
+    values: &'a BTreeMap<String, Type>,
+}
+
+impl<'a> Bindings<'a> {
+    fn apply(
+        inventory: &'a Inventory,
+        namespace: &'a str,
+        values: &'a BTreeMap<String, Type>,
+        value: &Type,
+    ) -> Type {
+        let mut value = value.clone();
+        Self {
+            inventory,
+            namespace,
+            values,
+        }
+        .visit_type_mut(&mut value);
+        value
+    }
+}
+
+impl VisitMut for Bindings<'_> {
+    fn visit_type_mut(&mut self, value: &mut Type) {
+        if let Type::Path(path) = value
+            && path.qself.is_none()
+            && let Some(name) = path.path.get_ident()
+            && let Some(bound) = self.values.get(&name.unraw().to_string())
+        {
+            *value = bound.clone();
+            return;
+        }
+        visit_mut::visit_type_mut(self, value);
+        let Type::Path(path) = value else {
+            return;
+        };
+        if path.qself.is_some() {
+            return;
+        }
+        let name = References::path(&path.path);
+        if let Some(owner) = self
+            .inventory
+            .resolve(self.namespace, &name, &mut BTreeSet::new())
+        {
+            let arguments = path.path.segments.last().unwrap().arguments.clone();
+            path.path = syn::parse_str(&format!("{}::{}", owner.namespace, owner.name))
+                .expect("resolved type path");
+            path.path.segments.last_mut().unwrap().arguments = arguments;
+        }
     }
 }
 
@@ -7299,6 +7798,8 @@ impl Declarations<'_> {
         };
         let tokens = node.to_token_stream();
         let mut generic_bindings = BTreeSet::new();
+        let mut generic_parameters = Vec::new();
+        let mut plugin_parameters = Vec::new();
         let mut component_bindings = BTreeMap::new();
         let mut plugin = false;
         let mut plugin_path = None;
@@ -7307,6 +7808,9 @@ impl Declarations<'_> {
             references.visit_file(&file);
             for item in &file.items {
                 if let Item::Impl(implementation) = item {
+                    if let Type::Path(owner) = implementation.self_ty.as_ref() {
+                        plugin_parameters = References::arguments(&owner.path);
+                    }
                     plugin_path = implementation.trait_.as_ref().map(|(_, path, _)| {
                         path.segments
                             .iter()
@@ -7332,6 +7836,7 @@ impl Declarations<'_> {
                     match parameter {
                         syn::GenericParam::Type(value) => {
                             generic_bindings.insert(value.ident.unraw().to_string());
+                            generic_parameters.push(value.ident.unraw().to_string());
                             for bound in &value.bounds {
                                 let syn::TypeParamBound::Trait(bound) = bound else {
                                     continue;
@@ -7554,6 +8059,8 @@ impl Declarations<'_> {
             plugin_path,
             parameter_path,
             plugin_children: references.plugins,
+            plugin_arguments: references.plugin_arguments,
+            system_arguments: references.system_arguments,
             registered_systems: references.registered_systems,
             field_types: match &parsed_item {
                 Some(Item::Struct(value)) => value
@@ -7610,6 +8117,8 @@ impl Declarations<'_> {
             fields: field_names.names,
             field_paths: field_names.paths,
             generic_bindings,
+            generic_parameters,
+            plugin_parameters,
             component_bindings,
             local: references.local,
             dynamic: references.dynamic,
@@ -7905,6 +8414,8 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 struct References {
     include_tests: bool,
     plugins: BTreeSet<String>,
+    plugin_arguments: BTreeSet<(String, Vec<String>)>,
+    system_arguments: BTreeSet<(String, String, Vec<String>)>,
     registered_systems: BTreeSet<(String, String)>,
     inside_build: bool,
     build_app: Option<(String, String)>,
@@ -8147,6 +8658,11 @@ impl<'ast> Visit<'ast> for References {
             }
         }
         if self.inside_build && self.app_receiver(&value.receiver) {
+            if value.method == "add_plugins" {
+                for argument in &value.args {
+                    self.typed_plugins(argument);
+                }
+            }
             let argument = match value.method.to_string().as_str() {
                 "add_systems" => value.args.iter().nth(1),
                 "add_observer" | "observe" => value.args.first(),
@@ -8228,7 +8744,13 @@ impl References {
                     .collect::<Vec<_>>()
                     .join("::");
                 if let Some((_, app_type)) = &self.build_app {
-                    self.registered_systems.insert((app_type.clone(), path));
+                    self.registered_systems
+                        .insert((app_type.clone(), path.clone()));
+                    self.system_arguments.insert((
+                        app_type.clone(),
+                        path,
+                        Self::arguments(&value.path),
+                    ));
                 }
             }
             syn::Expr::Tuple(value) => {
@@ -8367,6 +8889,48 @@ impl References {
                     );
                 }
             }
+        }
+    }
+
+    fn arguments(path: &syn::Path) -> Vec<String> {
+        let mut values = Vec::new();
+        for segment in &path.segments {
+            if let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments {
+                for argument in &arguments.args {
+                    if let syn::GenericArgument::Type(value) = argument {
+                        values.push(value.to_token_stream().to_string());
+                    }
+                }
+            }
+        }
+        values
+    }
+
+    fn typed_plugins(&mut self, value: &syn::Expr) {
+        if !self.include_tests && Usage::test_only(Usage::expression_attributes(value)) {
+            return;
+        }
+        match value {
+            syn::Expr::Path(value) if value.qself.is_none() => {
+                let mut path = Vec::new();
+                for segment in &value.path.segments {
+                    path.push(segment.ident.unraw().to_string());
+                    if !matches!(segment.arguments, syn::PathArguments::None) {
+                        let arguments = Self::arguments(&value.path);
+                        self.plugin_arguments.insert((path.join("::"), arguments));
+                        break;
+                    }
+                }
+            }
+            syn::Expr::Tuple(value) => {
+                for child in &value.elems {
+                    self.typed_plugins(child);
+                }
+            }
+            syn::Expr::Call(value) => self.typed_plugins(&value.func),
+            syn::Expr::Paren(value) => self.typed_plugins(&value.expr),
+            syn::Expr::Group(value) => self.typed_plugins(&value.expr),
+            _ => {}
         }
     }
 

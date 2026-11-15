@@ -440,6 +440,17 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.render_free == 'true'
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
+      - uses: ./.github/actions/cache-ecs-lints
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+
+      - name: Check typed registration fixtures
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        run: vmux internal ecs-lint -- --test
+
+      - name: Lint registered systems
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        run: VMUX_SKIP_DX_BUILD=1 vmux internal ecs-lint -- --locked ${{ steps.scope.outputs.lint_args }} --all-targets
+
       - name: CI configuration and cache tests
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: node --test scripts/ci-preflight.test.js

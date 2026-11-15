@@ -33,11 +33,14 @@ impl bevy_app::Plugin for DebugPlugin {
             .add_plugins((
                 (
                     crate::cargo::CargoPlugin,
+                    crate::compiler_lint::Plugin,
                     IoPlugin::<CaptureOutput>::default(),
                     IoPlugin::<ProbeProcess>::default(),
                     IoPlugin::<HashInput>::default(),
                     IoPlugin::<RemoveDirectory>::default(),
                     IoPlugin::<CloneExecutable>::default(),
+                    IoPlugin::<crate::compiler_lint_io::Prepare>::default(),
+                    IoPlugin::<crate::compiler_lint_io::Read>::default(),
                 ),
                 IoPlugin::<SpawnProcess>::default(),
                 IoPlugin::<RunProcess>::default(),
@@ -71,6 +74,7 @@ impl bevy_app::Plugin for DebugPlugin {
             .add_observer(accept::<Acquire>)
             .add_observer(accept::<Tool>)
             .add_observer(accept::<crate::cargo::Run>)
+            .add_observer(accept::<crate::compiler_lint::Run>)
             .add_observer(accept::<IdentityRequest>)
             .add_observer(accept::<Clear>)
             .add_observer(accept::<Sign>)
@@ -196,6 +200,7 @@ impl<J: IoJob> Default for IoPlugin<J> {
 impl<J: IoJob> bevy_app::Plugin for IoPlugin<J> {
     fn build(&self, app: &mut App) {
         app.add_plugins(JobPlugin::<Task<J>>::default())
+            .add_observer(queue::<J>)
             .add_systems(Update, collect::<J>.in_set(Stage::Collect))
             .add_systems(Update, submit::<J>.in_set(Stage::Submit));
     }
@@ -206,6 +211,13 @@ pub(crate) struct Io;
 
 #[derive(Component)]
 struct Admitted;
+
+#[derive(Component)]
+struct Queued;
+
+fn queue<J: IoJob>(added: On<Add, J>, mut commands: Commands) {
+    commands.entity(added.entity).insert(Queued);
+}
 
 #[derive(Component, Default)]
 #[require(crate::Step)]
@@ -4971,31 +4983,9 @@ type Pending<'w, 's> = Query<
     (Entity, &'static ChildOf, Option<&'static After>),
     (
         With<Io>,
+        With<Queued>,
         Without<Submitted>,
         Without<Admitted>,
-        Or<(
-            Or<(
-                With<ProbeProcess>,
-                With<HashInput>,
-                With<RemoveDirectory>,
-                With<CaptureOutput>,
-                With<CloneExecutable>,
-            )>,
-            With<AcquireTarget>,
-            With<RunProcess>,
-            With<SpawnProcess>,
-            With<ReadFile>,
-            With<HashFile>,
-            With<InspectPath>,
-            With<ReadDirectory>,
-            With<CreateDirectory>,
-            With<CopyFile>,
-            With<RemoveFile>,
-            With<LinkPath>,
-            With<WriteFile>,
-            With<RenamePath>,
-            With<CreateTemporary>,
-        )>,
     ),
 >;
 
@@ -5378,6 +5368,34 @@ mod tests {
                 assert!(Instant::now() < deadline, "debug operation did not finish");
                 std::thread::park_timeout(Duration::from_millis(10));
             }
+        }
+
+        fn compiler(&mut self) {
+            let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lints");
+            let library = self.root.join("crates/feature/vmux_dx/lints");
+            fs::create_dir_all(&library).unwrap();
+            for file in ["rust-toolchain.toml", "tool-versions.toml"] {
+                fs::copy(source.join(file), library.join(file)).unwrap();
+            }
+            for tool in ["cargo", "rustup"] {
+                let path = self.root.join("bin").join(tool);
+                fs::write(&path, r#"#!/bin/sh
+printf '%s|%s|%s|%s|%s|%s\n' "$*" "$PWD" "$CARGO_TARGET_DIR" "$CARGO_BUILD_TARGET" "$RUSTFLAGS" "$DYLINT_DRIVER_PATH" >> "$TEST_ROOT/compiler-events"
+if [ "$1" = +nightly-2026-08-20 ] && [ "$2" = install ] && [ "$COMPILER_FAIL_INSTALL" = 1 ]; then exit 23; fi
+"#).unwrap();
+                fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            let mut settings = self
+                .app
+                .world_mut()
+                .get_mut::<Settings>(self.operation)
+                .unwrap();
+            settings.0.set("CARGO_BIN", self.root.join("bin/cargo"));
+            settings.0.set("RUSTUP_BIN", self.root.join("bin/rustup"));
+            settings
+                .0
+                .set("CARGO_BUILD_TARGET", "wasm32-unknown-unknown");
+            settings.0.set("RUSTFLAGS", "inherited flags");
         }
 
         fn io_owner(&mut self) -> Entity {
@@ -5813,6 +5831,100 @@ exit 0
                 .map(OsString::from),
             original
         );
+    }
+
+    #[test]
+    fn compiler_request_sequences_tools_and_clears_product_compiler_context() {
+        let mut fixture = Fixture::new();
+        fixture.compiler();
+        assert_eq!(
+            fixture.run(crate::compiler_lint::Run {
+                fixtures: true,
+                arguments: Some(vec![
+                    "--locked".into(),
+                    "--features".into(),
+                    "headless".into()
+                ]),
+            }),
+            0
+        );
+        let events = fs::read_to_string(fixture.root.join("compiler-events")).unwrap();
+        let lines: Vec<_> = events.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].starts_with("toolchain install nightly-2026-08-20 "));
+        assert!(lines[1].starts_with("+nightly-2026-08-20 install cargo-dylint dylint-link "));
+        assert!(lines[2].starts_with("+nightly-2026-08-20 test --locked --lib|"));
+        assert!(
+            lines[3]
+                .split('|')
+                .next()
+                .unwrap()
+                .ends_with("-- --locked --features headless")
+        );
+        for line in lines {
+            let fields: Vec<_> = line.split('|').collect();
+            assert_eq!(
+                fields[2],
+                fixture.root.join(".build-tools/lints").to_str().unwrap()
+            );
+            assert_eq!(fields[3], "");
+            assert_eq!(fields[4], "");
+            assert_eq!(
+                fields[5],
+                fixture
+                    .root
+                    .join(".build-tools/dylint-drivers")
+                    .to_str()
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn compiler_preparation_and_tool_failures_prevent_later_steps() {
+        for failure in ["metadata", "cache", "install"] {
+            let mut fixture = Fixture::new();
+            fixture.compiler();
+            match failure {
+                "metadata" => fs::write(
+                    fixture
+                        .root
+                        .join("crates/feature/vmux_dx/lints/tool-versions.toml"),
+                    vec![b'x'; 4097],
+                )
+                .unwrap(),
+                "cache" => {
+                    let outside = fixture.root.join("outside");
+                    fs::create_dir(&outside).unwrap();
+                    std::os::unix::fs::symlink(&outside, fixture.root.join(".build-tools"))
+                        .unwrap();
+                }
+                "install" => fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<Settings>(fixture.operation)
+                    .unwrap()
+                    .0
+                    .set("COMPILER_FAIL_INSTALL", "1"),
+                _ => unreachable!(),
+            }
+            assert_ne!(
+                fixture.run(crate::compiler_lint::Run {
+                    fixtures: true,
+                    arguments: Some(Vec::new())
+                }),
+                0
+            );
+            let log = fixture.root.join("compiler-events");
+            if failure == "install" {
+                let events = fs::read_to_string(log).unwrap();
+                assert_eq!(events.lines().count(), 2);
+                assert!(!events.contains(" test "));
+                assert!(!events.contains(" dylint "));
+            } else {
+                assert!(!log.exists());
+            }
+        }
     }
 
     #[test]

@@ -37,7 +37,7 @@ tempfile = "3"
 dioxus-rsx = "=0.7.9"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
-syn = { version = "2", features = ["full", "visit"] }
+syn = { version = "2", features = ["full", "visit", "visit-mut"] }
 
 [lints]
 workspace = true
