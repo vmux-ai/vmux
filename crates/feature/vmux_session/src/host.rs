@@ -100,7 +100,7 @@ impl Plugin for SessionClientPlugin {
             session::ChatHostPlugin,
             command_bar::CommandBarPlugin,
             transcript::TranscriptPlugin,
-            onboarding::Plugin,
+            onboarding::OnboardingPlugin,
         ));
     }
 }

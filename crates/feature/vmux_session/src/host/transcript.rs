@@ -1417,7 +1417,7 @@ mod tests {
     #[test]
     fn setup_lifecycle_reaches_a_synced_page_without_messages_or_status_changes() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, Plugin))
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
             .init_resource::<Published>()
             .add_observer(Published::record);
         let session = app

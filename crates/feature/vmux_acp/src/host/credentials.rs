@@ -9,9 +9,9 @@ use vmux_session::{AgentId, Session, SessionId};
 
 use super::onboarding::AgentCredential;
 
-pub(super) struct Plugin;
+pub(super) struct CredentialsPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for CredentialsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(OnboardingSaveKey, ChatSaveKey)>::default())
             .add_message::<vmux_session::host::RecoverPrompt>()

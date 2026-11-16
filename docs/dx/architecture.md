@@ -62,6 +62,8 @@ Development and local products may use explicit loopback Cloud endpoints and cer
 
 ## Development and validation
 
+Fresh onboarding launches create a private temporary data tree through a typed IO job, override the launch profile and environment-key mode, and retain that tree only after a successful launch. Normal launches preserve the requested data and profile.
+
 Development CLI operations follow the same ownership model as product work. Systems sequence builds, signing, packaging, CI planning, evidence validation and cleanup. CI composes the development feature without the desktop runtime; Git, Cargo, filesystem and Actions adapters return bounded facts to accepted operations. Leases protect active work and shared artifacts; cancellation drains IO before returning.
 
 The push hook checks Rust formatting. CI owns Clippy, repository policy, lifecycle and platform validation; targeted tests cover behavior during iteration. Product builds retain their real identity. CI artifacts and results can be reused only with matching inputs and successful validation, so caching cannot substitute for a required check.

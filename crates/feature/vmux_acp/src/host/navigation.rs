@@ -866,8 +866,8 @@ mod tests {
                 vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
                 vmux_ecs::UiStatePlugin::<SessionDetailUiState>::default(),
                 vmux_layout::warm_page::PrewarmPagesPlugin,
-                super::Plugin,
-                super::super::attach::Plugin,
+                super::NavigationPlugin,
+                super::super::attach::AttachPlugin,
             ))
             .insert_resource(AppSettings::default())
             .add_message::<SwapStackSession>()

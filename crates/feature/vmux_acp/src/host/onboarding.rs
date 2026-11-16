@@ -10,9 +10,9 @@ use vmux_ecs::service::ServiceRequest;
 use vmux_session::onboarding::{ChatAuthenticate, ChatCancelSetup};
 use vmux_session::{AgentId, RunState, Session, SessionId};
 
-pub(super) struct Plugin;
+pub(super) struct OnboardingPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for OnboardingPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProvidersChanged>()
             .add_message::<ServiceRequest>()
@@ -344,7 +344,7 @@ mod tests {
                 Startup,
                 DeferredSettings::load.in_set(vmux_setting::SettingsLoadSet),
             )
-            .add_plugins(Plugin);
+            .add_plugins(OnboardingPlugin);
 
         app.update();
 

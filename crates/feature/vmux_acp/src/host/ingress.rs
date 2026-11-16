@@ -297,7 +297,7 @@ mod tests {
     fn promptless_setup_retains_recovery_until_the_agent_is_ready() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(Plugin);
+        app.add_plugins(IngressPlugin);
         let session = app
             .world_mut()
             .spawn((
@@ -374,7 +374,7 @@ mod tests {
     fn cancelled_setup_rejects_late_status_until_explicit_reattachment() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(Plugin);
+        app.add_plugins(IngressPlugin);
         let session = app
             .world_mut()
             .spawn((

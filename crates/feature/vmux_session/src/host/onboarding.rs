@@ -7,9 +7,9 @@ use vmux_ecs::{PageOpenTarget, UiStatePlugin, UiStateWriter};
 use super::StartRequest;
 use crate::onboarding::{AgentOption, OnboardingChooseAgent, OnboardingConnect, OnboardingUiState};
 
-pub(super) struct Plugin;
+pub(super) struct OnboardingPlugin;
 
-impl bevy_app::Plugin for Plugin {
+impl bevy_app::Plugin for OnboardingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<OnboardingUiState>::default())
             .add_plugins(UiStatePlugin::<crate::onboarding::KeyEntryUiState>::default())
@@ -713,7 +713,7 @@ mod tests {
 
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(Plugin)
+            app.add_plugins(OnboardingPlugin)
                 .add_observer(Self::delivered)
                 .insert_non_send(bevy_cef::prelude::Browsers::default());
             app.world_mut().spawn(vmux_api::UiEventPermissions {
@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn prewarmed_setup_pages_cannot_choose_an_agent() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(OnboardingPlugin);
         app.update();
         let owner = app
             .world_mut()
@@ -1012,7 +1012,7 @@ mod tests {
     #[test]
     fn setup_route_claims_reused_views_without_manager_authority() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(OnboardingPlugin);
         let stack = app.world_mut().spawn_empty().id();
         let view = app
             .world_mut()
@@ -1058,7 +1058,7 @@ mod tests {
             [(true, false, 0), (true, true, 0), (false, false, 0)]
         {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(OnboardingPlugin);
             app.update();
             if resume {
                 let directory = tempfile::tempdir().unwrap();
@@ -1114,7 +1114,7 @@ mod tests {
     #[test]
     fn first_launch_stays_on_start_until_explicit_setup_and_later_tabs_keep_the_launcher() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(OnboardingPlugin);
         let restore = app
             .world_mut()
             .spawn(vmux_ecs::store::WorkspaceRestore::default())
@@ -1189,7 +1189,7 @@ mod tests {
     fn readiness_shortcut_requires_an_attached_runtime() {
         for attached in [false, true] {
             let mut app = App::new();
-            app.add_plugins(Plugin);
+            app.add_plugins(OnboardingPlugin);
             let session = app
                 .world_mut()
                 .spawn((
@@ -1241,7 +1241,7 @@ mod tests {
     fn agent_selection_starts_once_without_task_or_project_input() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(OnboardingPlugin);
         app.world_mut().spawn(ProjectsRoot(
             ProjectsDirectory::ensure_at(directory.path().to_path_buf()).unwrap(),
         ));
@@ -1317,7 +1317,7 @@ mod tests {
         .unwrap();
         let restored = Draft::load(&path);
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(OnboardingPlugin);
         app.update();
         let owner = app
             .world_mut()
@@ -1374,7 +1374,7 @@ mod tests {
     #[test]
     fn cancellation_keeps_start_and_preserves_the_session_for_explicit_retry() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(OnboardingPlugin);
         app.update();
         let owner = app
             .world_mut()
