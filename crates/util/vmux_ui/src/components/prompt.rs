@@ -134,7 +134,11 @@ pub fn PromptSelection(
                             label {
                                 key: "prompt-{option.value}",
                                 id: format!("{name}-row-{index}"),
-                                class: if unavailable {
+                                class: if numbered && unavailable {
+                                    "group/choice flex min-h-9 shrink-0 cursor-not-allowed items-center gap-3 px-3 py-1.5 opacity-45"
+                                } else if numbered {
+                                    "group/choice flex min-h-9 shrink-0 cursor-pointer items-center gap-3 px-3 py-1.5"
+                                } else if unavailable {
                                     "flex min-h-9 shrink-0 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-1.5 opacity-45"
                                 } else if checked {
                                     "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg bg-primary/[0.08] px-3 py-1.5 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
@@ -142,7 +146,15 @@ pub fn PromptSelection(
                                     "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 transition-colors hover:bg-background/[0.04] focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
                                 },
                                 if numbered {
-                                    span { aria_hidden: "true", class: "w-4 shrink-0 text-xs font-medium tabular-nums text-muted-foreground", "{index + 1}." }
+                                    span {
+                                        aria_hidden: "true",
+                                        class: if checked {
+                                            "vmux-primary-fill flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold tabular-nums group-focus-within/choice:ring-2 group-focus-within/choice:ring-primary/40 group-focus-within/choice:ring-offset-2 group-focus-within/choice:ring-offset-card"
+                                        } else {
+                                            "flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-medium tabular-nums text-muted-foreground group-hover/choice:text-foreground"
+                                        },
+                                        "{index + 1}"
+                                    }
                                 }
                                 input {
                                     r#type: mode.input_type(),
@@ -151,7 +163,7 @@ pub fn PromptSelection(
                                     aria_label: option.label.clone(),
                                     checked,
                                     disabled: unavailable,
-                                    class: "size-4 shrink-0 cursor-inherit accent-[var(--primary-action-start)]",
+                                    class: if numbered { "sr-only" } else { "size-4 shrink-0 cursor-inherit accent-[var(--primary-action-start)]" },
                                     onmounted: move |event| {
                                         if numbered && checked && !unavailable {
                                             spawn(async move { let _ = event.data().set_focus(true).await; });
