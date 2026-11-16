@@ -75,7 +75,7 @@ pub(super) struct BrowserOpenPlugin;
 
 impl Plugin for BrowserOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(super::authentication::Plugin)
+        app.add_plugins(super::authentication::AuthenticationPlugin)
             .add_agent_request::<AgentOpenBrowser>()
             .add_message::<PageOpenRequest>()
             .add_message::<OpenBesideRequest>()

@@ -6188,7 +6188,9 @@ impl Boundary {
                         inventory
                             .entries
                             .get(path)
-                            .or_else(|| inventory.resolve(&adapter.namespace, path, &mut BTreeSet::new()))
+                            .or_else(|| {
+                                inventory.resolve(&adapter.namespace, path, &mut BTreeSet::new())
+                            })
                             .is_some_and(|child| child.production && child.renderer)
                     }))
                     || adapter.test && inventory.fixture_dom_mount(adapter)))

@@ -677,12 +677,18 @@ values: [
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||struct:ReadResult", owner: "crates/feature/vmux_acp/src/host/external.rs||struct:ConversationLoadTask", lifetime: "bounded raw IO result of one Session-owned blocking Read task"),
 ],
 shape: (
+  bodies: [
+    (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver::run", fingerprint: "d0283485e8ccaa6a", boundary: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver", reason: "One supervised agent_client_protocol stdio loop translates bounded native inbox receipts into initialization, authentication, prompt, configuration, permission and cancellation RPCs; canonical Session updates return through typed ECS inboxes and process IO drains before teardown."),
+    (key: "crates/feature/vmux_acp/src/service_driver.rs||impl:AcpServiceConnection::dispatch", fingerprint: "62a7f90aec3520b5", boundary: "crates/feature/vmux_acp/src/service_driver.rs||impl:AcpServiceConnection", reason: "One ServiceProtocolConnection adapter decodes a per-client ServiceMessage into canonical ECS requests or encodes Session results for its transport; authorization remains in the host and the bounded reply channels retire with the client connection."),
+  ],
+
+  enums: [
+    (key: "crates/feature/vmux_acp/src/acp/driver.rs||enum:AcpInput", fingerprint: "b2ef2acf03158746", role: Boundary, owner: "crates/feature/vmux_acp/src/acp/driver.rs||enum:AcpInput", reason: "Bounded native Tokio inbox maps each accepted user, authentication, approval, configuration or cancellation input to the agent_client_protocol subprocess transport; it retains no separate ECS workflow."),
+  ],
   debt: [
     (key: "crates/feature/vmux_acp/src/host/external.rs||fn:activate", fingerprint: "667e52675037bdd5", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/acp/projection_driver.rs||enum:Intent", fingerprint: "6cbbc1a83c0d548d", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_acp/src/host/command.rs||enum:CommandSet", fingerprint: "9c0c6b0538135b51", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_acp/src/host/navigation_driver.rs||impl:PageOpener < \'_ , \'_ >::apply", fingerprint: "592b1e8e00934b3b", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_acp/src/service_driver.rs||impl:AcpServiceConnection::dispatch", fingerprint: "14948fb01e0da1e3", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/external.rs||enum:SourceKind", fingerprint: "83e86de54aaffec8", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||impl:FileConversation::read", fingerprint: "1670671cfe49b297", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/external.rs||enum:SourceChange", fingerprint: "83a1e073e670612f", issue: "VMX-253", finding: "AU-13"),
@@ -692,8 +698,6 @@ shape: (
     (key: "crates/feature/vmux_acp/src/host/approval_io.rs||fn:flush", fingerprint: "ee410e916fdc2db6", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/remote_driver.rs||impl:RemoteMediaQuery < \'_ >::entries", fingerprint: "e45cac602beb3a8e", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||impl:FileConversation::before", fingerprint: "cd2dc41d05ea77ef", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver::run", fingerprint: "c229e07014c7c4e5", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_acp/src/host/navigation.rs||fn:prepare", fingerprint: "f82b41ef2ac7ab68", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/acp/registry.rs||enum:Runtime", fingerprint: "f3b32130a48a1e6d", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||impl:ChatDecoder::record", fingerprint: "40016c71a2a52a49", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||enum:AcpTranscriptInput", fingerprint: "dce0afc902d30b7a", issue: "VMX-253", finding: "AU-13"),

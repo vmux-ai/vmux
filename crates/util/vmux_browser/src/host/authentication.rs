@@ -11,9 +11,9 @@ use vmux_layout::state::LayoutUiState;
 use vmux_session::host::{SessionView, SessionViews};
 use vmux_session::{RunState, Session, SetupPending};
 
-pub(super) struct Plugin;
+pub(super) struct AuthenticationPlugin;
 
-impl bevy::prelude::Plugin for Plugin {
+impl bevy::prelude::Plugin for AuthenticationPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<crate::PopupWebviewsPlugin>() {
             app.add_plugins(crate::PopupWebviewsPlugin);

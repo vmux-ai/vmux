@@ -28,6 +28,8 @@ flowchart LR
 
 A page may keep a draft, caret or scroll position locally. Changes to shared work go through the owning system. Closing a page does not necessarily stop its conversation or process; reopening it can show the same ongoing work.
 
+Transcript delivery selects a page target on the canonical Session, applies queued-input updates, and publishes through ordered systems in the same frame. The temporary target is removed after delivery or deferral; the page publication capability only hydrates and emits the typed snapshot.
+
 ## Where the code lives
 
 | Directory | Responsibility |
