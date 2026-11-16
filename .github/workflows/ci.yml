@@ -965,7 +965,7 @@ jobs:
           cache-key: build-mac
 
   ci:
-    name: CI
+    name: Check Results
     runs-on: ubuntu-latest
     needs: [plan, changes, lint, tests, website, dx-macos, build-mac, ios-build]
     if: always()
