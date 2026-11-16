@@ -2,14 +2,18 @@ use std::path::Path;
 use std::process::Command;
 
 pub fn emit() {
+    println!("cargo::rerun-if-env-changed=VMUX_CI_VALIDATION");
     println!("cargo::rerun-if-env-changed=VMUX_TARGET_DESTINATION");
     println!("cargo::rerun-if-env-changed=VMUX_HOST_NAME");
     let identity = BuildIdentity::read();
     println!("cargo::rustc-env=VMUX_GIT_HASH={}", identity.hash);
     println!("cargo::rustc-env=VMUX_GIT_BRANCH={}", identity.branch);
 
-    let worktree =
-        git_stdout(&["rev-parse", "--show-toplevel"]).unwrap_or_else(|| "unknown".to_string());
+    let worktree = if BuildIdentity::validation() {
+        "ci-validation".to_string()
+    } else {
+        git_stdout(&["rev-parse", "--show-toplevel"]).unwrap_or_else(|| "unknown".to_string())
+    };
     println!(
         "cargo::rustc-env=VMUX_WORKTREE_ID={:016x}",
         stable_hash(&worktree)
@@ -27,6 +31,10 @@ pub fn emit() {
         identity.title(&profile)
     );
     println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
+
+    if BuildIdentity::validation() {
+        return;
+    }
 
     let mut refs = vec!["HEAD".to_string(), "logs/HEAD".to_string()];
     if let Some(head_ref) = symbolic_head_ref() {
@@ -49,12 +57,32 @@ struct BuildIdentity {
 
 impl BuildIdentity {
     fn read() -> Self {
+        if Self::validation() {
+            return Self {
+                hash: "ci-validation".to_string(),
+                branch: String::new(),
+                name: std::env::var("VMUX_HOST_NAME").unwrap_or_else(|_| "Vmux".to_string()),
+            };
+        }
         Self {
             hash: git_stdout(&["rev-parse", "--short=7", "HEAD"])
                 .unwrap_or_else(|| "unknown".to_string()),
             branch: git_stdout(&["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default(),
             name: std::env::var("VMUX_HOST_NAME").unwrap_or_else(|_| "Vmux".to_string()),
         }
+    }
+
+    fn validation() -> bool {
+        if std::env::var("VMUX_CI_VALIDATION").as_deref() != Ok("1") {
+            return false;
+        }
+        if std::env::var("PROFILE").as_deref() == Ok("release") {
+            return false;
+        }
+        !matches!(
+            std::env::var("VMUX_BUILD_PROFILE").as_deref(),
+            Ok("local" | "release")
+        )
     }
 
     fn title(&self, profile: &str) -> String {

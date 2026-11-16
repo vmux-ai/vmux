@@ -1,6 +1,10 @@
 name: Restore Cargo source timestamps
 description: Reuse cached workspace artifacts only for identical source contents and modes
 inputs:
+  workspace:
+    description: Isolated source checkout directory inside the runner workspace
+    required: false
+    default: "."
   snapshot:
     description: Source snapshot included in the compiler cache
     required: true

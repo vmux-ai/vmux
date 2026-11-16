@@ -11,7 +11,7 @@ class CliArtifact {
     Preflight.sha(tree);
     if (!toolchain || !/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^[^/]+\/[^/]+$/.test(env.GITHUB_REPOSITORY || '')) throw new Error('Missing CLI artifact provenance');
     if (!['Linux', 'macOS'].includes(env.RUNNER_OS) || !['X64', 'ARM64'].includes(env.RUNNER_ARCH)) throw new Error('Unsupported CLI artifact platform');
-    return { version: 1, repository: env.GITHUB_REPOSITORY, run: env.GITHUB_RUN_ID, tree, toolchain, os: env.RUNNER_OS, arch: env.RUNNER_ARCH, features: 'dx,ci-syntax', compile: env.VMUX_CI_FAST_RUST === '1' ? 'opt1-cgu16' : 'default' };
+    return { version: 1, repository: env.GITHUB_REPOSITORY, run: env.GITHUB_RUN_ID, tree, toolchain, os: env.RUNNER_OS, arch: env.RUNNER_ARCH, features: 'dx,ci-syntax', compile: env.VMUX_CI_FAST_RUST === '1' ? 'opt1-cgu16' : 'default', build_identity: env.VMUX_CI_VALIDATION === '1' ? 'validation' : 'product' };
   }
 
   static checksum(file) {
@@ -80,7 +80,7 @@ class CliArtifact {
     hash.update(execFileSync('cargo', ['-V'], { encoding: 'utf8' }));
     hash.update(graph.replaceAll(root, '<checkout>'));
     for (const key of Object.keys(env).sort()) {
-      if (/^(CARGO_|RUSTC|CC$|CXX$|CFLAGS$|CXXFLAGS$|AR$|VMUX_BUILD_PROFILE$|VMUX_HOST_NAME$|VMUX_TARGET_DESTINATION$|VMUX_UPDATE_PUBLIC_KEY$|ImageOS$|ImageVersion$)/.test(key)) hash.update(`${key}=${env[key]}\0`);
+      if (/^(CARGO_|RUSTC|CC$|CXX$|CFLAGS$|CXXFLAGS$|AR$|VMUX_CI_VALIDATION$|VMUX_BUILD_PROFILE$|VMUX_HOST_NAME$|VMUX_TARGET_DESTINATION$|VMUX_UPDATE_PUBLIC_KEY$|ImageOS$|ImageVersion$)/.test(key)) hash.update(`${key}=${env[key]}\0`);
     }
     const names = execFileSync('git', ['ls-files', '-z'], { cwd: root, env: Preflight.gitEnvironment(), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }).split('\0').filter(Boolean).sort();
     const required = new Set(['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env']);
