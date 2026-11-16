@@ -39,7 +39,7 @@ impl bevy::prelude::Plugin for PresentPlugin {
             .add_plugins(crate::viewport::ViewportPlugin)
             .init_resource::<FrameSyncMemory>()
             .add_plugins(crate::layout_placement::LayoutPlacementPlugin)
-            .configure_sets(PostUpdate, RepaintSet)
+            .configure_sets(PostUpdate, (LayoutChildrenSet, RepaintSet))
             .add_systems(
                 PostUpdate,
                 (
@@ -74,7 +74,7 @@ impl bevy::prelude::Plugin for PresentPlugin {
 #[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RepaintSet;
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct LayoutChildrenSet;
 
 type LayoutKeyboardCapture = Or<(
