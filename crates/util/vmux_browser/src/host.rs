@@ -10,7 +10,7 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::CommandBarPanelActive;
 use vmux_flex::prelude::*;
 use vmux_layout::{
-    Header, Open, UpdateState, bookmark::BookmarkContextMenuActive, overlay::LayoutOverlayActive,
+    Header, Open, bookmark::BookmarkContextMenuActive, overlay::LayoutOverlayActive,
     side_sheet::SideSheet,
 };
 use vmux_setting::AppSettings;
@@ -235,18 +235,6 @@ impl LayoutFixedOffsets {
             right: window_width - logical.max().x,
             height: logical.size.y,
         })
-    }
-}
-
-pub(crate) struct UpdateProjection;
-
-impl UpdateProjection {
-    pub(crate) fn should_emit(
-        current: &UpdateState,
-        last: &Option<UpdateState>,
-        page_ready_changed: bool,
-    ) -> bool {
-        last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
     }
 }
 

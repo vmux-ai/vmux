@@ -117,6 +117,13 @@ update; unchanged acknowledged state emits nothing. Removing the Window retires 
 receipt, so reattaching it reapplies visibility even when the header state is unchanged.
 The AppKit adapter performs only the requested button update and retains no layout state.
 
+Browser update notices retain their last published state on the receiving LayoutCef
+entity. The registered projection reads the current update state and page readiness,
+publishes typed UI patches only when needed, and records the publication in the same
+deferred-command drain. An unavailable browser records nothing. Removing LayoutCef
+retires its receipt, including same-update reattachment; other layouts keep their own
+publication history. Non-idle notices replay after page readiness changes.
+
 CI sequencing belongs to the GitHub Actions workflow before product composition. Its Git adapter verifies the captured head/base merge and prepares identical checkouts for every runner; CLI artifacts bind their bytes to that checkout and run. PR validation performs no branch-run lookup or polling, so merge verification cannot wait behind a separate push workflow. Required statuses reject failed preparation and unexpected skips of applicable checks. Native distribution work remains outside ordinary PR validation. Heavy validation remains applicable after preparation failures but cancels when a PR run is superseded, so it cannot hold the concurrency slot for the new head.
 
 Compiler caches restore workspace artifacts together with content/mode-validated source timestamps. Each restore retains a target-specific receipt and its original key/path configuration. Successful workflow steps checkpoint the snapshot and explicitly upload it with the artifacts before dependency-cache post cleanup can prune them. Publication never depends on nested composite outputs surviving into a post action; changed compile environments during the job cannot redirect the save to another partition.
