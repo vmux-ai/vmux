@@ -2840,6 +2840,47 @@ fn view_is_frontmost_subview(parent: &objc2_app_kit::NSView, view: &objc2_app_ki
     count > 0 && core::ptr::eq(&*subviews.objectAtIndex(count - 1), view)
 }
 
+impl Browsers {
+    #[cfg(target_os = "macos")]
+    pub fn try_raise_windowed_to_front(&self, webview: &Entity) -> bool {
+        use objc2::ClassType;
+        use objc2_app_kit::{NSView, NSWindowOrderingMode};
+        let Some(browser) = self.browsers.get(webview) else {
+            return false;
+        };
+        if !browser.windowed {
+            return false;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return false;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let target = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super())
+            .unwrap_or(view);
+        let Some(parent) = (unsafe { target.superview() }) else {
+            return false;
+        };
+        let subviews = parent.subviews();
+        let count = subviews.count();
+        if count > 0 && core::ptr::eq(&*subviews.objectAtIndex(count - 1), target) {
+            return true;
+        }
+        parent.addSubview_positioned_relativeTo(target, NSWindowOrderingMode::Above, None);
+        let subviews = parent.subviews();
+        let count = subviews.count();
+        count > 0 && core::ptr::eq(&*subviews.objectAtIndex(count - 1), target)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn try_raise_windowed_to_front(&self, _: &Entity) -> bool {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::requires_extension_free_context;

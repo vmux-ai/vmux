@@ -38,12 +38,12 @@ impl Plugin for PresentPlugin {
         app.add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
             .add_plugins(crate::viewport::ViewportPlugin)
             .init_resource::<FrameSyncMemory>()
+            .add_plugins(crate::layout_placement::LayoutPlacementPlugin)
             .add_systems(
                 PostUpdate,
                 (
                     sync_keyboard_target,
-                    sync_children_to_ui,
-                    sync_windowed_layout,
+                    sync_children_to_ui.in_set(LayoutChildrenSet),
                     sync_windowed_frames.in_set(crate::BrowserSystemSet::SyncWindowedFrames),
                     sync_windowed_command_bar
                         .in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
@@ -72,6 +72,9 @@ impl Plugin for PresentPlugin {
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RepaintSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct LayoutChildrenSet;
 
 type LayoutKeyboardCapture = Or<(
     With<BookmarkTextInputActive>,
@@ -874,42 +877,6 @@ fn windowed_pages_to_hide(
 
 fn windowed_page_all_corners(layout_hidden: bool, visible_pane_count: usize) -> bool {
     layout_hidden || visible_pane_count > 1
-}
-
-fn sync_windowed_layout(
-    browsers: NonSend<Browsers>,
-    layout_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
-    windows: Query<&Window>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
-) {
-    let mut current = std::collections::HashSet::new();
-    for (entity, host_window) in &layout_q {
-        current.insert(entity);
-        let window_entity = host_window.map(|h| h.0).or(focused_window.entity());
-        let Some(window_entity) = window_entity else {
-            continue;
-        };
-        let Ok(window) = windows.get(window_entity) else {
-            continue;
-        };
-        let scale = window.resolution.scale_factor();
-        let w = window.resolution.physical_width() as f32;
-        let h = window.resolution.physical_height() as f32;
-        if w <= 0.0 || h <= 0.0 {
-            continue;
-        }
-        browsers.set_windowed_hidden(&entity, false);
-        browsers.set_windowed_frame(&entity, 0.0, 0.0, w, h, scale);
-        if browsers.windowed_view_ready(&entity) {
-            let key = (0, 0, w.round() as i32, h.round() as i32);
-            let changed = last_raised_frame.insert(entity, key) != Some(key);
-            if changed {
-                browsers.raise_windowed_to_front(&entity);
-            }
-        }
-    }
-    last_raised_frame.retain(|entity, _| current.contains(entity));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

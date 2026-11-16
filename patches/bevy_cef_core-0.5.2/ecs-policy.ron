@@ -1,4 +1,7 @@
 (
+boundaries: [
+    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||impl:Browsers#2", fingerprint: "fd28e9486b70a5d6", interface: "AppKit NSView sibling ordering and frontmost-subview postcondition", input: "ECS: crates/util/vmux_browser/src/layout_placement.rs||struct:Placement", output: "external: native raise availability and frontmost sibling-order result", lifetime: "one synchronous requested raise using borrowed CEF/AppKit handles", bounds: "one captured browser owner and at most one addSubview ordering call; no layout selection, registry or retry authority", teardown: "native handles remain borrowed through the postcondition check; unsupported/missing/detached views return false", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_browser/src/layout_placement.rs||impl:Plugin for LayoutPlacementPlugin")),
+],
 legacy: [
     (key: "patches/bevy_cef_core-0.5.2/build.rs||fn:main", fingerprint: "1bbcd25fc41ffb95", issue: "VMX-253"),
     (key: "patches/bevy_cef_core-0.5.2/build.rs||fn:write_cef_embedded_scheme", fingerprint: "68ba4b4321a7c952", issue: "VMX-253"),
