@@ -11,7 +11,9 @@ use zeroize::Zeroizing;
 
 use crate::catalog::Catalog;
 use crate::wire::Request;
-use crate::{Account, Binding, Failure, LinkRequest, Location, MutationCompleted, Root, Set};
+use crate::{
+    Account, Binding, Failure, FailureKind, LinkRequest, Location, MutationCompleted, Root, Set,
+};
 
 pub(crate) struct ConnectionPlugin;
 
@@ -91,10 +93,12 @@ pub struct CancelConnectRequest {
 }
 
 #[derive(Component)]
+#[require(Phase)]
 pub struct Connection;
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
+    #[default]
     Connecting,
     Authorizing,
     AwaitingApproval,
@@ -114,6 +118,12 @@ pub struct Authorization {
 
 #[derive(Component)]
 pub struct ConnectionError(pub Failure);
+
+impl ConnectionError {
+    pub fn kind(&self) -> FailureKind {
+        self.0.kind()
+    }
+}
 
 #[derive(Component)]
 pub struct Disconnecting;
@@ -299,7 +309,7 @@ fn connect(
         let Ok((server, location)) = roots.get(request.root) else {
             commands
                 .entity(request.root)
-                .insert(ConnectionError(Failure::AccessDenied));
+                .insert(ConnectionError(Failure::access_denied()));
             continue;
         };
         for (entity, owner) in &connections {
@@ -415,7 +425,7 @@ fn prepare(mut ready: PreparedKeys, mut send: MessageWriter<SendRequest>, mut co
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)));
+                    .insert(Rejected(Failure::storage(error)));
                 continue;
             }
         };
@@ -460,7 +470,7 @@ fn authorize(
         {
             commands
                 .entity(entity)
-                .insert(Rejected(Failure::InvalidStore));
+                .insert(Rejected(Failure::invalid_store()));
             continue;
         }
         commands
@@ -487,7 +497,7 @@ fn poll(
         if Instant::now() >= grant.expires {
             commands
                 .entity(entity)
-                .insert(Rejected(Failure::AuthorizationExpired));
+                .insert(Rejected(Failure::authorization_expired()));
             continue;
         }
         if waiting || slowed {
@@ -528,7 +538,7 @@ fn register(
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)));
+                    .insert(Rejected(Failure::storage(error)));
                 continue;
             }
         };
@@ -596,7 +606,7 @@ fn verify(
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)));
+                    .insert(Rejected(Failure::storage(error)));
             }
         }
     }
@@ -640,7 +650,7 @@ fn bind(
         {
             commands
                 .entity(entity)
-                .insert(Rejected(Failure::AccountMismatch));
+                .insert(Rejected(Failure::account_mismatch()));
             continue;
         }
         let operation_id = Uuid::new_v4();
@@ -664,7 +674,7 @@ fn reject(rejected: Rejections, mut send: MessageWriter<SendRequest>, mut comman
     for (entity, owner, phase, rejected, reusing) in &rejected {
         if reusing
             && matches!(phase, Phase::Challenging | Phase::Verifying)
-            && rejected.0 == Failure::NotAuthenticated
+            && rejected.0 == Failure::not_authenticated()
         {
             commands
                 .entity(entity)
@@ -710,7 +720,7 @@ fn complete(
                     if !bound {
                         commands
                             .entity(result.root)
-                            .insert(ConnectionError(Failure::AccountMismatch));
+                            .insert(ConnectionError(Failure::account_mismatch()));
                         commands.entity(entity).despawn();
                         continue;
                     }

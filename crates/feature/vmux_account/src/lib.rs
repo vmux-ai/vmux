@@ -11,8 +11,8 @@ pub use mutations::{
     Commit, CreateRequest, LinkRequest, MutationCompleted, RenameRequest, SyncRequest,
     WriteCompleted, WriteFailure, WriteRequest,
 };
-pub use profile::Failure;
 pub use profile::{Account, Binding, Owner, Profile, SyncEnabled};
+pub use profile::{Failure, FailureKind};
 
 #[cfg(feature = "cloud")]
 pub use availability::AccountCloudFlag;

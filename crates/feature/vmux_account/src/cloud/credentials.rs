@@ -91,7 +91,7 @@ fn receive(mut ready: Results, mut commands: Commands) {
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)));
+                    .insert(Rejected(Failure::storage(error)));
             }
         }
         commands

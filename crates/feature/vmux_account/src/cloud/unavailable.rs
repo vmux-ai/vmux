@@ -21,7 +21,7 @@ fn refuse(
         if active.contains(request.entity) {
             commands
                 .entity(request.entity)
-                .insert(Rejected(Failure::Storage(
+                .insert(Rejected(Failure::storage(
                     "secure account credentials are unavailable on this platform".into(),
                 )));
         }

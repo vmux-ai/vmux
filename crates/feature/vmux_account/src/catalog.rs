@@ -9,8 +9,8 @@ use vmux_ecs::record::{
     CaptureRequest, Graph, Persisted, Record, RestoreRequest, Restored, Scope, StoreOwner,
 };
 use vmux_ecs::{
-    Active, Operation, OperationCompleted, Order, ProfileId, ProfileLabel, Ready, Revision,
-    Uuid as Id,
+    Active, EntityTarget, Operation, OperationCompleted, Order, ProfileId, ProfileLabel, Ready,
+    Revision, Uuid as Id,
 };
 use vmux_profile::Profile as Directory;
 
@@ -23,7 +23,10 @@ impl bevy_app::Plugin for CatalogPlugin {
             .add_message::<RetryRequest>()
             .add_systems(Update, (retry, load, receive).chain().in_set(Set::Receive))
             .add_systems(Update, seed.in_set(Set::Seed))
-            .add_systems(Update, adopt.in_set(Set::Adopt));
+            .add_systems(
+                Update,
+                (validate, reconcile, adopt).chain().in_set(Set::Adopt),
+            );
     }
 }
 
@@ -173,21 +176,33 @@ impl Catalog<'_, '_> {
         None
     }
 
+    pub(crate) fn available_directory(&self, account: Entity, name: &str) -> String {
+        let base = Directory::named(name).into_id();
+        let mut directory = base.clone();
+        for suffix in 2usize.. {
+            if self.directory(account, &directory).is_none() {
+                break;
+            }
+            directory = format!("{base}-{suffix}");
+        }
+        directory
+    }
+
     pub(crate) fn validate(&self, entities: &[Entity]) -> Result<(Entity, Uuid), Failure> {
         let mut account = None;
         for entity in entities {
             if let Ok((entity, id, scope, _)) = self.accounts.get(*entity) {
-                let id: Uuid = id.0.parse().map_err(|_| Failure::InvalidStore)?;
+                let id: Uuid = id.0.parse().map_err(|_| Failure::invalid_store())?;
                 if account.is_some() || scope.0 != id {
-                    return Err(Failure::InvalidStore);
+                    return Err(Failure::invalid_store());
                 }
                 account = Some((entity, id));
             }
         }
-        let (account, scope) = account.ok_or(Failure::InvalidStore)?;
+        let (account, scope) = account.ok_or(Failure::invalid_store())?;
         let binding = self.bindings.get(account).ok();
         if binding.is_some_and(|binding| !binding.is_valid()) {
-            return Err(Failure::InvalidStore);
+            return Err(Failure::invalid_store());
         }
         let mut directories = std::collections::HashSet::new();
         for entity in entities {
@@ -196,7 +211,7 @@ impl Catalog<'_, '_> {
             }
             let Ok((_, _, directory, _, owner, _, stored_scope)) = self.profiles.get(*entity)
             else {
-                return Err(Failure::InvalidStore);
+                return Err(Failure::invalid_store());
             };
             if owner.0 != account
                 || (self.consent.get(*entity).is_ok_and(|consent| consent.0)
@@ -205,7 +220,7 @@ impl Catalog<'_, '_> {
                 || Directory::named(&directory.0).id() != directory.0
                 || !directories.insert(&directory.0)
             {
-                return Err(Failure::InvalidStore);
+                return Err(Failure::invalid_store());
             }
         }
         Ok((account, scope))
@@ -260,7 +275,7 @@ fn receive(
             Err(error) => {
                 commands
                     .entity(root)
-                    .insert(Error(Failure::Storage(error.clone())))
+                    .insert(Error(Failure::storage(error.clone())))
                     .remove::<Loading>();
                 commands.trigger(OperationCompleted {
                     entity: result.entity,
@@ -272,7 +287,7 @@ fn receive(
         if loaded.generation > 0 && loaded.records.is_empty() {
             commands
                 .entity(root)
-                .insert(Error(Failure::InvalidStore))
+                .insert(Error(Failure::invalid_store()))
                 .remove::<Loading>();
             commands.entity(result.entity).despawn();
             continue;
@@ -354,21 +369,23 @@ fn seed(
     }
 }
 
-fn adopt(
+#[derive(Component)]
+struct Validated;
+
+fn validate(
     pending: Restores,
     observations: Query<(&ChildOf, &ProfileId, Option<&Name>), With<Observed>>,
     catalog: Catalog,
-    mut generations: Generations,
     mut commands: Commands,
 ) {
-    for (operation, parent, restored, generation, fresh) in &pending {
+    for (operation, parent, restored, _, _) in &pending {
         let root = parent.parent();
         let entities = match &restored.0 {
             Ok(entities) => entities,
             Err(_) => {
                 commands
                     .entity(root)
-                    .insert(Error(Failure::InvalidStore))
+                    .insert(Error(Failure::invalid_store()))
                     .remove::<Loading>();
                 commands.entity(operation).despawn();
                 continue;
@@ -385,25 +402,58 @@ fn adopt(
                 continue;
             }
         };
-        let Ok(selection) = catalog.selections.get(root) else {
-            continue;
-        };
-        let old = catalog.account(root);
-        let mut captured = entities.clone();
-        let mut changed = fresh;
-        let mut selected = catalog.directory(account, &selection.0).is_some();
-        for (owner, directory, name) in &observations {
+        let mut valid = true;
+        for (owner, directory, _) in &observations {
             if owner.parent() != operation {
                 continue;
             }
             if Directory::named(&directory.0).id() != directory.0 {
                 commands
                     .entity(root)
-                    .insert(Error(Failure::InvalidStore))
+                    .insert(Error(Failure::invalid_store()))
                     .remove::<Loading>();
                 commands.entity(operation).despawn();
-                captured.clear();
+                valid = false;
                 break;
+            }
+        }
+        if valid {
+            commands.entity(operation).insert((
+                EntityTarget::<Account>::new(account),
+                Scope(scope),
+                Validated,
+            ));
+        }
+    }
+}
+
+#[derive(Component)]
+struct CaptureRequired;
+
+fn reconcile(
+    mut pending: Query<(Entity, &ChildOf, &mut Restored, Has<Fresh>), With<Load>>,
+    validated: Query<(&EntityTarget<Account>, &Scope), With<Validated>>,
+    observations: Query<(&ChildOf, &ProfileId, Option<&Name>), With<Observed>>,
+    catalog: Catalog,
+    mut commands: Commands,
+) {
+    for (operation, parent, mut restored, fresh) in &mut pending {
+        let root = parent.parent();
+        let Ok((target, scope)) = validated.get(operation) else {
+            continue;
+        };
+        let account = target.entity();
+        let scope = scope.0;
+        let Ok(selection) = catalog.selections.get(root) else {
+            continue;
+        };
+        let entities = restored.0.as_ref().unwrap();
+        let mut captured = entities.clone();
+        let mut changed = fresh;
+        let mut selected = catalog.directory(account, &selection.0).is_some();
+        for (owner, directory, name) in &observations {
+            if owner.parent() != operation {
+                continue;
             }
             if catalog.directory(account, &directory.0).is_some() {
                 continue;
@@ -444,6 +494,34 @@ fn adopt(
                 .insert(EnsureDirectory(selection.0.clone()));
             changed = true;
         }
+        restored.0 = Ok(captured);
+        if changed {
+            commands.entity(operation).insert(CaptureRequired);
+        }
+    }
+}
+
+fn adopt(
+    pending: Restores,
+    validated: Query<(&EntityTarget<Account>, &Scope), With<Validated>>,
+    required: Query<(), With<CaptureRequired>>,
+    catalog: Catalog,
+    mut generations: Generations,
+    mut commands: Commands,
+) {
+    for (operation, parent, restored, generation, fresh) in &pending {
+        let root = parent.parent();
+        let Ok((target, scope)) = validated.get(operation) else {
+            continue;
+        };
+        let entities = restored.0.as_ref().unwrap();
+        let account = target.entity();
+        let scope = scope.0;
+        let Ok(selection) = catalog.selections.get(root) else {
+            continue;
+        };
+        let old = catalog.account(root);
+        let captured = entities;
         commands
             .entity(account)
             .remove::<StoreOwner>()
@@ -458,11 +536,14 @@ fn adopt(
         }
         commands
             .entity(operation)
+            .remove::<Validated>()
+            .remove::<EntityTarget<Account>>()
+            .remove::<Scope>()
             .remove::<Restored>()
             .remove::<Load>();
-        if changed {
+        if required.contains(operation) {
             if fresh {
-                for entity in &captured {
+                for entity in captured {
                     commands.entity(*entity).insert(Persisted(0));
                 }
             }
@@ -472,11 +553,11 @@ fn adopt(
                 Target(scope),
                 CaptureRequest {
                     scope_id: scope,
-                    entities: captured,
+                    entities: captured.clone(),
                 },
             ));
         } else {
-            for entity in &captured {
+            for entity in captured {
                 if let Ok((_, _, directory, _, _, _, _)) = catalog.profiles.get(*entity) {
                     let mut profile = commands.entity(*entity);
                     profile.insert(ProfileLabel);

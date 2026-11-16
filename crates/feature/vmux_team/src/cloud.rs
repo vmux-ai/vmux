@@ -4,8 +4,8 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use uuid::Uuid;
 use vmux_account::{
     Account, Authorization, Binding, CancelConnectRequest, CloudAvailable, ConnectRequest,
-    Connection, ConnectionError, DisconnectRequest, Disconnecting, Failure, MutationCompleted,
-    Owner, Phase, Profile, Root, Set, SyncEnabled, SyncRequest,
+    Connection, ConnectionError, DisconnectRequest, Disconnecting, Failure, FailureKind,
+    MutationCompleted, Owner, Phase, Profile, Root, Set, SyncEnabled, SyncRequest,
 };
 use vmux_api::team::{
     ProfileRow, TeamAccountCancelRequest, TeamAccountConnectRequest, TeamAccountDisconnectRequest,
@@ -106,12 +106,14 @@ impl Projection<'_, '_> {
             server_account_id: binding.and_then(|binding| binding.account_id.clone()),
             pending: disconnecting,
             sync_pending: pending_sync.is_some(),
-            error: error.map(|error| match &error.0 {
-                Failure::AccountMismatch => TeamAccountError::AccountMismatch,
-                Failure::AccessDenied | Failure::NotAuthenticated => TeamAccountError::AccessDenied,
-                Failure::AuthorizationExpired => TeamAccountError::Expired,
-                Failure::NotLinked => TeamAccountError::NotLinked,
-                Failure::Storage(_) | Failure::InvalidStore => TeamAccountError::SaveFailed,
+            error: error.map(|error| match error.kind() {
+                FailureKind::AccountMismatch => TeamAccountError::AccountMismatch,
+                FailureKind::AccessDenied | FailureKind::NotAuthenticated => {
+                    TeamAccountError::AccessDenied
+                }
+                FailureKind::AuthorizationExpired => TeamAccountError::Expired,
+                FailureKind::NotLinked => TeamAccountError::NotLinked,
+                FailureKind::Storage | FailureKind::InvalidStore => TeamAccountError::SaveFailed,
                 _ => TeamAccountError::Unavailable,
             }),
             ..TeamAccountState::default()
@@ -257,7 +259,7 @@ fn complete(
             {
                 commands
                     .entity(root)
-                    .insert(ConnectionError(Failure::InvalidStore));
+                    .insert(ConnectionError(Failure::invalid_store()));
                 continue;
             }
             if let Err(error) = &result.result {

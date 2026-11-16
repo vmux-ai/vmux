@@ -83,7 +83,7 @@ impl Profile {
     pub(crate) fn name(raw: &str) -> Result<String, Failure> {
         let name = raw.trim();
         if name.is_empty() || name.chars().count() > 256 || name.chars().any(char::is_control) {
-            return Err(Failure::InvalidName);
+            return Err(Failure::invalid_name());
         }
         Ok(name.to_string())
     }
@@ -107,12 +107,79 @@ pub struct Owner(pub Entity);
 pub struct Profiles(Vec<Entity>);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Failure {
+pub struct Failure {
+    pub(crate) kind: FailureKind,
+    detail: Option<String>,
+}
+
+impl Failure {
+    fn new(kind: FailureKind) -> Self {
+        Self { kind, detail: None }
+    }
+
+    pub fn kind(&self) -> FailureKind {
+        self.kind
+    }
+
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
+    }
+
+    pub fn storage(detail: String) -> Self {
+        Self {
+            kind: FailureKind::Storage,
+            detail: Some(detail),
+        }
+    }
+
+    pub fn invalid_name() -> Self {
+        Self::new(FailureKind::InvalidName)
+    }
+
+    pub fn unknown_profile() -> Self {
+        Self::new(FailureKind::UnknownProfile)
+    }
+
+    pub fn not_ready() -> Self {
+        Self::new(FailureKind::NotReady)
+    }
+
+    pub fn conflict() -> Self {
+        Self::new(FailureKind::Conflict)
+    }
+
+    pub fn invalid_store() -> Self {
+        Self::new(FailureKind::InvalidStore)
+    }
+
+    pub fn account_mismatch() -> Self {
+        Self::new(FailureKind::AccountMismatch)
+    }
+
+    pub fn not_linked() -> Self {
+        Self::new(FailureKind::NotLinked)
+    }
+
+    pub fn not_authenticated() -> Self {
+        Self::new(FailureKind::NotAuthenticated)
+    }
+
+    pub fn authorization_expired() -> Self {
+        Self::new(FailureKind::AuthorizationExpired)
+    }
+
+    pub fn access_denied() -> Self {
+        Self::new(FailureKind::AccessDenied)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
     InvalidName,
     UnknownProfile,
     NotReady,
     Conflict,
-    Storage(String),
+    Storage,
     InvalidStore,
     AccountMismatch,
     NotLinked,

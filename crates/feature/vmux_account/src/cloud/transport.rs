@@ -247,7 +247,7 @@ fn receive_open(mut results: Results<Open>, mut commands: Commands) {
             Ok(Err(error)) | Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)));
+                    .insert(Rejected(Failure::storage(error)));
             }
         }
         commands
@@ -288,7 +288,7 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)))
+                    .insert(Rejected(Failure::storage(error)))
                     .remove::<Reply>();
                 continue;
             }
@@ -303,7 +303,7 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
                 interval_seconds,
             } => {
                 if expires_in_seconds == 0 || expires_in_seconds > 900 {
-                    target.insert(Rejected(Failure::InvalidStore));
+                    target.insert(Rejected(Failure::invalid_store()));
                 } else {
                     target.insert((
                         Authorized,
@@ -326,10 +326,10 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
                 target.insert(Slowed);
             }
             Response::ExpiredToken => {
-                target.insert(Rejected(Failure::AuthorizationExpired));
+                target.insert(Rejected(Failure::authorization_expired()));
             }
             Response::AccessDenied => {
-                target.insert(Rejected(Failure::AccessDenied));
+                target.insert(Rejected(Failure::access_denied()));
             }
             Response::SignedIn { session_token } => {
                 target.insert(SessionToken(session_token));
@@ -344,16 +344,16 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
                 target.insert(Verified);
             }
             Response::NotAuthenticated => {
-                target.insert(Rejected(Failure::NotAuthenticated));
+                target.insert(Rejected(Failure::not_authenticated()));
             }
             Response::Account { id } => {
                 target.insert(RemoteAccount(id));
             }
             Response::RegistrationRefused => {
-                target.insert(Rejected(Failure::AccountMismatch));
+                target.insert(Rejected(Failure::account_mismatch()));
             }
             Response::Busy | Response::Failed | Response::Malformed => {
-                target.insert(Rejected(Failure::Storage("account request refused".into())));
+                target.insert(Rejected(Failure::storage("account request refused".into())));
             }
         }
         target.remove::<Reply>();
@@ -373,7 +373,7 @@ fn receive_delay(mut results: Results<Delay>, mut commands: Commands) {
             Ok(Err(error)) | Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(Rejected(Failure::Storage(error)));
+                    .insert(Rejected(Failure::storage(error)));
             }
         }
         commands
@@ -386,7 +386,7 @@ fn receive_delay(mut results: Results<Delay>, mut commands: Commands) {
 fn closed(peers: Query<(Entity, &Transport), With<Connection>>, mut commands: Commands) {
     for (entity, peer) in &peers {
         if peer.connection.close_reason().is_some() {
-            commands.entity(entity).insert(Rejected(Failure::Storage(
+            commands.entity(entity).insert(Rejected(Failure::storage(
                 "account connection closed".into(),
             )));
         }

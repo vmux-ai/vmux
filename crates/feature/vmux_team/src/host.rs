@@ -709,11 +709,11 @@ fn complete_profile(
                         form.0.error = None;
                     }
                     Err(failure) => {
-                        form.0.error = Some(match failure {
-                            vmux_account::Failure::InvalidName => TeamProfileError::InvalidName,
-                            vmux_account::Failure::Conflict => TeamProfileError::Conflict,
-                            vmux_account::Failure::UnknownProfile
-                            | vmux_account::Failure::NotReady => TeamProfileError::Unavailable,
+                        form.0.error = Some(match failure.kind() {
+                            vmux_account::FailureKind::InvalidName => TeamProfileError::InvalidName,
+                            vmux_account::FailureKind::Conflict => TeamProfileError::Conflict,
+                            vmux_account::FailureKind::UnknownProfile
+                            | vmux_account::FailureKind::NotReady => TeamProfileError::Unavailable,
                             _ => TeamProfileError::SaveFailed,
                         });
                     }

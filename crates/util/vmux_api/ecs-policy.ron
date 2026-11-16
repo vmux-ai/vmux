@@ -289,6 +289,7 @@ shape: (
   ],
   enums: [
     (key: "crates/util/vmux_api/src/icon.rs||enum:BuiltinIcon", fingerprint: "9c8a3df2d35d317b", role: Boundary, owner: "crates/util/vmux_ui/src/icon.rs|wasm|fn:BuiltinIconView", reason: "Immutable declared icon codec vocabulary mapped to SVG or glyph presentation by the mounted renderer; no commands or state transitions."),
+    (key: "crates/util/vmux_api/src/team.rs||enum:TeamAccountError", fingerprint: "b696fdcf4c09668d", role: Boundary, owner: "crates/feature/vmux_team/src/ui.rs||fn:AccountError", reason: "Serialized UI error vocabulary is consumed by the mounted AccountError Dioxus component, which maps it to Fluent alert DOM; separate events carry requests."),
   ],
   bodies: [
   ],

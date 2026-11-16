@@ -129,11 +129,8 @@ start = ["runtime", "dep:vmux_start"]
 vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
-<<<<<<< HEAD
 vmux_container = { path = "../../feature/vmux_container", optional = true }
-=======
 vmux_feature = { path = "../../feature/vmux_feature", features = ["http"], optional = true }
->>>>>>> 9a087e1f1 (feat(account): gate cloud linking on Vmux Cloud release flags)
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_account = { path = "../../feature/vmux_account", optional = true }

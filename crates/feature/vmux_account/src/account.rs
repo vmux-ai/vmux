@@ -496,7 +496,7 @@ mod tests {
         let local_id = fixture.account().1;
         assert_eq!(
             fixture.select(profile, true).result.unwrap_err(),
-            Failure::NotLinked
+            Failure::not_linked()
         );
         fixture.connect();
         let old = fixture.phase(Phase::AwaitingApproval);
@@ -549,7 +549,7 @@ mod tests {
         });
         assert_eq!(
             fixture.result(operation_id).result.unwrap_err(),
-            Failure::AccountMismatch
+            Failure::account_mismatch()
         );
         let operation_id = Uuid::new_v4();
         fixture.app.world_mut().write_message(LinkRequest {
@@ -564,7 +564,7 @@ mod tests {
         });
         assert_eq!(
             fixture.result(operation_id).result.unwrap_err(),
-            Failure::AccountMismatch
+            Failure::account_mismatch()
         );
         assert_eq!(
             fixture
@@ -590,7 +590,7 @@ mod tests {
         let profile = fixture.profile("personal").0;
         assert_eq!(
             fixture.select(profile, true).result.unwrap_err(),
-            Failure::AccessDenied
+            Failure::access_denied()
         );
         let entity = fixture.entity("personal");
         assert!(fixture.app.world().get::<SyncEnabled>(entity).is_none());
@@ -686,7 +686,7 @@ mod tests {
         );
         assert_eq!(
             fixture.select(profile_id, true).result.unwrap_err(),
-            Failure::AccessDenied
+            Failure::access_denied()
         );
         drop(fixture);
         let mut restored = Fixture::at(data.path());
@@ -735,7 +735,10 @@ mod tests {
         });
         assert!(matches!(
             fixture.result(operation_id).result,
-            Err(Failure::Storage(_))
+            Err(Failure {
+                kind: crate::FailureKind::Storage,
+                ..
+            })
         ));
         assert!(fixture.app.world().get::<Binding>(account).is_none());
         held.execute_batch("rollback").unwrap();
@@ -755,7 +758,10 @@ mod tests {
         held.execute_batch("begin immediate").unwrap();
         assert!(matches!(
             fixture.select(profile, true).result,
-            Err(Failure::Storage(_))
+            Err(Failure {
+                kind: crate::FailureKind::Storage,
+                ..
+            })
         ));
         let entity = fixture.entity("personal");
         assert!(
@@ -786,7 +792,7 @@ mod tests {
         });
         assert_eq!(
             fixture.result(selection).result.unwrap_err(),
-            Failure::AccountMismatch
+            Failure::account_mismatch()
         );
         assert!(fixture.app.world().get::<SyncEnabled>(entity).unwrap().0);
     }
@@ -852,7 +858,7 @@ mod tests {
             .result
             .unwrap();
         let refused = second.rename(Uuid::new_v4(), profile, "Unaccepted");
-        assert_eq!(refused.result.unwrap_err(), Failure::Conflict);
+        assert_eq!(refused.result.unwrap_err(), Failure::conflict());
         second.ready();
         assert_eq!(second.profile("personal").1, "Accepted");
         second
@@ -872,10 +878,22 @@ mod tests {
         let held = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
         held.execute_batch("begin immediate").unwrap();
         let rejected = fixture.rename(Uuid::new_v4(), before.0, "Blocked");
-        assert!(matches!(rejected.result, Err(Failure::Storage(_))));
+        assert!(matches!(
+            rejected.result,
+            Err(Failure {
+                kind: crate::FailureKind::Storage,
+                ..
+            })
+        ));
         assert_eq!(fixture.profile("personal"), before);
         let rejected = fixture.create(Uuid::new_v4(), "Blocked create");
-        assert!(matches!(rejected.result, Err(Failure::Storage(_))));
+        assert!(matches!(
+            rejected.result,
+            Err(Failure {
+                kind: crate::FailureKind::Storage,
+                ..
+            })
+        ));
         assert!(!data.path().join("profiles/blocked-create").exists());
         let mut profiles = fixture
             .app
@@ -917,7 +935,13 @@ mod tests {
             .entity_mut(entity)
             .insert(vmux_ecs::record::Scope(Uuid::new_v4()));
         let rejected = fixture.rename(Uuid::new_v4(), before.0, "Rejected");
-        assert!(matches!(rejected.result, Err(Failure::Storage(_))));
+        assert!(matches!(
+            rejected.result,
+            Err(Failure {
+                kind: crate::FailureKind::Storage,
+                ..
+            })
+        ));
         assert_eq!(fixture.profile("personal"), before);
         fixture
             .app
@@ -945,7 +969,7 @@ mod tests {
             .unwrap()
             .0 = i64::MAX as u64;
         let rejected = fixture.rename(Uuid::new_v4(), before.0, "Rejected");
-        assert_eq!(rejected.result.unwrap_err(), Failure::NotReady);
+        assert_eq!(rejected.result.unwrap_err(), Failure::not_ready());
         assert_eq!(fixture.profile("personal").1, before.1);
         fixture
             .app
