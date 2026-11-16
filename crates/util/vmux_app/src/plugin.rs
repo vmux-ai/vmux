@@ -36,7 +36,11 @@ pub enum VmuxPlugin {
     Flex(vmux_flex::FlexPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
-    #[plugin(feature = "feature-flags", desktop, requires(runtime, jobs))]
+    #[plugin(
+        feature = "feature-flags",
+        desktop,
+        requires(runtime, jobs, release_flags)
+    )]
     FeatureFlags(crate::feature_flags::FeatureFlagsPlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
     Command(vmux_command::CommandPlugin),
@@ -386,5 +390,64 @@ mod account_tests {
                 .get::<vmux_account::CloudAvailable>(root)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn cloud_gate_keeps_its_release_source_when_administration_adds_another_provider() {
+        use bevy_ecs::prelude::*;
+        use std::collections::BTreeMap;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use vmux_feature::snapshot::Document;
+
+        let mut app = App::new();
+        app.add_plugins(VmuxPlugin::builder().jobs(true).account_cloud(true).build());
+        #[cfg(feature = "feature-flags")]
+        app.add_plugins(crate::feature_flags::FeatureFlagsPlugin);
+        app.finish();
+        app.cleanup();
+        app.world_mut().run_schedule(bevy_app::Startup);
+        let world = app.world_mut();
+        let (release, environment) = world
+            .query_filtered::<(Entity, &Name), With<vmux_feature::Provider>>()
+            .single(world)
+            .unwrap();
+        let environment = environment.as_str().to_string();
+        app.world_mut()
+            .entity_mut(release)
+            .remove::<vmux_feature::http::Endpoint>();
+        let other = app
+            .world_mut()
+            .spawn(vmux_feature::Provider::bundle("administration-only"))
+            .id();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for (index, enabled) in [true, false].into_iter().enumerate() {
+            for (provider, name, decision) in [
+                (release, environment.as_str(), enabled),
+                (other, "administration-only", !enabled),
+            ] {
+                app.world_mut().write_message(vmux_feature::Receive {
+                    provider,
+                    generation: 0,
+                    document: Document {
+                        schema_version: 1,
+                        environment: name.into(),
+                        revision: index as u64 + 1,
+                        issued_at: now,
+                        valid_until: now + 600,
+                        flags: BTreeMap::from([("account.cloud".into(), decision)]),
+                    },
+                });
+            }
+            app.world_mut().run_schedule(Update);
+            let world = app.world_mut();
+            let current = world
+                .query_filtered::<&vmux_feature::Current, With<vmux_account::AccountCloudFlag>>()
+                .single(world)
+                .unwrap();
+            assert_eq!(current.0, enabled);
+        }
     }
 }

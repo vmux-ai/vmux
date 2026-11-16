@@ -38,7 +38,7 @@ impl bevy_app::Plugin for HttpPlugin {
     }
 }
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, PartialEq, Eq)]
 #[component(immutable)]
 #[require(PollState)]
 pub struct Endpoint(Url);

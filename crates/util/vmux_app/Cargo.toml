@@ -132,7 +132,7 @@ vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
 vmux_container = { path = "../../feature/vmux_container", optional = true }
-vmux_feature = { path = "../../feature/vmux_feature", features = ["http"], optional = true }
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["http"], optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_account = { path = "../../feature/vmux_account", optional = true }
@@ -141,7 +141,6 @@ vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }
 vmux_ecs = { path = "../vmux_ecs", optional = true }
-vmux_feature = { path = "../../feature/vmux_feature", default-features = false, optional = true }
 vmux_editor = { path = "../../feature/vmux_editor", optional = true }
 vmux_extension = { path = "../../feature/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
