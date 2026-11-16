@@ -30,7 +30,7 @@ env:
 
 jobs:
   plan:
-    name: Verify PR merge & CEF version
+    name: Plan
     runs-on: ubuntu-latest
     outputs:
       head: ${{ steps.plan.outputs.head }}
@@ -61,7 +61,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   changes:
-    name: Build CI tool & select checks
+    name: Prepare
     needs: [plan]
     runs-on: ubuntu-latest
     outputs:
@@ -70,7 +70,7 @@ jobs:
       macos_tooling: ${{ steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false' }}
       ios: ${{ github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false' }}
       code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
-      compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.tooling == 'true' }}
+      compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' }}
       contracts: ${{ steps.scope.outputs.sdk == 'true' }}
       headless: ${{ steps.scope.outputs.headless == 'true' }}
       rust: ${{ steps.scope.outputs.rust == 'true' }}
@@ -79,17 +79,22 @@ jobs:
       tooling: ${{ steps.scope.outputs.tooling == 'true' }}
       args: ${{ steps.scope.outputs.args }}
       lint_args: ${{ steps.scope.outputs.lint_args }}
-      lean: ${{ steps.scope.outputs.lean == 'true' }}
+      desktop: ${{ steps.scope.outputs.desktop == 'true' }}
+      legacy_desktop: ${{ github.event_name == 'schedule' }}
+      tests: ${{ steps.checks.outputs.tests }}
+      test_count: ${{ steps.checks.outputs.test_count }}
       check_lint: ${{ steps.checks.outputs.check_lint }}
       reuse_lint: ${{ steps.checks.outputs.reuse_lint }}
       check_test_rust: ${{ steps.checks.outputs.check_test_rust }}
       reuse_test_rust: ${{ steps.checks.outputs.reuse_test_rust }}
       check_test_sdk: ${{ steps.checks.outputs.check_test_sdk }}
       reuse_test_sdk: ${{ steps.checks.outputs.reuse_test_sdk }}
-      check_test_lean: ${{ steps.checks.outputs.check_test_lean }}
-      reuse_test_lean: ${{ steps.checks.outputs.reuse_test_lean }}
-      check_test_headless: ${{ steps.checks.outputs.check_test_headless }}
-      reuse_test_headless: ${{ steps.checks.outputs.reuse_test_headless }}
+      check_test_desktop: ${{ steps.checks.outputs.check_test_desktop }}
+      reuse_test_desktop: ${{ steps.checks.outputs.reuse_test_desktop }}
+      check_test_features: ${{ steps.checks.outputs.check_test_features }}
+      reuse_test_features: ${{ steps.checks.outputs.reuse_test_features }}
+      check_test_ecs: ${{ steps.checks.outputs.check_test_ecs }}
+      reuse_test_ecs: ${{ steps.checks.outputs.reuse_test_ecs }}
       check_website: ${{ steps.checks.outputs.check_website }}
       reuse_website: ${{ steps.checks.outputs.reuse_website }}
     steps:
@@ -253,6 +258,13 @@ jobs:
           VMUX_TEST_SCOPE: ${{ steps.scope.outputs.args }}
           VMUX_CHECK_INPUTS: ${{ steps.scope.outputs.inputs }}
           VMUX_RECORDS: ${{ steps.scope.outputs.records }}
+          VMUX_CODE_REQUIRED: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
+          VMUX_RUST_REQUIRED: ${{ steps.scope.outputs.rust }}
+          VMUX_SDK_REQUIRED: ${{ steps.scope.outputs.sdk }}
+          VMUX_DESKTOP_REQUIRED: ${{ steps.scope.outputs.desktop }}
+          VMUX_FEATURES_REQUIRED: ${{ steps.scope.outputs.headless == 'true' || github.event_name == 'schedule' }}
+          VMUX_COMPILER_REQUIRED: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' }}
+          VMUX_LEGACY_DESKTOP: ${{ github.event_name == 'schedule' }}
         with:
           script: |
             const Checks = require('./scripts/ci-checks.js');
@@ -262,16 +274,22 @@ jobs:
             const scope = (args) => JSON.stringify({ args, os: process.env.RUNNER_OS, arch: process.env.RUNNER_ARCH, image: process.env.ImageVersion, flags: process.env.RUSTFLAGS, encoded: process.env.CARGO_ENCODED_RUSTFLAGS });
             const inputs = JSON.parse(process.env.VMUX_CHECK_INPUTS || '{}');
             const paths = (key) => [...common, ...(inputs[key] || ['crates/**', 'patches/**']), ...(key === 'test-sdk' ? ['examples/**', ...cli] : [])];
+            const code = process.env.VMUX_CODE_REQUIRED === 'true';
             const profiles = [
-              { key: 'lint', name: 'Lint', paths: [...rust, 'website/**', 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope(process.env.VMUX_LINT_SCOPE) },
-              { key: 'test-rust', name: 'Rust unit & integration tests', paths: [...paths('test-rust'), ...(process.env.VMUX_RECORDS === 'true' ? paths('records') : [])], scope: scope(JSON.stringify({ args: process.env.VMUX_TEST_SCOPE, records: process.env.VMUX_RECORDS })) },
-              { key: 'test-sdk', name: 'Public API compatibility tests', paths: paths('test-sdk'), scope: scope('sdk-path+host') },
-              { key: 'test-lean', name: 'Desktop feature availability tests', paths: paths('test-lean'), scope: scope('desktop-lean') },
-              { key: 'test-headless', name: 'App configuration tests', paths: paths('test-headless'), scope: scope('daemon+mcp') },
-              { key: 'website', name: 'Website Build', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
+              { key: 'lint', name: 'Lint', paths: [...rust, 'website/**'], scope: scope(JSON.stringify({ args: process.env.VMUX_LINT_SCOPE, compiler: process.env.VMUX_COMPILER_REQUIRED })), enabled: code && process.env.VMUX_COMPILER_REQUIRED === 'true' },
+              { key: 'test-rust', name: 'Test Rust', paths: [...paths('test-rust'), ...(process.env.VMUX_RECORDS === 'true' ? paths('records') : [])], scope: scope(JSON.stringify({ args: process.env.VMUX_TEST_SCOPE, records: process.env.VMUX_RECORDS })), enabled: code && process.env.VMUX_RUST_REQUIRED === 'true', matrix: { cache: 'test', dependencies: 'test', native: 'true' } },
+              { key: 'test-sdk', name: 'Test SDK', paths: paths('test-sdk'), scope: scope('sdk-path+host'), enabled: code && process.env.VMUX_SDK_REQUIRED === 'true', matrix: { cache: 'sdk-path', dependencies: 'sdk-path', native: 'true' } },
+              { key: 'test-desktop', name: 'Test Desktop', paths: paths('test-desktop'), scope: scope('desktop-defaults'), enabled: code && process.env.VMUX_DESKTOP_REQUIRED === 'true', matrix: { cache: 'desktop', dependencies: 'test', native: 'true' } },
+              { key: 'test-features', name: 'Test Features', paths: paths('test-features'), scope: scope(JSON.stringify({ features: 'daemon,mcp', legacy: process.env.VMUX_LEGACY_DESKTOP })), enabled: code && process.env.VMUX_FEATURES_REQUIRED === 'true', matrix: { cache: 'headless', dependencies: 'headless', native: 'true' } },
+              { key: 'test-ecs', name: 'Test ECS Composition', paths: [...rust, 'website/**', 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope('ownership+conventions'), enabled: code, matrix: { cache: 'ecs', dependencies: 'lint', native: 'false' } },
+              { key: 'website', name: 'Build Web', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
             ];
             const identity = { base: process.env.VMUX_CHECK_BASE, tree: process.env.VMUX_CHECK_TREE, branch: context.payload.pull_request?.head.ref, release: process.env.VMUX_CHECK_RELEASE === 'true' };
-            await new Checks({ github, context, core }).plan(identity, profiles);
+            const checks = new Checks({ github, context, core });
+            const results = await checks.plan(identity, profiles);
+            const matrix = Checks.matrix(profiles, results);
+            core.setOutput('tests', JSON.stringify(matrix));
+            core.setOutput('test_count', String(matrix.include.length));
 
       - name: Record the CLI identity
         if: steps.rust.outcome == 'success'
@@ -336,7 +354,7 @@ jobs:
           overwrite: true
 
       - uses: ./.github/actions/setup-linux
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.compiler_lints == 'true' && !needs.changes.outputs.reuse_lint
         with:
           components: rustfmt,clippy
           cache-key: lint
@@ -356,7 +374,7 @@ jobs:
         run: cargo clippy --locked -p vmux_dx --features ci-syntax --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lean == 'true'
+        if: github.event_name == 'schedule' && needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.desktop == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
       - name: Clippy renderer-free record contracts
@@ -466,258 +484,120 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
 
-      - name: ECS Policy check
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
-        run: cargo test --locked -p vmux_dx --test policy --test conventions
-
       - name: Save validated compiler artifacts
         uses: ./.github/actions/save-workspace
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.compiler_lints == 'true' && !needs.changes.outputs.reuse_lint
         with:
           cache-key: lint
 
-  test-rust:
-    name: Rust unit & integration tests
-    runs-on: ubuntu-latest
+  tests:
+    name: ${{ matrix.name }}
     needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.rust == 'true' && !needs.changes.outputs.reuse_test_rust
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
-
-      - uses: ./.github/actions/prepare-ci
-        with:
-          head: ${{ needs.plan.outputs.head }}
-          base: ${{ needs.plan.outputs.base }}
-          tree: ${{ needs.plan.outputs.tree }}
-
-      - name: Record validation inputs
-        if: needs.changes.outputs.check_test_rust != ''
-        env:
-          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_rust }}
-          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
-      - name: Publish validation inputs
-        if: needs.changes.outputs.check_test_rust != ''
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ needs.changes.outputs.check_test_rust }}-${{ github.run_attempt }}
-          path: ci-check-inputs.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - uses: ./.github/actions/setup-linux
-        with:
-          cache-key: test
-          cef-version: ${{ needs.plan.outputs.cef }}
-
-      - name: Run Rust unit and integration tests
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ needs.changes.outputs.args }}
-
-      - name: Test record contracts alongside Workspace storage
-        if: needs.changes.outputs.records == 'true'
-        run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
-
-      - name: Save validated compiler artifacts
-        uses: ./.github/actions/save-workspace
-        with:
-          cache-key: test
-
-  test-sdk:
-    name: Public API compatibility tests
+    if: needs.changes.outputs.test_count != '0'
     runs-on: ubuntu-latest
-    needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.contracts == 'true' && !needs.changes.outputs.reuse_test_sdk
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.tests) }}
     steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
-
-      - uses: ./.github/actions/prepare-ci
-        with:
-          head: ${{ needs.plan.outputs.head }}
-          base: ${{ needs.plan.outputs.base }}
-          tree: ${{ needs.plan.outputs.tree }}
-      - name: Record validation inputs
-        if: needs.changes.outputs.check_test_sdk != ''
-        env:
-          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_sdk }}
-          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
-      - name: Publish validation inputs
-        if: needs.changes.outputs.check_test_sdk != ''
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ needs.changes.outputs.check_test_sdk }}-${{ github.run_attempt }}
-          path: ci-check-inputs.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - uses: ./.github/actions/setup-linux
-        with:
-          cache-key: sdk-path
-          cef-version: ${{ needs.plan.outputs.cef }}
-      - name: Verify public APIs from an external workspace
-        if: needs.changes.outputs.contracts == 'true'
-        run: vmux dx test sdk
-      - name: Verify host APIs from an external workspace
-        if: needs.changes.outputs.contracts == 'true'
-        run: vmux dx test sdk --host
-
-      - name: Test immutable Git dependencies
-        if: github.event_name != 'pull_request'
-        run: |
-          vmux dx test sdk --git
-          vmux dx test sdk --host --git
-
-      - name: Save validated compiler artifacts
-        uses: ./.github/actions/save-workspace
-        with:
-          cache-key: sdk-path
-
-  test-lean:
-    name: Desktop feature availability tests
-    runs-on: ubuntu-latest
-    needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lean == 'true' && !needs.changes.outputs.reuse_test_lean
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
-
-      - uses: ./.github/actions/prepare-ci
-        with:
-          head: ${{ needs.plan.outputs.head }}
-          base: ${{ needs.plan.outputs.base }}
-          tree: ${{ needs.plan.outputs.tree }}
-
-      - name: Record validation inputs
-        if: needs.changes.outputs.check_test_lean != ''
-        env:
-          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_lean }}
-          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
-      - name: Publish validation inputs
-        if: needs.changes.outputs.check_test_lean != ''
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ needs.changes.outputs.check_test_lean }}-${{ github.run_attempt }}
-          path: ci-check-inputs.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - uses: ./.github/actions/setup-linux
-        with:
-          cache-key: test-lean
-          cef-version: ${{ needs.plan.outputs.cef }}
-
-      - name: Verify unavailable desktop features
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests
-
-      - name: Save validated compiler artifacts
-        uses: ./.github/actions/save-workspace
-        with:
-          cache-key: test-lean
-
-  test-headless:
-    name: App configuration tests
-    runs-on: ubuntu-latest
-    needs: [plan, changes]
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.headless == 'true' && !needs.changes.outputs.reuse_test_headless
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
-
-      - uses: ./.github/actions/prepare-ci
-        with:
-          head: ${{ needs.plan.outputs.head }}
-          base: ${{ needs.plan.outputs.base }}
-          tree: ${{ needs.plan.outputs.tree }}
-      - name: Record validation inputs
-        if: needs.changes.outputs.check_test_headless != ''
-        env:
-          VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_test_headless }}
-          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
-      - name: Publish validation inputs
-        if: needs.changes.outputs.check_test_headless != ''
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ needs.changes.outputs.check_test_headless }}-${{ github.run_attempt }}
-          path: ci-check-inputs.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - uses: ./.github/actions/setup-linux
-        with:
-          cache-key: headless
-          cef-version: ${{ needs.plan.outputs.cef }}
-      - name: Verify plugin configuration without desktop adapters
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
-
-      - name: Save validated compiler artifacts
-        uses: ./.github/actions/save-workspace
-        with:
-          cache-key: headless
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    needs: [plan, changes, test-rust, test-sdk, test-lean, test-headless]
-    if: always()
-    steps:
-      - name: Gate
+      - name: Require CI preparation
         env:
           PLAN: ${{ needs.plan.result }}
-          CHANGES: ${{ needs.changes.result }}
-          REUSE_RUST_TEST: ${{ needs.changes.outputs.reuse_test_rust }}
-          REUSE_SDK: ${{ needs.changes.outputs.reuse_test_sdk }}
-          REUSE_HEADLESS: ${{ needs.changes.outputs.reuse_test_headless }}
-          REUSE_LEAN_TEST: ${{ needs.changes.outputs.reuse_test_lean }}
-          CODE: ${{ needs.changes.outputs.code }}
-          CONTRACTS: ${{ needs.changes.outputs.contracts }}
-          HEADLESS_REQUIRED: ${{ needs.changes.outputs.headless }}
-          RUST_REQUIRED: ${{ needs.changes.outputs.rust }}
-          LEAN: ${{ needs.changes.outputs.lean }}
-          RUST_TEST: ${{ needs.test-rust.result }}
-          SDK: ${{ needs.test-sdk.result }}
-          HEADLESS: ${{ needs.test-headless.result }}
-          LEAN_TEST: ${{ needs.test-lean.result }}
+          PREPARE: ${{ needs.changes.result }}
+          SUITE: ${{ matrix.key }}
         run: |
           set -euo pipefail
           test "$PLAN" = success
-          test "$CHANGES" = success
-          if [ "$CODE" = true ]; then
-            if [ "$RUST_REQUIRED" = true ]; then
-              if [ -z "${REUSE_RUST_TEST:-}" ]; then test "$RUST_TEST" = success; else echo "Reused RUST_TEST from verified run $REUSE_RUST_TEST"; fi
-            fi
-            if [ "$CONTRACTS" = true ]; then
-              if [ -z "${REUSE_SDK:-}" ]; then test "$SDK" = success; else echo "Reused SDK from verified run $REUSE_SDK"; fi
-            fi
-            if [ "$HEADLESS_REQUIRED" = true ]; then
-              if [ -z "${REUSE_HEADLESS:-}" ]; then test "$HEADLESS" = success; else echo "Reused HEADLESS from verified run $REUSE_HEADLESS"; fi
-            fi
-            if [ "$LEAN" = true ]; then
-              if [ -z "${REUSE_LEAN_TEST:-}" ]; then test "$LEAN_TEST" = success; else echo "Reused LEAN_TEST from verified run $REUSE_LEAN_TEST"; fi
-            fi
-          fi
+          test "$PREPARE" = success
+          case "$SUITE" in
+            test-rust|test-sdk|test-desktop|test-features|test-ecs) ;;
+            *) echo "::error::Unknown test suite: $SUITE"; exit 1 ;;
+          esac
+      - name: Reuse verified test result
+        if: matrix.reuse != ''
+        env:
+          VERIFIED_RUN: ${{ matrix.reuse }}
+        run: echo "Reused matching successful tests from run $VERIFIED_RUN"
+      - uses: actions/checkout@v5
+        if: matrix.reuse == ''
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+      - uses: ./.github/actions/prepare-ci
+        if: matrix.reuse == ''
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
+      - name: Record validation inputs
+        if: matrix.reuse == '' && matrix.claim != ''
+        env:
+          VMUX_CHECK_NAME: ${{ matrix.claim }}
+          VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
+        run: node scripts/ci-checks.js record
+      - name: Publish validation inputs
+        if: matrix.reuse == '' && matrix.claim != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.claim }}-${{ github.run_attempt }}
+          path: ci-check-inputs.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+      - uses: ./.github/actions/setup-linux
+        if: matrix.reuse == ''
+        with:
+          cache-key: ${{ matrix.cache }}
+          dependency-cache-key: ${{ matrix.dependencies }}
+          desktop: ${{ matrix.native }}
+          cef-version: ${{ needs.plan.outputs.cef }}
+      - name: Rust
+        if: matrix.reuse == '' && matrix.key == 'test-rust'
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ needs.changes.outputs.args }}
+      - name: Records
+        if: matrix.reuse == '' && matrix.key == 'test-rust' && needs.changes.outputs.records == 'true'
+        run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
+      - name: SDK
+        if: matrix.reuse == '' && matrix.key == 'test-sdk'
+        run: |
+          vmux dx test sdk
+          vmux dx test sdk --host
+      - name: Git SDK
+        if: matrix.reuse == '' && matrix.key == 'test-sdk' && github.event_name != 'pull_request'
+        run: |
+          vmux dx test sdk --git
+          vmux dx test sdk --host --git
+      - name: Desktop
+        if: matrix.reuse == '' && matrix.key == 'test-desktop'
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop
+      - name: Features
+        if: matrix.reuse == '' && matrix.key == 'test-features' && needs.changes.outputs.headless == 'true'
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
+      - name: Legacy desktop features
+        if: matrix.reuse == '' && matrix.key == 'test-features' && needs.changes.outputs.legacy_desktop == 'true'
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests
+      - name: ECS composition
+        if: matrix.reuse == '' && matrix.key == 'test-ecs'
+        run: cargo test --locked -p vmux_dx --test policy --test conventions
+      - name: Save validated compiler artifacts
+        if: matrix.reuse == ''
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: ${{ matrix.cache }}
+
+  test:
+    name: Test
+    needs: [ci]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Required-check compatibility
+        env:
+          CI: ${{ needs.ci.result }}
+        run: test "$CI" = success
 
   website:
-    name: Website Build
+    name: Build Web
     needs: [plan, changes]
     if: needs.changes.outputs.website == 'true' && !needs.changes.outputs.reuse_website
     runs-on: ubuntu-latest
@@ -764,7 +644,7 @@ jobs:
           cache-key: website
 
   dx-macos:
-    name: Build macOS CI tool & test signing
+    name: Prepare macOS
     needs: [plan, changes]
     if: (github.event_name != 'pull_request' || needs.plan.outputs.release == 'true') && (needs.changes.outputs.macos == 'true' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos_tooling == 'true')
     runs-on: macos-latest
@@ -800,7 +680,7 @@ jobs:
           retention-days: 1
 
   ios-build:
-    name: Build iOS App
+    name: Build iOS
     runs-on: macos-latest
     needs: [plan, changes, dx-macos]
     if: github.event_name != 'pull_request' && needs.changes.outputs.ios == 'true'
@@ -872,7 +752,7 @@ jobs:
           cache-key: ios
 
   build-mac:
-    name: Build macOS App
+    name: Build macOS
     needs: [plan, changes, dx-macos]
     if: needs.changes.outputs.macos == 'true' && (github.event_name != 'pull_request' || needs.plan.outputs.release == 'true')
     runs-on: macos-latest
@@ -1095,25 +975,24 @@ jobs:
         with:
           cache-key: build-mac
 
-  build-macos:
-    name: Build macOS
+  ci:
+    name: CI
     runs-on: ubuntu-latest
-    needs: [plan, changes, build-mac]
+    needs: [plan, changes, lint, tests, website, dx-macos, build-mac, ios-build]
     if: always()
     steps:
-      - name: Gate distribution policy
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head || github.sha }}
+      - uses: ./.github/actions/prepare-ci
+        if: needs.plan.result == 'success' && needs.changes.result == 'success'
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
+      - name: Verify selected checks
         env:
-          PLAN: ${{ needs.plan.result }}
-          CHANGES: ${{ needs.changes.result }}
-          MACOS: ${{ needs.changes.outputs.macos }}
-          DISTRIBUTION: ${{ github.event_name != 'pull_request' || needs.plan.outputs.release == 'true' }}
-          RESULT: ${{ needs.build-mac.result }}
-        run: |
-          set -euo pipefail
-          test "$PLAN" = success
-          test "$CHANGES" = success
-          if [ "$DISTRIBUTION" = true ] && [ "$MACOS" = true ]; then
-            test "$RESULT" = success
-          else
-            echo "Distribution builds are reserved for main, releases, and manual runs."
-          fi
+          VMUX_CI_RESULTS: ${{ toJSON(needs) }}
+          VMUX_CI_DISTRIBUTION: ${{ github.event_name != 'pull_request' || needs.plan.outputs.release == 'true' }}
+        run: node scripts/ci-checks.js gate
