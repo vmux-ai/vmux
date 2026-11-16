@@ -1,3 +1,4 @@
+#[cfg(ui)]
 use crate::GalleryUiState;
 #[cfg(ui)]
 use dioxus::prelude::*;

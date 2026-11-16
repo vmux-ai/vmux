@@ -1,11 +1,10 @@
 #[cfg(ui)]
 pub(crate) use catalog::RegisteredStory;
 pub use catalog::Story;
-mod catalog;
-
 #[cfg(host)]
 pub use host::GalleryPlugin;
 
+mod catalog;
 #[cfg(host)]
 mod host;
 #[cfg(ui)]
