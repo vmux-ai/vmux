@@ -26,14 +26,18 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageMetadata, PageOpenSet};
 use vmux_layout::LayoutCef;
 use vmux_layout::overlay::{LayoutOverlayDismissRevision, LayoutOverlayOpened};
-use vmux_layout::window::FocusedWindow;
 use vmux_page::{
     Appearance, AssetReply, Assets as RendererAssets, Embedding, LifecycleSink, LifecycleUpdate,
-    Outbox as RendererOutbox, Page, PageClaimDirty, PagePlacement, PageRegistration, SiblingOrder,
+    Outbox as RendererOutbox, PageClaimDirty, PagePlacement, PageRegistration, SiblingOrder,
     Wake as RendererWake, WebView,
 };
 use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
 use vmux_ui::hooks::EventListenerError;
+
+use super::native_focus::{
+    FocusAttempt, FocusSet, HostedSurface, HostedSurfaceGeneration, NativeFocusPlugin,
+    ResponderCompleted, ResponderRequested,
+};
 
 use crate::host::LayoutPointerCapture;
 use crate::present::{AllCorners, FocusRing, PaneFrame, WindowFrameQueries};
@@ -64,6 +68,7 @@ impl Plugin for MacosBrowserPlugin {
         .add_systems(Update, dismiss_popups)
         .add_observer(stop_loading)
         .add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
+        .add_plugins(NativeFocusPlugin)
         .init_non_send::<PageRenderer>()
         .init_resource::<SurfacePresentations>()
         .init_resource::<SurfaceSettleRetries>()
@@ -117,10 +122,7 @@ impl Plugin for MacosBrowserPlugin {
             PostUpdate,
             render.after(vmux_layout::presentation::NativePresentationSet::Finalize),
         )
-        .add_systems(
-            PostUpdate,
-            focus.after(crate::BrowserSystemSet::HostFocusApplied),
-        )
+        .add_systems(PostUpdate, focus.in_set(FocusSet::Apply))
         .add_observer(forward_host_emit)
         .add_observer(reload)
         .add_observer(hard_reload)
@@ -129,14 +131,6 @@ impl Plugin for MacosBrowserPlugin {
         .add_observer(mark_candidate_added::<LayoutCef>)
         .add_observer(mark_candidate_removed::<LayoutCef>);
     }
-}
-
-#[derive(Component, Clone)]
-struct HostedSurface {
-    placement: PagePlacement,
-    page: &'static Page,
-    window: Entity,
-    url: String,
 }
 
 fn reload(event: On<RequestReload>, renderer: NonSend<PageRenderer>, mut commands: Commands) {
@@ -164,9 +158,6 @@ fn hard_reload(
             .remove::<PageReady>();
     }
 }
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-struct HostedSurfaceGeneration(u64);
 
 #[derive(Clone, Copy)]
 struct PageClaim {
@@ -2144,49 +2135,23 @@ fn render(
 }
 
 fn focus(
+    mut requested: MessageReader<ResponderRequested>,
+    attempts: Query<&FocusAttempt>,
     renderer: Option<NonSend<PageRenderer>>,
-    hosted: Query<(Entity, &HostedSurface, &HostedSurfaceGeneration)>,
-    intent: Single<&crate::host_focus::HostFocusIntent>,
-    focused_window: FocusedWindow,
-    mut focused: Local<Option<(Entity, u64)>>,
+    mut completed: MessageWriter<ResponderCompleted>,
 ) {
-    let Some(renderer) = renderer else {
-        return;
-    };
-    let wanted = match **intent {
-        crate::host_focus::HostFocusIntent::LayoutView => hosted
-            .iter()
-            .find(|(_, page, _)| {
-                page.placement == PagePlacement::Layout
-                    && focused_window
-                        .entity()
-                        .is_none_or(|window| page.window == window)
-            })
-            .map(|(entity, _, generation)| (entity, generation.0)),
-        crate::host_focus::HostFocusIntent::HostedPane(page) => hosted
-            .get(page)
-            .ok()
-            .map(|(entity, _, generation)| (entity, generation.0)),
-        _ => {
-            *focused = None;
-            return;
-        }
-    };
-    let Some((entity, generation)) = wanted else {
-        *focused = None;
-        return;
-    };
-    if *focused == Some((entity, generation)) && !focused_window.is_changed() {
-        return;
-    }
-    let Some(surface) = renderer.active.get(&entity) else {
-        *focused = None;
-        return;
-    };
-    if surface.take_first_responder() {
-        *focused = Some((entity, generation));
-    } else {
-        *focused = None;
+    for request in requested.read() {
+        let accepted = match (attempts.get(request.attempt), renderer.as_deref()) {
+            (Ok(attempt), Some(renderer)) => match renderer.active.get(&attempt.surface) {
+                Some(surface) => surface.take_first_responder(),
+                None => false,
+            },
+            _ => false,
+        };
+        completed.write(ResponderCompleted {
+            attempt: request.attempt,
+            accepted,
+        });
     }
 }
 
