@@ -24,13 +24,17 @@ Open Terminal and check that ordinary text is bold. This is a small CSS change w
 Open `vmux://ui/` in the desktop address bar, or search for `storybook` in the command bar.
 The component catalog renders the actual `vmux_ui` controls through the same native page
 and IPC path as other Vmux pages. Choose a component, try its variants, toggle disabled
-state, and inspect the last accepted event and current values. Reset restores the selected
-example, including its internal component state. Resize the pane to check smaller layouts;
-appearance and language follow the application's settings.
+state, and inspect the last accepted event and current values. The sidebar and content
+scroll independently, using the same workspace layout as Tools and Git. Search accepts
+component names such as `ComposerFrame` and `IdentityOrb`. Each family has a direct URL:
+`vmux://ui/composer` opens the composer, and the shared breadcrumb and browser history
+follow the selected family. Reset restores the selected example and its local state.
+Resize the pane to check smaller layouts; appearance and language follow application settings.
 
 The catalog lives in `crates/feature/vmux_gallery`. Add examples there while keeping reusable
-controls in `crates/util/vmux_ui`. It is a desktop feature: it does not require a web server,
-a separate renderer, or a remote service.
+controls in `crates/util/vmux_ui`. Add an executable gallery example when introducing a
+shared component, before integrating it into a feature page. Composer, menu and directory
+examples use fixed sample data and page-scoped interactions. The catalog is a desktop feature.
 
 ## Follow a behavior change
 

@@ -1,29 +1,57 @@
 #![allow(non_snake_case)]
 
+use dioxus::prelude::component;
 use dioxus::prelude::*;
-use vmux_ui::components::avatar::Avatar;
-use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar, Identicon, IdentityOrb};
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant, IconButton};
+use vmux_ui::components::card::{
+    Card, CardContent, CardDescription, CardHeader, CardTitle, CardVariant,
+};
 use vmux_ui::components::checkbox::{Checkbox, CheckboxTone};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
-use vmux_ui::components::input::Input;
+use vmux_ui::components::input::{ActionInput, Input};
+use vmux_ui::components::manager::{
+    ManagerPage, ManagerSearch, ManagerSearchRow, ManagerSidebarItem, WorkspaceLayout,
+};
+use vmux_ui::components::page::PageContent;
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::components::progress::{LoadingIcon, Progress, ProgressIndicator};
-use vmux_ui::components::select::{Select, SelectList, SelectOption, SelectTrigger, SelectValue};
+use vmux_ui::components::select::{
+    Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
+};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::components::textarea::{Textarea, TextareaVariant};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
+use vmux_ui::navigation::PageNavigation;
+
+mod auxiliary;
+mod composer;
+mod editing;
+mod management;
+mod menus;
+mod navigation;
+mod surfaces;
+
+use auxiliary::AuxiliaryPreview;
+use composer::ComposerPreview;
+use editing::EditingPreview;
+use management::ManagementPreview;
+use menus::MenuPreview;
+use navigation::NavigationPreview;
+use surfaces::SurfacePreview;
 
 use crate::{
     GalleryCheckedRequest, GalleryChoiceRequest, GalleryClickRequest, GalleryDialogRequest,
-    GalleryDisabledRequest, GalleryProgressRequest, GalleryResetRequest, GallerySelectRequest,
-    GalleryTextRequest, GalleryUiState, Story,
+    GalleryDisabledRequest, GalleryProgressRequest, GalleryResetRequest, GalleryTextRequest,
+    GalleryUiState, Story,
 };
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "GalleryUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "GalleryUiState"],
+    subtree
 )]
 pub(crate) struct GalleryPage;
 
@@ -34,73 +62,72 @@ pub fn Page() -> Element {
     let state = binding.state;
     let mut filter = use_signal(String::new);
     let current = state();
+    let mut toolbar = Vec::new();
+    toolbar.push(ToolbarControl::button(
+        translate("gallery-reset"),
+        move |_| {
+            let _ = send(&GalleryResetRequest);
+        },
+    ));
+    let disabled = current.disabled;
+    toolbar.push(
+        ToolbarControl::button(translate("gallery-disabled"), move |_| {
+            let _ = send(&GalleryDisabledRequest {
+                disabled: !disabled,
+            });
+        })
+        .active(disabled),
+    );
     rsx! {
-        div { class: "flex h-full min-h-0 flex-col bg-background font-sans text-foreground",
-            header { class: "flex flex-wrap items-center justify-between gap-3 px-5 py-4",
-                div {
-                    h1 { class: "text-base font-semibold", {translate("gallery-title")} }
-                    p { class: "mt-1 text-xs text-muted-foreground", {translate("gallery-description")} }
-                }
-                Button {
-                    variant: ButtonVariant::Secondary,
-                    size: ButtonSize::Sm,
-                    onclick: move |_| { let _ = send(&GalleryResetRequest); },
-                    {translate("gallery-reset")}
-                }
-            }
-            div { class: "flex min-h-0 flex-1",
-                nav { class: "flex w-32 shrink-0 flex-col gap-2 overflow-y-auto bg-foreground/[0.025] p-3 sm:w-44",
-                    aria_label: translate("gallery-title"),
-                    Input {
-                        class: "w-full text-xs",
-                        value: filter(),
-                        placeholder: translate("gallery-search"),
-                        aria_label: translate("gallery-search"),
-                        oninput: move |event: FormEvent| filter.set(event.value()),
+        document::Title { "{current.story.name()}" }
+        ManagerPage {
+            PageBreadcrumbs { state: current.address.clone() }
+            WorkspaceLayout {
+                resizable: true,
+                search: rsx! { ManagerSearchRow {
+                    ManagerSearch {
+                        value: filter(), placeholder: translate("gallery-search"),
+                        onsearch: move |query| filter.set(query),
                     }
-                    for story in Story::ALL {
-                        if story.name().to_ascii_lowercase().contains(&filter().to_ascii_lowercase()) {
-                            Button {
-                                key: "{story.name()}",
-                                size: ButtonSize::Block,
-                                variant: if story == current.story { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
-                                aria_current: if story == current.story { "true" } else { "false" },
-                                onclick: move |_| { let _ = send(&GallerySelectRequest { story }); },
-                                "{story.name()}"
+                } },
+                sidebar: rsx! {
+                    nav { class: "flex flex-col gap-0.5",
+                        for story in Story::ALL {
+                            if story.component_names().to_ascii_lowercase().contains(&filter().to_ascii_lowercase()) {
+                                ManagerSidebarItem {
+                                    key: "{story.slug()}",
+                                    label: story.name().to_string(),
+                                    count: 0, show_count: false,
+                                    selected: story == current.story,
+                                    onclick: move |event| PageNavigation::click(story.url(), &event),
+                                }
                             }
                         }
                     }
-                }
-                main { class: "flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-3 sm:p-6",
-                    div { class: "flex flex-wrap items-center justify-between gap-4",
-                        h2 { class: "font-mono text-lg font-semibold", "{current.story.name()}" }
-                        label { class: "flex items-center gap-2 text-xs text-muted-foreground",
-                            Checkbox {
-                                checked: current.disabled,
-                                on_checked_change: move |disabled| { let _ = send(&GalleryDisabledRequest { disabled }); },
-                            }
-                            {translate("gallery-disabled")}
-                        }
+                },
+                toolbar: rsx! { PageToolbar { controls: toolbar } },
+                PageContent { content_class: "mx-auto w-full max-w-5xl",
+                    div { class: "mb-5 flex flex-wrap items-center justify-between gap-3",
+                        h1 { class: "font-mono text-base font-semibold", "{current.story.name()}" }
+                        span { class: "text-xs text-muted-foreground", {translate("gallery-description")} }
                     }
-                    section { class: "flex min-h-64 items-center justify-center rounded-xl bg-card p-3 sm:p-6",
+                    p { class: "mb-3 font-mono text-[11px] text-muted-foreground", {current.story.component_names()} }
+                    section { class: "min-h-64 rounded-lg bg-foreground/[0.025] p-4",
                         aria_label: translate("gallery-preview"),
                         Preview { key: "{current.revision}", state: current.clone() }
                     }
-                    section { class: "space-y-3 text-sm",
-                        h3 { class: "font-medium", {translate("gallery-events")} }
-                        p { class: "text-xs text-muted-foreground", {translate("gallery-events-description")} }
+                    details { class: "mt-6 text-xs text-muted-foreground", open: true,
+                        summary { class: "mb-3 cursor-pointer font-medium", {translate("gallery-events")} }
+                        p { class: "mb-3", {translate("gallery-events-description")} }
                         if let Some(error) = (binding.error)() {
-                            pre { role: "alert", class: "whitespace-pre-wrap text-xs text-destructive", "{error}" }
+                            pre { role: "alert", class: "whitespace-pre-wrap text-destructive", "{error}" }
                         }
-                        output { class: "block overflow-x-auto rounded-lg bg-foreground/[0.035] p-4 font-mono text-xs", aria_live: "polite",
-                            if current.interaction_count == 0 {
-                                {translate("gallery-no-events")}
-                            } else {
-                                "#{current.interaction_count} {current.last_event}"
-                            }
+                        output { class: "block overflow-x-auto rounded-lg bg-foreground/[0.035] p-3 font-mono", aria_live: "polite",
+                            if current.interaction_count == 0 { {translate("gallery-no-events")} }
+                            else { "#{current.interaction_count} {current.last_event}" }
                         }
-                        pre { class: "overflow-x-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground",
-                            "disabled: {current.disabled}\nchecked: {current.checked}\ntext: {current.text:?}\nchoice: {current.choice:?}\ndialog_open: {current.dialog_open}\nprogress: {current.progress}"
+                        pre { class: "mt-3 overflow-x-auto whitespace-pre-wrap font-mono",
+                            "disabled: {current.disabled}\nchecked: {current.checked}\ntext: {current.text:?}\nchoice: {current.choice:?}\nmenu: {current.menu:?}\nagent: {current.agent:?}\nmodel: {current.model:?}\neffort: {current.effort:?}\npermission: {current.permission:?}\nproject: {current.project:?}\nbranch: {current.branch:?}\nrunning: {current.running}\nsubmitted: {current.submitted:?}"
                         }
                     }
                 }
@@ -113,15 +140,64 @@ pub fn Page() -> Element {
 fn Preview(state: GalleryUiState) -> Element {
     let revision = state.revision;
     match state.story {
+        Story::Favicon
+        | Story::TypeIcon
+        | Story::PromptGhost
+        | Story::DirectoryNavigator
+        | Story::MatrixRain
+        | Story::BackButton => rsx! { AuxiliaryPreview { state } },
+        Story::PromptComposer | Story::ComposerBar | Story::PromptBox => {
+            rsx! { ComposerPreview { state } }
+        }
+        Story::AgentMenu
+        | Story::ModelMenu
+        | Story::EffortMenu
+        | Story::PermissionMenu
+        | Story::ProjectPicker
+        | Story::McpMenu
+        | Story::PromptMediaOptions => rsx! { MenuPreview { state } },
+        Story::Address
+        | Story::Breadcrumbs
+        | Story::Dropdown
+        | Story::PageAddress
+        | Story::SegmentedControl
+        | Story::Sheet
+        | Story::FileTree => rsx! { NavigationPreview { state } },
+        Story::AlertDialog
+        | Story::ContextMenu
+        | Story::Badge
+        | Story::ShellCode
+        | Story::ErrorState
+        | Story::Filter
+        | Story::Icon
+        | Story::Motion
+        | Story::Notice
+        | Story::Page
+        | Story::StartHero
+        | Story::Tooltip => rsx! { SurfacePreview { state } },
+        Story::Manager => rsx! { ManagementPreview { state } },
+        Story::InlineEdit => rsx! { EditingPreview { state } },
         Story::Button => rsx! { Buttons { disabled: state.disabled, revision } },
         Story::Input => rsx! {
+            div { class: "mx-auto w-full max-w-xl space-y-6",
             Input {
                 class: "w-full max-w-sm",
-                value: state.text,
+                value: state.text.clone(),
                 disabled: state.disabled,
                 placeholder: translate("gallery-sample"),
                 aria_label: "Input",
                 oninput: move |event: FormEvent| { let _ = send(&GalleryTextRequest { revision, text: event.value() }); },
+            }
+            ActionInput {
+                value: state.text.clone(), placeholder: translate("gallery-sample"),
+                aria_label: "ActionInput", action_label: translate("gallery-sample"),
+                class: "relative flex w-full items-center", input_class: "w-full rounded-md bg-background p-2",
+                oninput: move |event: FormEvent| { let _ = send(&GalleryTextRequest { revision, text: event.value() }); },
+                onkeydown: move |event: KeyboardEvent| { if event.key() == Key::Enter { let _ = send(&GalleryClickRequest { revision, label: "ActionInput.enter".into() }); } },
+                onblur: move |_| { let _ = send(&GalleryClickRequest { revision, label: "ActionInput.blur".into() }); },
+                onaction: move |_| { let _ = send(&GalleryClickRequest { revision, label: "ActionInput.action".into() }); },
+                "+"
+            }
             }
         },
         Story::Textarea => rsx! { Textareas { state } },
@@ -159,31 +235,34 @@ fn Preview(state: GalleryUiState) -> Element {
                     if let Some(choice) = choice { let _ = send(&GalleryChoiceRequest { revision, choice }); }
                 },
                 SelectTrigger { aria_label: "Select", SelectValue {} }
-                SelectList {
+                SelectList { SelectGroup {
                     for (index, choice) in ["one", "two", "three"].into_iter().enumerate() {
                         SelectOption::<String> {
                             value: choice.to_string(),
                             index,
                             text_value: translate(&format!("gallery-option-{choice}")),
                             {translate(&format!("gallery-option-{choice}"))}
+                            SelectItemIndicator {}
                         }
                     }
-                }
+                } }
             }
         },
         Story::Dialog => rsx! { DialogPreview { state } },
         Story::Card => rsx! {
-            Card { class: "w-full max-w-sm",
-                CardHeader {
-                    CardTitle { {translate("gallery-sample")} }
-                    CardDescription { {translate("gallery-description")} }
-                }
-                CardContent {
-                    Button {
-                        disabled: state.disabled,
-                        size: ButtonSize::Sm,
-                        onclick: move |_| { let _ = send(&GalleryClickRequest { revision, label: "Card".to_string() }); },
-                        {translate("gallery-sample")}
+            div { class: "flex flex-wrap gap-6",
+                for variant in [CardVariant::Default, CardVariant::Panel] {
+                    Card { variant, class: "w-full max-w-sm",
+                        CardHeader {
+                            CardTitle { {translate("gallery-sample")} }
+                            CardDescription { {translate("gallery-description")} }
+                        }
+                        CardContent {
+                            Button { disabled: state.disabled, size: ButtonSize::Sm,
+                                onclick: move |_| { let _ = send(&GalleryClickRequest { revision, label: "Card".into() }); },
+                                {translate("gallery-sample")}
+                            }
+                        }
                     }
                 }
             }
@@ -201,6 +280,11 @@ fn Preview(state: GalleryUiState) -> Element {
                     for class in ["size-6", "size-10", "size-16"] {
                         Avatar { seed: state.text.clone(), background: "", alt: translate("gallery-sample"), class }
                     }
+                }
+                div { class: "flex items-center gap-4",
+                    AgentThumbnail { seed: state.text.clone(), background: "", alt: "AgentThumbnail", class: "size-10" }
+                    Identicon { seed: state.text.clone(), alt: "Identicon", class: "size-10" }
+                    IdentityOrb { seed: state.text.clone(), alt: "IdentityOrb", class: "size-10" }
                 }
             }
         },
@@ -235,6 +319,16 @@ fn Preview(state: GalleryUiState) -> Element {
 fn Buttons(disabled: bool, revision: u64) -> Element {
     rsx! {
         div { class: "flex w-full flex-col gap-5",
+            div { class: "flex flex-wrap items-center gap-3",
+                IconButton { label: "IconButton", paths: vec!["M12 5v14M5 12h14".into()], disabled,
+                    onclick: move |_| { let _ = send(&GalleryClickRequest { revision, label: "IconButton".into() }); },
+                }
+                Button { size: ButtonSize::Icon, disabled, "I" }
+                Button { size: ButtonSize::Block, disabled,
+                    onclick: move |_| { let _ = send(&GalleryClickRequest { revision, label: "Button/Block".into() }); },
+                    "Block"
+                }
+            }
             for (variant, name) in [
                 (ButtonVariant::Primary, "Primary"),
                 (ButtonVariant::Secondary, "Secondary"),
