@@ -43,4 +43,4 @@ vmux internal cargo -- test --locked -p vmux_layout --lib
 
 For a visual change, check the rendered screen rather than testing a literal CSS class. The push hook checks formatting; CI runs the heavier checks. [Test and share a build](validation-and-release.md) covers explicit diagnostics and packaging.
 
-You can keep the result locally, open a PR in your fork, or propose it upstream. Update a guide when the way someone uses or understands the feature changes.
+You can keep the result locally, open a PR in your fork, or propose it upstream. Update the relevant UX guide when user behavior changes. Update the architecture guide only for substantial changes to responsibilities, dependencies or shared ownership/lifecycle boundaries. Routine refactors belong in code, tests and the PR; they do not require architecture edits or migration notes.
