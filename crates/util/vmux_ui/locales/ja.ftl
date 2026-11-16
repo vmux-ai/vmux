@@ -1253,3 +1253,17 @@ gallery-category-composition = 組み合わせ
 gallery-category-navigation = ナビゲーション
 gallery-category-feedback = 状態・通知
 gallery-category-icons = アイコン
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = 既定
+gallery-preset-disabled-outline = 無効・アウトライン
+gallery-preset-running = 実行中
+gallery-preset-with-attachment = 添付あり
+gallery-preset-with-content = 内容あり
+gallery-model-balanced = バランス
+gallery-model-fast = 高速
+gallery-mode-plan = 計画
+gallery-model-description = サンプルモデル: { $id }
+gallery-mode-description = サンプルの権限モード: { $id }
+gallery-example-review = この UI コンポーネントを確認する
+gallery-completion = そして期待する動作を説明する

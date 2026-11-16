@@ -1273,3 +1273,17 @@ gallery-category-composition = Композиция
 gallery-category-navigation = Навигация
 gallery-category-feedback = Обратная связь
 gallery-category-icons = Значки
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = По умолчанию
+gallery-preset-disabled-outline = Неактивный контур
+gallery-preset-running = Выполняется
+gallery-preset-with-attachment = С вложением
+gallery-preset-with-content = С содержимым
+gallery-model-balanced = Сбалансированный
+gallery-model-fast = Быстрый
+gallery-mode-plan = План
+gallery-model-description = Пример модели: { $id }
+gallery-mode-description = Пример режима разрешений: { $id }
+gallery-example-review = Проверьте этот компонент UI
+gallery-completion = и опишите ожидаемое поведение

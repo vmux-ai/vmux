@@ -57,6 +57,12 @@ Args can change several conditions at once, including when the preview is disabl
 Named presets replace previous conditions and reset component-local state. Composer,
 menu and directory callbacks update isolated sample state. The catalog is a desktop feature.
 
+Preset names remain stable developer identifiers in RON. Their display labels use Fluent
+messages named `gallery-preset-` followed by the name in lowercase kebab case, such as
+`gallery-preset-with-content` for `WithContent`. Add that message to every bundled locale
+when introducing a new preset. Component names, property keys and fixture values remain
+as authored.
+
 ## Follow a behavior change
 
 Open `crates/feature/vmux_setting/src/ui.rs` and find `Page`, the Settings screen. Its `rsx!` markup is similar to JSX: it renders HTML-like elements and other components. The search input has this callback:

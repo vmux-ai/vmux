@@ -10811,6 +10811,7 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
+ "fluent-syntax",
  "rkyv",
  "ron 0.12.1",
  "serde",

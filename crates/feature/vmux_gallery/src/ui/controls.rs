@@ -19,7 +19,7 @@ pub(super) fn StoryControls(state: GalleryUiState) -> Element {
                 for (index, preset) in state.presets.iter().enumerate() {
                     Button { variant: ButtonVariant::Secondary, size: ButtonSize::Xs, class: "rounded-md",
                         onclick: move |_| { let _ = send(&GalleryPresetRequest { revision, index }); },
-                        "{preset.name}"
+                        {translate(&crate::StoryPreset::label_key(preset))}
                     }
                 }
             }

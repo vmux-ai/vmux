@@ -1270,3 +1270,17 @@ gallery-category-composition = 組合
 gallery-category-navigation = 導覽
 gallery-category-feedback = 回饋
 gallery-category-icons = 圖示
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = 預設
+gallery-preset-disabled-outline = 停用外框
+gallery-preset-running = 執行中
+gallery-preset-with-attachment = 附有附件
+gallery-preset-with-content = 有內容
+gallery-model-balanced = 均衡
+gallery-model-fast = 快速
+gallery-mode-plan = 計畫
+gallery-model-description = 範例模型：{ $id }
+gallery-mode-description = 範例權限模式：{ $id }
+gallery-example-review = 檢查此 UI 元件
+gallery-completion = 並描述預期行為

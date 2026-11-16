@@ -3,6 +3,8 @@ pub(crate) use catalog::RegisteredStory;
 pub use catalog::Story;
 #[cfg(host)]
 pub use host::GalleryPlugin;
+#[cfg(ui)]
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 mod catalog;
 #[cfg(host)]
@@ -52,6 +54,38 @@ pub struct Examples {
     pub media: Vec<vmux_api::prompt_media::PromptMediaOption>,
     pub attachments: Vec<vmux_api::prompt_media::PromptComposerAttachment>,
     pub mcp: vmux_api::mcp::McpServersUiState,
+}
+
+#[cfg(ui)]
+impl Examples {
+    pub(crate) fn localized(&self) -> Self {
+        let mut examples = self.clone();
+        for model in &mut examples.models {
+            let key = match model.id.as_str() {
+                "balanced" => "gallery-model-balanced",
+                "fast" => "gallery-model-fast",
+                _ => continue,
+            };
+            model.name = translate(key);
+            model.description = translate_with(
+                "gallery-model-description",
+                &[("id", TranslationValue::String(&model.id))],
+            );
+        }
+        for mode in &mut examples.modes {
+            let key = match mode.id.as_str() {
+                "default" => "gallery-preset-default",
+                "plan" => "gallery-mode-plan",
+                _ => continue,
+            };
+            mode.name = translate(key);
+            mode.description = Some(translate_with(
+                "gallery-mode-description",
+                &[("id", TranslationValue::String(&mode.id))],
+            ));
+        }
+        examples
+    }
 }
 
 #[vmux_api::ui_event]
@@ -213,6 +247,24 @@ pub struct StoryPreset {
     pub args: ArgsPatch,
 }
 
+#[cfg(any(ui, test))]
+impl StoryPreset {
+    pub(crate) fn label_key(&self) -> String {
+        let mut key = String::from("gallery-preset-");
+        for (index, character) in self.name.chars().enumerate() {
+            if character.is_ascii_uppercase() {
+                if index > 0 {
+                    key.push('-');
+                }
+                key.push(character.to_ascii_lowercase());
+            } else {
+                key.push(character);
+            }
+        }
+        key
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct StoryDefinition {
     pub defaults: ArgsPatch,
@@ -223,4 +275,34 @@ pub(crate) struct StoryDefinition {
 pub struct GalleryPresetRequest {
     pub revision: u64,
     pub index: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fluent_syntax::{ast::Entry, parser};
+    use std::collections::HashSet;
+
+    #[test]
+    fn every_story_preset_has_a_bundled_display_label() {
+        let resource = parser::parse(include_str!("../../../util/vmux_ui/locales/en-US.ftl"))
+            .expect("valid bundled Fluent catalog");
+        let mut messages = HashSet::new();
+        for entry in resource.body {
+            if let Entry::Message(message) = entry {
+                messages.insert(message.id.name);
+            }
+        }
+        for story in Story::ALL {
+            let definition: StoryDefinition = ron::from_str(story.metadata_source()).unwrap();
+            for preset in definition.presets {
+                assert!(
+                    messages.contains(preset.label_key().as_str()),
+                    "missing display label for {} / {}",
+                    story.name(),
+                    preset.name,
+                );
+            }
+        }
+    }
 }

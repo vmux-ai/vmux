@@ -1273,3 +1273,17 @@ gallery-category-composition = Samenstelling
 gallery-category-navigation = Navigatie
 gallery-category-feedback = Feedback
 gallery-category-icons = Pictogrammen
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = Standaard
+gallery-preset-disabled-outline = Uitgeschakelde omlijning
+gallery-preset-running = Actief
+gallery-preset-with-attachment = Met bijlage
+gallery-preset-with-content = Met inhoud
+gallery-model-balanced = Gebalanceerd
+gallery-model-fast = Snel
+gallery-mode-plan = Plan
+gallery-model-description = Voorbeeldmodel: { $id }
+gallery-mode-description = Voorbeeldmachtigingsmodus: { $id }
+gallery-example-review = Bekijk deze UI-component
+gallery-completion = en beschrijf het verwachte gedrag

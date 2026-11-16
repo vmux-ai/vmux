@@ -10,7 +10,15 @@ pub(super) struct Snapshot(pub(super) DynamicWorld);
 
 impl Snapshot {
     pub(super) fn recover(mut self) -> Result<DynamicWorld, String> {
-        let owners: HashSet<Entity> = self.0.entities.iter().map(|entity| entity.entity).collect();
+        let mut owners = HashSet::new();
+        for entity in &self.0.entities {
+            if !owners.insert(entity.entity) {
+                return Err(format!(
+                    "duplicate stored entity identity: {:?}",
+                    entity.entity
+                ));
+            }
+        }
         let mut discarded = HashSet::new();
         for entity in &self.0.entities {
             if StoredPage(entity).is_orphan(&owners) || StoredAgent(entity).is_orphan(&owners) {
@@ -126,6 +134,47 @@ mod tests {
     use bevy::ecs::relationship::RelationshipTarget;
     use vmux_ecs::store::WorkspaceRestoreValidator;
     use vmux_session::{Session, SessionId};
+
+    #[test]
+    fn recovery_refuses_duplicate_identities_before_discarding_orphaned_scaffolds() {
+        for agent in [false, true] {
+            for saved_first in [false, true] {
+                let duplicate = Entity::from_bits(1);
+                let missing = Entity::from_bits(2);
+                let components: Vec<Box<dyn PartialReflect>> = if agent {
+                    vec![
+                        Box::new(AgentId("codex-acp".into())),
+                        Box::new(ChildOf(missing)),
+                        Box::new(Children::from_collection_risky(Vec::new())),
+                    ]
+                } else {
+                    vec![
+                        Box::new(Cwd("/saved".into())),
+                        Box::new(PageMetadata::default()),
+                        Box::new(ChildOf(missing)),
+                    ]
+                };
+                let mut entities = vec![
+                    DynamicEntity {
+                        entity: duplicate,
+                        components,
+                    },
+                    DynamicEntity {
+                        entity: duplicate,
+                        components: vec![Box::new(Name::new("Saved content"))],
+                    },
+                ];
+                if saved_first {
+                    entities.reverse();
+                }
+                let snapshot = DynamicWorld {
+                    resources: Vec::new(),
+                    entities,
+                };
+                assert!(Snapshot(snapshot).recover().is_err());
+            }
+        }
+    }
 
     #[test]
     fn recovery_discards_only_empty_orphaned_agent_scaffolds() {

@@ -1273,3 +1273,17 @@ gallery-category-composition = التركيب
 gallery-category-navigation = التنقل
 gallery-category-feedback = الملاحظات
 gallery-category-icons = الأيقونات
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = الافتراضي
+gallery-preset-disabled-outline = إطار معطّل
+gallery-preset-running = قيد التشغيل
+gallery-preset-with-attachment = مع مرفق
+gallery-preset-with-content = مع محتوى
+gallery-model-balanced = متوازن
+gallery-model-fast = سريع
+gallery-mode-plan = خطة
+gallery-model-description = نموذج تجريبي: { $id }
+gallery-mode-description = وضع أذونات تجريبي: { $id }
+gallery-example-review = راجع مكوّن واجهة المستخدم هذا
+gallery-completion = وصِف السلوك المتوقع

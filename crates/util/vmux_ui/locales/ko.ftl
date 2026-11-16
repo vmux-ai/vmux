@@ -1270,3 +1270,17 @@ gallery-category-composition = 조합
 gallery-category-navigation = 탐색
 gallery-category-feedback = 피드백
 gallery-category-icons = 아이콘
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = 기본값
+gallery-preset-disabled-outline = 비활성 윤곽선
+gallery-preset-running = 실행 중
+gallery-preset-with-attachment = 첨부 포함
+gallery-preset-with-content = 내용 포함
+gallery-model-balanced = 균형
+gallery-model-fast = 빠름
+gallery-mode-plan = 계획
+gallery-model-description = 예제 모델: { $id }
+gallery-mode-description = 예제 권한 모드: { $id }
+gallery-example-review = 이 UI 컴포넌트를 검토하고
+gallery-completion = 예상 동작을 설명하세요

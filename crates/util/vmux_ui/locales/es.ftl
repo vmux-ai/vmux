@@ -1273,3 +1273,17 @@ gallery-category-composition = Composición
 gallery-category-navigation = Navegación
 gallery-category-feedback = Respuesta
 gallery-category-icons = Iconos
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = Predeterminado
+gallery-preset-disabled-outline = Contorno desactivado
+gallery-preset-running = En ejecución
+gallery-preset-with-attachment = Con adjunto
+gallery-preset-with-content = Con contenido
+gallery-model-balanced = Equilibrado
+gallery-model-fast = Rápido
+gallery-mode-plan = Plan
+gallery-model-description = Modelo de ejemplo: { $id }
+gallery-mode-description = Modo de permisos de ejemplo: { $id }
+gallery-example-review = Revisar este componente de UI
+gallery-completion = y describir el comportamiento esperado

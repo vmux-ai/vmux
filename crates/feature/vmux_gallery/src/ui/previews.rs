@@ -179,6 +179,7 @@ pub(crate) fn BasicPreview(state: GalleryUiState) -> Element {
                     aria_label: "Input",
                     oninput: move |event: FormEvent| { let _ = send(&GalleryTextRequest { revision, text: event.value() }); },
         }
+                fieldset { disabled: state.disabled, class: "contents",
                 ActionInput {
                     value: state.text.clone(), placeholder: translate("gallery-sample"),
                     aria_label: "ActionInput", action_label: translate("gallery-sample"),
@@ -188,6 +189,7 @@ pub(crate) fn BasicPreview(state: GalleryUiState) -> Element {
                     onblur: move |_| { let _ = send(&GalleryClickRequest { revision, label: "ActionInput.blur".into() }); },
                     onaction: move |_| { let _ = send(&GalleryClickRequest { revision, label: "ActionInput.action".into() }); },
                     "+"
+                }
                 }
                 }
             },
@@ -460,7 +462,7 @@ pub(crate) fn ComposerPreview(state: GalleryUiState) -> Element {
         div { class: "mx-auto w-full max-w-4xl space-y-6 py-16",
             div { class: "flex flex-wrap gap-2",
                 Button { variant: ButtonVariant::Secondary,
-                    onclick: move |_| { let _ = send(&GalleryTextRequest { revision, text: "Review this UI component".into() }); },
+                    onclick: move |_| { let _ = send(&GalleryTextRequest { revision, text: translate("gallery-example-review") }); },
                     {translate("gallery-sample")}
                 }
                 Button { variant: ButtonVariant::Ghost,
@@ -480,7 +482,7 @@ pub(crate) fn ComposerPreview(state: GalleryUiState) -> Element {
                         accent_gradient: "from-primary to-primary/70",
                         disabled: state.disabled,
                         attachments: state.examples.attachments.clone(),
-                        completion: if state.checked { " and describe the expected behavior".into() } else { String::new() },
+                        completion: if state.checked { format!(" {}", translate("gallery-completion")) } else { String::new() },
                         mode: if state.running { PromptComposerMode::Stop } else { PromptComposerMode::Send },
                         action_title: if state.running { translate("common-stop") } else { translate("command-send") },
                         action_enabled: state.running || !state.text.trim().is_empty(),
@@ -509,6 +511,7 @@ pub(crate) fn ComposerPreview(state: GalleryUiState) -> Element {
 #[component]
 fn ComposerStrip(state: GalleryUiState) -> Element {
     let revision = state.revision;
+    let examples = crate::Examples::localized(&state.examples);
     let opened = match state.menu.as_str() {
         "agent" => Some(ComposerMenuKind::Agent),
         "model" => Some(ComposerMenuKind::Model),
@@ -537,9 +540,9 @@ fn ComposerStrip(state: GalleryUiState) -> Element {
                 on_hover: move |cursor| { let _ = send(&GalleryCursorRequest { revision, cursor }); },
                 on_dismiss: move |_| { let _ = send(&GalleryMenuRequest { revision, menu: String::new() }); },
                 agent: Some(AgentMenuData { options: state.examples.agents.clone(), selected_url: state.agent.clone(), on_select: EventHandler::new(move |value| { let _ = send(&GalleryAgentRequest { revision, value }); }) }),
-                model: Some(ModelMenuData { models: state.examples.models.clone(), current_model_id: state.model.clone(), on_select: EventHandler::new(move |entry: vmux_api::session::ModelOptionEntry| { let _ = send(&GalleryModelRequest { revision, value: entry.id }); }) }),
+                model: Some(ModelMenuData { models: examples.models.clone(), current_model_id: state.model.clone(), on_select: EventHandler::new(move |entry: vmux_api::session::ModelOptionEntry| { let _ = send(&GalleryModelRequest { revision, value: entry.id }); }) }),
                 effort: Some(EffortMenuData { levels: vec!["low".into(), "medium".into(), "high".into()], selected: state.effort.clone(), on_select: EventHandler::new(move |value| { let _ = send(&GalleryEffortRequest { revision, value }); }) }),
-                permission: Some(PermissionMenuData { modes: state.examples.modes.clone(), current_mode_id: state.permission.clone(), on_select: EventHandler::new(move |entry: vmux_api::protocol::AcpModeOption| { let _ = send(&GalleryPermissionRequest { revision, value: entry.id }); }) }),
+                permission: Some(PermissionMenuData { modes: examples.modes.clone(), current_mode_id: state.permission.clone(), on_select: EventHandler::new(move |entry: vmux_api::protocol::AcpModeOption| { let _ = send(&GalleryPermissionRequest { revision, value: entry.id }); }) }),
                 project: Some(ProjectMenuData { projects: state.examples.projects.clone(), loaded: true, on_pick: EventHandler::new(move |pick: vmux_ui::components::project_picker::ProjectPick| { let _ = send(&GalleryProjectRequest { revision, value: pick.project }); }), on_choose_another: EventHandler::new(move |_| { let _ = send(&GalleryClickRequest { revision, label: "ProjectPicker.choose_another".into() }); }) }),
                 branch: Some(BranchMenuData { project: state.project.clone(), branches: state.examples.branches.clone(), loaded: true, on_pick: EventHandler::new(move |pick: vmux_ui::components::project_picker::ProjectPick| { let _ = send(&GalleryBranchRequest { revision, value: pick.branch }); }) }),
             }
@@ -560,6 +563,11 @@ pub(crate) fn EditingPreview(state: GalleryUiState) -> Element {
     let revision = state.revision;
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| state.text.clone());
+    let mut active = use_signal(|| None::<usize>);
+    let mut inline_draft = use_signal(|| state.text.clone());
+    let mut multiline_draft = use_signal(|| state.text.clone());
+    let inline_value = state.text.clone();
+    let multiline_value = state.text.clone();
     rsx! {
         fieldset { disabled: state.disabled, class: "mx-auto max-w-xl space-y-8",
             div { class: "space-y-3",
@@ -570,20 +578,40 @@ pub(crate) fn EditingPreview(state: GalleryUiState) -> Element {
                     input_class: "w-full rounded-md bg-background p-2 outline-none",
                     title: "EditableText", empty_display: translate("gallery-sample"),
                     allow_empty: true,
-                    on_commit: move |text| { let _ = send(&GalleryTextRequest { revision, text }); },
+                    on_active_change: Some(EventHandler::new(move |started: bool| {
+                        if started { active.set(Some(0)); }
+                        else if active() == Some(0) { active.set(None); }
+                    })),
+                    on_commit: move |text| {
+                        if active() == Some(0) { let _ = send(&GalleryTextRequest { revision, text }); }
+                    },
                 }
             }
             div { class: "space-y-3",
-                p { class: "font-mono text-xs text-muted-foreground", "InlineEdit / InlineTextarea" }
-                Button { variant: ButtonVariant::Secondary, onclick: move |_| editing.set(!editing()), "editing: {editing}" }
-                if editing() {
-                    InlineEdit { draft, class: "w-full rounded-md bg-background p-2", aria_label: "InlineEdit", allow_empty: true,
-                        on_commit: move |text| { let _ = send(&GalleryTextRequest { revision, text }); editing.set(false); },
-                        on_cancel: move |_| { editing.set(false); let _ = send(&GalleryClickRequest { revision, label: "InlineEdit.cancel".into() }); },
+                p { class: "font-mono text-xs text-muted-foreground", "InlineEdit" }
+                Button { variant: ButtonVariant::Secondary, onclick: move |_| {
+                    editing.set(false);
+                    inline_draft.set(inline_value.clone());
+                    active.set(if active() == Some(1) { None } else { Some(1) });
+                }, "editing: {active() == Some(1)}" }
+                if active() == Some(1) {
+                    InlineEdit { draft: inline_draft, class: "w-full rounded-md bg-background p-2", aria_label: "InlineEdit", allow_empty: true,
+                        on_commit: move |text| { if active() == Some(1) { active.set(None); let _ = send(&GalleryTextRequest { revision, text }); } },
+                        on_cancel: move |_| { if active() == Some(1) { active.set(None); let _ = send(&GalleryClickRequest { revision, label: "InlineEdit.cancel".into() }); } },
                     }
-                    InlineTextarea { draft, class: "w-full rounded-md bg-background p-2", aria_label: "InlineTextarea", allow_empty: true,
-                        on_commit: move |text| { let _ = send(&GalleryTextRequest { revision, text }); editing.set(false); },
-                        on_cancel: move |_| { editing.set(false); let _ = send(&GalleryClickRequest { revision, label: "InlineTextarea.cancel".into() }); },
+                }
+            }
+            div { class: "space-y-3",
+                p { class: "font-mono text-xs text-muted-foreground", "InlineTextarea" }
+                Button { variant: ButtonVariant::Secondary, onclick: move |_| {
+                    editing.set(false);
+                    multiline_draft.set(multiline_value.clone());
+                    active.set(if active() == Some(2) { None } else { Some(2) });
+                }, "editing: {active() == Some(2)}" }
+                if active() == Some(2) {
+                    InlineTextarea { draft: multiline_draft, class: "w-full rounded-md bg-background p-2", aria_label: "InlineTextarea", allow_empty: true,
+                        on_commit: move |text| { if active() == Some(2) { active.set(None); let _ = send(&GalleryTextRequest { revision, text }); } },
+                        on_cancel: move |_| { if active() == Some(2) { active.set(None); let _ = send(&GalleryClickRequest { revision, label: "InlineTextarea.cancel".into() }); } },
                     }
                 }
             }
@@ -641,7 +669,7 @@ pub(crate) fn ManagementPreview(state: GalleryUiState) -> Element {
                     toolbar: rsx! {
                         ManagerToolbar {
                             ManagerControls {
-                                ManagerViewToggle { view, list_label: "List", grid_label: "Grid",
+                                ManagerViewToggle { view, list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"),
                                     onchange: move |view| { let _ = send(&GalleryCheckedRequest { revision, checked: view == ManagerView::Grid }); },
                                 }
                                 ManagerSearchAction { value: state.text.clone(), placeholder: translate("gallery-search"),
@@ -795,6 +823,7 @@ pub(crate) fn MenuPreview(state: GalleryUiState) -> Element {
 #[component]
 fn MenuPopup(state: GalleryUiState) -> Element {
     let revision = state.revision;
+    let examples = crate::Examples::localized(&state.examples);
     let hover = EventHandler::new(move |cursor| {
         let _ = send(&GalleryCursorRequest { revision, cursor });
     });
@@ -811,7 +840,7 @@ fn MenuPopup(state: GalleryUiState) -> Element {
             on_select: move |value| { let _ = send(&GalleryAgentRequest { revision, value }); },
         } },
         Story::ModelMenu => rsx! { ModelMenu {
-            models: state.examples.models, current_model_id: state.model, selected: state.cursor, on_hover: hover, on_dismiss: dismiss,
+            models: examples.models, current_model_id: state.model, selected: state.cursor, on_hover: hover, on_dismiss: dismiss,
             on_select: move |(_, entry): (usize, vmux_api::session::ModelOptionEntry)| { let _ = send(&GalleryModelRequest { revision, value: entry.id }); },
         } },
         Story::EffortMenu => rsx! { EffortMenu {
@@ -819,7 +848,7 @@ fn MenuPopup(state: GalleryUiState) -> Element {
             on_select: move |value| { let _ = send(&GalleryEffortRequest { revision, value }); },
         } },
         Story::PermissionMenu => rsx! { PermissionMenu {
-            modes: state.examples.modes, current_mode_id: state.permission, selected: state.cursor, on_hover: hover, on_dismiss: dismiss,
+            modes: examples.modes, current_mode_id: state.permission, selected: state.cursor, on_hover: hover, on_dismiss: dismiss,
             on_select: move |entry: vmux_api::protocol::AcpModeOption| { let _ = send(&GalleryPermissionRequest { revision, value: entry.id }); },
         } },
         Story::ProjectPicker => rsx! { ProjectPicker {

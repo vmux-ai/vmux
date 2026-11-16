@@ -127,7 +127,7 @@ impl Plugin for SimulatorPlugin {
                 .after(finish_device_attachments)
                 .after(sync_active_view),
         )
-        .add_systems(Update, handle_screenshot_requests.in_set(SimulatorInputSet))
+        .add_systems(Update, handle_screenshot_requests.after(sync_active_view))
         .add_systems(
             Update,
             (

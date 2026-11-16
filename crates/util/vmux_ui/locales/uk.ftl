@@ -1273,3 +1273,17 @@ gallery-category-composition = Композиція
 gallery-category-navigation = Навігація
 gallery-category-feedback = Зворотний зв’язок
 gallery-category-icons = Піктограми
+
+gallery-preset-disabled = { gallery-disabled }
+gallery-preset-default = Типовий
+gallery-preset-disabled-outline = Вимкнений контур
+gallery-preset-running = Виконується
+gallery-preset-with-attachment = З вкладенням
+gallery-preset-with-content = З вмістом
+gallery-model-balanced = Збалансований
+gallery-model-fast = Швидкий
+gallery-mode-plan = План
+gallery-model-description = Приклад моделі: { $id }
+gallery-mode-description = Приклад режиму дозволів: { $id }
+gallery-example-review = Перевірте цей компонент UI
+gallery-completion = і опишіть очікувану поведінку
