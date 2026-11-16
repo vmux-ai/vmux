@@ -14,7 +14,7 @@ pub mod http;
 #[cfg(all(feature = "page", host, ui))]
 mod native;
 #[cfg(feature = "page")]
-pub mod page;
+pub mod registration;
 #[cfg(feature = "ecs")]
 mod runtime;
 pub mod snapshot;

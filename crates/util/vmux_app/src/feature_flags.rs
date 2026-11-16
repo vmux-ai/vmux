@@ -38,7 +38,7 @@ pub(crate) struct FeatureFlagsPlugin;
 #[cfg(feature = "feature-flags")]
 impl bevy_app::Plugin for FeatureFlagsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_feature::page::FeaturePagePlugin);
+        app.add_plugins(vmux_feature::registration::FeaturePagePlugin);
         #[cfg(target_os = "macos")]
         app.add_plugins(vmux_feature::http::HttpPlugin)
             .add_systems(bevy_app::Startup, configure_administration);
@@ -47,7 +47,7 @@ impl bevy_app::Plugin for FeatureFlagsPlugin {
 
 #[cfg(all(feature = "feature-flags", target_os = "macos"))]
 fn configure_administration(mut commands: bevy_ecs::prelude::Commands) {
-    let public = vmux_feature::page::Endpoint::new("https://api.vmux.ai/", "production", None)
+    let public = vmux_feature::registration::Endpoint::new("https://api.vmux.ai/", "production", None)
         .expect("static public endpoint");
     let snapshot = vmux_feature::http::Endpoint::new("https://api.vmux.ai/v1/flags/snapshot")
         .expect("static snapshot endpoint");
@@ -65,7 +65,7 @@ fn configure_administration(mut commands: bevy_ecs::prelude::Commands) {
     let credential = std::env::var("VMUX_FEATURE_ADMIN_TOKEN").ok();
     let environment =
         std::env::var("VMUX_FEATURE_ADMIN_ENVIRONMENT").unwrap_or_else(|_| "development".into());
-    let endpoint = match vmux_feature::page::Endpoint::new(&url, &environment, credential) {
+    let endpoint = match vmux_feature::registration::Endpoint::new(&url, &environment, credential) {
         Ok(endpoint) if endpoint.is_loopback() && environment != "production" => endpoint,
         _ => {
             tracing::warn!("local flag administration endpoint rejected");

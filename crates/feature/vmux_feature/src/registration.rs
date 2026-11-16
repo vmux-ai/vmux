@@ -1,3 +1,5 @@
+#[cfg(all(host, ui))]
+pub use crate::native::Endpoint;
 use bevy_app::{App, Plugin};
 
 #[vmux_page::page]
@@ -29,6 +31,3 @@ struct Feature;
 impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
-
-#[cfg(all(host, ui))]
-pub use crate::native::Endpoint;

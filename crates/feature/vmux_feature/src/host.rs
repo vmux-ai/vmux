@@ -42,6 +42,8 @@ impl Plugin for FeatureHostPlugin {
             )>::default(),
         ))
         .add_message::<Received>()
+        .add_message::<ReadRequested>()
+        .add_systems(Update, load.before(JobSet::Submit))
         .add_observer(page_ready)
         .add_observer(open)
         .add_observer(filter)
@@ -175,6 +177,83 @@ struct Pending {
     read_only: bool,
 }
 
+impl Pending {
+    fn read(page: Entity, endpoint: Entity, context: &Context) -> impl Bundle {
+        (
+            Operation::bundle("feature.inspect").unwrap(),
+            ChildOf(page),
+            Self {
+                endpoint,
+                generation: context.generation,
+                configuration: context.configuration,
+                preserve: true,
+                read_only: true,
+            },
+        )
+    }
+
+    fn write(page: Entity, context: &Context) -> impl Bundle {
+        (
+            Operation::bundle("feature.admin").unwrap(),
+            ChildOf(page),
+            Self {
+                endpoint: context.endpoint.unwrap(),
+                generation: context.generation,
+                configuration: context.configuration,
+                preserve: false,
+                read_only: false,
+            },
+        )
+    }
+}
+
+#[derive(Message)]
+struct ReadRequested {
+    page: Entity,
+    endpoint: Entity,
+    generation: u64,
+}
+
+fn load(
+    mut requests: MessageReader<ReadRequested>,
+    mut contexts: Query<&mut Context>,
+    endpoints: Query<&Endpoint>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let Ok(mut context) = contexts.get_mut(request.page) else {
+            continue;
+        };
+        if context.pending.is_some()
+            || context.endpoint != Some(request.endpoint)
+            || context.generation != request.generation
+        {
+            continue;
+        }
+        let Ok(endpoint) = endpoints.get(request.endpoint) else {
+            continue;
+        };
+        context.configuration = endpoint.fingerprint();
+        context.environment = endpoint.environment.clone();
+        let operation = commands
+            .spawn(Pending::read(request.page, request.endpoint, &context))
+            .id();
+        if endpoint.writable() {
+            commands.entity(operation).insert(JobRequest(native::Load {
+                endpoint: endpoint.clone(),
+            }));
+        } else {
+            commands
+                .entity(operation)
+                .insert(JobRequest(native::Inspect {
+                    endpoint: endpoint.clone(),
+                }));
+        }
+        context.pending = Some(operation);
+        context.error.clear();
+    }
+}
+
 #[derive(Component)]
 struct PublicationAttempt(crate::administration::Publish);
 
@@ -275,7 +354,7 @@ fn page_ready(
     };
     if !metadata
         .url
-        .starts_with(crate::page::FeaturePagePlugin::URL)
+        .starts_with(crate::registration::FeaturePagePlugin::URL)
         || contexts.contains(page)
     {
         return;
@@ -287,7 +366,11 @@ fn page_ready(
     let mut context = Context::default();
     if let Some((entity, endpoint)) = endpoint {
         context.endpoint = Some(entity);
-        context.fetch(page, entity, endpoint, &mut commands);
+        commands.write_message(ReadRequested {
+            page,
+            endpoint: entity,
+            generation: context.generation,
+        });
         for (name, value) in declarations.defaults(&endpoint.environment) {
             commands.spawn((
                 Name::new(name),
@@ -314,63 +397,6 @@ fn page_ready(
 }
 
 impl Context {
-    fn fetch(
-        &mut self,
-        page: Entity,
-        entity: Entity,
-        endpoint: &Endpoint,
-        commands: &mut Commands,
-    ) {
-        self.configuration = endpoint.fingerprint();
-        self.environment = endpoint.environment.clone();
-        let operation = commands
-            .spawn((
-                Operation::bundle("feature.inspect").unwrap(),
-                ChildOf(page),
-                Pending {
-                    endpoint: entity,
-                    generation: self.generation,
-                    configuration: self.configuration,
-                    preserve: true,
-                    read_only: true,
-                },
-            ))
-            .id();
-        if endpoint.writable() {
-            commands.entity(operation).insert(JobRequest(native::Load {
-                endpoint: endpoint.clone(),
-            }));
-        } else {
-            commands
-                .entity(operation)
-                .insert(JobRequest(native::Inspect {
-                    endpoint: endpoint.clone(),
-                }));
-        }
-        self.pending = Some(operation);
-        self.error.clear();
-    }
-
-    fn submit<J: Job>(&mut self, page: Entity, job: J, commands: &mut Commands) -> Entity {
-        let operation = commands
-            .spawn((
-                Operation::bundle("feature.admin").unwrap(),
-                ChildOf(page),
-                Pending {
-                    endpoint: self.endpoint.unwrap(),
-                    generation: self.generation,
-                    configuration: self.configuration,
-                    preserve: false,
-                    read_only: false,
-                },
-                JobRequest(job),
-            ))
-            .id();
-        self.pending = Some(operation);
-        self.error.clear();
-        operation
-    }
-
     fn matches(&self, endpoint: &Endpoint) -> bool {
         self.configuration == endpoint.fingerprint()
     }
@@ -419,7 +445,11 @@ fn open(
         context.loaded = false;
         context.capabilities = Capabilities::default();
     }
-    context.fetch(page, entity, endpoint, &mut commands);
+    commands.write_message(ReadRequested {
+        page,
+        endpoint: entity,
+        generation: context.generation,
+    });
 }
 
 fn filter(trigger: On<UiInput<FeaturesFilterRequest>>, mut selections: Query<&mut Selection>) {
@@ -515,14 +545,17 @@ fn save(
         base_revision: draft.base,
         changes,
     };
-    let operation = context.submit(
-        page,
-        native::Save {
-            endpoint: endpoint.clone(),
-            request: request.clone(),
-        },
-        &mut commands,
-    );
+    let operation = commands
+        .spawn((
+            Pending::write(page, &context),
+            JobRequest(native::Save {
+                endpoint: endpoint.clone(),
+                request: request.clone(),
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
     commands.entity(operation).insert(request);
 }
 
@@ -575,14 +608,17 @@ fn review(
         expected_revision: request.expected_revision,
         base_revision: request.base_revision,
     };
-    let operation = context.submit(
-        page,
-        native::Review {
-            endpoint: endpoint.clone(),
-            request: request.clone(),
-        },
-        &mut commands,
-    );
+    let operation = commands
+        .spawn((
+            Pending::write(page, &context),
+            JobRequest(native::Review {
+                endpoint: endpoint.clone(),
+                request: request.clone(),
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
     commands.entity(operation).insert(request);
 }
 
@@ -653,14 +689,17 @@ fn publish(
     commands
         .entity(page)
         .insert(PublicationAttempt(publication.clone()));
-    let operation = context.submit(
-        page,
-        native::Publish {
-            endpoint: endpoint.clone(),
-            request: publication.clone(),
-        },
-        &mut commands,
-    );
+    let operation = commands
+        .spawn((
+            Pending::write(page, &context),
+            JobRequest(native::Publish {
+                endpoint: endpoint.clone(),
+                request: publication.clone(),
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
     commands.entity(operation).insert(publication);
 }
 
@@ -713,14 +752,17 @@ fn discard(
         draft_id: request.draft_id.clone(),
         expected_revision: request.expected_revision,
     };
-    let operation = context.submit(
-        page,
-        native::Discard {
-            endpoint: endpoint.clone(),
-            request: request.clone(),
-        },
-        &mut commands,
-    );
+    let operation = commands
+        .spawn((
+            Pending::write(page, &context),
+            JobRequest(native::Discard {
+                endpoint: endpoint.clone(),
+                request: request.clone(),
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
     commands.entity(operation).insert(request);
 }
 
@@ -1205,7 +1247,17 @@ mod tests {
                 endpoint: Some(owner),
                 ..Default::default()
             };
-            context.fetch(page, owner, &endpoint, &mut commands);
+            context.configuration = endpoint.fingerprint();
+            context.environment = endpoint.environment.clone();
+            let operation = commands
+                .spawn((
+                    Pending::read(page, owner, &context),
+                    JobRequest(native::Load {
+                        endpoint: endpoint.clone(),
+                    }),
+                ))
+                .id();
+            context.pending = Some(operation);
             commands.entity(page).insert(context);
             app.world_mut().flush();
             Self {
@@ -1331,14 +1383,16 @@ mod tests {
             .take::<Context>()
             .unwrap();
         let mut commands = fixture.app.world_mut().commands();
-        let operation = context.submit(
-            fixture.page,
-            native::Save {
-                endpoint,
-                request: request.clone(),
-            },
-            &mut commands,
-        );
+        let operation = commands
+            .spawn((
+                Pending::write(fixture.page, &context),
+                JobRequest(native::Save {
+                    endpoint,
+                    request: request.clone(),
+                }),
+            ))
+            .id();
+        context.pending = Some(operation);
         commands.entity(operation).insert(request);
         commands.entity(fixture.page).insert(context);
         fixture.app.world_mut().flush();
