@@ -1,7 +1,10 @@
-use bevy::prelude::*;
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::{
+    App, Commands, Component, Entity, EntityEvent, IntoScheduleConfigs, MessageReader,
+    MessageWriter, NonSend, On, Or, Plugin, Query, Remove, Res, Update, With, Without,
+};
 use bevy_cef::prelude::{BinIpcBlocked, Browsers, HistorySwipeEventReceiver};
 use bevy_cef_core::prelude::{HistorySwipeDirection, HistorySwipeRaw};
-use std::sync::atomic::{AtomicU64, Ordering};
 use vmux_command::ReadCommandRequests;
 use vmux_page::HistorySwipe;
 
@@ -12,28 +15,26 @@ pub(crate) struct HistorySwipePlugin;
 impl Plugin for HistorySwipePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::native_bridge::NativeHistoryPlugin)
+            .add_observer(retire)
             .add_systems(
                 Update,
-                sync.after(crate::BrowserLoadSet)
+                (initialize, sync)
+                    .chain()
+                    .after(crate::BrowserLoadSet)
                     .before(ReadCommandRequests),
             );
     }
 }
 
+#[derive(Component, Default)]
 struct Installation {
     token: String,
 }
 
 impl Installation {
     fn new() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64;
         Self {
-            token: format!("{timestamp:016x}{serial:016x}"),
+            token: uuid::Uuid::new_v4().simple().to_string(),
         }
     }
 
@@ -46,7 +47,39 @@ impl Installation {
     }
 
     fn accepts(&self, event: &HistorySwipeRaw, current_url: &str) -> bool {
-        self.token == event.token && event.page_url == current_url
+        !self.token.is_empty() && self.token == event.token && event.page_url == current_url
+    }
+}
+
+fn initialize(
+    owners: Query<Entity, (With<vmux_layout::Browser>, Without<Installation>)>,
+    mut commands: Commands,
+) {
+    for owner in &owners {
+        commands.entity(owner).insert(Installation::default());
+    }
+}
+
+#[derive(SystemParam)]
+struct NativeDocuments<'w> {
+    browsers: NonSend<'w, Browsers>,
+}
+
+impl NativeDocuments<'_> {
+    fn available(&self, owner: Entity) -> bool {
+        self.browsers.has_browser(owner)
+    }
+
+    fn url(&self, owner: Entity) -> Option<String> {
+        self.browsers.page_url(&owner)
+    }
+
+    fn inject(&self, owner: Entity, script: &str) -> bool {
+        if self.browsers.page_url(&owner).is_none() {
+            return false;
+        }
+        self.browsers.execute_js(&owner, script);
+        true
     }
 }
 
@@ -54,8 +87,9 @@ fn sync(
     mut navigated: MessageReader<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
     mut loaded: MessageReader<WebviewLoadCompleted>,
     receiver: Res<HistorySwipeEventReceiver>,
-    browsers: NonSend<Browsers>,
-    mut installations: Local<std::collections::HashMap<Entity, Installation>>,
+    native: NativeDocuments,
+    mut installations: Query<(Entity, &mut Installation), With<vmux_layout::Browser>>,
+    owners: Query<(), With<vmux_layout::Browser>>,
     blocked: Query<
         (),
         Or<(
@@ -68,30 +102,44 @@ fn sync(
     for event in navigated.read() {
         if event.is_main_frame {
             crate::NativeBridge::invalidate_history_input(event.webview);
-            installations.remove(&event.webview);
+            if let Ok((_, mut installation)) = installations.get_mut(event.webview) {
+                installation.token.clear();
+            }
         }
     }
-    installations.retain(|webview, _| browsers.has_browser(*webview));
+    for (webview, mut installation) in &mut installations {
+        if !native.available(webview) {
+            installation.token.clear();
+        }
+    }
     for event in loaded.read() {
         crate::NativeBridge::invalidate_history_input(event.webview);
-        let Some(url) = browsers.page_url(&event.webview) else {
+        if !owners.contains(event.webview) {
+            continue;
+        }
+        let Ok((_, mut current)) = installations.get_mut(event.webview) else {
+            continue;
+        };
+        current.token.clear();
+        let Some(url) = native.url(event.webview) else {
             continue;
         };
         if !url.starts_with("http://") && !url.starts_with("https://") {
             continue;
         }
         let installation = Installation::new();
-        browsers.execute_js(&event.webview, &installation.script());
-        installations.insert(event.webview, installation);
+        if native.inject(event.webview, &installation.script()) {
+            *current = installation;
+        }
     }
     while let Ok(event) = receiver.0.try_recv() {
         if blocked.contains(event.webview) {
             continue;
         }
-        let Some(installation) = installations.get(&event.webview) else {
+        let Ok((_, installation)) = installations.get(event.webview) else {
             continue;
         };
-        let Some(url) = browsers.page_url(&event.webview) else {
+        let Some(url) = native.url(event.webview) else {
             continue;
         };
         if !installation.accepts(&event, &url) {
@@ -108,9 +156,94 @@ fn sync(
     }
 }
 
+fn retire(removed: On<Remove, vmux_layout::Browser>, mut commands: Commands) {
+    commands
+        .entity(removed.event_target())
+        .try_remove::<Installation>();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct InstallationFixture {
+        app: App,
+        owner: Entity,
+    }
+
+    impl InstallationFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            let (_, receiver) = async_channel::bounded(32);
+            app.add_plugins((bevy::prelude::MinimalPlugins, HistorySwipePlugin))
+                .insert_non_send(Browsers::default())
+                .insert_resource(HistorySwipeEventReceiver(receiver))
+                .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+                .add_message::<WebviewLoadCompleted>()
+                .add_message::<NavigationRequest>();
+            let owner = app.world_mut().spawn(vmux_layout::Browser).id();
+            app.update();
+            Self { app, owner }
+        }
+
+        fn accepts(&self, event: &HistorySwipeRaw) -> bool {
+            self.app
+                .world()
+                .get::<Installation>(self.owner)
+                .is_some_and(|installation| installation.accepts(event, &event.page_url))
+        }
+    }
+
+    #[test]
+    fn browser_reattachment_cannot_reuse_a_retired_document_token() {
+        let mut fixture = InstallationFixture::new();
+        let installation = Installation::new();
+        let event = HistorySwipeRaw {
+            webview: fixture.owner,
+            page_url: "https://example.com/".to_string(),
+            token: installation.token.clone(),
+            direction: HistorySwipeDirection::Back,
+        };
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.owner)
+            .insert(installation);
+        assert!(fixture.accepts(&event));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.owner)
+            .remove::<vmux_layout::Browser>();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.owner)
+            .insert(vmux_layout::Browser);
+        assert!(!fixture.accepts(&event));
+        fixture.app.update();
+        assert!(!fixture.accepts(&event));
+    }
+
+    #[test]
+    fn a_missing_native_browser_retires_its_document_token() {
+        let mut fixture = InstallationFixture::new();
+        let installation = Installation::new();
+        let event = HistorySwipeRaw {
+            webview: fixture.owner,
+            page_url: "https://example.com/".to_string(),
+            token: installation.token.clone(),
+            direction: HistorySwipeDirection::Forward,
+        };
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.owner)
+            .insert(installation);
+        assert!(fixture.accepts(&event));
+        fixture.app.update();
+        assert!(!fixture.accepts(&event));
+    }
 
     #[test]
     fn a_previous_document_cannot_reuse_a_history_notification() {
