@@ -204,6 +204,53 @@ mod tests {
     }
 }
 
+#[cfg(all(test, feature = "account-local", feature = "jobs"))]
+mod composition_tests {
+    use super::*;
+    use bevy_ecs::prelude::{Name, With};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn shared_jobs_compose_with_account_local_and_restore_profiles() {
+        for shared_jobs in [true, false] {
+            let data = tempfile::tempdir().unwrap();
+            let directory = data.path().join("profiles/personal");
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("display_name"), "Restored profile").unwrap();
+            let mut app = App::new();
+            app.add_plugins(
+                VmuxPlugin::builder()
+                    .account_local(true)
+                    .jobs(shared_jobs)
+                    .build(),
+            );
+            let root = app
+                .world_mut()
+                .spawn(vmux_account::Root::at(data.path(), "personal"))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                app.update();
+                if app.world().get::<vmux_ecs::Ready>(root).is_some() {
+                    break;
+                }
+                if let Some(error) = app.world().get::<vmux_account::Error>(root) {
+                    panic!("account load failed: {:?}", error.0);
+                }
+                assert!(Instant::now() < deadline, "account load timed out");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let world = app.world_mut();
+            let (id, name) = world
+                .query_filtered::<(&vmux_ecs::ProfileId, &Name), With<vmux_account::Profile>>()
+                .single(world)
+                .unwrap();
+            assert_eq!(id.0, "personal");
+            assert_eq!(name.as_str(), "Restored profile");
+        }
+    }
+}
+
 #[cfg(all(test, feature = "daemon"))]
 mod profile_tests {
     use super::*;

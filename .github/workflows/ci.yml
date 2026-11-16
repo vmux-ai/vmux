@@ -554,7 +554,7 @@ jobs:
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop
       - name: Features
         if: matrix.reuse == '' && matrix.key == 'test-features' && needs.changes.outputs.headless == 'true'
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp,account-local,jobs --lib
       - name: Legacy desktop features
         if: matrix.reuse == '' && matrix.key == 'test-features' && needs.changes.outputs.legacy_desktop == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests

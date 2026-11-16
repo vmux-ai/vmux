@@ -176,6 +176,7 @@ vmux_transport = { path = "../vmux_transport", optional = true }
 
 [dev-dependencies]
 bevy_ecs.workspace = true
+tempfile = "3"
 
 [[bin]]
 name = "vmux_service"
