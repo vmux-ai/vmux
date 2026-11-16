@@ -2,8 +2,10 @@ use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 
 use crate::components::button::{Button, ButtonSize, ButtonVariant};
+use crate::components::composer::ComposerButton;
 use crate::components::progress::LoadingIcon;
 use crate::i18n::translate;
+use crate::icon::LineIcon;
 
 #[component]
 pub fn ConversationPrompt(
@@ -142,6 +144,8 @@ pub fn PromptConfirmation(
     on_confirm: EventHandler<()>,
     #[props(default = true)] enabled: bool,
     #[props(default)] pending: bool,
+    #[props(default)] sender: bool,
+    #[props(default)] accent_gradient: String,
     #[props(default = Some(translate("common-cancel")))] cancel_label: Option<String>,
     #[props(default)] on_cancel: Option<EventHandler<()>>,
 ) -> Element {
@@ -158,6 +162,13 @@ pub fn PromptConfirmation(
                     {label}
                 }
             }
+            if sender {
+                ComposerButton {
+                    action_title: confirm_label.clone(), label: Some(confirm_label), icon: Some(LineIcon::Play),
+                    icon_class: "[&_path]:fill-current".to_string(), accent_gradient, enabled: enabled && !pending,
+                    on_action: move |_| { if enabled && !pending { on_confirm.call(()); } },
+                }
+            } else {
             Button {
                 size: ButtonSize::Sm,
                 r#type: "button",
@@ -172,6 +183,7 @@ pub fn PromptConfirmation(
                 },
                 if pending { LoadingIcon { class: "size-3.5".to_string() } }
                 {confirm_label}
+            }
             }
         }
     }

@@ -92,7 +92,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
     let action = if resumable {
         Some(
             rsx! { ComposerButton { action_title: translate("common-resume"), label: Some(translate("common-resume")),
-                icon: Some(vmux_ui::icon::LineIcon::ChevronDown), icon_class: "-rotate-90".to_string(), enabled: !keys.pending, accent_gradient: gradient,
+                icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(), enabled: !keys.pending, accent_gradient: gradient,
                 on_action: move |_| Choice::Retry.choose(),
             } },
         )
@@ -108,7 +108,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
         };
         Some(
             rsx! { ComposerButton { action_title: translate("common-continue"), label: Some(translate("common-continue")),
-                icon: Some(vmux_ui::icon::LineIcon::ChevronDown), icon_class: "-rotate-90".to_string(), enabled: available && !keys.pending, accent_gradient: gradient,
+                icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(), enabled: available && !keys.pending, accent_gradient: gradient,
                 on_action: move |_| { if selected() == "key" { chat.request_key_input(true); } else { connection.connect(chat); } },
             } },
         )

@@ -142,7 +142,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
     };
     let action = Some(rsx! { ComposerButton {
         action_title: confirm_label.clone(), label: Some(confirm_label),
-        icon: Some(vmux_ui::icon::LineIcon::ChevronDown), icon_class: "-rotate-90".to_string(),
+        icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(),
         enabled: enabled && !pending,
         accent_gradient: vmux_ui::agent_accent::AgentAccent::for_agent(&agent_id).grad.to_string(),
         on_action: move |_| { if enabled && !pending { let _ = send(&OnboardingConnect { agent_id: choice() }); } },

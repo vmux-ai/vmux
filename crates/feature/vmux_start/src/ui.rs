@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::composer::ComposerFrame;
+use vmux_ui::components::composer::PromptComposer;
 use vmux_ui::components::manager::ManagerPage;
 use vmux_ui::components::message::{MessageFrame, WelcomeLayout};
 use vmux_ui::components::progress::TaskSteps;
@@ -83,14 +83,23 @@ fn SetupWelcome() -> Element {
                 }
             }
             div { class: "h-[var(--vmux-welcome-composer-height)] shrink-0",
-                ComposerFrame {
-                    content_class: "rounded-[14px] bg-muted px-3 py-2".to_string(),
-                    PromptConfirmation {
+                PromptComposer {
+                    shared_transition: true, input_disabled: true, caret_visible: false,
+                    value: String::new(), placeholder: translate("command-composer-placeholder"),
+                    accent_color: "var(--primary)".to_string(),
+                    accent_gradient: "from-[var(--primary-action-start)] to-[var(--primary-action-end)]".to_string(),
+                    footer: Some(rsx! {}),
+                    action: Some(rsx! { PromptConfirmation {
+                        sender: true,
+                        accent_gradient: "from-[var(--primary-action-start)] to-[var(--primary-action-end)]".to_string(),
                         confirm_label: translate("common-continue"),
                         on_confirm: move |_| {
                             let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest { value: "vmux://start/onboarding/agent".to_string(), open: Some(vmux_api::open_target::OpenTarget::InPlace) });
                         },
-                    }
+                    } }),
+                    action_title: translate("common-continue"), action_enabled: true,
+                    on_input: move |_| {}, on_keydown: move |_| {}, on_paste: move |_| {},
+                    on_attach: move |_| {}, on_remove_attachment: move |_| {}, on_action: move |_| {},
                 }
             }
         }
@@ -133,6 +142,14 @@ mod tests {
         let initial = dom.rebuild_to_vec();
         assert!(host.0.borrow().is_empty());
         let html = dioxus_ssr::render(&dom);
+        let input = html
+            .split("<textarea")
+            .nth(1)
+            .expect("normal composer input")
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(input.contains(" disabled"));
         for prompt in vmux_ui::components::starter_prompts::StarterPrompt::all() {
             assert!(!html.contains(&prompt.text()));
         }
