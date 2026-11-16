@@ -463,37 +463,58 @@ class Workflow {
     return files.some((file) => !push['paths-ignore'].some((pattern) => path.matchesGlob(file, pattern)));
   }
 
-  async checkProfiles(identity, context, inputs = {}) {
+  async checkProfiles(identity, context, inputs = {}, selection = {}) {
     const captured = {};
     class Adapter {
-      async plan(_identity, profiles) { captured.profiles = profiles; }
+      async plan(_identity, profiles) { captured.profiles = profiles; return Object.fromEntries(profiles.map((profile) => [profile.key, { claim: '', reuse: '' }])); }
+      static matrix(profiles, results) { return Checks.matrix(profiles, results); }
     }
     const step = this.jobs.changes.steps.find((step) => step.id === 'checks');
     const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
     const execute = new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script);
-    await execute(() => Adapter, {}, context, {}, { env: { VMUX_CHECK_BASE: identity.base, VMUX_CHECK_TREE: identity.tree, VMUX_CHECK_RELEASE: 'false', VMUX_LINT_SCOPE: '-p example', VMUX_TEST_SCOPE: '-p example', VMUX_CHECK_INPUTS: JSON.stringify(inputs), VMUX_RECORDS: 'false', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', ImageVersion: 'fixture' } });
+    await execute(() => Adapter, {}, context, { setOutput() {} }, { env: { VMUX_CHECK_BASE: identity.base, VMUX_CHECK_TREE: identity.tree, VMUX_CHECK_RELEASE: 'false', VMUX_LINT_SCOPE: '-p example', VMUX_TEST_SCOPE: '-p example', VMUX_CHECK_INPUTS: JSON.stringify(inputs), VMUX_RECORDS: 'false', VMUX_CODE_REQUIRED: 'true', VMUX_RUST_REQUIRED: 'true', VMUX_SDK_REQUIRED: 'true', VMUX_DESKTOP_REQUIRED: 'true', VMUX_FEATURES_REQUIRED: 'true', VMUX_COMPILER_REQUIRED: 'true', VMUX_LEGACY_DESKTOP: 'false', ...selection, RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', ImageVersion: 'fixture' } });
     return captured.profiles;
   }
 
   gate(name, env) {
-    return require('node:child_process').spawnSync('bash', ['-c', this.jobs[name].steps[0].run], { env: { ...process.env, ...env }, encoding: 'utf8' });
+    return require('node:child_process').spawnSync('bash', ['-c', this.jobs[name].steps.find((step) => step.run).run], { env: { ...process.env, ...env }, encoding: 'utf8' });
   }
 
-  step(name, title, event, feature, changes) {
+  step(name, title, event, feature, changes, matrix = {}) {
     const step = this.jobs[name].steps.find((step) => step.name === title);
-    return this.lane(name, event, feature, changes, '', step.if);
+    return this.lane(name, event, feature, changes, '', step.if, 'false', matrix);
   }
 
-  lane(name, event, feature, changes, reuse = '', condition = this.jobs[name].if, release = 'false') {
+  lane(name, event, feature, changes, reuse = '', condition = this.jobs[name].if, release = 'false', matrix = {}) {
     const github = { event_name: event };
     const outputs = {};
     for (const [key, value] of Object.entries(changes)) outputs[key] = String(value);
     const needs = { plan: { outputs: { feature, reuse, release } }, changes: { outputs } };
-    return Function('github', 'needs', `return (${condition});`)(github, needs);
+    return Function('github', 'needs', 'matrix', `return (${condition});`)(github, needs, matrix);
   }
 
   ready(name, results) {
     return this.jobs[name].needs.every((dependency) => results[dependency] === 'success');
+  }
+
+  ciResults(changes, distribution = 'false') {
+    const outputs = {};
+    for (const [key, value] of Object.entries(changes)) outputs[key] = String(value);
+    const native = distribution === 'true';
+    return {
+      plan: { result: 'success' },
+      changes: { result: 'success', outputs },
+      lint: { result: 'success' },
+      tests: { result: outputs.test_count === '0' ? 'skipped' : 'success' },
+      website: { result: changes.website && !changes.reuse_website ? 'success' : 'skipped' },
+      'dx-macos': { result: native && (changes.macos || changes.ios || changes.macos_tooling) ? 'success' : 'skipped' },
+      'build-mac': { result: native && changes.macos ? 'success' : 'skipped' },
+      'ios-build': { result: changes.ios ? 'success' : 'skipped' },
+    };
+  }
+
+  ciGate(results, distribution = 'false') {
+    return this.gate('ci', { VMUX_CI_RESULTS: JSON.stringify(results), VMUX_CI_DISTRIBUTION: distribution });
   }
 
   paths(files) {
@@ -511,13 +532,13 @@ class Workflow {
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
 
-  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false', selection = {}) {
+  async changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false', selection = {}) {
     const github = { event_name: event };
     const needs = { plan: { outputs: { feature, base, release } } };
     const steps = {
       filter: { outputs: filter },
       native: { outputs: { native } },
-      scope: { outputs: { lean, sdk: "true", headless: "true", rust: "true", records: "true", render_free: "true", tooling: "true", ...selection } },
+      scope: { outputs: { lean, desktop: lean, sdk: "true", headless: "true", rust: "true", records: "true", render_free: "true", tooling: "true", ...selection } },
       checks: { outputs: {} },
     };
     for (const name of Object.keys(this.jobs.changes.outputs)) {
@@ -527,8 +548,22 @@ class Workflow {
     if (!Function('github', 'needs', 'steps', `return (${classify.if});`)(github, needs, steps)) steps.native.outputs.native = '';
     const result = {};
     for (const [key, value] of Object.entries(this.jobs.changes.outputs)) {
-      result[key] = Function('github', 'needs', 'steps', `return (${value.slice(3, -2)});`)(github, needs, steps);
+      if (!['tests', 'test_count'].includes(key)) result[key] = Function('github', 'needs', 'steps', `return (${value.slice(3, -2)});`)(github, needs, steps);
     }
+    const profiles = await this.checkProfiles({ base, tree: '' }, { payload: {} }, {}, {
+      VMUX_CODE_REQUIRED: String(result.code),
+      VMUX_RUST_REQUIRED: String(result.rust),
+      VMUX_SDK_REQUIRED: String(result.contracts),
+      VMUX_DESKTOP_REQUIRED: String(result.desktop),
+      VMUX_FEATURES_REQUIRED: String(result.headless || result.legacy_desktop),
+      VMUX_COMPILER_REQUIRED: String(result.compiler_lints),
+      VMUX_LEGACY_DESKTOP: String(result.legacy_desktop),
+    });
+    const evidence = {};
+    for (const profile of profiles) evidence[profile.key] = { claim: '', reuse: result[`reuse_${profile.key.replaceAll('-', '_')}`] || '' };
+    const matrix = Checks.matrix(profiles, evidence);
+    result.tests = JSON.stringify(matrix);
+    result.test_count = String(matrix.include.length);
     return result;
   }
 }
@@ -728,10 +763,10 @@ test('change detection receives a local merge object ID accepted by paths-filter
   assert.equal(workflow.filterRef('', commit), '');
 });
 
-test('ordinary PRs never select macOS or iOS builds, including packaging changes', () => {
+test('ordinary PRs never select macOS or iOS builds, including packaging changes', async () => {
   const workflow = new Workflow();
   for (const file of ['.github/workflows/ci.yml', 'crates/app/vmux_desktop/src/main.rs', 'crates/app/vmux_mobile/src/main.rs', 'packaging/Info.plist', 'Cargo.toml']) {
-    const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]));
+    const changes = await workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]));
     for (const name of ['dx-macos', 'build-mac', 'ios-build']) {
       assert.equal(workflow.lane(name, 'pull_request', 'false', changes), false, `${file}: ${name}`);
     }
@@ -752,16 +787,16 @@ test('feature pushes do not dispatch CI while PRs, main, and explicit validation
   }
 });
 
-test('main and explicit full validation retain native builds and release PRs retain packaging', () => {
+test('main and explicit full validation retain native builds and release PRs retain packaging', async () => {
   const workflow = new Workflow();
   for (const event of ['push', 'workflow_dispatch']) {
-    const changes = workflow.changes(event, 'false', '', '', workflow.paths(['Cargo.toml']));
+    const changes = await workflow.changes(event, 'false', '', '', workflow.paths(['Cargo.toml']));
     for (const name of ['dx-macos', 'build-mac', 'ios-build']) {
       assert.equal(workflow.lane(name, event, 'false', changes), true, `${event}: ${name}`);
     }
   }
   for (const native of ['true', 'false']) {
-    const changes = workflow.changes('pull_request', 'false', 'base', native, workflow.paths(['Cargo.toml']), 'true', 'true');
+    const changes = await workflow.changes('pull_request', 'false', 'base', native, workflow.paths(['Cargo.toml']), 'true', 'true');
     assert.equal(changes.macos, native === 'true');
     assert.equal(changes.macos_tooling, native === 'true');
     assert.equal(changes.ios, false);
@@ -769,50 +804,77 @@ test('main and explicit full validation retain native builds and release PRs ret
       assert.equal(workflow.lane(name, 'pull_request', 'false', changes, '', workflow.jobs[name].if, 'true'), native === 'true', `${native}: ${name}`);
     }
   }
-  const scheduled = workflow.changes('schedule', 'false', '', '', workflow.paths([]));
+  const scheduled = await workflow.changes('schedule', 'false', '', '', workflow.paths([]));
   assert.equal(workflow.lane('ios-build', 'schedule', 'false', scheduled), true);
 });
 
 test('immutable Git SDK consumer validation stays outside ordinary PRs', () => {
   const workflow = new Workflow();
   for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
-    assert.equal(workflow.step('test-sdk', 'Test immutable Git dependencies', event, 'false', {}), event !== 'pull_request', event);
+    assert.equal(workflow.step('tests', 'Git SDK', event, 'false', {}, { key: 'test-sdk', reuse: '' }), event !== 'pull_request', event);
   }
 });
 
-test('feature variants remain parallel with ordinary tests and required when selected', () => {
+test('selected test suites share one parallel matrix without waiting for another suite', async () => {
   const workflow = new Workflow();
-  for (const name of ['test-sdk', 'test-headless', 'test-lean']) {
-    assert.equal(workflow.ready(name, { plan: 'success', changes: 'success', 'test-rust': 'in_progress' }), true);
-  }
-  assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', contracts: 'false', lean: 'true' }), true);
-  assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', contracts: 'false', lean: 'false' }), false);
-  const valid = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'true', HEADLESS_REQUIRED: 'true', CONTRACTS: 'false', LEAN: 'true', RUST_TEST: 'success', SDK: 'success', HEADLESS: 'success', LEAN_TEST: 'success' };
-  assert.equal(workflow.gate('test', valid).status, 0);
+  const changes = await workflow.changes('pull_request', 'false', 'base', '', workflow.paths(['Cargo.toml']));
+  assert.equal(workflow.ready('tests', { plan: 'success', changes: 'success' }), true);
+  const matrix = JSON.parse(changes.tests).include;
+  assert.deepEqual(new Set(matrix.map((entry) => entry.name)), new Set(['Test Rust', 'Test SDK', 'Test Desktop', 'Test Features', 'Test ECS Composition']));
+  assert.equal(workflow.ciGate(workflow.ciResults(changes)).status, 0);
   for (const result of ['failure', 'cancelled', 'skipped']) {
-    assert.equal(workflow.gate('test', { ...valid, LEAN_TEST: result }).status, 1, result);
+    const results = workflow.ciResults(changes);
+    results.tests.result = result;
+    assert.equal(workflow.ciGate(results).status, 1, result);
   }
 });
 
-test('required statuses fail on preparation errors and applicable child failures or unexpected skips', () => {
+test('desktop changes run normal desktop tests while legacy feature checks remain scheduled', async () => {
   const workflow = new Workflow();
-  const valid = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'true', HEADLESS_REQUIRED: 'true', CONTRACTS: 'true', LEAN: 'false', RUST_TEST: 'success', SDK: 'success', HEADLESS: 'success', LEAN_TEST: 'success', DISTRIBUTION: 'true', MACOS: 'true', RESULT: 'success' };
-  for (const name of ['lint', 'test', 'build-macos']) {
-    assert.equal(workflow.gate(name, valid).status, 0, name);
-    for (const key of ['PLAN', 'CHANGES']) {
-      for (const result of ['failure', 'cancelled', 'skipped']) {
-        assert.equal(workflow.gate(name, { ...valid, [key]: result }).status, 1, `${name}: ${key}: ${result}`);
-      }
+  const desktop = await workflow.changes('pull_request', 'false', 'base', '', workflow.paths(['crates/app/vmux_desktop/src/plugin.rs']), 'true', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
+  const rows = JSON.parse(desktop.tests).include;
+  assert.deepEqual(rows.map((row) => row.name), ['Test Desktop', 'Test ECS Composition']);
+  assert.equal(desktop.compiler_lints, true);
+  assert.equal(workflow.step('tests', 'Desktop', 'pull_request', 'false', desktop, rows[0]), true);
+  for (const event of ['pull_request', 'push', 'workflow_dispatch', 'schedule']) {
+    const changes = await workflow.changes(event, 'false', 'base', '', workflow.paths(['Cargo.toml']));
+    const features = JSON.parse(changes.tests).include.find((row) => row.key === 'test-features');
+    assert.equal(workflow.step('tests', 'Legacy desktop features', event, 'false', changes, features), event === 'schedule', event);
+    assert.equal(workflow.step('lint', 'Clippy lean desktop features', event, 'false', changes), event === 'schedule', event);
+  }
+});
+
+test('malformed test matrix configurations fail before dispatch', async () => {
+  const profiles = await new Workflow().checkProfiles({}, { payload: {} });
+  const results = {};
+  for (const profile of profiles) results[profile.key] = { claim: '', reuse: '' };
+  for (const change of ['suite', 'cache', 'dependencies', 'native', 'reuse']) {
+    const invalid = structuredClone(profiles);
+    const row = invalid.find((profile) => profile.matrix);
+    const evidence = structuredClone(results);
+    if (change === 'suite') row.key = 'test-unknown';
+    if (change === 'cache') row.matrix.cache = '../target';
+    if (change === 'dependencies') row.matrix.dependencies = '';
+    if (change === 'native') row.matrix.native = 'yes';
+    if (change === 'reuse') evidence[row.key].reuse = 'invalid';
+    assert.throws(() => Checks.matrix(invalid, evidence), /Unknown|Invalid/, change);
+  }
+});
+
+test('CI rejects failed preparation and required test, lint, website and platform failures', async () => {
+  const workflow = new Workflow();
+  const changes = await workflow.changes('workflow_dispatch', 'false', '', '', workflow.paths(['Cargo.toml']));
+  const valid = workflow.ciResults(changes, 'true');
+  assert.equal(workflow.ciGate(valid, 'true').status, 0);
+  for (const name of ['plan', 'changes', 'lint', 'tests', 'website', 'dx-macos', 'build-mac', 'ios-build']) {
+    for (const result of ['failure', 'cancelled', 'skipped']) {
+      const invalid = structuredClone(valid);
+      invalid[name].result = result;
+      assert.equal(workflow.ciGate(invalid, 'true').status, 1, `${name}: ${result}`);
     }
   }
-  for (const result of ['failure', 'cancelled', 'skipped']) {
-    for (const key of ['RUST_TEST', 'SDK', 'HEADLESS']) {
-      assert.equal(workflow.gate('test', { ...valid, [key]: result }).status, 1, `${key}: ${result}`);
-    }
-    assert.equal(workflow.gate('build-macos', { ...valid, RESULT: result }).status, 1);
-  }
-  assert.equal(workflow.gate('test', { ...valid, CODE: 'false', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped' }).status, 0);
-  assert.equal(workflow.gate('build-macos', { ...valid, DISTRIBUTION: 'false', RESULT: 'skipped' }).status, 0);
+  assert.equal(workflow.gate('test', { CI: 'success' }).status, 0);
+  for (const result of ['failure', 'cancelled', 'skipped']) assert.equal(workflow.gate('test', { CI: result }).status, 1, result);
 });
 
 test('compiler-cache policy pairs each workflow restore with a successful explicit save', () => {
@@ -1210,8 +1272,18 @@ test('successful configured workflow jobs remain reusable through their displaye
   fixture.profiles = await workflow.checkProfiles(fixture.identity, fixture.context);
   fixture.runs = [];
   fixture.prove(42);
+  const evidence = {};
+  for (const profile of fixture.profiles) evidence[profile.key] = { claim: '', reuse: '' };
+  const matrix = Checks.matrix(fixture.profiles, evidence);
   for (let index = 0; index < fixture.profiles.length; index++) {
-    fixture.jobs[42][index].name = workflow.jobs[fixture.profiles[index].key].name;
+    const profile = fixture.profiles[index];
+    if (profile.matrix) {
+      const row = matrix.include.find((entry) => entry.key === profile.key);
+      const expression = workflow.jobs.tests.name.slice(3, -2);
+      fixture.jobs[42][index].name = Function('matrix', `return (${expression});`)(row);
+    } else {
+      fixture.jobs[42][index].name = workflow.jobs[profile.key].name;
+    }
   }
   const result = await fixture.plan();
   for (const profile of fixture.profiles) assert.equal(result[profile.key].reuse, '42', profile.key);
@@ -1330,7 +1402,7 @@ test('every validation artifact discovers its recorded claim with the default hi
   Preflight.checkout({ VMUX_CI_HEAD: fixture.git.head, VMUX_CI_BASE: fixture.identity.base, VMUX_CI_TREE: fixture.identity.tree }, fixture.git.root);
   Checks.record({ VMUX_CHECK_NAME: claim, VMUX_CHECK_TREE: fixture.identity.tree, GITHUB_RUN_ID: '99', GITHUB_RUN_ATTEMPT: '1' }, fixture.git.root);
   const workflow = new Workflow();
-  for (const key of ['lint', 'test-rust', 'test-sdk', 'test-lean', 'test-headless', 'website']) {
+  for (const key of ['lint', 'tests', 'website']) {
     const upload = workflow.jobs[key].steps.find((step) => step.name === 'Publish validation inputs');
     const files = [];
     for (const file of fs.globSync(upload.with.path, { cwd: fixture.git.root })) {
@@ -1342,52 +1414,68 @@ test('every validation artifact discovers its recorded claim with the default hi
   }
 });
 
-test('Test accepts verified reused children but still rejects fresh failures and failed preparation', () => {
+test('reused test rows remain in the matrix and fresh matrix failures still reject CI', async () => {
   const workflow = new Workflow();
-  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'true', HEADLESS_REQUIRED: 'true', CONTRACTS: 'true', LEAN: 'true', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped', REUSE_RUST_TEST: '42', REUSE_SDK: '42', REUSE_HEADLESS: '42', REUSE_LEAN_TEST: '42' };
-  assert.equal(workflow.gate('test', env).status, 0);
-  for (const key of ['REUSE_RUST_TEST', 'REUSE_SDK', 'REUSE_HEADLESS', 'REUSE_LEAN_TEST']) {
-    assert.equal(workflow.gate('test', { ...env, [key]: '' }).status, 1, key);
+  const changes = await workflow.changes('pull_request', 'false', 'base', '', workflow.paths(['Cargo.toml']));
+  const profiles = await workflow.checkProfiles({}, { payload: {} });
+  const evidence = {};
+  for (const profile of profiles) evidence[profile.key] = { claim: '', reuse: '42' };
+  const matrix = Checks.matrix(profiles, evidence);
+  changes.tests = JSON.stringify(matrix);
+  changes.test_count = String(matrix.include.length);
+  for (const row of matrix.include) {
+    assert.equal(workflow.step('tests', 'Rust', 'pull_request', 'false', changes, row), false);
+    assert.equal(workflow.step('tests', 'Desktop', 'pull_request', 'false', changes, row), false);
+    assert.equal(workflow.step('tests', 'Reuse verified test result', 'pull_request', 'false', changes, row), true);
   }
-  assert.equal(workflow.gate('test', { ...env, CHANGES: 'failure' }).status, 1);
-  assert.equal(workflow.lane('test-rust', 'pull_request', 'false', { code: 'true', rust: 'true', reuse_test_rust: '42' }), false);
+  const valid = workflow.ciResults(changes);
+  assert.equal(workflow.ciGate(valid).status, 0);
+  valid.tests.result = 'failure';
+  assert.equal(workflow.ciGate(valid).status, 1);
 });
 
-test('SDK, headless and ordinary Rust requirements reject skips independently', () => {
+test('CI rejects missing, duplicate and unknown matrix cases and missing scope metadata', async () => {
   const workflow = new Workflow();
-  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'false', HEADLESS_REQUIRED: 'false', CONTRACTS: 'false', LEAN: 'false', RUST_TEST: 'skipped', SDK: 'skipped', HEADLESS: 'skipped', LEAN_TEST: 'skipped' };
-  assert.equal(workflow.gate('test', env).status, 0);
-  for (const [required, result, job, selected] of [
-    ['RUST_REQUIRED', 'RUST_TEST', 'test-rust', { rust: 'true' }],
-    ['CONTRACTS', 'SDK', 'test-sdk', { contracts: 'true' }],
-    ['HEADLESS_REQUIRED', 'HEADLESS', 'test-headless', { headless: 'true' }],
-    ['LEAN', 'LEAN_TEST', 'test-lean', { lean: 'true' }],
-  ]) {
-    assert.equal(workflow.lane(job, 'pull_request', 'false', { code: 'true', ...selected }), true, job);
-    assert.equal(workflow.gate('test', { ...env, [required]: 'true' }).status, 1, job);
-    assert.equal(workflow.gate('test', { ...env, [required]: 'true', [result]: 'success' }).status, 0, job);
+  const changes = await workflow.changes('pull_request', 'false', 'base', '', workflow.paths(['Cargo.toml']));
+  const valid = workflow.ciResults(changes);
+  const matrix = JSON.parse(changes.tests).include;
+  for (const row of matrix) {
+    const invalid = structuredClone(valid);
+    const include = matrix.filter((entry) => entry.key !== row.key);
+    invalid.changes.outputs.tests = JSON.stringify({ include });
+    invalid.changes.outputs.test_count = String(include.length);
+    assert.equal(workflow.ciGate(invalid).status, 1, row.key);
+  }
+  for (const key of ['code', 'rust', 'contracts', 'desktop', 'headless', 'legacy_desktop', 'test_count', 'website', 'macos', 'ios', 'macos_tooling']) {
+    const invalid = structuredClone(valid);
+    delete invalid.changes.outputs[key];
+    assert.equal(workflow.ciGate(invalid).status, 1, key);
+  }
+  for (const replacement of [matrix[0], { key: 'test-unknown' }]) {
+    const invalid = structuredClone(valid);
+    invalid.changes.outputs.tests = JSON.stringify({ include: [...matrix.slice(0, -1), replacement] });
+    assert.equal(workflow.ciGate(invalid).status, 1);
   }
 });
 
-test('shared build inputs select website and Rust validation while website manifests keep policy coverage', () => {
+test('shared build inputs select website and Rust validation while website manifests keep policy coverage', async () => {
   const workflow = new Workflow();
   for (const file of ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/config.toml', '.github/workflows/ci.yml', 'scripts/ci-checks.js', 'website/Cargo.toml', 'website/Cargo.lock']) {
-    const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]));
+    const changes = await workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]));
     assert.equal(changes.website, true, file);
     assert.equal(changes.code, true, file);
   }
-  const policy = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths(['website/Cargo.toml']), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
-  for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, 'pull_request', 'false', policy), false, job);
-  const env = { PLAN: 'success', CHANGES: 'success', CODE: 'true', RUST_REQUIRED: 'false', HEADLESS_REQUIRED: 'false', CONTRACTS: 'false', LEAN: 'false' };
-  assert.equal(workflow.gate('test', env).status, 0);
+  const policy = await workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths(['website/Cargo.toml']), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
+  assert.deepEqual(JSON.parse(policy.tests).include.map((row) => row.key), ['test-ecs']);
+  assert.equal(workflow.ciGate(workflow.ciResults(policy)).status, 0);
 });
 
-test('main documentation changes select their contracts while explicit runs retain full validation', () => {
+test('main documentation changes select their contracts while explicit runs retain full validation', async () => {
   const workflow = new Workflow();
   for (const event of ['schedule', 'workflow_dispatch']) {
-    const changes = workflow.changes(event, 'false', 'base', 'true', workflow.paths(['docs/ux/terminal.md']));
+    const changes = await workflow.changes(event, 'false', 'base', 'true', workflow.paths(['docs/ux/terminal.md']));
     assert.equal(changes.code, true, event);
-    for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, event, 'false', changes), true, `${event}: ${job}`);
+    assert.equal(JSON.parse(changes.tests).include.length, 5, event);
   }
   const scope = workflow.jobs.changes.steps.find((step) => step.id === 'scope');
   for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
@@ -1396,23 +1484,26 @@ test('main documentation changes select their contracts while explicit runs reta
   }
   const empty = Function('github', 'needs', `return (${scope.env.VMUX_CI_BASE.slice(3, -2)});`)({ event_name: 'push', event: { before: '0'.repeat(40) } }, {});
   assert.equal(empty, '');
-  const docs = workflow.changes('push', 'false', '', 'true', workflow.paths(['docs/ux/terminal.md']), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
+  const docs = await workflow.changes('push', 'false', '', 'true', workflow.paths(['docs/ux/terminal.md']), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
   assert.equal(docs.code, false);
-  for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, 'push', 'false', docs), false, job);
+  assert.deepEqual(JSON.parse(docs.tests).include, []);
+  assert.equal(workflow.lane('tests', 'push', 'false', docs), false);
 });
 
-test('architecture and policy-only changes retain ownership checks without invoking compiler or native setup', () => {
+test('architecture and policy-only changes retain ownership checks without invoking compiler or native setup', async () => {
   const workflow = new Workflow();
   for (const event of ['pull_request', 'push']) {
     for (const file of ['docs/dx/architecture.md', 'ecs-policy.ron', 'crates/feature/vmux_dx/ecs-policy.ron']) {
-      const changes = workflow.changes(event, 'false', 'base', 'true', workflow.paths([file]), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false', lint_args: '-p vmux_dx' });
+      const changes = await workflow.changes(event, 'false', 'base', 'true', workflow.paths([file]), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false', lint_args: '-p vmux_dx' });
       assert.equal(changes.code, true, file);
       assert.equal(changes.compiler_lints, false, file);
-      assert.equal(workflow.step('lint', 'ECS Policy check', event, 'false', changes), true, file);
+      const rows = JSON.parse(changes.tests).include;
+      assert.deepEqual(rows.map((row) => row.key), ['test-ecs'], file);
+      assert.equal(workflow.step('tests', 'ECS composition', event, 'false', changes, rows[0]), true, file);
       for (const title of ['Check formatting', 'Clippy', 'Check typed registration fixtures', 'Lint registered systems']) assert.equal(workflow.step('lint', title, event, 'false', changes), false, `${file}: ${title}`);
-      const setup = workflow.jobs.lint.steps.find((step) => step.uses === './.github/actions/setup-linux');
-      const desktop = Function('needs', `return (${setup.with.desktop.slice(3, -2)});`)({ changes: { outputs: changes } });
-      assert.equal(desktop, false, file);
+      const setup = workflow.jobs.tests.steps.find((step) => step.uses === './.github/actions/setup-linux');
+      const desktop = Function('matrix', `return (${setup.with.desktop.slice(3, -2)});`)(rows[0]);
+      assert.equal(desktop, 'false', file);
     }
   }
 });
@@ -1427,20 +1518,20 @@ test('empty package scopes cannot invoke Cargo default targets during deletion-o
 
 test('workflow reuse claims invalidate each variant only when its complete inputs change', async (t) => {
   for (const [file, expectedFresh] of [
-    ['crates/unrelated/src/lib.rs', ['lint']],
-    ['crates/util/vmux_mcp/src/lib.rs', ['lint', 'test-headless']],
-    ['crates/util/vmux_app/src/lib.rs', ['lint', 'test-headless', 'test-sdk', 'test-lean']],
-    ['crates/example/src/lib.rs', ['lint', 'test-rust']],
-    ['website/src/main.rs', ['lint', 'website']],
-    ['.github/workflows/ci.yml', ['lint', 'test-rust', 'test-sdk', 'test-lean', 'test-headless', 'website']],
+    ['crates/unrelated/src/lib.rs', ['lint', 'test-ecs']],
+    ['crates/util/vmux_mcp/src/lib.rs', ['lint', 'test-features', 'test-ecs']],
+    ['crates/util/vmux_app/src/lib.rs', ['lint', 'test-features', 'test-sdk', 'test-desktop', 'test-ecs']],
+    ['crates/example/src/lib.rs', ['lint', 'test-rust', 'test-ecs']],
+    ['website/src/main.rs', ['lint', 'website', 'test-ecs']],
+    ['.github/workflows/ci.yml', ['lint', 'test-rust', 'test-sdk', 'test-desktop', 'test-features', 'test-ecs', 'website']],
   ]) {
     const fixture = new CheckFixture(t);
     fixture.advance({ 'crates/unrelated/src/lib.rs': 'unrelated', 'crates/util/vmux_mcp/src/lib.rs': 'mcp', 'crates/util/vmux_app/src/lib.rs': 'app' });
     fixture.profiles = await new Workflow().checkProfiles(fixture.identity, fixture.context, {
       'test-rust': ['crates/example/**'],
       'test-sdk': ['crates/util/vmux_app/**'],
-      'test-headless': ['crates/util/vmux_app/**', 'crates/util/vmux_mcp/**'],
-      'test-lean': ['crates/util/vmux_app/**'],
+      'test-features': ['crates/util/vmux_app/**', 'crates/util/vmux_mcp/**'],
+      'test-desktop': ['crates/util/vmux_app/**'],
     });
     fixture.runs = [];
     fixture.prove(42);

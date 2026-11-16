@@ -26,7 +26,7 @@ class Checks {
     if (this.context.eventName === 'pull_request' && pull?.head.repo?.full_name === repository && !identity.release) {
       if (!Number.isSafeInteger(pull.number) || pull.number < 1) throw new Error('Invalid PR identity');
       const fingerprints = this.inputs(identity, profiles, repository, pull.number);
-      for (const profile of profiles) results[profile.key].claim = fingerprints[profile.key];
+      for (const profile of profiles) results[profile.key].claim = profile.enabled === false ? '' : fingerprints[profile.key];
       try {
         await this.lookup(identity, profiles, results, repository);
       } catch {
@@ -122,6 +122,64 @@ class Checks {
     }
   }
 
+  static matrix(profiles, results) {
+    const include = [];
+    for (const profile of profiles) {
+      if (!profile.matrix || !profile.enabled) continue;
+      if (!/^test-(rust|sdk|desktop|features|ecs)$/.test(profile.key)) throw new Error('Unknown test suite');
+      for (const key of ['cache', 'dependencies']) {
+        if (!/^[a-zA-Z0-9_-]+$/.test(profile.matrix[key] || '')) throw new Error('Invalid test cache partition');
+      }
+      if (!['true', 'false'].includes(profile.matrix.native)) throw new Error('Invalid test native configuration');
+      const result = results[profile.key];
+      if (!result || typeof result.claim !== 'string' || typeof result.reuse !== 'string' || (result.reuse && !/^[1-9]\d*$/.test(result.reuse))) throw new Error('Invalid test evidence');
+      include.push({ key: profile.key, name: profile.name, cache: profile.matrix.cache, dependencies: profile.matrix.dependencies, native: profile.matrix.native, claim: result.claim, reuse: result.reuse });
+    }
+    return { include };
+  }
+
+  static gate(env = process.env) {
+    const results = JSON.parse(env.VMUX_CI_RESULTS);
+    Checks.requireResult(results, 'plan', true);
+    Checks.requireResult(results, 'changes', true);
+    const outputs = results.changes.outputs;
+    for (const key of ['code', 'rust', 'contracts', 'desktop', 'headless', 'legacy_desktop', 'website', 'macos', 'ios', 'macos_tooling']) {
+      if (!['true', 'false'].includes(outputs[key])) throw new Error(`Invalid CI selection: ${key}`);
+    }
+    const matrix = JSON.parse(outputs.tests);
+    if (!Array.isArray(matrix.include) || matrix.include.length > 5 || String(matrix.include.length) !== outputs.test_count) throw new Error('Invalid test matrix');
+    const code = outputs.code === 'true';
+    const selected = new Set();
+    for (const entry of matrix.include) {
+      if (selected.has(entry.key)) throw new Error('Duplicate test suite');
+      selected.add(entry.key);
+    }
+    for (const [key, required] of [
+      ['test-rust', code && outputs.rust === 'true'],
+      ['test-sdk', code && outputs.contracts === 'true'],
+      ['test-desktop', code && outputs.desktop === 'true'],
+      ['test-features', code && (outputs.headless === 'true' || outputs.legacy_desktop === 'true')],
+      ['test-ecs', code],
+    ]) {
+      if (selected.has(key) !== required) throw new Error(`Test selection differs from required scope: ${key}`);
+      selected.delete(key);
+    }
+    if (selected.size) throw new Error('Unknown test selection');
+    Checks.requireResult(results, 'tests', matrix.include.length > 0);
+    Checks.requireResult(results, 'lint', true);
+    Checks.requireResult(results, 'website', outputs.website === 'true', Boolean(outputs.reuse_website));
+    if (!['true', 'false'].includes(env.VMUX_CI_DISTRIBUTION)) throw new Error('Invalid distribution policy');
+    const distribution = env.VMUX_CI_DISTRIBUTION === 'true';
+    Checks.requireResult(results, 'dx-macos', distribution && (outputs.macos === 'true' || outputs.ios === 'true' || outputs.macos_tooling === 'true'));
+    Checks.requireResult(results, 'build-mac', distribution && outputs.macos === 'true');
+    Checks.requireResult(results, 'ios-build', outputs.ios === 'true');
+  }
+
+  static requireResult(results, name, required, reused = false) {
+    const expected = required && !reused ? 'success' : 'skipped';
+    if (results[name]?.result !== expected) throw new Error(`CI ${name}: expected ${expected}, received ${results[name]?.result || 'missing'}`);
+  }
+
   static record(env = process.env, root = process.cwd()) {
     if (!/^ci-check-v1-\d+-[a-f0-9]{40}-[a-z][a-z0-9-]*-[a-f0-9]{64}$/.test(env.VMUX_CHECK_NAME || '') || !/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT || '')) throw new Error('Invalid check claim identity');
     Preflight.sha(env.VMUX_CHECK_TREE);
@@ -141,6 +199,7 @@ class Checks {
 module.exports = Checks;
 
 if (require.main === module) {
-  if (process.argv[2] !== 'record') throw new Error('Expected record');
-  Checks.record();
+  if (process.argv[2] === 'record') Checks.record();
+  else if (process.argv[2] === 'gate') Checks.gate();
+  else throw new Error('Expected record or gate');
 }

@@ -244,9 +244,10 @@ impl Workspace {
         if selection.workspace {
             return Ok(());
         }
-        if !selection.packages.is_empty() {
+        let packages = selection.rust_packages();
+        if !packages.is_empty() {
             let mut args = Vec::new();
-            for package in &selection.packages {
+            for package in &packages {
                 args.extend(["-p", package.as_str()]);
             }
             selection
@@ -275,7 +276,7 @@ impl Workspace {
         }
         for (key, enabled, args) in [
             (
-                "test-headless",
+                "test-features",
                 selection.headless,
                 &[
                     "-p",
@@ -285,11 +286,7 @@ impl Workspace {
                     "daemon,mcp",
                 ][..],
             ),
-            (
-                "test-lean",
-                selection.lean,
-                &["-p", "vmux_desktop", "--no-default-features"][..],
-            ),
+            ("test-desktop", selection.lean, &["-p", "vmux_desktop"][..]),
             (
                 "records",
                 selection.records,
@@ -622,20 +619,32 @@ impl Selection {
                 .is_some_and(|name| name.starts_with("build_") && name.ends_with(".rs"))
     }
 
-    fn emit(&self, workspace: &Workspace) {
+    fn rust_packages(&self) -> BTreeSet<String> {
+        let mut packages = self.packages.clone();
+        packages.remove("vmux_desktop");
+        packages
+    }
+
+    fn arguments(&self) -> String {
         if self.workspace {
-            eprintln!("CI test scope: full workspace");
-            println!("args=--workspace --exclude vmux_dx");
-        } else {
-            eprintln!("CI test scope: {} packages", self.packages.len());
-            print!("args=");
-            let mut separator = "";
-            for package in &self.packages {
-                print!("{separator}-p {package}");
-                separator = " ";
-            }
-            println!();
+            return "--workspace --exclude vmux_dx --exclude vmux_desktop".into();
         }
+        let mut args = String::new();
+        for package in self.rust_packages() {
+            if !args.is_empty() {
+                args.push(' ');
+            }
+            args.push_str("-p ");
+            args.push_str(&package);
+        }
+        args
+    }
+
+    fn emit(&self, workspace: &Workspace) {
+        let packages = self.rust_packages();
+        let args = self.arguments();
+        eprintln!("CI test scope: {args}");
+        println!("args={args}");
         print!("lint_args=");
         let mut separator = "";
         for package in &self.lint {
@@ -644,7 +653,8 @@ impl Selection {
         }
         println!();
         println!("lean={}", self.lean);
-        println!("rust={}", self.workspace || !self.packages.is_empty());
+        println!("desktop={}", self.lean);
+        println!("rust={}", self.workspace || !packages.is_empty());
         println!("sdk={}", self.sdk);
         println!("headless={}", self.headless);
         println!("records={}", self.records);
@@ -657,7 +667,7 @@ impl Selection {
         if !paths.contains_key("test-rust") {
             paths.insert(
                 "test-rust".into(),
-                self.paths(workspace, &workspace.dependencies(self.packages.clone())),
+                self.paths(workspace, &workspace.dependencies(packages)),
             );
         }
         println!(
@@ -1184,7 +1194,7 @@ mod tests {
             );
             if file == "crates/util/vmux_app/src/lib.rs" {
                 assert_eq!(
-                    selection.inputs["test-headless"],
+                    selection.inputs["test-features"],
                     BTreeSet::from([
                         "vmux_app".into(),
                         "vmux_mcp".into(),
@@ -1285,6 +1295,28 @@ mod tests {
         assert!(!docs.workspace);
         assert!(docs.packages.is_empty());
         assert!(docs.lint.is_empty());
+    }
+
+    #[test]
+    fn desktop_test_targets_are_partitioned_from_other_changed_packages() {
+        let workspace = Workspace::fixture();
+        for (files, expected) in [
+            (vec!["crates/app/vmux_desktop/src/lib.rs"], ""),
+            (vec!["crates/feature/leaf/src/lib.rs"], "-p leaf"),
+            (
+                vec![
+                    "crates/app/vmux_desktop/src/lib.rs",
+                    "crates/feature/leaf/src/lib.rs",
+                ],
+                "-p leaf",
+            ),
+        ] {
+            let mut paths = Vec::new();
+            for file in files {
+                paths.push(PathBuf::from(file));
+            }
+            assert_eq!(workspace.select(&paths).unwrap().arguments(), expected);
+        }
     }
 
     #[test]
