@@ -13,7 +13,7 @@ use vmux_layout::{
     pane::Pane,
     presentation::Layer as PresentationLayer,
     side_sheet::SideSheet,
-    stack::{LayoutFocus, Stack},
+    stack::LayoutFocus,
     tab::Tab,
     window::{
         VmuxWindow, WEBVIEW_Z_BASE, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
@@ -49,7 +49,7 @@ impl Plugin for PresentPlugin {
                         .in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
                     flush_command_bar_pointer,
                     apply_repaint_nudge.in_set(RepaintSet),
-                    sync_osr_webview_focus.after(crate::viewport::ViewportSet),
+                    show_infrastructure.after(crate::viewport::ViewportSet),
                 )
                     .chain()
                     .after(vmux_layout::presentation::StackMotionSet)
@@ -1168,170 +1168,25 @@ fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed
     }
 }
 
-fn sync_osr_webview_focus(
-    browsers: NonSend<Browsers>,
+fn show_infrastructure(
+    browsers: Option<NonSend<Browsers>>,
     webviews: Query<
+        (Entity, &Visibility),
         (
-            Entity,
-            Option<&Visibility>,
-            Option<&ComputedNode>,
-            Has<PendingWebviewReveal>,
-            Has<PendingCommandBarReveal>,
-            Has<WindowOverlay>,
-            Has<KeyboardOwner>,
-            Has<WebviewWindowed>,
-            Has<LayoutCef>,
-            Has<BookmarkTextInputActive>,
-            Has<BookmarkContextMenuActive>,
-            Has<CommandBarPanelActive>,
-            Has<Header>,
-            Has<SideSheet>,
+            With<crate::InfrastructureWebview>,
+            With<WebviewSource>,
+            Without<WebviewWindowed>,
         ),
-        With<WebviewSource>,
     >,
-    windows: Query<&Window>,
-    host_windows: Query<&HostWindow>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    focus: vmux_layout::stack::FocusedStack,
-    presentation: WindowFrameQueries,
-    stacks: Query<(), With<Stack>>,
-
-    mut ready: Local<Vec<Entity>>,
-    mut auxiliary: Local<Vec<Entity>>,
-    mut last_active: Local<Option<Entity>>,
-    mut last_ready_set: Local<Vec<Entity>>,
 ) {
-    ready.clear();
-    let mut layout_shells = Vec::new();
-    let mut modal_keyboard_target = None;
-    let mut layout_keyboard_target = None;
-    let mut page_keyboard_target = None;
-    let focused_window = focused_window.entity();
-    let window = focused_window.and_then(|window| windows.get(window).ok());
-    let window_visible = window.is_some_and(|window| window.visible);
-    let window_focused = window.is_some_and(|window| window.focused);
-    for (
-        entity,
-        visibility,
-        computed,
-        pending_reveal,
-        pending_command_bar_reveal,
-        is_modal,
-        has_keyboard_target,
-        is_windowed,
-        is_layout,
-        bookmark_text_input_active,
-        bookmark_context_menu_active,
-        command_bar_panel_active,
-        is_header,
-        is_side_sheet,
-    ) in webviews.iter()
-    {
-        if !browsers.has_browser(entity) {
-            continue;
-        }
-        if focused_window.is_some()
-            && host_windows
-                .get(entity)
-                .is_ok_and(|host| Some(host.0) != focused_window)
-        {
-            browsers.set_osr_hidden(&entity);
-            continue;
-        }
-        let size = computed.map(|node| node.size).unwrap_or(Vec2::ONE);
-        if webview_osr_should_run(
-            size,
-            visibility,
-            pending_reveal || pending_command_bar_reveal,
-        ) {
-            ready.push(entity);
-            if is_layout {
-                layout_shells.push(entity);
-                if bookmark_text_input_active
-                    || bookmark_context_menu_active
-                    || command_bar_panel_active
-                {
-                    layout_keyboard_target = Some(entity);
-                }
-            }
-            if is_modal && has_keyboard_target {
-                modal_keyboard_target = Some((entity, is_windowed));
-            } else if !is_layout && !is_header && !is_side_sheet && has_keyboard_target {
-                page_keyboard_target = Some(entity);
-            }
-        } else if keep_hidden_osr_webview_warm(is_modal, is_windowed, window_visible) {
-            browsers.set_osr_not_hidden(&entity);
-        } else {
-            browsers.set_osr_hidden(&entity);
-        }
-    }
-    if ready.is_empty() {
-        if last_active.is_some() || !last_ready_set.is_empty() {
-            browsers.sync_osr_focus_to_active_pane(None, &[]);
-            *last_active = None;
-            last_ready_set.clear();
-        }
+    let Some(browsers) = browsers else {
         return;
-    }
-    ready.sort_by_key(|e| e.to_bits());
-    let fallback = focus.stack.is_none().then_some(ready[0]);
-    let active = layout_keyboard_target.or_else(|| {
-        choose_osr_active_webview(modal_keyboard_target, page_keyboard_target, fallback)
-    });
-
-    if !window_visible || !window_focused {
-        if last_active.is_some() || *last_ready_set != *ready {
-            browsers.sync_osr_focus_to_active_pane(None, &[]);
-            *last_active = None;
-            last_ready_set.clone_from(&ready);
-        }
-    } else if *last_active == active && *last_ready_set == *ready {
-    } else {
-        auxiliary.clear();
-        let (active, next_auxiliary) = osr_focus_targets(
-            ready.as_slice(),
-            active,
-            layout_keyboard_target.is_some(),
-            |e| layout_shells.contains(&e),
-        );
-        auxiliary.extend(next_auxiliary);
-        browsers.sync_osr_focus_to_active_pane(active, auxiliary.as_slice());
-        *last_active = active;
-        last_ready_set.clone_from(&ready);
-    }
-    for &e in ready.iter() {
-        let mut parent_is_stack = false;
-        let mut pane_is_leaf = false;
-        let mut is_active = false;
-        let mut is_prev = false;
-
-        if let Ok(parent) = presentation.child_of.get(e).map(|co| co.get()) {
-            parent_is_stack = stacks.contains(parent);
-            if parent_is_stack
-                && let Ok(pane) = presentation.child_of.get(parent).map(|co| co.get())
-            {
-                pane_is_leaf = presentation.focus.is_leaf(pane);
-                if pane_is_leaf {
-                    let layer = presentation.presentation(e);
-                    is_active = matches!(
-                        layer,
-                        PresentationLayer::Current | PresentationLayer::Incoming
-                    );
-                    is_prev = layer == PresentationLayer::Retained;
-                }
-            }
-        }
-
-        if should_show_osr_webview(
-            window_visible,
-            parent_is_stack,
-            pane_is_leaf,
-            is_active,
-            is_prev,
-        ) {
-            browsers.set_osr_not_hidden(&e);
+    };
+    for (entity, visibility) in &webviews {
+        if matches!(visibility, Visibility::Hidden) {
+            browsers.set_osr_hidden(&entity);
         } else {
-            browsers.set_osr_hidden(&e);
+            browsers.set_osr_not_hidden(&entity);
         }
     }
 }
@@ -1363,64 +1218,6 @@ fn webview_layout_is_renderable(
         && size_px.y > 0.0
 }
 
-fn webview_osr_should_run(
-    size_px: Vec2,
-    visibility: Option<&Visibility>,
-    pending_reveal: bool,
-) -> bool {
-    pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
-}
-
-fn keep_hidden_osr_webview_warm(is_modal: bool, is_windowed: bool, window_visible: bool) -> bool {
-    is_modal && !is_windowed && window_visible
-}
-
-fn choose_osr_active_webview(
-    modal_keyboard_target: Option<(Entity, bool)>,
-    active_stack: Option<Entity>,
-    fallback: Option<Entity>,
-) -> Option<Entity> {
-    if modal_keyboard_target.is_some_and(|(_, is_windowed)| is_windowed) {
-        None
-    } else {
-        modal_keyboard_target
-            .map(|(entity, _)| entity)
-            .or(active_stack)
-            .or(fallback)
-    }
-}
-
-fn osr_focus_targets(
-    ready: &[Entity],
-    active: Option<Entity>,
-    allow_layout_active: bool,
-    mut is_layout: impl FnMut(Entity) -> bool,
-) -> (Option<Entity>, Vec<Entity>) {
-    let active = active.filter(|&e| allow_layout_active || !is_layout(e));
-    let auxiliary = ready
-        .iter()
-        .copied()
-        .filter(|&e| Some(e) != active)
-        .collect();
-    (active, auxiliary)
-}
-
-fn should_show_osr_webview(
-    window_visible: bool,
-    parent_is_stack: bool,
-    pane_is_leaf: bool,
-    stack_is_active: bool,
-    stack_is_previous_new_stack: bool,
-) -> bool {
-    if !window_visible {
-        return false;
-    }
-    if !parent_is_stack || !pane_is_leaf {
-        return true;
-    }
-    stack_is_active || stack_is_previous_new_stack
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1429,6 +1226,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
 
     use vmux_history::LastActivatedAt;
+    use vmux_layout::stack::Stack;
 
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
@@ -1465,21 +1263,6 @@ mod tests {
 
         let (width, _) = windowed_ring_for(stack, &focused, 1, None, &settings, 1.0);
         assert_eq!(width, 0.0);
-    }
-
-    #[test]
-    fn osr_webview_hides_when_window_is_hidden() {
-        assert!(!should_show_osr_webview(true, true, true, false, false));
-        assert!(!should_show_osr_webview(false, true, true, true, false));
-        assert!(!should_show_osr_webview(false, false, true, false, false));
-        assert!(should_show_osr_webview(true, true, true, true, false));
-    }
-
-    #[test]
-    fn auxiliary_osr_webviews_remain_visible_when_window_is_focused() {
-        assert!(should_show_osr_webview(true, false, true, false, false));
-        assert!(should_show_osr_webview(true, true, false, false, false));
-        assert!(should_show_osr_webview(true, true, true, false, true));
     }
 
     #[test]
@@ -1801,56 +1584,6 @@ mod tests {
     }
 
     #[test]
-    fn pending_reveal_webviews_keep_cef_running() {
-        assert!(webview_osr_should_run(
-            Vec2::ZERO,
-            Some(&Visibility::Hidden),
-            true
-        ));
-    }
-
-    #[test]
-    fn hidden_osr_command_bar_stays_warm_for_reopen() {
-        assert!(keep_hidden_osr_webview_warm(true, false, true));
-        assert!(!keep_hidden_osr_webview_warm(false, false, true));
-        assert!(!keep_hidden_osr_webview_warm(true, true, true));
-        assert!(!keep_hidden_osr_webview_warm(true, false, false));
-    }
-
-    #[test]
-    fn command_bar_modal_wins_osr_focus_for_keyboard_input() {
-        let pane = Entity::from_bits(1);
-        let modal = Entity::from_bits(2);
-
-        assert_eq!(
-            choose_osr_active_webview(Some((modal, false)), Some(pane), Some(pane)),
-            Some(modal)
-        );
-    }
-
-    #[test]
-    fn windowed_command_bar_modal_suppresses_osr_focus_targets() {
-        let pane = Entity::from_bits(1);
-        let modal = Entity::from_bits(2);
-
-        assert_eq!(
-            choose_osr_active_webview(Some((modal, true)), Some(pane), Some(pane)),
-            None
-        );
-    }
-
-    #[test]
-    fn focused_stack_without_a_ready_surface_does_not_focus_another_page() {
-        let fallback = Entity::from_bits(1);
-
-        assert_eq!(choose_osr_active_webview(None, None, None), None);
-        assert_eq!(
-            choose_osr_active_webview(None, None, Some(fallback)),
-            Some(fallback)
-        );
-    }
-
-    #[test]
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
         app.add_plugins(vmux_layout::LayoutContractPlugin)
@@ -1943,41 +1676,6 @@ mod tests {
 
         assert!(app.world().get::<KeyboardOwner>(retained_page).is_none());
         assert!(app.world().get::<KeyboardOwner>(incoming_page).is_none());
-    }
-
-    #[test]
-    fn layout_shell_is_auxiliary_osr_focus_target() {
-        let active = Entity::from_bits(1);
-        let layout = Entity::from_bits(2);
-        let sidecar = Entity::from_bits(3);
-
-        assert_eq!(
-            osr_focus_targets(&[active, layout, sidecar], Some(active), false, |e| e
-                == layout),
-            (Some(active), vec![layout, sidecar])
-        );
-    }
-
-    #[test]
-    fn layout_shell_is_not_active_osr_focus_target() {
-        let layout = Entity::from_bits(1);
-        let sidecar = Entity::from_bits(2);
-
-        assert_eq!(
-            osr_focus_targets(&[layout, sidecar], Some(layout), false, |e| e == layout),
-            (None, vec![layout, sidecar])
-        );
-    }
-
-    #[test]
-    fn bookmark_text_input_can_make_layout_shell_active_osr_target() {
-        let layout = Entity::from_bits(1);
-        let sidecar = Entity::from_bits(2);
-
-        assert_eq!(
-            osr_focus_targets(&[layout, sidecar], Some(layout), true, |e| e == layout),
-            (Some(layout), vec![sidecar])
-        );
     }
 
     #[test]
