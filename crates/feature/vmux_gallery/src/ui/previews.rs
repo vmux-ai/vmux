@@ -566,6 +566,8 @@ pub(crate) fn EditingPreview(state: GalleryUiState) -> Element {
     let mut active = use_signal(|| None::<usize>);
     let mut inline_draft = use_signal(|| state.text.clone());
     let mut multiline_draft = use_signal(|| state.text.clone());
+    let mut inline_baseline = use_signal(|| state.text.clone());
+    let mut multiline_baseline = use_signal(|| state.text.clone());
     let inline_value = state.text.clone();
     let multiline_value = state.text.clone();
     rsx! {
@@ -589,28 +591,42 @@ pub(crate) fn EditingPreview(state: GalleryUiState) -> Element {
             }
             div { class: "space-y-3",
                 p { class: "font-mono text-xs text-muted-foreground", "InlineEdit" }
+                if active() != Some(1) {
                 Button { variant: ButtonVariant::Secondary, onclick: move |_| {
                     editing.set(false);
                     inline_draft.set(inline_value.clone());
-                    active.set(if active() == Some(1) { None } else { Some(1) });
-                }, "editing: {active() == Some(1)}" }
+                    inline_baseline.set(inline_value.clone());
+                    active.set(Some(1));
+                }, "editing: false" }
+                }
                 if active() == Some(1) {
                     InlineEdit { draft: inline_draft, class: "w-full rounded-md bg-background p-2", aria_label: "InlineEdit", allow_empty: true,
-                        on_commit: move |text| { if active() == Some(1) { active.set(None); let _ = send(&GalleryTextRequest { revision, text }); } },
+                        on_commit: move |text| {
+                            if active() != Some(1) { return; }
+                            active.set(None);
+                            if text != inline_baseline().trim() { let _ = send(&GalleryTextRequest { revision, text }); }
+                        },
                         on_cancel: move |_| { if active() == Some(1) { active.set(None); let _ = send(&GalleryClickRequest { revision, label: "InlineEdit.cancel".into() }); } },
                     }
                 }
             }
             div { class: "space-y-3",
                 p { class: "font-mono text-xs text-muted-foreground", "InlineTextarea" }
+                if active() != Some(2) {
                 Button { variant: ButtonVariant::Secondary, onclick: move |_| {
                     editing.set(false);
                     multiline_draft.set(multiline_value.clone());
-                    active.set(if active() == Some(2) { None } else { Some(2) });
-                }, "editing: {active() == Some(2)}" }
+                    multiline_baseline.set(multiline_value.clone());
+                    active.set(Some(2));
+                }, "editing: false" }
+                }
                 if active() == Some(2) {
                     InlineTextarea { draft: multiline_draft, class: "w-full rounded-md bg-background p-2", aria_label: "InlineTextarea", allow_empty: true,
-                        on_commit: move |text| { if active() == Some(2) { active.set(None); let _ = send(&GalleryTextRequest { revision, text }); } },
+                        on_commit: move |text| {
+                            if active() != Some(2) { return; }
+                            active.set(None);
+                            if text != multiline_baseline().trim() { let _ = send(&GalleryTextRequest { revision, text }); }
+                        },
                         on_cancel: move |_| { if active() == Some(2) { active.set(None); let _ = send(&GalleryClickRequest { revision, label: "InlineTextarea.cancel".into() }); } },
                     }
                 }
