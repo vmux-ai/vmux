@@ -18,7 +18,7 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 }
 
 mod capture;
-#[cfg(host)]
+#[cfg(all(host, any(target_os = "macos", test)))]
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod keyboard_native;
@@ -37,7 +37,7 @@ impl Plugin for InputPlugin {
                 vmux_api::input::KeyContextRequest,
             )>::default(),
         ));
-        #[cfg(host)]
+        #[cfg(all(host, any(target_os = "macos", test)))]
         app.add_plugins(keyboard::KeyboardPlugin);
     }
 }

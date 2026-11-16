@@ -722,6 +722,14 @@ mod tests {
         assert!(commands.is_empty());
         assert_eq!(effects, [false]);
         assert!(inputs[0].captured);
+        let hint = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardSuppression>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert!(hint.all_keys);
         keyboard.press(Keyboard::combo(KeyCode::Tab, false, false), 10);
         keyboard.press(Keyboard::combo(KeyCode::KeyK, false, true), 20);
         let (commands, effects, inputs) = keyboard.update();
@@ -736,6 +744,14 @@ mod tests {
                 .get::<NativeKeyCapture>(capture)
                 .is_none()
         );
+        let hint = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardSuppression>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert!(!hint.all_keys);
     }
 
     #[test]
@@ -796,9 +812,23 @@ mod tests {
             .entity_mut(keyboard.keymap)
             .insert(map);
         keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
-        let (commands, effects, _) = keyboard.update();
-        assert!(commands.is_empty());
-        assert_eq!(effects, [false]);
+        keyboard.app.update();
+        let world = keyboard.app.world_mut();
+        assert!(
+            world
+                .resource_mut::<Messages<CommandInvocation>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let effects: Vec<_> = world
+            .resource_mut::<Messages<KeyboardEffect>>()
+            .drain()
+            .collect();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].stream, keyboard.stream);
+        assert_eq!(effects[0].token, keyboard.next);
+        assert!(!effects[0].forward);
     }
 
     #[test]
@@ -832,6 +862,15 @@ mod tests {
         assert!(commands.is_empty());
         assert_eq!(effects, [false]);
         assert!(inputs[0].claim.is_some());
+        let hint = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardSuppression>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert_eq!(hint.stream, keyboard.stream);
+        assert!(hint.keys.contains(&key));
         keyboard
             .app
             .world_mut()
@@ -841,6 +880,14 @@ mod tests {
         assert!(commands.is_empty());
         assert_eq!(effects, [true]);
         assert!(inputs.is_empty());
+        let hint = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardSuppression>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert!(!hint.keys.contains(&key));
     }
 
     #[test]
