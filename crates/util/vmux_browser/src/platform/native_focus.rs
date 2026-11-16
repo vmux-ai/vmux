@@ -235,15 +235,6 @@ mod tests {
     use bevy::prelude::{MinimalPlugins, ResMut, Resource};
     use vmux_ecs::Active;
 
-    struct ResponderFixturePlugin;
-
-    impl Plugin for ResponderFixturePlugin {
-        fn build(&self, app: &mut App) {
-            app.init_resource::<ResponderFixture>()
-                .add_systems(PostUpdate, respond.in_set(FocusSet::Apply));
-        }
-    }
-
     #[derive(Resource, Default)]
     struct ResponderFixture {
         accepted: bool,
@@ -279,7 +270,9 @@ mod tests {
     impl FocusFixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, NativeFocusPlugin, ResponderFixturePlugin));
+            app.add_plugins((MinimalPlugins, NativeFocusPlugin))
+                .init_resource::<ResponderFixture>()
+                .add_systems(PostUpdate, respond.in_set(FocusSet::Apply));
             let intent = app.world_mut().spawn(HostFocusIntent::default()).id();
             Self { app, intent }
         }
