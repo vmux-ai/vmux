@@ -1,4 +1,4 @@
-use bevy::prelude::{Changed, Query, Window};
+use bevy::prelude::{App, Changed, Commands, On, Plugin, Query, Remove, Window};
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::bookmark::{
@@ -41,7 +41,7 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 use vmux_space::{ExpandedProjectDirs, SpaceProjects};
 
-use crate::host::{LayoutFixedOffsets, LayoutWindowPadding, UpdateProjection};
+use crate::host::{LayoutFixedOffsets, LayoutWindowPadding};
 use vmux_flex::prelude::*;
 
 pub(crate) struct PagePresentation;
@@ -189,7 +189,8 @@ pub(crate) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_revision)
+        app.add_observer(retire_update_notice)
+            .add_systems(Startup, spawn_revision)
             .add_systems(
                 PostUpdate,
                 mark_page_dirty.after(vmux_layout::presentation::PresentationFlushSet),
@@ -1352,21 +1353,44 @@ fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
+#[derive(Component)]
+struct UpdateNoticeReceipt(UpdateState);
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct NoticeDelivery<'w, 's> {
+    browsers: NonSend<'w, Browsers>,
+    layouts: Query<'w, 's, (), With<LayoutCef>>,
+}
+
+impl NoticeDelivery<'_, '_> {
+    fn available(&self, entity: Entity) -> bool {
+        self.layouts.contains(entity) && self.browsers.can_emit_to(&entity)
+    }
+}
+
+fn retire_update_notice(removed: On<Remove, LayoutCef>, mut commands: Commands) {
+    commands
+        .entity(removed.event_target())
+        .try_remove::<UpdateNoticeReceipt>();
+}
+
 fn push_update_notice_emit(
     mut commands: Commands,
-    browsers: NonSend<Browsers>,
+    delivery: NoticeDelivery,
     layout: FocusedLayout,
     state: Single<&UpdateState>,
-    mut last: Local<std::collections::HashMap<Entity, UpdateState>>,
+    receipts: Query<&UpdateNoticeReceipt, With<LayoutCef>>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
+    if !delivery.available(cef_e) {
         return;
     }
-    let previous = last.get(&cef_e).cloned();
-    if !UpdateProjection::should_emit(&state, &previous, page_ready_changed) {
+    let unchanged = receipts
+        .get(cef_e)
+        .is_ok_and(|previous| previous.0 == **state);
+    if unchanged && (!page_ready_changed || **state == UpdateState::Idle) {
         return;
     }
     match &*state {
@@ -1411,13 +1435,223 @@ fn push_update_notice_emit(
             ));
         }
     }
-    last.insert(cef_e, state.clone());
+    commands
+        .entity(cef_e)
+        .insert(UpdateNoticeReceipt(state.clone()));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_api::UiStateProjection;
+    use vmux_layout::state::UpdateStatus;
+
+    #[derive(Resource, Default)]
+    struct PublishedUpdates(Vec<(Entity, LayoutUiState)>);
+
+    fn record_updates(
+        write: On<UiStateWrite<LayoutUiState>>,
+        mut updates: ResMut<PublishedUpdates>,
+    ) {
+        let patch = write.update();
+        if patch.update_progress.is_none()
+            && patch.update_ready.is_none()
+            && patch.update_cleared.is_none()
+        {
+            return;
+        }
+        let mut state = LayoutUiState::default();
+        state.apply(patch.clone());
+        updates.0.push((write.webview(), state));
+    }
+
+    struct UpdatePages {
+        app: App,
+        state: Entity,
+    }
+
+    impl UpdatePages {
+        fn new(state: UpdateState) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, StatePlugin))
+                .insert_resource(AppSettings::default())
+                .init_resource::<vmux_space::ActiveProjectRows>()
+                .init_non_send::<Browsers>()
+                .init_resource::<PublishedUpdates>()
+                .add_observer(record_updates);
+            let state = app.world_mut().spawn(state).id();
+            Self { app, state }
+        }
+
+        fn page(&mut self) -> Entity {
+            let page = self.app.world_mut().spawn((LayoutCef, PageReady {})).id();
+            self.app
+                .world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(page);
+            page
+        }
+
+        fn update(&mut self) -> Vec<(Entity, Option<UpdateStatus>)> {
+            self.app.update();
+            let mut results = Vec::new();
+            for (entity, state) in self
+                .app
+                .world_mut()
+                .resource_mut::<PublishedUpdates>()
+                .0
+                .drain(..)
+            {
+                results.push((entity, state.update));
+            }
+            results
+        }
+
+        fn set(&mut self, state: UpdateState) {
+            self.app.world_mut().entity_mut(self.state).insert(state);
+        }
+    }
+
+    #[test]
+    fn update_notice_replays_on_readiness_and_clears_when_update_finishes() {
+        let mut pages = UpdatePages::new(UpdateState::Ready {
+            version: "v2".into(),
+        });
+        let page = pages.page();
+        let ready = vec![(
+            page,
+            Some(UpdateStatus::Ready {
+                version: "v2".into(),
+            }),
+        )];
+        assert_eq!(pages.update(), ready);
+        assert!(pages.update().is_empty());
+        pages.app.world_mut().entity_mut(page).insert(PageReady {});
+        assert_eq!(pages.update(), ready);
+        pages.set(UpdateState::Idle);
+        assert_eq!(pages.update(), vec![(page, None)]);
+        pages.app.world_mut().entity_mut(page).insert(PageReady {});
+        assert!(pages.update().is_empty());
+    }
+
+    #[test]
+    fn update_notice_restarts_after_layout_owner_is_reattached() {
+        let mut pages = UpdatePages::new(UpdateState::Idle);
+        let page = pages.page();
+        assert_eq!(pages.update(), vec![(page, None)]);
+        assert!(pages.update().is_empty());
+        pages.app.world_mut().entity_mut(page).remove::<LayoutCef>();
+        pages.app.world_mut().entity_mut(page).insert(LayoutCef);
+        assert_eq!(pages.update(), vec![(page, None)]);
+        pages.app.world_mut().entity_mut(page).remove::<LayoutCef>();
+        assert!(pages.update().is_empty());
+        assert!(pages.app.world().get::<UpdateNoticeReceipt>(page).is_none());
+    }
+
+    #[test]
+    fn update_notice_publications_stay_independent_when_window_focus_changes() {
+        let mut pages = UpdatePages::new(UpdateState::Ready {
+            version: "v2".into(),
+        });
+        let first_window = pages
+            .app
+            .world_mut()
+            .spawn((Window::default(), Active))
+            .id();
+        let second_window = pages.app.world_mut().spawn(Window::default()).id();
+        let first = pages.page();
+        let second = pages.page();
+        pages
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .insert(HostWindow(first_window));
+        pages
+            .app
+            .world_mut()
+            .entity_mut(second)
+            .insert(HostWindow(second_window));
+        assert_eq!(
+            pages.update(),
+            vec![(
+                first,
+                Some(UpdateStatus::Ready {
+                    version: "v2".into()
+                })
+            )]
+        );
+        pages
+            .app
+            .world_mut()
+            .entity_mut(first_window)
+            .remove::<Active>();
+        pages
+            .app
+            .world_mut()
+            .entity_mut(second_window)
+            .insert(Active);
+        assert_eq!(
+            pages.update(),
+            vec![(
+                second,
+                Some(UpdateStatus::Ready {
+                    version: "v2".into()
+                })
+            )]
+        );
+        pages
+            .app
+            .world_mut()
+            .entity_mut(second_window)
+            .remove::<Active>();
+        pages
+            .app
+            .world_mut()
+            .entity_mut(first_window)
+            .insert(Active);
+        assert!(pages.update().is_empty());
+    }
+
+    #[test]
+    fn update_notice_does_not_acknowledge_an_unavailable_browser() {
+        let mut pages = UpdatePages::new(UpdateState::Downloading {
+            version: "v2".into(),
+            downloaded: 3,
+            total: 10,
+        });
+        let page = pages.app.world_mut().spawn((LayoutCef, PageReady {})).id();
+        assert!(pages.update().is_empty());
+        pages
+            .app
+            .world_mut()
+            .non_send_mut::<Browsers>()
+            .set_externally_hosted(page);
+        assert_eq!(
+            pages.update(),
+            vec![(
+                page,
+                Some(UpdateStatus::Downloading {
+                    version: "v2".into(),
+                    downloaded: 3,
+                    total: 10
+                })
+            )]
+        );
+        assert!(pages.update().is_empty());
+        pages.set(UpdateState::Installing {
+            version: "v2".into(),
+        });
+        assert_eq!(
+            pages.update(),
+            vec![(
+                page,
+                Some(UpdateStatus::Installing {
+                    version: "v2".into()
+                })
+            )]
+        );
+    }
 
     #[test]
     fn dormant_stack_keeps_its_favicon_without_a_loading_indicator() {
