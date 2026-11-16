@@ -59,3 +59,40 @@ You can use Vmux itself as the editor: open this checkout as a Project, select t
 uses the current checkout; select `vmux desktop main` when you intend main. Build an
 unprepared checkout first with `vmux build <branch>`. `vmux run` remains available for
 explicit platform selection, including mobile and web.
+
+## CLI updates
+
+The development CLI refreshes from the selected checkout when its source changes.
+Standalone releases currently cover macOS Apple Silicon and contain the DX-only CLI.
+They use the desktop's `stable` (default) and `preview` release channels:
+
+```sh
+vmux update --channel preview
+vmux update --channel stable
+vmux update --check
+vmux update --auto off
+```
+
+Channel and automatic-update preferences persist between commands. Signed standalone
+CLIs check at most hourly on invocation and keep working with the installed version
+if an automatic update fails.
+
+Cargo source installs without `VMUX_UPDATE_PUBLIC_KEY` refresh from source and can
+inspect release metadata, but need a verification key to install releases. Standalone
+releases embed the desktop update key. Runtime-enabled and app-bundled CLIs keep their
+existing source/application update owner.
+
+## Native VM dependencies
+
+Container development requires Apple Silicon, macOS 14+, libkrun 1.x, libkrunfw 5,
+and gvproxy. Declare the dependencies in your Homebrew Brewfile, then run
+`brew bundle`:
+
+```ruby
+tap "slp/krun"
+brew "slp/krun/libkrun"
+brew "slp/krun/gvproxy"
+```
+
+Build and open your branch with the commands above. [VM and Docker](../ux/containers.md)
+covers starting the VM, discovering containers, and forwarding their ports.
