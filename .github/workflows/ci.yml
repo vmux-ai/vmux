@@ -69,7 +69,8 @@ jobs:
       macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' || (github.event_name == 'push' && steps.filter.outputs.macos_main == 'true')) && steps.native.outputs.native != 'false' }}
       macos_tooling: ${{ steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false' }}
       ios: ${{ github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false' }}
-      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+      code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
+      compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.tooling == 'true' }}
       contracts: ${{ steps.scope.outputs.sdk == 'true' }}
       headless: ${{ steps.scope.outputs.headless == 'true' }}
       rust: ${{ steps.scope.outputs.rust == 'true' }}
@@ -107,7 +108,7 @@ jobs:
         if: github.event_name != 'schedule'
         id: filter
         with:
-          base: ${{ needs.plan.outputs.base || github.event.repository.default_branch }}
+          base: ${{ needs.plan.outputs.base || github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || github.event.repository.default_branch }}
           ref: ${{ needs.plan.outputs.base && steps.prepared.outputs.commit || '' }}
           predicate-quantifier: 'some-with-excludes'
           filters: |
@@ -226,9 +227,9 @@ jobs:
 
       - name: Select Rust validation scope
         id: scope
-        if: github.event_name != 'pull_request' || steps.filter.outputs.code == 'true'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true'
         env:
-          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && needs.plan.outputs.base || '' }}
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && needs.plan.outputs.base || github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
         run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Classify native build inputs
@@ -340,13 +341,14 @@ jobs:
           components: rustfmt,clippy
           cache-key: lint
           cef-version: ${{ needs.plan.outputs.cef }}
+          desktop: ${{ needs.changes.outputs.compiler_lints }}
 
       - name: Check formatting
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lint_args != ''
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.compiler_lints == 'true' && needs.changes.outputs.lint_args != ''
         run: cargo fmt ${{ needs.changes.outputs.lint_args }} -- --check
 
       - name: Clippy
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lint_args != ''
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.compiler_lints == 'true' && needs.changes.outputs.lint_args != ''
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ needs.changes.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy CI syntax classifier
@@ -442,14 +444,14 @@ jobs:
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
       - uses: ./.github/actions/cache-ecs-lints
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.compiler_lints == 'true'
 
       - name: Check typed registration fixtures
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
         run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
 
       - name: Lint registered systems
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lint_args != ''
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.compiler_lints == 'true' && needs.changes.outputs.lint_args != ''
         run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
 
       - name: CI configuration and cache tests
