@@ -39,7 +39,7 @@ struct NativeKeyboardMailbox {
     hint: Option<KeyboardSuppression>,
     next: u64,
     pending: VecDeque<KeyboardPress>,
-    held: HashMap<u64, Retained<NSEvent>>,
+    held: HashMap<u64, (Entity, Retained<NSEvent>)>,
     forwarded: HashMap<usize, Retained<NSEvent>>,
     overflowed: bool,
 }
@@ -57,27 +57,35 @@ impl NativeKeyboardQueue {
         if mailbox.forwarded.remove(&pointer).is_some() {
             return false;
         }
-        if event.r#type() != NSEventType::KeyDown {
+        let key_down = event.r#type() == NSEventType::KeyDown;
+        let busy = !mailbox.held.is_empty() || !mailbox.forwarded.is_empty();
+        if !key_down && !busy {
             return false;
         }
-        let Some(hint) = mailbox.hint.as_ref() else {
+        let hint = mailbox.hint.as_ref();
+        if hint.is_none() && !busy {
             return false;
+        }
+        let input = if key_down {
+            NativeEvent::input(event)
+        } else {
+            NativeEvent::empty()
         };
-        let input = NativeEvent::input(event);
         let combo = input.key.map(|key| NativeKey {
             key,
             modifiers: input.modifiers,
         });
-        let interested = hint.all_keys
-            || !mailbox.held.is_empty()
-            || !mailbox.forwarded.is_empty()
-            || combo
-                .as_ref()
-                .is_some_and(|combo| hint.keys.contains(combo));
+        let interested = busy
+            || hint.is_some_and(|hint| {
+                hint.all_keys
+                    || combo
+                        .as_ref()
+                        .is_some_and(|combo| hint.keys.contains(combo))
+            });
         if !interested {
             return false;
         }
-        let stream = hint.stream;
+        let stream = hint.map(|hint| hint.stream).unwrap_or(Entity::PLACEHOLDER);
         if mailbox.held.len() + mailbox.forwarded.len() >= 256 {
             mailbox.pending.clear();
             mailbox.held.clear();
@@ -90,10 +98,11 @@ impl NativeKeyboardQueue {
         };
         mailbox.next = mailbox.next.wrapping_add(1).max(1);
         let token = mailbox.next;
-        mailbox.held.insert(token, retained);
+        mailbox.held.insert(token, (stream, retained));
         mailbox.pending.push_back(KeyboardPress {
             stream,
             token,
+            key_down,
             window: NativeEvent::owner(event),
             input,
             observed_at: Instant::now(),
@@ -105,8 +114,12 @@ impl NativeKeyboardQueue {
     fn reset(&self) {
         let mut mailbox = self.0.borrow_mut();
         mailbox.hint = None;
-        mailbox.pending.clear();
-        mailbox.held.clear();
+        mailbox
+            .pending
+            .retain(|packet| !packet.key_down || packet.stream == Entity::PLACEHOLDER);
+        mailbox.held.retain(|_, (stream, event)| {
+            *stream == Entity::PLACEHOLDER || event.r#type() != NSEventType::KeyDown
+        });
         mailbox.overflowed = false;
     }
 
@@ -119,6 +132,7 @@ impl NativeKeyboardQueue {
                 events.push(KeyboardPress {
                     stream: hint.stream,
                     token: 0,
+                    key_down: true,
                     window: None,
                     input: NativeEvent::empty(),
                     observed_at: Instant::now(),
@@ -131,16 +145,20 @@ impl NativeKeyboardQueue {
     }
 
     fn apply(&self, effect: &KeyboardEffect) {
-        let Some(event) = self.0.borrow_mut().held.remove(&effect.token) else {
+        let Some((stream, event)) = self.0.borrow_mut().held.remove(&effect.token) else {
             return;
         };
-        if !effect.forward
-            || self
+        if !effect.forward || effect.stream != stream {
+            return;
+        }
+        if event.r#type() == NSEventType::KeyDown
+            && stream != Entity::PLACEHOLDER
+            && self
                 .0
                 .borrow()
                 .hint
                 .as_ref()
-                .is_none_or(|hint| hint.stream != effect.stream)
+                .is_none_or(|hint| hint.stream != stream)
         {
             return;
         }
@@ -190,9 +208,11 @@ impl NativeKeyboardTransport {
 
     fn close(&mut self) {
         self.queue.reset();
-        if !self.queue.0.borrow().forwarded.is_empty() {
+        let mailbox = self.queue.0.borrow();
+        if !mailbox.held.is_empty() || !mailbox.forwarded.is_empty() {
             return;
         }
+        drop(mailbox);
         if let Some(monitor) = self.monitor.take() {
             unsafe {
                 NSEvent::removeMonitor(&monitor);
@@ -203,7 +223,12 @@ impl NativeKeyboardTransport {
 
 impl Drop for NativeKeyboardTransport {
     fn drop(&mut self) {
-        self.queue.0.borrow_mut().forwarded.clear();
+        {
+            let mut mailbox = self.queue.0.borrow_mut();
+            mailbox.pending.clear();
+            mailbox.held.clear();
+            mailbox.forwarded.clear();
+        }
         self.close();
     }
 }
@@ -445,5 +470,80 @@ impl NativeEvent {
             0x7E => KeyCode::ArrowUp,
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    struct NativeEvents {
+        queue: NativeKeyboardQueue,
+    }
+
+    impl NativeEvents {
+        fn new(hint: KeyboardSuppression) -> Self {
+            let queue = NativeKeyboardQueue::default();
+            queue.0.borrow_mut().hint = Some(hint);
+            Self { queue }
+        }
+
+        fn press(&self, kind: NSEventType) -> bool {
+            let text: Retained<_> = unsafe {
+                objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: c"h".as_ptr()]
+            };
+            let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+                kind,
+                Default::default(),
+                NSEventModifierFlags::empty(),
+                0.0,
+                0,
+                None,
+                &text,
+                &text,
+                false,
+                0x04,
+            )
+            .unwrap();
+            self.queue.enqueue(&event)
+        }
+    }
+
+    #[test]
+    fn native_key_up_stays_behind_a_retained_key_down() {
+        let events = NativeEvents::new(KeyboardSuppression {
+            stream: Entity::PLACEHOLDER,
+            keys: HashSet::new(),
+            all_keys: true,
+        });
+        assert!(events.press(NSEventType::KeyDown));
+        assert!(events.press(NSEventType::KeyUp));
+        let packets = events.queue.drain();
+        let phases: Vec<_> = packets.iter().map(|packet| packet.key_down).collect();
+        assert_eq!(phases, [true, false]);
+    }
+
+    #[test]
+    fn native_retirement_preserves_releases_and_following_unclaimed_input() {
+        let mut world = World::new();
+        let stream = world.spawn(crate::keyboard::KeyboardStream).id();
+        let events = NativeEvents::new(KeyboardSuppression {
+            stream,
+            keys: HashSet::new(),
+            all_keys: true,
+        });
+        assert!(events.press(NSEventType::KeyDown));
+        assert!(events.press(NSEventType::KeyUp));
+        world.despawn(stream);
+        events.queue.reset();
+        assert!(events.press(NSEventType::KeyDown));
+        events.queue.reset();
+        let packets = events.queue.drain();
+        assert_eq!(packets.len(), 2);
+        assert!(!packets[0].key_down);
+        assert_eq!(packets[0].stream, stream);
+        assert!(packets[1].key_down);
+        assert_eq!(packets[1].stream, Entity::PLACEHOLDER);
     }
 }

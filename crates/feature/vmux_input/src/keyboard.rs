@@ -89,6 +89,7 @@ struct NativePrefix {
 pub(crate) struct KeyboardPress {
     pub(crate) stream: Entity,
     pub(crate) token: u64,
+    pub(crate) key_down: bool,
     pub(crate) window: Option<Entity>,
     pub(crate) input: NativeKeyInput,
     pub(crate) observed_at: Instant,
@@ -350,7 +351,7 @@ fn route(
     }
     let Sequences { streams, maps } = &mut sequences;
     for packet in packets.read() {
-        let mut forward = false;
+        let mut forward = !packet.key_down || packet.stream == Entity::PLACEHOLDER;
         let Ok((stream, parent, mut chord)) = streams.get_mut(packet.stream) else {
             output.effects.write(KeyboardEffect {
                 stream: packet.stream,
@@ -363,7 +364,7 @@ fn route(
             output.effects.write(KeyboardEffect {
                 stream,
                 token: packet.token,
-                forward: false,
+                forward,
             });
             continue;
         };
@@ -383,7 +384,9 @@ fn route(
             });
             continue;
         }
-        if capture_active {
+        if !packet.key_down {
+            forward = true;
+        } else if capture_active {
             chord.prefix = None;
             if !packet.input.repeat {
                 let mut input = packet.input.clone();
@@ -635,6 +638,7 @@ mod tests {
                 .write(KeyboardPress {
                     stream: self.stream,
                     token: self.next,
+                    key_down: true,
                     window: Some(self.window),
                     observed_at: self.clock + Duration::from_millis(at_ms),
                     overflowed: false,
@@ -675,6 +679,69 @@ mod tests {
                 .collect();
             (commands, effects, inputs)
         }
+    }
+
+    #[test]
+    fn native_key_release_is_forwarded_without_advancing_capture() {
+        let mut keyboard = Keyboard::new();
+        let capture = keyboard.app.world_mut().spawn(NativeKeyCapture).id();
+        keyboard.press(Keyboard::combo(KeyCode::KeyK, false, true), 0);
+        let mut packet = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .drain()
+            .next()
+            .unwrap();
+        packet.key_down = false;
+        keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .write(packet);
+        let (commands, effects, inputs) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true]);
+        assert!(inputs.is_empty());
+        assert!(
+            keyboard
+                .app
+                .world()
+                .get::<NativeKeyCapture>(capture)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn native_retired_stream_releases_and_unclaimed_input_drain_without_commands() {
+        let mut keyboard = Keyboard::new();
+        keyboard
+            .app
+            .world_mut()
+            .entity_mut(keyboard.keymap)
+            .remove::<Keymap>();
+        keyboard.press(Keyboard::combo(KeyCode::KeyK, false, true), 0);
+        let mut packet = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .drain()
+            .next()
+            .unwrap();
+        packet.key_down = false;
+        let mut unclaimed = packet.clone();
+        unclaimed.key_down = true;
+        unclaimed.stream = Entity::PLACEHOLDER;
+        unclaimed.token += 1;
+        keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .write_batch([packet, unclaimed]);
+        let (commands, effects, inputs) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true, true]);
+        assert!(inputs.is_empty());
     }
 
     #[test]
