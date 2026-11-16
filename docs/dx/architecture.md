@@ -143,6 +143,14 @@ Rust files under `ui/`, materialized in a temporary Cargo project with independe
 expected diagnostics. Source audits recognize input data through current content hashes and
 actual inclusion by its test-owned Cargo harness. The same proof is used for ownership and
 conventions, and inputs compiled as product modules or library/binary targets are refused.
+
+Source ownership audits reuse completed namespace/module/declaration lookup answers within one
+source inventory. Recursive probes retain their original cycle/ambiguity context and do
+not publish partial answers. Source arrival and module rebinding invalidate the lookup
+memoization; declaration results also restore the caller traversal state. Every audit still
+evaluates current ownership, shape and provenance.
+No lookup result persists between invocations.
+
 Current ownership checks remain active until equivalent typed checks replace them; VMX-253
 still requires zero migration debt and eventual removal of `ecs-policy.ron`.
 

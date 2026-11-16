@@ -27,6 +27,109 @@ const UPSTREAM_SETS: &[(&str, &str)] = &[
 ];
 
 #[test]
+fn cached_namespaces_preserve_cyclic_glob_ambiguity_in_both_query_orders() {
+    for reverse in [false, true] {
+        let inventory = Inventory::fixture(
+            "mod left { pub mod leaf {} } mod right { pub mod leaf {} } mod a { pub use crate::b::*; pub use crate::left::*; } mod b { pub use crate::a::*; pub use crate::right::*; }",
+        );
+        let mut ambiguous = ["a::leaf", "b::leaf"];
+        if reverse {
+            ambiguous.reverse();
+        }
+        for _ in 0..2 {
+            for prefix in ambiguous {
+                assert_eq!(
+                    inventory.glob_namespace("fixture", prefix, &mut BTreeSet::new()),
+                    None,
+                    "{prefix}"
+                );
+            }
+            assert_eq!(
+                inventory
+                    .glob_namespace("fixture", "left::leaf", &mut BTreeSet::new())
+                    .as_deref(),
+                Some("fixture::left::leaf")
+            );
+            assert_eq!(
+                inventory
+                    .glob_namespace("fixture", "right::leaf", &mut BTreeSet::new())
+                    .as_deref(),
+                Some("fixture::right::leaf")
+            );
+        }
+    }
+}
+
+#[test]
+fn cached_missing_modules_are_resolved_after_source_arrives() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/cache_fixture/src/lib.rs", "pub mod child;");
+    for _ in 0..2 {
+        assert_eq!(
+            inventory.module_binding("cache_fixture", "child", &mut BTreeSet::new()),
+            None
+        );
+        assert_eq!(
+            inventory.glob_namespace("cache_fixture", "child", &mut BTreeSet::new()),
+            None
+        );
+        assert!(
+            inventory
+                .resolve("cache_fixture", "child::Value", &mut BTreeSet::new())
+                .is_none()
+        );
+    }
+    inventory.source(
+        "crates/util/cache_fixture/src/child.rs",
+        "pub mod leaf {} pub struct Value;",
+    );
+    inventory.resolve_usage();
+    for _ in 0..2 {
+        assert_eq!(
+            inventory
+                .module_binding("cache_fixture", "child", &mut BTreeSet::new())
+                .as_deref(),
+            Some("cache_fixture::child")
+        );
+        assert_eq!(
+            inventory
+                .glob_namespace("cache_fixture", "child::leaf", &mut BTreeSet::new())
+                .as_deref(),
+            Some("cache_fixture::child::leaf")
+        );
+        assert_eq!(
+            inventory
+                .resolve("cache_fixture", "child::Value", &mut BTreeSet::new())
+                .unwrap()
+                .key,
+            "crates/util/cache_fixture/src/child.rs||struct:Value"
+        );
+    }
+}
+
+#[test]
+fn cached_declaration_lookup_keeps_the_callers_cycle_refusal() {
+    let inventory =
+        Inventory::fixture("mod first { pub struct Value; } mod second { pub struct Value; }");
+    for _ in 0..2 {
+        for (path, expected) in [
+            ("first::Value", "fixture.rs|first|struct:Value"),
+            ("second::Value", "fixture.rs|second|struct:Value"),
+        ] {
+            let mut visiting = BTreeSet::new();
+            assert_eq!(
+                inventory
+                    .resolve("fixture", path, &mut visiting)
+                    .unwrap()
+                    .key,
+                expected
+            );
+            assert!(inventory.resolve("fixture", path, &mut visiting).is_none());
+        }
+    }
+}
+
+#[test]
 fn bevy_plugins_use_descriptive_names_with_plugin_suffix() {
     let inventory = Inventory::workspace(&Workspace::current().0);
     let violations = inventory.plugin_names();
@@ -5628,7 +5731,15 @@ struct Inventory {
     generic_usage: Instantiations,
     lookup_depth: Cell<usize>,
     root_bindings: RefCell<BTreeMap<(String, String), Option<String>>>,
+    root_namespaces: RefCell<BTreeMap<(String, String), Option<String>>>,
+    root_modules: RefCell<BTreeMap<(String, String), Option<String>>>,
+    root_declarations: RefCell<BTreeMap<(String, String), DeclarationLookup>>,
     owner_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
+}
+
+struct DeclarationLookup {
+    declaration: Option<String>,
+    visited: BTreeSet<String>,
 }
 
 impl Inventory {
@@ -5856,6 +5967,9 @@ impl Inventory {
     fn source(&mut self, path: &str, source: &str) {
         self.sources.insert(path.into(), source.into());
         self.root_bindings.get_mut().clear();
+        self.root_namespaces.get_mut().clear();
+        self.root_modules.get_mut().clear();
+        self.root_declarations.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
         if !path.ends_with(".rs") {
             self.script(path, source);
@@ -5877,6 +5991,9 @@ impl Inventory {
             production: true,
         }
         .visit_file(&file);
+        self.root_namespaces.get_mut().clear();
+        self.root_modules.get_mut().clear();
+        self.root_declarations.get_mut().clear();
     }
 
     fn namespace(&self, path: &str, scope: &[String]) -> Namespace {
@@ -7386,6 +7503,26 @@ impl Inventory {
         prefix: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<String> {
+        if !visiting.is_empty() {
+            return self.lookup_namespace(namespace, prefix, visiting);
+        }
+        let key = (namespace.to_string(), prefix.to_string());
+        if let Some(result) = self.root_namespaces.borrow().get(&key) {
+            return result.clone();
+        }
+        let result = self.lookup_namespace(namespace, prefix, visiting);
+        self.root_namespaces
+            .borrow_mut()
+            .insert(key, result.clone());
+        result
+    }
+
+    fn lookup_namespace(
+        &self,
+        namespace: &str,
+        prefix: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<String> {
         let mut scoped = visiting.clone();
         let visiting = &mut scoped;
         if !visiting.insert(format!("path:{namespace}|{prefix}")) {
@@ -7428,6 +7565,24 @@ impl Inventory {
     }
 
     fn module_binding(
+        &self,
+        namespace: &str,
+        name: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<String> {
+        if !visiting.is_empty() {
+            return self.lookup_module(namespace, name, visiting);
+        }
+        let key = (namespace.to_string(), name.to_string());
+        if let Some(result) = self.root_modules.borrow().get(&key) {
+            return result.clone();
+        }
+        let result = self.lookup_module(namespace, name, visiting);
+        self.root_modules.borrow_mut().insert(key, result.clone());
+        result
+    }
+
+    fn lookup_module(
         &self,
         namespace: &str,
         name: &str,
@@ -7481,6 +7636,9 @@ impl Inventory {
     }
 
     fn resolve_usage(&mut self) {
+        self.root_namespaces.get_mut().clear();
+        self.root_modules.get_mut().clear();
+        self.root_declarations.get_mut().clear();
         if self.usage.iter().any(|(path, usage)| {
             path.ends_with(".rs") && usage.namespace != self.namespace(path, &[]).0
         }) {
@@ -7630,6 +7788,9 @@ impl Inventory {
         }
         self.used_keys = keys;
         self.registered_keys = registered;
+        self.root_namespaces.get_mut().clear();
+        self.root_modules.get_mut().clear();
+        self.root_declarations.get_mut().clear();
     }
 
     fn actual_plugin(&self, implementation: &Declaration) -> bool {
@@ -8000,6 +8161,34 @@ impl Inventory {
     }
 
     fn resolve(
+        &self,
+        namespace: &str,
+        reference: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<&Declaration> {
+        if !visiting.is_empty() || self.lookup_depth.get() != 0 {
+            return self.lookup_declaration(namespace, reference, visiting);
+        }
+        let key = (namespace.to_string(), reference.to_string());
+        if let Some(result) = self.root_declarations.borrow().get(&key) {
+            visiting.extend(result.visited.iter().cloned());
+            return result
+                .declaration
+                .as_ref()
+                .and_then(|key| self.entries.get(key));
+        }
+        let declaration = self.lookup_declaration(namespace, reference, visiting);
+        self.root_declarations.borrow_mut().insert(
+            key,
+            DeclarationLookup {
+                declaration: declaration.map(|entry| entry.key.clone()),
+                visited: visiting.clone(),
+            },
+        );
+        declaration
+    }
+
+    fn lookup_declaration(
         &self,
         namespace: &str,
         reference: &str,
