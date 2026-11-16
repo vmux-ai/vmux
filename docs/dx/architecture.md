@@ -72,6 +72,12 @@ Target-lock acquisition is a scoped IO job. Inheritance uses the actual parent-p
 
 The repository's policy checks test these relationships. Ownership is inferred from the code; local `ecs-policy.ron` files carry migration debt and the exceptions the checker cannot infer. Read the feature's types, handlers, and tests first, and use a policy file when a check points to one.
 
+Layout display history belongs to each layout entity. Active-session projection retains a
+loading page only while that page remains in the current pane tree, and owner removal retires
+the history before reattachment. Task and workspace changes still flow from canonical state.
+Each layout root compares its Transform with its current native window dimensions, so late
+or rebound roots initialize immediately while stable geometry avoids repeated writes.
+
 The Git push hook invokes Rust formatting directly, without compiling the development CLI
 or running repository tests. CI owns the heavier compiler, DX/CLI lifecycle, ownership,
 conventions, and platform checks. Targeted local tests cover the changed behavior;
