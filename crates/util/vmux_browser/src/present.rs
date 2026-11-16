@@ -1,9 +1,4 @@
-use bevy::{
-    ecs::relationship::Relationship,
-    prelude::*,
-    window::WindowResized,
-    winit::{EventLoopProxyWrapper, WinitUserEvent},
-};
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::CommandBar;
 use vmux_command::CommandBarPanelActive;
@@ -41,6 +36,7 @@ pub(crate) struct PresentPlugin;
 impl Plugin for PresentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
+            .add_plugins(crate::viewport::ViewportPlugin)
             .init_resource::<FrameSyncMemory>()
             .add_systems(
                 PostUpdate,
@@ -52,9 +48,8 @@ impl Plugin for PresentPlugin {
                     sync_windowed_command_bar
                         .in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
                     flush_command_bar_pointer,
-                    apply_repaint_nudge,
-                    sync_webview_resize,
-                    sync_osr_webview_focus,
+                    apply_repaint_nudge.in_set(RepaintSet),
+                    sync_osr_webview_focus.after(crate::viewport::ViewportSet),
                 )
                     .chain()
                     .after(vmux_layout::presentation::StackMotionSet)
@@ -74,6 +69,9 @@ impl Plugin for PresentPlugin {
             );
     }
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct RepaintSet;
 
 type LayoutKeyboardCapture = Or<(
     With<BookmarkTextInputActive>,
@@ -1203,66 +1201,6 @@ fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed
     }
 }
 
-fn sync_webview_resize(
-    browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<WindowOverlay>)>,
-    host_window: Query<&HostWindow>,
-    windows: Query<&Window>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut last_entries: Local<std::collections::HashMap<u64, (Vec2, f32)>>,
-    mut window_resized: MessageReader<WindowResized>,
-    mut pending_create: Local<std::collections::HashSet<Entity>>,
-) {
-    let force = window_resized.read().count() > 0;
-    if force {
-        last_entries.clear();
-    }
-    let mut pushed_any = false;
-    let mut awaiting_create = std::collections::HashSet::new();
-    let mut seen = std::collections::HashSet::new();
-    for (entity, size) in webviews.iter() {
-        if !browsers.has_browser(entity) {
-            awaiting_create.insert(entity);
-            continue;
-        }
-        let key = entity.to_bits();
-        seen.insert(key);
-        let window_entity = host_window
-            .get(entity)
-            .ok()
-            .map(|h| h.0)
-            .or(focused_window.entity());
-        let device_scale_factor = window_entity
-            .and_then(|e| windows.get(e).ok())
-            .map(|w| w.resolution.scale_factor())
-            .filter(|s| s.is_finite() && *s > 0.0)
-            .unwrap_or(1.0);
-        if last_entries.get(&key).is_some_and(|(last_size, scale)| {
-            *last_size == size.0 && (*scale - device_scale_factor).abs() < 0.01
-        }) {
-            continue;
-        }
-        browsers.resize(&entity, size.0, device_scale_factor);
-        pushed_any = true;
-        last_entries.insert(key, (size.0, device_scale_factor));
-    }
-    last_entries.retain(|key, _| seen.contains(key));
-    let newly_awaiting = awaiting_create
-        .iter()
-        .any(|entity| !pending_create.contains(entity));
-    *pending_create = awaiting_create;
-    if windowed_reconcile_should_wake(pushed_any, newly_awaiting)
-        && let Some(proxy) = proxy.as_ref()
-    {
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
-    }
-}
-
-fn windowed_reconcile_should_wake(pushed_any: bool, newly_awaiting: bool) -> bool {
-    pushed_any || newly_awaiting
-}
-
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<
@@ -2271,12 +2209,5 @@ mod tests {
             Display::Flex,
             Visibility::Visible
         ));
-    }
-
-    #[test]
-    fn windowed_reconcile_wakes_until_hosted_pages_are_sized() {
-        assert!(windowed_reconcile_should_wake(true, false));
-        assert!(windowed_reconcile_should_wake(false, true));
-        assert!(!windowed_reconcile_should_wake(false, false));
     }
 }

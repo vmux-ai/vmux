@@ -59,6 +59,7 @@ mod scroll;
 mod snapshot;
 mod state;
 mod tool;
+mod viewport;
 mod window_drag;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
