@@ -52,6 +52,8 @@ Persistence restores canonical state rather than creating another live registry.
 
 Source checks infer ownership and verify explicit adapter boundaries. Local `ecs-policy.ron` files describe exceptions and frozen migration debt; they are not runtime state. Current checks remain required until equivalent compiler checks replace them and the remaining debt is removed.
 
+Account systems combine release availability with secure credential support before accepting cloud authentication or sync consent. Native adapters retain bounded IO ownership, while connection and credential generations reject obsolete results. Authenticated binding preserves local Account and Profile identities; explicit unlink clears sync selections atomically. Accepted persistence outlives a page, failed saves preserve committed state, and credentials stay outside reflected records and UI views.
+
 ## Development and validation
 
 Development CLI operations follow the same ownership model as product work. Systems sequence builds, signing, packaging, CI planning, evidence validation and cleanup. CI composes the development feature without the desktop runtime; Git, Cargo, filesystem and Actions adapters return bounded facts to accepted operations. Leases protect active work and shared artifacts; cancellation drains IO before returning.

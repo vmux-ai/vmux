@@ -6,6 +6,8 @@ use vmux_macro::app_plugin;
 pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop, daemon, cli, mcp)]
     Ecs(VmuxEcsPlugin),
+    #[plugin(feature = "jobs", desktop, requires(ecs))]
+    Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "account", desktop, requires(ecs))]
     Account(vmux_account::AccountPlugin),
     #[plugin(feature = "account-local", desktop, requires(account))]
@@ -30,8 +32,6 @@ pub enum VmuxPlugin {
     ExtensionCore(vmux_extension::ExtensionPlugin),
     #[plugin(feature = "lsp", requires(ecs))]
     Lsp(vmux_lsp::LspPlugin),
-    #[plugin(feature = "jobs", desktop, requires(ecs))]
-    Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "flex", desktop, requires(ecs))]
     Flex(vmux_flex::FlexPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
@@ -311,5 +311,31 @@ mod profile_tests {
                 Some(&OperationState::Succeeded)
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "account-cloud", feature = "jobs"))]
+mod account_tests {
+    use super::*;
+    use bevy_app::Update;
+
+    #[test]
+    fn cloud_composition_revokes_availability_without_an_accepted_release_snapshot() {
+        let mut app = App::new();
+        app.add_plugins(VmuxPlugin::builder().jobs(true).account_cloud(true).build());
+        app.finish();
+        app.cleanup();
+        app.world_mut()
+            .spawn(vmux_feature::Provider::bundle("production"));
+        let root = app
+            .world_mut()
+            .spawn((vmux_account::Root, vmux_account::CloudAvailable))
+            .id();
+        app.world_mut().run_schedule(Update);
+        assert!(
+            app.world()
+                .get::<vmux_account::CloudAvailable>(root)
+                .is_none()
+        );
     }
 }
