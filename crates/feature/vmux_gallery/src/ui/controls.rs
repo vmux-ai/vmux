@@ -97,9 +97,12 @@ pub(super) fn StoryControls(state: GalleryUiState) -> Element {
 
 #[component]
 fn BoolControl(label: String, value: bool, onchange: EventHandler<bool>) -> Element {
-    rsx! { label { class: "flex min-h-11 items-center justify-between gap-3 rounded-md bg-foreground/[0.025] px-3 py-2",
+    rsx! { label { class: "flex flex-col gap-1.5",
         span { class: "font-mono text-[11px] text-muted-foreground", "{label}" }
-        Switch { checked: Some(value), on_checked_change: onchange, SwitchThumb {} }
+        div { class: "flex h-8 items-center justify-between gap-3 rounded-md bg-foreground/[0.035] px-3",
+            code { class: "text-xs text-foreground", "{value}" }
+            Switch { checked: Some(value), on_checked_change: onchange, SwitchThumb {} }
+        }
     } }
 }
 

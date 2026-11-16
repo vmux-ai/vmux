@@ -838,6 +838,7 @@ fn MenuPopup(state: GalleryUiState) -> Element {
 #[component]
 pub(crate) fn NavigationPreview(state: GalleryUiState) -> Element {
     let revision = state.revision;
+    let dropdown_open = state.menu == "dropdown";
     let address = use_ui_state::<PageAddressUiState>().state;
     let address = address().address.unwrap_or_else(|| state.address.clone());
     rsx! {
@@ -878,10 +879,12 @@ pub(crate) fn NavigationPreview(state: GalleryUiState) -> Element {
                     BreadcrumbOptionIcon { class: "size-6", option: BreadcrumbOption { label: "vmux".into(), value: "one".into(), identity_seed: "vmux".into(), icon_url: String::new(), icon: Some(vmux_api::BuiltinIcon::Layers) } }
                 },
                 Story::Dropdown => rsx! {
-                    div { class: "relative min-h-80",
+                    div { class: "grid items-start gap-6 @lg/gallery:grid-cols-2",
+                    div { class: "relative min-w-0 space-y-3",
+                        p { class: "font-mono text-[11px] text-muted-foreground", "DropdownTrigger / DropdownPopup" }
                         Dropdown { open: state.menu == "dropdown", on_dismiss: move |_| { let _ = send(&GalleryMenuRequest { revision, menu: String::new() }); },
-                            DropdownTrigger { label: "DropdownTrigger", open: state.menu == "dropdown", disabled: state.disabled,
-                                onclick: move |_| { let _ = send(&GalleryMenuRequest { revision, menu: "dropdown".into() }); },
+                            DropdownTrigger { label: state.choice.clone(), class: "inline-flex min-w-36 justify-between rounded-md bg-foreground/5 px-3 py-2", open: dropdown_open, disabled: state.disabled,
+                                onclick: move |_| { let _ = send(&GalleryMenuRequest { revision, menu: if dropdown_open { String::new() } else { "dropdown".into() } }); },
                                 trailing: rsx! { DropdownToggleIndicator { open: state.menu == "dropdown" } },
                             }
                             if state.menu == "dropdown" {
@@ -895,14 +898,16 @@ pub(crate) fn NavigationPreview(state: GalleryUiState) -> Element {
                             }
                         }
                     }
-                    div { class: "relative min-h-80",
-                        DropdownSelector { label: "DropdownSelector", open: state.menu == "dropdown-selector", disabled: state.disabled,
+                    div { class: "relative min-w-0 space-y-3",
+                        p { class: "font-mono text-[11px] text-muted-foreground", "DropdownSelector" }
+                        DropdownSelector { label: state.choice.clone(), trigger_class: "inline-flex min-w-36 justify-between rounded-md bg-foreground/5 px-3 py-2", open: state.menu == "dropdown-selector", disabled: state.disabled,
                             on_open_change: move |open| { let _ = send(&GalleryMenuRequest { revision, menu: if open { "dropdown-selector".into() } else { String::new() } }); },
                             on_dismiss: move |_| { let _ = send(&GalleryMenuRequest { revision, menu: String::new() }); },
                             DropdownOption { label: translate("gallery-option-one"), selected: state.choice == "one",
                                 onclick: move |_| { let _ = send(&GalleryChoiceRequest { revision, choice: "one".into() }); },
                             }
                         }
+                    }
                     }
                 },
                 Story::SegmentedControl => rsx! {

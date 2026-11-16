@@ -23,12 +23,12 @@ Open Terminal and check that ordinary text is bold. This is a small CSS change w
 
 Open `vmux://ui/` in the desktop address bar, or search for `storybook` in the command bar.
 The component catalog renders the actual `vmux_ui` controls through the same native page
-and IPC path as other Vmux pages. Choose a component, try its variants, toggle disabled
-state, and inspect the last accepted event and current values. The sidebar and content
+and IPC path as other Vmux pages. Choose a component, try its presets, edit the disabled
+property in Controls, and inspect the last accepted event and current values. The sidebar and content
 scroll independently, using the same workspace layout as Tools and Git. Search accepts
 component names such as `ComposerFrame` and `IdentityOrb`. Each family has a direct URL:
 `vmux://ui/composer` opens the composer, and the shared breadcrumb and browser history
-follow the selected family. Reset restores the selected example and its local state.
+follow the selected family. The Default preset restores the example and its local state.
 Resize the pane to check smaller layouts; appearance and language follow application settings.
 
 The sidebar groups stories into Primitives, Forms, Composition, Navigation, Feedback,

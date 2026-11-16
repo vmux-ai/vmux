@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{GalleryDisabledRequest, GalleryResetRequest, GalleryUiState, RegisteredStory, Story};
+use crate::{GalleryUiState, RegisteredStory, Story};
 use controls::StoryControls;
 use dioxus::prelude::component;
 use dioxus::prelude::*;
@@ -8,8 +8,8 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerSearch, ManagerSearchRow, ManagerSidebarItem, WorkspaceLayout,
 };
 use vmux_ui::components::page::PageContent;
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::components::page_address::PageBreadcrumbs;
+use vmux_ui::hooks::{use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::navigation::PageNavigation;
 
@@ -32,22 +32,6 @@ pub fn Page() -> Element {
     let mut filter = use_signal(String::new);
     let current = state();
     let query = filter().to_ascii_lowercase();
-    let mut toolbar = Vec::new();
-    toolbar.push(ToolbarControl::button(
-        translate("gallery-reset"),
-        move |_| {
-            let _ = send(&GalleryResetRequest);
-        },
-    ));
-    let disabled = current.disabled;
-    toolbar.push(
-        ToolbarControl::button(translate("gallery-disabled"), move |_| {
-            let _ = send(&GalleryDisabledRequest {
-                disabled: !disabled,
-            });
-        })
-        .active(disabled),
-    );
     rsx! {
         document::Title { "{current.story.name()}" }
         ManagerPage {
@@ -97,7 +81,6 @@ pub fn Page() -> Element {
                         }
                     }
                 },
-                toolbar: rsx! { PageToolbar { controls: toolbar } },
                 PageContent { content_class: "@container/gallery mx-auto w-full max-w-6xl",
                     header { class: "mb-6 space-y-2",
                         p { class: "text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60", {translate(current.story.category())} }
@@ -112,7 +95,7 @@ pub fn Page() -> Element {
                                     span { class: "text-[10px]", {translate("gallery-description")} }
                                 }
                             }
-                            section { class: if current.story == Story::Icon { "min-w-0" } else { "flex min-h-80 min-w-0 items-start rounded-xl bg-foreground/[0.025] p-6 @3xl/gallery:min-h-96" },
+                            section { class: if current.story == Story::Icon { "min-w-0" } else { "min-w-0 rounded-xl bg-foreground/[0.025] p-5" },
                                 aria_label: translate("gallery-preview"),
                                 div { class: "w-full min-w-0", RegisteredStory { key: "{current.revision}", state: current.clone() } }
                             }
