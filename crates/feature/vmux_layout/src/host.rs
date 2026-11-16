@@ -47,6 +47,8 @@ pub mod tool;
 pub mod unit;
 pub mod warm_page;
 pub mod window;
+#[cfg(any(target_os = "macos", test))]
+mod window_buttons;
 pub mod workspace_snapshot;
 pub mod workspace_snapshot_publish;
 pub mod worktree;

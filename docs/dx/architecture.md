@@ -110,6 +110,13 @@ another checkout of the same repository; edit observations can select a differen
 Repeated observations keep their input order. Tab removal retires its transient identity,
 including removal and reattachment in one update, without changing persisted workspace data.
 
+Native window-button visibility is projected from headers in the same window. The
+registered layout system requests one native update and records its successful visibility
+on the Window entity. Missing native handles leave the request unacknowledged for the next
+update; unchanged acknowledged state emits nothing. Removing the Window retires the
+receipt, so reattaching it reapplies visibility even when the header state is unchanged.
+The AppKit adapter performs only the requested button update and retains no layout state.
+
 CI sequencing belongs to the GitHub Actions workflow before product composition. Its Git adapter verifies the captured head/base merge and prepares identical checkouts for every runner; CLI artifacts bind their bytes to that checkout and run. PR validation performs no branch-run lookup or polling, so merge verification cannot wait behind a separate push workflow. Required statuses reject failed preparation and unexpected skips of applicable checks. Native distribution work remains outside ordinary PR validation. Heavy validation remains applicable after preparation failures but cancels when a PR run is superseded, so it cannot hold the concurrency slot for the new head.
 
 Compiler caches restore workspace artifacts together with content/mode-validated source timestamps. Each restore retains a target-specific receipt and its original key/path configuration. Successful workflow steps checkpoint the snapshot and explicitly upload it with the artifacts before dependency-cache post cleanup can prune them. Publication never depends on nested composite outputs surviving into a post action; changed compile environments during the job cannot redirect the save to another partition.
