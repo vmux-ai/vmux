@@ -584,18 +584,16 @@ fn open(
             anchor: Some(anchor),
             ..
         } = &request.origin
-        {
-            if request
+            && request
                 .payload
                 .source
                 .as_deref()
                 .is_none_or(|source| !target.accepts_launch(source, *anchor))
-            {
-                responses.write(request.reply.response(AgentCommandResult::Error(
-                    "browser source launch is no longer active".into(),
-                )));
-                continue;
-            }
+        {
+            responses.write(request.reply.response(AgentCommandResult::Error(
+                "browser source launch is no longer active".into(),
+            )));
+            continue;
         }
         match target.authentication(
             request.reply.request_id.to_string(),

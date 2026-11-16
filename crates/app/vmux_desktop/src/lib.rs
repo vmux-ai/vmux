@@ -129,10 +129,10 @@ mod tests {
                 .add_plugins(bevy_cef::prelude::IpcPlugin)
                 .add_plugins(
                     vmux_app::VmuxPlugin::builder()
+                        .desktop()
+                        .browser(false)
+                        .extension(false)
                         .gallery(true)
-                        .input(true)
-                        .simulator(true)
-                        .shortcut(true)
                         .feature_flags(feature_flags)
                         .build(),
                 )
@@ -140,17 +140,26 @@ mod tests {
                 .add_plugins(crate::window::WindowPlugin);
             vmux_browser::BrowserPlugin::configure_schedule(&mut app).add_systems(
                 Update,
-                cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
+                (
+                    ui_event_flush_probe.in_set(bevy_cef::prelude::UiEventSystems::Flush),
+                    cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
+                ),
             );
-            let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
-            let mut schedule = schedules.remove(Update).unwrap();
-
-            let initialized = schedule.initialize(app.world_mut());
-            assert!(
-                initialized.is_ok(),
-                "desktop update schedule must be acyclic (feature_flags={feature_flags}): {:?}",
-                initialized.err()
-            );
+            for label in [
+                bevy::ecs::schedule::ScheduleLabel::intern(&First),
+                bevy::ecs::schedule::ScheduleLabel::intern(&PreUpdate),
+                bevy::ecs::schedule::ScheduleLabel::intern(&Update),
+                bevy::ecs::schedule::ScheduleLabel::intern(&PostUpdate),
+                bevy::ecs::schedule::ScheduleLabel::intern(&Last),
+            ] {
+                let mut schedule = app
+                    .world_mut()
+                    .resource_mut::<Schedules>()
+                    .remove(label)
+                    .expect("desktop schedule is registered");
+                let result = schedule.initialize(app.world_mut()).map(|_| ());
+                assert!(result.is_ok(), "{label:?} must initialize without a cycle (feature_flags={feature_flags})");
+            }
         }
     }
 
