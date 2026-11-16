@@ -17,10 +17,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - uses: ./.github/actions/setup-ci
     - id: checkout
       shell: bash
       env:
         VMUX_CI_HEAD: ${{ inputs.head }}
         VMUX_CI_BASE: ${{ inputs.base }}
         VMUX_CI_TREE: ${{ inputs.tree }}
-      run: node scripts/ci-preflight.js checkout
+      run: vmux-ci checkout >> "$GITHUB_OUTPUT"

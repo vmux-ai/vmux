@@ -20,33 +20,21 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Load pinned tool versions
-      shell: bash
-      run: cat tool-versions.env >> "$GITHUB_ENV"
-
-    - name: Resolve Rust toolchain
+    - uses: ./.github/actions/setup-ci
       id: rust
-      shell: bash
-      run: |
-        channel="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
-        test -n "$channel"
-        echo "channel=$channel" >> "$GITHUB_OUTPUT"
-
-    - uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: ${{ steps.rust.outputs.channel }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
     - name: Validate compiler cache locations
       shell: bash
-      run: node scripts/ci-cache.js validate
+      run: vmux-ci cache-validate
 
     - name: Identify development CLI compile inputs
       id: cli-inputs
       if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
       shell: bash
-      run: node scripts/ci-cli.js cache-inputs
+      run: vmux-ci cli-key >> "$GITHUB_OUTPUT"
 
     - name: Restore unchanged development CLI binary
       if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
@@ -60,7 +48,7 @@ runs:
       if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
       shell: bash
       run: |
-        node scripts/ci-cli.js cache-reuse .build-tools/cli-cache
+        vmux-ci cli-reuse .build-tools/cli-cache >> "$GITHUB_OUTPUT"
         echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
 
     - name: Restore development CLI compiler cache
@@ -109,7 +97,7 @@ runs:
     - name: Record reusable development CLI binary
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       shell: bash
-      run: node scripts/ci-cli.js cache-publish .build-tools/cli-cache
+      run: vmux-ci cli-publish .build-tools/cli-cache
 
     - name: Save reusable development CLI binary
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
@@ -129,10 +117,10 @@ runs:
       if: inputs.cli != 'build' && env.VMUX_CI_PREBUILT_DX == '1'
       shell: bash
       run: |
-        node scripts/ci-cli.js install .build-tools/prebuilt
+        vmux-ci artifact-install .build-tools/prebuilt
         echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
 
     - name: Configure CI Rust compilation
       if: inputs.fast-rust == 'true' || (inputs.fast-rust == 'auto' && env.VMUX_CI_FAST_RUST == '1')
       shell: bash
-      run: node scripts/ci-cli.js fast-rust
+      run: vmux-ci fast-rust >> "$GITHUB_ENV"

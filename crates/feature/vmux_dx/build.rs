@@ -1,4 +1,5 @@
 #[path = "src/source.rs"]
+#[cfg(feature = "development")]
 mod source;
 
 fn main() {
@@ -7,6 +8,12 @@ fn main() {
         std::env::var("TARGET").unwrap()
     );
     println!("cargo:rerun-if-env-changed=VMUX_UPDATE_PUBLIC_KEY");
+    #[cfg(feature = "development")]
+    development();
+}
+
+#[cfg(feature = "development")]
+fn development() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)

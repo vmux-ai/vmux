@@ -12,7 +12,7 @@ runs:
       shell: bash
       env:
         VMUX_CACHE_PARTITION: ${{ inputs.cache-key }}
-      run: node scripts/ci-cache.js checkpoint
+      run: vmux-ci cache-checkpoint >> "$GITHUB_OUTPUT"
     - name: Save workspace artifacts and source snapshot
       if: steps.snapshot.outputs.save == 'true'
       uses: actions/cache/save@v5

@@ -6,6 +6,9 @@ edition.workspace = true
 publish = false
 
 [features]
+default = ["development"]
+development = ["ci-runtime"]
+ci-runtime = []
 runtime-cli = []
 ci-syntax = ["dep:proc-macro2", "dep:syn"]
 
@@ -27,6 +30,14 @@ minisign-verify = "0.2"
 semver = "1"
 tar = "0.4"
 libc = "0.2"
+globset = "0.4"
+yaml-rust = "0.4"
+filetime = "0.2"
+
+[[bin]]
+name = "vmux-ci"
+path = "src/ci_main.rs"
+required-features = ["ci-runtime"]
 
 [build-dependencies]
 libc = "0.2"

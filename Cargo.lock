@@ -10626,7 +10626,9 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "dioxus-rsx",
+ "filetime",
  "flate2",
+ "globset",
  "libc",
  "minisign-verify",
  "plist",
@@ -10642,6 +10644,7 @@ dependencies = [
  "tempfile",
  "toml",
  "vmux_ecs",
+ "yaml-rust",
 ]
 
 [[package]]

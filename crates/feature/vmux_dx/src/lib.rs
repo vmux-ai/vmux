@@ -1,96 +1,144 @@
+mod ci;
+mod ci_io;
+pub use ci::CiPlugin;
+
+#[cfg(feature = "development")]
 use std::ffi::OsString;
+#[cfg(feature = "development")]
 use std::sync::{Arc, Mutex, mpsc};
+#[cfg(feature = "development")]
 use std::thread;
 
+#[cfg(feature = "development")]
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
+#[cfg(feature = "development")]
 use bevy_ecs::system::SystemParam;
+#[cfg(feature = "development")]
 use vmux_ecs::cli::{CliInvocation, CliResult};
+#[cfg(feature = "development")]
 use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
+#[cfg(feature = "development")]
 use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState};
 
 use environment::Environment;
+#[cfg(feature = "development")]
 use execution::Failure;
+#[cfg(feature = "development")]
 use repository::Checkout;
+#[cfg(feature = "development")]
 use storage::Storage;
+#[cfg(feature = "development")]
 use target_lock::TargetLock;
+#[cfg(feature = "development")]
 use work::{Outcome, Work};
 
+#[cfg(feature = "development")]
 mod cargo;
 #[cfg(feature = "ci-syntax")]
+#[cfg(feature = "development")]
 mod ci_native;
+#[cfg(feature = "development")]
 mod ci_scope;
+#[cfg(feature = "development")]
 mod cli_package;
+#[cfg(feature = "development")]
 mod cli_package_io;
+#[cfg(feature = "development")]
 mod compiler_lint;
+#[cfg(feature = "development")]
 mod compiler_lint_io;
+#[cfg(feature = "development")]
 mod consumer;
+#[cfg(feature = "development")]
 mod debug;
+#[cfg(feature = "development")]
 mod debug_io;
 mod environment;
 mod execution;
+#[cfg(feature = "development")]
 mod local;
+#[cfg(feature = "development")]
 mod native;
+#[cfg(feature = "development")]
 mod package;
+#[cfg(feature = "development")]
 mod package_io;
+#[cfg(feature = "development")]
 mod policy;
+#[cfg(feature = "development")]
 mod process_observation;
 #[path = "../../../build_product.rs"]
 #[allow(dead_code)]
+#[cfg(feature = "development")]
 mod product;
+#[cfg(feature = "development")]
 mod publication;
+#[cfg(feature = "development")]
 mod publication_io;
+#[cfg(feature = "development")]
 pub mod repository;
+#[cfg(feature = "development")]
 mod repository_io;
+#[cfg(feature = "development")]
 mod repository_selection;
+#[cfg(feature = "development")]
 mod reset;
+#[cfg(feature = "development")]
 mod reset_io;
 mod signals;
+#[cfg(feature = "development")]
 mod source;
+#[cfg(feature = "development")]
 mod storage;
+#[cfg(feature = "development")]
 mod storage_io;
+#[cfg(feature = "development")]
 mod storage_runtime;
+#[cfg(feature = "development")]
 mod target_lock;
 mod temporary;
 #[cfg(test)]
 mod testing;
+#[cfg(feature = "development")]
 mod tooling;
+#[cfg(feature = "development")]
 mod tooling_io;
+#[cfg(feature = "development")]
 mod update_io;
+#[cfg(feature = "development")]
 pub mod updates;
 #[expect(
     dead_code,
     reason = "VMX-253 retains the exact legacy schema until follow-up removal"
 )]
+#[cfg(feature = "development")]
 mod work;
+#[cfg(feature = "development")]
 mod workspace;
+#[cfg(feature = "development")]
 mod workspace_io;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[cfg(feature = "development")]
 pub struct DxPlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg(feature = "development")]
 enum Stage {
     Initialize,
     Execute,
 }
 
+#[cfg(feature = "development")]
 impl bevy_app::Plugin for DxPlugin {
     fn build(&self, app: &mut App) {
-        if !app
-            .world()
-            .contains_resource::<vmux_ecs::blocking::BlockingRuntime>()
-        {
-            app.insert_resource(vmux_ecs::blocking::BlockingRuntime::new(
-                vmux_ecs::blocking::BlockingPool::new("vmux-dx-short", 0, 0),
-                vmux_ecs::blocking::BlockingPool::new("vmux-dx-long", 0, 0),
-                vmux_ecs::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
-            ));
-        }
+        Self::runtime(app);
         app.register_required_components::<Work, Step>();
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
+            ci::CiPlugin,
             updates::UpdatesPlugin,
             workspace::WorkspacePlugin,
             repository_selection::RepositorySelectionPlugin,
@@ -179,76 +227,110 @@ impl bevy_app::Plugin for DxPlugin {
     }
 }
 
+#[cfg(feature = "development")]
 impl DxPlugin {
+    fn runtime(app: &mut App) {
+        if !app
+            .world()
+            .contains_resource::<vmux_ecs::blocking::BlockingRuntime>()
+        {
+            app.insert_resource(vmux_ecs::blocking::BlockingRuntime::new(
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-short", 1, 16),
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-long", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
+            ));
+        }
+    }
+
     pub fn selected(arguments: impl Iterator<Item = OsString>) -> bool {
         workspace::Host::selected(arguments.collect())
     }
 }
 
+#[cfg(feature = "development")]
 struct Feature;
 
+#[cfg(feature = "development")]
 impl FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 #[derive(Component)]
 #[require(Tail)]
+#[cfg(feature = "development")]
 struct Accepted;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Admitting;
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Admission;
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Validated(std::path::PathBuf);
 #[derive(Component)]
 #[component(immutable)]
+#[cfg(feature = "development")]
 struct Started {
     context: Entity,
     attempt: u64,
 }
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Retirement(Failure);
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Assigned;
 
 #[derive(Component, Default)]
+#[cfg(feature = "development")]
 struct Tail(Option<Entity>);
 
+#[cfg(feature = "development")]
 #[derive(Component, Default)]
 pub(crate) struct Step;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct NativeSubmitted;
 
 #[derive(Component, Clone)]
 struct Settings(Environment);
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Lease(Arc<TargetLock>);
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Predecessor(Entity);
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Running;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Completed;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 pub struct Artifact(pub std::path::PathBuf);
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Attempt(u64);
 
 #[derive(Resource)]
+#[cfg(feature = "development")]
 struct Mailbox {
     sender: mpsc::SyncSender<Completion>,
     receiver: Mutex<mpsc::Receiver<Completion>>,
     wake: thread::Thread,
 }
 
+#[cfg(feature = "development")]
 impl Mailbox {
     fn new() -> Self {
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -261,6 +343,7 @@ impl Mailbox {
 }
 
 #[derive(Message)]
+#[cfg(feature = "development")]
 struct Completion {
     entity: Entity,
     context: Entity,
@@ -268,6 +351,7 @@ struct Completion {
     result: std::result::Result<Outcome, Failure>,
 }
 
+#[cfg(feature = "development")]
 type Completions<'w, 's> = Query<
     'w,
     's,
@@ -279,6 +363,7 @@ type Completions<'w, 's> = Query<
     (With<Running>, With<Step>, Without<Admission>),
 >;
 
+#[cfg(feature = "development")]
 type Incoming<'w, 's> = Query<
     'w,
     's,
@@ -296,6 +381,7 @@ type Incoming<'w, 's> = Query<
         Without<Preparing>,
     ),
 >;
+#[cfg(feature = "development")]
 type Pending<'w, 's> = Query<
     'w,
     's,
@@ -308,6 +394,7 @@ type Pending<'w, 's> = Query<
     ),
     (With<Step>, Without<Running>, Without<Completed>),
 >;
+#[cfg(feature = "development")]
 type Inputs<'w, 's> = Query<
     'w,
     's,
@@ -321,8 +408,10 @@ type Inputs<'w, 's> = Query<
     ),
     Without<CliResult>,
 >;
+#[cfg(feature = "development")]
 type Cancellations<'w, 's> =
     Query<'w, 's, (Entity, &'static mut OperationState), (With<Accepted>, Without<CliResult>)>;
+#[cfg(feature = "development")]
 type Finishing<'w, 's> = Query<
     'w,
     's,
@@ -330,6 +419,7 @@ type Finishing<'w, 's> = Query<
     (With<Accepted>, Without<CliResult>),
 >;
 
+#[cfg(feature = "development")]
 fn normalize(mut requests: Query<&mut CliInvocation, Without<CliResult>>) {
     for mut invocation in &mut requests {
         if invocation.is("dx.desktop") {
@@ -338,6 +428,7 @@ fn normalize(mut requests: Query<&mut CliInvocation, Without<CliResult>>) {
     }
 }
 
+#[cfg(feature = "development")]
 fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
     if signals.is_some() {
         return;
@@ -363,6 +454,7 @@ fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut co
     }
 }
 
+#[cfg(feature = "development")]
 type Admissions<'w, 's> = Query<
     'w,
     's,
@@ -375,6 +467,7 @@ type Admissions<'w, 's> = Query<
     With<Admission>,
 >;
 
+#[cfg(feature = "development")]
 fn admit(
     mut completions: MessageReader<Completion>,
     steps: Admissions,
@@ -417,20 +510,26 @@ fn admit(
 }
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Preparing;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct SettingsLoaded;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct TargetConfigured;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct ToolsPrepared;
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct SettingsConfigured;
 
+#[cfg(feature = "development")]
 type Preparations<'w, 's, F> = Query<
     'w,
     's,
@@ -444,8 +543,12 @@ type Preparations<'w, 's, F> = Query<
     (With<Preparing>, Without<CliResult>, F),
 >;
 
+#[cfg(feature = "development")]
 fn resolve(requests: Incoming, providers: Query<&workspace::Provider>, mut commands: Commands) {
     for (entity, invocation, dispatch, resolved_context) in &requests {
+        if invocation.command.starts_with("dx.ci.") {
+            continue;
+        }
         if invocation.is("dx.update") {
             continue;
         }
@@ -510,6 +613,7 @@ fn resolve(requests: Incoming, providers: Query<&workspace::Provider>, mut comma
     }
 }
 
+#[cfg(feature = "development")]
 fn load_settings(mut requests: Preparations<Without<SettingsLoaded>>, mut commands: Commands) {
     for (entity, invocation, dispatch, checkout, mut settings) in &mut requests {
         let environment = &mut settings.0;
@@ -533,6 +637,7 @@ fn load_settings(mut requests: Preparations<Without<SettingsLoaded>>, mut comman
     }
 }
 
+#[cfg(feature = "development")]
 fn configure_target(
     mut requests: Preparations<(With<SettingsLoaded>, Without<TargetConfigured>)>,
     mut commands: Commands,
@@ -572,6 +677,7 @@ fn configure_target(
     }
 }
 
+#[cfg(feature = "development")]
 fn ensure_tooling(
     mut requests: Preparations<(
         With<TargetConfigured>,
@@ -599,6 +705,7 @@ fn ensure_tooling(
     }
 }
 
+#[cfg(feature = "development")]
 fn configure_settings(
     mut requests: Preparations<(With<ToolsPrepared>, Without<SettingsConfigured>)>,
     mut commands: Commands,
@@ -635,6 +742,7 @@ fn configure_settings(
     }
 }
 
+#[cfg(feature = "development")]
 fn accept(
     mut requests: Preparations<(
         With<SettingsConfigured>,
@@ -700,10 +808,12 @@ fn accept(
 }
 
 #[derive(SystemParam)]
+#[cfg(feature = "development")]
 struct Plans<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
+#[cfg(feature = "development")]
 impl Plans<'_, '_> {
     fn push<B: Bundle>(&mut self, owner: Entity, tail: &mut Tail, bundle: B) -> Entity {
         let mut step = self.commands.spawn((
@@ -740,8 +850,10 @@ impl Plans<'_, '_> {
 }
 
 #[derive(Component)]
+#[cfg(feature = "development")]
 struct Planned;
 
+#[cfg(feature = "development")]
 type Planning<'w, 's> = Query<
     'w,
     's,
@@ -755,6 +867,7 @@ type Planning<'w, 's> = Query<
     (With<Accepted>, Without<Planned>, Without<CliResult>),
 >;
 
+#[cfg(feature = "development")]
 fn plan_provider(
     mut operations: Planning,
     providers: Query<&workspace::Provider>,
@@ -821,6 +934,7 @@ fn plan_provider(
     }
 }
 
+#[cfg(feature = "development")]
 fn prepare_build(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.build") && tail.0.is_none()) {
@@ -838,6 +952,7 @@ fn prepare_build(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -922,6 +1037,7 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -946,6 +1062,7 @@ fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -962,6 +1079,7 @@ fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_mobile(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -1005,6 +1123,7 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_web(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -1042,6 +1161,7 @@ fn plan_web(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn refuse_build(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, _tail) in &mut operations {
         let platform = invocation.value("platform").unwrap_or("desktop");
@@ -1060,6 +1180,7 @@ fn refuse_build(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -1071,6 +1192,7 @@ fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_run(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = if invocation.is("dx.serve") {
@@ -1118,6 +1240,7 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_stop(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.stop")) {
@@ -1128,6 +1251,7 @@ fn plan_stop(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.reset-layout")) {
@@ -1138,6 +1262,7 @@ fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_test(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -1181,6 +1306,7 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_lint(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
@@ -1241,6 +1367,7 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_doctor(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.doctor")) {
@@ -1251,6 +1378,7 @@ fn plan_doctor(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_setup(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let platform = invocation.value("platform").unwrap_or("desktop");
@@ -1288,6 +1416,7 @@ fn plan_setup(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.cache.status")) {
@@ -1298,6 +1427,7 @@ fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.cache.clean")) {
@@ -1316,6 +1446,7 @@ fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
@@ -1331,6 +1462,7 @@ fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
@@ -1346,6 +1478,7 @@ fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_checks(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.checks.test")) {
@@ -1369,6 +1502,7 @@ fn plan_checks(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_sdk(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.checks.sdk")) {
@@ -1392,6 +1526,7 @@ fn plan_sdk(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn plan_internal(mut operations: Planning, mut plans: Plans) {
     for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
         let forwarded = invocation
@@ -1492,6 +1627,7 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
     }
 }
 
+#[cfg(feature = "development")]
 fn refuse_plan(operations: Planning, mut commands: Commands) {
     for (entity, _, dispatch, _, _) in &operations {
         let error = if dispatch.is_some() {
@@ -1505,6 +1641,7 @@ fn refuse_plan(operations: Planning, mut commands: Commands) {
     }
 }
 
+#[cfg(feature = "development")]
 fn start(
     steps: Pending,
     running: Query<Entity, With<Running>>,
@@ -1562,6 +1699,7 @@ fn start(
     }
 }
 
+#[cfg(feature = "development")]
 type Dispatches<'w, 's> = Query<
     'w,
     's,
@@ -1575,6 +1713,7 @@ type Dispatches<'w, 's> = Query<
     (With<Running>, Without<Assigned>, Without<NativeSubmitted>),
 >;
 
+#[cfg(feature = "development")]
 fn dispatch_storage(requests: Dispatches, loans: Query<&Lease>, mut commands: Commands) {
     for (entity, work, started, _checkout, settings) in &requests {
         let storage = match work {
@@ -1610,6 +1749,7 @@ fn dispatch_storage(requests: Dispatches, loans: Query<&Lease>, mut commands: Co
     }
 }
 
+#[cfg(feature = "development")]
 fn dispatch(requests: Dispatches, mut commands: Commands) {
     for (entity, work, started, checkout, settings) in &requests {
         match work {
@@ -1694,6 +1834,7 @@ fn dispatch(requests: Dispatches, mut commands: Commands) {
     }
 }
 
+#[cfg(feature = "development")]
 type NativeReady<'w, 's> = Query<
     'w,
     's,
@@ -1709,6 +1850,7 @@ type NativeReady<'w, 's> = Query<
     (With<Running>, Without<NativeSubmitted>, Without<Assigned>),
 >;
 
+#[cfg(feature = "development")]
 fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut commands: Commands) {
     for (entity, work, parent, attempt, captured, checkout, settings) in &steps {
         if parent.is_none_or(|parent| parent.parent() != captured.root)
@@ -1762,6 +1904,7 @@ fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut com
     }
 }
 
+#[cfg(feature = "development")]
 fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
     let receiver = mailbox.receiver.lock().unwrap();
     while let Ok(completion) = receiver.try_recv() {
@@ -1770,6 +1913,7 @@ fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
 }
 
 #[derive(SystemParam)]
+#[cfg(feature = "development")]
 struct Drains<'w, 's> {
     running: Query<'w, 's, &'static Started, With<Running>>,
     packages: package::Drains<'w, 's>,
@@ -1777,6 +1921,7 @@ struct Drains<'w, 's> {
     publications: publication::Drains<'w, 's>,
 }
 
+#[cfg(feature = "development")]
 impl Drains<'_, '_> {
     fn pending(&self, context: Entity) -> bool {
         self.running
@@ -1788,6 +1933,7 @@ impl Drains<'_, '_> {
     }
 }
 
+#[cfg(feature = "development")]
 fn cancel(
     signals: Option<Res<signals::Signals>>,
     drains: Drains,
@@ -1811,16 +1957,19 @@ fn cancel(
 }
 
 #[derive(SystemParam)]
+#[cfg(feature = "development")]
 struct Replies<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
+#[cfg(feature = "development")]
 impl Replies<'_, '_> {
     fn send(&mut self, entity: Entity, result: CliResult) {
         self.commands.entity(entity).insert(result);
     }
 }
 
+#[cfg(feature = "development")]
 fn collect(
     mut completions: MessageReader<Completion>,
     steps: Completions,
@@ -1886,8 +2035,10 @@ fn collect(
 
 #[derive(Component)]
 #[component(immutable)]
+#[cfg(feature = "development")]
 struct Receipt(std::result::Result<Outcome, Failure>);
 
+#[cfg(feature = "development")]
 type Applying<'w, 's> = Query<
     'w,
     's,
@@ -1900,6 +2051,7 @@ type Applying<'w, 's> = Query<
     ),
 >;
 
+#[cfg(feature = "development")]
 fn apply(
     receipts: Applying,
     mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
@@ -2002,6 +2154,7 @@ fn apply(
     }
 }
 
+#[cfg(feature = "development")]
 fn retire(
     requests: Query<(Entity, &Retirement, &OperationState), Without<CliResult>>,
     drains: Drains,
@@ -2020,6 +2173,7 @@ fn retire(
     }
 }
 
+#[cfg(feature = "development")]
 fn finish(
     operations: Finishing,
     drains: Drains,
@@ -2057,6 +2211,7 @@ fn finish(
 }
 
 #[cfg(test)]
+#[cfg(feature = "development")]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

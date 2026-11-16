@@ -43,16 +43,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/github-script@v8
+      - uses: ./.github/actions/setup-ci
+      - name: Verify merge
         id: plan
-        with:
-          script: |
-            const Preflight = require('./scripts/ci-preflight.js');
-            const plan = await new Preflight({ github, context, core }).plan({ reuseChecks: false });
-            const Workflow = require('./scripts/ci-workflow.js');
-            const presentation = Workflow.presentationOnly(process.cwd(), plan.base, plan.tree);
-            core.setOutput('presentation_only', String(presentation));
-            if (presentation) core.info('Workflow display names changed; executable configuration is unchanged');
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: vmux-ci plan >> "$GITHUB_OUTPUT"
       - name: Resolve cef crate version from Cargo.lock
         id: resolve
         run: |
@@ -254,8 +250,11 @@ jobs:
 
       - name: Reuse successful checks with identical inputs
         id: checks
-        uses: actions/github-script@v8
         env:
+          GH_TOKEN: ${{ github.token }}
+          VMUX_CHECK_PR: ${{ github.event.pull_request.number || 0 }}
+          VMUX_CHECK_BRANCH: ${{ github.event.pull_request.head.ref }}
+          VMUX_CHECK_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           VMUX_CHECK_BASE: ${{ needs.plan.outputs.base }}
           VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
           VMUX_CHECK_RELEASE: ${{ needs.plan.outputs.release }}
@@ -270,35 +269,11 @@ jobs:
           VMUX_FEATURES_REQUIRED: ${{ steps.scope.outputs.headless == 'true' || github.event_name == 'schedule' }}
           VMUX_COMPILER_REQUIRED: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' }}
           VMUX_LEGACY_DESKTOP: ${{ github.event_name == 'schedule' }}
-        with:
-          script: |
-            const Checks = require('./scripts/ci-checks.js');
-            const common = ['.github/**', '.cargo/**', '.gitattributes', '.env', '.env.*', '**/ecs-policy.ron', 'cef/**', 'packaging/**', 'scripts/**', 'Cargo.*', 'rust-toolchain.toml', 'tool-versions.env'];
-            const rust = [...common, 'crates/**', 'patches/**', 'examples/**'];
-            const cli = ['crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'crates/build_*.rs'];
-            const scope = (args) => JSON.stringify({ args, os: process.env.RUNNER_OS, arch: process.env.RUNNER_ARCH, image: process.env.ImageVersion, flags: process.env.RUSTFLAGS, encoded: process.env.CARGO_ENCODED_RUSTFLAGS });
-            const inputs = JSON.parse(process.env.VMUX_CHECK_INPUTS || '{}');
-            const paths = (key) => [...common, ...(inputs[key] || ['crates/**', 'patches/**']), ...(key === 'test-sdk' ? ['examples/**', ...cli] : [])];
-            const code = process.env.VMUX_CODE_REQUIRED === 'true';
-            const profiles = [
-              { key: 'lint', name: 'Lint', paths: [...rust, 'website/**'], scope: scope(JSON.stringify({ args: process.env.VMUX_LINT_SCOPE, compiler: process.env.VMUX_COMPILER_REQUIRED })), enabled: code && process.env.VMUX_COMPILER_REQUIRED === 'true' },
-              { key: 'test-rust', name: 'Test Rust', paths: [...paths('test-rust'), ...(process.env.VMUX_RECORDS === 'true' ? paths('records') : [])], scope: scope(JSON.stringify({ args: process.env.VMUX_TEST_SCOPE, records: process.env.VMUX_RECORDS })), enabled: code && process.env.VMUX_RUST_REQUIRED === 'true', matrix: { cache: 'test', dependencies: 'test', native: 'true' } },
-              { key: 'test-sdk', name: 'Test SDK', paths: paths('test-sdk'), scope: scope('sdk-path+host'), enabled: code && process.env.VMUX_SDK_REQUIRED === 'true', matrix: { cache: 'sdk-path', dependencies: 'sdk-path', native: 'true' } },
-              { key: 'test-desktop', name: 'Test Desktop', paths: paths('test-desktop'), scope: scope('desktop-defaults'), enabled: code && process.env.VMUX_DESKTOP_REQUIRED === 'true', matrix: { cache: 'desktop', dependencies: 'test', native: 'true' } },
-              { key: 'test-features', name: 'Test Features', paths: paths('test-features'), scope: scope(JSON.stringify({ features: 'daemon,mcp', legacy: process.env.VMUX_LEGACY_DESKTOP })), enabled: code && process.env.VMUX_FEATURES_REQUIRED === 'true', matrix: { cache: 'headless', dependencies: 'headless', native: 'true' } },
-              { key: 'test-ecs', name: 'Test ECS Composition', paths: [...rust, 'website/**', 'docs/architecture.md', 'docs/dx/architecture.md'], scope: scope('ownership+conventions'), enabled: code, matrix: { cache: 'ecs', dependencies: 'lint', native: 'false' } },
-              { key: 'website', name: 'Build Web', paths: [...common, ...cli, 'website/**', 'docs/**'], scope: scope('website-release') },
-            ];
-            const identity = { base: process.env.VMUX_CHECK_BASE, tree: process.env.VMUX_CHECK_TREE, branch: context.payload.pull_request?.head.ref, release: process.env.VMUX_CHECK_RELEASE === 'true' };
-            const checks = new Checks({ github, context, core });
-            const results = await checks.plan(identity, profiles);
-            const matrix = Checks.matrix(profiles, results);
-            core.setOutput('tests', JSON.stringify(matrix));
-            core.setOutput('test_count', String(matrix.include.length));
+        run: vmux-ci checks-plan >> "$GITHUB_OUTPUT"
 
       - name: Record the CLI identity
         if: steps.rust.outcome == 'success'
-        run: node scripts/ci-cli.js publish .build-tools/bin/vmux .build-tools/artifact
+        run: vmux-ci artifact-publish .build-tools/bin/vmux .build-tools/artifact
       - uses: actions/upload-artifact@v6
         if: steps.rust.outcome == 'success'
         with:
@@ -346,7 +321,7 @@ jobs:
         env:
           VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_lint }}
           VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
+        run: vmux-ci checks-record
       - name: Publish validation inputs
         if: needs.changes.outputs.check_lint != '' && needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         uses: actions/upload-artifact@v6
@@ -476,10 +451,12 @@ jobs:
       - name: Lint registered systems
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.compiler_lints == 'true' && needs.changes.outputs.lint_args != ''
         run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
-
-      - name: CI configuration and cache tests
-        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
-        run: node --test scripts/ci-preflight.test.js scripts/ci-build-identity.test.js
+      - uses: ./.github/actions/save-sources
+        if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.compiler_lints == 'true'
+        with:
+          workspace: .build-tools/compiler-checkout
+          snapshot: .build-tools/lints-sources.json
+          target: .build-tools/lints
 
       - name: CI tool lifecycle tests
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
@@ -538,7 +515,7 @@ jobs:
         env:
           VMUX_CHECK_NAME: ${{ matrix.claim }}
           VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
+        run: vmux-ci checks-record
       - name: Publish validation inputs
         if: matrix.reuse == '' && matrix.claim != ''
         uses: actions/upload-artifact@v6
@@ -612,7 +589,7 @@ jobs:
         env:
           VMUX_CHECK_NAME: ${{ needs.changes.outputs.check_website }}
           VMUX_CHECK_TREE: ${{ needs.plan.outputs.tree }}
-        run: node scripts/ci-checks.js record
+        run: vmux-ci checks-record
       - name: Publish validation inputs
         if: needs.changes.outputs.check_website != ''
         uses: actions/upload-artifact@v6
@@ -663,7 +640,7 @@ jobs:
         if: needs.changes.outputs.macos_tooling == 'true'
         run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --target-dir .build-tools/cargo
       - name: Record the CLI identity
-        run: node scripts/ci-cli.js publish .build-tools/bin/vmux .build-tools/artifact
+        run: vmux-ci artifact-publish .build-tools/bin/vmux .build-tools/artifact
       - uses: actions/upload-artifact@v6
         with:
           name: dx-cli-${{ runner.os }}-${{ runner.arch }}
@@ -979,6 +956,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.plan.outputs.head || github.sha }}
+      - uses: ./.github/actions/setup-ci
       - uses: ./.github/actions/prepare-ci
         if: needs.plan.result == 'success' && needs.changes.result == 'success'
         with:
@@ -989,4 +967,4 @@ jobs:
         env:
           VMUX_CI_RESULTS: ${{ toJSON(needs) }}
           VMUX_CI_DISTRIBUTION: ${{ github.event_name != 'pull_request' || needs.plan.outputs.release == 'true' }}
-        run: node scripts/ci-checks.js gate
+        run: vmux-ci checks-gate

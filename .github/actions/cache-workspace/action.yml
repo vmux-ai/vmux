@@ -26,7 +26,7 @@ runs:
         VMUX_CACHE_TARGET: ${{ inputs.target }}
         VMUX_CACHE_WORKSPACE: ${{ inputs.workspace }}
         VMUX_CACHE_SAVE: ${{ github.ref == 'refs/heads/main' || inputs.branch-cache == 'true' || (inputs.branch-cache == 'auto' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-      run: node scripts/ci-cache.js inputs
+      run: vmux-ci cache-inputs >> "$GITHUB_OUTPUT"
     - uses: actions/cache/restore@v5
       with:
         path: ${{ steps.inputs.outputs.paths }}

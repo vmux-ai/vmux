@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::Result;
+#[cfg(feature = "development")]
 use crate::product::ProductMetadata;
 
 #[derive(Clone)]
@@ -13,6 +14,7 @@ pub struct Environment {
 }
 
 impl Environment {
+    #[cfg(feature = "development")]
     pub fn product(&self, root: &Path) -> Result<ProductMetadata> {
         let mut input = BTreeMap::new();
         for (key, value) in &self.values {

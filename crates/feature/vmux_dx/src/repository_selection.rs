@@ -92,6 +92,9 @@ type Incoming<'w, 's> = Query<
 
 fn request(requests: Incoming, mut commands: Commands) {
     for (entity, invocation) in &requests {
+        if invocation.command.starts_with("dx.ci.") {
+            continue;
+        }
         if !invocation.command.starts_with("dx.")
             || invocation.is("dx.help")
             || invocation.is("dx.update")

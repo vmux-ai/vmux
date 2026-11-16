@@ -52,6 +52,8 @@ impl Host {
             .add_plugins(WorkspacePlugin);
         app.world_mut()
             .spawn(FeatureManifest::of::<crate::Feature>());
+        app.world_mut()
+            .spawn(FeatureManifest::of::<crate::ci::Feature>());
         app.update();
         app.world().resource::<Admission>().0
     }

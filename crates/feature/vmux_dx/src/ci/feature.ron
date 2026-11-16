@@ -1,0 +1,27 @@
+(
+    name: "CI",
+    root: true,
+    cli: Some((commands: [(
+        id: "dx.ci",
+        name: "ci",
+        subcommand_required: true,
+        arguments: [(id: "root", long: Some("root"), global: true, value_name: Some("PATH"))],
+        commands: [
+            (id: "dx.ci.plan", name: "plan"),
+            (id: "dx.ci.checkout", name: "checkout"),
+            (id: "dx.ci.cache-inputs", name: "cache-inputs"),
+            (id: "dx.ci.cache-restore", name: "cache-restore"),
+            (id: "dx.ci.cache-checkpoint", name: "cache-checkpoint"),
+            (id: "dx.ci.cache-validate", name: "cache-validate"),
+            (id: "dx.ci.cli-key", name: "cli-key"),
+            (id: "dx.ci.cli-reuse", name: "cli-reuse", arguments: [(id: "forward", index: Some(1), trailing: true)]),
+            (id: "dx.ci.cli-publish", name: "cli-publish", arguments: [(id: "forward", index: Some(1), trailing: true)]),
+            (id: "dx.ci.artifact-publish", name: "artifact-publish", arguments: [(id: "forward", index: Some(1), trailing: true)]),
+            (id: "dx.ci.artifact-install", name: "artifact-install", arguments: [(id: "forward", index: Some(1), trailing: true)]),
+            (id: "dx.ci.fast-rust", name: "fast-rust"),
+            (id: "dx.ci.checks-plan", name: "checks-plan"),
+            (id: "dx.ci.checks-record", name: "checks-record"),
+            (id: "dx.ci.checks-gate", name: "checks-gate"),
+        ],
+    )])),
+)

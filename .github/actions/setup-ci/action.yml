@@ -1,0 +1,50 @@
+name: Setup CI
+description: Build the source-owned Rust CI runtime from the pinned toolchain
+inputs:
+  components:
+    description: Comma-separated rustup components
+    required: false
+    default: ""
+  targets:
+    description: Comma-separated rustup targets
+    required: false
+    default: ""
+outputs:
+  channel:
+    description: Pinned Rust toolchain channel
+    value: ${{ steps.rust.outputs.channel }}
+runs:
+  using: composite
+  steps:
+    - name: Load tool versions
+      shell: bash
+      run: cat tool-versions.env >> "$GITHUB_ENV"
+    - name: Resolve toolchain
+      id: rust
+      shell: bash
+      run: |
+        channel="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
+        test -n "$channel"
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.rust.outputs.channel }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+    - uses: Swatinem/rust-cache@v2
+      if: env.VMUX_CI_RUNTIME_READY != '1'
+      with:
+        workspaces: . -> .build-tools/ci-cargo
+        shared-key: ci-runtime-v1
+        cache-workspace-crates: "false"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Build CI runtime
+      if: env.VMUX_CI_RUNTIME_READY != '1'
+      shell: bash
+      run: |
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS cargo clean -p vmux_dx -p vmux_ecs -p vmux_task -p vmux_api -p vmux_macro --target-dir .build-tools/ci-cargo
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS="-C opt-level=1 -C codegen-units=16" CARGO_PROFILE_DEV_LTO=off cargo build --locked -p vmux_dx --bin vmux-ci --no-default-features --features ci-runtime --target-dir .build-tools/ci-cargo
+        mkdir -p .build-tools/bootstrap
+        install -m 0755 .build-tools/ci-cargo/debug/vmux-ci .build-tools/bootstrap/vmux-ci
+        echo "$GITHUB_WORKSPACE/.build-tools/bootstrap" >> "$GITHUB_PATH"
+        echo 'VMUX_CI_RUNTIME_READY=1' >> "$GITHUB_ENV"
