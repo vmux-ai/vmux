@@ -48,6 +48,7 @@ impl Plugin for LayoutUiProjectionPlugin {
         )
         .add_observer(address_request)
         .add_observer(capture_tab_list)
+        .add_observer(retire_active_session)
         .configure_sets(
             PostUpdate,
             (
@@ -113,6 +114,33 @@ pub struct SpacesProjection(pub vmux_ecs::event::space::SpacesListEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct TabListProjection(TabListState);
+
+#[derive(Component, Clone, Debug, PartialEq)]
+struct ActiveSessionProjection(ActiveSessionState);
+
+impl ActiveSessionProjection {
+    fn retain(&self, panes: &PaneTreeState) -> Option<ActiveSession> {
+        let previous = self.0.session.as_ref()?;
+        let pending = panes.panes.iter().any(|pane| {
+            pane.is_active
+                && pane
+                    .stacks
+                    .iter()
+                    .any(|stack| stack.is_active && (stack.url.is_empty() || stack.is_loading))
+        });
+        if !pending {
+            return None;
+        }
+        for pane in &panes.panes {
+            for stack in &pane.stacks {
+                if stack.id == previous.page.id {
+                    return Some(previous.clone());
+                }
+            }
+        }
+        None
+    }
+}
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct HeaderProjection(HeaderState);
@@ -841,9 +869,11 @@ fn publish_active_session(
     layouts: Query<
         (
             Entity,
+            Ref<LayoutCef>,
             Option<Ref<PaneTreeProjection>>,
             Option<Ref<ProjectProjection>>,
             Option<Ref<TeamProjection>>,
+            Option<&ActiveSessionProjection>,
         ),
         With<LayoutCef>,
     >,
@@ -857,7 +887,6 @@ fn publish_active_session(
     >,
     mut sessions: SessionProjection,
     mut git: GitSelectionProjection,
-    mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
     mut commands: Commands,
 ) {
     let empty_panes = PaneTreeState::default();
@@ -872,11 +901,12 @@ fn publish_active_session(
         .any(|pending| pending.is_changed())
         || !removed_pending_selections.is_empty();
     removed_pending_selections.clear();
-    for (entity, panes, projects, team) in &layouts {
+    for (entity, owner, panes, projects, team, current) in &layouts {
+        let current = if owner.is_added() { None } else { current };
         let projection_changed = panes.as_ref().is_some_and(|value| value.is_changed())
             || projects.as_ref().is_some_and(|value| value.is_changed())
             || team.as_ref().is_some_and(|value| value.is_changed());
-        if last.contains_key(&entity)
+        if current.is_some()
             && !sessions_changed
             && !git_changed
             && !projection_changed
@@ -905,27 +935,11 @@ fn publish_active_session(
                 .map(|pending| (*pending).clone())
         });
         let focused_pane = focus.pane.map(Entity::to_bits);
-        let projected = ActiveSession::from_projections(panes, projects, team);
-        let retained = projected.or_else(|| {
-            let active_is_pending = panes.panes.iter().any(|pane| {
-                pane.is_active
-                    && pane
-                        .stacks
-                        .iter()
-                        .any(|stack| stack.is_active && (stack.url.is_empty() || stack.is_loading))
-            });
-            if !active_is_pending {
-                return None;
-            }
-            let previous = last.get(&entity)?.session.as_ref()?;
-            panes
-                .panes
-                .iter()
-                .flat_map(|pane| pane.stacks.iter())
-                .any(|stack| stack.id == previous.page.id)
-                .then(|| previous.clone())
-        });
-        let session = retained.map(|mut active| {
+        let mut session = match ActiveSession::from_projections(panes, projects, team) {
+            Some(active) => Some(active),
+            None => current.and_then(|current| current.retain(panes)),
+        };
+        if let Some(active) = session.as_mut() {
             active.task = sessions.task(&active.page);
             let selection = git.page(&active.page);
             active.project_workspace(
@@ -937,17 +951,24 @@ fn publish_active_session(
             if let Some(project) = active.project.as_mut() {
                 project.expanded = sections.under(Entity::from_bits(active.pane_id)).projects;
             }
-            active
-        });
+        }
         let event = ActiveSessionState { session };
-        if last.get(&entity) == Some(&event) {
+        if current.is_some_and(|current| current.0 == event) {
             continue;
         }
+        commands
+            .entity(entity)
+            .insert(ActiveSessionProjection(event.clone()));
         commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
             entity, &event,
         ));
-        last.insert(entity, event);
     }
+}
+
+fn retire_active_session(removed: On<Remove, LayoutCef>, mut commands: Commands) {
+    commands
+        .entity(removed.event_target())
+        .try_remove::<ActiveSessionProjection>();
 }
 
 fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<LayoutUiState>>, mut commands: Commands) {
@@ -1282,6 +1303,204 @@ fn publish_bookmark_ui(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[derive(Resource, Default)]
+    struct ActiveSessionWrites(Vec<(Entity, Option<ActiveSession>)>);
+
+    fn capture_active_sessions(
+        update: On<vmux_ecs::UiStateWrite<LayoutUiState>>,
+        mut writes: ResMut<ActiveSessionWrites>,
+    ) {
+        if let Some(active) = &update.event().update().active_session {
+            writes
+                .0
+                .push((update.event().webview(), active.session.clone()));
+        }
+    }
+
+    struct ActiveSessionPages {
+        app: App,
+        layout: Entity,
+        page: Entity,
+    }
+
+    impl ActiveSessionPages {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(LayoutUiProjectionPlugin)
+                .init_resource::<ActiveSessionWrites>()
+                .add_observer(capture_active_sessions);
+            let pane = app.world_mut().spawn_empty().id();
+            let page = app.world_mut().spawn_empty().id();
+            let layout = app
+                .world_mut()
+                .spawn((
+                    LayoutCef,
+                    PaneTreeProjection(PaneTreeState {
+                        panes: vec![crate::event::PaneNode {
+                            id: pane.to_bits(),
+                            is_active: true,
+                            collapsed: false,
+                            bookmarks_expanded: false,
+                            stacks: vec![StackNode {
+                                id: page.to_bits(),
+                                agent_id: None,
+                                title: "Terminal".into(),
+                                url: "vmux://terminal/first".into(),
+                                icon: Default::default(),
+                                is_active: true,
+                                is_loading: false,
+                                is_dirty: false,
+                                bg_color: None,
+                            }],
+                        }],
+                    }),
+                ))
+                .id();
+            app.update();
+            Self { app, layout, page }
+        }
+
+        fn pending(&mut self, page: Entity) {
+            let mut panes = self
+                .app
+                .world_mut()
+                .get_mut::<PaneTreeProjection>(self.layout)
+                .unwrap();
+            let stack = &mut panes.0.panes[0].stacks[0];
+            stack.id = page.to_bits();
+            stack.url.clear();
+            stack.is_loading = true;
+        }
+
+        fn current(&self) -> Option<&ActiveSession> {
+            let writes = self.app.world().resource::<ActiveSessionWrites>();
+            let (_, session) = writes
+                .0
+                .iter()
+                .rev()
+                .find(|(entity, _)| *entity == self.layout)
+                .unwrap();
+            session.as_ref()
+        }
+
+        fn writes(&self) -> usize {
+            self.app
+                .world()
+                .resource::<ActiveSessionWrites>()
+                .0
+                .iter()
+                .filter(|(entity, _)| *entity == self.layout)
+                .count()
+        }
+    }
+
+    #[test]
+    fn loading_retains_only_a_page_still_owned_by_the_current_layout() {
+        let mut pages = ActiveSessionPages::new();
+        assert_eq!(pages.current().unwrap().page.url, "vmux://terminal/first");
+        let writes = pages.writes();
+        pages.pending(pages.page);
+        pages.app.update();
+        assert_eq!(pages.current().unwrap().page.url, "vmux://terminal/first");
+        assert_eq!(pages.writes(), writes);
+        let other = pages.app.world_mut().spawn_empty().id();
+        pages.pending(other);
+        pages.app.update();
+        assert!(pages.current().is_none());
+        assert_eq!(pages.writes(), writes + 1);
+    }
+
+    #[test]
+    fn reattaching_a_layout_cannot_inherit_a_retired_active_session() {
+        for same_update in [false, true] {
+            let mut pages = ActiveSessionPages::new();
+            pages.pending(pages.page);
+            pages
+                .app
+                .world_mut()
+                .entity_mut(pages.layout)
+                .remove::<LayoutCef>();
+            if !same_update {
+                pages.app.update();
+                assert!(
+                    pages
+                        .app
+                        .world()
+                        .get::<ActiveSessionProjection>(pages.layout)
+                        .is_none()
+                );
+            }
+            pages
+                .app
+                .world_mut()
+                .entity_mut(pages.layout)
+                .insert(LayoutCef);
+            pages.app.update();
+            assert!(
+                pages.current().is_none(),
+                "same-update attachment: {same_update}"
+            );
+        }
+    }
+
+    #[test]
+    fn stable_layout_sources_publish_once_and_title_changes_publish_current_state() {
+        let mut pages = ActiveSessionPages::new();
+        let writes = pages.writes();
+        pages.app.update();
+        pages.app.update();
+        assert_eq!(pages.writes(), writes);
+        pages
+            .app
+            .world_mut()
+            .get_mut::<PaneTreeProjection>(pages.layout)
+            .unwrap()
+            .0
+            .panes[0]
+            .stacks[0]
+            .title = "Renamed".into();
+        pages.app.update();
+        assert_eq!(pages.current().unwrap().page.title, "Renamed");
+        assert_eq!(pages.writes(), writes + 1);
+    }
+
+    #[test]
+    fn a_retained_loading_page_reads_current_canonical_task_state() {
+        let mut pages = ActiveSessionPages::new();
+        let session = pages
+            .app
+            .world_mut()
+            .spawn((
+                Session,
+                Name::new("Task"),
+                Description::default(),
+                Stage(StageId("in_progress".into())),
+                RunState::Idle,
+            ))
+            .id();
+        pages
+            .app
+            .world_mut()
+            .entity_mut(pages.page)
+            .insert(EntityTarget::<Session>::new(session));
+        pages.app.update();
+        assert_eq!(
+            pages.current().unwrap().task.as_ref().unwrap().runtime,
+            "idle"
+        );
+        pages.pending(pages.page);
+        pages
+            .app
+            .world_mut()
+            .entity_mut(session)
+            .insert(RunState::Streaming);
+        pages.app.update();
+        assert_eq!(
+            pages.current().unwrap().task.as_ref().unwrap().runtime,
+            "streaming"
+        );
+    }
 
     struct HeaderPages {
         app: App,

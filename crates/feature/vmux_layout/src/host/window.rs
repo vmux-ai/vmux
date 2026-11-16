@@ -912,7 +912,6 @@ fn gap(
 
 fn fit_to_screen(
     windows: Query<&bevy::window::Window>,
-    mut last_sizes: Local<std::collections::HashMap<Entity, Vec2>>,
     mut roots: Query<(&HostWindow, &mut Transform), With<VmuxWindow>>,
 ) {
     for (host, mut transform) in &mut roots {
@@ -920,15 +919,15 @@ fn fit_to_screen(
             continue;
         };
         let m = window.meters();
-        if last_sizes
-            .get(&host.0)
-            .is_some_and(|last| (m.x - last.x).abs() < 0.001 && (m.y - last.y).abs() < 0.001)
+        let translation = Vec3::new(0.0, m.y * 0.5, 0.0);
+        let scale = Vec3::new(m.x, m.y, 1.0);
+        if transform.translation.abs_diff_eq(translation, 0.0005)
+            && transform.scale.abs_diff_eq(scale, 0.001)
         {
             continue;
         }
-        last_sizes.insert(host.0, m);
-        transform.translation = Vec3::new(0.0, m.y * 0.5, 0.0);
-        transform.scale = Vec3::new(m.x, m.y, 1.0);
+        transform.translation = translation;
+        transform.scale = scale;
     }
 }
 
@@ -940,6 +939,150 @@ mod tests {
     use bevy::window::Monitor;
 
     use bevy::ecs::system::SystemState;
+
+    #[derive(Resource, Default)]
+    struct SizingWrites(usize);
+
+    fn track_sizing_changes(
+        changed: Query<(), (With<VmuxWindow>, Changed<Transform>)>,
+        mut writes: ResMut<SizingWrites>,
+    ) {
+        writes.0 += changed.iter().count();
+    }
+
+    struct WindowSizing {
+        app: App,
+        first: Entity,
+        second: Entity,
+    }
+
+    impl WindowSizing {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, WindowLayoutPlugin))
+                .insert_resource(test_settings(8.0))
+                .init_resource::<SizingWrites>()
+                .add_systems(Last, track_sizing_changes);
+            let first = app
+                .world_mut()
+                .spawn(Window {
+                    resolution: (1200, 800).into(),
+                    ..default()
+                })
+                .id();
+            let second = app
+                .world_mut()
+                .spawn(Window {
+                    resolution: (800, 600).into(),
+                    ..default()
+                })
+                .id();
+            app.update();
+            Self { app, first, second }
+        }
+
+        fn root(&mut self, window: Entity) -> Entity {
+            let world = self.app.world_mut();
+            for (entity, host) in world
+                .query_filtered::<(Entity, &HostWindow), With<VmuxWindow>>()
+                .iter(world)
+            {
+                if host.0 == window {
+                    return entity;
+                }
+            }
+            panic!("missing layout root for {window:?}");
+        }
+
+        fn writes(&self) -> usize {
+            self.app.world().resource::<SizingWrites>().0
+        }
+    }
+
+    #[test]
+    fn late_and_rebound_layout_roots_follow_their_current_window_without_idle_writes() {
+        let mut windows = WindowSizing::new();
+        let first = windows.root(windows.first);
+        let second = windows.root(windows.second);
+        let initial = windows.writes();
+        windows.app.update();
+        windows.app.update();
+        assert_eq!(windows.writes(), initial);
+
+        let late = windows
+            .app
+            .world_mut()
+            .spawn((
+                VmuxWindow,
+                HostWindow(windows.first),
+                Transform::default(),
+                Node::default(),
+            ))
+            .id();
+        windows.app.update();
+        assert_eq!(
+            windows.app.world().get::<Transform>(late).unwrap().scale,
+            Vec3::new(12.0, 8.0, 1.0)
+        );
+        assert_eq!(
+            windows
+                .app
+                .world()
+                .get::<Transform>(late)
+                .unwrap()
+                .translation,
+            Vec3::new(0.0, 4.0, 0.0)
+        );
+        assert_eq!(windows.writes(), initial + 1);
+
+        windows
+            .app
+            .world_mut()
+            .entity_mut(late)
+            .insert(HostWindow(windows.second));
+        windows.app.update();
+        assert_eq!(
+            windows.app.world().get::<Transform>(late).unwrap().scale,
+            Vec3::new(8.0, 6.0, 1.0)
+        );
+        assert_eq!(
+            windows
+                .app
+                .world()
+                .get::<Transform>(late)
+                .unwrap()
+                .translation,
+            Vec3::new(0.0, 3.0, 0.0)
+        );
+
+        windows
+            .app
+            .world_mut()
+            .get_mut::<Window>(windows.first)
+            .unwrap()
+            .resolution
+            .set(1400.0, 900.0);
+        windows.app.update();
+        assert_eq!(
+            windows.app.world().get::<Transform>(first).unwrap().scale,
+            Vec3::new(14.0, 9.0, 1.0)
+        );
+        assert_eq!(
+            windows
+                .app
+                .world()
+                .get::<Transform>(first)
+                .unwrap()
+                .translation,
+            Vec3::new(0.0, 4.5, 0.0)
+        );
+        for root in [second, late] {
+            assert_eq!(
+                windows.app.world().get::<Transform>(root).unwrap().scale,
+                Vec3::new(8.0, 6.0, 1.0)
+            );
+        }
+    }
 
     #[test]
     fn scaffold_builds_tab_pane_stack_under_space() {
