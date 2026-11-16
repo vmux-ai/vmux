@@ -7,8 +7,14 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex};
 
 use bevy::ecs::archetype::ArchetypeId;
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::ecs::world::EntityRef;
 use bevy::prelude::*;
+use bevy::prelude::{
+    App, ChildOf, Commands, Component, Entity, EntityEvent, Has, MessageReader, MessageWriter,
+    NonSend, NonSendMut, On, Plugin, Query, Ref, Remove, Res, ResMut, Resource, Window, With,
+    Without,
+};
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef::prelude::{
@@ -68,10 +74,8 @@ impl Plugin for MacosBrowserPlugin {
         .add_systems(Update, dismiss_popups)
         .add_observer(stop_loading)
         .add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
-        .add_plugins(NativeFocusPlugin)
+        .add_plugins((NativeFocusPlugin, SurfacePresentationPlugin))
         .init_non_send::<PageRenderer>()
-        .init_resource::<SurfacePresentations>()
-        .init_resource::<SurfaceSettleRetries>()
         .init_resource::<OpenPageDropdown>()
         .add_systems(Startup, move |mut commands: Commands| {
             let (metadata, lifecycle) = startup
@@ -105,21 +109,6 @@ impl Plugin for MacosBrowserPlugin {
         )
         .add_systems(
             PostUpdate,
-            (place, bevy::ecs::schedule::ApplyDeferred)
-                .chain()
-                .in_set(vmux_layout::presentation::NativePresentationSet::Place)
-                .after(vmux_ecs::UiStateFlushSet)
-                .after(crate::BrowserSystemSet::SyncWindowedFrames),
-        )
-        .add_systems(
-            PostUpdate,
-            (place, bevy::ecs::schedule::ApplyDeferred)
-                .chain()
-                .in_set(vmux_layout::presentation::NativePresentationSet::Finalize)
-                .run_if(on_message::<vmux_layout::presentation::NativeSelectionCommitted>),
-        )
-        .add_systems(
-            PostUpdate,
             render.after(vmux_layout::presentation::NativePresentationSet::Finalize),
         )
         .add_systems(PostUpdate, focus.in_set(FocusSet::Apply))
@@ -130,6 +119,45 @@ impl Plugin for MacosBrowserPlugin {
         .add_observer(mark_candidate_removed::<HostsPage>)
         .add_observer(mark_candidate_added::<LayoutCef>)
         .add_observer(mark_candidate_removed::<LayoutCef>);
+    }
+}
+
+struct SurfacePresentationPlugin;
+
+impl Plugin for SurfacePresentationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<vmux_layout::presentation::NativeSurfaceReused>()
+            .add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
+            .init_resource::<SurfaceSettleWake>()
+            .add_message::<SurfaceWakeRequested>()
+            .add_systems(
+                PostUpdate,
+                wake.after(vmux_layout::presentation::NativePresentationSet::Place)
+                    .after(vmux_layout::presentation::NativePresentationSet::Finalize),
+            )
+            .add_observer(confirm)
+            .add_observer(retire_history::<HostedSurface>)
+            .add_observer(retire_history::<HostedSurfaceGeneration>)
+            .add_systems(
+                PostUpdate,
+                (
+                    initialize,
+                    collect,
+                    place,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(vmux_layout::presentation::NativePresentationSet::Place)
+                    .after(vmux_ecs::UiStateFlushSet)
+                    .after(crate::BrowserSystemSet::SyncWindowedFrames),
+            )
+            .add_systems(
+                PostUpdate,
+                (initialize, place, bevy::ecs::schedule::ApplyDeferred)
+                    .chain()
+                    .in_set(vmux_layout::presentation::NativePresentationSet::Finalize)
+                    .run_if(on_message::<vmux_layout::presentation::NativeSelectionCommitted>),
+            );
     }
 }
 
@@ -540,40 +568,6 @@ impl SurfacePresentation {
     }
 }
 
-fn sync_presentation_readiness(
-    presentation: SurfacePresentation,
-    entity: Entity,
-    pending: bool,
-    presentation_ready: bool,
-    transition_ready: bool,
-    commands: &mut Commands,
-) {
-    let presented = matches!(presentation, SurfacePresentation::Visible { .. });
-    if presented && !presentation_ready {
-        commands
-            .entity(entity)
-            .try_insert(vmux_layout::hosted_page::SurfacePresentationReady);
-    } else if !presented && presentation_ready {
-        commands
-            .entity(entity)
-            .try_remove::<vmux_layout::hosted_page::SurfacePresentationReady>();
-    }
-    let transitioned = pending
-        && matches!(
-            presentation,
-            SurfacePresentation::Visible { opacity, .. } if opacity >= 1.0
-        );
-    if transitioned && !transition_ready {
-        commands
-            .entity(entity)
-            .try_insert(vmux_layout::hosted_page::SurfaceTransitionReady);
-    } else if !transitioned && transition_ready {
-        commands
-            .entity(entity)
-            .try_remove::<vmux_layout::hosted_page::SurfaceTransitionReady>();
-    }
-}
-
 impl PaneFrame {
     fn matches(self, bounds: Option<wry::Rect>) -> bool {
         let Some(bounds) = bounds else {
@@ -633,92 +627,126 @@ impl CachedNativeFrame {
     }
 }
 
-#[derive(Resource, Default)]
-struct SurfacePresentations {
-    applied: HashMap<Entity, AppliedSurfacePresentation>,
-    cached: HashMap<Entity, CachedNativeFrame>,
+#[derive(Component, Default)]
+struct SurfaceHistory {
+    applied: Option<AppliedSurfacePresentation>,
+    cached: Option<CachedNativeFrame>,
+    attempt: Option<SurfaceSettleAttempt>,
 }
 
-impl SurfacePresentations {
+#[derive(Clone, Copy)]
+struct SurfaceSettleAttempt {
+    generation: u64,
+    presentation: SurfacePresentation,
+    started: std::time::Instant,
+}
+
+impl SurfaceHistory {
+    fn remembered(
+        &self,
+        generation: u64,
+        navigation_revision: u64,
+        presentation: SurfacePresentation,
+    ) -> bool {
+        match presentation {
+            SurfacePresentation::Visible {
+                frame,
+                opacity: 1.0,
+                ..
+            } => self
+                .cached
+                .is_some_and(|cached| cached.matches_frame(generation, navigation_revision, frame)),
+            _ => true,
+        }
+    }
+
+    fn record(&mut self, generation: u64, presentation: SurfacePresentation, settled: bool) {
+        self.applied = Some(AppliedSurfacePresentation {
+            generation,
+            presentation,
+            settled,
+        });
+    }
+
+    fn matches(&self, generation: u64, presentation: SurfacePresentation) -> bool {
+        self.applied.is_some_and(|current| {
+            current.generation == generation && current.presentation == presentation
+        })
+    }
+
     fn remember(
         &mut self,
-        entity: Entity,
         generation: u64,
-        surface: &WebView,
+        navigation_revision: u64,
         presentation: SurfacePresentation,
+        bounds: Option<wry::Rect>,
+        native_settled: bool,
     ) {
         let SurfacePresentation::Visible { frame, opacity, .. } = presentation else {
             return;
         };
         if opacity == 1.0
-            && self.cached.get(&entity).is_some_and(|cached| {
-                cached.matches_frame(generation, surface.navigation_revision(), frame)
-            })
+            && self
+                .cached
+                .is_some_and(|cached| cached.matches_frame(generation, navigation_revision, frame))
         {
             return;
         }
-        if opacity != 1.0
-            || !frame.matches(surface.bounds())
-            || !surface.presentation_settled(opacity)
-        {
+        if opacity != 1.0 || !frame.matches(bounds) || !native_settled {
             return;
         }
-        self.cached.insert(
-            entity,
-            CachedNativeFrame {
-                generation,
-                navigation_revision: surface.navigation_revision(),
-                frame,
-            },
-        );
+        self.cached = Some(CachedNativeFrame {
+            generation,
+            navigation_revision,
+            frame,
+        });
+    }
+
+    fn retry(
+        &mut self,
+        generation: u64,
+        presentation: SurfacePresentation,
+        now: std::time::Instant,
+    ) -> bool {
+        match self.attempt.as_mut() {
+            Some(attempt)
+                if attempt.generation == generation && attempt.presentation == presentation =>
+            {
+                now.saturating_duration_since(attempt.started) < SURFACE_SETTLE_TIMEOUT
+            }
+            _ => {
+                self.attempt = Some(SurfaceSettleAttempt {
+                    generation,
+                    presentation,
+                    started: now,
+                });
+                true
+            }
+        }
     }
 }
 
 const SURFACE_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 const SURFACE_SETTLE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
+#[derive(Message)]
+struct SurfaceWakeRequested {
+    deadline: std::time::Instant,
+}
+
+fn wake(
+    mut requests: MessageReader<SurfaceWakeRequested>,
+    service: Res<SurfaceSettleWake>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    for request in requests.read() {
+        service.schedule(request.deadline, proxy.as_deref());
+    }
+}
+
 #[derive(Resource, Default)]
-struct SurfaceSettleRetries {
-    started: HashMap<(Entity, u64), (SurfacePresentation, std::time::Instant)>,
-    wake: SurfaceSettleWake,
-}
-
-impl SurfaceSettleRetries {
-    fn clear(&mut self, entity: Entity) {
-        self.started
-            .retain(|(candidate, _), _| *candidate != entity);
-    }
-
-    fn retry(
-        &mut self,
-        entity: Entity,
-        generation: u64,
-        presentation: SurfacePresentation,
-        now: std::time::Instant,
-    ) -> bool {
-        self.started.retain(|(candidate, current_generation), _| {
-            *candidate != entity || *current_generation == generation
-        });
-        let (_, started) = self
-            .started
-            .entry((entity, generation))
-            .and_modify(|(target, started)| {
-                if *target != presentation {
-                    *target = presentation;
-                    *started = now;
-                }
-            })
-            .or_insert((presentation, now));
-        now.saturating_duration_since(*started) < SURFACE_SETTLE_TIMEOUT
-    }
-
-    fn schedule(&self, proxy: Option<&EventLoopProxyWrapper>) {
-        self.wake.schedule(proxy);
-    }
-}
-
-#[derive(Default)]
 struct SurfaceSettleWake {
+    worker: Mutex<Option<std::thread::JoinHandle<()>>>,
     shared: Arc<(Mutex<SurfaceSettleWakeState>, Condvar)>,
 }
 
@@ -726,33 +754,37 @@ struct SurfaceSettleWake {
 struct SurfaceSettleWakeState {
     deadline: Option<std::time::Instant>,
     proxy: Option<EventLoopProxy<WinitUserEvent>>,
-    worker_started: bool,
+    stopping: bool,
 }
 
 impl SurfaceSettleWake {
-    fn schedule(&self, proxy: Option<&EventLoopProxyWrapper>) {
+    fn schedule(&self, deadline: std::time::Instant, proxy: Option<&EventLoopProxyWrapper>) {
         let Some(proxy) = proxy else {
             return;
         };
-        let deadline = std::time::Instant::now() + SURFACE_SETTLE_RETRY_INTERVAL;
-        let start_worker = {
+        {
             let (state, wake) = &*self.shared;
             let mut state = state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if state.deadline.is_some_and(|current| current <= deadline) {
+            if state.stopping || state.deadline.is_some_and(|current| current <= deadline) {
                 return;
             }
             state.deadline = Some(deadline);
             state.proxy = Some((**proxy).clone());
-            let start_worker = !state.worker_started;
-            state.worker_started = true;
             wake.notify_one();
-            start_worker
-        };
-        if start_worker {
+        }
+        self.start();
+    }
+
+    fn start(&self) {
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if worker.is_none() {
             let shared = self.shared.clone();
-            std::thread::spawn(move || Self::run(shared));
+            *worker = Some(std::thread::spawn(move || Self::run(shared)));
         }
     }
 
@@ -762,6 +794,9 @@ impl SurfaceSettleWake {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         loop {
+            if state.stopping {
+                return;
+            }
             let Some(deadline) = state.deadline else {
                 state = wake
                     .wait(state)
@@ -788,6 +823,29 @@ impl SurfaceSettleWake {
                 .0
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+}
+
+impl Drop for SurfaceSettleWake {
+    fn drop(&mut self) {
+        {
+            let (state, wake) = &*self.shared;
+            let mut state = state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.stopping = true;
+            state.deadline = None;
+            state.proxy = None;
+            wake.notify_one();
+        }
+        let worker = self
+            .worker
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(worker) = worker {
+            let _ = worker.join();
         }
     }
 }
@@ -1838,39 +1896,120 @@ fn registration_claim_priority(
     Some((3, page.url.len()))
 }
 
-fn place(
+#[derive(EntityEvent)]
+struct PresentationCompleted {
+    #[event_target]
+    surface: Entity,
+    generation: u64,
+    presentation: SurfacePresentation,
+    pending: bool,
+    reusable: bool,
+    cached: bool,
+}
+
+type HostedPresentations<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut SurfaceHistory,
+        Ref<'static, HostedSurface>,
+        &'static HostedSurfaceGeneration,
+        Option<&'static vmux_layout::hosted_page::SurfaceHandoff>,
+        Option<&'static vmux_layout::page_slot::SurfaceOpacity>,
+        Has<vmux_layout::hosted_page::SurfacePaintReady>,
+        Has<PageReady>,
+        Has<vmux_ecs::PagePresented>,
+        Has<vmux_layout::hosted_page::SurfaceBlocked>,
+        Has<vmux_ecs::PageTransition>,
+        Has<vmux_layout::PendingWebviewReveal>,
+    ),
+    With<HostsPage>,
+>;
+
+#[derive(SystemParam)]
+struct Placement<'w, 's> {
+    ready_spares: Query<'w, 's, (), (With<vmux_layout::warm_page::WarmPageSpare>, With<PageReady>)>,
+    frames: Query<'w, 's, &'static PaneFrame>,
+    rings: Query<'w, 's, &'static FocusRing>,
+    corners: Query<'w, 's, &'static AllCorners>,
+    windows: Query<'w, 's, &'static Window>,
+    capturing: Query<'w, 's, &'static HostWindow, (With<LayoutCef>, LayoutPointerCapture)>,
+    settings: Res<'w, AppSettings>,
+    frame_queries: WindowFrameQueries<'w, 's>,
+}
+
+impl Placement<'_, '_> {
+    fn presentation(
+        &self,
+        entity: Entity,
+        page: &HostedSurface,
+        handoff: Option<&vmux_layout::hosted_page::SurfaceHandoff>,
+        opacity: Option<&vmux_layout::page_slot::SurfaceOpacity>,
+        paint_ready: bool,
+    ) -> SurfacePresentation {
+        if self.ready_spares.contains(entity) {
+            return SurfacePresentation::Hidden;
+        }
+        let window = self.windows.get(page.window).ok();
+        let Some(frame) = page.placement.frame(entity, window, &self.frames) else {
+            return SurfacePresentation::Hidden;
+        };
+        let all_corners = self.corners.get(entity).is_ok_and(|corners| corners.0);
+        let ring = self.rings.get(entity).copied().unwrap_or_default();
+        let capturing = self.capturing.iter().any(|host| host.0 == page.window);
+        let pending = handoff.is_some_and(|handoff| !handoff.retain_visible());
+        let opacity = if handoff.is_some_and(|handoff| handoff.requires_paint(paint_ready)) {
+            0.0
+        } else {
+            match opacity {
+                Some(opacity) => opacity.value(),
+                None if pending => 0.0,
+                None => 1.0,
+            }
+        };
+        SurfacePresentation::Visible {
+            frame,
+            radius: self.settings.layout.radius as f64,
+            opacity,
+            all_corners,
+            ring,
+            order: page.placement.pointer_order(
+                capturing,
+                pending,
+                self.frame_queries.presentation(entity),
+            ),
+        }
+    }
+}
+
+fn initialize(
+    surfaces: Query<
+        Entity,
+        (
+            With<HostedSurface>,
+            With<HostedSurfaceGeneration>,
+            Without<SurfaceHistory>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for entity in &surfaces {
+        commands.entity(entity).insert(SurfaceHistory::default());
+    }
+}
+
+fn retire_history<T: Component>(removed: On<Remove, T>, mut commands: Commands) {
+    commands
+        .entity(removed.event_target())
+        .try_remove::<SurfaceHistory>();
+}
+
+fn collect(
     renderer: Option<NonSendMut<PageRenderer>>,
     all_hosted: Query<(), With<HostsPage>>,
-    hosted: Query<
-        (
-            Entity,
-            Ref<HostedSurface>,
-            &HostedSurfaceGeneration,
-            Option<&vmux_layout::hosted_page::SurfaceHandoff>,
-            Option<&vmux_layout::page_slot::SurfaceOpacity>,
-            Has<vmux_layout::hosted_page::SurfacePresentationReady>,
-            Has<vmux_layout::hosted_page::SurfaceTransitionReady>,
-            Has<vmux_layout::hosted_page::SurfacePaintReady>,
-            Has<PageReady>,
-            Has<vmux_ecs::PagePresented>,
-            Has<vmux_layout::hosted_page::SurfaceBlocked>,
-            Has<vmux_ecs::PageTransition>,
-            Has<vmux_layout::PendingWebviewReveal>,
-        ),
-        With<HostsPage>,
-    >,
-    ready_spares: Query<(), (With<vmux_layout::warm_page::WarmPageSpare>, With<PageReady>)>,
-    frames: Query<&PaneFrame>,
-    rings: Query<&FocusRing>,
-    corners: Query<&AllCorners>,
-    windows: Query<&Window>,
-    capturing: Query<&HostWindow, (With<LayoutCef>, LayoutPointerCapture)>,
-    settings: Res<AppSettings>,
-    frame_queries: WindowFrameQueries,
+    histories: Query<Entity, With<SurfaceHistory>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut presentations: ResMut<SurfacePresentations>,
-    mut retries: ResMut<SurfaceSettleRetries>,
-    mut reused: MessageWriter<vmux_layout::presentation::NativeSurfaceReused>,
     mut commands: Commands,
 ) {
     let Some(mut renderer) = renderer else {
@@ -1888,99 +2027,49 @@ fn place(
         renderer.retire(entity, now, proxy.as_deref());
     }
     renderer.collect_retired(now, proxy.as_deref());
-    presentations
-        .applied
-        .retain(|entity, _| renderer.active.contains_key(entity));
-    presentations
-        .cached
-        .retain(|entity, _| renderer.active.contains_key(entity));
-    retries
-        .started
-        .retain(|(entity, _), _| renderer.active.contains_key(entity));
+    for entity in &histories {
+        if !renderer.active.contains_key(&entity) {
+            commands.entity(entity).try_remove::<SurfaceHistory>();
+        }
+    }
     if renderer.active.len() != held
         && let Some(proxy) = proxy.as_ref()
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-    let mut committed_replacements = Vec::new();
+}
+
+fn place(
+    renderer: Option<NonSend<PageRenderer>>,
+    mut hosted: HostedPresentations,
+    lookup: Placement,
+    mut wakes: MessageWriter<SurfaceWakeRequested>,
+    mut commands: Commands,
+) {
+    let Some(renderer) = renderer else {
+        return;
+    };
+    let now = std::time::Instant::now();
     for (
         entity,
+        mut history,
         page,
         generation,
         handoff,
         opacity,
-        presentation_ready,
-        transition_ready,
         paint_ready,
         ready,
         presented,
         blocked,
         transitioning,
         revealing,
-    ) in &hosted
+    ) in &mut hosted
     {
         let Some(surface) = renderer.active.get(&entity) else {
             continue;
         };
         let pending = handoff.is_some_and(|handoff| !handoff.retain_visible());
-        let presentation = frame_queries.presentation(entity);
-        let hidden = ready_spares.contains(entity);
-        let next = if hidden {
-            SurfacePresentation::Hidden
-        } else {
-            let window = windows.get(page.window).ok();
-            let Some(frame) = page.placement.frame(entity, window, &frames) else {
-                if presentation_ready || transition_ready {
-                    commands.entity(entity).try_remove::<(
-                        vmux_layout::hosted_page::SurfacePresentationReady,
-                        vmux_layout::hosted_page::SurfaceTransitionReady,
-                    )>();
-                }
-                let hidden_applied = presentations.applied.get(&entity).is_some_and(|current| {
-                    current.generation == generation.0
-                        && current.presentation == SurfacePresentation::Hidden
-                        && current.settled
-                });
-                if page.is_changed() || !hidden_applied {
-                    SurfacePresentation::Hidden.apply(surface, false, false);
-                    presentations.applied.insert(
-                        entity,
-                        AppliedSurfacePresentation {
-                            generation: generation.0,
-                            presentation: SurfacePresentation::Hidden,
-                            settled: true,
-                        },
-                    );
-                    retries.clear(entity);
-                }
-                continue;
-            };
-            let all_corners = corners.get(entity).is_ok_and(|corners| corners.0);
-            let ring = rings.get(entity).copied().unwrap_or_default();
-            let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
-            let awaiting_first_paint =
-                handoff.is_some_and(|handoff| handoff.requires_paint(paint_ready));
-            let opacity = if awaiting_first_paint {
-                0.0
-            } else {
-                opacity.map_or_else(
-                    || {
-                        if pending { 0.0 } else { 1.0 }
-                    },
-                    |opacity| opacity.value(),
-                )
-            };
-            SurfacePresentation::Visible {
-                frame,
-                radius: settings.layout.radius as f64,
-                opacity,
-                all_corners,
-                ring,
-                order: page
-                    .placement
-                    .pointer_order(window_is_capturing, pending, presentation),
-            }
-        };
+        let next = lookup.presentation(entity, &page, handoff, opacity, paint_ready);
         let reusable = ready
             && presented
             && handoff.is_none()
@@ -1989,8 +2078,8 @@ fn place(
             && !revealing
             && !renderer.replacements.contains_key(&entity);
         let cached = reusable
-            && presentation == PresentationLayer::Incoming
-            && presentations.cached.get(&entity).is_some_and(|cached| {
+            && lookup.frame_queries.presentation(entity) == PresentationLayer::Incoming
+            && history.cached.is_some_and(|cached| {
                 cached.matches(
                     generation.0,
                     surface.navigation_revision(),
@@ -1998,112 +2087,158 @@ fn place(
                     surface.bounds(),
                 )
             });
-        let previous = presentations.applied.get(&entity).copied();
-        let same = !page.is_changed()
-            && previous.is_some_and(|current| {
-                current.generation == generation.0 && current.presentation == next
-            });
-
+        let previous = history.applied;
+        let same = !page.is_changed() && history.matches(generation.0, next);
         let native_settled = match next {
             SurfacePresentation::Hidden => true,
             SurfacePresentation::Visible { opacity, .. } => {
                 !pending || surface.presentation_settled(opacity)
             }
         };
-        if same && previous.is_some_and(|current| current.settled) && native_settled {
-            sync_presentation_readiness(
-                next,
-                entity,
-                pending,
-                presentation_ready,
-                transition_ready,
-                &mut commands,
-            );
-            if cached && surface.presentation_settled(1.0) {
-                reused.write(vmux_layout::presentation::NativeSurfaceReused { surface: entity });
-            }
-            if reusable {
-                presentations.remember(entity, generation.0, surface, next);
-            }
-            if renderer.replacements.contains_key(&entity)
-                && (handoff.is_none() || paint_ready)
-                && matches!(next, SurfacePresentation::Visible { .. })
-            {
-                committed_replacements.push(entity);
-            }
-            continue;
-        }
-        let retain_visible = matches!(
-            previous,
-            Some(AppliedSurfacePresentation {
-                generation: current_generation,
-                presentation: SurfacePresentation::Visible { .. },
-                ..
-            }) if current_generation == generation.0
-        );
-        let settled = if same {
+        let retain_visible = matches!(previous, Some(AppliedSurfacePresentation { generation: current, presentation: SurfacePresentation::Visible { .. }, .. }) if current == generation.0);
+        let settled = if same && previous.is_some_and(|current| current.settled) && native_settled {
+            true
+        } else if same {
             next.settle(surface, retain_visible, pending)
         } else {
             next.apply(surface, retain_visible, pending)
         };
-        presentations.applied.insert(
-            entity,
-            AppliedSurfacePresentation {
+        history.record(generation.0, next, settled);
+        if settled {
+            history.attempt = None;
+            commands.trigger(PresentationCompleted {
+                surface: entity,
                 generation: generation.0,
                 presentation: next,
-                settled,
-            },
-        );
-        if settled {
-            sync_presentation_readiness(
-                next,
-                entity,
                 pending,
-                presentation_ready,
-                transition_ready,
-                &mut commands,
-            );
-            retries.clear(entity);
-            if cached && surface.presentation_settled(1.0) {
-                reused.write(vmux_layout::presentation::NativeSurfaceReused { surface: entity });
-            }
-            if reusable {
-                presentations.remember(entity, generation.0, surface, next);
-            }
-            if renderer.replacements.contains_key(&entity)
-                && (handoff.is_none() || paint_ready)
-                && matches!(next, SurfacePresentation::Visible { .. })
-            {
-                committed_replacements.push(entity);
-            }
-        } else if retries.retry(entity, generation.0, next, now) {
-            commands.entity(entity).try_remove::<(
-                vmux_layout::hosted_page::SurfacePresentationReady,
-                vmux_layout::hosted_page::SurfaceTransitionReady,
-            )>();
-            retries.schedule(proxy.as_deref());
-        } else {
-            surface.set_visible(false);
-            commands
-                .entity(entity)
-                .try_remove::<(
-                    vmux_layout::hosted_page::SurfacePresentationReady,
-                    vmux_layout::hosted_page::SurfaceTransitionReady,
-                )>()
-                .try_insert(vmux_layout::hosted_page::SurfaceHandoffFailed);
-            presentations.applied.insert(
-                entity,
-                AppliedSurfacePresentation {
-                    generation: generation.0,
-                    presentation: SurfacePresentation::Hidden,
-                    settled: true,
-                },
-            );
-            retries.clear(entity);
+                reusable,
+                cached,
+            });
+            continue;
         }
+        commands.entity(entity).try_remove::<(
+            vmux_layout::hosted_page::SurfacePresentationReady,
+            vmux_layout::hosted_page::SurfaceTransitionReady,
+        )>();
+        if history.retry(generation.0, next, now) {
+            wakes.write(SurfaceWakeRequested {
+                deadline: std::time::Instant::now() + SURFACE_SETTLE_RETRY_INTERVAL,
+            });
+            continue;
+        }
+        surface.set_visible(false);
+        commands
+            .entity(entity)
+            .try_insert(vmux_layout::hosted_page::SurfaceHandoffFailed);
+        history.record(generation.0, SurfacePresentation::Hidden, true);
+        history.attempt = None;
     }
-    for entity in committed_replacements {
-        renderer.commit_replacement(entity, now, proxy.as_deref());
+}
+
+fn confirm(
+    completed: On<PresentationCompleted>,
+    mut surfaces: Query<
+        (
+            &HostedSurfaceGeneration,
+            &mut SurfaceHistory,
+            Option<&vmux_layout::hosted_page::SurfaceHandoff>,
+            Has<vmux_layout::hosted_page::SurfacePaintReady>,
+            Has<vmux_layout::hosted_page::SurfacePresentationReady>,
+            Has<vmux_layout::hosted_page::SurfaceTransitionReady>,
+        ),
+        With<HostedSurface>,
+    >,
+    renderer: Option<NonSendMut<PageRenderer>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let entity = completed.surface;
+    let Ok((generation, mut history, handoff, paint_ready, presentation_ready, transition_ready)) =
+        surfaces.get_mut(entity)
+    else {
+        return;
+    };
+    let Some(applied) = history.applied else {
+        return;
+    };
+    if generation.0 != completed.generation
+        || applied.generation != generation.0
+        || applied.presentation != completed.presentation
+        || !applied.settled
+    {
+        return;
+    }
+    sync_presentation_readiness(
+        applied.presentation,
+        entity,
+        completed.pending,
+        presentation_ready,
+        transition_ready,
+        &mut commands,
+    );
+    let Some(mut renderer) = renderer else {
+        return;
+    };
+    let Some(surface) = renderer.active.get(&entity) else {
+        return;
+    };
+    if completed.cached && surface.presentation_settled(1.0) {
+        commands.write_message(vmux_layout::presentation::NativeSurfaceReused { surface: entity });
+    }
+    if completed.reusable
+        && !history.remembered(
+            generation.0,
+            surface.navigation_revision(),
+            applied.presentation,
+        )
+    {
+        history.remember(
+            generation.0,
+            surface.navigation_revision(),
+            applied.presentation,
+            surface.bounds(),
+            surface.presentation_settled(1.0),
+        );
+    }
+    if renderer.replacements.contains_key(&entity)
+        && (handoff.is_none() || paint_ready)
+        && matches!(applied.presentation, SurfacePresentation::Visible { .. })
+    {
+        renderer.commit_replacement(entity, std::time::Instant::now(), proxy.as_deref());
+    }
+}
+
+fn sync_presentation_readiness(
+    presentation: SurfacePresentation,
+    entity: Entity,
+    pending: bool,
+    presentation_ready: bool,
+    transition_ready: bool,
+    commands: &mut Commands,
+) {
+    let presented = matches!(presentation, SurfacePresentation::Visible { .. });
+    if presented && !presentation_ready {
+        commands
+            .entity(entity)
+            .try_insert(vmux_layout::hosted_page::SurfacePresentationReady);
+    } else if !presented && presentation_ready {
+        commands
+            .entity(entity)
+            .try_remove::<vmux_layout::hosted_page::SurfacePresentationReady>();
+    }
+    let transitioned = pending
+        && matches!(
+            presentation,
+            SurfacePresentation::Visible { opacity, .. } if opacity >= 1.0
+        );
+    if transitioned && !transition_ready {
+        commands
+            .entity(entity)
+            .try_insert(vmux_layout::hosted_page::SurfaceTransitionReady);
+    } else if !transitioned && transition_ready {
+        commands
+            .entity(entity)
+            .try_remove::<vmux_layout::hosted_page::SurfaceTransitionReady>();
     }
 }
 
@@ -2843,11 +2978,11 @@ fn report_waiting(reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CachedNativeFrame, HostedSurfaceGeneration, MacosBrowserPlugin, OpenPageDropdown,
-        PageLifecycleEnvelope, PageLifecycleMailbox, PageLifecycleReceiver, PageMetadataMailbox,
-        PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt,
-        SURFACE_SETTLE_TIMEOUT, SimulatorFrame, SimulatorFrameRequest, SurfacePresentation,
-        SurfaceSettleRetries,
+        AppliedSurfacePresentation, CachedNativeFrame, HostedSurfaceGeneration, MacosBrowserPlugin,
+        OpenPageDropdown, PageLifecycleEnvelope, PageLifecycleMailbox, PageLifecycleReceiver,
+        PageMetadataMailbox, PageMetadataReceiver, PageMetadataSender, PageOutbox,
+        PagePlacementExt, SURFACE_SETTLE_TIMEOUT, SimulatorFrame, SimulatorFrameRequest,
+        SurfaceHistory, SurfacePresentation, SurfaceSettleWake,
     };
     use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{
@@ -3018,40 +3153,172 @@ mod tests {
     }
 
     #[test]
-    fn surface_settle_retries_are_time_bounded() {
-        let entity = bevy::prelude::Entity::PLACEHOLDER;
-        let generation = 1;
-        let mut retries = SurfaceSettleRetries::default();
+    fn surface_settle_deadlines_are_independent_and_restart_for_new_targets() {
+        let mut first = SurfaceHistory::default();
+        let mut second = SurfaceHistory::default();
         let started = std::time::Instant::now();
-        let presentation = SurfacePresentation::Hidden;
+        let later = started + SURFACE_SETTLE_TIMEOUT;
+        assert!(first.retry(1, SurfacePresentation::Hidden, started));
+        assert!(second.retry(1, SurfacePresentation::Hidden, later));
+        assert!(!first.retry(1, SurfacePresentation::Hidden, later));
+        assert!(second.retry(1, SurfacePresentation::Hidden, later));
+        assert!(first.retry(2, SurfacePresentation::Hidden, later));
+    }
 
-        assert!(retries.retry(entity, generation, presentation, started));
-        assert!(retries.retry(
-            entity,
-            generation,
-            presentation,
-            started + SURFACE_SETTLE_TIMEOUT - std::time::Duration::from_millis(1)
-        ));
-        assert!(!retries.retry(
-            entity,
-            generation,
-            presentation,
-            started + SURFACE_SETTLE_TIMEOUT
-        ));
-        retries.clear(entity);
-        assert!(retries.retry(
-            entity,
-            generation,
-            presentation,
-            started + SURFACE_SETTLE_TIMEOUT
-        ));
-        assert!(retries.retry(
-            entity,
-            generation + 1,
-            presentation,
-            started + SURFACE_SETTLE_TIMEOUT
-        ));
-        assert_eq!(retries.started.len(), 1);
+    #[test]
+    fn surface_settle_worker_releases_ownership_on_teardown() {
+        let wake = SurfaceSettleWake::default();
+        wake.shared.0.lock().unwrap().deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        let lifetime = std::sync::Arc::downgrade(&wake.shared);
+        wake.start();
+        drop(wake);
+        assert!(lifetime.upgrade().is_none());
+    }
+
+    struct HistoryFixture {
+        app: App,
+        surface: bevy::prelude::Entity,
+    }
+
+    impl HistoryFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, super::SurfacePresentationPlugin))
+                .init_resource::<vmux_setting::AppSettings>();
+            let surface = app
+                .world_mut()
+                .spawn((
+                    super::HostedSurface {
+                        placement: PagePlacement::Pane,
+                        page: &const {
+                            vmux_page::Page::pane("vmux://presentation-test", vmux_layout::ui::Page)
+                        },
+                        window: bevy::prelude::Entity::PLACEHOLDER,
+                        url: "vmux://presentation-test".to_string(),
+                    },
+                    HostedSurfaceGeneration(1),
+                ))
+                .id();
+            app.update();
+            Self { app, surface }
+        }
+
+        fn retry(&mut self, now: std::time::Instant) -> bool {
+            self.app
+                .world_mut()
+                .get_mut::<SurfaceHistory>(self.surface)
+                .unwrap()
+                .retry(1, SurfacePresentation::Hidden, now)
+        }
+
+        fn visible(opacity: f32) -> SurfacePresentation {
+            SurfacePresentation::Visible {
+                frame: PaneFrame {
+                    left: 0.0,
+                    top: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                radius: 0.0,
+                opacity,
+                all_corners: false,
+                ring: crate::present::FocusRing::default(),
+                order: None,
+            }
+        }
+
+        fn applied(&mut self, generation: u64, presentation: SurfacePresentation) {
+            self.app
+                .world_mut()
+                .get_mut::<SurfaceHistory>(self.surface)
+                .unwrap()
+                .applied = Some(AppliedSurfacePresentation {
+                generation,
+                presentation,
+                settled: true,
+            });
+        }
+
+        fn complete(&mut self, generation: u64, presentation: SurfacePresentation) {
+            self.app.world_mut().trigger(super::PresentationCompleted {
+                surface: self.surface,
+                generation,
+                presentation,
+                pending: true,
+                reusable: false,
+                cached: false,
+            });
+            self.app.world_mut().flush();
+        }
+
+        fn ready(&self) -> bool {
+            self.app
+                .world()
+                .get::<vmux_layout::hosted_page::SurfacePresentationReady>(self.surface)
+                .is_some()
+        }
+
+        fn transitioned(&self) -> bool {
+            self.app
+                .world()
+                .get::<vmux_layout::hosted_page::SurfaceTransitionReady>(self.surface)
+                .is_some()
+        }
+    }
+
+    #[test]
+    fn native_surface_reattachment_retires_its_settle_deadline() {
+        let mut fixture = HistoryFixture::new();
+        let started = std::time::Instant::now();
+        assert!(fixture.retry(started));
+        let generation = fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.surface)
+            .take::<HostedSurfaceGeneration>()
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.surface)
+            .insert(generation);
+        fixture.app.update();
+        assert!(fixture.retry(started + SURFACE_SETTLE_TIMEOUT));
+    }
+
+    #[test]
+    fn settled_presentation_publishes_readiness_and_completed_transition() {
+        let mut fixture = HistoryFixture::new();
+        let presentation = HistoryFixture::visible(1.0);
+        fixture.applied(1, presentation);
+        fixture.complete(1, presentation);
+        assert!(fixture.ready());
+        assert!(fixture.transitioned());
+    }
+
+    #[test]
+    fn a_retired_generation_cannot_publish_readiness() {
+        let mut fixture = HistoryFixture::new();
+        let presentation = HistoryFixture::visible(1.0);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.surface)
+            .insert(HostedSurfaceGeneration(2));
+        fixture.applied(2, presentation);
+        fixture.complete(1, presentation);
+        assert!(!fixture.ready());
+        assert!(!fixture.transitioned());
+    }
+
+    #[test]
+    fn an_earlier_target_cannot_complete_a_later_presentation() {
+        let mut fixture = HistoryFixture::new();
+        fixture.applied(1, HistoryFixture::visible(0.0));
+        fixture.complete(1, HistoryFixture::visible(1.0));
+        assert!(!fixture.ready());
+        assert!(!fixture.transitioned());
     }
 
     #[test]
