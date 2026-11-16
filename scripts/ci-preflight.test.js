@@ -833,6 +833,40 @@ test('compiler-cache policy pairs each workflow restore with a successful explic
   }
 });
 
+test('pinned compiler tools retain their cache across product edits and invalidate when tool versions change', (t) => {
+  const fixture = new Fixture(t);
+  const action = JSON.parse(execFileSync('ruby', ['-ryaml', '-rjson', '-e', 'puts JSON.generate(YAML.load_file(ARGV[0]))', path.join(__dirname, '../.github/actions/cache-ecs-lints/action.yml')], { encoding: 'utf8' }));
+  const caches = action.runs.steps.filter((step) => step.uses === 'actions/cache@v5');
+  const tools = caches.find((step) => step.with.path.includes('dylint-drivers'));
+  const artifacts = caches.find((step) => step.with.path.includes('lints-sources.json'));
+  const toolchain = 'crates/feature/vmux_dx/lints/rust-toolchain.toml';
+  const versions = 'crates/feature/vmux_dx/lints/tool-versions.toml';
+  fs.mkdirSync(path.dirname(path.join(fixture.root, toolchain)), { recursive: true });
+  fs.writeFileSync(path.join(fixture.root, toolchain), 'channel = "nightly-2026-08-20"\n');
+  fs.writeFileSync(path.join(fixture.root, versions), 'dylint = "6.4.0"\n');
+  fixture.commit('tool inputs');
+  const key = (cache) => cache.with.key.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, expression) => {
+    const hashFiles = (...patterns) => {
+      const hash = require('node:crypto').createHash('sha256');
+      for (const file of fixture.git('ls-files').split('\n')) {
+        if (patterns.some((pattern) => path.matchesGlob(file, pattern))) hash.update(fs.readFileSync(path.join(fixture.root, file)));
+      }
+      return hash.digest('hex');
+    };
+    return Function('runner', 'steps', 'env', 'github', 'hashFiles', `return (${expression});`)({ os: 'Linux', arch: 'X64' }, { compiler: { outputs: { channel: 'nightly-2026-08-20' } } }, { VMUX_CI_VALIDATION: '1' }, { sha: fixture.git('rev-parse', 'HEAD') }, hashFiles);
+  });
+  const originalTools = key(tools);
+  const originalArtifacts = key(artifacts);
+  fs.writeFileSync(path.join(fixture.root, 'product.rs'), 'fn updated() {}\n');
+  fixture.commit('product edit');
+  assert.equal(key(tools), originalTools);
+  assert.notEqual(key(artifacts), originalArtifacts);
+  fs.writeFileSync(path.join(fixture.root, versions), 'dylint = "6.5.0"\n');
+  fixture.commit('tool upgrade');
+  assert.notEqual(key(tools), originalTools);
+  for (const file of tools.with.path.trim().split('\n')) assert.equal(artifacts.with.path.trim().split('\n').includes(file), false);
+});
+
 test('superseded PRs cancel heavy Lint while failed preparation still runs its gate', () => {
   const workflow = new Workflow();
   const expression = workflow.jobs.lint.if;
@@ -843,17 +877,18 @@ test('superseded PRs cancel heavy Lint while failed preparation still runs its g
   }
 });
 
-test('required lint runs compiler fixtures and source checks unless identical inputs were verified', () => {
+test('required compiler lint runs source checks and changed-tool fixtures unless identical inputs were verified', () => {
   const workflow = new Workflow();
   for (const name of ['Check typed registration fixtures', 'Lint registered systems']) {
     for (const [code, reuse_lint, selected] of [['true', '', true], ['false', '', false], ['true', '42', false]]) {
-      assert.equal(workflow.step('lint', name, 'pull_request', 'false', { code, reuse_lint, lint_args: '-p vmux_dx' }), selected, `${name}: ${code}: ${reuse_lint}`);
+      assert.equal(workflow.step('lint', name, 'pull_request', 'false', { code, reuse_lint, compiler_lints: 'true', tooling: 'true', lint_args: '-p vmux_dx' }), selected, `${name}: ${code}: ${reuse_lint}`);
     }
     const step = workflow.jobs.lint.steps.find((step) => step.name === name);
     assert.equal(step['continue-on-error'], undefined);
   }
   assert.equal(workflow.step('lint', 'Lint registered systems', 'pull_request', 'false', { code: 'true', lint_args: '' }), false);
-  assert.equal(workflow.step('lint', 'Check typed registration fixtures', 'pull_request', 'false', { code: 'true', lint_args: '' }), true);
+  assert.equal(workflow.step('lint', 'Check typed registration fixtures', 'pull_request', 'false', { code: 'true', tooling: 'true', lint_args: '' }), true);
+  assert.equal(workflow.step('lint', 'Check typed registration fixtures', 'pull_request', 'false', { code: 'true', tooling: 'false', compiler_lints: 'true', lint_args: '-p feature' }), false);
 });
 
 test('post-job snapshots preserve inputs when Actions clears action inputs', (t) => {
@@ -1347,17 +1382,38 @@ test('shared build inputs select website and Rust validation while website manif
   assert.equal(workflow.gate('test', env).status, 0);
 });
 
-test('main and explicit runs keep full Rust validation even for documentation-only changes', () => {
+test('main documentation changes select their contracts while explicit runs retain full validation', () => {
   const workflow = new Workflow();
-  for (const event of ['push', 'schedule', 'workflow_dispatch']) {
+  for (const event of ['schedule', 'workflow_dispatch']) {
     const changes = workflow.changes(event, 'false', 'base', 'true', workflow.paths(['docs/ux/terminal.md']));
     assert.equal(changes.code, true, event);
     for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, event, 'false', changes), true, `${event}: ${job}`);
   }
   const scope = workflow.jobs.changes.steps.find((step) => step.id === 'scope');
   for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
-    const comparison = Function('github', 'needs', `return (${scope.env.VMUX_CI_BASE.slice(3, -2)});`)({ event_name: event }, { plan: { outputs: { base: 'captured-base' } } });
-    assert.equal(comparison, event === 'pull_request' ? 'captured-base' : '', event);
+    const comparison = Function('github', 'needs', `return (${scope.env.VMUX_CI_BASE.slice(3, -2)});`)({ event_name: event, event: { before: 'push-base' } }, { plan: { outputs: { base: 'captured-base' } } });
+    assert.equal(comparison, event === 'pull_request' ? 'captured-base' : event === 'push' ? 'push-base' : '', event);
+  }
+  const empty = Function('github', 'needs', `return (${scope.env.VMUX_CI_BASE.slice(3, -2)});`)({ event_name: 'push', event: { before: '0'.repeat(40) } }, {});
+  assert.equal(empty, '');
+  const docs = workflow.changes('push', 'false', '', 'true', workflow.paths(['docs/ux/terminal.md']), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false' });
+  assert.equal(docs.code, false);
+  for (const job of ['test-rust', 'test-sdk', 'test-headless', 'test-lean']) assert.equal(workflow.lane(job, 'push', 'false', docs), false, job);
+});
+
+test('architecture and policy-only changes retain ownership checks without invoking compiler or native setup', () => {
+  const workflow = new Workflow();
+  for (const event of ['pull_request', 'push']) {
+    for (const file of ['docs/dx/architecture.md', 'ecs-policy.ron', 'crates/feature/vmux_dx/ecs-policy.ron']) {
+      const changes = workflow.changes(event, 'false', 'base', 'true', workflow.paths([file]), 'false', 'false', { rust: 'false', sdk: 'false', headless: 'false', tooling: 'false', lint_args: '-p vmux_dx' });
+      assert.equal(changes.code, true, file);
+      assert.equal(changes.compiler_lints, false, file);
+      assert.equal(workflow.step('lint', 'ECS Policy check', event, 'false', changes), true, file);
+      for (const title of ['Check formatting', 'Clippy', 'Check typed registration fixtures', 'Lint registered systems']) assert.equal(workflow.step('lint', title, event, 'false', changes), false, `${file}: ${title}`);
+      const setup = workflow.jobs.lint.steps.find((step) => step.uses === './.github/actions/setup-linux');
+      const desktop = Function('needs', `return (${setup.with.desktop.slice(3, -2)});`)({ changes: { outputs: changes } });
+      assert.equal(desktop, false, file);
+    }
   }
 });
 
@@ -1365,7 +1421,7 @@ test('empty package scopes cannot invoke Cargo default targets during deletion-o
   const workflow = new Workflow();
   for (const title of ['Check formatting', 'Clippy']) {
     assert.equal(workflow.step('lint', title, 'pull_request', 'false', { code: 'true', lint_args: '' }), false, title);
-    assert.equal(workflow.step('lint', title, 'pull_request', 'false', { code: 'true', lint_args: '-p vmux_ecs' }), true, title);
+    assert.equal(workflow.step('lint', title, 'pull_request', 'false', { code: 'true', compiler_lints: 'true', lint_args: '-p vmux_ecs' }), true, title);
   }
 });
 

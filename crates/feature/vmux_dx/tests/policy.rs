@@ -27,6 +27,37 @@ const UPSTREAM_SETS: &[(&str, &str)] = &[
 ];
 
 #[test]
+fn newly_loaded_implementations_prove_only_their_qualified_owner_references() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/ownership/src/lib.rs",
+        "mod first { pub struct Owner; } mod second { pub struct Owner; } pub struct Value; mod access;",
+    );
+    for owner in ["first::Owner", "second::Owner"] {
+        let owner = inventory
+            .resolve("ownership", owner, &mut BTreeSet::new())
+            .unwrap();
+        let value = inventory
+            .resolve("ownership", "Value", &mut BTreeSet::new())
+            .unwrap();
+        assert!(!inventory.owner_references(owner, value));
+    }
+    inventory.source(
+        "crates/util/ownership/src/access.rs",
+        "impl crate::first::Owner { fn value() -> crate::Value { crate::Value } }",
+    );
+    for (owner, expected) in [("first::Owner", true), ("second::Owner", false)] {
+        let owner = inventory
+            .resolve("ownership", owner, &mut BTreeSet::new())
+            .unwrap();
+        let value = inventory
+            .resolve("ownership", "Value", &mut BTreeSet::new())
+            .unwrap();
+        assert_eq!(inventory.owner_references(owner, value), expected);
+    }
+}
+
+#[test]
 fn cached_namespaces_preserve_cyclic_glob_ambiguity_in_both_query_orders() {
     for reverse in [false, true] {
         let inventory = Inventory::fixture(
@@ -5735,6 +5766,7 @@ struct Inventory {
     root_modules: RefCell<BTreeMap<(String, String), Option<String>>>,
     root_declarations: RefCell<BTreeMap<(String, String), DeclarationLookup>>,
     owner_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
+    implementation_index: RefCell<Option<BTreeMap<String, Vec<String>>>>,
 }
 
 struct DeclarationLookup {
@@ -5971,6 +6003,7 @@ impl Inventory {
         self.root_modules.get_mut().clear();
         self.root_declarations.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
+        *self.implementation_index.get_mut() = None;
         if !path.ends_with(".rs") {
             self.script(path, source);
             return;
@@ -6015,6 +6048,7 @@ impl Inventory {
 
     fn script(&mut self, path: &str, source: &str) {
         self.owner_reference_cache.get_mut().clear();
+        *self.implementation_index.get_mut() = None;
         let key = format!("{path}||script");
         self.entries.insert(
             key.clone(),
@@ -6610,19 +6644,11 @@ impl Inventory {
 
     fn references_of(&self, owner: &Declaration, value: &Declaration) -> bool {
         let mut candidates = vec![owner];
-        for implementation in self.entries.values() {
+        for implementation in self.implementations(owner) {
             if owner.production && !implementation.production {
                 continue;
             }
-            let Some(path) = &implementation.owner else {
-                continue;
-            };
-            if self
-                .resolve(&implementation.namespace, path, &mut BTreeSet::new())
-                .is_some_and(|resolved| resolved.key == owner.key)
-            {
-                candidates.push(implementation);
-            }
+            candidates.push(implementation);
         }
         for candidate in candidates {
             for (attribute, input) in &candidate.page_inputs {
@@ -6725,6 +6751,35 @@ impl Inventory {
         false
     }
 
+    fn implementations(&self, owner: &Declaration) -> Vec<&Declaration> {
+        if self.implementation_index.borrow().is_none() {
+            let mut index: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for implementation in self.entries.values() {
+                let Some(path) = &implementation.owner else {
+                    continue;
+                };
+                let Some(resolved) =
+                    self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                index
+                    .entry(resolved.key.clone())
+                    .or_default()
+                    .push(implementation.key.clone());
+            }
+            *self.implementation_index.borrow_mut() = Some(index);
+        }
+        let index = self.implementation_index.borrow();
+        let mut implementations = Vec::new();
+        if let Some(keys) = index.as_ref().unwrap().get(&owner.key) {
+            for key in keys {
+                implementations.push(&self.entries[key]);
+            }
+        }
+        implementations
+    }
+
     fn boundary_references(
         &self,
         adapter: &Declaration,
@@ -6761,17 +6816,8 @@ impl Inventory {
                 return true;
             }
         }
-        for implementation in self.entries.values() {
+        for implementation in self.implementations(owner) {
             if !implementation.plugin || owner.production && !implementation.production {
-                continue;
-            }
-            let Some(path) = &implementation.owner else {
-                continue;
-            };
-            if self
-                .resolve(&implementation.namespace, path, &mut BTreeSet::new())
-                .is_none_or(|resolved| resolved.key != owner.key)
-            {
                 continue;
             }
             let actual_plugin = implementation
@@ -7661,6 +7707,7 @@ impl Inventory {
             }
         }
         self.owner_reference_cache.get_mut().clear();
+        *self.implementation_index.get_mut() = None;
         let mut keys = BTreeSet::new();
         let mut registered = BTreeSet::new();
         for usage in self.usage.values() {

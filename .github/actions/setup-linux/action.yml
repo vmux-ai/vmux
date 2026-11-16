@@ -11,6 +11,10 @@ inputs:
     description: Comma-separated rustup components
     required: false
     default: ""
+  desktop:
+    description: Install native desktop libraries and restore the CEF SDK
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -29,6 +33,7 @@ runs:
         fi
 
     - name: Install Linux dependencies
+      if: inputs.desktop == 'true'
       shell: bash
       run: |
         sudo tee /etc/apt/apt-mirrors.txt > /dev/null <<'MIRROR'
@@ -80,6 +85,7 @@ runs:
         cache-key: ${{ inputs.cache-key }}
 
     - name: Use a shared Linux CEF SDK
+      if: inputs.desktop == 'true'
       shell: bash
       env:
         CEF_CRATE_VERSION: ${{ inputs.cef-version }}
@@ -98,6 +104,7 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Cache Linux CEF SDK
+      if: inputs.desktop == 'true'
       uses: actions/cache@v5
       with:
         path: ~/.cache/vmux/cef-sdk
