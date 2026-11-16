@@ -163,9 +163,15 @@ impl BlockingPool {
         let output = Arc::clone(&state);
         let canceled = Arc::new(AtomicBool::new(false));
         let worker_canceled = Arc::clone(&canceled);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
         let work = Box::new(move || {
-            let wake = CompletionWake(wake);
+            let completion = TaskCompletion {
+                finished: worker_finished,
+                wake: CompletionWake(wake),
+            };
             if worker_canceled.load(Ordering::Acquire) {
+                drop(run);
                 return;
             }
             let previous = CANCELLATION
@@ -173,15 +179,20 @@ impl BlockingPool {
             let scope = CancellationScope { previous };
             let result = catch_unwind(AssertUnwindSafe(run));
             drop(scope);
-            if let Ok(mut output) = output.lock()
-                && !worker_canceled.load(Ordering::Acquire)
-            {
-                *output = Some(result);
+            match output.lock() {
+                Ok(mut output) if !worker_canceled.load(Ordering::Acquire) => {
+                    *output = Some(result);
+                }
+                _ => drop(result),
             }
-            drop(wake);
+            drop(completion);
         });
         self.capacity_wake.send(sender, work, retry_wake)?;
-        Ok(BlockingTask { state, canceled })
+        Ok(BlockingTask {
+            state,
+            canceled,
+            finished,
+        })
     }
 }
 
@@ -260,6 +271,18 @@ impl Drop for CompletionWake {
         if let Some(wake) = &self.0 {
             let _ = catch_unwind(AssertUnwindSafe(|| wake.wake_by_ref()));
         }
+    }
+}
+
+struct TaskCompletion {
+    finished: Arc<AtomicBool>,
+    wake: CompletionWake,
+}
+
+impl Drop for TaskCompletion {
+    fn drop(&mut self) {
+        self.finished.store(true, Ordering::Release);
+        drop(CompletionWake(self.wake.0.take()));
     }
 }
 
@@ -382,9 +405,14 @@ impl Drop for CancellationScope {
 pub struct BlockingTask<T> {
     state: Arc<Mutex<Option<std::thread::Result<T>>>>,
     canceled: Arc<AtomicBool>,
+    finished: Arc<AtomicBool>,
 }
 
 impl<T> BlockingTask<T> {
+    pub fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
     pub fn poll(&mut self) -> Option<std::thread::Result<T>> {
         self.state.lock().ok()?.take()
     }
@@ -432,20 +460,16 @@ mod tests {
 
     struct PublicationWake {
         task: Mutex<Option<BlockingTask<u32>>>,
-        observed: mpsc::SyncSender<Option<u32>>,
+        observed: mpsc::SyncSender<(bool, Option<u32>)>,
     }
 
     impl std::task::Wake for PublicationWake {
         fn wake(self: Arc<Self>) {
-            let result = self
-                .task
-                .lock()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .poll()
-                .map(Result::unwrap);
-            self.observed.send(result).unwrap();
+            let mut task = self.task.lock().unwrap();
+            let task = task.as_mut().unwrap();
+            let finished = task.is_finished();
+            let result = task.poll().map(Result::unwrap);
+            self.observed.send((finished, result)).unwrap();
         }
     }
 
@@ -468,7 +492,7 @@ mod tests {
         release_tx.send(()).unwrap();
         assert_eq!(
             observed_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Some(17)
+            (true, Some(17))
         );
     }
 
@@ -650,6 +674,75 @@ mod tests {
                 std::thread::yield_now();
             }
         }
+    }
+
+    #[test]
+    fn cancellation_completion_waits_for_discarded_output_cleanup() {
+        let pool = BlockingPool::new("completion-drain", 1, 2);
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let (cleaned_tx, cleaned_rx) = mpsc::sync_channel::<()>(1);
+        let mut task = pool
+            .spawn(None, move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                cleaned_tx
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        task.cancel();
+        assert!(!task.is_finished());
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !task.is_finished() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(matches!(
+            cleaned_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(task.poll().is_none());
+    }
+
+    #[test]
+    fn canceled_queued_work_releases_captured_resources_before_completion() {
+        let pool = BlockingPool::new("queued-drain", 1, 2);
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let first = pool
+            .spawn(None, move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let (cleaned_tx, cleaned_rx) = mpsc::sync_channel::<()>(1);
+        let capture = cleaned_tx;
+        let (executed_tx, executed_rx) = mpsc::sync_channel(1);
+        let mut queued = pool
+            .spawn(None, move || {
+                executed_tx.send(()).unwrap();
+                drop(capture);
+            })
+            .unwrap();
+        queued.cancel();
+        assert!(!queued.is_finished());
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !queued.is_finished() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(matches!(
+            cleaned_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(matches!(
+            executed_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        drop(first);
     }
 
     #[test]
