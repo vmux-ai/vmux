@@ -73,38 +73,6 @@ struct PushState {
 }
 
 impl PushState {
-    fn context_changed(
-        world: &PushWorld,
-        session: Entity,
-        user_moved: bool,
-        loading_changed: bool,
-    ) -> bool {
-        let Ok((_, agent_id, name, state, turn_meta, profile, _, imported, title, _, _)) =
-            world.sessions.get(session)
-        else {
-            return false;
-        };
-        user_moved
-            || agent_id.is_changed()
-            || loading_changed
-            || name.is_changed()
-            || state.is_changed()
-            || world
-                .preparation
-                .get(session)
-                .is_ok_and(|preparation| preparation.is_changed())
-            || world
-                .authentication
-                .get(session)
-                .is_ok_and(|authentication| authentication.is_changed())
-            || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
-            || profile.as_ref().is_some_and(|profile| profile.is_changed())
-            || imported
-                .as_ref()
-                .is_some_and(|imported| imported.is_changed())
-            || title.as_ref().is_some_and(|title| title.is_changed())
-    }
-
     const STREAM_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
     fn due(streaming: bool, urgent: bool, elapsed: Option<std::time::Duration>) -> bool {
@@ -341,6 +309,35 @@ fn track_turn_duration(
     }
 }
 
+impl PushWorld<'_, '_> {
+    fn context_changed(&self, session: Entity, user_moved: bool, loading_changed: bool) -> bool {
+        let Ok((_, agent_id, name, state, turn_meta, profile, _, imported, title, _, _)) =
+            self.sessions.get(session)
+        else {
+            return false;
+        };
+        user_moved
+            || agent_id.is_changed()
+            || loading_changed
+            || name.is_changed()
+            || state.is_changed()
+            || self
+                .preparation
+                .get(session)
+                .is_ok_and(|preparation| preparation.is_changed())
+            || self
+                .authentication
+                .get(session)
+                .is_ok_and(|authentication| authentication.is_changed())
+            || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
+            || profile.as_ref().is_some_and(|profile| profile.is_changed())
+            || imported
+                .as_ref()
+                .is_some_and(|imported| imported.is_changed())
+            || title.as_ref().is_some_and(|title| title.is_changed())
+    }
+}
+
 fn select_push(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut commands: Commands) {
     let user_profile = world.user_profiles.single().ok();
     let user_moved = user_profile
@@ -385,12 +382,8 @@ fn select_push(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut comm
             .as_ref()
             .is_some_and(|children| children.is_changed())
             || changed_transcripts.contains(&session);
-        let context_changed = PushState::context_changed(
-            &world,
-            session,
-            user_moved,
-            loading_changes.contains(&session),
-        );
+        let context_changed =
+            world.context_changed(session, user_moved, loading_changes.contains(&session));
         let moved = context_changed || queue.is_changed();
         if !moved && !conversation_changed && !push.pending {
             continue;
@@ -494,6 +487,7 @@ fn push_to_page(
     mut pushes: Query<(Entity, &mut PushState, &PushTarget)>,
     mut bindings: ViewBindings,
     mut commands: Commands,
+    mut publication: ViewPublication,
 ) {
     let user_profile = world.user_profiles.single().ok();
     for (session, mut push, target) in &mut pushes {
@@ -574,13 +568,13 @@ fn push_to_page(
         } else {
             None
         };
-        projection.publish(
+        publication.publish(
+            projection,
             webview,
             &mut transcript,
             &mut snapshot,
             attachments,
             viewport_patch,
-            &mut commands,
         );
         if !initialized {
             bindings.ensure(webview, session);
@@ -614,30 +608,35 @@ impl QueuedPromptReads<'_, '_> {
     }
 }
 
-impl ChatProjection {
+#[derive(SystemParam)]
+struct ViewPublication<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl ViewPublication<'_, '_> {
     fn publish(
-        mut self,
+        &mut self,
+        mut projection: ChatProjection,
         webview: Entity,
         transcript: &mut ChatTranscriptProjection,
         snapshot: &mut ChatSnapshotProjection,
         attachments: &ChatAttachmentProjection,
         viewport: Option<crate::state::ChatUiStatePatch>,
-        commands: &mut Commands,
     ) {
-        let mut transcript_changed = transcript.merge_tail(self.transcript);
+        let mut transcript_changed = transcript.merge_tail(projection.transcript);
         transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
-        attachments.hydrate_snapshot(&mut self.snapshot);
-        snapshot.0 = self.snapshot;
+        attachments.hydrate_snapshot(&mut projection.snapshot);
+        snapshot.0 = projection.snapshot;
         if let Some(viewport) = viewport {
-            commands.trigger(
+            self.commands.trigger(
                 vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &viewport),
             );
         }
-        commands.trigger(
+        self.commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
         );
         if transcript_changed {
-            commands.trigger(
+            self.commands.trigger(
                 vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                     webview,
                     &transcript.state,
@@ -646,10 +645,13 @@ impl ChatProjection {
         }
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {
-            commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
+            self.commands
+                .trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
     }
+}
 
+impl ChatProjection {
     fn viewport(
         session: Option<&SessionId>,
         position: Option<ChatViewport>,
