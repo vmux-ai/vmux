@@ -1226,7 +1226,7 @@ container-vm = VM
 
 gallery-title = UI コンポーネント
 gallery-description = ネイティブページ環境で共通コンポーネントを確認します。
-gallery-controls = 引数 / コントロール
+gallery-controls = コントロール
 gallery-reset = リセット
 gallery-search = コンポーネントを検索
 gallery-disabled = 無効
@@ -1240,3 +1240,16 @@ gallery-close = 閉じる
 gallery-option-one = 最初の選択肢
 gallery-option-two = 2 番目の選択肢
 gallery-option-three = 3 番目の選択肢
+
+gallery-all-icons = すべてのアイコン
+gallery-presets = プリセット
+gallery-properties = プロパティ
+gallery-search-icons = 名前・種類でアイコンを検索
+gallery-icon-size = サイズ
+gallery-no-icons = 一致するアイコンはありません
+gallery-category-primitives = 基本部品
+gallery-category-forms = フォーム
+gallery-category-composition = 組み合わせ
+gallery-category-navigation = ナビゲーション
+gallery-category-feedback = 状態・通知
+gallery-category-icons = アイコン

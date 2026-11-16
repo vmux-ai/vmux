@@ -2,6 +2,7 @@
 (
     id: "skeleton",
     title: "Skeleton",
+    category: "gallery-category-primitives",
     components: ["Skeleton"],
     controls: ["disabled"],
     defaults: (),

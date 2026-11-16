@@ -2,6 +2,7 @@
 (
     id: "error-state",
     title: "ErrorState",
+    category: "gallery-category-feedback",
     components: ["ErrorState"],
     controls: ["disabled"],
     defaults: (),

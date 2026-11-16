@@ -2,6 +2,7 @@
 (
     id: "composer-bar",
     title: "ComposerBar",
+    category: "gallery-category-composition",
     components: ["StatusDot", "ComposerStatus", "WorkspaceBadges", "ComposerBar", "ComposerMenus", "ComposerChipIcon"],
     controls: ["disabled", "menu", "cursor", "agent", "model", "effort", "permission", "project", "branch", "status"],
     defaults: (),

@@ -2,6 +2,7 @@
 (
     id: "avatar",
     title: "Avatar",
+    category: "gallery-category-primitives",
     components: ["Avatar", "AgentThumbnail", "Identicon", "IdentityOrb"],
     controls: ["text"],
     defaults: (),

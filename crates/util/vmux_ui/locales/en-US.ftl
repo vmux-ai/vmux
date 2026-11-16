@@ -1234,7 +1234,7 @@ container-vm = VM
 
 gallery-title = UI Components
 gallery-description = Preview shared components in the native page runtime.
-gallery-controls = Args / Controls
+gallery-controls = Controls
 gallery-reset = Reset
 gallery-search = Search components
 gallery-disabled = Disabled
@@ -1248,3 +1248,16 @@ gallery-close = Close
 gallery-option-one = First option
 gallery-option-two = Second option
 gallery-option-three = Third option
+
+gallery-all-icons = All icons
+gallery-presets = Presets
+gallery-properties = Properties
+gallery-search-icons = Search icons by name or set
+gallery-icon-size = Size
+gallery-no-icons = No matching icons
+gallery-category-primitives = Primitives
+gallery-category-forms = Forms
+gallery-category-composition = Composition
+gallery-category-navigation = Navigation
+gallery-category-feedback = Feedback
+gallery-category-icons = Icons

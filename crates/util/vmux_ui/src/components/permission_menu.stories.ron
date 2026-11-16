@@ -2,6 +2,7 @@
 (
     id: "permission-menu",
     title: "PermissionMenu",
+    category: "gallery-category-composition",
     components: ["PermissionMenu"],
     controls: ["disabled", "menu", "cursor", "permission"],
     defaults: (),

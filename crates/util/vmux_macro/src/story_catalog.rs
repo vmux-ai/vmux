@@ -11,16 +11,30 @@ pub(crate) struct Catalog {
     item: DeriveInput,
     state: Type,
     entries: Vec<Entry>,
+    categories: Vec<LitStr>,
 }
 
 impl Catalog {
     pub(crate) fn parse(args: TokenStream, mut item: DeriveInput) -> syn::Result<Self> {
         let args = Punctuated::<Meta, syn::Token![,]>::parse_terminated.parse2(args)?;
         let mut state = None;
+        let mut categories = Vec::new();
         for arg in args {
             let Meta::NameValue(value) = arg else {
                 return Err(syn::Error::new_spanned(arg, "expected state = Type"));
             };
+            if value.path.is_ident("categories") {
+                let Expr::Array(array) = value.value else {
+                    return Err(syn::Error::new_spanned(
+                        value.value,
+                        "categories must be an array",
+                    ));
+                };
+                for value in array.elems {
+                    categories.push(syn::parse2(quote! { #value })?);
+                }
+                continue;
+            }
             if !value.path.is_ident("state") {
                 return Err(syn::Error::new_spanned(
                     value.path,
@@ -64,6 +78,7 @@ impl Catalog {
             item,
             state,
             entries,
+            categories,
         })
     }
 
@@ -81,7 +96,16 @@ impl Catalog {
         let mut metadata_sources = Vec::new();
         let mut metadata_paths = Vec::new();
         let mut arg_checks = Vec::new();
+        let mut category_names = Vec::new();
+        let mut categories = self.categories;
         for entry in self.entries {
+            if !categories
+                .iter()
+                .any(|value| value.value() == entry.category.value())
+            {
+                categories.push(entry.category.clone());
+            }
+            category_names.push(entry.category);
             variants.push(entry.variant);
             names.push(entry.name);
             ids.push(entry.id);
@@ -98,6 +122,8 @@ impl Catalog {
             const _: fn() = || { #(let _: crate::ArgsPatch = #arg_checks;)* };
             impl #ident {
                 pub const ALL: [Self; #count] = [#(Self::#variants),*];
+                pub const CATEGORIES: &'static [&'static str] = &[#(#categories),*];
+                pub fn category(self) -> &'static str { match self { #(Self::#variants => #category_names),* } }
                 pub fn name(self) -> &'static str { match self { #(Self::#variants => #names),* } }
                 pub fn slug(self) -> &'static str { match self { #(Self::#variants => #ids),* } }
                 pub fn component_names(self) -> &'static str { match self { #(Self::#variants => #components),* } }
@@ -156,6 +182,7 @@ struct Entry {
     variant: Ident,
     id: LitStr,
     name: LitStr,
+    category: LitStr,
     components: LitStr,
     controls: Vec<LitStr>,
     component: Path,
@@ -169,6 +196,7 @@ impl Entry {
         let values = attr.parse_args_with(Punctuated::<Meta, syn::Token![,]>::parse_terminated)?;
         let mut id = None;
         let mut name = LitStr::new(&variant.to_string(), variant.span());
+        let mut category = LitStr::new("gallery-category-primitives", variant.span());
         let mut components = name.clone();
         let mut controls = Vec::new();
         let mut component = None;
@@ -211,6 +239,8 @@ impl Entry {
                 id = Some(text);
             } else if value.path.is_ident("name") {
                 name = text;
+            } else if value.path.is_ident("category") {
+                category = text;
             } else if value.path.is_ident("components") {
                 components = text;
             } else {
@@ -230,6 +260,7 @@ impl Entry {
             let arg_checks = definition.validate()?;
             id = Some(LitStr::new(&definition.id, file.span()));
             name = LitStr::new(&definition.title, file.span());
+            category = LitStr::new(&definition.category, file.span());
             components = LitStr::new(&definition.components.join(" · "), file.span());
             controls = definition
                 .controls
@@ -255,6 +286,7 @@ impl Entry {
             variant: variant.clone(),
             id: id.ok_or_else(|| syn::Error::new_spanned(&variant, "story requires id"))?,
             name,
+            category,
             components,
             controls,
             component: component
@@ -271,6 +303,7 @@ impl Entry {
 struct Definition {
     id: String,
     title: String,
+    category: String,
     components: Vec<String>,
     controls: Vec<String>,
     defaults: ron::Value,

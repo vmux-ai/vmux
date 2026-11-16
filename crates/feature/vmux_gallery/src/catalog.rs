@@ -2,7 +2,13 @@ use crate::GalleryUiState;
 #[cfg(ui)]
 use dioxus::prelude::*;
 
-#[vmux_macro::story_catalog(state = GalleryUiState)]
+#[vmux_macro::story_catalog(
+    state = GalleryUiState,
+    categories = [
+        "gallery-category-primitives", "gallery-category-forms", "gallery-category-composition",
+        "gallery-category-navigation", "gallery-category-feedback", "gallery-category-icons"
+    ]
+)]
 #[vmux_api::contract(Default, Copy, Eq)]
 pub enum Story {
     #[story(metadata = "../../util/vmux_ui/src/favicon.stories.ron", component = crate::ui::previews::AuxiliaryPreview)]
@@ -54,7 +60,7 @@ pub enum Story {
     ErrorState,
     #[story(metadata = "../../util/vmux_ui/src/components/filter.stories.ron", component = crate::ui::previews::SurfacePreview)]
     Filter,
-    #[story(metadata = "../../util/vmux_ui/src/components/icon.stories.ron", component = crate::ui::previews::SurfacePreview)]
+    #[story(metadata = "../../util/vmux_ui/src/components/icon.stories.ron", component = crate::ui::icons::IconLibrary)]
     Icon,
     #[story(metadata = "../../util/vmux_ui/src/components/inline_edit.stories.ron", component = crate::ui::previews::EditingPreview)]
     InlineEdit,

@@ -2,6 +2,7 @@
 (
     id: "tooltip",
     title: "Tooltip",
+    category: "gallery-category-primitives",
     components: ["Tooltip"],
     controls: ["disabled"],
     defaults: (),

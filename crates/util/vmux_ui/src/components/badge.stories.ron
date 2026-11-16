@@ -2,6 +2,7 @@
 (
     id: "badge",
     title: "Badge",
+    category: "gallery-category-primitives",
     components: ["Badge"],
     controls: ["disabled"],
     defaults: (),

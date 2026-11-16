@@ -2,6 +2,7 @@
 (
     id: "favicon",
     title: "Favicon",
+    category: "gallery-category-icons",
     components: ["Favicon", "GlobeIcon"],
     controls: ["disabled"],
     defaults: (),

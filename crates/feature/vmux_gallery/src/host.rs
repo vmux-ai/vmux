@@ -233,6 +233,9 @@ impl Preview {
     fn address(&self, url: &str) -> PageAddress {
         let mut options = Vec::new();
         for story in Story::ALL {
+            if story.category() != self.story.category() {
+                continue;
+            }
             options.push(AddressOption {
                 label: story.name().into(),
                 intent: Some(AddressIntent::Navigate { url: story.url() }),
@@ -249,18 +252,32 @@ impl Preview {
                 }),
                 ..Default::default()
             },
-            fixed: vec![AddressCrumb {
-                entry: AddressOption {
-                    label: self.story.name().into(),
-                    intent: Some(AddressIntent::Navigate {
-                        url: self.story.url(),
-                    }),
+            fixed: vec![
+                AddressCrumb {
+                    entry: AddressOption {
+                        label_key: self.story.category().into(),
+                        ..Default::default()
+                    },
+                    options,
                     ..Default::default()
                 },
-                options,
-                active: true,
-                ..Default::default()
-            }],
+                AddressCrumb {
+                    entry: AddressOption {
+                        label: self.story.name().into(),
+                        label_key: if self.story == Story::Icon {
+                            "gallery-all-icons".into()
+                        } else {
+                            String::new()
+                        },
+                        intent: Some(AddressIntent::Navigate {
+                            url: self.story.url(),
+                        }),
+                        ..Default::default()
+                    },
+                    active: true,
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         }
     }
@@ -1082,7 +1099,11 @@ mod tests {
             .unwrap()
             .address("vmux://ui/composer");
         assert_eq!(address.url, "vmux://ui/composer");
-        assert_eq!(address.fixed[0].entry.label, "PromptComposer");
+        assert_eq!(
+            address.fixed[0].entry.label_key,
+            "gallery-category-composition"
+        );
+        assert_eq!(address.fixed[1].entry.label, "PromptComposer");
         app.world_mut().get_mut::<PageMetadata>(page).unwrap().url = Story::Input.url();
         app.update();
         assert_eq!(

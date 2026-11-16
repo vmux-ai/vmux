@@ -1246,7 +1246,7 @@ container-vm = VM
 
 gallery-title = Componentes de UI
 gallery-description = Vista previa de componentes compartidos en una página nativa.
-gallery-controls = Argumentos / Controles
+gallery-controls = Controles
 gallery-reset = Restablecer
 gallery-search = Buscar componentes
 gallery-disabled = Desactivado
@@ -1260,3 +1260,16 @@ gallery-close = Cerrar
 gallery-option-one = Primera opción
 gallery-option-two = Segunda opción
 gallery-option-three = Tercera opción
+
+gallery-all-icons = Todos los iconos
+gallery-presets = Preajustes
+gallery-properties = Propiedades
+gallery-search-icons = Buscar iconos por nombre o conjunto
+gallery-icon-size = Tamaño
+gallery-no-icons = No hay iconos coincidentes
+gallery-category-primitives = Primitivas
+gallery-category-forms = Formularios
+gallery-category-composition = Composición
+gallery-category-navigation = Navegación
+gallery-category-feedback = Respuesta
+gallery-category-icons = Iconos

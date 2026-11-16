@@ -2,6 +2,7 @@
 (
     id: "file-tree",
     title: "FileTree",
+    category: "gallery-category-navigation",
     components: ["FileTree", "FileTreeSkeleton", "FileTreeHeader", "FileTreeScroller", "FileTreeRowGroup", "FileTreeChildren", "FileTreeRow"],
     controls: ["disabled", "checked", "choice"],
     defaults: (),

@@ -2,6 +2,7 @@
 (
     id: "prompt-media-options",
     title: "PromptMediaOptions",
+    category: "gallery-category-composition",
     components: ["PromptMediaOptions"],
     controls: ["disabled"],
     defaults: (),

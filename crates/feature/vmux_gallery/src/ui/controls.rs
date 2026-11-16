@@ -1,11 +1,9 @@
-use crate::{
-    ArgsPatch, GalleryConfigureRequest, GalleryPresetRequest, GalleryResetRequest, GalleryUiState,
-};
+use crate::{ArgsPatch, GalleryConfigureRequest, GalleryPresetRequest, GalleryUiState};
 use dioxus::prelude::component;
 use dioxus::prelude::*;
-use vmux_ui::components::button::{Button, ButtonVariant};
-use vmux_ui::components::checkbox::Checkbox;
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
+use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -14,18 +12,19 @@ pub(super) fn StoryControls(state: GalleryUiState) -> Element {
     let revision = state.revision;
     let fields = state.story.control_names();
     rsx! {
-        details { class: "mb-5 rounded-lg bg-foreground/[0.025] p-3 text-xs", open: true,
-            summary { class: "cursor-pointer font-mono font-medium", {translate("gallery-controls")} }
-            div { class: "mt-3 flex flex-wrap gap-2",
-                Button { variant: ButtonVariant::Secondary, onclick: move |_| { let _ = send(&GalleryResetRequest); }, {translate("gallery-reset")} }
+        details { class: "rounded-xl bg-foreground/[0.025] p-4 text-xs", open: true,
+            summary { class: "cursor-pointer text-sm font-medium", {translate("gallery-controls")} }
+            h2 { class: "mt-5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60", {translate("gallery-presets")} }
+            div { class: "mt-2 flex flex-wrap gap-1.5",
                 for (index, preset) in state.presets.iter().enumerate() {
-                    Button { variant: ButtonVariant::Secondary,
+                    Button { variant: ButtonVariant::Secondary, size: ButtonSize::Xs, class: "rounded-md",
                         onclick: move |_| { let _ = send(&GalleryPresetRequest { revision, index }); },
                         "{preset.name}"
                     }
                 }
             }
-            div { class: "mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3",
+            h2 { class: "mb-2 mt-5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60", {translate("gallery-properties")} }
+            div { class: "grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] items-end gap-3",
                 if fields.contains(&"choice") { ChoiceControl { label: "choice", value: state.choice.clone(), options: vec!["one".into(), "two".into(), "three".into(), "list".into(), "grid".into()], onchange: move |value| { let _ = send(&GalleryConfigureRequest { revision, args: ArgsPatch { choice: Some(value), ..Default::default() } }); } } }
                 if fields.contains(&"button_variant") { ChoiceControl { label: "button_variant", value: state.button_variant.clone(), options: vec!["all".into(), "primary".into(), "secondary".into(), "destructive".into(), "outline".into(), "ghost".into()], onchange: move |value| { let _ = send(&GalleryConfigureRequest { revision, args: ArgsPatch { button_variant: Some(value), ..Default::default() } }); } } }
                 if fields.contains(&"button_size") { ChoiceControl { label: "button_size", value: state.button_size.clone(), options: vec!["all".into(), "xs".into(), "sm".into(), "md".into(), "icon".into(), "block".into()], onchange: move |value| { let _ = send(&GalleryConfigureRequest { revision, args: ArgsPatch { button_size: Some(value), ..Default::default() } }); } } }
@@ -71,22 +70,22 @@ pub(super) fn StoryControls(state: GalleryUiState) -> Element {
                 }
 
                 if fields.contains(&"text") {
-                label { class: "flex flex-col gap-1 font-mono", "text",
-                    Input { value: state.text.clone(), aria_label: "text", class: "text-xs",
+                label { class: "flex flex-col gap-1.5 font-mono text-[11px] text-muted-foreground", "text",
+                    Input { value: state.text.clone(), aria_label: "text", class: "h-8 bg-foreground/[0.035] text-xs",
                         oninput: move |event: FormEvent| { let _ = send(&GalleryConfigureRequest { revision, args: ArgsPatch { text: Some(event.value()), ..Default::default() } }); },
                     }
                 }
                 }
                 if fields.contains(&"progress") {
-                label { class: "flex flex-col gap-1 font-mono", "progress",
-                    Input { r#type: "number", min: "0", max: "100", value: "{state.progress}", aria_label: "progress", class: "text-xs",
+                label { class: "flex flex-col gap-1.5 font-mono text-[11px] text-muted-foreground", "progress",
+                    Input { r#type: "number", min: "0", max: "100", value: "{state.progress}", aria_label: "progress", class: "h-8 bg-foreground/[0.035] text-xs",
                         oninput: move |event: FormEvent| { if let Ok(value) = event.value().parse() { let _ = send(&GalleryConfigureRequest { revision, args: ArgsPatch { progress: Some(value), ..Default::default() } }); } },
                     }
                 }
                 }
                 if fields.contains(&"cursor") {
-                label { class: "flex flex-col gap-1 font-mono", "cursor",
-                    Input { r#type: "number", min: "0", max: "16", value: "{state.cursor}", aria_label: "cursor", class: "text-xs",
+                label { class: "flex flex-col gap-1.5 font-mono text-[11px] text-muted-foreground", "cursor",
+                    Input { r#type: "number", min: "0", max: "16", value: "{state.cursor}", aria_label: "cursor", class: "h-8 bg-foreground/[0.035] text-xs",
                         oninput: move |event: FormEvent| { if let Ok(value) = event.value().parse() { let _ = send(&GalleryConfigureRequest { revision, args: ArgsPatch { cursor: Some(value), ..Default::default() } }); } },
                     }
                 }
@@ -98,9 +97,9 @@ pub(super) fn StoryControls(state: GalleryUiState) -> Element {
 
 #[component]
 fn BoolControl(label: String, value: bool, onchange: EventHandler<bool>) -> Element {
-    rsx! { label { class: "flex items-center gap-2 font-mono",
-        Checkbox { checked: value, on_checked_change: onchange }
-        "{label}"
+    rsx! { label { class: "flex min-h-11 items-center justify-between gap-3 rounded-md bg-foreground/[0.025] px-3 py-2",
+        span { class: "font-mono text-[11px] text-muted-foreground", "{label}" }
+        Switch { checked: Some(value), on_checked_change: onchange, SwitchThumb {} }
     } }
 }
 
@@ -111,8 +110,9 @@ fn ChoiceControl(
     options: Vec<String>,
     onchange: EventHandler<String>,
 ) -> Element {
-    rsx! { label { class: "flex flex-col gap-1 font-mono", "{label}",
-        select { class: "h-8 rounded-md bg-background px-2 text-xs text-foreground", value,
+    rsx! { label { class: "flex flex-col gap-1.5",
+        span { class: "font-mono text-[11px] text-muted-foreground", "{label}" }
+        select { class: "h-8 w-full rounded-md bg-foreground/[0.035] px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/40", value,
             onchange: move |event| onchange.call(event.value()),
             for option in options { option { value: option.clone(), "{option}" } }
         }

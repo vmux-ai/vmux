@@ -2,6 +2,7 @@
 (
     id: "select",
     title: "Select",
+    category: "gallery-category-forms",
     components: ["Select", "SelectTrigger", "SelectValue", "SelectList", "SelectGroup", "SelectOption", "SelectItemIndicator"],
     controls: ["disabled"],
     defaults: (),

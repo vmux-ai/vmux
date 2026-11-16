@@ -2,6 +2,7 @@
 (
     id: "breadcrumbs",
     title: "Breadcrumbs",
+    category: "gallery-category-navigation",
     components: ["Breadcrumbs", "BreadcrumbItem", "BreadcrumbSeparator", "BreadcrumbDropdown", "BreadcrumbSelector", "BreadcrumbOptionIcon"],
     controls: ["disabled", "menu", "choice"],
     defaults: (),

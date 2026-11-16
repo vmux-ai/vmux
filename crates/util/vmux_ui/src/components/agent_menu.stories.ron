@@ -2,6 +2,7 @@
 (
     id: "agent-menu",
     title: "AgentMenu",
+    category: "gallery-category-composition",
     components: ["AgentMenu"],
     controls: ["disabled", "menu", "cursor", "agent"],
     defaults: (),

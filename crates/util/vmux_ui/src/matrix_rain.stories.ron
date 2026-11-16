@@ -2,6 +2,7 @@
 (
     id: "matrix-rain",
     title: "MatrixRain",
+    category: "gallery-category-feedback",
     components: ["MatrixRain", "MatrixLoader"],
     controls: ["disabled"],
     defaults: (),

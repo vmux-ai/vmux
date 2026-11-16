@@ -2,6 +2,7 @@
 (
     id: "mcp-menu",
     title: "McpMenu",
+    category: "gallery-category-composition",
     components: ["McpMenu"],
     controls: ["disabled", "menu", "cursor", "checked"],
     defaults: (),

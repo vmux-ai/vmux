@@ -1243,7 +1243,7 @@ container-vm = VM
 
 gallery-title = UI 컴포넌트
 gallery-description = 네이티브 페이지 환경에서 공통 컴포넌트를 미리 봅니다.
-gallery-controls = 인수 / 컨트롤
+gallery-controls = 컨트롤
 gallery-reset = 초기화
 gallery-search = 컴포넌트 검색
 gallery-disabled = 비활성화
@@ -1257,3 +1257,16 @@ gallery-close = 닫기
 gallery-option-one = 첫 번째 옵션
 gallery-option-two = 두 번째 옵션
 gallery-option-three = 세 번째 옵션
+
+gallery-all-icons = 모든 아이콘
+gallery-presets = 프리셋
+gallery-properties = 속성
+gallery-search-icons = 이름 또는 세트로 아이콘 검색
+gallery-icon-size = 크기
+gallery-no-icons = 일치하는 아이콘이 없습니다
+gallery-category-primitives = 기본 요소
+gallery-category-forms = 폼
+gallery-category-composition = 조합
+gallery-category-navigation = 탐색
+gallery-category-feedback = 피드백
+gallery-category-icons = 아이콘

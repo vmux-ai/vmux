@@ -1246,7 +1246,7 @@ container-vm = VM
 
 gallery-title = UI-componenten
 gallery-description = Bekijk gedeelde componenten in een native pagina.
-gallery-controls = Argumenten / Bediening
+gallery-controls = Bediening
 gallery-reset = Opnieuw instellen
 gallery-search = Componenten zoeken
 gallery-disabled = Uitgeschakeld
@@ -1260,3 +1260,16 @@ gallery-close = Sluiten
 gallery-option-one = Eerste optie
 gallery-option-two = Tweede optie
 gallery-option-three = Derde optie
+
+gallery-all-icons = Alle pictogrammen
+gallery-presets = Voorinstellingen
+gallery-properties = Eigenschappen
+gallery-search-icons = Zoek pictogrammen op naam of set
+gallery-icon-size = Grootte
+gallery-no-icons = Geen overeenkomende pictogrammen
+gallery-category-primitives = Basiselementen
+gallery-category-forms = Formulieren
+gallery-category-composition = Samenstelling
+gallery-category-navigation = Navigatie
+gallery-category-feedback = Feedback
+gallery-category-icons = Pictogrammen

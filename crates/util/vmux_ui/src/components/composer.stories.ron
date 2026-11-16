@@ -2,6 +2,7 @@
 (
     id: "composer",
     title: "PromptComposer",
+    category: "gallery-category-composition",
     components: ["PromptComposer", "ComposerFrame"],
     controls: ["disabled", "text", "checked", "running", "has_attachment", "menu", "cursor", "agent", "model", "effort", "permission", "project", "branch", "status"],
     defaults: (),

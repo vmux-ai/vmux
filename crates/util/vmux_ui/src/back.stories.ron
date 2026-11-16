@@ -2,6 +2,7 @@
 (
     id: "back-button",
     title: "BackButton",
+    category: "gallery-category-navigation",
     components: ["BackButton"],
     controls: ["disabled"],
     defaults: (),

@@ -2,6 +2,7 @@
 (
     id: "context-menu",
     title: "ContextMenu",
+    category: "gallery-category-feedback",
     components: ["ContextMenu", "ContextMenuTrigger", "ContextMenuContent", "ContextMenuItem"],
     controls: ["disabled", "menu", "cursor", "checked"],
     defaults: (),

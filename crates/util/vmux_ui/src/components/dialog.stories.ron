@@ -2,6 +2,7 @@
 (
     id: "dialog",
     title: "Dialog",
+    category: "gallery-category-feedback",
     components: ["DialogRoot", "DialogContent", "DialogTitle", "DialogDescription"],
     controls: ["disabled", "dialog_open"],
     defaults: (),

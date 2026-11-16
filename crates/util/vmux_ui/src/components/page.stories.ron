@@ -2,6 +2,7 @@
 (
     id: "page",
     title: "Page",
+    category: "gallery-category-navigation",
     components: ["PageShell", "PageToolbarRow", "PageSidebarToggle", "PageHeader", "PageContent"],
     controls: ["disabled"],
     defaults: (),

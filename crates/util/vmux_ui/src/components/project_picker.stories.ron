@@ -2,6 +2,7 @@
 (
     id: "project-picker",
     title: "ProjectPicker",
+    category: "gallery-category-composition",
     components: ["ProjectSelectTrigger", "ProjectSelectPopup", "ProjectPicker", "BranchPicker"],
     controls: ["disabled", "menu", "cursor", "project"],
     defaults: (),

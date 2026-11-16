@@ -2,6 +2,7 @@
 (
     id: "effort-menu",
     title: "EffortMenu",
+    category: "gallery-category-composition",
     components: ["EffortMenu"],
     controls: ["disabled", "menu", "cursor", "effort"],
     defaults: (),

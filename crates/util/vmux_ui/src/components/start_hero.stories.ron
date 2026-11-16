@@ -2,6 +2,7 @@
 (
     id: "start-hero",
     title: "StartHero",
+    category: "gallery-category-composition",
     components: ["StartBackdrop", "StartHero"],
     controls: ["disabled"],
     defaults: (),

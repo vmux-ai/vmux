@@ -14,7 +14,7 @@ pub use terminal::{
 pub use ui_state::{UiState, UiStateFrame, UiStatePatch, UiStateProjection};
 pub use vmux_macro::{
     agent, bidirectional_event, contract, host_event, service_message, ui_event, ui_event_variants,
-    ui_state, ui_state_patch,
+    ui_state, ui_state_patch, variant_names,
 };
 
 extern crate self as vmux_api;

@@ -2,6 +2,7 @@
 (
     id: "checkbox",
     title: "Checkbox",
+    category: "gallery-category-forms",
     components: ["Checkbox"],
     controls: ["disabled", "checked"],
     defaults: (),

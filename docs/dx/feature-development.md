@@ -31,6 +31,13 @@ component names such as `ComposerFrame` and `IdentityOrb`. Each family has a dir
 follow the selected family. Reset restores the selected example and its local state.
 Resize the pane to check smaller layouts; appearance and language follow application settings.
 
+The sidebar groups stories into Primitives, Forms, Composition, Navigation, Feedback,
+and Icons. The breadcrumb includes the selected category. The preview appears before
+the inspector; wider panes place Controls beside it, and Events expand when needed.
+Open `vmux://ui/icon` for the searchable icon library. Line, builtin and Git icons are
+enumerated from their declared variants, alongside file types, favicons and agent logos.
+Change the icon size to compare them at the sizes used in feature pages.
+
 Keep a component's metadata and conditions next to its implementation:
 
 ```text
@@ -38,7 +45,7 @@ crates/util/vmux_ui/src/components/button.rs
 crates/util/vmux_ui/src/components/button.stories.ron
 ```
 
-The RON file describes its title, Controls, defaults and named presets. `catalog.rs` in
+The RON file describes its category, title, Controls, defaults and named presets. `catalog.rs` in
 `crates/feature/vmux_gallery` connects that file to a shared Rust renderer with one
 `#[story(metadata = "...", component = ...)]` entry. The registration attribute generates
 names, component URLs, search metadata and dispatch, and type-checks preset fields.

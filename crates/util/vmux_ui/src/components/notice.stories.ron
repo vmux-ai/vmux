@@ -2,6 +2,7 @@
 (
     id: "notice",
     title: "Notice",
+    category: "gallery-category-feedback",
     components: ["Notice"],
     controls: ["checked"],
     defaults: (),

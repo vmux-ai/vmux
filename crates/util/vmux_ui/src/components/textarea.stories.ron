@@ -2,6 +2,7 @@
 (
     id: "textarea",
     title: "Textarea",
+    category: "gallery-category-forms",
     components: ["Textarea"],
     controls: ["disabled", "text"],
     defaults: (),

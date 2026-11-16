@@ -2,7 +2,8 @@ pub use wasm::{BuiltinIconView, GitIconView, GitSymbolView, LineIconView, PageIc
 
 pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[vmux_api::contract(Copy, Eq)]
+#[vmux_api::variant_names]
 pub enum GitSymbol {
     Repository,
     Branch,
@@ -49,6 +50,7 @@ impl GitSymbol {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[vmux_api::variant_names]
 pub enum LineIcon {
     AlertCircle,
     Archive,

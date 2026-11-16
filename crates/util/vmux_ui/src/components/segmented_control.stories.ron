@@ -2,6 +2,7 @@
 (
     id: "segmented-control",
     title: "SegmentedControl",
+    category: "gallery-category-navigation",
     components: ["SegmentedControl"],
     controls: ["disabled", "choice"],
     defaults: (),

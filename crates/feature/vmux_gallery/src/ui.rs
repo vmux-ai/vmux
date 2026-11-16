@@ -14,6 +14,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::navigation::PageNavigation;
 
 mod controls;
+pub(crate) mod icons;
 pub(crate) mod previews;
 
 #[vmux_page::page(
@@ -30,6 +31,7 @@ pub fn Page() -> Element {
     let state = binding.state;
     let mut filter = use_signal(String::new);
     let current = state();
+    let query = filter().to_ascii_lowercase();
     let mut toolbar = Vec::new();
     toolbar.push(ToolbarControl::button(
         translate("gallery-reset"),
@@ -59,44 +61,83 @@ pub fn Page() -> Element {
                     }
                 } },
                 sidebar: rsx! {
-                    nav { class: "flex flex-col gap-0.5",
-                        for story in Story::ALL {
-                            if story.component_names().to_ascii_lowercase().contains(&filter().to_ascii_lowercase()) {
-                                ManagerSidebarItem {
-                                    key: "{story.slug()}",
-                                    label: story.name().to_string(),
-                                    count: 0, show_count: false,
-                                    selected: story == current.story,
-                                    onclick: move |event| PageNavigation::click(story.url(), &event),
+                    nav { class: "flex flex-col gap-3 pb-3",
+                        for &category in Story::CATEGORIES {
+                            {
+                                let mut stories = Vec::new();
+                                for story in Story::ALL {
+                                    let label = if story == Story::Icon { translate("gallery-all-icons") } else { story.name().to_string() };
+                                    if story.category() == category && (story.component_names().to_ascii_lowercase().contains(&query) || label.to_ascii_lowercase().contains(&query) || translate(category).to_ascii_lowercase().contains(&query)) {
+                                        stories.push(story);
+                                    }
+                                }
+                                rsx! {
+                                    if !stories.is_empty() {
+                                        details { key: "{category}", class: "group", open: true,
+                                            summary { class: "flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70 [&::-webkit-details-marker]:hidden",
+                                                span { class: "inline-block text-[8px] transition-transform group-open:rotate-90", "›" }
+                                                {translate(category)}
+                                                span { class: "ml-auto font-mono text-[9px] tabular-nums text-muted-foreground/40", "{stories.len()}" }
+                                            }
+                                            div { class: "flex flex-col gap-0.5",
+                                                for story in stories {
+                                                    ManagerSidebarItem {
+                                                        key: "{story.slug()}",
+                                                        label: if story == Story::Icon { translate("gallery-all-icons") } else { story.name().to_string() },
+                                                        count: 0, show_count: false,
+                                                        selected: story == current.story,
+                                                        onclick: move |event| PageNavigation::click(story.url(), &event),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 },
                 toolbar: rsx! { PageToolbar { controls: toolbar } },
-                PageContent { content_class: "mx-auto w-full max-w-5xl",
-                    div { class: "mb-5 flex flex-wrap items-center justify-between gap-3",
-                        h1 { class: "font-mono text-base font-semibold", "{current.story.name()}" }
-                        span { class: "text-xs text-muted-foreground", {translate("gallery-description")} }
+                PageContent { content_class: "@container/gallery mx-auto w-full max-w-6xl",
+                    header { class: "mb-6 space-y-2",
+                        p { class: "text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60", {translate(current.story.category())} }
+                        h1 { class: "text-xl font-medium tracking-tight", if current.story == Story::Icon { {translate("gallery-all-icons")} } else { "{current.story.name()}" } }
+                        p { class: "font-mono text-[11px] leading-5 text-muted-foreground/60", {current.story.component_names()} }
                     }
-                    p { class: "mb-3 font-mono text-[11px] text-muted-foreground", {current.story.component_names()} }
-                    StoryControls { state: current.clone() }
-                    section { class: "min-h-64 rounded-lg bg-foreground/[0.025] p-4",
-                        aria_label: translate("gallery-preview"),
-                        RegisteredStory { key: "{current.revision}", state: current.clone() }
-                    }
-                    details { class: "mt-6 text-xs text-muted-foreground", open: true,
-                        summary { class: "mb-3 cursor-pointer font-medium", {translate("gallery-events")} }
-                        p { class: "mb-3", {translate("gallery-events-description")} }
-                        if let Some(error) = (binding.error)() {
-                            pre { role: "alert", class: "whitespace-pre-wrap text-destructive", "{error}" }
+                    div { class: if current.story == Story::Icon { "grid gap-6" } else { "grid items-start gap-6 @3xl/gallery:grid-cols-[minmax(0,1fr)_16rem]" },
+                        main { class: "min-w-0 space-y-4",
+                            if current.story != Story::Icon {
+                                div { class: "flex items-center justify-between text-xs text-muted-foreground",
+                                    span { {translate("gallery-preview")} }
+                                    span { class: "text-[10px]", {translate("gallery-description")} }
+                                }
+                            }
+                            section { class: if current.story == Story::Icon { "min-w-0" } else { "flex min-h-80 min-w-0 items-start rounded-xl bg-foreground/[0.025] p-6 @3xl/gallery:min-h-96" },
+                                aria_label: translate("gallery-preview"),
+                                div { class: "w-full min-w-0", RegisteredStory { key: "{current.revision}", state: current.clone() } }
+                            }
+                            details { class: "rounded-lg bg-foreground/[0.015] px-3 py-2 text-xs text-muted-foreground",
+                                summary { class: "flex cursor-pointer items-center justify-between gap-3 font-medium",
+                                    {translate("gallery-events")}
+                                    span { class: "font-mono text-[10px] font-normal tabular-nums", "{current.interaction_count}" }
+                                }
+                                div { class: "space-y-3 pt-3",
+                                    p { class: "text-[11px]", {translate("gallery-events-description")} }
+                                    if let Some(error) = (binding.error)() {
+                                        pre { role: "alert", class: "whitespace-pre-wrap text-destructive", "{error}" }
+                                    }
+                                    output { class: "block overflow-x-auto rounded-md bg-foreground/[0.035] p-3 font-mono text-[11px]", aria_live: "polite",
+                                        if current.interaction_count == 0 { {translate("gallery-no-events")} }
+                                        else { "#{current.interaction_count} {current.last_event}" }
+                                    }
+                                    pre { class: "overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-5",
+                                        "disabled: {current.disabled}\nchecked: {current.checked}\ntext: {current.text:?}\nchoice: {current.choice:?}\nmenu: {current.menu:?}\nagent: {current.agent:?}\nmodel: {current.model:?}\neffort: {current.effort:?}\npermission: {current.permission:?}\nproject: {current.project:?}\nbranch: {current.branch:?}\nrunning: {current.running}\nsubmitted: {current.submitted:?}"
+                                    }
+                                }
+                            }
                         }
-                        output { class: "block overflow-x-auto rounded-lg bg-foreground/[0.035] p-3 font-mono", aria_live: "polite",
-                            if current.interaction_count == 0 { {translate("gallery-no-events")} }
-                            else { "#{current.interaction_count} {current.last_event}" }
-                        }
-                        pre { class: "mt-3 overflow-x-auto whitespace-pre-wrap font-mono",
-                            "disabled: {current.disabled}\nchecked: {current.checked}\ntext: {current.text:?}\nchoice: {current.choice:?}\nmenu: {current.menu:?}\nagent: {current.agent:?}\nmodel: {current.model:?}\neffort: {current.effort:?}\npermission: {current.permission:?}\nproject: {current.project:?}\nbranch: {current.branch:?}\nrunning: {current.running}\nsubmitted: {current.submitted:?}"
+                        if current.story != Story::Icon {
+                            aside { class: "min-w-0 @3xl/gallery:sticky @3xl/gallery:top-0", StoryControls { state: current.clone() } }
                         }
                     }
                 }

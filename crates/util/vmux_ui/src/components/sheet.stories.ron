@@ -2,6 +2,7 @@
 (
     id: "sheet",
     title: "Sheet",
+    category: "gallery-category-navigation",
     components: ["SheetHeaderAction", "SheetHeaderChevron", "SheetToggleRow", "SheetSelectorRow"],
     controls: ["disabled", "checked"],
     defaults: (),

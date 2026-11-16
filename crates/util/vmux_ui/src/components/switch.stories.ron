@@ -2,6 +2,7 @@
 (
     id: "switch",
     title: "Switch",
+    category: "gallery-category-forms",
     components: ["Switch", "SwitchThumb"],
     controls: ["disabled", "checked"],
     defaults: (),

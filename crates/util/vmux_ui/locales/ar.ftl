@@ -1246,7 +1246,7 @@ container-vm = آلة افتراضية
 
 gallery-title = مكوّنات الواجهة
 gallery-description = معاينة المكوّنات المشتركة في بيئة الصفحة الأصلية.
-gallery-controls = المعاملات / عناصر التحكم
+gallery-controls = عناصر التحكم
 gallery-reset = إعادة ضبط
 gallery-search = البحث عن المكوّنات
 gallery-disabled = معطّل
@@ -1260,3 +1260,16 @@ gallery-close = إغلاق
 gallery-option-one = الخيار الأول
 gallery-option-two = الخيار الثاني
 gallery-option-three = الخيار الثالث
+
+gallery-all-icons = كل الأيقونات
+gallery-presets = الإعدادات المسبقة
+gallery-properties = الخصائص
+gallery-search-icons = البحث عن الأيقونات بالاسم أو المجموعة
+gallery-icon-size = الحجم
+gallery-no-icons = لا توجد أيقونات مطابقة
+gallery-category-primitives = العناصر الأساسية
+gallery-category-forms = النماذج
+gallery-category-composition = التركيب
+gallery-category-navigation = التنقل
+gallery-category-feedback = الملاحظات
+gallery-category-icons = الأيقونات

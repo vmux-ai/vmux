@@ -2,6 +2,7 @@
 (
     id: "alert-dialog",
     title: "AlertDialog",
+    category: "gallery-category-feedback",
     components: ["AlertDialogRoot", "AlertDialogContent", "AlertDialogTitle", "AlertDialogDescription", "AlertDialogActions", "AlertDialogCancel", "AlertDialogAction"],
     controls: ["disabled", "dialog_open"],
     defaults: (),

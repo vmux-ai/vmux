@@ -2,6 +2,7 @@
 (
     id: "progress",
     title: "Progress",
+    category: "gallery-category-feedback",
     components: ["LoadingIcon", "Progress", "ProgressIndicator"],
     controls: ["progress"],
     defaults: (),

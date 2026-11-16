@@ -2,6 +2,7 @@
 (
     id: "dropdown",
     title: "Dropdown",
+    category: "gallery-category-navigation",
     components: ["DropdownToggleIndicator", "DropdownTrigger", "DropdownOption", "DropdownSelector", "Dropdown", "DropdownPopup"],
     controls: ["disabled", "menu", "choice"],
     defaults: (),

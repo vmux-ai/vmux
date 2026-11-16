@@ -2,6 +2,7 @@
 (
     id: "shell-code",
     title: "ShellCode",
+    category: "gallery-category-primitives",
     components: ["ShellCode"],
     controls: ["disabled"],
     defaults: (),

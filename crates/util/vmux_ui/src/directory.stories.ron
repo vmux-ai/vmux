@@ -2,6 +2,7 @@
 (
     id: "directory",
     title: "DirectoryNavigator",
+    category: "gallery-category-navigation",
     components: ["DirectoryNavigator", "DirectoryEntryVisual"],
     controls: ["disabled", "text", "cursor", "checked"],
     defaults: (),

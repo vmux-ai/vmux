@@ -2,6 +2,7 @@
 (
     id: "type-icon",
     title: "TypeIcon",
+    category: "gallery-category-icons",
     components: ["TypeIcon"],
     controls: ["disabled"],
     defaults: (),

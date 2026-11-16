@@ -2,6 +2,7 @@
 (
     id: "page-address",
     title: "PageAddress",
+    category: "gallery-category-navigation",
     components: ["PageBreadcrumbs", "PageToolbar", "AddressSurface"],
     controls: ["disabled"],
     defaults: (),

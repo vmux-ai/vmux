@@ -2,6 +2,7 @@
 (
     id: "card",
     title: "Card",
+    category: "gallery-category-primitives",
     components: ["Card", "CardHeader", "CardTitle", "CardDescription", "CardContent"],
     controls: ["disabled"],
     defaults: (),

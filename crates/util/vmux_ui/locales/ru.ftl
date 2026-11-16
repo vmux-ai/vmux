@@ -1246,7 +1246,7 @@ container-vm = VM
 
 gallery-title = Компоненты UI
 gallery-description = Просмотр общих компонентов в среде нативной страницы.
-gallery-controls = Аргументы / Элементы управления
+gallery-controls = Элементы управления
 gallery-reset = Сбросить
 gallery-search = Поиск компонентов
 gallery-disabled = Отключено
@@ -1260,3 +1260,16 @@ gallery-close = Закрыть
 gallery-option-one = Первый вариант
 gallery-option-two = Второй вариант
 gallery-option-three = Третий вариант
+
+gallery-all-icons = Все значки
+gallery-presets = Наборы настроек
+gallery-properties = Свойства
+gallery-search-icons = Поиск значков по имени или набору
+gallery-icon-size = Размер
+gallery-no-icons = Нет подходящих значков
+gallery-category-primitives = Базовые элементы
+gallery-category-forms = Формы
+gallery-category-composition = Композиция
+gallery-category-navigation = Навигация
+gallery-category-feedback = Обратная связь
+gallery-category-icons = Значки

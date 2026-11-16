@@ -2,6 +2,7 @@
 (
     id: "input",
     title: "Input",
+    category: "gallery-category-forms",
     components: ["Input", "ActionInput"],
     controls: ["disabled", "text"],
     defaults: (),

@@ -2,6 +2,7 @@
 (
     id: "prompt-box",
     title: "PromptBox",
+    category: "gallery-category-composition",
     components: ["PromptBox", "PromptPopup"],
     controls: ["disabled", "text", "menu"],
     defaults: (),

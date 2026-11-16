@@ -1243,7 +1243,7 @@ container-vm = 虚拟机
 
 gallery-title = UI 组件
 gallery-description = 在原生页面环境中预览共享组件。
-gallery-controls = 参数 / 控件
+gallery-controls = 控件
 gallery-reset = 重置
 gallery-search = 搜索组件
 gallery-disabled = 禁用
@@ -1257,3 +1257,16 @@ gallery-close = 关闭
 gallery-option-one = 第一个选项
 gallery-option-two = 第二个选项
 gallery-option-three = 第三个选项
+
+gallery-all-icons = 所有图标
+gallery-presets = 预设
+gallery-properties = 属性
+gallery-search-icons = 按名称或图标集搜索
+gallery-icon-size = 尺寸
+gallery-no-icons = 没有匹配的图标
+gallery-category-primitives = 基础组件
+gallery-category-forms = 表单
+gallery-category-composition = 组合
+gallery-category-navigation = 导航
+gallery-category-feedback = 反馈
+gallery-category-icons = 图标

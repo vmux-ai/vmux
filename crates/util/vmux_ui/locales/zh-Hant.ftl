@@ -1243,7 +1243,7 @@ container-vm = 虛擬機
 
 gallery-title = UI 元件
 gallery-description = 在原生頁面環境中預覽共用元件。
-gallery-controls = 參數 / 控制項
+gallery-controls = 控制項
 gallery-reset = 重設
 gallery-search = 搜尋元件
 gallery-disabled = 停用
@@ -1257,3 +1257,16 @@ gallery-close = 關閉
 gallery-option-one = 第一個選項
 gallery-option-two = 第二個選項
 gallery-option-three = 第三個選項
+
+gallery-all-icons = 所有圖示
+gallery-presets = 預設
+gallery-properties = 屬性
+gallery-search-icons = 依名稱或圖示集搜尋
+gallery-icon-size = 尺寸
+gallery-no-icons = 沒有相符的圖示
+gallery-category-primitives = 基礎元件
+gallery-category-forms = 表單
+gallery-category-composition = 組合
+gallery-category-navigation = 導覽
+gallery-category-feedback = 回饋
+gallery-category-icons = 圖示

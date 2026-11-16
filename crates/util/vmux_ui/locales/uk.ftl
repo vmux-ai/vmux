@@ -1246,7 +1246,7 @@ container-vm = VM
 
 gallery-title = Компоненти UI
 gallery-description = Перегляд спільних компонентів у середовищі нативної сторінки.
-gallery-controls = Аргументи / Елементи керування
+gallery-controls = Елементи керування
 gallery-reset = Скинути
 gallery-search = Пошук компонентів
 gallery-disabled = Вимкнено
@@ -1260,3 +1260,16 @@ gallery-close = Закрити
 gallery-option-one = Перший варіант
 gallery-option-two = Другий варіант
 gallery-option-three = Третій варіант
+
+gallery-all-icons = Усі піктограми
+gallery-presets = Набори налаштувань
+gallery-properties = Властивості
+gallery-search-icons = Пошук піктограм за назвою або набором
+gallery-icon-size = Розмір
+gallery-no-icons = Немає відповідних піктограм
+gallery-category-primitives = Базові елементи
+gallery-category-forms = Форми
+gallery-category-composition = Композиція
+gallery-category-navigation = Навігація
+gallery-category-feedback = Зворотний зв’язок
+gallery-category-icons = Піктограми

@@ -2,6 +2,7 @@
 (
     id: "motion",
     title: "Motion",
+    category: "gallery-category-feedback",
     components: ["ContentTransition", "Collapse", "Collapsible"],
     controls: ["checked"],
     defaults: (),
