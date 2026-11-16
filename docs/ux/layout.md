@@ -18,6 +18,8 @@ Each Pane keeps its own page history. Back and Forward in one Pane do not replac
 
 Click the Pane you want to use before typing or navigating. Keyboard and navigation commands act on the focused page.
 
+A pending multi-key shortcut is canceled when you switch window focus or change its bindings. Start the shortcut again in the new context. Text fields keep leader keys that are not claimed by a direct shortcut.
+
 An agent's ongoing task keeps its own Session and working folder when you focus another page. You can inspect another source without redirecting the background work.
 
 ## Keep quick access and collections

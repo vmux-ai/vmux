@@ -40,5 +40,8 @@ bevy_cef = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSGraphicsContext"] }
+
 [lints]
 workspace = true

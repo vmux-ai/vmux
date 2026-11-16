@@ -49,11 +49,8 @@ legacy: [
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:tab_settings_with_leader", fingerprint: "111317191252c934", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|impl:ShortcutFixture", fingerprint: "b48bc0b7c30c3bdf", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|struct:ShortcutFixture", fingerprint: "60543112693f4bf2", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/input.rs||fn:dispatch", fingerprint: "29ae7dab177d3e28", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs||fn:sync", fingerprint: "90c1d1d6fdd7f952", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/input.rs||impl:Plugin for InputPlugin", fingerprint: "c142308c34add36f", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs||struct:Initialize", fingerprint: "006756e1686281a3", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/input.rs||struct:InputPlugin", fingerprint: "e50f82c52475e045", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||alias:ShortcutUiStateUpdates", fingerprint: "128e8ef9bdb4e8f5", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutBinding", fingerprint: "1d98091106bd6d29", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutCatalog", fingerprint: "bfe10e6591e599bd", issue: "VMX-253"),
@@ -73,6 +70,8 @@ legacy: [
     (key: "crates/feature/vmux_shortcut/src/ui.rs||struct:ShortcutPage", fingerprint: "53630a675443821f", issue: "VMX-253"),
 ],
 boundaries: [
+    (key: "crates/feature/vmux_shortcut/src/input.rs||struct:InputPlugin", fingerprint: "e50f82c52475e045", interface: "Bevy fallback keyboard/keymap prefix owner registration", input: "ECS: crates/feature/vmux_shortcut/src/input.rs||struct:PendingPrefix", output: "external: installed shortcut synchronization, dispatch and prefix retirement", lifetime: "one shortcut plugin installation", bounds: "registration and synchronization ordering only; Keymap-owned components retain pending chord state", teardown: "Keymap removal retires pending prefix before reattachment", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_shortcut/src/input.rs||impl:Plugin for InputPlugin", fingerprint: "2691290c0ed9b162", interface: "Bevy fallback keyboard/keymap prefix owner registration", input: "ECS: crates/feature/vmux_shortcut/src/input.rs||struct:PendingPrefix", output: "external: installed shortcut synchronization, dispatch and prefix retirement", lifetime: "one shortcut plugin installation", bounds: "registration and synchronization ordering only; Keymap-owned components retain pending chord state", teardown: "Keymap removal retires pending prefix before reattachment", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:test_settings_with_leader", fingerprint: "4628e272c0bfdfc2", interface: "Rust test harness configuration adapter", input: "ECS: crates/feature/vmux_setting/src/host/runtime.rs||struct:AppSettings", output: "external: Controlled test App, DOM, configuration or protocol observations", lifetime: "One isolated fixture invocation", bounds: "One generated settings value for an isolated production-plugin fixture", teardown: "App, DOM listeners, captured results, temporary files and native handles drop with the fixture", architecture: "ECS ownership boundaries"),
 ],
 shape: (

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::prelude::{App, Plugin};
 
 pub use capture::*;
 pub use native_key::{
@@ -17,8 +18,10 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 }
 
 mod capture;
-#[cfg(target_os = "macos")]
+#[cfg(all(host, any(target_os = "macos", test)))]
 mod keyboard;
+#[cfg(target_os = "macos")]
+mod keyboard_native;
 mod native_key;
 mod pointer;
 
@@ -34,7 +37,7 @@ impl Plugin for InputPlugin {
                 vmux_api::input::KeyContextRequest,
             )>::default(),
         ));
-        #[cfg(target_os = "macos")]
+        #[cfg(all(host, any(target_os = "macos", test)))]
         app.add_plugins(keyboard::KeyboardPlugin);
     }
 }
