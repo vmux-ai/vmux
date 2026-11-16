@@ -62,6 +62,7 @@ desktop = [
 mobile = ["session", "dep:vmux_start", "dep:vmux_team"]
 service-daemon = ["daemon"]
 daemon = [
+    "dep:vmux_session",
     "host",
     "ecs",
     "vmux_ecs/host",
@@ -87,7 +88,7 @@ flex = ["ecs", "dep:vmux_flex"]
 runtime = ["flex", "vmux_flex/window", "vmux_ecs/host"]
 command = ["runtime", "dep:vmux_command"]
 setting = ["runtime", "dep:vmux_setting"]
-session = ["dep:vmux_session"]
+session = ["vmux_session/app", "dep:vmux_session"]
 layout = ["ecs", "dep:vmux_layout"]
 layout-runtime = ["layout", "command", "setting", "vmux_layout/host"]
 browser = ["command", "layout-runtime", "dep:vmux_browser"]
@@ -144,7 +145,7 @@ vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_remote = { path = "../../feature/vmux_remote", optional = true }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
-vmux_session = { path = "../../feature/vmux_session", optional = true }
+vmux_session = { path = "../../feature/vmux_session", default-features = false, optional = true }
 vmux_setting = { path = "../../feature/vmux_setting", optional = true }
 vmux_shortcut = { path = "../../feature/vmux_shortcut", optional = true }
 vmux_simulator = { path = "../../feature/vmux_simulator", optional = true }

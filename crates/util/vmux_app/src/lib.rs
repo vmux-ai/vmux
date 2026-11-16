@@ -1,3 +1,5 @@
+#[cfg(feature = "daemon")]
+pub use host_runtime::SessionHostRuntimePlugin;
 #[cfg(feature = "mobile")]
 pub use mobile::VmuxMobilePlugin;
 #[cfg(feature = "ecs")]
@@ -24,6 +26,8 @@ pub use vmux_profile as host;
 #[cfg(feature = "project")]
 pub use vmux_project as project;
 
+#[cfg(feature = "daemon")]
+mod host_runtime;
 #[cfg(feature = "mobile")]
 mod mobile;
 mod plugin;

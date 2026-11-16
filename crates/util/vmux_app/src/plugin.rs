@@ -15,10 +15,7 @@ pub enum VmuxPlugin {
     #[plugin(feature = "cli", cli, mcp, requires(ecs))]
     CliTools(crate::VmuxToolPlugin),
     #[plugin(feature = "daemon", daemon, requires(ecs))]
-    ServiceDaemon(
-        vmux_service::server::ServiceDaemonPlugin,
-        vmux_acp::AcpServicePlugin,
-    ),
+    ServiceDaemon(crate::SessionHostRuntimePlugin),
     #[plugin(feature = "project", desktop, requires(ecs))]
     Project(vmux_project::ProjectPlugin),
     #[plugin(feature = "extension-core", desktop, requires(ecs))]
@@ -36,7 +33,7 @@ pub enum VmuxPlugin {
     #[plugin(feature = "setting", desktop, requires(runtime))]
     Setting(vmux_setting::SettingsPlugin),
     #[plugin(feature = "session", desktop, mobile)]
-    Session(vmux_session::SessionPlugin),
+    Session(vmux_session::SessionClientPlugin),
     #[plugin(feature = "layout", desktop, requires(ecs))]
     Layout(vmux_layout::LayoutPlugin),
     #[plugin(
@@ -198,6 +195,7 @@ mod tests {
 #[cfg(all(test, feature = "daemon"))]
 mod profile_tests {
     use super::*;
+    use bevy_app::Update;
     use bevy_ecs::prelude::*;
     use vmux_ecs::manifest::FeatureManifest;
     use vmux_ecs::{
@@ -220,6 +218,35 @@ mod profile_tests {
             app.add_plugins(VmuxPlugin::builder().options(options).build());
             app.finish();
             app.cleanup();
+            if !tools {
+                app.world_mut()
+                    .write_message(vmux_session::CreateRequest::new(
+                        "Background task",
+                        "Renderer-free mutation",
+                        std::path::PathBuf::from("/tmp/headless-session"),
+                        None,
+                    ));
+                app.world_mut().run_schedule(Update);
+                let world = app.world_mut();
+                let (id, name) = world
+                    .query_filtered::<(&vmux_session::SessionId, &Name), With<vmux_session::Session>>()
+                    .single(world)
+                    .unwrap();
+                assert_eq!(name.as_str(), "Background task");
+                let id = id.clone();
+                app.world_mut().write_message(vmux_session::RenameRequest {
+                    id: id.clone(),
+                    name: "Renamed without a page".into(),
+                });
+                app.world_mut().run_schedule(Update);
+                let world = app.world_mut();
+                let (current, name) = world
+                    .query_filtered::<(&vmux_session::SessionId, &Name), With<vmux_session::Session>>()
+                    .single(world)
+                    .unwrap();
+                assert_eq!(current, &id);
+                assert_eq!(name.as_str(), "Renamed without a page");
+            }
             #[cfg(feature = "runtime")]
             assert!(!app.is_plugin_added::<VmuxRuntimePlugin>());
             let mut catalog = Vec::new();

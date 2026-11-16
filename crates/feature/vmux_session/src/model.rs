@@ -13,12 +13,14 @@ use std::collections::{HashMap, HashSet};
 use vmux_api::session::SessionId;
 #[cfg(test)]
 use vmux_ecs::CreatedAt;
+#[cfg(any(feature = "app", test))]
+use vmux_ecs::PageMetadata;
 #[cfg(host)]
 use vmux_ecs::store::StoreAppExt;
 #[cfg(host)]
 use vmux_ecs::{
     ActivateRequest, ArchivedAt, EntityTarget, ExternalIdentityIndex, ExternalIdentityIndexPlugin,
-    ExternalIdentityIndexSet, LastActivatedAt, Order, PageMetadata,
+    ExternalIdentityIndexSet, LastActivatedAt, Order,
 };
 use vmux_ecs::{Cwd, Description};
 
@@ -116,8 +118,17 @@ impl Plugin for MetadataPlugin {
                 (sync_conversation_title, rename, update_description)
                     .chain()
                     .in_set(crate::mutation::ReceiveSet),
-            )
-            .add_systems(Update, project_views.after(MutationSet));
+            );
+    }
+}
+
+#[cfg(all(host, feature = "app"))]
+pub(crate) struct MetadataClientPlugin;
+
+#[cfg(all(host, feature = "app"))]
+impl Plugin for MetadataClientPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, project_views.after(MutationSet));
     }
 }
 
@@ -793,7 +804,7 @@ fn activate(
     }
 }
 
-#[cfg(host)]
+#[cfg(all(host, feature = "app"))]
 fn project_views(
     sessions: Query<(&SessionId, Ref<Name>), With<Session>>,
     views: Query<(Entity, Ref<EntityTarget<Session>>, Option<&Children>)>,
@@ -1934,10 +1945,11 @@ mod tests {
         assert!(app.world().get::<LastActivatedAt>(session).unwrap().0 > 1);
     }
 
+    #[cfg(feature = "app")]
     #[test]
     fn renamed_session_updates_view_metadata() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
+        app.add_plugins((crate::SessionDomainPlugin, MetadataClientPlugin));
         let session = app
             .world_mut()
             .spawn((Session, SessionId("session-1".into()), Name::new("Before")))
@@ -1971,5 +1983,38 @@ mod tests {
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("After".into()))
         );
+    }
+    #[test]
+    fn domain_rename_preserves_unrelated_page_projection() {
+        let mut app = App::new();
+        app.add_plugins(crate::SessionDomainPlugin);
+        app.world_mut()
+            .spawn((Session, SessionId("headless".into()), Name::new("Before")));
+        let session = app
+            .world_mut()
+            .query_filtered::<Entity, With<Session>>()
+            .single(app.world())
+            .unwrap();
+        let page = app
+            .world_mut()
+            .spawn((
+                EntityTarget::<Session>::new(session),
+                PageMetadata {
+                    title: "Owned by client".into(),
+                    url: "vmux://client/".into(),
+                    icon: Default::default(),
+                    bg_color: None,
+                },
+            ))
+            .id();
+        app.world_mut().write_message(RenameRequest {
+            id: SessionId("headless".into()),
+            name: "After".into(),
+        });
+        app.update();
+        assert_eq!(app.world().get::<Name>(session).unwrap().as_str(), "After");
+        let metadata = app.world().get::<PageMetadata>(page).unwrap();
+        assert_eq!(metadata.title, "Owned by client");
+        assert_eq!(metadata.url, "vmux://client/");
     }
 }
