@@ -52,6 +52,10 @@ A feature usually includes its UI, event types, handlers, and tests. `feature.ro
 
 The desktop displays pages and handles native integration. The background service keeps processes and conversations alive beyond a page. Mobile uses supported host features through a remote connection. Web pages stay ordinary browser content and do not receive unrestricted access to the host.
 
+Session composition separates canonical mutation, Host behavior and page projection. `SessionDomainPlugin` owns identity, metadata and stage changes. `SessionHostPlugin` adds provider lifecycle, prompt queues, transcript/history ownership and the canonical catalog, with no page or implicit Profile file store. `SessionClientPlugin` owns page metadata and UI projection; desktop preferences are composed explicitly.
+
+The application daemon uses `SessionHostRuntimePlugin` to compose that same public Host behavior with the existing service daemon and ACP process/agent runtime. Domain and Host consumers compile without the app feature or renderer. Native process work remains owned by the service/ACP systems. The reused Host boundary owns provider and transcript operations; Cloud-specific runtime enrollment and Host assignment remain in VMX-232/148. Client sync and gateway implementations can reuse the public records and domain operations without importing private Cloud storage or transport SDKs into the domain.
+
 ### ECS ownership boundaries
 
 Filesystem, network, process, and native API calls sit behind adapters. Handlers decide what should happen; an adapter performs the outside operation and returns its result. Before applying a delayed result, the handler checks that it still belongs to the current task or page.

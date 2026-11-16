@@ -19,7 +19,9 @@ pub use conversation::{
 #[cfg(host)]
 pub use history::{MoreRequest as ConversationHistoryMoreRequest, Window as ConversationHistory};
 #[cfg(feature = "app")]
-pub use host::SessionPlugin;
+pub use host::SessionClientPlugin;
+#[cfg(feature = "app")]
+pub use host::SessionClientPlugin as SessionPlugin;
 #[cfg(host)]
 pub use model::ProviderSessionTombstones;
 pub use model::{
@@ -35,11 +37,29 @@ pub use queue::{
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};
+#[cfg(host)]
+pub use runtime::SessionHostPlugin;
+#[cfg(host)]
+pub use runtime::SessionHostPlugin as DomainPlugin;
 pub use session::{
     AgentConversationTitle, ApprovalCount, ApprovalProjectionSet, TitlePending, TranscriptLoading,
 };
 pub use title::ConversationTitle;
 pub use vmux_api::session::SessionId;
+
+#[cfg(host)]
+pub struct SessionDomainPlugin;
+
+#[cfg(host)]
+impl Plugin for SessionDomainPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            model::EntityPlugin,
+            model::MetadataPlugin,
+            model::StagePlugin,
+        ));
+    }
+}
 
 #[cfg(all(host, feature = "app"))]
 pub(crate) struct Feature;
@@ -86,27 +106,4 @@ mod route;
 mod title;
 
 #[cfg(host)]
-pub struct DomainPlugin;
-
-#[cfg(host)]
-impl Plugin for DomainPlugin {
-    fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<provider::ProviderPlugin>() {
-            app.add_plugins(provider::ProviderPlugin);
-        }
-        if !app.is_plugin_added::<QueuePlugin>() {
-            app.add_plugins(QueuePlugin);
-        }
-        #[cfg(feature = "preferences")]
-        app.add_plugins(preferences::PreferencesPlugin);
-        app.add_plugins((
-            model::EntityPlugin,
-            model::MetadataPlugin,
-            model::StagePlugin,
-            catalog::CatalogPlugin,
-        ));
-        if !app.is_plugin_added::<history::HistoryPlugin>() {
-            app.add_plugins(history::HistoryPlugin);
-        }
-    }
-}
+mod runtime;

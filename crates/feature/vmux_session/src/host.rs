@@ -12,6 +12,7 @@ use vmux_ecs::page::PrewarmPage;
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::store::{WorkspaceRestoreValidator, WorkspaceStoreValidator};
 
+pub use SessionClientPlugin as SessionPlugin;
 #[cfg(host)]
 pub use catalog::{ScopeProjectionRequest, SessionCatalogView, SessionManagerView};
 pub use conversation::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
@@ -63,9 +64,9 @@ mod transcript;
 mod video;
 
 #[vmux_page::page]
-pub struct SessionPlugin;
+pub struct SessionClientPlugin;
 
-impl Plugin for SessionPlugin {
+impl Plugin for SessionClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             state::ChatUiStatePlugin,
@@ -74,9 +75,16 @@ impl Plugin for SessionPlugin {
             conversation::ChatConversationPlugin,
         ));
         #[cfg(all(host, not(target_os = "android")))]
-        app.add_plugins(crate::DomainPlugin)
-            .add_systems(PreStartup, (spawn_store_validator, prewarm))
-            .add_systems(Startup, register_route);
+        {
+            if !app.is_plugin_added::<crate::SessionHostPlugin>() {
+                app.add_plugins(crate::SessionHostPlugin);
+            }
+            app.add_plugins(crate::model::MetadataClientPlugin)
+                .add_systems(PreStartup, (spawn_store_validator, prewarm))
+                .add_systems(Startup, register_route);
+        }
+        #[cfg(all(host, not(target_os = "android"), feature = "preferences"))]
+        app.add_plugins(crate::preferences::PreferencesPlugin);
         #[cfg(host)]
         app.add_plugins((
             FeaturePlugin::<crate::Feature>::default(),
