@@ -4,7 +4,9 @@ use bevy::prelude::{
     With, Without,
 };
 use vmux_layout::window::FocusedWindow;
-use vmux_page::{Page, PagePlacement};
+#[cfg(target_os = "macos")]
+use vmux_page::Page;
+use vmux_page::PagePlacement;
 
 use crate::host_focus::HostFocusIntent;
 
@@ -42,8 +44,10 @@ pub(super) enum FocusSet {
 #[derive(Component, Clone)]
 pub(super) struct HostedSurface {
     pub(super) placement: PagePlacement,
+    #[cfg(target_os = "macos")]
     pub(super) page: &'static Page,
     pub(super) window: Entity,
+    #[cfg(target_os = "macos")]
     pub(super) url: String,
 }
 
@@ -290,8 +294,10 @@ mod tests {
                 .spawn((
                     HostedSurface {
                         placement,
+                        #[cfg(target_os = "macos")]
                         page: &const { Page::pane("vmux://native-focus-test", vmux_layout::ui::Page) },
                         window,
+                        #[cfg(target_os = "macos")]
                         url: "vmux://native-focus-test".to_string(),
                     },
                     HostedSurfaceGeneration(1),
