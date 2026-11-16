@@ -1,4 +1,4 @@
-use bevy::prelude::{Changed, Query, Window};
+use bevy::prelude::{App, Changed, Commands, On, Plugin, Query, Remove, Window};
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::bookmark::{
@@ -1356,6 +1356,18 @@ fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData
 #[derive(Component)]
 struct UpdateNoticeReceipt(UpdateState);
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct NoticeDelivery<'w, 's> {
+    browsers: NonSend<'w, Browsers>,
+    layouts: Query<'w, 's, (), With<LayoutCef>>,
+}
+
+impl NoticeDelivery<'_, '_> {
+    fn available(&self, entity: Entity) -> bool {
+        self.layouts.contains(entity) && self.browsers.can_emit_to(&entity)
+    }
+}
+
 fn retire_update_notice(removed: On<Remove, LayoutCef>, mut commands: Commands) {
     commands
         .entity(removed.event_target())
@@ -1364,7 +1376,7 @@ fn retire_update_notice(removed: On<Remove, LayoutCef>, mut commands: Commands) 
 
 fn push_update_notice_emit(
     mut commands: Commands,
-    browsers: NonSend<Browsers>,
+    delivery: NoticeDelivery,
     layout: FocusedLayout,
     state: Single<&UpdateState>,
     receipts: Query<&UpdateNoticeReceipt, With<LayoutCef>>,
@@ -1372,7 +1384,7 @@ fn push_update_notice_emit(
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
+    if !delivery.available(cef_e) {
         return;
     }
     let unchanged = receipts

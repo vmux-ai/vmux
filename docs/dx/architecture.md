@@ -122,7 +122,8 @@ entity. The registered projection reads the current update state and page readin
 publishes typed UI patches only when needed, and records the publication in the same
 deferred-command drain. An unavailable browser records nothing. Removing LayoutCef
 retires its receipt, including same-update reattachment; other layouts keep their own
-publication history. Non-idle notices replay after page readiness changes.
+publication history. Non-idle notices replay after page readiness changes. CEF endpoint
+availability is a borrowed adapter observation, not retained publication state.
 
 CI sequencing belongs to the GitHub Actions workflow before product composition. Its Git adapter verifies the captured head/base merge and prepares identical checkouts for every runner; CLI artifacts bind their bytes to that checkout and run. PR validation performs no branch-run lookup or polling, so merge verification cannot wait behind a separate push workflow. Required statuses reject failed preparation and unexpected skips of applicable checks. Native distribution work remains outside ordinary PR validation. Heavy validation remains applicable after preparation failures but cancels when a PR run is superseded, so it cannot hold the concurrency slot for the new head.
 
