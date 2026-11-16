@@ -171,6 +171,21 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
     let open = use_signal(|| false);
     let mut trigger = use_signal(|| None::<Rc<MountedData>>);
     let menu = ExtensionMenuState { open, trigger };
+    let browser =
+        super::state::LayoutUi::current().use_selector(|state| state.browser_modal.clone())();
+    let browser_active = !browser.id.is_empty();
+    let browser_id = browser.id.clone();
+    let browser_title = if browser.title.is_empty() {
+        browser.origin.clone()
+    } else {
+        browser.title.clone()
+    };
+    use_effect(use_reactive!(|browser_active| {
+        if browser_active && *open.peek() {
+            let mut open = open;
+            open.set(false);
+        }
+    }));
     let enabled = extensions
         .into_iter()
         .filter(|extension| extension.enabled)
@@ -185,19 +200,26 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                 "data-vmux-dropdown-trigger": "true",
                 r#type: "button",
                 class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
-                title: translate("layout-manage-extensions"),
-                aria_label: translate("extensions-title"),
-                aria_expanded: open(),
+                title: if browser_active { browser_title.clone() } else { translate("layout-manage-extensions") },
+                aria_label: if browser_active { browser_title.clone() } else { translate("extensions-title") },
+                aria_expanded: browser_active || open(),
                 onmounted: move |event| {
                     trigger.set(Some(event.data()));
                     toolbar.mount(event.data());
                 },
-                onclick: move |_| menu.toggle(),
-                Icon { class: "h-4 w-4",
+                onclick: move |_| {
+                    if browser_active {
+                        let _ = send(&vmux_api::browser::BrowserModalCloseRequest { id: browser_id.clone() });
+                    } else { menu.toggle(); }
+                },
+                if browser_active {
+                    if let Some(icon) = browser.icon { img { src: icon, alt: "", class: "size-4 object-contain" } }
+                    else { vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::Globe, class: "size-4".to_string() } }
+                } else { Icon { class: "h-4 w-4",
                     path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
-                }
+                } }
             }
-            if open() {
+            if open() && !browser_active {
                 DropdownPopup { align: DropdownAlign::End, class: "w-72 p-0",
                     div { class: "border-b border-border/70 px-3 py-2 text-xs font-semibold text-foreground",
                         {translate("extensions-title")}
