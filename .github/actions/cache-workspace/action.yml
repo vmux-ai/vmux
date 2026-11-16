@@ -13,9 +13,9 @@ inputs:
     required: false
     default: .
   branch-cache:
-    description: Retain an isolated cache for profiles that main never compiles
+    description: Publish successful same-repository PR caches (auto, true or false)
     required: false
-    default: "false"
+    default: "auto"
 runs:
   using: composite
   steps:
@@ -25,7 +25,7 @@ runs:
         VMUX_CACHE_PARTITION: ${{ inputs.cache-key }}
         VMUX_CACHE_TARGET: ${{ inputs.target }}
         VMUX_CACHE_WORKSPACE: ${{ inputs.workspace }}
-        VMUX_CACHE_SAVE: ${{ github.ref == 'refs/heads/main' || inputs.branch-cache == 'true' }}
+        VMUX_CACHE_SAVE: ${{ github.ref == 'refs/heads/main' || inputs.branch-cache == 'true' || (inputs.branch-cache == 'auto' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
       run: node scripts/ci-cache.js inputs
     - uses: actions/cache/restore@v5
       with:
@@ -37,4 +37,4 @@ runs:
         snapshot: ${{ steps.inputs.outputs.snapshot }}
         receipt: ${{ steps.inputs.outputs.receipt }}
         target: ${{ steps.inputs.outputs.target }}
-        save: ${{ github.ref == 'refs/heads/main' || inputs.branch-cache == 'true' }}
+        save: ${{ steps.inputs.outputs.save }}

@@ -38,6 +38,7 @@ jobs:
       tree: ${{ steps.plan.outputs.tree }}
       cef: ${{ steps.resolve.outputs.version }}
       release: ${{ steps.plan.outputs.release }}
+      presentation_only: ${{ steps.plan.outputs.presentation_only }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -47,7 +48,11 @@ jobs:
         with:
           script: |
             const Preflight = require('./scripts/ci-preflight.js');
-            await new Preflight({ github, context, core }).plan({ reuseChecks: false });
+            const plan = await new Preflight({ github, context, core }).plan({ reuseChecks: false });
+            const Workflow = require('./scripts/ci-workflow.js');
+            const presentation = Workflow.presentationOnly(process.cwd(), plan.base, plan.tree);
+            core.setOutput('presentation_only', String(presentation));
+            if (presentation) core.info('Workflow display names changed; executable configuration is unchanged');
       - name: Resolve cef crate version from Cargo.lock
         id: resolve
         run: |
@@ -65,11 +70,11 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     outputs:
-      website: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.website == 'true' }}
-      macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' || (github.event_name == 'push' && steps.filter.outputs.macos_main == 'true')) && steps.native.outputs.native != 'false' }}
-      macos_tooling: ${{ steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false' }}
-      ios: ${{ github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false' }}
-      code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
+      website: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.website == 'true') }}
+      macos: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' || (github.event_name == 'push' && steps.filter.outputs.macos_main == 'true')) && steps.native.outputs.native != 'false') }}
+      macos_tooling: ${{ needs.plan.outputs.presentation_only != 'true' && (steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false') }}
+      ios: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false') }}
+      code: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true') }}
       compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' }}
       contracts: ${{ steps.scope.outputs.sdk == 'true' }}
       headless: ${{ steps.scope.outputs.headless == 'true' }}
@@ -228,11 +233,11 @@ jobs:
         with:
           cli: build
           fast-rust: "false"
-        if: github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' || steps.filter.outputs.website == 'true' || steps.filter.outputs.macos == 'true' || steps.filter.outputs.macos_main == 'true' || steps.filter.outputs.macos_tooling == 'true' || steps.filter.outputs.ios == 'true'
+        if: needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' || steps.filter.outputs.website == 'true' || steps.filter.outputs.macos == 'true' || steps.filter.outputs.macos_main == 'true' || steps.filter.outputs.macos_tooling == 'true' || steps.filter.outputs.ios == 'true')
 
       - name: Select Rust validation scope
         id: scope
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true'
+        if: needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true')
         env:
           VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && needs.plan.outputs.base || github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
         run: vmux ci-scope >> "$GITHUB_OUTPUT"
@@ -258,7 +263,7 @@ jobs:
           VMUX_TEST_SCOPE: ${{ steps.scope.outputs.args }}
           VMUX_CHECK_INPUTS: ${{ steps.scope.outputs.inputs }}
           VMUX_RECORDS: ${{ steps.scope.outputs.records }}
-          VMUX_CODE_REQUIRED: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
+          VMUX_CODE_REQUIRED: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true') }}
           VMUX_RUST_REQUIRED: ${{ steps.scope.outputs.rust }}
           VMUX_SDK_REQUIRED: ${{ steps.scope.outputs.sdk }}
           VMUX_DESKTOP_REQUIRED: ${{ steps.scope.outputs.desktop }}
