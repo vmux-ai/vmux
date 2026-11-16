@@ -585,17 +585,6 @@ jobs:
         with:
           cache-key: ${{ matrix.cache }}
 
-  test:
-    name: Test
-    needs: [ci]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Required-check compatibility
-        env:
-          CI: ${{ needs.ci.result }}
-        run: test "$CI" = success
-
   website:
     name: Build Web
     needs: [plan, changes]
