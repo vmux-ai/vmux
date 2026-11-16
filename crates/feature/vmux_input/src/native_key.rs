@@ -9,6 +9,21 @@ pub struct NativeKey {
 }
 
 #[cfg(host)]
+impl NativeKey {
+    pub fn combo(&self) -> vmux_command::KeyCombo {
+        vmux_command::KeyCombo {
+            key: self.key,
+            modifiers: vmux_command::Modifiers {
+                ctrl: self.modifiers.ctrl,
+                alt: self.modifiers.alt,
+                shift: self.modifiers.shift,
+                super_key: self.modifiers.super_key,
+            },
+        }
+    }
+}
+
+#[cfg(host)]
 #[derive(bevy::prelude::Component)]
 pub struct ConsumesNativeKey;
 

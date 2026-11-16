@@ -15,14 +15,16 @@ struct Initialize;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            sync.in_set(Initialize)
-                .after(SettingsLoadSet)
-                .after(vmux_command::BindCommands),
-        )
-        .add_systems(Update, sync)
-        .add_systems(Update, dispatch.in_set(WriteCommandRequests));
+        app.add_observer(retire_prefix)
+            .add_systems(PreUpdate, (initialize_prefix, ApplyDeferred).chain())
+            .add_systems(
+                Startup,
+                sync.in_set(Initialize)
+                    .after(SettingsLoadSet)
+                    .after(vmux_command::BindCommands),
+            )
+            .add_systems(Update, sync.before(WriteCommandRequests))
+            .add_systems(Update, dispatch.in_set(WriteCommandRequests));
     }
 }
 
@@ -132,14 +134,46 @@ impl PressedKeys<'_> {
     }
 }
 
+#[derive(Component, Default)]
+struct PendingPrefix {
+    accepted: Option<(vmux_input::NativeKey, Instant)>,
+    window: Option<Entity>,
+}
+
+fn initialize_prefix(
+    keymaps: Query<Entity, (With<Keymap>, Without<PendingPrefix>)>,
+    mut commands: Commands,
+) {
+    for entity in &keymaps {
+        commands.entity(entity).insert(PendingPrefix::default());
+    }
+}
+
+fn retire_prefix(removed: On<Remove, Keymap>, mut commands: Commands) {
+    commands
+        .entity(removed.event_target())
+        .try_remove::<PendingPrefix>();
+}
+
 fn dispatch(
     input: PressedKeys,
-    bindings: Single<&Keymap>,
-    mut pending_prefix: Local<Option<(KeyCombo, Instant)>>,
+    bindings: Single<(Ref<Keymap>, &mut PendingPrefix)>,
+    windows: Query<Entity, (With<Window>, With<vmux_ecs::Active>)>,
+    contexts: Query<&vmux_input::KeyboardContext>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     user: Query<Entity, With<vmux_ecs::team::User>>,
     capture: Query<(), With<NativeKeyCapture>>,
 ) {
+    let (bindings, mut state) = bindings.into_inner();
+    let window = windows.iter().next();
+    let text_entry = contexts
+        .single()
+        .is_ok_and(|context| context.text_entry_owns_keys);
+    if bindings.is_changed() || state.window != window || text_entry {
+        state.accepted = None;
+    }
+    state.window = window;
+    let pending_prefix = &mut state.accepted;
     if !capture.is_empty() {
         *pending_prefix = None;
         return;
@@ -155,12 +189,12 @@ fn dispatch(
 
     let just_pressed = input.just_pressed();
 
-    if let Some((prefix, instant)) = pending_prefix.clone() {
+    if let Some((prefix, instant)) = *pending_prefix {
         let timeout = std::time::Duration::from_millis(bindings.chord_timeout_ms);
         if instant.elapsed() <= timeout
             && let Some(cmd) = just_pressed
                 .iter()
-                .find_map(|pressed| bindings.chord(&prefix, pressed))
+                .find_map(|pressed| bindings.chord(&prefix.combo(), pressed))
         {
             invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
             *pending_prefix = None;
@@ -177,8 +211,19 @@ fn dispatch(
             invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
             return;
         }
-        if bindings.has_chord_prefix(pressed) {
-            *pending_prefix = Some((pressed.clone(), Instant::now()));
+        if !text_entry && bindings.has_chord_prefix(pressed) {
+            *pending_prefix = Some((
+                vmux_input::NativeKey {
+                    key: pressed.key,
+                    modifiers: vmux_api::input::KeyModifiers {
+                        ctrl: pressed.modifiers.ctrl,
+                        alt: pressed.modifiers.alt,
+                        shift: pressed.modifiers.shift,
+                        super_key: pressed.modifiers.super_key,
+                    },
+                },
+                Instant::now(),
+            ));
             for (second_index, second) in just_pressed.iter().enumerate() {
                 if second_index == index {
                     continue;
@@ -372,6 +417,68 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();
+    }
+
+    #[test]
+    fn fallback_prefix_does_not_survive_keymap_removal_and_reattachment() {
+        let mut app = ShortcutFixture::app(None);
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        let (owner, map) = {
+            let world = app.world_mut();
+            let mut maps = world.query::<(Entity, &Keymap)>();
+            let (entity, map) = maps.single(world).unwrap();
+            (entity, map.clone())
+        };
+        app.world_mut().entity_mut(owner).remove::<Keymap>();
+        app.world_mut().entity_mut(owner).insert(map);
+        press(&mut app, KeyCode::KeyH);
+        app.update();
+        assert!(ShortcutFixture::invocations(&mut app).is_empty());
+    }
+
+    #[test]
+    fn fallback_prefix_does_not_cross_window_focus_changes() {
+        let mut app = ShortcutFixture::app(None);
+        let first = app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        app.world_mut()
+            .entity_mut(first)
+            .remove::<vmux_ecs::Active>();
+        app.world_mut().spawn((Window::default(), vmux_ecs::Active));
+        press(&mut app, KeyCode::KeyH);
+        app.update();
+        assert!(ShortcutFixture::invocations(&mut app).is_empty());
+    }
+
+    #[test]
+    fn fallback_text_entry_does_not_open_a_leader_chord() {
+        let mut app = ShortcutFixture::app(None);
+        app.world_mut().spawn(vmux_input::KeyboardContext {
+            text_entry_owns_keys: true,
+            ..Default::default()
+        });
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        press(&mut app, KeyCode::KeyH);
+        app.update();
+        assert!(ShortcutFixture::invocations(&mut app).is_empty());
     }
 
     #[test]

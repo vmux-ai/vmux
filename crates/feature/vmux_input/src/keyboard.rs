@@ -1,59 +1,126 @@
-use std::collections::{HashMap, HashSet};
-use std::ptr::NonNull;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
 use crate::{
-    ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
+    ConsumesNativeKey, ExitFullscreenShortcut, HideWindowsShortcut, KeyboardContext,
+    KeyboardContextSet, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
     NativeKeyInputSet, PassesNativeKey,
 };
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use crossbeam_channel::{Receiver, Sender};
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
-use parking_lot::Mutex;
+use bevy::prelude::{
+    App, ChildOf, Commands, Entity, Has, MessageReader, MessageWriter, Plugin, Query, Ref, Window,
+    With,
+};
+use bevy::prelude::{On, Remove};
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
 use vmux_api::input::KeyModifiers;
-use vmux_command::{CommandInvocation, WriteCommandRequests};
-use vmux_command::{KeyCombo, Keymap, Modifiers};
+use vmux_command::{
+    CommandInvocation, KeyCombo, Keymap, Modifiers, Shortcut, WriteCommandRequests,
+};
 use vmux_ecs::team::User;
-use vmux_ecs::{Active, UnixMillis, WindowFullscreen, WindowFullscreenSet};
-
-use crate::{ExitFullscreenShortcut, HideWindowsShortcut, KeyboardContext, KeyboardContextSet};
+use vmux_ecs::{Active, WindowFullscreen, WindowFullscreenSet};
 
 pub(crate) struct KeyboardPlugin;
 
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<NativeKeyInput>()
+        app.add_message::<KeyboardPress>()
+            .add_message::<KeyboardEffect>()
+            .add_message::<KeyboardSuppression>()
+            .add_message::<NativeKeyInput>()
             .add_message::<ExitFullscreenShortcut>()
             .add_message::<HideWindowsShortcut>()
-            .init_resource::<HideWindowsGesture>()
-            .add_systems(Startup, (spawn_bridge, spawn_application_key_bindings))
-            .add_systems(Update, install_monitor)
+            .add_observer(retire_streams)
+            .add_systems(Startup, spawn_application_key_bindings)
             .add_systems(
-                Update,
-                sync_context
-                    .after(KeyboardContextSet)
-                    .after(NativeKeyClaimSet)
-                    .before(NativeKeyInputSet),
-            )
-            .add_systems(Update, dispatch_commands.in_set(WriteCommandRequests))
-            .add_systems(
-                Update,
-                dispatch_inputs
-                    .after(sync_context)
-                    .in_set(NativeKeyInputSet),
+                PreUpdate,
+                (initialize, ApplyDeferred)
+                    .chain()
+                    .in_set(KeyboardInitializeSet),
             )
             .add_systems(
                 Update,
-                sync_application_key_bindings
+                (sync_application_key_bindings, ApplyDeferred)
+                    .chain()
                     .in_set(NativeKeyClaimSet)
                     .after(KeyboardContextSet)
                     .after(WindowFullscreenSet),
             )
-            .add_systems(Update, publish_shortcuts.after(NativeKeyInputSet));
+            .add_systems(
+                Update,
+                route
+                    .in_set(KeyboardRouteSet)
+                    .in_set(WriteCommandRequests)
+                    .after(KeyboardContextSet)
+                    .after(NativeKeyClaimSet)
+                    .before(NativeKeyInputSet),
+            )
+            .add_systems(Update, publish_shortcuts.after(NativeKeyInputSet))
+            .add_systems(PostUpdate, release_capture)
+            .add_systems(Last, publish_suppression.in_set(KeyboardPublishSet));
+        #[cfg(target_os = "macos")]
+        app.add_plugins(crate::keyboard_native::KeyboardNativePlugin);
     }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct KeyboardInitializeSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct KeyboardRouteSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct KeyboardPublishSet;
+
+#[derive(Component)]
+pub(crate) struct KeyboardStream;
+
+#[derive(Component, Default)]
+struct NativeChord {
+    prefix: Option<NativePrefix>,
+    focused_window: Option<Entity>,
+}
+
+struct NativePrefix {
+    key: NativeKey,
+    accepted_at: Instant,
+}
+
+#[derive(Message, Clone, Debug)]
+pub(crate) struct KeyboardPress {
+    pub(crate) stream: Entity,
+    pub(crate) token: u64,
+    pub(crate) window: Option<Entity>,
+    pub(crate) input: NativeKeyInput,
+    pub(crate) observed_at: Instant,
+    pub(crate) overflowed: bool,
+}
+
+impl KeyboardPress {
+    fn combo(&self, key: KeyCode) -> KeyCombo {
+        KeyCombo {
+            key,
+            modifiers: Modifiers {
+                ctrl: self.input.modifiers.ctrl,
+                alt: self.input.modifiers.alt,
+                shift: self.input.modifiers.shift,
+                super_key: self.input.modifiers.super_key,
+            },
+        }
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug)]
+pub(crate) struct KeyboardEffect {
+    pub(crate) stream: Entity,
+    pub(crate) token: u64,
+    pub(crate) forward: bool,
+}
+
+#[derive(Message, Clone)]
+pub(crate) struct KeyboardSuppression {
+    pub(crate) stream: Entity,
+    pub(crate) keys: HashSet<NativeKey>,
+    pub(crate) all_keys: bool,
 }
 
 #[derive(Component)]
@@ -62,7 +129,7 @@ struct ExitFullscreenKey;
 #[derive(Component)]
 struct HideWindowsKey;
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct HideWindowsGesture {
     started_at_ms: Option<i64>,
     triggered: bool,
@@ -98,46 +165,46 @@ impl HideWindowsGesture {
     }
 }
 
-#[derive(Component, Clone)]
-struct KeyboardBridge {
-    context: Arc<Mutex<NativeKeyboardContext>>,
-    output: NativeKeyboardOutput,
+fn initialize(
+    keymaps: Query<(Entity, Ref<Keymap>)>,
+    streams: Query<(Entity, &ChildOf), With<KeyboardStream>>,
+    mut commands: Commands,
+) {
+    for (owner, keymap) in &keymaps {
+        if !keymap.is_added() && streams.iter().any(|(_, parent)| parent.parent() == owner) {
+            continue;
+        }
+        for (entity, parent) in &streams {
+            if parent.parent() == owner {
+                commands.entity(entity).despawn();
+            }
+        }
+        commands.spawn((
+            Name::new("Native keyboard stream"),
+            KeyboardStream,
+            NativeChord::default(),
+            ChildOf(owner),
+        ));
+    }
 }
 
-#[derive(Default)]
-struct NativeKeyboardContext {
-    keymap: Option<Keymap>,
-    pending_prefix: Option<(KeyCombo, Instant)>,
-    capture_active: bool,
-    consumed: HashMap<KeyCombo, Entity>,
-    passed: HashSet<KeyCombo>,
-    text_entry_owns_keys: bool,
-}
-
-#[derive(Clone)]
-struct NativeKeyboardOutput {
-    commands: Sender<String>,
-    inputs: Sender<NativeKeyInput>,
-}
-
-#[derive(Component)]
-struct KeyboardInbox {
-    commands: Receiver<String>,
-    inputs: Receiver<NativeKeyInput>,
-}
-
-#[derive(Component)]
-struct KeyboardMonitorPending;
-
-fn spawn_bridge(mut commands: Commands) {
-    let (bridge, inbox) = KeyboardBridge::channel();
-    commands.spawn((Name::new("Keyboard"), bridge, inbox, KeyboardMonitorPending));
+fn retire_streams(
+    removed: On<Remove, Keymap>,
+    streams: Query<(Entity, &ChildOf), With<KeyboardStream>>,
+    mut commands: Commands,
+) {
+    for (entity, parent) in &streams {
+        if parent.parent() == removed.event_target() {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 fn spawn_application_key_bindings(mut commands: Commands) {
     commands.spawn((
         Name::new("Hide windows key"),
         HideWindowsKey,
+        HideWindowsGesture::default(),
         NativeKey {
             key: KeyCode::KeyQ,
             modifiers: KeyModifiers {
@@ -161,324 +228,53 @@ fn spawn_application_key_bindings(mut commands: Commands) {
     }
 }
 
-impl KeyboardBridge {
-    fn channel() -> (Self, KeyboardInbox) {
-        let (commands, command_inbox) = crossbeam_channel::unbounded();
-        let (inputs, input_inbox) = crossbeam_channel::unbounded();
-        (
-            Self {
-                context: Arc::new(Mutex::new(NativeKeyboardContext::default())),
-                output: NativeKeyboardOutput { commands, inputs },
-            },
-            KeyboardInbox {
-                commands: command_inbox,
-                inputs: input_inbox,
-            },
-        )
-    }
-
-    fn install(&self, wake: impl Fn() + Send + Sync + 'static) {
-        let context = self.context.clone();
-        let output = self.output.clone();
-        let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-            let ev = unsafe { event.as_ref() };
-            wake();
-            if ev.r#type() != NSEventType::KeyDown {
-                return event.as_ptr();
+impl NativeChord {
+    fn command(
+        &mut self,
+        map: &Keymap,
+        combo: KeyCombo,
+        now: Instant,
+        text_entry: bool,
+    ) -> (bool, Option<String>) {
+        if self.prefix.as_ref().is_some_and(|prefix| {
+            now.saturating_duration_since(prefix.accepted_at)
+                > Duration::from_millis(map.chord_timeout_ms)
+        }) {
+            self.prefix = None;
+        }
+        if let Some(prefix) = self.prefix.take()
+            && let Some(command) = map.chord(&prefix.key.combo(), &combo)
+        {
+            return (true, Some(command));
+        }
+        if let Some(command) = map.direct(&combo) {
+            if combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key {
+                return (true, Some(command));
             }
-            let key_code = ev.keyCode();
-            let flags = ev.modifierFlags();
-            let input = native_input(ev, key_code, flags);
-            let mut context = context.lock();
-            if context.capture_active {
-                if ev.isARepeat() {
-                    return std::ptr::null_mut();
-                }
-                let releases = input.releases_capture();
-                if releases {
-                    context.capture_active = false;
-                }
-                context.pending_prefix = None;
-                let _ = output.inputs.send(NativeKeyInput {
-                    captured: true,
-                    ..input
-                });
-                if releases {
-                    return event.as_ptr();
-                }
-                return std::ptr::null_mut();
-            }
-            let Some(combo) = translate(key_code, flags) else {
-                return event.as_ptr();
-            };
-            let disposition = context.classify(combo);
-            if output.publish(disposition, input) {
-                std::ptr::null_mut()
-            } else {
-                event.as_ptr()
-            }
-        });
-        let mask = NSEventMask::KeyDown | NSEventMask::KeyUp | NSEventMask::FlagsChanged;
-        let token = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
-        if let Some(token) = token {
-            std::mem::forget(token);
+            return (false, None);
         }
-    }
-}
-
-enum KeyDisposition {
-    Consume(Option<String>),
-    Feature(Entity),
-    PassThrough,
-}
-
-fn decide(
-    map: &Keymap,
-    pending: &mut Option<(KeyCombo, Instant)>,
-    combo: KeyCombo,
-    now: Instant,
-    text_entry_owns_keys: bool,
-) -> KeyDisposition {
-    if let Some((_, started)) = pending.as_ref()
-        && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
-    {
-        *pending = None;
-    }
-
-    if let Some((prefix, _)) = pending.clone() {
-        if let Some(cmd) = map.chord(&prefix, &combo) {
-            *pending = None;
-            return KeyDisposition::Consume(Some(cmd));
+        if !text_entry && map.has_chord_prefix(&combo) {
+            self.prefix = Some(NativePrefix {
+                key: NativeKey {
+                    key: combo.key,
+                    modifiers: KeyModifiers {
+                        ctrl: combo.modifiers.ctrl,
+                        alt: combo.modifiers.alt,
+                        shift: combo.modifiers.shift,
+                        super_key: combo.modifiers.super_key,
+                    },
+                },
+                accepted_at: now,
+            });
+            return (true, None);
         }
-        *pending = None;
-    }
-
-    if let Some(cmd) = map.direct(&combo) {
-        if combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key {
-            return KeyDisposition::Consume(Some(cmd));
-        }
-        return KeyDisposition::PassThrough;
-    }
-
-    if !text_entry_owns_keys && map.has_chord_prefix(&combo) {
-        *pending = Some((combo, now));
-        return KeyDisposition::Consume(None);
-    }
-
-    KeyDisposition::PassThrough
-}
-
-impl NativeKeyboardContext {
-    fn classify(&mut self, combo: KeyCombo) -> KeyDisposition {
-        if self.passed.contains(&combo) {
-            return KeyDisposition::PassThrough;
-        }
-        if let Some(entity) = self.consumed.get(&combo) {
-            return KeyDisposition::Feature(*entity);
-        }
-        let Some(map) = self.keymap.as_ref() else {
-            return KeyDisposition::PassThrough;
-        };
-        decide(
-            map,
-            &mut self.pending_prefix,
-            combo,
-            Instant::now(),
-            self.text_entry_owns_keys,
-        )
+        (false, None)
     }
 }
 
-impl NativeKeyboardOutput {
-    fn publish(&self, disposition: KeyDisposition, mut input: NativeKeyInput) -> bool {
-        match disposition {
-            KeyDisposition::Consume(command) => {
-                if let Some(command) = command {
-                    let _ = self.commands.send(command);
-                }
-                true
-            }
-            KeyDisposition::Feature(claim) => {
-                input.claim = Some(claim);
-                let _ = self.inputs.send(input);
-                true
-            }
-            KeyDisposition::PassThrough => false,
-        }
-    }
-}
-
-fn translate(key_code: u16, flags: NSEventModifierFlags) -> Option<KeyCombo> {
-    let key = key_code_from_vk(key_code)?;
-    Some(KeyCombo {
-        key,
-        modifiers: modifiers(flags),
-    })
-}
-
-fn modifiers(flags: NSEventModifierFlags) -> Modifiers {
-    Modifiers {
-        ctrl: flags.contains(NSEventModifierFlags::Control),
-        shift: flags.contains(NSEventModifierFlags::Shift),
-        alt: flags.contains(NSEventModifierFlags::Option),
-        super_key: flags.contains(NSEventModifierFlags::Command),
-    }
-}
-
-fn native_input(event: &NSEvent, native_code: u16, flags: NSEventModifierFlags) -> NativeKeyInput {
-    let text = event
-        .charactersIgnoringModifiers()
-        .map(|characters| characters.to_string())
-        .unwrap_or_default();
-    NativeKeyInput {
-        key: key_code_from_vk(native_code),
-        native_code,
-        text,
-        modifiers: modifiers(flags).into(),
-        repeat: event.isARepeat(),
-        captured: false,
-        claim: None,
-        pressed_at_ms: UnixMillis::now().0,
-    }
-}
-
-fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
-    let key = match vk {
-        0x00 => KeyCode::KeyA,
-        0x01 => KeyCode::KeyS,
-        0x02 => KeyCode::KeyD,
-        0x03 => KeyCode::KeyF,
-        0x04 => KeyCode::KeyH,
-        0x05 => KeyCode::KeyG,
-        0x06 => KeyCode::KeyZ,
-        0x07 => KeyCode::KeyX,
-        0x08 => KeyCode::KeyC,
-        0x09 => KeyCode::KeyV,
-        0x0A => KeyCode::IntlBackslash,
-        0x0B => KeyCode::KeyB,
-        0x0C => KeyCode::KeyQ,
-        0x0D => KeyCode::KeyW,
-        0x0E => KeyCode::KeyE,
-        0x0F => KeyCode::KeyR,
-        0x10 => KeyCode::KeyY,
-        0x11 => KeyCode::KeyT,
-        0x12 => KeyCode::Digit1,
-        0x13 => KeyCode::Digit2,
-        0x14 => KeyCode::Digit3,
-        0x15 => KeyCode::Digit4,
-        0x16 => KeyCode::Digit6,
-        0x17 => KeyCode::Digit5,
-        0x18 => KeyCode::Equal,
-        0x19 => KeyCode::Digit9,
-        0x1A => KeyCode::Digit7,
-        0x1B => KeyCode::Minus,
-        0x1C => KeyCode::Digit8,
-        0x1D => KeyCode::Digit0,
-        0x1E => KeyCode::BracketRight,
-        0x1F => KeyCode::KeyO,
-        0x20 => KeyCode::KeyU,
-        0x21 => KeyCode::BracketLeft,
-        0x22 => KeyCode::KeyI,
-        0x23 => KeyCode::KeyP,
-        0x24 => KeyCode::Enter,
-        0x25 => KeyCode::KeyL,
-        0x26 => KeyCode::KeyJ,
-        0x27 => KeyCode::Quote,
-        0x28 => KeyCode::KeyK,
-        0x29 => KeyCode::Semicolon,
-        0x2A => KeyCode::Backslash,
-        0x2B => KeyCode::Comma,
-        0x2C => KeyCode::Slash,
-        0x2D => KeyCode::KeyN,
-        0x2E => KeyCode::KeyM,
-        0x2F => KeyCode::Period,
-        0x30 => KeyCode::Tab,
-        0x31 => KeyCode::Space,
-        0x32 => KeyCode::Backquote,
-        0x33 => KeyCode::Backspace,
-        0x35 => KeyCode::Escape,
-        0x40 => KeyCode::F17,
-        0x41 => KeyCode::NumpadDecimal,
-        0x43 => KeyCode::NumpadMultiply,
-        0x45 => KeyCode::NumpadAdd,
-        0x47 => KeyCode::NumpadClear,
-        0x4B => KeyCode::NumpadDivide,
-        0x4C => KeyCode::NumpadEnter,
-        0x4E => KeyCode::NumpadSubtract,
-        0x4F => KeyCode::F18,
-        0x50 => KeyCode::F19,
-        0x51 => KeyCode::NumpadEqual,
-        0x52 => KeyCode::Numpad0,
-        0x53 => KeyCode::Numpad1,
-        0x54 => KeyCode::Numpad2,
-        0x55 => KeyCode::Numpad3,
-        0x56 => KeyCode::Numpad4,
-        0x57 => KeyCode::Numpad5,
-        0x58 => KeyCode::Numpad6,
-        0x59 => KeyCode::Numpad7,
-        0x5A => KeyCode::F20,
-        0x5B => KeyCode::Numpad8,
-        0x5C => KeyCode::Numpad9,
-        0x5D => KeyCode::IntlYen,
-        0x5E => KeyCode::IntlRo,
-        0x5F => KeyCode::NumpadComma,
-        0x60 => KeyCode::F5,
-        0x61 => KeyCode::F6,
-        0x62 => KeyCode::F7,
-        0x63 => KeyCode::F3,
-        0x64 => KeyCode::F8,
-        0x65 => KeyCode::F9,
-        0x66 => KeyCode::Lang2,
-        0x67 => KeyCode::F11,
-        0x68 => KeyCode::Lang1,
-        0x69 => KeyCode::F13,
-        0x6A => KeyCode::F16,
-        0x6B => KeyCode::F14,
-        0x6D => KeyCode::F10,
-        0x6F => KeyCode::F12,
-        0x71 => KeyCode::F15,
-        0x72 => KeyCode::Insert,
-        0x73 => KeyCode::Home,
-        0x74 => KeyCode::PageUp,
-        0x75 => KeyCode::Delete,
-        0x76 => KeyCode::F4,
-        0x77 => KeyCode::End,
-        0x78 => KeyCode::F2,
-        0x79 => KeyCode::PageDown,
-        0x7A => KeyCode::F1,
-        0x7B => KeyCode::ArrowLeft,
-        0x7C => KeyCode::ArrowRight,
-        0x7D => KeyCode::ArrowDown,
-        0x7E => KeyCode::ArrowUp,
-        _ => return None,
-    };
-    Some(key)
-}
-
-fn install_monitor(
-    keyboard: Query<(Entity, &KeyboardBridge), With<KeyboardMonitorPending>>,
-    keymaps: Query<&Keymap>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Some(proxy) = proxy else {
-        return;
-    };
-    let Ok((entity, keyboard)) = keyboard.single() else {
-        return;
-    };
-    let Ok(keymap) = keymaps.single() else {
-        return;
-    };
-    keyboard.context.lock().keymap = Some((*keymap).clone());
-    let proxy = (**proxy).clone();
-    keyboard.install(move || {
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
-    });
-    commands.entity(entity).remove::<KeyboardMonitorPending>();
-}
-
-type ActiveNativeKeyClaims<'w, 's> = Query<
+type NativeStreams<'w, 's> =
+    Query<'w, 's, (Entity, &'static ChildOf, &'static mut NativeChord), With<KeyboardStream>>;
+type NativeClaims<'w, 's> = Query<
     'w,
     's,
     (
@@ -490,57 +286,208 @@ type ActiveNativeKeyClaims<'w, 's> = Query<
     With<Active>,
 >;
 
-fn sync_context(
-    keyboard: Single<&KeyboardBridge>,
-    keymap: Single<Ref<Keymap>>,
-    contexts: Query<&KeyboardContext>,
-    capture: Query<(), With<NativeKeyCapture>>,
-    claims: ActiveNativeKeyClaims,
+#[derive(bevy::ecs::system::SystemParam)]
+struct Sequences<'w, 's> {
+    streams: NativeStreams<'w, 's>,
+    maps: Query<'w, 's, Ref<'static, Keymap>>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct RoutingOutput<'w, 's> {
+    inputs: MessageWriter<'w, NativeKeyInput>,
+    invocations: MessageWriter<'w, CommandInvocation>,
+    effects: MessageWriter<'w, KeyboardEffect>,
+    commands: Commands<'w, 's>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct Routing<'w, 's> {
+    windows: Query<'w, 's, Entity, (With<Window>, With<Active>)>,
+    contexts: Query<'w, 's, &'static KeyboardContext>,
+    captures: Query<'w, 's, Entity, With<NativeKeyCapture>>,
+    claims: NativeClaims<'w, 's>,
+    user: Query<'w, 's, Entity, With<User>>,
+}
+
+impl Routing<'_, '_> {
+    fn claim(&self, input: &NativeKeyInput) -> (bool, Option<Entity>) {
+        let mut passed = false;
+        let mut feature = None;
+        for (entity, key, consumes, passes) in &self.claims {
+            if Some(key.key) != input.key || key.modifiers != input.modifiers {
+                continue;
+            }
+            passed |= passes;
+            if consumes {
+                feature = Some(entity);
+            }
+        }
+        (passed, feature)
+    }
+}
+
+fn route(
+    mut packets: MessageReader<KeyboardPress>,
+    mut sequences: Sequences,
+    routing: Routing,
+    mut output: RoutingOutput,
 ) {
-    let mut context = keyboard.context.lock();
-    if keymap.is_changed() || context.keymap.is_none() {
-        context.keymap = Some((**keymap).clone());
-    }
-    context.capture_active = !capture.is_empty();
-    context.consumed.clear();
-    context.passed.clear();
-    for (entity, key, consumes, passes) in &claims {
-        let combo = KeyCombo {
-            key: key.key,
-            modifiers: Modifiers {
-                ctrl: key.modifiers.ctrl,
-                shift: key.modifiers.shift,
-                alt: key.modifiers.alt,
-                super_key: key.modifiers.super_key,
-            },
-        };
-        if passes {
-            context.passed.insert(combo.clone());
-        }
-        if consumes {
-            context.consumed.insert(combo, entity);
-        }
-    }
-    context.text_entry_owns_keys = contexts
+    let focused = routing.windows.iter().next();
+    let text_entry = routing
+        .contexts
         .single()
-        .ok()
-        .is_some_and(|context| context.text_entry_owns_keys);
-}
-
-fn dispatch_commands(
-    inbox: Single<&KeyboardInbox>,
-    mut invocations: MessageWriter<CommandInvocation>,
-    user: Query<Entity, With<User>>,
-) {
-    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
-    for command in inbox.commands.try_iter() {
-        invocations.write(CommandInvocation::new(caller, command));
+        .is_ok_and(|context| context.text_entry_owns_keys);
+    let caller = routing.user.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut capture_active = !routing.captures.is_empty();
+    for (_, parent, mut chord) in &mut sequences.streams {
+        let Ok(map) = sequences.maps.get(parent.parent()) else {
+            continue;
+        };
+        if map.is_changed() || chord.focused_window != focused || text_entry || capture_active {
+            chord.prefix = None;
+        }
+        chord.focused_window = focused;
+    }
+    let Sequences { streams, maps } = &mut sequences;
+    for packet in packets.read() {
+        let mut forward = false;
+        let Ok((stream, parent, mut chord)) = streams.get_mut(packet.stream) else {
+            output.effects.write(KeyboardEffect {
+                stream: packet.stream,
+                token: packet.token,
+                forward,
+            });
+            continue;
+        };
+        let Ok(map) = maps.get(parent.parent()) else {
+            output.effects.write(KeyboardEffect {
+                stream,
+                token: packet.token,
+                forward: false,
+            });
+            continue;
+        };
+        if packet.overflowed {
+            chord.prefix = None;
+            capture_active = false;
+            for capture in &routing.captures {
+                output.commands.entity(capture).remove::<NativeKeyCapture>();
+            }
+            continue;
+        }
+        if packet.window.is_some() && packet.window != focused {
+            output.effects.write(KeyboardEffect {
+                stream,
+                token: packet.token,
+                forward,
+            });
+            continue;
+        }
+        if capture_active {
+            chord.prefix = None;
+            if !packet.input.repeat {
+                let mut input = packet.input.clone();
+                input.captured = true;
+                let release = input.releases_capture();
+                output.inputs.write(input);
+                if release {
+                    capture_active = false;
+                }
+                forward = release;
+            }
+        } else {
+            forward = true;
+            if let Some(key) = packet.input.key {
+                let (passed, feature) = routing.claim(&packet.input);
+                if !passed {
+                    if let Some(claim) = feature {
+                        let mut input = packet.input.clone();
+                        input.claim = Some(claim);
+                        output.inputs.write(input);
+                        forward = false;
+                    } else {
+                        let combo = packet.combo(key);
+                        let (consumed, command) =
+                            chord.command(&map, combo, packet.observed_at, text_entry);
+                        if let Some(command) = command {
+                            output
+                                .invocations
+                                .write(CommandInvocation::new(caller, command));
+                        }
+                        forward = !consumed;
+                    }
+                }
+            }
+        }
+        output.effects.write(KeyboardEffect {
+            stream,
+            token: packet.token,
+            forward,
+        });
     }
 }
 
-fn dispatch_inputs(inbox: Single<&KeyboardInbox>, mut inputs: MessageWriter<NativeKeyInput>) {
-    for input in inbox.inputs.try_iter() {
-        inputs.write(input);
+fn publish_suppression(
+    streams: Query<(Entity, &ChildOf, &NativeChord), With<KeyboardStream>>,
+    maps: Query<&Keymap>,
+    contexts: Query<&KeyboardContext>,
+    captures: Query<(), With<NativeKeyCapture>>,
+    claims: NativeClaims,
+    mut masks: MessageWriter<KeyboardSuppression>,
+) {
+    let text_entry = contexts
+        .single()
+        .is_ok_and(|context| context.text_entry_owns_keys);
+    for (stream, parent, chord) in &streams {
+        let Ok(map) = maps.get(parent.parent()) else {
+            continue;
+        };
+        let mut keys = HashSet::new();
+        for binding in map.bindings() {
+            match &binding.shortcut {
+                Shortcut::Direct(combo) => {
+                    if combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key {
+                        keys.insert(NativeKey {
+                            key: combo.key,
+                            modifiers: KeyModifiers {
+                                ctrl: combo.modifiers.ctrl,
+                                alt: combo.modifiers.alt,
+                                shift: combo.modifiers.shift,
+                                super_key: combo.modifiers.super_key,
+                            },
+                        });
+                    }
+                }
+                Shortcut::Chord(prefix, _) => {
+                    if !text_entry {
+                        keys.insert(NativeKey {
+                            key: prefix.key,
+                            modifiers: KeyModifiers {
+                                ctrl: prefix.modifiers.ctrl,
+                                alt: prefix.modifiers.alt,
+                                shift: prefix.modifiers.shift,
+                                super_key: prefix.modifiers.super_key,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        for (_, key, consumes, _) in &claims {
+            if consumes {
+                keys.insert(*key);
+            }
+        }
+        for (_, key, _, passes) in &claims {
+            if passes {
+                keys.remove(key);
+            }
+        }
+        masks.write(KeyboardSuppression {
+            stream,
+            keys,
+            all_keys: chord.prefix.is_some() || !captures.is_empty(),
+        });
     }
 }
 
@@ -571,22 +518,41 @@ fn sync_application_key_bindings(
     }
 }
 
+fn release_capture(
+    mut inputs: MessageReader<NativeKeyInput>,
+    captures: Query<Entity, With<NativeKeyCapture>>,
+    mut commands: Commands,
+) {
+    if !inputs
+        .read()
+        .any(|input| input.captured && input.releases_capture())
+    {
+        return;
+    }
+    for capture in &captures {
+        commands.entity(capture).remove::<NativeKeyCapture>();
+    }
+}
+
 fn publish_shortcuts(
     mut inputs: MessageReader<NativeKeyInput>,
-    bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<Active>>,
-    mut hide_windows_gesture: ResMut<HideWindowsGesture>,
+    mut bindings: Query<(Has<ExitFullscreenKey>, Option<&mut HideWindowsGesture>), With<Active>>,
     mut exit_fullscreen: MessageWriter<ExitFullscreenShortcut>,
     mut hide_windows: MessageWriter<HideWindowsShortcut>,
 ) {
     for input in inputs.read() {
-        let Some(claim) = input.claim else { continue };
-        let Ok((exits_fullscreen, hides_windows)) = bindings.get(claim) else {
+        let Some(claim) = input.claim else {
             continue;
         };
-        if exits_fullscreen {
+        let Ok((exits, gesture)) = bindings.get_mut(claim) else {
+            continue;
+        };
+        if exits {
             exit_fullscreen.write(ExitFullscreenShortcut);
         }
-        if hides_windows && hide_windows_gesture.register(input) {
+        if let Some(mut gesture) = gesture
+            && gesture.register(input)
+        {
             hide_windows.write(HideWindowsShortcut);
         }
     }
@@ -596,277 +562,376 @@ fn publish_shortcuts(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{Binding, Shortcut, Source};
+    use vmux_command::{Binding, Source};
 
-    fn map() -> Keymap {
-        let mut map = Keymap::defaults();
-        map.register([
-            "select_pane_left",
-            "command_bar_open",
-            "command_bar_edit_page",
-            "command_bar_open_path",
-        ]);
-        map.extend(
-            Source::Default,
-            [
-                Binding {
-                    shortcut: Shortcut::Chord(
-                        combo(KeyCode::KeyB, true),
-                        combo(KeyCode::KeyH, false),
-                    ),
-                    command: "select_pane_left".to_string(),
-                    when: None,
-                },
-                Binding {
-                    shortcut: Shortcut::Direct(super_combo(KeyCode::KeyK)),
-                    command: "command_bar_open".to_string(),
-                    when: None,
-                },
-                Binding {
-                    shortcut: Shortcut::Direct(super_combo(KeyCode::KeyL)),
-                    command: "command_bar_edit_page".to_string(),
-                    when: None,
-                },
-                Binding {
-                    shortcut: Shortcut::Direct(super_combo(KeyCode::Slash)),
-                    command: "command_bar_open_path".to_string(),
-                    when: None,
-                },
-            ],
-        );
-        map
+    struct Keyboard {
+        app: App,
+        keymap: Entity,
+        window: Entity,
+        stream: Entity,
+        clock: Instant,
+        next: u64,
     }
 
-    fn combo(key: KeyCode, ctrl: bool) -> KeyCombo {
-        KeyCombo {
-            key,
-            modifiers: Modifiers {
-                ctrl,
-                ..Default::default()
-            },
-        }
-    }
-
-    fn super_combo(key: KeyCode) -> KeyCombo {
-        KeyCombo {
-            key,
-            modifiers: Modifiers {
-                super_key: true,
-                ..Default::default()
-            },
-        }
-    }
-
-    fn input(key: KeyCode) -> NativeKeyInput {
-        NativeKeyInput {
-            key: Some(key),
-            native_code: 0,
-            text: String::new(),
-            modifiers: Default::default(),
-            repeat: false,
-            captured: false,
-            claim: None,
-            pressed_at_ms: 0,
-        }
-    }
-
-    #[test]
-    fn hide_windows_requires_a_hold_or_double_tap() {
-        let mut gesture = HideWindowsGesture::default();
-        let mut first = input(KeyCode::KeyQ);
-        first.pressed_at_ms = 1_000;
-        assert!(!gesture.register(&first));
-
-        let mut held = first.clone();
-        held.repeat = true;
-        held.pressed_at_ms = 1_899;
-        assert!(!gesture.register(&held));
-        held.pressed_at_ms = 1_900;
-        assert!(gesture.register(&held));
-        held.pressed_at_ms = 2_000;
-        assert!(!gesture.register(&held));
-
-        let mut gesture = HideWindowsGesture::default();
-        assert!(!gesture.register(&first));
-        let mut second = first.clone();
-        second.pressed_at_ms = 1_450;
-        assert!(gesture.register(&second));
-    }
-
-    #[test]
-    fn a_field_being_typed_into_keeps_the_leader_key() {
-        let map = map();
-        let mut pending = None;
-
-        let disposition = decide(
-            &map,
-            &mut pending,
-            combo(KeyCode::KeyB, true),
-            Instant::now(),
-            true,
-        );
-
-        assert!(matches!(disposition, KeyDisposition::PassThrough));
-        assert!(pending.is_none(), "no chord may be left open");
-    }
-
-    #[test]
-    fn leader_then_h_consumes_and_emits_select_left() {
-        let map = map();
-        let mut pending = None;
-        let now = Instant::now();
-
-        let prefix = decide(&map, &mut pending, combo(KeyCode::KeyB, true), now, false);
-        assert!(matches!(prefix, KeyDisposition::Consume(None)));
-        assert!(pending.is_some());
-
-        let second = decide(&map, &mut pending, combo(KeyCode::KeyH, false), now, false);
-        assert!(matches!(
-            second,
-            KeyDisposition::Consume(Some(id)) if id == "select_pane_left"
-        ));
-        assert!(pending.is_none());
-    }
-
-    #[test]
-    fn bare_key_without_pending_passes_through() {
-        let map = map();
-        let mut pending = None;
-        let disposition = decide(
-            &map,
-            &mut pending,
-            combo(KeyCode::KeyH, false),
-            Instant::now(),
-            false,
-        );
-        assert!(matches!(disposition, KeyDisposition::PassThrough));
-    }
-
-    #[test]
-    fn consumed_shortcut_queues_command() {
-        let (bridge, inbox) = KeyboardBridge::channel();
-        let consumed = bridge.output.publish(
-            KeyDisposition::Consume(Some("select_pane_left".to_string())),
-            input(KeyCode::KeyH),
-        );
-        assert!(consumed);
-        assert_eq!(inbox.commands.try_recv().unwrap(), "select_pane_left");
-    }
-
-    #[test]
-    fn expired_prefix_does_not_consume_second_key() {
-        let map = map();
-        let mut pending = Some((combo(KeyCode::KeyB, true), Instant::now()));
-        let later = Instant::now() + Duration::from_millis(2000);
-        let disposition = decide(
-            &map,
-            &mut pending,
-            combo(KeyCode::KeyH, false),
-            later,
-            false,
-        );
-        assert!(matches!(disposition, KeyDisposition::PassThrough));
-        assert!(pending.is_none());
-    }
-
-    #[test]
-    fn native_command_bar_shortcuts_are_consumed_before_cef() {
-        let map = map();
-        let mut pending = None;
-        let now = Instant::now();
-        let shortcuts = [
-            (super_combo(KeyCode::KeyK), "command_bar_open"),
-            (super_combo(KeyCode::KeyL), "command_bar_edit_page"),
-            (super_combo(KeyCode::Slash), "command_bar_open_path"),
-        ];
-
-        for (pressed, expected) in shortcuts {
-            let disposition = decide(&map, &mut pending, pressed, now, false);
-            assert!(matches!(
-                disposition,
-                KeyDisposition::Consume(Some(id)) if id == expected
-            ));
-        }
-    }
-
-    #[test]
-    fn native_key_map_covers_insert_and_international_keys() {
-        assert_eq!(key_code_from_vk(0x72), Some(KeyCode::Insert));
-        assert_eq!(key_code_from_vk(0x0A), Some(KeyCode::IntlBackslash));
-        assert_eq!(key_code_from_vk(0x5D), Some(KeyCode::IntlYen));
-        assert_eq!(key_code_from_vk(0x5E), Some(KeyCode::IntlRo));
-    }
-
-    #[test]
-    fn bare_tab_releases_shortcut_capture() {
-        let stroke = input(KeyCode::Tab);
-        let mut modified = stroke.clone();
-        modified.modifiers.ctrl = true;
-
-        assert!(stroke.releases_capture());
-        assert!(!modified.releases_capture());
-    }
-
-    #[test]
-    fn fullscreen_escape_publishes_a_shortcut_unless_the_page_owns_it() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<NativeKeyInput>()
-            .add_message::<ExitFullscreenShortcut>()
-            .add_message::<HideWindowsShortcut>()
-            .init_resource::<HideWindowsGesture>()
-            .add_systems(Startup, spawn_application_key_bindings)
-            .add_systems(
-                Update,
-                (sync_application_key_bindings, publish_shortcuts).chain(),
+    impl Keyboard {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, KeyboardPlugin))
+                .add_message::<CommandInvocation>();
+            let window = app.world_mut().spawn((Window::default(), Active)).id();
+            let mut map = Keymap::defaults();
+            map.register(["left", "bar"]);
+            map.extend(
+                Source::Default,
+                [
+                    Binding {
+                        shortcut: Shortcut::Chord(
+                            Self::combo(KeyCode::KeyB, true, false),
+                            Self::combo(KeyCode::KeyH, false, false),
+                        ),
+                        command: "left".into(),
+                        when: None,
+                    },
+                    Binding {
+                        shortcut: Shortcut::Direct(Self::combo(KeyCode::KeyK, false, true)),
+                        command: "bar".into(),
+                        when: None,
+                    },
+                ],
             );
-        app.world_mut().spawn((
-            Window::default(),
-            vmux_ecs::WindowFullscreen(true),
-            vmux_ecs::Active,
-        ));
-        app.update();
-        let mut claims = app.world_mut().query_filtered::<
-            (Entity, &NativeKey),
-            (With<ExitFullscreenKey>, With<vmux_ecs::Active>),
-        >();
-        let claim = claims
-            .iter(app.world())
-            .find_map(|(entity, key)| (!key.modifiers.shift).then_some(entity))
+            let keymap = app.world_mut().spawn(map).id();
+            app.update();
+            let stream = {
+                let world = app.world_mut();
+                let mut streams = world.query_filtered::<Entity, With<KeyboardStream>>();
+                streams.single(world).unwrap()
+            };
+            Self {
+                app,
+                keymap,
+                window,
+                stream,
+                clock: Instant::now(),
+                next: 0,
+            }
+        }
+
+        fn combo(key: KeyCode, ctrl: bool, super_key: bool) -> KeyCombo {
+            KeyCombo {
+                key,
+                modifiers: Modifiers {
+                    ctrl,
+                    super_key,
+                    ..Default::default()
+                },
+            }
+        }
+
+        fn press(&mut self, combo: KeyCombo, at_ms: u64) {
+            self.next += 1;
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<KeyboardPress>>()
+                .write(KeyboardPress {
+                    stream: self.stream,
+                    token: self.next,
+                    window: Some(self.window),
+                    observed_at: self.clock + Duration::from_millis(at_ms),
+                    overflowed: false,
+                    input: NativeKeyInput {
+                        key: Some(combo.key),
+                        native_code: 0,
+                        text: String::new(),
+                        modifiers: KeyModifiers {
+                            ctrl: combo.modifiers.ctrl,
+                            alt: combo.modifiers.alt,
+                            shift: combo.modifiers.shift,
+                            super_key: combo.modifiers.super_key,
+                        },
+                        repeat: false,
+                        captured: false,
+                        claim: None,
+                        pressed_at_ms: at_ms as i64,
+                    },
+                });
+        }
+
+        fn update(&mut self) -> (Vec<String>, Vec<bool>, Vec<NativeKeyInput>) {
+            self.app.update();
+            let world = self.app.world_mut();
+            let commands = world
+                .resource_mut::<Messages<CommandInvocation>>()
+                .drain()
+                .map(|input| input.id)
+                .collect();
+            let effects = world
+                .resource_mut::<Messages<KeyboardEffect>>()
+                .drain()
+                .map(|effect| effect.forward)
+                .collect();
+            let inputs = world
+                .resource_mut::<Messages<NativeKeyInput>>()
+                .drain()
+                .collect();
+            (commands, effects, inputs)
+        }
+    }
+
+    #[test]
+    fn native_chord_consumes_a_prefix_and_routes_one_command() {
+        let mut keyboard = Keyboard::new();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        assert_eq!(keyboard.update().1, [false]);
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        let (commands, effects, _) = keyboard.update();
+        assert_eq!(commands, ["left"]);
+        assert_eq!(effects, [false]);
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 30);
+        let (commands, effects, _) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true]);
+    }
+
+    #[test]
+    fn native_chord_preserves_order_when_both_keys_arrive_in_one_update() {
+        let mut keyboard = Keyboard::new();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        let (commands, effects, _) = keyboard.update();
+        assert_eq!(commands, ["left"]);
+        assert_eq!(effects, [false, false]);
+    }
+
+    #[test]
+    fn native_chord_expiry_returns_the_second_key_to_its_native_window() {
+        let mut keyboard = Keyboard::new();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        keyboard.update();
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 2_000);
+        let (commands, effects, _) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true]);
+    }
+
+    #[test]
+    fn capture_releases_on_tab_before_the_next_input_in_the_batch() {
+        let mut keyboard = Keyboard::new();
+        let capture = keyboard.app.world_mut().spawn(NativeKeyCapture).id();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        let (commands, effects, inputs) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [false]);
+        assert!(inputs[0].captured);
+        keyboard.press(Keyboard::combo(KeyCode::Tab, false, false), 10);
+        keyboard.press(Keyboard::combo(KeyCode::KeyK, false, true), 20);
+        let (commands, effects, inputs) = keyboard.update();
+        assert_eq!(commands, ["bar"]);
+        assert_eq!(effects, [true, false]);
+        assert_eq!(inputs.len(), 1);
+        assert!(inputs[0].releases_capture());
+        assert!(
+            keyboard
+                .app
+                .world()
+                .get::<NativeKeyCapture>(capture)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn native_chord_does_not_cross_window_focus_changes() {
+        let mut keyboard = Keyboard::new();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        keyboard.update();
+        keyboard
+            .app
+            .world_mut()
+            .entity_mut(keyboard.window)
+            .remove::<Active>();
+        keyboard.window = keyboard
+            .app
+            .world_mut()
+            .spawn((Window::default(), Active))
+            .id();
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        let (commands, effects, _) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true]);
+    }
+
+    #[test]
+    fn native_input_from_a_retired_window_cannot_target_the_new_focus() {
+        let mut keyboard = Keyboard::new();
+        keyboard
+            .app
+            .world_mut()
+            .entity_mut(keyboard.window)
+            .remove::<Active>();
+        keyboard.app.world_mut().spawn((Window::default(), Active));
+        keyboard.press(Keyboard::combo(KeyCode::KeyK, false, true), 0);
+        let (commands, effects, _) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [false]);
+    }
+
+    #[test]
+    fn native_input_cannot_reuse_a_removed_keymap_stream() {
+        let mut keyboard = Keyboard::new();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        keyboard.update();
+        let map = keyboard
+            .app
+            .world()
+            .get::<Keymap>(keyboard.keymap)
+            .unwrap()
+            .clone();
+        keyboard
+            .app
+            .world_mut()
+            .entity_mut(keyboard.keymap)
+            .remove::<Keymap>();
+        keyboard
+            .app
+            .world_mut()
+            .entity_mut(keyboard.keymap)
+            .insert(map);
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        let (commands, effects, _) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [false]);
+    }
+
+    #[test]
+    fn text_entry_keeps_leaders_but_native_command_shortcuts_still_route() {
+        let mut keyboard = Keyboard::new();
+        keyboard.app.world_mut().spawn(KeyboardContext {
+            text_entry_owns_keys: true,
+            ..Default::default()
+        });
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        keyboard.press(Keyboard::combo(KeyCode::KeyK, false, true), 30);
+        let (commands, effects, _) = keyboard.update();
+        assert_eq!(commands, ["bar"]);
+        assert_eq!(effects, [true, true, false]);
+    }
+
+    #[test]
+    fn native_pass_claims_win_without_publishing_a_feature_key() {
+        let mut keyboard = Keyboard::new();
+        let key = NativeKey {
+            key: KeyCode::KeyH,
+            modifiers: KeyModifiers::default(),
+        };
+        keyboard
+            .app
+            .world_mut()
+            .spawn((key, ConsumesNativeKey, Active));
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 0);
+        let (commands, effects, inputs) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [false]);
+        assert!(inputs[0].claim.is_some());
+        keyboard
+            .app
+            .world_mut()
+            .spawn((key, PassesNativeKey, Active));
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        let (commands, effects, inputs) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true]);
+        assert!(inputs.is_empty());
+    }
+
+    #[test]
+    fn native_capture_repeat_is_consumed_without_publishing_an_input() {
+        let mut keyboard = Keyboard::new();
+        keyboard.app.world_mut().spawn(NativeKeyCapture);
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        let mut packet = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .drain()
+            .next()
             .unwrap();
-        app.world_mut()
-            .resource_mut::<Messages<NativeKeyInput>>()
-            .write(NativeKeyInput {
-                key: Some(KeyCode::Escape),
-                native_code: 0,
-                text: String::new(),
-                modifiers: Default::default(),
-                repeat: false,
-                captured: false,
-                claim: Some(claim),
-                pressed_at_ms: 0,
-            });
-        app.update();
+        packet.input.repeat = true;
+        keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .write(packet);
+        let (commands, effects, inputs) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [false]);
+        assert!(inputs.is_empty());
+    }
+
+    #[test]
+    fn native_overflow_cancels_the_prefix_before_a_later_suffix() {
+        let mut keyboard = Keyboard::new();
+        keyboard.press(Keyboard::combo(KeyCode::KeyB, true, false), 0);
+        keyboard.update();
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 20);
+        let mut packet = keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .drain()
+            .next()
+            .unwrap();
+        packet.overflowed = true;
+        keyboard
+            .app
+            .world_mut()
+            .resource_mut::<Messages<KeyboardPress>>()
+            .write(packet);
+        keyboard.press(Keyboard::combo(KeyCode::KeyH, false, false), 30);
+        let (commands, effects, _) = keyboard.update();
+        assert!(commands.is_empty());
+        assert_eq!(effects, [true]);
+    }
+
+    #[test]
+    fn fullscreen_escape_and_hide_double_tap_use_registered_feature_receivers() {
+        let mut keyboard = Keyboard::new();
+        keyboard
+            .app
+            .world_mut()
+            .entity_mut(keyboard.window)
+            .insert(WindowFullscreen(true));
+        keyboard.press(Keyboard::combo(KeyCode::Escape, false, false), 0);
+        keyboard.update();
         assert_eq!(
-            app.world_mut()
+            keyboard
+                .app
+                .world_mut()
                 .resource_mut::<Messages<ExitFullscreenShortcut>>()
                 .drain()
                 .count(),
             1
         );
-
-        app.world_mut().spawn(KeyboardContext {
-            page_owns_escape: true,
-            text_entry_owns_keys: false,
-        });
-        app.update();
-
-        assert!(
-            app.world_mut()
-                .query_filtered::<Entity, (With<ExitFullscreenKey>, With<vmux_ecs::Active>)>()
-                .iter(app.world())
-                .next()
-                .is_none()
+        keyboard.press(Keyboard::combo(KeyCode::KeyQ, false, true), 1000);
+        keyboard.update();
+        assert_eq!(
+            keyboard
+                .app
+                .world_mut()
+                .resource_mut::<Messages<HideWindowsShortcut>>()
+                .drain()
+                .count(),
+            0
+        );
+        keyboard.press(Keyboard::combo(KeyCode::KeyQ, false, true), 1200);
+        keyboard.update();
+        assert_eq!(
+            keyboard
+                .app
+                .world_mut()
+                .resource_mut::<Messages<HideWindowsShortcut>>()
+                .drain()
+                .count(),
+            1
         );
     }
 }
