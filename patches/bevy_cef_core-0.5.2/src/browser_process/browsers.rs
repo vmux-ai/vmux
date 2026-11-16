@@ -2898,6 +2898,9 @@ impl Browsers {
             .as_ref()
             .map(|glass| glass.as_super())
             .unwrap_or(view);
+        if target.window().is_none() {
+            return false;
+        }
         let Some(parent) = (unsafe { target.superview() }) else {
             return false;
         };
