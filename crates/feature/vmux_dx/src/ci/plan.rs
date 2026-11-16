@@ -1,7 +1,6 @@
 use super::{Arguments, Completed, Context, Io, Root, Sequence, Stage};
 use crate::Settings;
 use crate::ci_io::fs::{Bytes, Location, Print, ReadFile, Written};
-use crate::ci_io::process::Captured;
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use serde_json::Value;
@@ -10,8 +9,8 @@ use vmux_ecs::cli::CliInvocation;
 #[derive(bevy_ecs :: system :: SystemParam)]
 struct Results<'w, 's> {
     event_slot_bytes: super::Reads<'w, 's, Bytes, EventSlot>,
-    ancestor_slot_captured: super::Reads<'w, 's, Captured, AncestorSlot>,
-    descendant_slot_captured: super::Reads<'w, 's, Captured, DescendantSlot>,
+    ancestor_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, AncestorSlot>,
+    descendant_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, DescendantSlot>,
     print_slot_written: super::Reads<'w, 's, Written, PrintSlot>,
     checkout_print_slot_written: super::Reads<'w, 's, Written, CheckoutPrintSlot>,
     parent_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, ParentSlot>,

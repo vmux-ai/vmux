@@ -1,5 +1,3 @@
-mod ci;
-mod ci_io;
 pub use ci::CiPlugin;
 
 #[cfg(feature = "development")]
@@ -35,6 +33,8 @@ use work::{Outcome, Work};
 
 #[cfg(feature = "development")]
 mod cargo;
+mod ci;
+mod ci_io;
 #[cfg(feature = "ci-syntax")]
 #[cfg(feature = "development")]
 mod ci_native;
@@ -138,7 +138,7 @@ impl bevy_app::Plugin for DxPlugin {
         app.register_required_components::<Work, Step>();
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
-            ci::CiPlugin,
+            CiPlugin,
             updates::UpdatesPlugin,
             workspace::WorkspacePlugin,
             repository_selection::RepositorySelectionPlugin,
