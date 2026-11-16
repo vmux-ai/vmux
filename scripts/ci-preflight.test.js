@@ -8,6 +8,7 @@ const Preflight = require('./ci-preflight.js');
 const CliArtifact = require('./ci-cli.js');
 const Checks = require('./ci-checks.js');
 const Sources = require('./ci-cache.js');
+const WorkflowInput = require('./ci-workflow.js');
 
 test('push formatting works without a prepared CLI and preserves formatter failures', (t) => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmux-push-format-')));
@@ -532,9 +533,9 @@ class Workflow {
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
 
-  async changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false', selection = {}) {
+  async changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true', release = 'false', selection = {}, presentation = false) {
     const github = { event_name: event };
-    const needs = { plan: { outputs: { feature, base, release } } };
+    const needs = { plan: { outputs: { feature, base, release, presentation_only: String(presentation) } } };
     const steps = {
       filter: { outputs: filter },
       native: { outputs: { native } },
@@ -546,6 +547,8 @@ class Workflow {
     }
     const classify = this.jobs.changes.steps.find((step) => step.id === 'native');
     if (!Function('github', 'needs', 'steps', `return (${classify.if});`)(github, needs, steps)) steps.native.outputs.native = '';
+    const scope = this.jobs.changes.steps.find((step) => step.id === 'scope');
+    if (!Function('github', 'needs', 'steps', `return (${scope.if});`)(github, needs, steps)) steps.scope.outputs = {};
     const result = {};
     for (const [key, value] of Object.entries(this.jobs.changes.outputs)) {
       if (!['tests', 'test_count'].includes(key)) result[key] = Function('github', 'needs', 'steps', `return (${value.slice(3, -2)});`)(github, needs, steps);
@@ -770,6 +773,83 @@ test('ordinary PRs never select macOS or iOS builds, including packaging changes
     for (const name of ['dx-macos', 'build-mac', 'ios-build']) {
       assert.equal(workflow.lane(name, 'pull_request', 'false', changes), false, `${file}: ${name}`);
     }
+  }
+});
+
+test('literal orchestration display names preserve executable workflow configuration', (t) => {
+  const fixture = new Fixture(t);
+  const before = fs.readFileSync(path.join(__dirname, '../.github/workflows/ci.yml'), 'utf8');
+  const file = path.join(fixture.root, '.github/workflows/ci.yml');
+  fs.writeFileSync(file, before);
+  const base = fixture.commit('workflow inputs');
+  const after = before.replace('name: Check Results', 'name: Results');
+  assert.notEqual(after, before);
+  fs.writeFileSync(file, after);
+  const head = fixture.commit('display name');
+  assert.equal(WorkflowInput.presentationOnly(fixture.root, base, head), true);
+  fs.writeFileSync(path.join(fixture.root, 'Cargo.toml'), '[workspace.package]\nversion = "2.0.0"\n');
+  const changed = fixture.commit('compiled source input');
+  assert.equal(WorkflowInput.presentationOnly(fixture.root, base, changed), false);
+  assert.equal(WorkflowInput.presentationOnly(fixture.root, '', changed), false);
+  assert.equal(WorkflowInput.presentationOnly(fixture.root, '--help', changed), false);
+});
+
+test('command, condition, runner, matrix and evidence names always require executable validation', () => {
+  const before = fs.readFileSync(path.join(__dirname, '../.github/workflows/ci.yml'), 'utf8');
+  for (const [source, replacement] of [
+    ['run: vmux ci-scope', 'run: vmux invalid-command'],
+    ['if: always()', 'if: false'],
+    ['runs-on: ubuntu-latest', 'runs-on: macos-latest'],
+    ['fail-fast: false', 'fail-fast: true'],
+    ['name: ${{ matrix.name }}', 'name: Tests'],
+    ['name: Code & App quality', 'name: Other workflow'],
+  ]) {
+    const after = before.replace(source, replacement);
+    assert.notEqual(after, before, source);
+    assert.equal(WorkflowInput.equivalent(before, after), false, source);
+  }
+});
+
+test('ambiguous YAML, duplicate keys, aliases and malformed input cannot skip validation', () => {
+  const before = 'jobs:\n  ci:\n    name: Results\n    steps:\n      - run: yes\n';
+  assert.equal(WorkflowInput.equivalent(before, before.replace('run: yes', 'run: true')), false);
+  for (const after of [
+    'jobs:\n  ci:\n    name: Results\n    name: Gate\n    steps:\n      - run: yes\n',
+    'jobs:\n  ci: &gate\n    name: Results\n    steps:\n      - run: yes\n  other: *gate\n',
+    'jobs: [',
+    '---\n---\n',
+  ]) assert.equal(WorkflowInput.equivalent(before, after), false);
+  assert.equal(WorkflowInput.equivalent(before, undefined), false);
+  assert.equal(WorkflowInput.equivalent(before, 'x'.repeat(1024 * 1024 + 1)), false);
+});
+
+test('presentation-only PRs skip CLI builds and test runners while still checking final results', async () => {
+  const workflow = new Workflow();
+  const changes = await workflow.changes('pull_request', 'false', 'base', '', workflow.paths(['.github/workflows/ci.yml']), 'true', 'false', {}, true);
+  assert.equal(changes.code, false);
+  assert.equal(changes.compiler_lints, false);
+  assert.deepEqual(JSON.parse(changes.tests).include, []);
+  assert.equal(workflow.ciGate(workflow.ciResults(changes)).status, 0);
+  for (const job of ['tests', 'website', 'dx-macos', 'build-mac', 'ios-build']) assert.equal(workflow.lane(job, 'pull_request', 'false', changes), false, job);
+  const rust = workflow.jobs.changes.steps.find((step) => step.id === 'rust');
+  const prepare = Function('github', 'needs', 'steps', `return (${rust.if});`)({ event_name: 'pull_request' }, { plan: { outputs: { presentation_only: 'true' } } }, { filter: { outputs: workflow.paths(['.github/workflows/ci.yml']) } });
+  assert.equal(prepare, false);
+});
+
+test('successful same-repository PRs publish isolated workspace caches while forks remain read-only', () => {
+  const action = JSON.parse(execFileSync('ruby', ['-ryaml', '-rjson', '-e', 'puts JSON.generate(YAML.load_file(ARGV[0]))', path.join(__dirname, '../.github/actions/cache-workspace/action.yml')], { encoding: 'utf8' }));
+  const expression = action.runs.steps.find((step) => step.id === 'inputs').env.VMUX_CACHE_SAVE.slice(3, -2).replaceAll('inputs.branch-cache', "inputs['branch-cache']");
+  for (const [ref, event, repository, headRepository, mode, expected] of [
+    ['refs/heads/main', 'push', 'owner/repo', '', 'auto', true],
+    ['refs/pull/1/merge', 'pull_request', 'owner/repo', 'owner/repo', 'auto', true],
+    ['refs/pull/1/merge', 'pull_request', 'owner/repo', 'fork/repo', 'auto', false],
+    ['refs/pull/1/merge', 'pull_request', 'owner/repo', 'owner/repo', 'false', false],
+    ['refs/heads/feature', 'workflow_dispatch', 'owner/repo', '', 'auto', false],
+    ['refs/heads/feature', 'workflow_dispatch', 'owner/repo', '', 'true', true],
+  ]) {
+    const github = { ref, event_name: event, repository, event: { pull_request: { head: { repo: { full_name: headRepository } } } } };
+    const publish = Function('github', 'inputs', `return (${expression});`)(github, { 'branch-cache': mode });
+    assert.equal(publish, expected, `${ref}: ${headRepository}: ${mode}`);
   }
 });
 
