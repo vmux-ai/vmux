@@ -2,6 +2,8 @@ use bevy::prelude::*;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "macos", test))]
+mod native_focus;
 #[cfg(not(target_os = "macos"))]
 mod other;
 
