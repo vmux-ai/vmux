@@ -7,6 +7,7 @@ pub fn MessageFrame(
     #[props(default)] avatar: Option<Element>,
     #[props(default)] seed: String,
     #[props(default)] metadata: Option<Element>,
+    #[props(default)] name_icon: Option<Element>,
     #[props(default)] compact: bool,
     #[props(default = true)] reserve_metadata: bool,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
@@ -33,7 +34,7 @@ pub fn MessageFrame(
                 }
             }
             div { class: "relative min-w-0 flex-1",
-                if !compact { div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" } }
+                if !compact { div { class: "mb-1 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground", if let Some(icon) = name_icon { {icon} } span { class: "truncate", "{name}" } } }
                 div { class: "flex min-w-0 flex-col gap-2.5", {children} }
                 if let Some(metadata) = metadata {
                     {metadata}

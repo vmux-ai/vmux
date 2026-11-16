@@ -30,6 +30,8 @@ A page may keep a draft, caret or scroll position locally. Changes to shared wor
 
 Transcript delivery selects a page target on the canonical Session, applies queued-input updates, and publishes through ordered systems in the same frame. The temporary target is removed after delivery or deferral; the page publication capability only hydrates and emits the typed snapshot.
 
+Native breadcrumb labels and parent links resolve from registered feature manifests and page declarations using the actual routed URL. Shared DOM document URLs do not determine navigation identity. Features add contextual entries; the host corrects a contributed root that belongs to a different route. A child route in `feature.ron` needs no separate breadcrumb registration.
+
 ## Where the code lives
 
 | Directory | Responsibility |

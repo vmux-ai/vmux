@@ -1,3 +1,5 @@
+use super::extension::ToolbarAnchor;
+use super::popup::{PopupLayer, PopupPlacement};
 use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 use dioxus::prelude::*;
 use std::rc::Rc;
@@ -9,16 +11,27 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 #[component]
 pub(super) fn BrowserModal(popup: BrowserModalState) -> Element {
     let id = popup.id.clone();
+    let toolbar = use_context::<ToolbarAnchor>();
+    let mut placement = use_signal(|| PopupPlacement::new(100000, 40));
+    use_effect(move || {
+        spawn(async move {
+            if let Some(anchor) = toolbar.measure().await {
+                placement.set(PopupPlacement::new(anchor.right, anchor.bottom));
+            }
+        });
+    });
     let region = BrowserModalRegion {
         id: id.clone(),
         node: use_signal(|| None),
     };
     let mut mounted = region.clone();
     let resized = region.clone();
-    use_effect(move || region.publish());
+    use_effect(move || {
+        let _ = placement();
+        region.publish();
+    });
     let close = BrowserModalClose { id: id.clone() };
-    let keyboard = close.clone();
-    let outside = close.clone();
+    let dismiss = close.clone();
     let overlay = format!("browser-modal-{id}");
     let opened = overlay.clone();
     use_effect(move || {
@@ -37,19 +50,12 @@ pub(super) fn BrowserModal(popup: BrowserModalState) -> Element {
         let _ = send(&BrowserModalCloseRequest { id });
     });
     rsx! {
-        div {
-            class: "pointer-events-auto fixed inset-0 z-[1000] bg-black/30",
-            role: "dialog",
-            aria_modal: "true",
-            aria_label: popup.title.clone(),
-            tabindex: "-1",
-            onmounted: move |event: MountedEvent| { let node = event.data(); spawn(async move { let _ = node.set_focus(true).await; }); },
-            onkeydown: move |event| { if event.key() == Key::Escape { event.prevent_default(); keyboard.close(); } },
-            onpointerdown: move |_| outside.close(),
+        PopupLayer { label: popup.title.clone(), on_close: move |_| dismiss.close(),
             div {
-                class: "absolute left-1/2 top-1/2 flex w-[min(520px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[14px] bg-foreground text-background",
+                class: "absolute flex flex-col overflow-hidden rounded-[12px] bg-background text-foreground shadow-lg ring-1 ring-foreground/10",
+                style: placement().style(360.0, 600.0),
                 onpointerdown: move |event| event.stop_propagation(),
-                header { class: "flex h-12 shrink-0 items-center gap-2 px-3",
+                header { class: "flex h-10 shrink-0 items-center gap-2 px-3",
                     if let Some(icon) = popup.icon { img { src: icon, alt: "", class: "size-5 shrink-0 object-contain" } }
                     div { class: "min-w-0 flex-1",
                         p { class: "truncate text-sm font-medium", "{popup.title}" }
@@ -60,7 +66,7 @@ pub(super) fn BrowserModal(popup: BrowserModalState) -> Element {
                     }
                 }
                 div {
-                    class: "pointer-events-none h-[min(640px,calc(100vh-96px))] w-full",
+                    class: "pointer-events-none min-h-0 w-full flex-1",
                     onmounted: move |event: MountedEvent| mounted.mount(event.data()),
                     onresize: move |_: ResizeEvent| resized.publish(),
                 }

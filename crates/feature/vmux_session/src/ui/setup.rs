@@ -4,11 +4,16 @@ use crate::onboarding::{
     ChatAuthenticate, ChatCancelSetup, ChatSaveKey, KeyEntryUiState, OnboardingChooseAgent,
 };
 use dioxus::prelude::*;
-use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::composer::{ComposerFrame, ComposerNotice, ShortcutHint};
+use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::composer::{
+    ComposerButton, ComposerFrame, ComposerNotice, PromptComposerMode, ShortcutHint,
+};
+use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::components::message::MessageFrame;
 use vmux_ui::components::progress::{Progress, ProgressIndicator, TaskSteps};
-use vmux_ui::components::prompt::{ConversationPrompt, PromptConfirmation};
+use vmux_ui::components::prompt::{
+    ConversationPrompt, PromptOption, PromptSelection, PromptSelectionChange,
+};
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -17,6 +22,7 @@ pub(super) fn Turn(#[props(default)] agent_name: String, children: Element) -> E
     rsx! {
         MessageFrame {
             name: if agent_name.is_empty() { Identity::name() } else { translate_with("onboarding-setup-agent", &[("agent", TranslationValue::String(&agent_name))]) },
+            name_icon: (!agent_name.is_empty()).then(|| rsx! { AgentThumbnail { src: None, seed: agent_name.clone(), background: String::new(), alt: String::new(), class: "size-3.5".to_string() } }),
             seed: "vmux-setup-agent".to_string(),
             reserve_metadata: false,
             {children}
@@ -64,25 +70,54 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .state
         .read()
         .clone();
-    let resumable = onboarding.paused || chat.status() == "errored";
-    let notice = if resumable {
-        Some(rsx! { RecoveryControls { pending: keys.pending } })
-    } else if chat.authentication_pending() {
-        Some(rsx! { CancelControl {} })
-    } else if chat.setup_busy() && chat.status() != "authentication" {
-        Some(rsx! { CancelControl {} })
-    } else if chat.status() == "authentication" {
-        if chat.key_input_requested() {
-            None
+    let connection = Connection::of(chat, !keys.key_variable.is_empty());
+    let prefer_key = connection.method.is_none();
+    let selected = use_signal(move || {
+        if prefer_key {
+            "key".to_string()
         } else {
-            Some(rsx! { ConnectionControls { chat, keys: keys.clone() } })
+            "connect".to_string()
         }
+    });
+    let resumable = onboarding.paused || chat.status() == "errored";
+    let busy =
+        chat.authentication_pending() || chat.setup_busy() && chat.status() != "authentication";
+    let choosing =
+        !resumable && !busy && chat.status() == "authentication" && !chat.key_input_requested();
+    let notice =
+        choosing.then(|| rsx! { ConnectionControls { chat, keys: keys.clone(), selected } });
+    let gradient = vmux_ui::agent_accent::AgentAccent::for_agent(&chat.agent())
+        .grad
+        .to_string();
+    let action = if resumable {
+        Some(
+            rsx! { ComposerButton { action_title: translate("common-resume"), label: Some(translate("common-resume")),
+                icon: Some(vmux_ui::icon::LineIcon::Play), enabled: !keys.pending, accent_gradient: gradient,
+                on_action: move |_| Choice::Retry.choose(),
+            } },
+        )
+    } else if busy && !chat.key_input_requested() {
+        Some(
+            rsx! { ComposerButton { mode: PromptComposerMode::Stop, action_title: translate("common-stop"), on_action: move |_| Choice::Cancel.choose() } },
+        )
+    } else if choosing {
+        let available = if selected() == "key" {
+            connection.key
+        } else {
+            connection.method.is_some()
+        };
+        Some(
+            rsx! { ComposerButton { action_title: translate("common-continue"), label: Some(translate("common-continue")),
+                icon: Some(vmux_ui::icon::LineIcon::Play), enabled: available && !keys.pending, accent_gradient: gradient,
+                on_action: move |_| { if selected() == "key" { chat.request_key_input(true); } else { connection.connect(chat); } },
+            } },
+        )
     } else {
-        Some(rsx! { RecoveryControls { pending: keys.pending } })
+        None
     };
     let on_choose = (!keys.pending && !chat.authentication_pending())
         .then_some(EventHandler::new(move |_| Choice::ChangeAgent.choose()));
-    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, SetupComposer { chat, keys } } }
+    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, action, SetupComposer { chat, keys } } }
 }
 
 #[component]
@@ -92,27 +127,26 @@ pub(super) fn Frame(
     #[props(default)] chat: Option<Chat>,
     #[props(default)] onboarding: OnboardingUiState,
     #[props(default)] on_choose: Option<EventHandler<()>>,
+    #[props(default)] action: Option<Element>,
     children: Element,
 ) -> Element {
-    let name = chat.as_ref().map(Chat::header_name).unwrap_or_default();
-    let notice = notice.or_else(|| on_choose.map(|_| rsx! {}));
     rsx! {
         ComposerFrame {
             borderless: true,
             content_class: if compact { "p-0".to_string() } else { String::new() },
-            notice: notice.map(|notice| rsx! { ComposerNotice {
-                content: Some(rsx! { div { class: "setup-reply p-2",
-                    if !onboarding.starting && let Some(on_choose) = on_choose {
-                        Button { variant: ButtonVariant::Ghost, size: ButtonSize::Sm, aria_label: Choice::ChangeAgent.label(), class: "mb-1 text-muted-foreground", onclick: move |_| on_choose.call(()),
-                            {name.clone()}
-                            vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::ChevronDown, class: "size-3.5".to_string() }
+            notice: notice.map(|notice| rsx! { ComposerNotice { content: Some(rsx! { div { class: "setup-reply p-2", {notice} } }), class: "setup-notice".to_string() } }),
+            {children}
+            if !onboarding.starting && let Some(chat) = chat {
+                div { class: "setup-reply flex min-w-0 items-center justify-between gap-2 rounded-[14px] bg-muted p-2",
+                    div { class: "min-w-0 flex-1",
+                        { let mut chip = chat.agent_chip(); chip.title = Choice::ChangeAgent.label();
+                          if let Some(on_choose) = on_choose { chip = chip.opens(on_choose); }
+                          rsx! { ComposerBar { opened: None, agent: Some(chip), compact: false } }
                         }
                     }
-                    {notice}
-                } }),
-                class: "setup-notice".to_string(),
-            } }),
-            {children}
+                    if let Some(action) = action { {action} }
+                }
+            }
         }
     }
 }
@@ -144,25 +178,12 @@ impl Task {
             name = chat.header_name();
         }
         let mut steps = Vec::new();
-        for (generic, named) in [
-            (
-                "onboarding-checklist-select",
-                "onboarding-checklist-select-agent",
-            ),
-            (
-                "onboarding-checklist-install",
-                "onboarding-checklist-install-agent",
-            ),
-            (
-                "onboarding-checklist-connect",
-                "onboarding-checklist-connect-agent",
-            ),
+        for key in [
+            "onboarding-checklist-select",
+            "onboarding-checklist-install",
+            "onboarding-checklist-connect",
         ] {
-            steps.push(if name.is_empty() {
-                translate(generic)
-            } else {
-                translate_with(named, &[("agent", TranslationValue::String(&name))])
-            });
+            steps.push(translate(key));
         }
         let status = chat.map(|chat| chat.status()).unwrap_or_default();
         let mut completed = Vec::new();
@@ -213,40 +234,26 @@ impl Task {
 }
 
 #[component]
-fn CancelControl() -> Element {
-    rsx! { div { class: "flex items-center gap-2 px-2 pt-2",
-        Button { variant: ButtonVariant::Ghost, size: ButtonSize::Sm, style: "color:inherit;", class: "[&:hover]:bg-background/5", aria_label: translate("common-cancel"), onclick: move |_| Choice::Cancel.choose(), {translate("common-cancel")} }
-    } }
-}
-
-#[component]
-fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
+fn ConnectionControls(chat: Chat, keys: KeyEntryUiState, mut selected: Signal<String>) -> Element {
     let connection = Connection::of(chat, !keys.key_variable.is_empty());
-    let available = connection.method.is_some() || connection.key;
-    let pending = chat.authentication_pending() || keys.pending;
-    let clicked = connection.clone();
+    let options = vec![
+        PromptOption {
+            value: "connect".into(),
+            label: translate("onboarding-connect"),
+            disabled: connection.method.is_none(),
+            ..Default::default()
+        },
+        PromptOption {
+            value: "key".into(),
+            label: translate("onboarding-use-key"),
+            disabled: !connection.key,
+            ..Default::default()
+        },
+    ];
     rsx! {
-        div { "data-slot": "composer-notice", class: "px-1 pt-2",
-            ConversationPrompt {
-                actions: Some(rsx! { PromptConfirmation {
-                    confirm_label: translate_with("onboarding-connect-agent", &[("agent", TranslationValue::String(&chat.header_name()))]),
-                    enabled: available,
-                    pending,
-                    cancel_label: Some(translate("common-cancel")),
-                    on_confirm: move |_| clicked.connect(chat),
-                    on_cancel: move |_| Choice::Cancel.choose(),
-                } }),
-            if connection.method.is_some() && connection.key && !chat.key_input_requested() && !pending {
-                Button {
-                    size: ButtonSize::Xs,
-                    variant: ButtonVariant::Ghost,
-                    class: "text-inherit opacity-60",
-                    style: "color:inherit;",
-                    aria_label: translate("onboarding-use-key"),
-                    onclick: move |_| chat.request_key_input(true),
-                    {translate("onboarding-use-key")}
-                }
-            }
+        ConversationPrompt {
+            PromptSelection { label: translate("onboarding-auth-question"), options, selected: vec![selected()], disabled: keys.pending,
+                on_change: move |change: PromptSelectionChange| selected.set(change.value),
             }
         }
     }
@@ -295,24 +302,6 @@ impl Connection {
 }
 
 #[component]
-fn RecoveryControls(pending: bool, #[props(default = true)] show_retry: bool) -> Element {
-    rsx! {
-        div { "data-slot": "composer-notice", class: "px-1 pt-2",
-            ConversationPrompt {
-                actions: Some(rsx! { if show_retry { PromptConfirmation {
-                    confirm_label: translate("common-resume"),
-                    pending,
-                    cancel_label: Some(Choice::Cancel.label()),
-                    on_confirm: move |_| Choice::Retry.choose(),
-                    on_cancel: move |_| Choice::Cancel.choose(),
-                } } else { CancelControl {} } }),
-
-            }
-        }
-    }
-}
-
-#[component]
 fn SetupComposer(chat: Chat, keys: KeyEntryUiState) -> Element {
     if chat.status() == "authentication"
         && chat.key_input_requested()
@@ -339,17 +328,7 @@ pub(super) fn ProgressTurn(
     #[props(default)] detail: String,
     #[props(default)] percent: Option<u8>,
 ) -> Element {
-    let label = if agent_name.is_empty() {
-        phase.label()
-    } else {
-        translate_with(
-            match phase {
-                Phase::Preparation => "onboarding-preparing-agent",
-                Phase::Installation => "onboarding-installing-agent",
-            },
-            &[("agent", TranslationValue::String(&agent_name))],
-        )
-    };
+    let label = phase.label();
     let detail = detail.trim();
     let show_detail =
         !detail.is_empty() && detail != label && detail != translate("agent-preparing");
@@ -544,6 +523,7 @@ mod tests {
             state.set(ChatUiState {
                 snapshot: ChatSnapshot {
                     status,
+                    agent_id: "mistral-vibe".into(),
                     agent_name: "Test ACP".into(),
                     header_name: "Test ACP".into(),
                     authentication_pending: pending,
@@ -625,14 +605,7 @@ mod tests {
                     value: AttributeValue::Text(value),
                     id,
                     ..
-                } if value
-                    == &translate_with(
-                        "onboarding-connect-agent",
-                        &[("agent", TranslationValue::String("Test ACP"))],
-                    ) =>
-                {
-                    Some(*id)
-                }
+                } if value == &translate("common-continue") => Some(*id),
                 _ => None,
             })
             .expect("the provider sign-in method is selectable in the composer");
@@ -649,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_setup_offers_cancel_without_a_work_textarea() {
+    fn busy_setup_offers_shared_stop_without_a_work_textarea() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         for (status, pending, key_available) in [
             ("preparing", false, false),
@@ -670,9 +643,9 @@ mod tests {
             dom.provide_root_context(HostBinding(host.clone()));
             let initial = dom.rebuild_to_vec();
             let html = dioxus_ssr::render(&dom);
-            assert!(html.contains(&translate("common-cancel")));
+            assert!(html.contains(&translate("common-stop")));
             assert!(initial.edits.iter().any(|edit| matches!(edit,
-                Mutation::SetAttribute { name: "aria-label" | "title", value: AttributeValue::Text(value), .. } if value == &translate("common-cancel"))));
+                Mutation::SetAttribute { name: "aria-label" | "title", value: AttributeValue::Text(value), .. } if value == &translate("common-stop"))));
             assert!(!html.contains(&translate("common-retry")));
             let choose_label = format!("aria-label=\"{}\"", translate("composer-choose-agent"));
             for button in html.split("<button").skip(1) {
@@ -689,6 +662,7 @@ mod tests {
             }
             assert!(!html.contains("type=\"password\""));
             assert!(!html.contains("<textarea"));
+            assert!(html.contains("<img"));
             let stop = initial
                 .edits
                 .iter()
@@ -698,10 +672,10 @@ mod tests {
                         value: AttributeValue::Text(value),
                         id,
                         ..
-                    } if value == &translate("common-cancel") => Some(*id),
+                    } if value == &translate("common-stop") => Some(*id),
                     _ => None,
                 })
-                .expect("busy setup must expose Cancel");
+                .expect("busy setup must expose Stop");
             assert!(!initial.edits.iter().any(|edit| matches!(edit,
                 Mutation::SetAttribute { name: "disabled", value: AttributeValue::Bool(true), id, .. } if *id == stop)));
             let keyboard = SerializedKeyboardData::new(
@@ -765,12 +739,41 @@ mod tests {
             })
             .expect("supported API key option must be available");
         dom.runtime().handle_event(
+            "change",
+            Event::new(
+                EventData::Form(SerializedFormData {
+                    value: "key".into(),
+                    values: Vec::new(),
+                    valid: true,
+                })
+                .into_any(),
+                true,
+            ),
+            choose,
+        );
+        dom.render_immediate_to_vec();
+        assert!(host.0.borrow().is_empty());
+        assert!(!dioxus_ssr::render(&dom).contains("type=\"password\""));
+        let proceed = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &translate("common-continue") => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        dom.runtime().handle_event(
             "click",
             Event::new(
                 EventData::Mouse(SerializedMouseData::default()).into_any(),
                 true,
             ),
-            choose,
+            proceed,
         );
         let fields = dom.render_immediate_to_vec();
         let html = dioxus_ssr::render(&dom);
@@ -778,7 +781,7 @@ mod tests {
         assert!(html.contains("Esc"));
         assert!(html.contains(&translate("common-cancel")));
         assert!(!html.contains("<textarea"));
-        assert!(!Notice::of(&html).hidden(), "{}", Notice::of(&html).0);
+        assert!(!html.contains(" inert"));
         assert!(!html.contains(&translate("onboarding-save-key")));
         assert!(host.0.borrow().is_empty());
         let label = translate("onboarding-api-key");
@@ -949,16 +952,17 @@ mod tests {
     }
 
     #[test]
-    fn recovery_sends_cancel_and_change_intent_without_discarding_the_owned_view() {
+    fn recovery_sends_resume_and_change_intent_without_discarding_the_owned_view() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         for (label, event) in [
-            ("common-cancel", "cancel"),
+            ("common-resume", "retry"),
             ("composer-choose-agent", "choose-agent"),
         ] {
             let host = Rc::new(Host::default());
             let mut dom = VirtualDom::new_with_props(FailedSetup, FailedSetupProps { setup: true });
             dom.provide_root_context(HostBinding(host.clone()));
             let initial = dom.rebuild_to_vec();
+            assert!(!dioxus_ssr::render(&dom).contains(&translate("common-cancel")));
             let label = translate(label);
             let button = initial
                 .edits

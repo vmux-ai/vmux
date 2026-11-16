@@ -64,17 +64,6 @@ pub fn PromptComposer(
     let has_ghost = ghost.is_some();
     let overlaid = !overlay.is_empty();
     let typed_text_class = if overlaid { "text-transparent" } else { "" };
-    let mode_class = if action_enabled && !disabled {
-        match mode {
-            PromptComposerMode::Send => cn([
-                "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
-                accent_gradient.as_str(),
-            ]),
-            PromptComposerMode::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
-        }
-    } else {
-        "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/[0.055] text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-white/[0.08] sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/25 sm:ring-black/[0.06] dark:sm:bg-white/[0.055] dark:sm:ring-white/[0.08]".to_string()
-    };
     let shared_transition_class = if shared_transition {
         "vmux-agent-composer-shared"
     } else {
@@ -278,11 +267,45 @@ pub fn PromptComposer(
                     }
                 }
                 if mode == PromptComposerMode::Stop || show_send_button {
+                    ComposerButton { mode, action_title, enabled: !disabled && action_enabled, accent_gradient, on_action }
+                }
+                if let Some(footer) = footer {
+                    div { class: "relative z-10 order-last w-full px-2 pb-1", {footer} }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ComposerButton(
+    #[props(default)] mode: PromptComposerMode,
+    action_title: String,
+    #[props(default)] label: Option<String>,
+    #[props(default)] icon: Option<LineIcon>,
+    #[props(default = true)] enabled: bool,
+    #[props(default)] accent_gradient: String,
+    on_action: EventHandler<()>,
+) -> Element {
+    let mode_class = if enabled {
+        match mode {
+            PromptComposerMode::Send => cn([
+                "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
+                accent_gradient.as_str(),
+            ]),
+            PromptComposerMode::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
+        }
+    } else {
+        "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/[0.055] text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-white/[0.08] sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/25 sm:ring-black/[0.06] dark:sm:bg-white/[0.055] dark:sm:ring-white/[0.08]".to_string()
+    };
+    rsx! {
                     button {
                         class: "{mode_class}",
+                        style: label.is_some().then_some("width:auto;min-width:2rem;padding:0 .75rem;gap:.375rem;white-space:nowrap;"),
                         r#type: "button",
-                        disabled: disabled || !action_enabled,
+                        disabled: !enabled,
                         title: "{action_title}",
+                        aria_label: "{action_title}",
                         onmousedown: move |event| event.prevent_default(),
                         onkeydown: move |event| {
                             if event.key() == Key::Enter || matches!(event.key(), Key::Character(key) if key == " ") {
@@ -290,11 +313,11 @@ pub fn PromptComposer(
                             }
                         },
                         onclick: move |_| {
-                            if !disabled && action_enabled {
+                            if enabled {
                                 on_action.call(());
                             }
                         },
-                        if mode == PromptComposerMode::Stop {
+                        if let Some(icon) = icon { LineIconView { icon, class: "h-4 w-4".to_string() } } else if mode == PromptComposerMode::Stop {
                             svg {
                                 class: "h-4 w-4",
                                 view_box: "0 0 24 24",
@@ -314,13 +337,8 @@ pub fn PromptComposer(
                                 path { d: "M5 12l7-7 7 7" }
                             }
                         }
+                        if let Some(label) = &label { span { class: "text-sm font-medium", "{label}" } }
                     }
-                }
-                if let Some(footer) = footer {
-                    div { class: "relative z-10 order-last w-full px-2 pb-1", {footer} }
-                }
-            }
-        }
     }
 }
 

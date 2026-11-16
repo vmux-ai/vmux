@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use super::LayoutDropdown;
+use super::popup::{PopupLayer, PopupPlacement};
 use dioxus::prelude::*;
 use vmux_api::extension::{
     ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
@@ -31,7 +32,7 @@ impl ToolbarAnchor {
         self.node.set(Some(node));
     }
 
-    async fn measure(self) -> Option<ExtensionPopupAnchor> {
+    pub(super) async fn measure(self) -> Option<ExtensionPopupAnchor> {
         let node = self.node.peek().clone()?;
         let rect = node.get_client_rect().await.ok()?;
         if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
@@ -61,7 +62,7 @@ pub(crate) fn ExtensionPopupModal(
             anchor.set(toolbar.measure().await.unwrap_or(fallback_anchor));
         });
     }));
-    let placement = ExtensionPopupPlacement::from(anchor());
+    let placement = PopupPlacement::new(anchor().right, anchor().bottom);
     let size = if preferred_size.id == current.id {
         preferred_size
     } else {
@@ -108,59 +109,16 @@ pub(crate) fn ExtensionPopupModal(
     });
 
     rsx! {
-        div {
-            class: "pointer-events-auto fixed inset-0 z-[1000]",
-            tabindex: "-1",
-            onmounted: move |event: Event<MountedData>| {
-                let target = event.data();
-                spawn(async move {
-                    let _ = target.set_focus(true).await;
-                });
-            },
-            onkeydown: move |event| {
-                if event.key() == Key::Escape {
-                    event.prevent_default();
-                    state.close();
-                }
-            },
-            onpointerdown: move |_| state.close(),
+        PopupLayer { on_close: move |_| state.close(),
             div {
                 key: "{current.id}",
                 class: "pointer-events-none absolute",
-                style: "{placement.style(&size)}",
+                style: "{placement.style(size.width, size.height)}",
                 onpointerdown: move |event| event.stop_propagation(),
                 onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
                 onresize: move |_: Event<ResizeData>| resized.publish(),
             }
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ExtensionPopupPlacement {
-    right: i32,
-    top: i32,
-}
-
-impl From<ExtensionPopupAnchor> for ExtensionPopupPlacement {
-    fn from(anchor: ExtensionPopupAnchor) -> Self {
-        Self {
-            right: anchor.right.max(48),
-            top: anchor.bottom.max(40) + 8,
-        }
-    }
-}
-
-impl ExtensionPopupPlacement {
-    fn style(self, size: &ExtensionPopupSizeEvent) -> String {
-        format!(
-            "right:max(8px,calc(100vw - {}px));top:{}px;width:min({:.0}px,calc(100vw - 16px));height:min({:.0}px,calc(100vh - {}px));",
-            self.right,
-            self.top,
-            size.width.clamp(200.0, 360.0),
-            size.height.max(80.0),
-            self.top + 8
-        )
     }
 }
 
