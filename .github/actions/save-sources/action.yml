@@ -1,0 +1,23 @@
+name: Save source timestamps
+description: Publish source evidence only after successful compiler validation
+inputs:
+  workspace:
+    description: Isolated source checkout inside the runner workspace
+    required: true
+  snapshot:
+    description: Source snapshot included in the compiler cache
+    required: true
+  target:
+    description: Cached Cargo target directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Snapshot sources
+      shell: bash
+      env:
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
+        INPUT_SNAPSHOT: ${{ inputs.snapshot }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_SAVE: "true"
+      run: vmux-ci cache-checkpoint

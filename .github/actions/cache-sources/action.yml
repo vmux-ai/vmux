@@ -20,7 +20,14 @@ inputs:
     required: false
     default: "false"
 runs:
-  using: node24
-  main: ../../../scripts/ci-cache.js
-  post: ../../../scripts/ci-cache.js
-  post-if: success()
+  using: composite
+  steps:
+    - name: Restore source timestamps
+      shell: bash
+      env:
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
+        INPUT_SNAPSHOT: ${{ inputs.snapshot }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_RECEIPT: ${{ inputs.receipt }}
+        INPUT_SAVE: ${{ inputs.save }}
+      run: vmux-ci cache-restore

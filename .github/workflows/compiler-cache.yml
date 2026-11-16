@@ -8,7 +8,13 @@ on:
       - '**/Cargo.toml'
       - crates/build_*.rs
       - crates/feature/vmux_dx/lints/**
-      - scripts/ci-cache.js
+      - crates/feature/vmux_dx/src/ci.rs
+      - crates/feature/vmux_dx/src/ci_io.rs
+      - crates/feature/vmux_dx/src/ci/**
+      - crates/feature/vmux_dx/src/ci_io/**
+      - .github/actions/setup-ci/**
+      - .github/actions/cache-sources/**
+      - .github/actions/save-sources/**
       - .github/actions/cache-ecs-lints/**
       - .github/workflows/compiler-cache.yml
   workflow_dispatch:
@@ -50,6 +56,11 @@ jobs:
         run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
       - name: Warm nightly workspace dependencies
         run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --workspace --all-targets
+      - uses: ./.github/actions/save-sources
+        with:
+          workspace: .build-tools/compiler-checkout
+          snapshot: .build-tools/lints-sources.json
+          target: .build-tools/lints
       - name: Publish successful compiler workspace snapshot
         uses: ./.github/actions/save-workspace
         with:

@@ -89,13 +89,6 @@ impl Native {
     }
 
     fn pre_push(&mut self) -> Result<()> {
-        self.run_command(
-            "node",
-            &[
-                OsStr::new("--test"),
-                OsStr::new("scripts/ci-preflight.test.js"),
-            ],
-        )?;
         let target = self.checkout.root.join(".build-tools/cargo");
         self.environment.set("CARGO_TARGET_DIR", target.as_os_str());
         for args in [
