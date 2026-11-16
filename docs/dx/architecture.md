@@ -77,6 +77,14 @@ or running repository tests. CI owns the heavier compiler, DX/CLI lifecycle, own
 conventions, and platform checks. Targeted local tests cover the changed behavior;
 `vmux dx test` remains available for explicit diagnostics.
 
+CI validation builds use a stable validation identity instead of embedding the current Git
+commit and worktree. This keeps unchanged crates reusable between checks; product builds
+retain their normal identity. Compiler and CLI cache identities include this mode, so
+validation artifacts cannot satisfy a product cache request. Nightly compiler caches retain
+content-validated source timestamps and are warmed from main in a separate workflow, without
+waiting behind the full main validation queue. Compiler fixtures and source checks remain
+required and publish cache state only after successful validation.
+
 Give independent operations separate typed requests and phases, and keep handlers focused on one stage. This makes ownership and failure paths visible when a feature grows. An adapter's exception describes its actual outside interface; it does not move the feature's decisions out of Bevy.
 
 Cloud release snapshots become canonical ECS before consumers read decisions; unavailable input uses the declared default. Native extension bridge setup translates granted catalog permissions into initialization parameters; permission decisions stay in the catalog.

@@ -248,7 +248,7 @@ class Sources {
     const hash = crypto.createHash('sha256');
     hash.update(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }));
     for (const key of Object.keys(env).sort()) {
-      if (/^(RUSTFLAGS$|RUSTC$|RUSTC_WRAPPER$|CARGO_ENCODED_RUSTFLAGS$|CARGO_BUILD_|CARGO_TARGET_|CARGO_PROFILE_|CC$|CXX$|CFLAGS$|CXXFLAGS$|AR$)/.test(key)) {
+      if (/^(RUSTFLAGS$|RUSTC$|RUSTC_WRAPPER$|CARGO_ENCODED_RUSTFLAGS$|CARGO_BUILD_|CARGO_TARGET_|CARGO_PROFILE_|VMUX_CI_VALIDATION$|VMUX_BUILD_PROFILE$|VMUX_HOST_NAME$|CC$|CXX$|CFLAGS$|CXXFLAGS$|AR$)/.test(key)) {
         hash.update(`${key}=${env[key]}\0`);
       }
     }

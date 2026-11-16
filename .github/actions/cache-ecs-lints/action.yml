@@ -18,8 +18,15 @@ runs:
           .build-tools/dylint-cargo
           .build-tools/dylint-drivers
           .build-tools/lints
+          .build-tools/lints-sources.json
           ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
-        key: ecs-lints-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+        key: ecs-lints-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
         restore-keys: |
-          ecs-lints-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
-          ecs-lints-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-
+          ecs-lints-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
+          ecs-lints-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
+
+    - uses: ./.github/actions/cache-sources
+      with:
+        snapshot: .build-tools/lints-sources.json
+        target: .build-tools/lints
+        save: "true"

@@ -26,6 +26,7 @@ env:
   DX_HOME: ${{ github.workspace }}/.dx
   VMUX_CI_PREBUILT_DX: "1"
   VMUX_CI_FAST_RUST: "1"
+  VMUX_CI_VALIDATION: "1"
 
 jobs:
   plan:
@@ -453,7 +454,7 @@ jobs:
 
       - name: CI configuration and cache tests
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'
-        run: node --test scripts/ci-preflight.test.js
+        run: node --test scripts/ci-preflight.test.js scripts/ci-build-identity.test.js
 
       - name: CI tool lifecycle tests
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'

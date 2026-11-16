@@ -1,0 +1,56 @@
+name: Warm ECS compiler cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - '**/Cargo.toml'
+      - crates/build_*.rs
+      - crates/feature/vmux_dx/lints/**
+      - scripts/ci-cache.js
+      - .github/actions/cache-ecs-lints/**
+      - .github/workflows/compiler-cache.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecs-compiler-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  VMUX_CI_PREBUILT_DX: "0"
+  VMUX_CI_FAST_RUST: "1"
+  VMUX_CI_VALIDATION: "1"
+
+jobs:
+  compiler-cache:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Resolve CEF version
+        id: cef
+        shell: bash
+        run: |
+          version="$(awk -F'\"' '/^name = \"cef\"$/{getline; print $2; exit}' Cargo.lock)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: compiler-warm
+          cef-version: ${{ steps.cef.outputs.version }}
+      - uses: ./.github/actions/cache-ecs-lints
+      - name: Validate compiler fixtures
+        run: vmux internal ecs-lint -- --test
+      - name: Warm nightly workspace dependencies
+        run: VMUX_SKIP_DX_BUILD=1 vmux internal ecs-lint -- --locked --workspace --all-targets
+      - name: Publish successful compiler workspace snapshot
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: compiler-warm
