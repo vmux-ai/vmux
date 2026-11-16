@@ -29,6 +29,7 @@ pub fn PromptComposer(
     accent_color: String,
     accent_gradient: String,
     #[props(default)] footer: Option<Element>,
+    #[props(default)] action: Option<Element>,
     #[props(default)] shared_transition: bool,
     #[props(default)] disabled: bool,
     #[props(default)] input_disabled: bool,
@@ -93,7 +94,7 @@ pub fn PromptComposer(
                 style: "--vmux-prompt-accent:{accent_color};",
                 if show_add_button {
                 button {
-                    class: if disabled {
+                    class: if field_disabled {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 cursor-not-allowed self-center items-center justify-center rounded-xl text-muted-foreground/35 sm:h-8 sm:w-8 sm:rounded-lg"
                     } else if add_menu_open() {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-foreground/10 text-foreground transition sm:h-8 sm:w-8 sm:rounded-lg"
@@ -101,19 +102,19 @@ pub fn PromptComposer(
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg"
                     },
                     r#type: "button",
-                    disabled,
+                    disabled: field_disabled,
                     title: translate("common-add"),
                     aria_label: translate("common-add"),
-                    aria_expanded: add_menu_open() && !disabled,
+                    aria_expanded: add_menu_open() && !field_disabled,
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
-                        if !disabled {
+                        if !field_disabled {
                             add_menu_open.set(!add_menu_open());
                         }
                     },
                     LineIconView { icon: LineIcon::Plus, class: "size-4".to_string() }
                 }
-                if add_menu_open() && !disabled {
+                if add_menu_open() && !field_disabled {
                     PromptPopup {
                         placement: PromptPopupPlacement::Upward,
                         on_dismiss: move |_| add_menu_open.set(false),
@@ -266,7 +267,7 @@ pub fn PromptComposer(
                         }
                     }
                 }
-                if mode == PromptComposerMode::Stop || show_send_button {
+                if let Some(action) = action { {action} } else if mode == PromptComposerMode::Stop || show_send_button {
                     ComposerButton { mode, action_title, enabled: !disabled && action_enabled, accent_gradient, on_action }
                 }
                 if let Some(footer) = footer {
@@ -283,6 +284,7 @@ pub fn ComposerButton(
     action_title: String,
     #[props(default)] label: Option<String>,
     #[props(default)] icon: Option<LineIcon>,
+    #[props(default)] icon_class: String,
     #[props(default = true)] enabled: bool,
     #[props(default)] accent_gradient: String,
     on_action: EventHandler<()>,
@@ -317,7 +319,7 @@ pub fn ComposerButton(
                                 on_action.call(());
                             }
                         },
-                        if let Some(icon) = icon { LineIconView { icon, class: "h-4 w-4".to_string() } } else if mode == PromptComposerMode::Stop {
+                        if let Some(icon) = icon { LineIconView { icon, class: format!("h-4 w-4 {icon_class}") } } else if mode == PromptComposerMode::Stop {
                             svg {
                                 class: "h-4 w-4",
                                 view_box: "0 0 24 24",

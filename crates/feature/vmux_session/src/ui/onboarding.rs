@@ -1,12 +1,14 @@
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::composer::ComposerButton;
+use vmux_ui::components::composer_bar::ComposerChip;
 use vmux_ui::components::manager::{ManagerSearch, ManagerSearchRow};
 use vmux_ui::components::prompt::{
-    ConversationPrompt, PromptConfirmation, PromptOption, PromptSelection, PromptSelectionChange,
+    ConversationPrompt, PromptOption, PromptSelection, PromptSelectionChange,
 };
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{UiStateBinding, send};
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::i18n::translate;
 
 use super::setup::Identity;
 use crate::onboarding::{AgentOption, OnboardingConnect, OnboardingUiState};
@@ -34,14 +36,7 @@ fn Conversation(state: OnboardingUiState) -> Element {
                 }
             }
             super::surface::Dock {
-                super::setup::Frame {
-                    compact: true,
-                    onboarding: state.clone(),
-                    notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1",
-                        AgentSelector { state }
-                    } }),
-
-                }
+                AgentSelector { state }
             }
         }
     }
@@ -89,29 +84,23 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
     }
     let chosen = choice();
     let agent = state.agents.iter().find(|agent| agent.id == chosen);
-    let confirm_label = match agent {
-        Some(agent) if (state.paused || state.failed) && agent.id == state.agent_id => {
-            translate("common-resume")
-        }
-        Some(agent) => translate_with(
-            "onboarding-continue-agent",
-            &[("agent", TranslationValue::String(&agent.name))],
-        ),
-        None => translate("common-continue"),
+    let confirm_label = if agent
+        .is_some_and(|agent| (state.paused || state.failed) && agent.id == state.agent_id)
+    {
+        translate("common-resume")
+    } else {
+        translate("common-continue")
     };
     let enabled = agent.is_some();
-    rsx! {
+    let chip = agent.map(|agent| {
+        ComposerChip::ready(agent.name.clone(), agent.name.clone()).with_agent(
+            vmux_api::PageIcon::favicon(agent.icon.clone()),
+            agent.id.clone(),
+        )
+    });
+    let agent_id = chosen.clone();
+    let notice = rsx! {
         ConversationPrompt {
-            actions: Some(rsx! { PromptConfirmation {
-                confirm_label,
-                enabled,
-                pending,
-                on_confirm: move |_| {
-                    if enabled && !pending {
-                        let _ = send(&OnboardingConnect { agent_id: choice() });
-                    }
-                },
-            } }),
             ManagerSearchRow { compact: true,
                 ManagerSearch {
                     value: query(),
@@ -136,7 +125,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     options,
                     leading: icons,
                     trailing: details,
-                    selected: if chosen.is_empty() { Vec::new() } else { vec![chosen] },
+                    selected: if chosen.is_empty() { Vec::new() } else { vec![chosen.clone()] },
                     viewport_class: "max-h-[min(14rem,35vh)]".to_string(),
                     disabled: pending,
                     on_change: move |change: PromptSelectionChange| {
@@ -150,7 +139,17 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                 }
             }
         }
-    }
+    };
+    let action = Some(rsx! { ComposerButton {
+        action_title: confirm_label.clone(), label: Some(confirm_label),
+        icon: Some(vmux_ui::icon::LineIcon::ChevronDown), icon_class: "-rotate-90".to_string(),
+        enabled: enabled && !pending,
+        accent_gradient: vmux_ui::agent_accent::AgentAccent::for_agent(&agent_id).grad.to_string(),
+        on_action: move |_| { if enabled && !pending { let _ = send(&OnboardingConnect { agent_id: choice() }); } },
+    } });
+    rsx! { super::setup::Frame { compact: true, onboarding: state, notice: Some(notice),
+        super::setup::DisabledComposer { chip, agent_id, action }
+    } }
 }
 
 #[derive(Clone)]
@@ -438,7 +437,14 @@ mod tests {
             .expect("response composer");
         assert!(progress < composer);
         assert!(!html[composer..].contains("<ol "));
-        assert!(!html.contains("<textarea"));
+        let input = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(input.contains(" disabled"));
         assert!(html.contains("role=\"radiogroup\""));
         for prompt in vmux_ui::components::starter_prompts::StarterPrompt::all() {
             assert!(!html.contains(&prompt.text()));
@@ -461,7 +467,17 @@ mod tests {
     fn choice_keyboard_activation_works_while_the_normal_composer_stays_disabled() {
         let mut fixture = Fixture::new(false);
         let html = dioxus_ssr::render(&fixture.dom);
-        assert!(!html.contains("<textarea"));
+        let input = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(input.contains(" disabled"));
+        let input = fixture.element("id", vmux_ui::components::composer::PROMPT_INPUT_ID);
+        fixture.press(input, Key::Enter, Code::Enter);
+        assert!(fixture.host.0.borrow().is_empty());
         let search = fixture.element("aria-label", &translate("onboarding-search-agents"));
         let confirm = fixture.element("aria-label", &translate("common-continue"));
         fixture.press(search, Key::Enter, Code::Enter);

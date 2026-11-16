@@ -6,9 +6,9 @@ use crate::onboarding::{
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::composer::{
-    ComposerButton, ComposerFrame, ComposerNotice, PromptComposerMode, ShortcutHint,
+    ComposerButton, ComposerFrame, ComposerNotice, PromptComposer, PromptComposerMode, ShortcutHint,
 };
-use vmux_ui::components::composer_bar::ComposerBar;
+use vmux_ui::components::composer_bar::{ComposerBar, ComposerChip};
 use vmux_ui::components::message::MessageFrame;
 use vmux_ui::components::progress::{Progress, ProgressIndicator, TaskSteps};
 use vmux_ui::components::prompt::{
@@ -92,7 +92,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
     let action = if resumable {
         Some(
             rsx! { ComposerButton { action_title: translate("common-resume"), label: Some(translate("common-resume")),
-                icon: Some(vmux_ui::icon::LineIcon::Play), enabled: !keys.pending, accent_gradient: gradient,
+                icon: Some(vmux_ui::icon::LineIcon::ChevronDown), icon_class: "-rotate-90".to_string(), enabled: !keys.pending, accent_gradient: gradient,
                 on_action: move |_| Choice::Retry.choose(),
             } },
         )
@@ -108,7 +108,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
         };
         Some(
             rsx! { ComposerButton { action_title: translate("common-continue"), label: Some(translate("common-continue")),
-                icon: Some(vmux_ui::icon::LineIcon::Play), enabled: available && !keys.pending, accent_gradient: gradient,
+                icon: Some(vmux_ui::icon::LineIcon::ChevronDown), icon_class: "-rotate-90".to_string(), enabled: available && !keys.pending, accent_gradient: gradient,
                 on_action: move |_| { if selected() == "key" { chat.request_key_input(true); } else { connection.connect(chat); } },
             } },
         )
@@ -117,17 +117,25 @@ pub(super) fn Controls(chat: Chat) -> Element {
     };
     let on_choose = (!keys.pending && !chat.authentication_pending())
         .then_some(EventHandler::new(move |_| Choice::ChangeAgent.choose()));
-    rsx! { Frame { notice, chat: Some(chat), onboarding, on_choose, action, SetupComposer { chat, keys } } }
+    let key_entry = !resumable
+        && chat.status() == "authentication"
+        && chat.key_input_requested()
+        && !keys.key_variable.is_empty();
+    rsx! { Frame { notice, onboarding,
+        if key_entry {
+            SetupComposer { chat, keys }
+            DisabledComposerBar { chat: Some(chat), on_choose }
+        } else {
+            DisabledComposer { chat: Some(chat), on_choose, action }
+        }
+    } }
 }
 
 #[component]
 pub(super) fn Frame(
     #[props(default)] notice: Option<Element>,
     #[props(default)] compact: bool,
-    #[props(default)] chat: Option<Chat>,
     #[props(default)] onboarding: OnboardingUiState,
-    #[props(default)] on_choose: Option<EventHandler<()>>,
-    #[props(default)] action: Option<Element>,
     children: Element,
 ) -> Element {
     rsx! {
@@ -135,20 +143,50 @@ pub(super) fn Frame(
             borderless: true,
             content_class: if compact { "p-0".to_string() } else { String::new() },
             notice: notice.map(|notice| rsx! { ComposerNotice { content: Some(rsx! { div { class: "setup-reply p-2", {notice} } }), class: "setup-notice".to_string() } }),
-            {children}
-            if !onboarding.starting && let Some(chat) = chat {
-                div { class: "setup-reply flex min-w-0 items-center justify-between gap-2 rounded-[14px] bg-muted p-2",
-                    div { class: "min-w-0 flex-1",
-                        { let mut chip = chat.agent_chip(); chip.title = Choice::ChangeAgent.label();
-                          if let Some(on_choose) = on_choose { chip = chip.opens(on_choose); }
-                          rsx! { ComposerBar { opened: None, agent: Some(chip), compact: false } }
-                        }
-                    }
-                    if let Some(action) = action { {action} }
-                }
-            }
+            div { aria_busy: onboarding.starting, {children} }
         }
     }
+}
+
+#[component]
+pub(super) fn DisabledComposer(
+    #[props(default)] chat: Option<Chat>,
+    #[props(default)] chip: Option<ComposerChip>,
+    #[props(default)] agent_id: String,
+    #[props(default)] on_choose: Option<EventHandler<()>>,
+    #[props(default)] action: Option<Element>,
+) -> Element {
+    let agent_id = chat.map(|chat| chat.agent()).unwrap_or(agent_id);
+    let accent = vmux_ui::agent_accent::AgentAccent::for_agent(&agent_id);
+    rsx! {
+        PromptComposer {
+            shared_transition: true, input_disabled: true, caret_visible: false,
+            value: String::new(), placeholder: translate("command-composer-placeholder"),
+            accent_color: chat.map(|chat| chat.accent().css).unwrap_or_else(|| Identity::COLOR.to_string()), accent_gradient: accent.grad.to_string(),
+            action, action_title: translate("common-continue"), action_enabled: false,
+            footer: Some(rsx! { DisabledComposerBar { chat, chip, on_choose } }),
+            on_input: move |_| {}, on_keydown: move |_| {}, on_paste: move |_| {},
+            on_attach: move |_| {}, on_remove_attachment: move |_| {}, on_action: move |_| {},
+        }
+    }
+}
+
+#[component]
+fn DisabledComposerBar(
+    #[props(default)] chat: Option<Chat>,
+    #[props(default)] chip: Option<ComposerChip>,
+    #[props(default)] on_choose: Option<EventHandler<()>>,
+) -> Element {
+    let chip = chip
+        .or_else(|| chat.map(|chat| chat.agent_chip()))
+        .map(|mut chip| {
+            if let Some(on_choose) = on_choose {
+                chip.title = Choice::ChangeAgent.label();
+                chip = chip.opens(on_choose);
+            }
+            chip
+        });
+    rsx! { ComposerBar { opened: None, agent: chip, compact: false } }
 }
 
 struct Task {
@@ -622,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_setup_offers_shared_stop_without_a_work_textarea() {
+    fn busy_setup_keeps_disabled_composer_with_shared_stop() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         for (status, pending, key_available) in [
             ("preparing", false, false),
@@ -661,7 +699,14 @@ mod tests {
                 assert!(!html.contains("role=\"listbox\""));
             }
             assert!(!html.contains("type=\"password\""));
-            assert!(!html.contains("<textarea"));
+            let field = html
+                .split("<textarea")
+                .nth(1)
+                .unwrap()
+                .split('>')
+                .next()
+                .unwrap();
+            assert!(field.contains(" disabled"));
             assert!(html.contains("<img"));
             let stop = initial
                 .edits
@@ -905,7 +950,14 @@ mod tests {
         dom.provide_root_context(HostBinding(host.clone()));
         let initial = dom.rebuild_to_vec();
         let html = dioxus_ssr::render(&dom);
-        assert!(!html.contains("<textarea"));
+        let field = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(field.contains(" disabled"));
         assert!(!html.contains("<ol "));
         let label = translate("common-resume");
         let retry = initial
