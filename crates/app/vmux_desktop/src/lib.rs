@@ -118,41 +118,41 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 mod tests {
     use super::*;
     use bevy::ecs::schedule::Schedules;
-    use bevy::ecs::schedule::{ScheduleBuildError, graph::DiGraphToposortError};
 
     fn cef_create_probe() {}
 
     #[test]
     fn desktop_feature_update_schedule_is_acyclic() {
-        let mut app = App::new();
-        app.add_plugins(DefaultPlugins.build().disable::<bevy::winit::WinitPlugin>())
-            .add_plugins(bevy_cef::prelude::IpcPlugin)
-            .add_plugins(
-                vmux_app::VmuxPlugin::builder()
-                    .gallery(true)
-                    .input(true)
-                    .simulator(true)
-                    .shortcut(true)
-                    .build(),
-            )
-            .add_message::<crate::runtime::HideAllWindowsRequest>()
-            .add_plugins(crate::window::WindowPlugin);
-        vmux_browser::BrowserPlugin::configure_schedule(&mut app).add_systems(
-            Update,
-            cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
-        );
-        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
-        let mut schedule = schedules.remove(Update).unwrap();
+        for feature_flags in [false, true] {
+            let mut app = App::new();
+            app.add_plugins(DefaultPlugins.build().disable::<bevy::winit::WinitPlugin>())
+                .add_plugins(bevy_cef::prelude::IpcPlugin)
+                .add_plugins(
+                    vmux_app::VmuxPlugin::builder()
+                        .gallery(true)
+                        .input(true)
+                        .simulator(true)
+                        .shortcut(true)
+                        .feature_flags(feature_flags)
+                        .build(),
+                )
+                .add_message::<crate::runtime::HideAllWindowsRequest>()
+                .add_plugins(crate::window::WindowPlugin);
+            vmux_browser::BrowserPlugin::configure_schedule(&mut app).add_systems(
+                Update,
+                (
+                    ui_event_flush_probe.in_set(bevy_cef::prelude::UiEventSystems::Flush),
+                    cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
+                ),
+            );
+            let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+            let mut schedule = schedules.remove(Update).unwrap();
 
-        if let Err(error) = schedule.initialize(app.world_mut()) {
-            let error = match error {
-                ScheduleBuildError::FlatDependencySort(DiGraphToposortError::Cycle(mut cycles)) => {
-                    cycles.truncate(1);
-                    ScheduleBuildError::FlatDependencySort(DiGraphToposortError::Cycle(cycles))
-                }
-                other => other,
-            };
-            panic!("{}", error.to_string(schedule.graph(), app.world()));
+            let initialized = schedule.initialize(app.world_mut()).is_ok();
+            assert!(
+                initialized,
+                "desktop update schedule must be acyclic (feature_flags={feature_flags})"
+            );
         }
     }
 

@@ -82,6 +82,7 @@ impl Plugin for SimulatorPlugin {
             Update,
             (NativeKeyClaimSet, NativeKeyInputSet, SimulatorInputSet).chain(),
         )
+        .configure_sets(Update, SimulatorInputSet.after(SimulatorFocusSet))
         .add_message::<HardwareButtonRequest>()
         .add_message::<SimulatorClipboardRequest>()
         .add_message::<SimulatorSoftwareKeyboardRequest>()

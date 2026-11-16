@@ -92,7 +92,6 @@ legacy: [
     (key: "crates/feature/vmux_simulator/src/host/input.rs||fn:touch", fingerprint: "4d66b76b481eaacf", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:DeviceCoordinates", fingerprint: "9ef32ed65c8b903d", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:Plugin for SimulatorInputPlugin", fingerprint: "3b4f291bb03ec198", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:Plugin for SimulatorNativeKeyPlugin", fingerprint: "215213a85143772b", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:SimulatorClipboard", fingerprint: "d5435f387ea685ec", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:SimulatorClipboardRunner", fingerprint: "9246191f7a56b05a", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:SimulatorKeyboard", fingerprint: "8b6ca97db9ca9eb7", issue: "VMX-253"),
@@ -174,6 +173,7 @@ legacy: [
 ],
 boundaries: [
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:Plugin for SimulatorPlugin", fingerprint: "03778fa4d37337a0", interface: "Bevy simulator feature and schedule registration", input: "external: Bevy App installation and declared simulator feature metadata", output: "ECS: crates/feature/vmux_simulator/src/host.rs||struct:ActiveSimulatorView", lifetime: "One installed simulator host runtime", bounds: "Registers existing lifecycle, typed input and projection systems; prepares focus in PreUpdate for keyboard claims and reconciles current layout focus in Update without a dependency back into command routing", teardown: "App teardown releases registered systems and simulator-owned entities; device adapters retain their existing cleanup ownership", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:Plugin for SimulatorNativeKeyPlugin", fingerprint: "9d3ee5f1d5a69cae", interface: "Bevy App plugin installation", input: "external: typed SimulatorInputPlugin composition", output: "ECS: crates/feature/vmux_simulator/src/host/input.rs||struct:SimulatorNativeKey", lifetime: "one owning desktop App composition", bounds: "register native key binding publication after canonical focus and before Simulator input; retained binding entities own claim identity", teardown: "App teardown retires registered schedules and App-owned canonical state", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   debt: [
