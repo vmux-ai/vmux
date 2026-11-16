@@ -1,10 +1,14 @@
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::{NonSendMarker, SystemParam};
 use bevy::prelude::{
     App, ChildOf, Commands, Component, Entity, EntityEvent, Has, IntoScheduleConfigs, Message,
     MessageReader, MessageWriter, Name, NonSend, On, Plugin, PostUpdate, Query, Remove, SystemSet,
     Vec2, Window, With, Without,
 };
+#[cfg(target_os = "macos")]
+use bevy::winit::WINIT_WINDOWS;
 use bevy_cef::prelude::{BinIpcSurfaceGeneration, Browsers, HostWindow, WebviewWindowed};
+#[cfg(target_os = "macos")]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use vmux_layout::LayoutCef;
 use vmux_layout::window::FocusedWindow;
 
@@ -13,12 +17,23 @@ pub(crate) struct LayoutPlacementPlugin;
 impl Plugin for LayoutPlacementPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PlacementRequested>()
+            .add_message::<WindowMatched>()
+            .add_message::<FrameRequested>()
             .add_message::<PlacementCompleted>()
             .add_message::<RaiseRequested>()
             .add_message::<RaiseCompleted>()
             .add_systems(
                 PostUpdate,
-                (initialize, select, apply, confirm, raise, finish)
+                (
+                    initialize,
+                    select,
+                    match_window,
+                    place,
+                    apply,
+                    confirm,
+                    raise,
+                    finish,
+                )
                     .chain()
                     .in_set(PlacementSet)
                     .after(crate::present::LayoutChildrenSet)
@@ -94,6 +109,48 @@ impl Windows<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+struct NativeWindows {
+    _thread: NonSendMarker,
+}
+
+impl NativeWindows {
+    #[cfg(target_os = "macos")]
+    fn matches(&self, browsers: &Browsers, owner: Entity, host: Entity) -> bool {
+        WINIT_WINDOWS.with_borrow(|windows| {
+            let Some(window) = windows.get_window(host) else {
+                return false;
+            };
+            let Ok(handle) = window.window_handle() else {
+                return false;
+            };
+            let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+                return false;
+            };
+            let view: &objc2_app_kit::NSView = unsafe { &*handle.ns_view.as_ptr().cast() };
+            let Some(window) = view.window() else {
+                return false;
+            };
+            let identity = (&*window as *const objc2_app_kit::NSWindow) as isize;
+            browsers.windowed_view_matches_window(&owner, identity)
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn matches(&self, _: &Browsers, _: Entity, _: Entity) -> bool {
+        false
+    }
+}
+
+#[derive(Message)]
+struct WindowMatched {
+    attempt: Entity,
+    matched: bool,
+}
+
+#[derive(Message)]
+struct FrameRequested(Entity);
+
 #[derive(Message)]
 struct PlacementRequested(Entity);
 
@@ -129,7 +186,7 @@ fn select(
 ) {
     for (owner, mut history) in &mut owners {
         if let Some(attempt) = history.pending.take() {
-            commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+            commands.entity(attempt).try_despawn();
         }
         let Some(target) = windows.target(owner) else {
             if history.raised.is_some() {
@@ -150,9 +207,67 @@ fn select(
     }
 }
 
+fn match_window(
+    browsers: Option<NonSend<Browsers>>,
+    native: NativeWindows,
+    mut requested: MessageReader<PlacementRequested>,
+    attempts: Query<(&Placement, &ChildOf, Has<vmux_ecs::Active>)>,
+    mut matched: MessageWriter<WindowMatched>,
+) {
+    let Some(browsers) = browsers else {
+        return;
+    };
+    for request in requested.read() {
+        let Ok((target, parent, active)) = attempts.get(request.0) else {
+            continue;
+        };
+        matched.write(WindowMatched {
+            attempt: request.0,
+            matched: active && native.matches(&browsers, parent.parent(), target.window),
+        });
+    }
+}
+
+fn place(
+    mut matched: MessageReader<WindowMatched>,
+    attempts: Query<(&Placement, &ChildOf)>,
+    mut owners: Query<&mut History, (With<LayoutCef>, With<WebviewWindowed>)>,
+    windows: Windows,
+    mut requested: MessageWriter<FrameRequested>,
+    mut commands: Commands,
+) {
+    for event in matched.read() {
+        let Ok((target, parent)) = attempts.get(event.attempt) else {
+            continue;
+        };
+        let owner = parent.parent();
+        let Ok(mut history) = owners.get_mut(owner) else {
+            commands.entity(event.attempt).try_despawn();
+            continue;
+        };
+        if history.pending != Some(event.attempt) {
+            commands.entity(event.attempt).try_despawn();
+            continue;
+        }
+        if !event.matched
+            || windows
+                .target(owner)
+                .is_none_or(|current| !current.matches(target.geometry()))
+        {
+            history.pending = None;
+            history.raised = None;
+            commands.entity(event.attempt).try_despawn();
+            continue;
+        }
+        requested.write(FrameRequested(event.attempt));
+    }
+}
+
 fn apply(
     browsers: Option<NonSend<Browsers>>,
-    mut requested: MessageReader<PlacementRequested>,
+    native: NativeWindows,
+    windows: Windows,
+    mut requested: MessageReader<FrameRequested>,
     attempts: Query<(&Placement, &ChildOf, Has<vmux_ecs::Active>)>,
     mut completed: MessageWriter<PlacementCompleted>,
 ) {
@@ -164,7 +279,10 @@ fn apply(
             continue;
         };
         let owner = parent.parent();
-        if active {
+        let current = windows.target(owner);
+        let valid = active && current.is_some_and(|current| current.matches(target.geometry()));
+        let bound = valid && native.matches(&browsers, owner, target.window);
+        if bound {
             browsers.set_windowed_hidden(&owner, false);
             browsers.set_windowed_frame(
                 &owner,
@@ -177,7 +295,9 @@ fn apply(
         }
         completed.write(PlacementCompleted {
             attempt: request.0,
-            ready: active && browsers.windowed_view_ready(&owner),
+            ready: bound
+                && native.matches(&browsers, owner, target.window)
+                && browsers.windowed_view_ready(&owner),
         });
     }
 }
@@ -227,20 +347,27 @@ fn confirm(
 
 fn raise(
     browsers: Option<NonSend<Browsers>>,
+    native: NativeWindows,
+    windows: Windows,
     mut requested: MessageReader<RaiseRequested>,
-    attempts: Query<(&ChildOf, Has<vmux_ecs::Active>), With<Placement>>,
+    attempts: Query<(&Placement, &ChildOf, Has<vmux_ecs::Active>)>,
     mut completed: MessageWriter<RaiseCompleted>,
 ) {
     let Some(browsers) = browsers else {
         return;
     };
     for request in requested.read() {
-        let Ok((parent, active)) = attempts.get(request.0) else {
+        let Ok((target, parent, active)) = attempts.get(request.0) else {
             continue;
         };
+        let current = windows.target(parent.parent());
+        let valid = active && current.is_some_and(|current| current.matches(target.geometry()));
         completed.write(RaiseCompleted {
             attempt: request.0,
-            raised: active && browsers.try_raise_windowed_to_front(&parent.parent()),
+            raised: valid
+                && native.matches(&browsers, parent.parent(), target.window)
+                && browsers.try_raise_windowed_to_front(&parent.parent())
+                && native.matches(&browsers, parent.parent(), target.window),
         });
     }
 }
@@ -284,7 +411,7 @@ fn retire<T: Component>(
     if let Ok(mut history) = owners.get_mut(owner)
         && let Some(attempt) = history.pending.take()
     {
-        commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+        commands.entity(attempt).try_despawn();
     }
     commands.entity(owner).try_remove::<History>();
 }
@@ -308,7 +435,7 @@ fn retire_window(
         }
         history.raised = None;
         if let Some(attempt) = history.pending.take() {
-            commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+            commands.entity(attempt).try_despawn();
         }
     }
 }
@@ -316,7 +443,7 @@ fn retire_window(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::prelude::{MinimalPlugins, ResMut, Resource};
+    use bevy::prelude::{MinimalPlugins, ResMut, Resource, resource_exists};
     use bevy::window::WindowResolution;
 
     struct PlacementFixture {
@@ -336,12 +463,23 @@ mod tests {
                     raise_succeeds: true,
                     hold: false,
                     hold_raise: false,
+                    raise_host: None,
                 })
                 .add_systems(
                     PostUpdate,
                     (
-                        respond.after(apply).before(confirm),
-                        respond_raise.after(raise).before(finish),
+                        match_fixture
+                            .after(match_window)
+                            .before(place)
+                            .run_if(resource_exists::<NativeFixture>),
+                        respond
+                            .after(apply)
+                            .before(confirm)
+                            .run_if(resource_exists::<NativeFixture>),
+                        respond_raise
+                            .after(raise)
+                            .before(finish)
+                            .run_if(resource_exists::<NativeFixture>),
                     ),
                 );
             let window = app
@@ -361,6 +499,7 @@ mod tests {
                     WebviewWindowed,
                     HostWindow(window),
                     NativeReady(true),
+                    NativeHost(window),
                 ))
                 .id();
             Self { app, window, owner }
@@ -385,6 +524,12 @@ mod tests {
                 .0 = ready;
         }
 
+        fn live_entities(&mut self) -> usize {
+            let world = self.app.world_mut();
+            let mut entities = world.query::<Entity>();
+            entities.iter(world).count()
+        }
+
         fn another_window(&mut self) -> Entity {
             self.app
                 .world_mut()
@@ -405,6 +550,9 @@ mod tests {
     #[derive(Component)]
     struct NativeReady(bool);
 
+    #[derive(Component)]
+    struct NativeHost(Entity);
+
     #[derive(Resource)]
     struct NativeFixture {
         calls: Vec<(Entity, Entity, Vec2, f32, bool)>,
@@ -413,12 +561,30 @@ mod tests {
         raise_succeeds: bool,
         hold: bool,
         hold_raise: bool,
+        raise_host: Option<Entity>,
+    }
+
+    fn match_fixture(
+        mut requested: MessageReader<PlacementRequested>,
+        attempts: Query<(&Placement, &ChildOf)>,
+        views: Query<&NativeHost>,
+        mut matched: MessageWriter<WindowMatched>,
+    ) {
+        for request in requested.read() {
+            let Ok((target, parent)) = attempts.get(request.0) else {
+                continue;
+            };
+            matched.write(WindowMatched {
+                attempt: request.0,
+                matched: views.get(parent.parent()).unwrap().0 == target.window,
+            });
+        }
     }
 
     fn respond(
-        mut requested: MessageReader<PlacementRequested>,
+        mut requested: MessageReader<FrameRequested>,
         attempts: Query<(&Placement, &ChildOf, Has<vmux_ecs::Active>)>,
-        views: Query<&NativeReady>,
+        views: Query<(&NativeReady, &NativeHost)>,
         mut native: ResMut<NativeFixture>,
         mut completed: MessageWriter<PlacementCompleted>,
     ) {
@@ -427,11 +593,12 @@ mod tests {
                 continue;
             };
             let owner = parent.parent();
-            let ready = active && views.get(owner).is_ok_and(|view| view.0);
+            let (view, native_host) = views.get(owner).unwrap();
+            let ready = active && view.0;
             if active {
                 native
                     .calls
-                    .push((owner, target.window, target.size, target.scale, false));
+                    .push((owner, native_host.0, target.size, target.scale, false));
             }
             if native.hold {
                 native.withheld.push(request.0);
@@ -446,15 +613,20 @@ mod tests {
 
     fn respond_raise(
         mut requested: MessageReader<RaiseRequested>,
-        attempts: Query<(&ChildOf, Has<vmux_ecs::Active>), With<Placement>>,
+        attempts: Query<(&Placement, &ChildOf, Has<vmux_ecs::Active>)>,
         mut native: ResMut<NativeFixture>,
+        mut views: Query<&mut NativeHost>,
         mut completed: MessageWriter<RaiseCompleted>,
     ) {
         for request in requested.read() {
-            let Ok((parent, active)) = attempts.get(request.0) else {
+            let Ok((target, parent, active)) = attempts.get(request.0) else {
                 continue;
             };
-            if active {
+            if let Some(host) = native.raise_host.take() {
+                views.get_mut(parent.parent()).unwrap().0 = host;
+            }
+            let bound = active && views.get(parent.parent()).unwrap().0 == target.window;
+            if bound {
                 native.raises.push(parent.parent());
             }
             if native.hold_raise {
@@ -463,8 +635,67 @@ mod tests {
             }
             completed.write(RaiseCompleted {
                 attempt: request.0,
-                raised: active && native.raise_succeeds,
+                raised: bound && native.raise_succeeds,
             });
+        }
+    }
+
+    #[test]
+    fn native_adapter_absence_does_not_accumulate_work_and_recovery_drains_it() {
+        let mut fixture = PlacementFixture::new();
+        let native = fixture
+            .app
+            .world_mut()
+            .remove_resource::<NativeFixture>()
+            .unwrap();
+        let baseline = fixture.live_entities();
+        fixture.app.update();
+        let pending = fixture.live_entities();
+        for _ in 0..32 {
+            fixture.app.update();
+            assert_eq!(fixture.live_entities(), pending);
+        }
+        fixture.app.insert_resource(native);
+        fixture.app.update();
+        assert_eq!(fixture.live_entities(), baseline);
+    }
+
+    #[test]
+    fn native_adapter_absence_does_not_retain_retired_owner_or_window_work() {
+        for retirement in 0..3 {
+            let mut fixture = PlacementFixture::new();
+            fixture
+                .app
+                .world_mut()
+                .remove_resource::<NativeFixture>()
+                .unwrap();
+            let baseline = fixture.live_entities();
+            fixture.app.update();
+            match retirement {
+                0 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .remove::<LayoutCef>();
+                }
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .remove::<WebviewWindowed>();
+                }
+                _ => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.window)
+                        .remove::<Window>();
+                }
+            }
+            fixture.app.update();
+            assert_eq!(fixture.live_entities(), baseline);
         }
     }
 
@@ -545,7 +776,30 @@ mod tests {
     }
 
     #[test]
-    fn root_window_rebinding_invalidates_identical_geometry() {
+    fn a_native_window_change_before_raise_cannot_acknowledge_the_old_binding() {
+        let mut fixture = PlacementFixture::new();
+        let window = fixture.another_window();
+        fixture
+            .app
+            .world_mut()
+            .resource_mut::<NativeFixture>()
+            .raise_host = Some(window);
+        let calls = fixture.step();
+        assert_eq!(calls.len(), 1);
+        assert!(!calls[0].4);
+        assert!(fixture.step().is_empty());
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<NativeHost>(fixture.owner)
+            .unwrap()
+            .0 = fixture.window;
+        assert!(fixture.step()[0].4);
+        assert!(!fixture.step()[0].4);
+    }
+
+    #[test]
+    fn root_window_rebinding_waits_for_the_actual_native_binding() {
         let mut fixture = PlacementFixture::new();
         fixture.step();
         let window = fixture.another_window();
@@ -553,6 +807,14 @@ mod tests {
             .app
             .world_mut()
             .get_mut::<HostWindow>(fixture.owner)
+            .unwrap()
+            .0 = window;
+        assert!(fixture.step().is_empty());
+        assert!(fixture.step().is_empty());
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<NativeHost>(fixture.owner)
             .unwrap()
             .0 = window;
         assert_eq!(
@@ -693,6 +955,12 @@ mod tests {
             .get_mut::<HostWindow>(fixture.owner)
             .unwrap()
             .0 = window;
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<NativeHost>(fixture.owner)
+            .unwrap()
+            .0 = window;
         fixture.app.world_mut().resource_mut::<NativeFixture>().hold = false;
         assert!(fixture.step()[0].4);
         fixture.complete_frame(old, false);
@@ -733,6 +1001,7 @@ mod tests {
                 WebviewWindowed,
                 HostWindow(window),
                 NativeReady(true),
+                NativeHost(window),
             ))
             .id();
         assert_eq!(fixture.step().iter().filter(|call| call.4).count(), 2);

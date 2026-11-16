@@ -2842,6 +2842,43 @@ fn view_is_frontmost_subview(parent: &objc2_app_kit::NSView, view: &objc2_app_ki
 
 impl Browsers {
     #[cfg(target_os = "macos")]
+    pub fn windowed_view_matches_window(&self, webview: &Entity, expected: isize) -> bool {
+        use objc2_app_kit::{NSView, NSWindow};
+        if expected == 0 {
+            return false;
+        }
+        let Some(browser) = self.browsers.get(webview) else {
+            return false;
+        };
+        if !browser.windowed {
+            return false;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return false;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let Some(mut window) = view.window() else {
+            return false;
+        };
+        for _ in 0..8 {
+            if (&*window as *const NSWindow) as isize == expected {
+                return true;
+            }
+            let Some(parent) = window.parentWindow() else {
+                return false;
+            };
+            window = parent;
+        }
+        false
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn windowed_view_matches_window(&self, _: &Entity, _: isize) -> bool {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn try_raise_windowed_to_front(&self, webview: &Entity) -> bool {
         use objc2::ClassType;
         use objc2_app_kit::{NSView, NSWindowOrderingMode};
