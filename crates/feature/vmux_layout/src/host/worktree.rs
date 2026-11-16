@@ -24,6 +24,7 @@ impl Plugin for WorktreePlugin {
             .add_systems(
                 Update,
                 (
+                    retire_checkout_observations,
                     ensure_tab_workspaces,
                     queue_added_tab_worktrees,
                     start_reconcile,
@@ -1223,16 +1224,20 @@ fn resume_page_open(
     }
 }
 
+#[derive(Component, Default)]
+pub(crate) struct CheckoutObservation(Option<CheckoutIdentity>);
+
 #[derive(Clone)]
-struct CachedCheckoutInfo {
+struct CheckoutIdentity {
     startup_dir: String,
     info: CheckoutInfo,
     fingerprint: CheckoutFingerprint,
 }
 
-#[derive(Default)]
-struct CheckoutCache {
-    entries: HashMap<Entity, CachedCheckoutInfo>,
+#[derive(bevy::ecs::system::SystemParam)]
+struct CheckoutObservations<'w, 's> {
+    values: Query<'w, 's, &'static mut CheckoutObservation>,
+    commands: Commands<'w, 's>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1257,7 +1262,7 @@ struct CheckoutFingerprint {
 
 struct ObservedDirectory(PathBuf);
 
-impl CachedCheckoutInfo {
+impl CheckoutIdentity {
     fn new(startup_dir: String, info: &CheckoutInfo) -> Option<Self> {
         Some(Self {
             startup_dir,
@@ -1272,34 +1277,23 @@ impl CachedCheckoutInfo {
     }
 }
 
-impl CheckoutCache {
-    fn remove(&mut self, tab: Entity) {
-        self.entries.remove(&tab);
-    }
-
-    fn store(&mut self, tab: Entity, startup_dir: String, info: &CheckoutInfo) {
-        let Some(cached) = CachedCheckoutInfo::new(startup_dir, info) else {
-            self.remove(tab);
-            return;
-        };
-        self.entries.insert(tab, cached);
-    }
-
-    fn resolve(
-        &mut self,
-        tab: Entity,
-        startup_dir: &str,
-        resolve: impl FnOnce(&Path) -> Option<CheckoutInfo>,
-    ) -> Option<CheckoutInfo> {
-        if let Some(cached) = self.entries.get(&tab)
-            && cached.is_current(startup_dir)
-        {
-            return Some(cached.info.clone());
+impl CheckoutObservations<'_, '_> {
+    fn current(&self, tab: Entity, startup_dir: &str) -> Option<CheckoutInfo> {
+        let observation = self.values.get(tab).ok()?.0.as_ref()?;
+        if !observation.is_current(startup_dir) {
+            return None;
         }
-        self.remove(tab);
-        let info = resolve(Path::new(startup_dir))?;
-        self.store(tab, startup_dir.to_string(), &info);
-        Some(info)
+        Some(observation.info.clone())
+    }
+
+    fn store(&mut self, tab: Entity, startup_dir: String, info: Option<&CheckoutInfo>) {
+        let next = info.and_then(|info| CheckoutIdentity::new(startup_dir, info));
+        match self.values.get_mut(tab) {
+            Ok(mut observation) => observation.0 = next,
+            Err(_) => {
+                self.commands.entity(tab).insert(CheckoutObservation(next));
+            }
+        }
     }
 }
 
@@ -1422,18 +1416,32 @@ impl TabWorktreeReady {
     }
 }
 
+fn retire_checkout_observations(
+    mut removed: RemovedComponents<Tab>,
+    tabs: Query<(), With<Tab>>,
+    mut observations: Query<&mut CheckoutObservation>,
+    mut commands: Commands,
+) {
+    for entity in removed.read() {
+        let Ok(mut observation) = observations.get_mut(entity) else {
+            continue;
+        };
+        if tabs.contains(entity) {
+            observation.0 = None;
+        } else {
+            commands.entity(entity).remove::<CheckoutObservation>();
+        }
+    }
+}
+
 fn rebind_tab_directories(
     mut reader: MessageReader<TabDirectoryObserved>,
     mut tabs: Query<&mut Tab>,
     mut workspaces: Query<&mut TabWorkspace>,
     managed: Query<(), With<TabWorktree>>,
-    mut removed_tabs: RemovedComponents<Tab>,
-    mut checkout_cache: Local<CheckoutCache>,
+    mut checkouts: CheckoutObservations,
     mut commands: Commands,
 ) {
-    for tab in removed_tabs.read() {
-        checkout_cache.remove(tab);
-    }
     for observed in reader.read() {
         let Some(observed_dir) = observed.directory() else {
             continue;
@@ -1453,9 +1461,14 @@ fn rebind_tab_directories(
         let Ok(observed_info) = CheckoutInfo::try_from(observed_dir.path()) else {
             continue;
         };
-        let current_info = checkout_cache.resolve(observed.tab, &current, |path| {
-            CheckoutInfo::try_from(path).ok()
-        });
+        let current_info = match checkouts.current(observed.tab, &current) {
+            Some(info) => Some(info),
+            None => {
+                let info = CheckoutInfo::try_from(Path::new(&current)).ok();
+                checkouts.store(observed.tab, current, info.as_ref());
+                info
+            }
+        };
         if current_info.is_none()
             && current_dir
                 .ancestors()
@@ -1493,7 +1506,7 @@ fn rebind_tab_directories(
             }
         }
         tab.startup_dir = Some(startup_dir.clone());
-        checkout_cache.store(observed.tab, startup_dir, &observed_info);
+        checkouts.store(observed.tab, startup_dir, Some(&observed_info));
         if managed.contains(observed.tab) {
             commands
                 .entity(observed.tab)
@@ -1507,7 +1520,6 @@ fn rebind_tab_directories(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
     use std::process::Command;
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -2350,117 +2362,231 @@ mod tests {
     }
 
     #[test]
-    fn cached_checkout_info_resolves_again_after_startup_or_git_identity_changes() {
-        let repo = tempfile::tempdir().unwrap();
-        std::fs::create_dir(repo.path().join(".git")).unwrap();
-        let next_root = repo.path().join(".worktrees/next");
-        std::fs::create_dir_all(next_root.join(".git")).unwrap();
-        let startup_dir = repo.path().to_string_lossy().into_owned();
-        let next_startup_dir = next_root.to_string_lossy().into_owned();
-        let tab = Entity::from_bits(1);
-        let calls = Cell::new(0);
-        let first = vmux_git::worktree::CheckoutInfo {
-            root: repo.path().canonicalize().unwrap(),
-            common_dir: repo.path().join(".git").canonicalize().unwrap(),
-        };
-        let second = vmux_git::worktree::CheckoutInfo {
-            root: next_root.canonicalize().unwrap(),
-            common_dir: repo.path().join(".git").canonicalize().unwrap(),
-        };
-        let mut cache = CheckoutCache::default();
+    fn checkout_observation_revalidates_the_canonical_startup_directory() {
+        let first = init_repo();
+        let second = init_repo();
+        let linked = second.path().join(".worktrees/next");
+        git(
+            second.path(),
+            &["worktree", "add", "-qb", "next", linked.to_str().unwrap()],
+        );
+        let first_dir = first
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let second_dir = second
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(first_dir.clone()),
+            })
+            .id();
 
-        let resolved = cache
-            .resolve(tab, &startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(first.clone())
-            })
-            .unwrap();
-        assert_eq!(resolved, first);
-        let resolved = cache
-            .resolve(tab, &startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(second.clone())
-            })
-            .unwrap();
-        assert_eq!(resolved, first);
-        std::fs::rename(repo.path().join(".git"), repo.path().join(".git-old")).unwrap();
-        std::fs::create_dir(repo.path().join(".git")).unwrap();
-        let resolved = cache
-            .resolve(tab, &startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(first.clone())
-            })
-            .unwrap();
-        assert_eq!(resolved, first);
-        let resolved = cache
-            .resolve(tab, &next_startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(second.clone())
-            })
-            .unwrap();
-
-        assert_eq!(resolved, second);
-        assert_eq!(calls.get(), 3);
+        observe(&mut app, tab, &second.path().join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(first_dir.as_str())
+        );
+        app.world_mut().get_mut::<Tab>(tab).unwrap().startup_dir = Some(second_dir.clone());
+        observe(&mut app, tab, &first.path().join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(second_dir.as_str())
+        );
+        observe(&mut app, tab, &linked.join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            linked.canonicalize().unwrap().to_str()
+        );
     }
 
     #[test]
-    fn cached_checkout_info_resolves_again_after_commondir_changes() {
-        let root = tempfile::tempdir().unwrap();
-        let admin = tempfile::tempdir().unwrap();
-        let first_common = tempfile::tempdir().unwrap();
-        let second_common = tempfile::tempdir().unwrap();
-        std::fs::write(
-            root.path().join(".git"),
-            format!("gitdir: {}\n", admin.path().display()),
-        )
-        .unwrap();
-        std::fs::write(
-            admin.path().join("commondir"),
-            first_common.path().to_string_lossy().as_bytes(),
-        )
-        .unwrap();
-        let startup_dir = root.path().to_string_lossy().into_owned();
-        let tab = Entity::from_bits(1);
-        let calls = Cell::new(0);
-        let first = vmux_git::worktree::CheckoutInfo {
-            root: root.path().canonicalize().unwrap(),
-            common_dir: first_common.path().canonicalize().unwrap(),
-        };
-        let second = vmux_git::worktree::CheckoutInfo {
-            root: root.path().canonicalize().unwrap(),
-            common_dir: second_common.path().canonicalize().unwrap(),
-        };
-        let mut cache = CheckoutCache::default();
+    fn checkout_observation_revalidates_changed_git_common_directory() {
+        let first = init_repo();
+        let second = init_repo();
+        let linked = first.path().join(".worktrees/linked");
+        git(
+            first.path(),
+            &["worktree", "add", "-qb", "linked", linked.to_str().unwrap()],
+        );
+        let linked_dir = linked
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(linked_dir.clone()),
+            })
+            .id();
 
-        let resolved = cache
-            .resolve(tab, &startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(first.clone())
-            })
-            .unwrap();
-        assert_eq!(resolved, first);
-        let resolved = cache
-            .resolve(tab, &startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(second.clone())
-            })
-            .unwrap();
-        assert_eq!(resolved, first);
-        assert_eq!(calls.get(), 1);
+        observe(&mut app, tab, &second.path().join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(linked_dir.as_str())
+        );
+        let marker = std::fs::read_to_string(linked.join(".git")).unwrap();
+        let admin = PathBuf::from(marker.trim().strip_prefix("gitdir: ").unwrap());
         std::fs::write(
-            admin.path().join("commondir"),
-            second_common.path().to_string_lossy().as_bytes(),
+            admin.join("commondir"),
+            second
+                .path()
+                .join(".git")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_bytes(),
         )
         .unwrap();
-        let resolved = cache
-            .resolve(tab, &startup_dir, |_| {
-                calls.set(calls.get() + 1);
-                Some(second.clone())
-            })
-            .unwrap();
+        observe(&mut app, tab, &second.path().join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            second.path().canonicalize().unwrap().to_str()
+        );
+    }
 
-        assert_eq!(resolved, second);
-        assert_eq!(calls.get(), 2);
+    #[test]
+    fn removing_a_tab_retires_its_checkout_observation_before_reuse() {
+        for same_frame in [false, true] {
+            let first = init_repo();
+            let second = init_repo();
+            let first_dir = first
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            let mut app = App::new();
+            app.add_plugins(WorktreePlugin);
+            let tab = app
+                .world_mut()
+                .spawn(Tab {
+                    name: "old".into(),
+                    startup_dir: Some(first_dir.clone()),
+                })
+                .id();
+
+            observe_edit(&mut app, tab, &second.path().join("seed.txt"));
+            assert_eq!(
+                app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+                second.path().canonicalize().unwrap().to_str()
+            );
+            assert!(
+                app.world()
+                    .get::<CheckoutObservation>(tab)
+                    .unwrap()
+                    .0
+                    .is_some()
+            );
+            app.world_mut().entity_mut(tab).remove::<Tab>();
+            if !same_frame {
+                app.update();
+                assert!(app.world().get::<CheckoutObservation>(tab).is_none());
+            }
+            app.world_mut().entity_mut(tab).insert(Tab {
+                name: "new".into(),
+                startup_dir: Some(first_dir.clone()),
+            });
+            app.update();
+            assert!(
+                app.world()
+                    .get::<CheckoutObservation>(tab)
+                    .unwrap()
+                    .0
+                    .is_none(),
+                "same-frame replacement: {same_frame}"
+            );
+            observe(&mut app, tab, &second.path().join("seed.txt"));
+            assert_eq!(
+                app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+                Some(first_dir.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_directory_observations_keep_each_tabs_latest_checkout() {
+        let first = init_repo();
+        let second = init_repo();
+        let third = init_repo();
+        let linked = third.path().join(".worktrees/next");
+        git(
+            third.path(),
+            &["worktree", "add", "-qb", "next", linked.to_str().unwrap()],
+        );
+        let first_dir = first
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "changing".into(),
+                startup_dir: Some(first_dir.clone()),
+            })
+            .id();
+        let untouched = app
+            .world_mut()
+            .spawn(Tab {
+                name: "untouched".into(),
+                startup_dir: Some(first_dir.clone()),
+            })
+            .id();
+        app.update();
+        for repository in [&second, &third] {
+            app.world_mut()
+                .resource_mut::<Messages<TabDirectoryObserved>>()
+                .write(TabDirectoryObserved {
+                    tab,
+                    path: repository.path().join("seed.txt"),
+                    kind: TabDirectoryObservationKind::Edit,
+                });
+        }
+        app.update();
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            third.path().canonicalize().unwrap().to_str()
+        );
+        assert_eq!(
+            app.world().get::<TabWorkspace>(tab).unwrap().project_dir,
+            third.path().canonicalize().unwrap().to_string_lossy()
+        );
+        observe(&mut app, tab, &second.path().join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            third.path().canonicalize().unwrap().to_str()
+        );
+        observe(&mut app, tab, &linked.join("seed.txt"));
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            linked.canonicalize().unwrap().to_str()
+        );
+        assert_eq!(
+            app.world()
+                .get::<Tab>(untouched)
+                .unwrap()
+                .startup_dir
+                .as_deref(),
+            Some(first_dir.as_str())
+        );
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]

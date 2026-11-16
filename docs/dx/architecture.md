@@ -83,6 +83,13 @@ Cloud release snapshots become canonical ECS before consumers read decisions; un
 
 Startup migrations retain their accepted configuration and revision on the owning store until completion. Bookmark default seeding materializes pending pins as entities before ordering and publication, preserves custom pins and folders, and advances autosave when the same deferred-command drain completes.
 
+Tab directory observations retain their last Git identity on the tab itself. The worktree
+system validates that identity against the current startup directory and Git filesystem
+metadata before deciding whether to reuse it or resolve again. Read observations can follow
+another checkout of the same repository; edit observations can select a different repository.
+Repeated observations keep their input order. Tab removal retires its transient identity,
+including removal and reattachment in one update, without changing persisted workspace data.
+
 CI sequencing belongs to the GitHub Actions workflow before product composition. Its Git adapter verifies the captured head/base merge and prepares identical checkouts for every runner; CLI artifacts bind their bytes to that checkout and run. PR validation performs no branch-run lookup or polling, so merge verification cannot wait behind a separate push workflow. Required statuses reject failed preparation and unexpected skips of applicable checks. Native distribution work remains outside ordinary PR validation. Heavy validation remains applicable after preparation failures but cancels when a PR run is superseded, so it cannot hold the concurrency slot for the new head.
 
 Compiler caches restore workspace artifacts together with content/mode-validated source timestamps. Each restore retains a target-specific receipt and its original key/path configuration. Successful workflow steps checkpoint the snapshot and explicitly upload it with the artifacts before dependency-cache post cleanup can prune them. Publication never depends on nested composite outputs surviving into a post action; changed compile environments during the job cannot redirect the save to another partition.
