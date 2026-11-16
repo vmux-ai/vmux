@@ -20,6 +20,7 @@ ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true }
 vmux_command = { path = "../../feature/vmux_command" }
 vmux_ecs = { path = "../vmux_ecs", features = ["host"] }
 vmux_project = { path = "../../feature/vmux_project", features = ["filesystem"] }
