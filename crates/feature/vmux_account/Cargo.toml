@@ -10,6 +10,8 @@ default = []
 local = ["dep:rusqlite"]
 cloud = ["dep:quinn", "dep:tokio", "dep:vmux_transport", "dep:vmux_feature"]
 
+profile-sync = ["cloud", "local"]
+
 [dependencies]
 vmux_feature = { path = "../vmux_feature", optional = true }
 bevy_app = { workspace = true }

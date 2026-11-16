@@ -1145,7 +1145,7 @@ media-permission-devices = { $kind ->
     [7] カメラ、マイク、画面
     }
 
-team-profile-invalid-name = 名前を1〜256文字で入力してください。
+team-profile-invalid-name = 名前が空、長すぎる、または制御文字を含んでいます。
 team-profiles-unavailable = プロファイルを利用できません。読み込みを再試行してください。
 team-profile-conflict = 別の更新が保存されました。変更を適用するには、もう一度保存してください。
 team-profile-save-failed = プロファイルを保存できませんでした。もう一度お試しください。
@@ -1283,3 +1283,26 @@ gallery-model-description = サンプルモデル: { $id }
 gallery-mode-description = サンプルの権限モード: { $id }
 gallery-example-review = この UI コンポーネントを確認する
 gallery-completion = そして期待する動作を説明する
+live-attention = 確認が必要です
+live-auto-pair = Vmux を開いて自動的にペアリングします
+live-connect-device = デバイスを接続
+live-copied = コピーしました
+live-no-phone = ペアリング済みのスマートフォンはありません
+live-pairing-expiry = ペアリング情報は 2 分後に自動的に非表示になります。
+live-phone-paired = スマートフォンをペアリング済み
+live-scan-phone = スマートフォンで読み取る
+live-show-qr = QR を表示
+live-starting = 開始中…
+live-stopping = 停止中…
+live-title = Live
+live-toggle = Live を切り替える
+profile-sync-active = 選択した Profile のメタデータを同期中…
+profile-sync-conflict = ローカルとリモートの Profile が異なります。保持する値を選択してください。
+profile-sync-current = 選択した Profile のメタデータは同期済みです。
+profile-sync-deleted = リモートで削除済み。ローカルのファイルは保持されます
+profile-sync-import = 取り込んで同期
+profile-sync-keep-local = ローカルの値を保持
+profile-sync-note = このプロフィールの名前だけを同期します（UTF-8 で 256 バイトまで）。認証情報、ローカルファイル、会話はこのデバイスに残ります。
+profile-sync-pending = 変更はローカルに保存され、同期を待っています。
+profile-sync-remote-profiles = この Account の Profile
+profile-sync-use-remote = リモートの値を採用

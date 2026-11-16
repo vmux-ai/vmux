@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] de camera, microfoon en het scherm
     }
 
-team-profile-invalid-name = Voer een naam van 1 tot 256 tekens in.
+team-profile-invalid-name = De naam is leeg, te lang of bevat controletekens.
 team-profiles-unavailable = Profielen zijn niet beschikbaar. Probeer ze opnieuw te laden.
 team-profile-conflict = Er is een andere wijziging opgeslagen. Sla opnieuw op om jouw wijziging toe te passen.
 team-profile-save-failed = Het profiel kon niet worden opgeslagen. Probeer het opnieuw.
@@ -1303,3 +1303,26 @@ gallery-model-description = Voorbeeldmodel: { $id }
 gallery-mode-description = Voorbeeldmachtigingsmodus: { $id }
 gallery-example-review = Bekijk deze UI-component
 gallery-completion = en beschrijf het verwachte gedrag
+live-attention = Aandacht vereist
+live-auto-pair = Opent Vmux en koppelt automatisch
+live-connect-device = Apparaat verbinden
+live-copied = Gekopieerd
+live-no-phone = Geen telefoon gekoppeld
+live-pairing-expiry = Koppelgegevens worden na 2 minuten verborgen.
+live-phone-paired = Telefoon gekoppeld
+live-scan-phone = Scan met je telefoon
+live-show-qr = QR tonen
+live-starting = Starten…
+live-stopping = Stoppen…
+live-title = Live
+live-toggle = Live aan- of uitzetten
+profile-sync-active = Metagegevens van het geselecteerde profiel synchroniseren…
+profile-sync-conflict = Het lokale en externe profiel verschillen. Kies welke waarde je wilt behouden.
+profile-sync-current = Metagegevens van het geselecteerde profiel zijn gesynchroniseerd.
+profile-sync-deleted = Extern verwijderd; lokale bestanden blijven behouden
+profile-sync-import = Importeren en synchroniseren
+profile-sync-keep-local = Lokale waarde behouden
+profile-sync-note = Alleen de naam van dit profiel wordt gesynchroniseerd (maximaal 256 UTF-8-bytes). Inloggegevens, lokale bestanden en gesprekken blijven op dit apparaat.
+profile-sync-pending = Lokale wijzigingen zijn opgeslagen en wachten op synchronisatie.
+profile-sync-remote-profiles = Profielen van dit account
+profile-sync-use-remote = Externe waarde gebruiken

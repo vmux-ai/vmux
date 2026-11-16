@@ -54,6 +54,10 @@ Source checks infer ownership and verify explicit adapter boundaries. Local `ecs
 
 Account systems combine release availability with secure credential support before accepting cloud authentication or sync consent. Native adapters retain bounded IO ownership, while connection and credential generations reject obsolete results. Authenticated binding preserves local Account and Profile identities; explicit unlink clears sync selections atomically. Accepted persistence outlives a page, failed saves preserve committed state, and credentials stay outside reflected records and UI views.
 
+Selected Profile sync uses durable local records and an idempotent outbox. ECS systems decide uploads, reconciliation, conflicts and retries; adapters perform individual network or SQLite operations. Failed saves preserve committed values and pending work, stale Account results cannot affect the current binding, and a remote tombstone preserves local files. Conflict resolution requires the displayed revisions and identity to remain current.
+
+Development and local products may use explicit loopback Cloud endpoints and certificate pinning. Release products retain production configuration and certificate verification. Live uses the existing encrypted host transport; enabling Live does not select Profiles for synchronization.
+
 ## Development and validation
 
 Development CLI operations follow the same ownership model as product work. Systems sequence builds, signing, packaging, CI planning, evidence validation and cleanup. CI composes the development feature without the desktop runtime; Git, Cargo, filesystem and Actions adapters return bounded facts to accepted operations. Leases protect active work and shared artifacts; cancellation drains IO before returning.

@@ -68,7 +68,15 @@ impl Environment {
             if valid {
                 if matches!(
                     key,
-                    "VMUX_PROFILE" | "VMUX_TEST" | "VMUX_DATA_DIR" | "VMUX_REMOTE_RELAY_URL"
+                    "VMUX_PROFILE"
+                        | "VMUX_TEST"
+                        | "VMUX_DATA_DIR"
+                        | "VMUX_REMOTE_RELAY_URL"
+                        | "VMUX_ACCOUNT_HOST"
+                        | "VMUX_ACCOUNT_PORT"
+                        | "VMUX_LOCAL_QUIC_FINGERPRINT"
+                        | "VMUX_RELEASE_FLAGS_ENDPOINT"
+                        | "VMUX_RELEASE_FLAGS_ENVIRONMENT"
                 ) && self.get(key).is_some()
                 {
                     continue;

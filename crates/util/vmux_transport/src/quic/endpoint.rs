@@ -120,7 +120,15 @@ impl Trust {
         };
         let mut endpoint =
             Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
-        endpoint.set_default_client_config(self.client_config()?);
+        let mut trust = self.clone();
+        if matches!(self, Self::Relay)
+            && remote.ip().is_loopback()
+            && matches!(option_env!("VMUX_BUILD_PROFILE"), Some("dev" | "local"))
+            && let Ok(fingerprint) = std::env::var("VMUX_LOCAL_QUIC_FINGERPRINT")
+        {
+            trust = Self::Desktop { fingerprint };
+        }
+        endpoint.set_default_client_config(trust.client_config()?);
         Ok(endpoint)
     }
 

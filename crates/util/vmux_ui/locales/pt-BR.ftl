@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] a câmera, o microfone e a tela
     }
 
-team-profile-invalid-name = Digite um nome entre 1 e 256 caracteres.
+team-profile-invalid-name = O nome está vazio, é muito longo ou contém caracteres de controle.
 team-profiles-unavailable = Os perfis estão indisponíveis. Tente carregá-los novamente.
 team-profile-conflict = Outra alteração foi salva. Salve novamente para aplicar a sua alteração.
 team-profile-save-failed = Não foi possível salvar o perfil. Tente novamente.
@@ -1303,3 +1303,26 @@ gallery-model-description = Modelo de exemplo: { $id }
 gallery-mode-description = Modo de permissões de exemplo: { $id }
 gallery-example-review = Revise este componente de UI
 gallery-completion = e descreva o comportamento esperado
+live-attention = Requer atenção
+live-auto-pair = Abre o Vmux e emparelha automaticamente
+live-connect-device = Conectar um dispositivo
+live-copied = Copiado
+live-no-phone = Nenhum celular emparelhado
+live-pairing-expiry = Os detalhes de emparelhamento são ocultados após 2 minutos.
+live-phone-paired = Celular emparelhado
+live-scan-phone = Leia com seu celular
+live-show-qr = Mostrar QR
+live-starting = Iniciando…
+live-stopping = Parando…
+live-title = Live
+live-toggle = Alternar Live
+profile-sync-active = Sincronizando metadados do perfil selecionado…
+profile-sync-conflict = Os perfis local e remoto são diferentes. Escolha o valor a manter.
+profile-sync-current = Os metadados do perfil selecionado estão sincronizados.
+profile-sync-deleted = Excluído remotamente; os arquivos locais são mantidos
+profile-sync-import = Importar e sincronizar
+profile-sync-keep-local = Manter valor local
+profile-sync-note = Somente o nome deste perfil é sincronizado (até 256 bytes UTF-8). Credenciais, arquivos locais e conversas permanecem neste dispositivo.
+profile-sync-pending = As alterações locais estão salvas e aguardam sincronização.
+profile-sync-remote-profiles = Perfis desta conta
+profile-sync-use-remote = Usar valor remoto

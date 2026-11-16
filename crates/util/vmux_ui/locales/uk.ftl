@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] камеру, мікрофон та екран
     }
 
-team-profile-invalid-name = Введіть назву завдовжки від 1 до 256 символів.
+team-profile-invalid-name = Ім’я порожнє, задовге або містить керівні символи.
 team-profiles-unavailable = Профілі недоступні. Спробуйте завантажити їх знову.
 team-profile-conflict = Збережено іншу зміну. Збережіть ще раз, щоб застосувати свою.
 team-profile-save-failed = Не вдалося зберегти профіль. Спробуйте ще раз.
@@ -1303,3 +1303,26 @@ gallery-model-description = Приклад моделі: { $id }
 gallery-mode-description = Приклад режиму дозволів: { $id }
 gallery-example-review = Перевірте цей компонент UI
 gallery-completion = і опишіть очікувану поведінку
+live-attention = Потрібна увага
+live-auto-pair = Відкриває Vmux і автоматично створює пару
+live-connect-device = Підключити пристрій
+live-copied = Скопійовано
+live-no-phone = Немає сполученого телефона
+live-pairing-expiry = Дані сполучення приховуються через 2 хвилини.
+live-phone-paired = Телефон сполучено
+live-scan-phone = Скануйте телефоном
+live-show-qr = Показати QR
+live-starting = Запуск…
+live-stopping = Зупинка…
+live-title = Live
+live-toggle = Перемкнути Live
+profile-sync-active = Синхронізація метаданих вибраного профілю…
+profile-sync-conflict = Локальний і віддалений профілі відрізняються. Виберіть значення для збереження.
+profile-sync-current = Метадані вибраного профілю синхронізовано.
+profile-sync-deleted = Видалено віддалено; локальні файли збережено
+profile-sync-import = Імпортувати та синхронізувати
+profile-sync-keep-local = Зберегти локальне значення
+profile-sync-note = Синхронізується лише ім’я цього профілю (до 256 байтів UTF-8). Облікові дані, локальні файли та розмови залишаються на цьому пристрої.
+profile-sync-pending = Локальні зміни збережено, вони очікують синхронізації.
+profile-sync-remote-profiles = Профілі цього облікового запису
+profile-sync-use-remote = Використати віддалене значення

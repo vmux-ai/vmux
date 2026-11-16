@@ -19,6 +19,9 @@ pub(crate) struct ConnectionPlugin;
 
 impl bevy_app::Plugin for ConnectionPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "cloud")]
+        app.add_message::<crate::sync::ListRequest>()
+            .add_message::<crate::sync::UploadRequest>();
         app.add_message::<ConnectRequest>()
             .add_message::<CancelConnectRequest>()
             .add_message::<DisconnectRequest>()
@@ -446,16 +449,31 @@ fn prepare(mut ready: PreparedKeys, mut send: MessageWriter<SendRequest>, mut co
 }
 
 fn authorize(
-    ready: Query<(Entity, &Phase, &Grant, &Authorization), With<Authorized>>,
+    ready: Query<(Entity, &Phase, &Grant, &Authorization, &Server), With<Authorized>>,
     mut polls: MessageWriter<PollRequest>,
     mut commands: Commands,
 ) {
-    for (entity, phase, grant, authorization) in &ready {
+    for (entity, phase, grant, authorization, server) in &ready {
         if *phase != Phase::Authorizing {
             continue;
         }
         let valid = url::Url::parse(&authorization.verification_uri).is_ok_and(|url| {
-            url.scheme() == "https"
+            let local_server = server.host == "localhost"
+                || server
+                    .host
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback());
+            let local_uri = url.host_str().is_some_and(|host| {
+                host == "localhost"
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            });
+            (url.scheme() == "https"
+                || url.scheme() == "http"
+                    && matches!(vmux_profile::build_profile(), "dev" | "local")
+                    && local_server
+                    && local_uri)
                 && url.host_str().is_some()
                 && url.username().is_empty()
                 && url.password().is_none()

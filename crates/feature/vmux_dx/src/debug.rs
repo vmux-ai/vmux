@@ -3661,6 +3661,11 @@ fn run_execute(
                 "VMUX_TEST",
                 "VMUX_DATA_DIR",
                 "VMUX_REMOTE_RELAY_URL",
+                "VMUX_ACCOUNT_HOST",
+                "VMUX_ACCOUNT_PORT",
+                "VMUX_LOCAL_QUIC_FINGERPRINT",
+                "VMUX_RELEASE_FLAGS_ENDPOINT",
+                "VMUX_RELEASE_FLAGS_ENVIRONMENT",
             ] {
                 if let Some(value) = environment.get(key) {
                     let mut argument = OsString::from(key);
