@@ -966,6 +966,52 @@ test('restoring another target preserves fresh artifacts and rebuilds stale code
   }
 });
 
+test('isolated nightly timestamp restoration cannot rewind standard sources or reuse stale artifacts', (t) => {
+  const fixture = new Fixture(t);
+  const standard = fixture.compilerCache();
+  const file = path.join(fixture.root, 'src/main.rs');
+  const original = fs.readFileSync(file);
+  const workspace = '.build-tools/compiler-checkout';
+  const compiler = path.join(fixture.root, workspace);
+  fs.mkdirSync(path.dirname(compiler), { recursive: true });
+  execFileSync('git', ['clone', '--quiet', '--shared', fixture.root, compiler], { env: Preflight.gitEnvironment(), stdio: 'pipe' });
+  fs.utimesSync(path.join(compiler, 'src/main.rs'), 1, 1);
+  const nightly = new Sources(compiler, '.nightly-sources.json', 'nightly-target');
+  nightly.save();
+  fs.writeFileSync(file, 'fn main() { println!("stale cached output"); }\n');
+  fixture.compile();
+  standard.save();
+  fs.writeFileSync(file, original);
+  fs.utimesSync(file, 1, 1);
+  standard.restore();
+  const modified = fs.statSync(file, { bigint: true }).mtimeNs;
+  Sources.run({
+    GITHUB_WORKSPACE: fixture.root,
+    GITHUB_STATE: path.join(fixture.root, 'nightly-state'),
+    INPUT_WORKSPACE: workspace,
+    INPUT_SNAPSHOT: '.nightly-sources.json',
+    INPUT_TARGET: 'nightly-target',
+    INPUT_SAVE: 'false',
+  });
+  assert.equal(fs.statSync(file, { bigint: true }).mtimeNs, modified);
+  assert.equal(execFileSync(fixture.compile(), { encoding: 'utf8' }), 'original\n');
+});
+
+test('source cache workspaces reject escaping and symlinked checkout directories', (t) => {
+  const fixture = new Fixture(t);
+  const inputs = {
+    GITHUB_WORKSPACE: fixture.root,
+    GITHUB_STATE: path.join(fixture.root, 'state'),
+    INPUT_SNAPSHOT: '.snapshot.json',
+    INPUT_TARGET: 'target',
+    INPUT_SAVE: 'false',
+  };
+  assert.throws(() => Sources.run({ ...inputs, INPUT_WORKSPACE: '..' }), /workspace escapes/);
+  fs.mkdirSync(path.join(fixture.root, 'compiler'));
+  fs.symlinkSync(path.join(fixture.root, 'compiler'), path.join(fixture.root, 'linked-compiler'));
+  assert.throws(() => Sources.run({ ...inputs, INPUT_WORKSPACE: 'linked-compiler' }), /real directories/);
+});
+
 test('source timestamp restoration preserves files reached through symbolic links', (t) => {
   const fixture = new Fixture(t);
   const sources = fixture.compilerCache();

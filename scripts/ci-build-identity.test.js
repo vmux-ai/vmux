@@ -31,11 +31,14 @@ class BuildFixture {
     fs.writeFileSync(path.join(this.root, 'src/main.rs'), `fn main() { println!("{}|{}|{}|${marker}", env!("VMUX_GIT_HASH"), env!("VMUX_GIT_BRANCH"), env!("VMUX_WORKTREE_ID")); }\n`);
   }
 
-  build(validation) {
+  build(validation, release = false, productProfile = '') {
     const env = { ...process.env, CARGO_TARGET_DIR: path.join(this.root, 'target'), CARGO_INCREMENTAL: '0', VMUX_CI_VALIDATION: validation ? '1' : '' };
     for (const key of ['CARGO_BUILD_TARGET', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'VMUX_BUILD_PROFILE', 'VMUX_HOST_NAME']) delete env[key];
-    execFileSync('cargo', ['build', '--offline', '--quiet'], { cwd: this.root, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const binary = path.join(this.root, 'target/debug/identity-fixture');
+    if (productProfile) env.VMUX_BUILD_PROFILE = productProfile;
+    const args = ['build', '--offline', '--quiet'];
+    if (release) args.push('--release');
+    execFileSync('cargo', args, { cwd: this.root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const binary = path.join(this.root, `target/${release ? 'release' : 'debug'}/identity-fixture`);
     return { output: execFileSync(binary, { encoding: 'utf8' }).trim(), modified: fs.statSync(binary, { bigint: true }).mtimeNs };
   }
 
@@ -74,5 +77,19 @@ test('product builds retain current Git identity and cannot reuse validation ide
     assert.notEqual(next.output, product.output);
   } finally {
     fixture.close();
+  }
+});
+
+test('release and local products preserve real Git identity even when CI validation is enabled', () => {
+  for (const [release, profile] of [[true, 'release'], [false, 'local']]) {
+    const fixture = new BuildFixture();
+    try {
+      const validation = fixture.build(true);
+      const product = fixture.build(true, release, profile);
+      assert.equal(product.output.split('|')[0], fixture.git('rev-parse', '--short=7', 'HEAD'));
+      assert.notEqual(product.output, validation.output);
+    } finally {
+      fixture.close();
+    }
   }
 });

@@ -291,11 +291,13 @@ class Sources {
   static run(env = process.env) {
     const post = env.STATE_cache_sources_post === 'true';
     const inputs = post ? JSON.parse(env.STATE_cache_sources_inputs) : {
+      workspace: env.INPUT_WORKSPACE || '.',
       snapshot: env.INPUT_SNAPSHOT,
       target: env.INPUT_TARGET,
       save: env.INPUT_SAVE === 'true',
     };
-    const sources = new Sources(env.GITHUB_WORKSPACE || process.cwd(), inputs.snapshot, inputs.target);
+    const root = this.workspace(env.GITHUB_WORKSPACE || process.cwd(), inputs.workspace || '.');
+    const sources = new Sources(root, inputs.snapshot, inputs.target);
     if (post) {
       if (inputs.save) {
         const receipt = sources.contained(inputs.receipt);
@@ -317,6 +319,20 @@ class Sources {
     }
     fs.appendFileSync(env.GITHUB_STATE, `cache_sources_post=true\ncache_sources_inputs=${JSON.stringify(inputs)}\n`);
     process.stdout.write(`Cargo source cache: ${result.restored} unchanged, ${result.changed} invalidated\n`);
+  }
+
+  static workspace(root, directory) {
+    root = fs.realpathSync(root);
+    const resolved = path.resolve(root, directory);
+    if (resolved === root) return root;
+    if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Source workspace escapes the checkout');
+    let current = root;
+    for (const part of path.relative(root, resolved).split(path.sep)) {
+      current = path.join(current, part);
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Source workspace must contain only real directories');
+    }
+    return resolved;
   }
 
   static configure(env = process.env) {

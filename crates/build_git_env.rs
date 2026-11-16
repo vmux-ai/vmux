@@ -73,7 +73,16 @@ impl BuildIdentity {
     }
 
     fn validation() -> bool {
-        std::env::var("VMUX_CI_VALIDATION").as_deref() == Ok("1")
+        if std::env::var("VMUX_CI_VALIDATION").as_deref() != Ok("1") {
+            return false;
+        }
+        if std::env::var("PROFILE").as_deref() == Ok("release") {
+            return false;
+        }
+        !matches!(
+            std::env::var("VMUX_BUILD_PROFILE").as_deref(),
+            Ok("local" | "release")
+        )
     }
 
     fn title(&self, profile: &str) -> String {

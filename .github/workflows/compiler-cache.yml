@@ -47,9 +47,9 @@ jobs:
           cef-version: ${{ steps.cef.outputs.version }}
       - uses: ./.github/actions/cache-ecs-lints
       - name: Validate compiler fixtures
-        run: vmux internal ecs-lint -- --test
+        run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
       - name: Warm nightly workspace dependencies
-        run: VMUX_SKIP_DX_BUILD=1 vmux internal ecs-lint -- --locked --workspace --all-targets
+        run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --workspace --all-targets
       - name: Publish successful compiler workspace snapshot
         uses: ./.github/actions/save-workspace
         with:

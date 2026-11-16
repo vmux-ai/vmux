@@ -446,11 +446,11 @@ jobs:
 
       - name: Check typed registration fixtures
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
-        run: vmux internal ecs-lint -- --test
+        run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
 
       - name: Lint registered systems
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.lint_args != ''
-        run: VMUX_SKIP_DX_BUILD=1 vmux internal ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
+        run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
 
       - name: CI configuration and cache tests
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint && needs.changes.outputs.tooling == 'true'

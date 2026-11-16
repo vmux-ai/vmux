@@ -80,8 +80,10 @@ conventions, and platform checks. Targeted local tests cover the changed behavio
 CI validation builds use a stable validation identity instead of embedding the current Git
 commit and worktree. This keeps unchanged crates reusable between checks; product builds
 retain their normal identity. Compiler and CLI cache identities include this mode, so
-validation artifacts cannot satisfy a product cache request. Nightly compiler caches retain
-content-validated source timestamps and are warmed from main in a separate workflow, without
+validation artifacts cannot satisfy a product cache request. Release and local product
+profiles always use real Git metadata. Nightly compiler caches retain content-validated
+source timestamps in an isolated checkout, so they cannot rewind a standard target's
+sources. They are warmed from main in a separate workflow, without
 waiting behind the full main validation queue. Compiler fixtures and source checks remain
 required and publish cache state only after successful validation.
 

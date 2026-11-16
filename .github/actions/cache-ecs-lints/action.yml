@@ -3,6 +3,14 @@ description: Reuse the isolated pinned compiler, Dylint tools and lint build art
 runs:
   using: composite
   steps:
+    - name: Prepare isolated compiler checkout
+      shell: bash
+      run: |
+        compiler_workspace=.build-tools/compiler-checkout
+        test ! -e "$compiler_workspace"
+        mkdir -p .build-tools
+        git clone --shared --no-checkout . "$compiler_workspace"
+        git -C "$compiler_workspace" checkout --detach "$(git rev-parse HEAD)"
     - name: Resolve compiler cache identity
       id: compiler
       shell: bash
@@ -14,19 +22,20 @@ runs:
     - uses: actions/cache@v4
       with:
         path: |
-          .build-tools/dylint
-          .build-tools/dylint-cargo
-          .build-tools/dylint-drivers
-          .build-tools/lints
-          .build-tools/lints-sources.json
+          .build-tools/compiler-checkout/.build-tools/dylint
+          .build-tools/compiler-checkout/.build-tools/dylint-cargo
+          .build-tools/compiler-checkout/.build-tools/dylint-drivers
+          .build-tools/compiler-checkout/.build-tools/lints
+          .build-tools/compiler-checkout/.build-tools/lints-sources.json
           ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
-        key: ecs-lints-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+        key: ecs-lints-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
         restore-keys: |
-          ecs-lints-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
-          ecs-lints-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
+          ecs-lints-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
+          ecs-lints-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
 
     - uses: ./.github/actions/cache-sources
       with:
+        workspace: .build-tools/compiler-checkout
         snapshot: .build-tools/lints-sources.json
         target: .build-tools/lints
         save: "true"
