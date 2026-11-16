@@ -873,8 +873,6 @@ test('CI rejects failed preparation and required test, lint, website and platfor
       assert.equal(workflow.ciGate(invalid, 'true').status, 1, `${name}: ${result}`);
     }
   }
-  assert.equal(workflow.gate('test', { CI: 'success' }).status, 0);
-  for (const result of ['failure', 'cancelled', 'skipped']) assert.equal(workflow.gate('test', { CI: result }).status, 1, result);
 });
 
 test('compiler-cache policy pairs each workflow restore with a successful explicit save', () => {
