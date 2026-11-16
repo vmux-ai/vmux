@@ -5,7 +5,10 @@ use vmux_ecs::profile::{CurrentProfile, Projects};
 use vmux_ecs::{PageOpenTarget, UiStatePlugin, UiStateWriter};
 
 use super::StartRequest;
-use crate::onboarding::{AgentOption, OnboardingChooseAgent, OnboardingConnect, OnboardingUiState};
+use crate::onboarding::{
+    AgentOption, AuthenticationChosen, ChatKeyEntryChanged, OnboardingChooseAgent,
+    OnboardingConnect, OnboardingUiState, SetupReply,
+};
 
 pub(super) struct OnboardingPlugin;
 
@@ -15,6 +18,7 @@ impl bevy_app::Plugin for OnboardingPlugin {
             .add_plugins(UiStatePlugin::<vmux_api::session::SetupReadinessUiState>::default())
             .add_plugins(UiStatePlugin::<crate::onboarding::KeyEntryUiState>::default())
             .add_plugins(UiEventPlugin::<(OnboardingConnect, OnboardingChooseAgent)>::default())
+            .add_plugins(UiEventPlugin::<(ChatKeyEntryChanged,)>::default())
             .add_message::<ProvidersChanged>()
             .add_message::<StartRequest>()
             .add_message::<vmux_ecs::PageOpenRequest>()
@@ -24,6 +28,8 @@ impl bevy_app::Plugin for OnboardingPlugin {
                 sync_views.after(vmux_ecs::PageOpenSet::HandleKnownPages),
             )
             .add_observer(connect)
+            .add_observer(authentication_chosen)
+            .add_observer(request_key)
             .add_observer(choose_agent)
             .add_observer(created)
             .add_observer(cancelled)
@@ -233,6 +239,10 @@ struct Draft {
     paused: bool,
     #[serde(default)]
     setup_started: bool,
+    #[serde(default)]
+    replies: Vec<SetupReply>,
+    #[serde(default)]
+    key_entry_requested: bool,
     #[serde(skip)]
     starting: bool,
     #[serde(skip)]
@@ -249,6 +259,8 @@ impl Default for Draft {
             session_id: String::new(),
             paused: false,
             setup_started: false,
+            replies: Vec::new(),
+            key_entry_requested: false,
             starting: false,
             failed: false,
             dirty: false,
@@ -257,6 +269,17 @@ impl Default for Draft {
 }
 
 impl Draft {
+    fn reply(&mut self, label_key: &str, value: &str) {
+        if self.replies.len() == 64 {
+            self.replies.remove(0);
+        }
+        self.replies.push(SetupReply {
+            label_key: label_key.to_string(),
+            value: value.to_string(),
+        });
+        self.dirty = true;
+    }
+
     fn title(&self, catalog: &Catalog) -> String {
         match catalog.0.iter().find(|agent| agent.id == self.agent_id) {
             Some(agent) if self.setup_started => vmux_ui::i18n::translate_with(
@@ -486,6 +509,7 @@ fn connect(
     });
     draft.setup_started = true;
     draft.agent_id.clone_from(agent_id);
+    draft.key_entry_requested = false;
     draft.paused = false;
     draft.failed = false;
     draft.dirty = true;
@@ -506,6 +530,9 @@ fn connect(
         return;
     }
     draft.session_id.clear();
+    if let Some(agent) = catalog.0.iter().find(|agent| agent.id == *agent_id) {
+        draft.reply("", &agent.name);
+    }
     let cwd = match projects.path() {
         Ok(path) => path.to_path_buf(),
         Err(error) => {
@@ -530,6 +557,67 @@ fn created(event: On<crate::Created>, mut drafts: Query<&mut Draft>) {
     };
     if draft.session_id == event.event().id.0 {
         draft.starting = false;
+    }
+}
+
+fn authentication_chosen(
+    event: On<AuthenticationChosen>,
+    sessions: Query<(&crate::SessionId, &crate::AgentId), With<crate::Session>>,
+    mut drafts: Query<&mut Draft>,
+) {
+    let Ok((id, agent)) = sessions.get(event.entity) else {
+        return;
+    };
+    let Ok(mut draft) = drafts.single_mut() else {
+        return;
+    };
+    if draft.setup_started && !draft.paused && draft.session_id == id.0 && draft.agent_id == agent.0
+    {
+        draft.key_entry_requested = false;
+        draft.dirty = true;
+        draft.reply("onboarding-connect", "");
+    }
+}
+
+fn request_key(
+    event: On<UiInput<ChatKeyEntryChanged>>,
+    views: super::SessionViews,
+    sessions: Query<
+        (&crate::SessionId, &crate::AgentId, &crate::Authentication),
+        With<crate::Session>,
+    >,
+    mut drafts: Query<(&mut Draft, &Catalog)>,
+) {
+    let Some(session) = views.session(event.webview) else {
+        return;
+    };
+    let Ok((id, agent, authentication)) = sessions.get(session) else {
+        return;
+    };
+    if !authentication.active || authentication.pending {
+        return;
+    }
+    let Ok((mut draft, catalog)) = drafts.single_mut() else {
+        return;
+    };
+    if !draft.setup_started
+        || draft.paused
+        || draft.session_id != id.0
+        || draft.agent_id != agent.0
+        || !catalog
+            .0
+            .iter()
+            .any(|agent| agent.id == draft.agent_id && !agent.key_variable.is_empty())
+    {
+        return;
+    }
+    if draft.key_entry_requested == event.requested {
+        return;
+    }
+    draft.key_entry_requested = event.requested;
+    draft.dirty = true;
+    if event.requested {
+        draft.reply("onboarding-use-key", "");
     }
 }
 
@@ -671,7 +759,7 @@ fn publish(
             &ChildOf,
             Has<super::SessionView>,
         ),
-        With<SetupView>,
+        Or<(With<SetupView>, With<super::SessionView>)>,
     >,
     targets: Query<(&vmux_ecs::EntityTarget<crate::Session>, Has<SetupTarget>)>,
     sessions: Query<&crate::SessionId, With<crate::Session>>,
@@ -688,6 +776,8 @@ fn publish(
         session_id: draft.session_id.clone(),
         failed: draft.failed,
         paused: draft.paused,
+        replies: draft.replies.clone(),
+        key_entry_requested: draft.key_entry_requested,
     };
     published.retain(|view, _| views.contains(*view));
     for (view, metadata, parent, session_view) in &views {
@@ -697,16 +787,20 @@ fn publish(
             targets
                 .get(parent.parent())
                 .ok()
-                .and_then(|(target, setup)| {
-                    if !setup {
-                        return None;
-                    }
+                .and_then(|(target, _)| {
                     let id = sessions.get(target.entity()).ok()?;
                     (id.0 == draft.session_id).then(|| id.0.clone())
                 })
                 .unwrap_or_default()
         } else {
             String::new()
+        };
+        next.key_entry_requested =
+            draft.key_entry_requested && (!session_view || !next.session_id.is_empty());
+        next.replies = if session_view && next.session_id.is_empty() {
+            Vec::new()
+        } else {
+            draft.replies.clone()
         };
         if published
             .get(&view)
@@ -822,6 +916,98 @@ mod tests {
                 session,
             }
         }
+    }
+
+    #[test]
+    fn confirmed_choices_are_persisted_once_and_reject_another_session() {
+        let mut app = App::new();
+        app.add_plugins(OnboardingPlugin);
+        let owner = app
+            .world_mut()
+            .spawn((
+                Draft {
+                    setup_started: true,
+                    agent_id: "chosen".into(),
+                    session_id: "current".into(),
+                    ..Default::default()
+                },
+                Catalog(vec![AgentOption {
+                    id: "chosen".into(),
+                    key_variable: "TEST_KEY".into(),
+                    ..Default::default()
+                }]),
+            ))
+            .id();
+        let session = app
+            .world_mut()
+            .spawn((
+                crate::Session,
+                crate::SessionId("current".into()),
+                crate::AgentId("chosen".into()),
+                crate::Authentication {
+                    active: true,
+                    ..Default::default()
+                },
+            ))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((
+                crate::Session,
+                crate::SessionId("other".into()),
+                crate::AgentId("chosen".into()),
+            ))
+            .id();
+        app.world_mut()
+            .trigger(AuthenticationChosen { entity: other });
+        assert!(app.world().get::<Draft>(owner).unwrap().replies.is_empty());
+        app.world_mut()
+            .trigger(AuthenticationChosen { entity: session });
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::EntityTarget::<crate::Session>::new(session))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((
+                super::super::SessionView,
+                vmux_ecs::PageMetadata {
+                    url: crate::Route::Setup.url(),
+                    ..Default::default()
+                },
+                ChildOf(stack),
+            ))
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ChatKeyEntryChanged { requested: true },
+        });
+        app.world_mut()
+            .get_mut::<crate::Authentication>(session)
+            .unwrap()
+            .pending = true;
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ChatKeyEntryChanged { requested: true },
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("onboarding.json");
+        app.world()
+            .get::<Draft>(owner)
+            .unwrap()
+            .save(&path)
+            .unwrap();
+        let restored = Draft::load(&path);
+        assert!(restored.key_entry_requested);
+        let actual: Vec<_> = restored
+            .replies
+            .iter()
+            .map(|reply| (reply.label_key.as_str(), reply.value.as_str()))
+            .collect();
+        assert_eq!(
+            actual,
+            [("onboarding-connect", ""), ("onboarding-use-key", "")]
+        );
     }
 
     #[test]

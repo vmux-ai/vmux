@@ -101,6 +101,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
     let agent_id = chosen.clone();
     let notice = rsx! {
         ConversationPrompt {
+            question: Some(translate("onboarding-agent-question")),
             ManagerSearchRow { compact: true,
                 ManagerSearch {
                     value: query(),
@@ -144,7 +145,6 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
         action_title: confirm_label.clone(), label: Some(confirm_label),
         icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(),
         enabled: enabled && !pending,
-        accent_gradient: vmux_ui::agent_accent::AgentAccent::for_agent(&agent_id).grad.to_string(),
         on_action: move |_| { if enabled && !pending { let _ = send(&OnboardingConnect { agent_id: choice() }); } },
     } });
     rsx! { super::setup::Frame { compact: true, onboarding: state, notice: Some(notice),

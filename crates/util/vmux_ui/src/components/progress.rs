@@ -44,7 +44,7 @@ pub fn TaskStep(
             span {
                 role: "img",
                 aria_label: translate("common-done"),
-                class: "flex size-4 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary-action-start),var(--primary-action-middle),var(--primary-action-end))] text-white",
+                class: "flex size-4 shrink-0 items-center justify-center rounded-full vmux-primary-fill",
                 LineIconView { icon: LineIcon::Check, class: "size-3 [stroke-width:2.5]".to_string() }
             }
         } else if pending {
@@ -112,7 +112,7 @@ pub fn Progress(props: ProgressProps) -> Element {
 pub fn ProgressIndicator(props: ProgressIndicatorProps) -> Element {
     rsx! {
         progress::ProgressIndicator {
-            class: "h-full w-[var(--progress-value,0%)] rounded-full bg-primary transition-[width] duration-200 group-data-[state=indeterminate]:w-1/3 group-data-[state=indeterminate]:animate-[update-indeterminate_1.2s_ease-in-out_infinite] motion-reduce:animate-none motion-reduce:transition-none",
+            class: "h-full w-[var(--progress-value,0%)] rounded-full vmux-primary-fill transition-[width] duration-200 group-data-[state=indeterminate]:w-1/3 group-data-[state=indeterminate]:animate-[update-indeterminate_1.2s_ease-in-out_infinite] motion-reduce:animate-none motion-reduce:transition-none",
             attributes: props.attributes,
             {props.children}
         }

@@ -8,7 +8,13 @@ pub struct AgentOption {
     pub key_variable: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 1)]
+#[vmux_api::contract(Default, Eq)]
+pub struct SetupReply {
+    pub label_key: String,
+    pub value: String,
+}
+
+#[vmux_api::ui_state(Default, Eq, version = 2)]
 pub struct OnboardingUiState {
     pub agents: Vec<AgentOption>,
     pub agent_id: String,
@@ -16,6 +22,8 @@ pub struct OnboardingUiState {
     pub session_id: String,
     pub failed: bool,
     pub paused: bool,
+    pub replies: Vec<SetupReply>,
+    pub key_entry_requested: bool,
 }
 
 #[vmux_api::ui_event]
@@ -29,6 +37,16 @@ pub struct OnboardingChooseAgent;
 #[vmux_api::ui_event]
 pub struct ChatAuthenticate {
     pub method_id: String,
+}
+
+#[derive(bevy_ecs::prelude::EntityEvent)]
+pub struct AuthenticationChosen {
+    pub entity: bevy_ecs::prelude::Entity,
+}
+
+#[vmux_api::ui_event]
+pub struct ChatKeyEntryChanged {
+    pub requested: bool,
 }
 
 #[vmux_api::ui_event]

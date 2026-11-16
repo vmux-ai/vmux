@@ -60,6 +60,54 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 }
 
 #[component]
+fn SetupReplies(chat: Chat) -> Element {
+    let state = vmux_ui::hooks::use_ui_state::<crate::onboarding::OnboardingUiState>()
+        .state
+        .read()
+        .clone();
+    let visible_count = if state.session_id == chat.transcript.session_id() {
+        state.replies.len()
+    } else {
+        0
+    };
+    use_effect(use_reactive!(|(visible_count, chat)| {
+        if visible_count > 0 && (chat.transcript.at_bottom)() {
+            chat.transcript.follow();
+        }
+    }));
+    if state.session_id != chat.transcript.session_id() {
+        return rsx! {};
+    }
+    rsx! {
+        for (index, reply) in state.replies.into_iter().enumerate() {
+            SetupReplyTurn { key: "setup-reply-{index}", chat, reply }
+        }
+    }
+}
+
+#[component]
+fn SetupReplyTurn(chat: Chat, reply: crate::onboarding::SetupReply) -> Element {
+    let question = translate(if reply.label_key.is_empty() {
+        "onboarding-agent-question"
+    } else {
+        "onboarding-connection-choice"
+    });
+    let text = if reply.label_key.is_empty() {
+        reply.value
+    } else {
+        translate(&reply.label_key)
+    };
+    rsx! {
+        super::setup::Turn { agent_name: chat.header_name(),
+            p { class: "text-sm leading-relaxed", "{question}" }
+        }
+        super::item::UserBubble { avatar_name: chat.user.name(), avatar_color: chat.user.color(), copy_text: text.clone(),
+            "{text}"
+        }
+    }
+}
+
+#[component]
 pub(super) fn ChatTranscript(
     chat: Chat,
     #[props(default)] reserve_details_toggle: bool,
@@ -120,6 +168,7 @@ pub(super) fn ChatTranscript(
                         }
                     }
                 }
+                SetupReplies { chat }
                 if !transcript_loading && chat.status() == "authentication" {
                     super::authentication::Authentication { chat }
                 } else if !transcript_loading && chat.status() == "errored" && setup {

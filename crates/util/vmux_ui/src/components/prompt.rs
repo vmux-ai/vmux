@@ -2,6 +2,7 @@ use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 
 use crate::components::button::{Button, ButtonSize, ButtonVariant};
+use crate::components::choice::ChoiceKey;
 use crate::components::composer::ComposerButton;
 use crate::components::progress::LoadingIcon;
 use crate::i18n::translate;
@@ -81,12 +82,15 @@ pub fn PromptSelection(
     selected: Vec<String>,
     #[props(default)] mode: PromptSelectionMode,
     #[props(default)] disabled: bool,
+    #[props(default)] numbered: bool,
     #[props(default)] leading: Vec<Element>,
     #[props(default)] trailing: Vec<Element>,
     #[props(default = "max-h-64".to_string())] viewport_class: String,
     on_change: EventHandler<PromptSelectionChange>,
 ) -> Element {
     let name = format!("prompt-selection-{}", current_scope_id().0);
+    let keyboard_options = options.clone();
+    let focus_group = numbered && selected.is_empty();
     let reveal = if mode == PromptSelectionMode::Single {
         options
             .iter()
@@ -105,6 +109,21 @@ pub fn PromptSelection(
             class: "min-w-0 border-0 p-0",
             role: if mode == PromptSelectionMode::Single { "radiogroup" } else { "group" },
             aria_label: label,
+            tabindex: if focus_group { "0" } else { "-1" },
+            onmounted: move |event| {
+                if focus_group && !disabled {
+                    spawn(async move { let _ = event.data().set_focus(true).await; });
+                }
+            },
+            onkeydown: move |event| {
+                if !numbered || disabled { return; }
+                let Some(ChoiceKey::Number(index)) = ChoiceKey::of(&event, true) else { return; };
+                let Some(option) = keyboard_options.get(index) else { return; };
+                if option.disabled { return; }
+                event.prevent_default();
+                event.stop_propagation();
+                on_change.call(PromptSelectionChange { value: option.value.clone(), mode });
+            },
             div { class: "flex flex-col gap-0.5 overflow-y-auto overscroll-contain {viewport_class}",
                 for (index, option) in options.into_iter().enumerate() {
                     {
@@ -118,10 +137,13 @@ pub fn PromptSelection(
                                 class: if unavailable {
                                     "flex min-h-9 shrink-0 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-1.5 opacity-45"
                                 } else if checked {
-                                    "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg bg-background/[0.06] px-3 py-1.5 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
+                                    "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg bg-primary/[0.08] px-3 py-1.5 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
                                 } else {
                                     "flex min-h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 transition-colors hover:bg-background/[0.04] focus-within:outline focus-within:outline-2 focus-within:outline-primary motion-reduce:transition-none"
                                 },
+                                if numbered {
+                                    span { aria_hidden: "true", class: "w-4 shrink-0 text-xs font-medium tabular-nums text-muted-foreground", "{index + 1}." }
+                                }
                                 input {
                                     r#type: mode.input_type(),
                                     name: name.clone(),
@@ -130,6 +152,11 @@ pub fn PromptSelection(
                                     checked,
                                     disabled: unavailable,
                                     class: "size-4 shrink-0 cursor-inherit accent-[var(--primary-action-start)]",
+                                    onmounted: move |event| {
+                                        if numbered && checked && !unavailable {
+                                            spawn(async move { let _ = event.data().set_focus(true).await; });
+                                        }
+                                    },
                                     onchange: move |_| {
                                         if !unavailable {
                                     on_change.call(PromptSelectionChange { value: value.clone(), mode });
@@ -209,7 +236,8 @@ mod tests {
     use super::*;
     use dioxus::core::{AttributeValue, Mutation, VirtualDom};
     use dioxus_html::{
-        EventData, SerializedFormData, SerializedHtmlEventConverter, SerializedMouseData,
+        Code, EventData, Location, Modifiers, SerializedFormData, SerializedHtmlEventConverter,
+        SerializedKeyboardData, SerializedMouseData,
     };
     use std::{cell::RefCell, rc::Rc};
 
@@ -234,6 +262,7 @@ mod tests {
                 PromptSelection {
                     label: "Choose options".to_string(),
                     mode,
+                    numbered: true,
                     disabled: pending,
                     selected: selected(),
                     options: vec![
@@ -285,6 +314,22 @@ mod tests {
             self.dom.render_immediate_to_vec();
         }
 
+        fn number(&mut self, value: &str, modifiers: Modifiers) {
+            self.dispatch(
+                "Choose options",
+                "keydown",
+                EventData::Keyboard(SerializedKeyboardData::new(
+                    Key::Character(value.to_string()),
+                    Code::Digit2,
+                    Location::Standard,
+                    false,
+                    modifiers,
+                    false,
+                )),
+            );
+            self.dom.render_immediate_to_vec();
+        }
+
         fn choose(&mut self, label: &str) {
             self.queue_choice(label);
             self.dom.render_immediate_to_vec();
@@ -321,6 +366,21 @@ mod tests {
                 .runtime()
                 .handle_event(event, Event::new(data.into_any(), true), id);
         }
+    }
+
+    #[test]
+    fn numbered_choices_select_without_submitting_and_ignore_unavailable_choices() {
+        let mut harness = Harness::new(PromptSelectionMode::Single, false);
+        harness.number("2", Modifiers::empty());
+        harness.number("3", Modifiers::empty());
+        harness.number("1", Modifiers::CONTROL);
+        assert_eq!(
+            *harness.records.borrow(),
+            [("select".into(), vec!["two".into()])]
+        );
+        let mut blocked = Harness::new(PromptSelectionMode::Single, true);
+        blocked.number("1", Modifiers::empty());
+        assert!(blocked.records.borrow().is_empty());
     }
 
     #[test]

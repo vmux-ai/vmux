@@ -1353,3 +1353,7 @@ onboarding-continue-agent = Doorgaan met { $agent }
 
 
 common-resume = Hervatten
+
+onboarding-connection-choice = Hoe wilt u verbinding maken?
+onboarding-connect-description = Meld u aan op de pagina die wordt geopend.
+onboarding-use-key-description = Voer in plaats daarvan een API-sleutel in.

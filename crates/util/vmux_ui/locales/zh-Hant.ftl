@@ -1350,3 +1350,7 @@ onboarding-continue-agent = 使用 { $agent } 繼續
 
 
 common-resume = 繼續
+
+onboarding-connection-choice = 您想如何連線？
+onboarding-connect-description = 在開啟的頁面上登入。
+onboarding-use-key-description = 或者輸入 API 金鑰。

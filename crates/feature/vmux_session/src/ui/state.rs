@@ -54,6 +54,7 @@ pub struct Chat {
     selection: Memo<Option<ChatListSelectionState>>,
     pub menu: ChatMenu,
     key_input_requested: Signal<bool>,
+    setup: Signal<crate::onboarding::OnboardingUiState>,
 }
 
 pub fn use_chat(session: String) -> Chat {
@@ -102,6 +103,7 @@ pub fn use_chat(session: String) -> Chat {
     };
     let chat = Chat {
         key_input_requested: use_signal(|| false),
+        setup: vmux_ui::hooks::use_ui_state::<crate::onboarding::OnboardingUiState>().state,
         root,
         transcript: use_transcript(root, session),
         run: RunState { snapshot },
@@ -168,7 +170,11 @@ impl Chat {
     fn watch(&self) {
         let chat = *self;
         use_effect(move || {
-            if chat.status() != "authentication" && *chat.key_input_requested.peek() {
+            let native_authentication_pending =
+                chat.authentication_pending() && !chat.setup.read().key_entry_requested;
+            if (chat.status() != "authentication" || native_authentication_pending)
+                && *chat.key_input_requested.peek()
+            {
                 let mut requested = chat.key_input_requested;
                 requested.set(false);
             }
@@ -272,12 +278,16 @@ impl Chat {
     }
 
     pub(super) fn key_input_requested(&self) -> bool {
-        (self.key_input_requested)()
+        let setup = self.setup.read();
+        self.status() == "authentication"
+            && ((self.key_input_requested)()
+                || setup.session_id == self.transcript.session_id() && setup.key_entry_requested)
     }
 
     pub(super) fn request_key_input(&self, requested: bool) {
         let mut input = self.key_input_requested;
         input.set(requested);
+        let _ = send(&crate::onboarding::ChatKeyEntryChanged { requested });
     }
 
     pub fn authentication_methods(&self) -> Vec<vmux_api::protocol::AuthenticationMethod> {
@@ -679,6 +689,10 @@ pub fn use_transcript(root: Signal<ChatUiState>, session: String) -> Transcript 
 }
 
 impl Transcript {
+    pub(super) fn session_id(self) -> String {
+        (self.session)()
+    }
+
     pub fn current(self) -> ChatTranscriptState {
         self.root.read().transcript.clone()
     }

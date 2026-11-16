@@ -71,14 +71,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .read()
         .clone();
     let connection = Connection::of(chat, !keys.key_variable.is_empty());
-    let prefer_key = connection.method.is_none();
-    let selected = use_signal(move || {
-        if prefer_key {
-            "key".to_string()
-        } else {
-            "connect".to_string()
-        }
-    });
+    let selected = use_signal(|| "connect".to_string());
     let resumable = onboarding.paused || chat.status() == "errored";
     let busy =
         chat.authentication_pending() || chat.setup_busy() && chat.status() != "authentication";
@@ -86,17 +79,14 @@ pub(super) fn Controls(chat: Chat) -> Element {
         !resumable && !busy && chat.status() == "authentication" && !chat.key_input_requested();
     let notice =
         choosing.then(|| rsx! { ConnectionControls { chat, keys: keys.clone(), selected } });
-    let gradient = vmux_ui::agent_accent::AgentAccent::for_agent(&chat.agent())
-        .grad
-        .to_string();
     let action = if resumable {
         Some(
             rsx! { ComposerButton { action_title: translate("common-resume"), label: Some(translate("common-resume")),
-                icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(), enabled: !keys.pending, accent_gradient: gradient,
+                icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(), enabled: !keys.pending,
                 on_action: move |_| Choice::Retry.choose(),
             } },
         )
-    } else if busy && !chat.key_input_requested() {
+    } else if busy {
         Some(
             rsx! { ComposerButton { mode: PromptComposerMode::Stop, action_title: translate("common-stop"), on_action: move |_| Choice::Cancel.choose() } },
         )
@@ -108,7 +98,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
         };
         Some(
             rsx! { ComposerButton { action_title: translate("common-continue"), label: Some(translate("common-continue")),
-                icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(), enabled: available && !keys.pending, accent_gradient: gradient,
+                icon: Some(vmux_ui::icon::LineIcon::Play), icon_class: "[&_path]:fill-current".to_string(), enabled: available && !keys.pending,
                 on_action: move |_| { if selected() == "key" { chat.request_key_input(true); } else { connection.connect(chat); } },
             } },
         )
@@ -118,6 +108,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
     let on_choose = (!keys.pending && !chat.authentication_pending())
         .then_some(EventHandler::new(move |_| Choice::ChangeAgent.choose()));
     let key_entry = !resumable
+        && !busy
         && chat.status() == "authentication"
         && chat.key_input_requested()
         && !keys.key_variable.is_empty();
@@ -161,7 +152,7 @@ pub(super) fn DisabledComposer(
     rsx! {
         PromptComposer {
             shared_transition: true, input_disabled: true, caret_visible: false,
-            value: String::new(), placeholder: translate("command-composer-placeholder"),
+            value: String::new(), placeholder: translate("onboarding-composer-wait"),
             accent_color: chat.map(|chat| chat.accent().css).unwrap_or_else(|| Identity::COLOR.to_string()), accent_gradient: accent.grad.to_string(),
             action, action_title: translate("common-continue"), action_enabled: false,
             footer: Some(rsx! { DisabledComposerBar { chat, chip, on_choose } }),
@@ -278,19 +269,20 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState, mut selected: Signal<St
         PromptOption {
             value: "connect".into(),
             label: translate("onboarding-connect"),
+            description: translate("onboarding-connect-description"),
             disabled: connection.method.is_none(),
-            ..Default::default()
         },
         PromptOption {
             value: "key".into(),
             label: translate("onboarding-use-key"),
+            description: translate("onboarding-use-key-description"),
             disabled: !connection.key,
-            ..Default::default()
         },
     ];
     rsx! {
         ConversationPrompt {
-            PromptSelection { label: translate("onboarding-auth-question"), options, selected: vec![selected()], disabled: keys.pending,
+            question: Some(translate("onboarding-connection-choice")),
+            PromptSelection { numbered: true, label: translate("onboarding-auth-question"), options, selected: vec![selected()], disabled: keys.pending,
                 on_change: move |change: PromptSelectionChange| selected.set(change.value),
             }
         }
@@ -318,7 +310,7 @@ impl Connection {
                 break;
             }
         }
-        if chosen.is_none() && !key {
+        if chosen.is_none() {
             chosen = methods.first().cloned();
         }
         Self {
@@ -555,6 +547,7 @@ mod tests {
         #[props(default)] pending: bool,
         #[props(default = "authentication".to_string())] status: String,
         #[props(default)] key_available: bool,
+        #[props(default)] persisted_key_entry: bool,
     ) -> Element {
         let mut state = vmux_ui::hooks::use_ui_state::<ChatUiState>().state;
         use_hook(move || {
@@ -592,6 +585,16 @@ mod tests {
                 });
             }
         });
+        let mut setup = vmux_ui::hooks::use_ui_state::<OnboardingUiState>().state;
+        use_hook(move || {
+            if persisted_key_entry {
+                setup.set(OnboardingUiState {
+                    session_id: "login-session".into(),
+                    key_entry_requested: true,
+                    ..Default::default()
+                });
+            }
+        });
         let chat = super::super::state::use_chat("login-session".into());
         if controls {
             rsx! { super::super::composer::ChatDock { chat } }
@@ -601,12 +604,94 @@ mod tests {
     }
 
     #[test]
+    fn active_authentication_suspends_the_password_response_and_keeps_stop_available() {
+        let mut dom = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                controls: true,
+                pending: true,
+                status: "authentication".into(),
+                key_available: true,
+                persisted_key_entry: true,
+            },
+        );
+        dom.provide_root_context(HostBinding(Rc::new(Host::default())));
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains(&translate("common-stop")));
+        assert!(!html.contains("type=\"password\""));
+    }
+
+    #[test]
+    fn persisted_key_entry_reopens_the_password_response_without_authenticating_again() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                controls: true,
+                pending: false,
+                status: "authentication".into(),
+                key_available: true,
+                persisted_key_entry: true,
+            },
+        );
+        dom.provide_root_context(HostBinding(host.clone()));
+        dom.rebuild_in_place();
+        assert!(dioxus_ssr::render(&dom).contains("type=\"password\""));
+        assert!(host.0.borrow().is_empty());
+    }
+
+    #[test]
+    fn authentication_defaults_to_connect_when_a_key_can_also_be_entered() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                persisted_key_entry: false,
+                controls: true,
+                pending: false,
+                status: "authentication".into(),
+                key_available: true,
+            },
+        );
+        dom.provide_root_context(HostBinding(host.clone()));
+        let initial = dom.rebuild_to_vec();
+        let button = initial
+            .edits
+            .iter()
+            .find_map(|mutation| match mutation {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &translate("common-continue") => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            button,
+        );
+        dom.render_immediate_to_vec();
+        assert_eq!(*host.0.borrow(), ["chat-gpt"]);
+        assert!(!dioxus_ssr::render(&dom).contains("type=\"password\""));
+    }
+
+    #[test]
     fn authentication_is_a_guide_message_and_sign_in_is_a_composer_reply() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         let host = Rc::new(Host::default());
         let mut message = VirtualDom::new_with_props(
             Login,
             LoginProps {
+                persisted_key_entry: false,
                 controls: false,
                 pending: false,
                 status: "authentication".into(),
@@ -622,6 +707,7 @@ mod tests {
         let mut composer = VirtualDom::new_with_props(
             Login,
             LoginProps {
+                persisted_key_entry: false,
                 controls: true,
                 pending: false,
                 status: "authentication".into(),
@@ -672,6 +758,7 @@ mod tests {
             let mut dom = VirtualDom::new_with_props(
                 Login,
                 LoginProps {
+                    persisted_key_entry: false,
                     controls: true,
                     pending,
                     status: status.into(),
@@ -758,6 +845,7 @@ mod tests {
         let mut dom = VirtualDom::new_with_props(
             Login,
             LoginProps {
+                persisted_key_entry: false,
                 controls: true,
                 pending: false,
                 status: "authentication".into(),

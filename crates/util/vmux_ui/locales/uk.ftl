@@ -1353,3 +1353,7 @@ onboarding-continue-agent = Продовжити з { $agent }
 
 
 common-resume = Відновити
+
+onboarding-connection-choice = Як ви хочете підключитися?
+onboarding-connect-description = Увійдіть на сторінці, що відкриється.
+onboarding-use-key-description = Або введіть ключ API.

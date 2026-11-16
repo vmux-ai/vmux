@@ -1333,3 +1333,7 @@ onboarding-continue-agent = { $agent } で続ける
 
 
 common-resume = 再開
+
+onboarding-connection-choice = 接続方法を選んでください。
+onboarding-connect-description = 開いたページでログインします。
+onboarding-use-key-description = 代わりに API キーを入力します。

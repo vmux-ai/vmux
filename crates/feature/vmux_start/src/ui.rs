@@ -88,14 +88,12 @@ fn SetupWelcome() -> Element {
             div { class: "h-[var(--vmux-welcome-composer-height)] shrink-0",
                 PromptComposer {
                     shared_transition: true, input_disabled: true, caret_visible: false,
-                    value: String::new(), placeholder: translate("command-composer-placeholder"),
-                    accent_color: "var(--primary)".to_string(),
-                    accent_gradient: "from-[var(--primary-action-start)] to-[var(--primary-action-end)]".to_string(),
+                    value: String::new(), placeholder: translate("onboarding-composer-wait"),
+                    accent_color: "var(--primary)".to_string(), accent_gradient: String::new(),
                     footer: Some(rsx! {}),
                     action: Some(rsx! { PromptConfirmation {
                         sender: true,
-                        accent_gradient: "from-[var(--primary-action-start)] to-[var(--primary-action-end)]".to_string(),
-                        confirm_label: translate("common-continue"),
+                            confirm_label: translate("common-continue"),
                         on_confirm: move |_| {
                             let _ = vmux_ui::hooks::send(&vmux_api::command_bar::OpenRequest { value: "vmux://start/onboarding/agent".to_string(), open: Some(vmux_api::open_target::OpenTarget::InPlace) });
                         },

@@ -19,7 +19,7 @@ pub fn ApiKeyEntry(
         PromptComposer {
             value: String::new(),
             accent_color,
-            accent_gradient: "from-indigo-500 to-violet-600".to_string(),
+            accent_gradient: String::new(),
             placeholder: translate("onboarding-api-key"),
             footer: Some(footer.unwrap_or_else(|| rsx! {})),
             show_add_button: false,

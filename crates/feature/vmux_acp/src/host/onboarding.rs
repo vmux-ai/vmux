@@ -76,6 +76,7 @@ fn authenticate(
     views: vmux_session::host::SessionViews,
     mut sessions: Query<(&SessionId, &mut vmux_session::Authentication), With<Session>>,
     mut requests: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
 ) {
     let Some(session) = views.session(input.event().webview) else {
         return;
@@ -96,6 +97,7 @@ fn authenticate(
         return;
     }
     authentication.pending = true;
+    commands.trigger(vmux_session::onboarding::AuthenticationChosen { entity: session });
     requests.write(ServiceRequest(ClientMessage::AuthenticateAcpAgent {
         sid: id.0.clone(),
         method_id: method_id.clone(),

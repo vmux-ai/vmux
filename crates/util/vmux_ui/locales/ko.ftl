@@ -1350,3 +1350,7 @@ onboarding-continue-agent = { $agent }로 계속
 
 
 common-resume = 재개
+
+onboarding-connection-choice = 어떻게 연결하시겠어요?
+onboarding-connect-description = 열리는 페이지에서 로그인합니다.
+onboarding-use-key-description = 대신 API 키를 입력합니다.

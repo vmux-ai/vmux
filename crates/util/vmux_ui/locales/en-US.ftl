@@ -1341,3 +1341,7 @@ onboarding-continue-agent = Continue with { $agent }
 
 
 common-resume = Resume
+
+onboarding-connection-choice = How would you like to connect?
+onboarding-connect-description = Sign in on the page that opens.
+onboarding-use-key-description = Enter an API key instead.
