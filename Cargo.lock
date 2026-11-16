@@ -10792,15 +10792,27 @@ name = "vmux_feature"
 version = "0.0.35"
 dependencies = [
  "async-io",
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
+ "chrono",
+ "dioxus",
+ "dioxus-ssr",
  "getrandom 0.4.2",
+ "inventory",
  "reqwest",
+ "rkyv",
  "serde",
  "serde_json",
  "serde_with",
  "sha2",
+ "uuid",
+ "vmux_api",
  "vmux_ecs",
+ "vmux_macro",
+ "vmux_page",
+ "vmux_ui",
 ]
 
 [[package]]

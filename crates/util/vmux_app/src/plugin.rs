@@ -36,6 +36,8 @@ pub enum VmuxPlugin {
     Flex(vmux_flex::FlexPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
+    #[plugin(feature = "feature-flags", desktop, requires(runtime, jobs))]
+    FeatureFlags(crate::feature_flags::FeatureFlagsPlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
     Command(vmux_command::CommandPlugin),
     #[plugin(feature = "setting", desktop, requires(runtime))]

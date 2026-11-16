@@ -1,0 +1,18 @@
+(
+    pages: [(
+        url: "vmux://features/",
+        title: "Flags",
+        title_message_id: "features-title",
+        icon: "Settings",
+        keywords: ["flags", "features", "rollout", "review", "publish"],
+        command_bar: true,
+        manifest: true,
+        placement: Some((group: "features", reuse: Group)),
+        permissions: [
+            "PageReady", "ThemeUiState", "PageAddressUiState", "PageAddressRequest", "PageAddressPublish",
+            "FeaturesUiState", "FeaturesOpenRequest", "FeaturesFilterRequest", "FeatureSelectRequest",
+            "DraftEditRequest", "DraftSaveRequest", "DraftReviewRequest", "DraftPublishRequest",
+            "DraftDiscardRequest", "FlagRollbackRequest",
+        ],
+    )],
+)

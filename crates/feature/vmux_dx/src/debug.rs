@@ -3666,6 +3666,9 @@ fn run_execute(
                 "VMUX_LOCAL_QUIC_FINGERPRINT",
                 "VMUX_RELEASE_FLAGS_ENDPOINT",
                 "VMUX_RELEASE_FLAGS_ENVIRONMENT",
+                "VMUX_FEATURE_ADMIN_ENDPOINT",
+                "VMUX_FEATURE_ADMIN_ENVIRONMENT",
+                "VMUX_FEATURE_ADMIN_TOKEN",
             ] {
                 if let Some(value) = environment.get(key) {
                     let mut argument = OsString::from(key);

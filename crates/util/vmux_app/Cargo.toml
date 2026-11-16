@@ -34,6 +34,7 @@ cli = [
 ]
 mcp = ["cli"]
 desktop = [
+    "feature-flags",
     "container",
 
     "account-cloud",
@@ -84,6 +85,7 @@ container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 release-flags = ["ecs", "dep:bevy_ecs", "dep:vmux_feature", "dep:vmux_profile"]
+feature-flags = ["release-flags", "runtime", "jobs", "host", "dep:bevy_ecs", "dep:tracing", "dep:vmux_feature", "vmux_feature/page"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
 account-local = ["account", "vmux_account/local"]
 account-cloud = ["account-local", "vmux_account/cloud", "vmux_account/profile-sync", "release-flags", "vmux_team?/profile-sync"]
@@ -139,6 +141,7 @@ vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }
 vmux_ecs = { path = "../vmux_ecs", optional = true }
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, optional = true }
 vmux_editor = { path = "../../feature/vmux_editor", optional = true }
 vmux_extension = { path = "../../feature/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
