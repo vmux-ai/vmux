@@ -127,11 +127,11 @@ fn observe(
     browsers: Option<NonSend<Browsers>>,
     mut owners: Query<(Entity, &mut Available), (With<Browser>, Without<WindowOverlay>)>,
 ) {
-    let Some(browsers) = browsers else {
-        return;
-    };
     for (owner, mut available) in &mut owners {
-        let present = browsers.has_browser(owner);
+        let present = match &browsers {
+            Some(browsers) => browsers.has_browser(owner),
+            None => false,
+        };
         if available.0 != present {
             available.0 = present;
         }
@@ -157,7 +157,7 @@ fn request(
             receipt.applied = None;
             if let Some(attempt) = receipt.pending {
                 receipt.pending = None;
-                commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+                commands.entity(attempt).try_despawn();
             }
         }
         if !available.0 {
@@ -170,7 +170,7 @@ fn request(
             }
             if let Some(attempt) = receipt.pending {
                 receipt.pending = None;
-                commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+                commands.entity(attempt).try_despawn();
             }
             continue;
         }
@@ -192,7 +192,7 @@ fn request(
                 continue;
             }
             receipt.pending = None;
-            commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+            commands.entity(attempt).try_despawn();
         }
         let attempt = commands
             .spawn((
@@ -292,7 +292,7 @@ fn retire<T: Component>(
         && let Some(attempt) = receipt.pending
     {
         receipt.pending = None;
-        commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+        commands.entity(attempt).try_despawn();
     }
     commands.entity(owner).try_remove::<(Receipt, Available)>();
 }
@@ -307,7 +307,7 @@ fn retire_overlay(
         && let Some(attempt) = receipt.pending
     {
         receipt.pending = None;
-        commands.entity(attempt).try_remove::<vmux_ecs::Active>();
+        commands.entity(attempt).try_despawn();
     }
     commands.entity(owner).try_remove::<(Receipt, Available)>();
 }
@@ -365,8 +365,10 @@ mod tests {
 
         fn step(&mut self) -> (Vec<(Entity, Vec2, f32)>, bool) {
             self.app.update();
-            let calls =
-                std::mem::take(&mut self.app.world_mut().resource_mut::<NativeFixture>().calls);
+            let calls = match self.app.world_mut().get_resource_mut::<NativeFixture>() {
+                Some(mut native) => std::mem::take(&mut native.calls),
+                None => Vec::new(),
+            };
             let wake = self
                 .wakes
                 .read(self.app.world().resource::<Messages<WakeRequested>>())
@@ -392,6 +394,11 @@ mod tests {
                 .set_scale_factor_override(Some(scale));
         }
 
+        fn live_entities(&mut self) -> usize {
+            let world = self.app.world_mut();
+            world.query::<Entity>().iter(world).count()
+        }
+
         fn complete(&mut self, attempt: Entity, submitted: bool) {
             self.app
                 .world_mut()
@@ -410,7 +417,13 @@ mod tests {
         hold: bool,
     }
 
-    fn observe_fixture(mut owners: Query<(&NativeReady, &mut Available)>) {
+    fn observe_fixture(
+        native: Option<Res<NativeFixture>>,
+        mut owners: Query<(&NativeReady, &mut Available)>,
+    ) {
+        if native.is_none() {
+            return;
+        }
         for (native, mut available) in &mut owners {
             if available.0 != native.0 {
                 available.0 = native.0;
@@ -421,9 +434,12 @@ mod tests {
     fn respond(
         mut requested: MessageReader<ResizeRequested>,
         attempts: Query<(&Resize, &ChildOf, Has<vmux_ecs::Active>)>,
-        mut native: ResMut<NativeFixture>,
+        native: Option<ResMut<NativeFixture>>,
         mut completed: MessageWriter<ResizeCompleted>,
     ) {
+        let Some(mut native) = native else {
+            return;
+        };
         for request in requested.read() {
             let Ok((target, parent, active)) = attempts.get(request.0) else {
                 continue;
@@ -714,5 +730,185 @@ mod tests {
             fixture.step().0,
             [(replacement, Vec2::new(320.0, 240.0), 1.0)]
         );
+    }
+
+    #[test]
+    fn adapter_loss_replays_unchanged_geometry_after_recovery() {
+        let mut fixture = ViewportFixture::new();
+        assert_eq!(fixture.step().0.len(), 1);
+        let count = fixture.live_entities();
+        let native = fixture
+            .app
+            .world_mut()
+            .remove_resource::<NativeFixture>()
+            .unwrap();
+        assert_eq!(fixture.step(), (Vec::new(), true));
+        assert_eq!(fixture.step(), (Vec::new(), false));
+        assert_eq!(fixture.live_entities(), count);
+        fixture.app.insert_resource(native);
+        assert_eq!(
+            fixture.step().0,
+            [(fixture.owner, Vec2::new(640.0, 480.0), 1.0)]
+        );
+        assert_eq!(fixture.step(), (Vec::new(), false));
+        assert_eq!(fixture.live_entities(), count);
+    }
+
+    #[test]
+    fn absent_adapter_does_not_accumulate_obsolete_resize_work() {
+        let mut fixture = ViewportFixture::new();
+        assert_eq!(fixture.step().0.len(), 1);
+        let count = fixture.live_entities();
+        fixture.app.world_mut().resource_mut::<NativeFixture>().hold = true;
+        fixture.scale(2.0);
+        fixture.step();
+        let mut native = fixture
+            .app
+            .world_mut()
+            .remove_resource::<NativeFixture>()
+            .unwrap();
+        let old = native.withheld[0];
+        for index in 0..64 {
+            fixture
+                .app
+                .world_mut()
+                .get_mut::<WebviewSize>(fixture.owner)
+                .unwrap()
+                .0 = Vec2::new(800.0 + index as f32, 600.0);
+            fixture.app.world_mut().write_message(WindowResized {
+                window: fixture.window,
+                width: 1200.0,
+                height: 900.0,
+            });
+            assert!(fixture.step().0.is_empty());
+            assert_eq!(fixture.live_entities(), count);
+        }
+        native.hold = false;
+        fixture.app.insert_resource(native);
+        fixture.complete(old, true);
+        assert_eq!(
+            fixture.step().0,
+            [(fixture.owner, Vec2::new(863.0, 600.0), 2.0)]
+        );
+        assert_eq!(fixture.step(), (Vec::new(), false));
+        assert_eq!(fixture.live_entities(), count);
+    }
+
+    #[test]
+    fn superseded_resize_work_stays_bounded_without_completions() {
+        let mut fixture = ViewportFixture::new();
+        assert_eq!(fixture.step().0.len(), 1);
+        let alternate = fixture.app.world_mut().spawn(Window::default()).id();
+        let count = fixture.live_entities();
+        fixture.app.world_mut().resource_mut::<NativeFixture>().hold = true;
+        for index in 0..64 {
+            fixture
+                .app
+                .world_mut()
+                .get_mut::<WebviewSize>(fixture.owner)
+                .unwrap()
+                .0 = Vec2::new(800.0 + index as f32, 600.0);
+            fixture
+                .app
+                .world_mut()
+                .get_mut::<HostWindow>(fixture.owner)
+                .unwrap()
+                .0 = if index % 2 == 0 {
+                fixture.window
+            } else {
+                alternate
+            };
+            if index % 3 == 0 {
+                fixture.app.world_mut().write_message(WindowResized {
+                    window: fixture.window,
+                    width: 1200.0,
+                    height: 900.0,
+                });
+            }
+            assert_eq!(fixture.step().0.len(), 1);
+            assert_eq!(fixture.live_entities(), count + 1);
+        }
+        let withheld = std::mem::take(
+            &mut fixture
+                .app
+                .world_mut()
+                .resource_mut::<NativeFixture>()
+                .withheld,
+        );
+        fixture.app.world_mut().resource_mut::<NativeFixture>().hold = false;
+        for attempt in withheld {
+            fixture.complete(attempt, true);
+        }
+        assert_eq!(fixture.step(), (Vec::new(), true));
+        assert_eq!(fixture.step(), (Vec::new(), false));
+        assert_eq!(fixture.live_entities(), count);
+    }
+
+    #[test]
+    fn owner_retirement_releases_resize_work_without_completion() {
+        for transition in 0..3 {
+            let mut fixture = ViewportFixture::new();
+            fixture.step();
+            let count = fixture.live_entities();
+            fixture.app.world_mut().resource_mut::<NativeFixture>().hold = true;
+            fixture.scale(2.0);
+            fixture.step();
+            assert_eq!(fixture.live_entities(), count + 1);
+            let old = fixture.app.world().resource::<NativeFixture>().withheld[0];
+            match transition {
+                0 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .remove::<Browser>();
+                }
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .remove::<WebviewSize>();
+                }
+                _ => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .insert(WindowOverlay);
+                }
+            }
+            assert_eq!(fixture.step(), (Vec::new(), false));
+            assert_eq!(fixture.live_entities(), count);
+            fixture.complete(old, true);
+            assert_eq!(fixture.step(), (Vec::new(), false));
+            fixture.app.world_mut().resource_mut::<NativeFixture>().hold = false;
+            match transition {
+                0 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .insert(Browser);
+                }
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .insert(WebviewSize(Vec2::new(640.0, 480.0)));
+                }
+                _ => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.owner)
+                        .remove::<WindowOverlay>();
+                }
+            }
+            assert_eq!(fixture.step().0.len(), 1);
+            assert_eq!(fixture.step(), (Vec::new(), false));
+            assert_eq!(fixture.live_entities(), count);
+        }
     }
 }
