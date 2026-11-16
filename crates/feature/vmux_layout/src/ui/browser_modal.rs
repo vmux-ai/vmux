@@ -26,6 +26,7 @@ pub(super) fn BrowserModal(popup: BrowserModalState) -> Element {
     };
     let mut mounted = region.clone();
     let resized = region.clone();
+    let viewport = region.clone();
     use_effect(move || {
         let _ = placement();
         region.publish();
@@ -51,6 +52,10 @@ pub(super) fn BrowserModal(popup: BrowserModalState) -> Element {
     });
     rsx! {
         PopupLayer { label: popup.title.clone(), on_close: move |_| dismiss.close(),
+            on_resize: Some(EventHandler::new(move |_| {
+                viewport.publish();
+                spawn(async move { if let Some(anchor) = toolbar.measure().await { placement.set(PopupPlacement::new(anchor.right, anchor.bottom)); } });
+            })),
             div {
                 class: "absolute flex flex-col overflow-hidden rounded-[12px] bg-background text-foreground shadow-lg ring-1 ring-foreground/10",
                 style: placement().style(360.0, 600.0),

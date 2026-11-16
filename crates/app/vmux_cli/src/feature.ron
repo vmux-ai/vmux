@@ -8,6 +8,7 @@
             arguments: [
                 (id: "url", index: Some(1), required: true, value_name: Some("URL")),
                 (id: "source", long: Some("source"), value_name: Some("SESSION_ID")),
+                (id: "anchor", long: Some("anchor"), hidden: true, value_name: Some("PROCESS_ID")),
             ],
         )],
     )),

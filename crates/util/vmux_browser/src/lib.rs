@@ -139,8 +139,8 @@ impl BrowserPlugin {
     }
 }
 
-impl Plugin for BrowserPlugin {
-    fn build(&self, app: &mut App) {
+impl bevy::prelude::Plugin for BrowserPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
         let startup_appearance = vmux_setting::AppearanceSettings::from_disk();
         let startup_locale = appearance::BrowserLocale::requested(&startup_appearance.locale);
         let startup_accept_language_list = startup_locale.accept_language_list();
@@ -157,8 +157,8 @@ impl Plugin for BrowserPlugin {
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
-        Self::configure_schedule(app)
-            .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+        Self::configure_schedule(app);
+        app.add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins((

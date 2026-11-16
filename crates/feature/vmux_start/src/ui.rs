@@ -14,7 +14,7 @@ use vmux_command::{CommandPalette, CommandPaletteSurface, use_command_bar_ui};
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "CommandBarUiState", "KeyClaimsUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "CommandBarUiState", "KeyClaimsUiState", "SetupReadinessUiState"]
 )]
 pub(crate) struct StartPage;
 
@@ -22,13 +22,16 @@ pub(crate) struct StartPage;
 pub fn Page() -> Element {
     use_theme();
     let state = use_command_bar_ui();
-    let setup = state
-        .read()
-        .palette
-        .projection
-        .composer
-        .agent_url
-        .is_empty();
+    let readiness =
+        vmux_ui::hooks::use_ui_state::<vmux_api::session::SetupReadinessUiState>().state;
+    let setup = readiness.read().pending
+        || state
+            .read()
+            .palette
+            .projection
+            .composer
+            .agent_url
+            .is_empty();
 
     rsx! {
         document::Title { "Any prompt. Anything, done." }

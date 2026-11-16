@@ -987,6 +987,7 @@ impl StartupSession {
     ) -> Result<(), String> {
         self.status(false);
         let mut queued = std::mem::take(&mut self.pending);
+        let mut deferred = VecDeque::new();
         while let Some(request) = if let Some(request) = queued.pop_front() {
             Some(request)
         } else {
@@ -1018,13 +1019,14 @@ impl StartupSession {
                                     return Err("authentication cancelled".into());
                                 }
                                 Some(AcpInput::Authenticate { .. }) => {}
-                                Some(request) => self.pending.push_back(request),
+                                Some(request) => queued.push_back(request),
                             }
                         }
                     };
                     match result {
                         Ok(Ok(_)) => {
-                            self.pending.extend(queued);
+                            deferred.extend(queued);
+                            self.pending = deferred;
                             self.shared.projection.status(AgentRunStatus::Starting);
                             return Ok(());
                         }
@@ -1032,7 +1034,7 @@ impl StartupSession {
                     }
                 }
                 AcpInput::Cancel | AcpInput::Close => return Err("authentication cancelled".into()),
-                request => self.pending.push_back(request),
+                request => deferred.push_back(request),
             }
         }
         Err("authentication connection closed".into())
@@ -1243,27 +1245,24 @@ impl AcpDriver {
             init.client_capabilities.fs.read_text_file = true;
             init.client_capabilities.fs.write_text_file = true;
             init.client_capabilities.terminal = true;
-            let init_resp =
-                match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
-                    .await
-                {
-                    Ok(Ok(resp)) => resp,
-                    Ok(Err(err)) => {
-                        main_shared.fail_startup(format!(
-                            "agent failed to start: {err}{}",
-                            main_shared.stderr_detail()
-                        ));
-                        return Ok(());
-                    }
-                    Err(_) => {
-                        main_shared.fail_startup(format!(
-                            "agent did not start within {}s{}",
-                            ACP_STARTUP_TIMEOUT.as_secs(),
-                            main_shared.stderr_detail()
-                        ));
-                        return Ok(());
-                    }
-                };
+            let operation = tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task());
+            tokio::pin!(operation);
+            let mut startup_pending = VecDeque::new();
+            let initialized = loop {
+                tokio::select! {
+                    biased;
+                    request = input_rx.recv() => match request {
+                        Some(AcpInput::Cancel | AcpInput::Close) | None => return Ok(()),
+                        Some(request) => startup_pending.push_back(request),
+                    },
+                    result = &mut operation => break result,
+                }
+            };
+            let init_resp = match initialized {
+                Ok(Ok(response)) => response,
+                Ok(Err(error)) => { main_shared.fail_startup(format!("agent failed to start: {error}{}", main_shared.stderr_detail())); return Ok(()); }
+                Err(_) => { main_shared.fail_startup(format!("agent did not start within {}s{}", ACP_STARTUP_TIMEOUT.as_secs(), main_shared.stderr_detail())); return Ok(()); }
+            };
             tracing::info!(target: "acp", sid = %main_shared.sid, "initialize answered");
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
@@ -1272,6 +1271,7 @@ impl AcpDriver {
             }
 
             let mut startup = StartupSession::new(main_shared.clone(), cx.clone(), init_resp.auth_methods);
+            startup.pending = startup_pending;
             let established = startup.establish(resume, init_resp.agent_capabilities.load_session, &mcp_servers, &mut input_rx).await;
             let mut session_id = match established {
                 Ok(id) => Some(id),
@@ -1738,6 +1738,7 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
         blocked: Option<&'static str>,
         notified: Option<mpsc::UnboundedSender<()>>,
+        reply: Option<Arc<tokio::sync::Notify>>,
     }
 
     impl AuthenticationAgent {
@@ -1746,6 +1747,7 @@ mod tests {
             let calls = self.calls.clone();
             let blocked = self.blocked;
             let notified = self.notified.clone();
+            let reply = self.reply.clone();
             let task = tokio::spawn(async move {
                 let (reader, mut writer) = tokio::io::split(server);
                 let mut reader = tokio::io::BufReader::new(reader);
@@ -1763,7 +1765,11 @@ mod tests {
                         if let Some(notified) = &notified {
                             let _ = notified.send(());
                         }
-                        continue;
+                        if let Some(reply) = &reply {
+                            reply.notified().await;
+                        } else {
+                            continue;
+                        }
                     }
                     let authenticated = attempts >= 2;
                     let result = match method.as_str() {
@@ -1802,6 +1808,160 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelling_an_unanswered_initialize_drains_without_publishing_a_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("initialized");
+        let script = directory.path().join("agent.py");
+        std::fs::write(&script, "import json,os,sys\nrequest=json.loads(sys.stdin.readline())\nassert request['method']=='initialize'\nopen(os.environ['TEST_INIT_FILE'],'w').write('ready')\nfor line in sys.stdin: pass\n").unwrap();
+        let (stream, mut events) = broadcast::channel(8);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (projection, _inboxes) = AcpProjectionSenders::open(wake);
+        let shared = Arc::new(AcpShared::with_projection(
+            "cancel-initialize".into(),
+            directory.path().to_path_buf(),
+            ProcessId::new(),
+            stream,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            projection,
+        ));
+        let (sender, input) = mpsc::unbounded_channel();
+        let run = tokio::spawn(AcpDriver::run(
+            "python3".into(),
+            vec![script.to_string_lossy().into_owned()],
+            vec![(
+                "TEST_INIT_FILE".into(),
+                marker.to_string_lossy().into_owned(),
+            )],
+            Vec::new(),
+            None,
+            shared,
+            input,
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !marker.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        sender.send(AcpInput::Close).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), run)
+            .await
+            .unwrap()
+            .unwrap();
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(event, ServiceMessage::AcpSessionCreated { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn authentication_keeps_preexisting_work_before_later_input() {
+        let (notify, mut notified) = mpsc::unbounded_channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let agent = AuthenticationAgent {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            blocked: Some("authenticate"),
+            notified: Some(notify),
+            reply: Some(release.clone()),
+        };
+        let (client, server) = agent.start();
+        let (reader, writer) = tokio::io::split(client);
+        let transport =
+            agent_client_protocol::ByteStreams::new(writer.compat_write(), reader.compat());
+        let (stream, _) = broadcast::channel(8);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (projection, mut inboxes) = AcpProjectionSenders::open(wake);
+        let shared = Arc::new(AcpShared::with_projection(
+            "ordered-auth".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            projection,
+        ));
+        let (sender, mut input) = mpsc::unbounded_channel();
+        let connection = Client
+            .builder()
+            .connect_with(transport, async move |connection| {
+                let mut startup = StartupSession::new(
+                    shared,
+                    connection,
+                    vec![AuthMethod::Agent(AuthMethodAgent::new(
+                        "browser", "Sign in",
+                    ))],
+                );
+                startup.pending.push_back(AcpInput::Authenticate {
+                    method_id: "browser".into(),
+                });
+                startup.pending.push_back(AcpInput::User {
+                    text: "earlier".into(),
+                    context: None,
+                    attachments: Vec::new(),
+                    preferred_mode: None,
+                });
+                {
+                    let future = startup.authenticate(&mut input);
+                    tokio::pin!(future);
+                    std::future::poll_fn(|context| {
+                        assert!(future.as_mut().poll(context).is_pending());
+                        std::task::Poll::Ready(())
+                    })
+                    .await;
+                    tokio::select! {
+                    notice = notified.recv() => { notice.unwrap(); },
+                    result = &mut future => panic!("authentication completed before its held response: {result:?}"),
+                }
+                    sender
+                        .send(AcpInput::User {
+                            text: "later".into(),
+                            context: None,
+                            attachments: Vec::new(),
+                            preferred_mode: None,
+                        })
+                        .unwrap();
+                    std::future::poll_fn(|context| {
+                        assert!(future.as_mut().poll(context).is_pending());
+                        std::task::Poll::Ready(())
+                    })
+                    .await;
+                    release.notify_one();
+                    let retry_sender = sender.clone();
+                    let finish = tokio::spawn(async move {
+                        let mut saw_pending = false;
+                        while let Some(status) = inboxes.status.0.recv().await {
+                            if let AgentRunStatus::AuthenticationRequired { pending, .. } = status {
+                                if pending { saw_pending = true; }
+                                else if saw_pending {
+                                    retry_sender.send(AcpInput::Authenticate { method_id: "browser".into() }).unwrap();
+                                    break;
+                                }
+                            }
+                        }
+                        notified.recv().await.unwrap();
+                        release.notify_one();
+                    });
+                    future.await.unwrap();
+                    finish.await.unwrap();
+                }
+                let order: Vec<_> = startup
+                    .pending
+                    .iter()
+                    .filter_map(|request| match request {
+                        AcpInput::User { text, .. } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(order, ["earlier", "later"]);
+                Ok(())
+            });
+        tokio::time::timeout(std::time::Duration::from_secs(5), connection)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn setup_cancellation_interrupts_unanswered_session_creation_and_load() {
         for method in ["session/new", "session/load"] {
             let (notified, mut requests) = mpsc::unbounded_channel();
@@ -1809,6 +1969,7 @@ mod tests {
                 calls: Arc::new(Mutex::new(Vec::new())),
                 blocked: Some(method),
                 notified: Some(notified),
+                reply: None,
             };
             let (client, server) = agent.start();
             let (reader, writer) = tokio::io::split(client);
@@ -1860,6 +2021,7 @@ mod tests {
             calls: Arc::new(Mutex::new(Vec::new())),
             blocked: None,
             notified: None,
+            reply: None,
         };
         let (client, server) = agent.start();
         let (reader, writer) = tokio::io::split(client);
@@ -1934,6 +2096,7 @@ mod tests {
             calls: Arc::new(Mutex::new(Vec::new())),
             blocked: Some("authenticate"),
             notified: Some(notified),
+            reply: None,
         };
         let (client, server) = agent.start();
         let (reader, writer) = tokio::io::split(client);

@@ -142,7 +142,7 @@ pub(super) fn Frame(
         ComposerFrame {
             borderless: true,
             content_class: if compact { "p-0".to_string() } else { String::new() },
-            notice: notice.map(|notice| rsx! { ComposerNotice { content: Some(rsx! { div { class: "setup-reply p-2", {notice} } }), class: "setup-notice".to_string() } }),
+            notice: Some(rsx! { ComposerNotice { content: notice.map(|notice| rsx! { div { class: "setup-reply p-2", {notice} } }), class: "setup-notice".to_string() } }),
             div { aria_busy: onboarding.starting, {children} }
         }
     }
@@ -826,7 +826,18 @@ mod tests {
         assert!(html.contains("Esc"));
         assert!(html.contains(&translate("common-cancel")));
         assert!(!html.contains("<textarea"));
-        assert!(!html.contains(" inert"));
+        let password = html
+            .split("<input")
+            .find(|node| {
+                node.split('>')
+                    .next()
+                    .is_some_and(|attrs| attrs.contains("type=\"password\""))
+            })
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(!password.contains(" disabled=") && !password.ends_with(" disabled"));
         assert!(!html.contains(&translate("onboarding-save-key")));
         assert!(host.0.borrow().is_empty());
         let label = translate("onboarding-api-key");

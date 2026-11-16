@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 pub(super) fn PopupLayer(
     #[props(default)] label: String,
     on_close: EventHandler<()>,
+    #[props(default)] on_resize: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
     rsx! {
@@ -15,6 +16,7 @@ pub(super) fn PopupLayer(
             onmounted: move |event: MountedEvent| { let node = event.data(); spawn(async move { let _ = node.set_focus(true).await; }); },
             onkeydown: move |event| { if event.key() == Key::Escape { event.prevent_default(); on_close.call(()); } },
             onpointerdown: move |_| on_close.call(()),
+            onresize: move |_: ResizeEvent| { if let Some(handler) = on_resize { handler.call(()); } },
             {children}
         }
     }

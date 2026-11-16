@@ -35,6 +35,14 @@ impl Recipients {
         self.0.push(target.downgrade());
     }
 
+    fn remove(&mut self, target: &mpsc::UnboundedSender<ServiceMessage>) {
+        self.0.retain(|client| {
+            client
+                .upgrade()
+                .is_some_and(|client| !client.is_closed() && !client.same_channel(target))
+        });
+    }
+
     fn target(&mut self) -> Option<mpsc::UnboundedSender<ServiceMessage>> {
         self.0
             .retain(|client| client.upgrade().is_some_and(|client| !client.is_closed()));
@@ -168,6 +176,20 @@ impl AgentBroker {
             .entry(sid.to_string())
             .or_default()
             .add(outbound);
+    }
+
+    pub async fn detach_browser(
+        &self,
+        sid: &str,
+        outbound: &mpsc::UnboundedSender<ServiceMessage>,
+    ) {
+        let mut browsers = self.browsers.lock().await;
+        if let Some(recipients) = browsers.sources.get_mut(sid) {
+            recipients.remove(outbound);
+        }
+        browsers
+            .sources
+            .retain(|_, recipients| recipients.target().is_some());
     }
 
     pub async fn command(
@@ -331,15 +353,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn browser_source_uses_another_attached_desktop_after_disconnect() {
+    async fn browser_source_uses_another_attached_desktop_after_live_detach() {
         let broker = AgentBroker::start();
-        let (first, first_receiver) = mpsc::unbounded_channel();
+        let (first, mut first_receiver) = mpsc::unbounded_channel();
         let (second, mut second_receiver) = mpsc::unbounded_channel();
         broker.subscribe_browser(&first).await;
         broker.subscribe_browser(&second).await;
         broker.attach_browser("source", &first).await;
         broker.attach_browser("source", &second).await;
-        drop(first_receiver);
+        broker.detach_browser("source", &first).await;
         let request_id = AgentRequestId::new();
         let request = AgentRequest::encode(&AgentOpenBrowser {
             url: "https://example.test/auth".into(),
@@ -351,6 +373,8 @@ mod tests {
         assert!(
             matches!(second_receiver.recv().await.unwrap(), ServiceMessage::AgentRequest { request_id: received, .. } if received == request_id)
         );
+        assert!(first_receiver.try_recv().is_err());
+        assert!(!first.is_closed());
         broker
             .resolve_command(request_id, AgentCommandResult::Ok)
             .await;

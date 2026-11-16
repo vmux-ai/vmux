@@ -1627,6 +1627,33 @@ fn manifest_metadata_boundaries_require_the_real_interface_and_a_stateless_marke
 }
 
 #[test]
+fn page_metadata_boundaries_require_the_real_attribute_and_a_stateless_marker() {
+    for (attribute, fields, expected) in [
+        ("vmux_page::page", "", true),
+        ("vmux_page::page", "{ state: String }", false),
+        ("vmux_other::page", "", false),
+        ("vmux_page::fake", "", false),
+    ] {
+        let mut inventory = Inventory::default();
+        let declaration = "#[proc_macro_attribute] pub fn page(input: proc_macro::TokenStream) -> proc_macro::TokenStream { input }";
+        inventory.source("crates/util/vmux_macro/src/lib.rs", declaration);
+        inventory.source("crates/util/vmux_other/src/lib.rs", declaration);
+        inventory.source(
+            "crates/util/vmux_page/src/lib.rs",
+            "pub use vmux_macro::page;",
+        );
+        let terminator = if fields.is_empty() { ";" } else { "" };
+        inventory.source(
+            "crates/feature/example/src/lib.rs",
+            &format!("#[{attribute}] struct Entry {fields}{terminator}"),
+        );
+        inventory.resolve_usage();
+        let marker = &inventory.entries["crates/feature/example/src/lib.rs||struct:Entry"];
+        assert_eq!(inventory.manifest_source(marker), expected);
+    }
+}
+
+#[test]
 fn reciprocal_relationship_targets_require_a_used_source() {
     for (parameter, inverse, expected) in [
         ("binding: Query<&Binding>", "Binding", true),
@@ -7202,6 +7229,13 @@ impl Inventory {
         };
         if !matches!(source.kind, Kind::Struct) || source.has_fields {
             return false;
+        }
+        if source
+            .framework_paths
+            .iter()
+            .any(|path| self.registration_macro(&source.namespace, path, "page"))
+        {
+            return true;
         }
         for implementation in self.entries.values() {
             let Some(owner) = &implementation.owner else {

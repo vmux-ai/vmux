@@ -12,6 +12,7 @@ pub(super) struct OnboardingPlugin;
 impl bevy_app::Plugin for OnboardingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<OnboardingUiState>::default())
+            .add_plugins(UiStatePlugin::<vmux_api::session::SetupReadinessUiState>::default())
             .add_plugins(UiStatePlugin::<crate::onboarding::KeyEntryUiState>::default())
             .add_plugins(UiEventPlugin::<(OnboardingConnect, OnboardingChooseAgent)>::default())
             .add_message::<ProvidersChanged>()
@@ -27,7 +28,10 @@ impl bevy_app::Plugin for OnboardingPlugin {
             .add_observer(created)
             .add_observer(cancelled)
             .add_observer(resumed)
-            .add_systems(PostUpdate, (begin, providers, publish, save).chain());
+            .add_systems(
+                PostUpdate,
+                (begin, providers, publish_readiness, publish, save).chain(),
+            );
     }
 }
 
@@ -620,6 +624,44 @@ fn providers(mut updates: MessageReader<ProvidersChanged>, mut catalogs: Query<&
     }
 }
 
+fn publish_readiness(
+    drafts: Query<&Draft>,
+    sessions: Query<(&crate::SessionId, Has<crate::SetupPending>), With<crate::Session>>,
+    pages: Query<(Entity, &vmux_ecs::PageMetadata), With<vmux_ecs::page::HostsPage>>,
+    mut writer: UiStateWriter<vmux_api::session::SetupReadinessUiState>,
+    mut published: Local<std::collections::HashMap<Entity, bool>>,
+) {
+    let Ok(draft) = drafts.single() else {
+        return;
+    };
+    let pending = draft.paused
+        || draft.starting
+        || draft.failed
+        || draft.setup_started
+            && (draft.session_id.is_empty()
+                || sessions
+                    .iter()
+                    .any(|(id, pending)| id.0 == draft.session_id && pending));
+    let next = vmux_api::session::SetupReadinessUiState { pending };
+    published.retain(|view, _| {
+        pages.get(*view).ok().is_some_and(|(_, metadata)| {
+            vmux_api::VmuxRoute::parse(&metadata.url)
+                .is_some_and(|route| route.is_host("start") && route.is_root())
+        })
+    });
+    for (view, metadata) in &pages {
+        if !vmux_api::VmuxRoute::parse(&metadata.url)
+            .is_some_and(|route| route.is_host("start") && route.is_root())
+        {
+            continue;
+        }
+        if published.get(&view) != Some(&pending) {
+            published.insert(view, pending);
+            writer.push(view, next.clone());
+        }
+    }
+}
+
 fn publish(
     state: Query<(&Draft, &Catalog)>,
     views: Query<
@@ -780,6 +822,82 @@ mod tests {
                 session,
             }
         }
+    }
+
+    #[test]
+    fn start_readiness_follows_setup_pending_and_pause_instead_of_installation() {
+        let mut setup = Setup::new();
+        setup.app.world_mut().spawn(vmux_api::UiEventPermissions {
+            url: "vmux://start/",
+            owns_subtree: false,
+            permissions: &["SetupReadinessUiState"],
+        });
+        let parent = setup.app.world_mut().spawn_empty().id();
+        let start = setup
+            .app
+            .world_mut()
+            .spawn((
+                vmux_ecs::page::HostsPage,
+                ChildOf(parent),
+                vmux_ecs::PageMetadata {
+                    url: "vmux://start/".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        setup.app.world_mut().entity_mut(start).insert((
+            bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+            bevy_cef::prelude::BinIpcNavigationRevision(1),
+            bevy_cef::prelude::BinIpcEpoch(1),
+        ));
+        setup
+            .app
+            .world_mut()
+            .non_send_mut::<bevy_cef::prelude::Browsers>()
+            .set_externally_hosted(start);
+        setup.app.update();
+        assert!(
+            setup
+                .app
+                .world()
+                .get::<vmux_ecs::UiState<vmux_api::session::SetupReadinessUiState>>(start)
+                .unwrap()
+                .current()
+                .unwrap()
+                .pending
+        );
+        setup
+            .app
+            .world_mut()
+            .entity_mut(setup.session)
+            .remove::<crate::SetupPending>();
+        setup.app.update();
+        assert!(
+            !setup
+                .app
+                .world()
+                .get::<vmux_ecs::UiState<vmux_api::session::SetupReadinessUiState>>(start)
+                .unwrap()
+                .current()
+                .unwrap()
+                .pending
+        );
+        setup.app.world_mut().trigger(UiInput {
+            webview: setup.view,
+            payload: crate::onboarding::ChatCancelSetup,
+        });
+        setup.app.world_mut().flush();
+        setup.app.update();
+        assert!(
+            setup
+                .app
+                .world()
+                .get::<vmux_ecs::UiState<vmux_api::session::SetupReadinessUiState>>(start)
+                .unwrap()
+                .current()
+                .unwrap()
+                .pending
+        );
     }
 
     #[test]

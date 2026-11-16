@@ -254,8 +254,12 @@ impl AcpLaunch {
         {
             env.push((
                 "BROWSER".into(),
-                vmux_process::BrowserCommand::for_session(Path::new(&mcp.command), &session_id.0)
-                    .into_string(),
+                vmux_process::BrowserCommand::for_launch(
+                    Path::new(&mcp.command),
+                    &session_id.0,
+                    anchor.0,
+                )
+                .into_string(),
             ));
         }
         ClientMessage::SpawnAcpAgent {

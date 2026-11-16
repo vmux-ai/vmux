@@ -39,7 +39,8 @@ impl bevy::prelude::Plugin for AuthenticationPlugin {
                     .chain()
                     .after(vmux_ecs::agent::AgentRequestApplySet),
             )
-            .add_systems(Update, install_escape.after(crate::BrowserLoadSet));
+            .add_systems(Update, install_escape.after(crate::BrowserLoadSet))
+            .add_systems(Update, sync_focus.before(vmux_input::KeyboardContextSet));
     }
 }
 
@@ -99,6 +100,8 @@ impl AuthenticationHost<'_, '_> {
     fn retire(&mut self, entity: Entity) {
         self.commands
             .trigger(crate::PopupHideRequest { webview: entity });
+        self.commands
+            .spawn(crate::RetiredInfrastructureWebview::new(entity));
         self.commands.entity(entity).try_despawn();
     }
 }
@@ -157,6 +160,7 @@ fn open(world: &mut World, state: &mut SystemState<(MessageReader<Open>, Authent
                     vmux_ecs::WindowOverlay,
                     vmux_ecs::FixedWindowOverlay,
                     crate::PopupWebview,
+                    crate::InfrastructureWebview,
                     Visibility::Hidden,
                 ));
         }
@@ -166,7 +170,8 @@ fn open(world: &mut World, state: &mut SystemState<(MessageReader<Open>, Authent
 
 fn bounds(
     input: On<UiInput<BrowserModalBoundsRequest>>,
-    popups: Query<(Entity, &AuthenticationPopup, &ChildOf)>,
+    popups: Query<(Entity, &AuthenticationPopup, &ChildOf, &HostWindow)>,
+    focused: vmux_layout::window::FocusedWindow,
     mut commands: EcsCommands,
 ) {
     let request = &input.event().payload;
@@ -175,11 +180,42 @@ fn bounds(
     else {
         return;
     };
-    for (entity, popup, parent) in &popups {
+    for (entity, popup, parent, host) in &popups {
         if popup.id == request.id && parent.parent() == input.event().webview {
             commands
                 .entity(entity)
-                .insert((bounds, Visibility::Visible, vmux_ecs::KeyboardOwner));
+                .insert((bounds, Visibility::Visible));
+            if Some(host.0) == focused.entity() {
+                commands.entity(entity).insert(vmux_ecs::KeyboardOwner);
+            } else {
+                commands.entity(entity).remove::<vmux_ecs::KeyboardOwner>();
+            }
+        }
+    }
+}
+
+fn sync_focus(
+    popups: Query<
+        (
+            Entity,
+            &HostWindow,
+            Option<&crate::PopupBounds>,
+            &Visibility,
+            Has<vmux_ecs::KeyboardOwner>,
+        ),
+        With<AuthenticationPopup>,
+    >,
+    focused: vmux_layout::window::FocusedWindow,
+    mut commands: EcsCommands,
+) {
+    for (entity, host, bounds, visibility, owns_keys) in &popups {
+        let active = Some(host.0) == focused.entity()
+            && bounds.is_some()
+            && *visibility == Visibility::Visible;
+        if active && !owns_keys {
+            commands.entity(entity).insert(vmux_ecs::KeyboardOwner);
+        } else if !active && owns_keys {
+            commands.entity(entity).remove::<vmux_ecs::KeyboardOwner>();
         }
     }
 }

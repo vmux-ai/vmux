@@ -458,6 +458,11 @@ pub struct ApprovalRequest {
     pub decision: crate::protocol::ApprovalDecision,
 }
 
+#[crate::ui_state(Default, Eq)]
+pub struct SetupReadinessUiState {
+    pub pending: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

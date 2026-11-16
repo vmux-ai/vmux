@@ -12,6 +12,7 @@ use vmux_transport::service::ServiceCodec;
 pub(crate) struct Open {
     url: Url,
     source: Option<String>,
+    anchor: Option<vmux_api::ProcessId>,
 }
 
 impl TryFrom<&CliInvocation> for Open {
@@ -19,9 +20,19 @@ impl TryFrom<&CliInvocation> for Open {
 
     fn try_from(invocation: &CliInvocation) -> Result<Self, Self::Error> {
         let url = invocation.value("url").ok_or("browser URL is missing")?;
+        let source = invocation.value("source").map(str::to_string);
+        let anchor = invocation
+            .value("anchor")
+            .map(str::parse)
+            .transpose()
+            .map_err(|error| format!("invalid browser launch anchor: {error}"))?;
+        if anchor.is_some() && source.is_none() {
+            return Err("browser launch anchor requires a source conversation".into());
+        }
         Ok(Self {
             url: Url::parse(url)?,
-            source: invocation.value("source").map(str::to_string),
+            source,
+            anchor,
         })
     }
 }
@@ -45,7 +56,7 @@ impl Open {
             &mut stream,
             &ClientMessage::AgentRequest {
                 request_id,
-                anchor: None,
+                anchor: self.anchor,
                 request,
             },
         )
@@ -81,6 +92,7 @@ mod tests {
         let fixture = tempfile::tempdir().unwrap();
         let socket = fixture.path().join("browser.sock");
         let listener = UnixListener::bind(&socket).unwrap();
+        let anchor = vmux_api::ProcessId::new();
         let receiver = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             stream.set_nonblocking(true).unwrap();
@@ -98,11 +110,13 @@ mod tests {
                 let ClientMessage::AgentRequest {
                     request_id,
                     request,
+                    anchor: received_anchor,
                     ..
                 } = message
                 else {
                     panic!("browser opening must use the existing request bridge");
                 };
+                assert_eq!(received_anchor, Some(anchor));
                 let request = request.decode::<AgentOpenBrowser>().unwrap().unwrap();
                 ServiceCodec::write_service(
                     &mut stream,
@@ -131,6 +145,7 @@ mod tests {
             arguments: std::collections::BTreeMap::from([
                 ("url".into(), vec![url.into()]),
                 ("source".into(), vec!["setup-session".into()]),
+                ("anchor".into(), vec![anchor.to_string().into()]),
             ]),
         };
         assert_eq!(Open::try_from(&invocation).unwrap().send(&socket), Ok(0));

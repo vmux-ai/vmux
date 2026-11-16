@@ -446,6 +446,7 @@ struct OpenResolver<'w, 's> {
         (
             &'static vmux_session::SessionId,
             Has<vmux_session::SetupPending>,
+            Option<&'static vmux_ecs::ProcessAnchor>,
         ),
     >,
     parents: Query<'w, 's, &'static ChildOf>,
@@ -473,6 +474,12 @@ struct OpenResolver<'w, 's> {
 }
 
 impl OpenResolver<'_, '_> {
+    fn accepts_launch(&self, source: &str, anchor: vmux_api::ProcessId) -> bool {
+        self.sessions.iter().any(|(id, _, current)| {
+            id.0 == source && current.is_some_and(|current| current.0 == anchor)
+        })
+    }
+
     fn resolve(&self, source: Option<&str>) -> Result<(Entity, bool), String> {
         let stack = if let Some(source) = source {
             let mut route =
@@ -487,7 +494,7 @@ impl OpenResolver<'_, '_> {
                     Some(target) => self
                         .sessions
                         .get(target.entity())
-                        .is_ok_and(|(id, _)| id.0 == source),
+                        .is_ok_and(|(id, _, _)| id.0 == source),
                     None => metadata.url == url,
                 };
                 matches.then_some(stack)
@@ -523,7 +530,7 @@ impl OpenResolver<'_, '_> {
         };
         let Some((stack, session)) = self.stacks.iter().find_map(|(stack, _, target)| {
             let target = target?;
-            let (candidate, setup) = self.sessions.get(target.entity()).ok()?;
+            let (candidate, setup, _) = self.sessions.get(target.entity()).ok()?;
             (setup && candidate.0 == source).then_some((stack, target.entity()))
         }) else {
             return Ok(None);
@@ -572,6 +579,23 @@ fn open(
         if let Err(error) = Url::parse(&request.payload.url) {
             responses.write(request.reply.response(AgentCommandResult::Error(error)));
             continue;
+        }
+        if let CommandOrigin::Agent {
+            anchor: Some(anchor),
+            ..
+        } = &request.origin
+        {
+            if request
+                .payload
+                .source
+                .as_deref()
+                .is_none_or(|source| !target.accepts_launch(source, *anchor))
+            {
+                responses.write(request.reply.response(AgentCommandResult::Error(
+                    "browser source launch is no longer active".into(),
+                )));
+                continue;
+            }
         }
         match target.authentication(
             request.reply.request_id.to_string(),
@@ -766,6 +790,125 @@ mod opening_tests {
                 .single(self.app.world())
                 .unwrap()
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_replaced_launch_cannot_open_a_popup_for_the_same_setup_session() {
+        let mut fixture = ModalFixture::new();
+        let old = vmux_api::ProcessId::new();
+        let current = vmux_api::ProcessId::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(vmux_ecs::ProcessAnchor(current));
+        for (anchor, allowed) in [(old, false), (current, true)] {
+            fixture.app.world_mut().write_message(AgentRequestMessage {
+                reply: AgentReply::new(AgentRequestId::new()),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                payload: AgentOpenBrowser {
+                    source: Some("source".into()),
+                    url: "https://example.test/auth".into(),
+                },
+            });
+            fixture.app.update();
+            fixture.app.update();
+            assert_eq!(
+                fixture
+                    .app
+                    .world_mut()
+                    .query_filtered::<Entity, With<crate::PopupWebview>>()
+                    .iter(fixture.app.world())
+                    .count(),
+                usize::from(allowed)
+            );
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .resource::<Messages<PageOpenRequest>>()
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn authentication_keyboard_ownership_tracks_its_window_and_preserves_the_popup() {
+        let mut fixture = ModalFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.window)
+            .insert(vmux_ecs::Active);
+        let popup = fixture.open("https://example.test/auth");
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.owner,
+            payload: vmux_api::browser::BrowserModalBoundsRequest {
+                id: fixture.request_id.clone(),
+                left: 10.0,
+                top: 20.0,
+                width: 360.0,
+                height: 560.0,
+            },
+        });
+        fixture.app.world_mut().flush();
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::KeyboardOwner>(popup)
+                .is_some()
+        );
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.window)
+            .remove::<vmux_ecs::Active>();
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::KeyboardOwner>(popup)
+                .is_none()
+        );
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(other)
+            .remove::<vmux_ecs::Active>();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.window)
+            .insert(vmux_ecs::Active);
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::KeyboardOwner>(popup)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::InfrastructureWebview>(popup)
+                .is_some()
+        );
     }
 
     #[test]

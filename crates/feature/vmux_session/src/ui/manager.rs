@@ -386,9 +386,7 @@ fn SessionsManagerContent(
             div { id: "sessions-scroll", class: "flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]",
             if presentation.loading {
                 SessionsSkeleton {}
-            } else if presentation.snapshot.sessions.is_empty() {
-                super::onboarding::Onboarding {}
-            } else if !presentation.visible_sessions {
+            } else if presentation.snapshot.sessions.is_empty() || !presentation.visible_sessions {
                 ManagerEmpty {
                     title: translate("sessions-inbox-empty"),
                     detail: translate("sessions-inbox-empty-detail"),

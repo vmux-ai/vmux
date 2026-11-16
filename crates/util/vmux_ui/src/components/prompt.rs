@@ -6,6 +6,7 @@ use crate::components::composer::ComposerButton;
 use crate::components::progress::LoadingIcon;
 use crate::i18n::translate;
 use crate::icon::LineIcon;
+use crate::scroll::ScrollIntoView;
 
 #[component]
 pub fn ConversationPrompt(
@@ -86,6 +87,19 @@ pub fn PromptSelection(
     on_change: EventHandler<PromptSelectionChange>,
 ) -> Element {
     let name = format!("prompt-selection-{}", current_scope_id().0);
+    let reveal = if mode == PromptSelectionMode::Single {
+        options
+            .iter()
+            .position(|option| selected.contains(&option.value))
+            .map(|index| format!("{name}-row-{index}"))
+    } else {
+        None
+    };
+    use_effect(use_reactive!(|reveal| {
+        if let Some(id) = reveal {
+            ScrollIntoView::nearest(&id);
+        }
+    }));
     rsx! {
         fieldset {
             class: "min-w-0 border-0 p-0",
@@ -100,6 +114,7 @@ pub fn PromptSelection(
                         rsx! {
                             label {
                                 key: "prompt-{option.value}",
+                                id: format!("{name}-row-{index}"),
                                 class: if unavailable {
                                     "flex min-h-9 shrink-0 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-1.5 opacity-45"
                                 } else if checked {
