@@ -2032,7 +2032,12 @@ mod tests {
     #[test]
     fn binding_and_renaming_a_setup_session_preserves_its_topic_and_guide_title() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, MetadataPlugin, MetadataClientPlugin, StagePlugin));
+        app.add_plugins((
+            EntityPlugin,
+            MetadataPlugin,
+            MetadataClientPlugin,
+            StagePlugin,
+        ));
         let session = app
             .world_mut()
             .spawn((
