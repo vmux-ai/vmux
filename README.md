@@ -1,50 +1,10 @@
 <h1 align="center">Vmux</h1>
-<p align="center"><b>Any prompt. Anything, done.</b></p>
-<p align="center">The browser that gets sh*t done.</p>
+<p align="center"><b>The browser that gets sh*t done.</b></p>
 
-<p align="center">
-  <img src="icon.png" alt="Vmux icon" width="256" />
-</p>
-
-Vmux is an open-source browser, ACP agent harness, and full IDE in one shared workspace.
-Work with your team and any ACP-compatible agent across pages, code, terminals, files, Git,
-commands, and tools.
+An open-source browser, AI agent workspace, and IDE. Browse, code, and work with
+any ACP-compatible agent in one place.
 
 ![Vmux agent, editor, and terminal demo](website/public/vmux-demo.jpg)
-
-## What you can do
-
-- **Stay in one context** — Browse documentation, inspect the running product, edit code, and
-  use the terminal without moving the task between applications.
-- **Collaborate with agents** — Give any ACP agent a task while you browse, review, and steer
-  the work in the same workspace.
-- **Work in parallel** — Give projects and agents their own Spaces, then return to the same
-  pages, processes, and sessions.
-- **Reconnect remotely** — Pair the iPhone app with your Mac and reach the same workspace
-  through an end-to-end encrypted connection.
-
-See Vmux fix software, find a flight, ship a client PoC, and launch a restaurant site in
-[use cases](https://vmux.ai/use-cases).
-
-## Any stack
-
-Vmux IDE and its ACP agent harness work with existing projects. React, Rust, or anything else:
-using Vmux Framework is optional.
-
-Choose [Vmux Framework](https://vmux.ai/framework) when you want to build a cross-platform
-application from the same typed feature plugins, contracts, manifests, and platform adapters
-that power Vmux itself.
-
-## Status
-
-Vmux is early-access software built in public.
-
-- macOS is the primary host platform.
-- iOS is the remote companion.
-- Linux builds and tests in CI but is not packaged yet.
-- Windows and Android are not supported yet.
-
-Expect rough edges and fast changes before the first stable release.
 
 ## Install
 
@@ -52,119 +12,24 @@ Expect rough edges and fast changes before the first stable release.
 curl -fsSL https://vmux.ai/install | sh
 ```
 
-Requires macOS 13.0 (Ventura) or later.
+macOS 13+ · Early access. Expect rough edges.
 
-## Architecture
+## One workspace
 
-**Flexible by composition. Predictable by design.** ECS composition lets Vmux add platforms
-and capabilities without multiplying architecture. The same small vocabulary gives people and
-coding agents an expected place for every change, so PRs fit the system without surprise layers.
+- **Browse and build.** Pages, code, Git, and terminals beside your agent. Bring any stack.
+- **Work in parallel.** Give projects and agents their own Spaces; keep their sessions running.
+- **Pick up on your phone.** Reconnect from iPhone over an end-to-end encrypted connection.
 
-```text
-feature = state + systems + UI + commands + tools + contracts
-runtime = feature plugins + platform adapters
-```
+See it [fix a bug, find a flight, and ship a site](https://vmux.ai/use-cases).
 
-Desktop, mobile, the background service, CLI, and MCP server compose the same feature-owned
-behavior instead of reimplementing it behind separate APIs. The host ECS owns durable state;
-pages render typed projections and emit typed intent.
+## Go deeper
 
-Read [the UX and DX guides](docs/README.md) for workspace behavior, development setup, architecture, and change routing.
-Exact behavior remains defined by code, tests, typed contracts, and `feature.ron`.
+[Use Vmux](docs/README.md) · [Build from source](docs/dx/getting-started.md) ·
+[Architecture](docs/dx/architecture.md) · [Vmux Framework](docs/dx/framework.md) ·
+[Contributing](AGENTS.md)
 
-## Development
-
-```sh
-cargo install --path crates/app/vmux_cli --no-default-features --features dx
-vmux setup
-vmux doctor
-vmux build
-vmux run
-```
-
-Use `vmux build navigation -p local` to build a branch in its existing worktree.
-`-P/--platform` selects desktop, ios, android, or web; `-p/--profile` selects dev,
-local, or release. Worktree directory names are accepted as unambiguous aliases.
-Builds seed compatible caches and preserve target locks. See `vmux --help` for
-commands, [Getting started](docs/dx/getting-started.md) for development, and [AGENTS.md](AGENTS.md) for repository workflow rules.
-
-Standalone CLI releases use the same `stable` (default) and `preview` channels as
-the desktop. `vmux update --channel preview` switches to preview;
-`vmux update --channel stable` switches back. `vmux update --check` checks without
-installing, and `vmux update --auto off` disables automatic release updates.
-Preferences persist between commands. Signed standalone CLIs check at most hourly
-on invocation and continue with the installed CLI when an automatic update fails.
-Release artifacts currently cover macOS Apple Silicon.
-
-The selected checkout's development CLI refreshes automatically when its source
-changes. Cargo source installs without `VMUX_UPDATE_PUBLIC_KEY` use that mechanism
-and can inspect release metadata; installing a release requires its verification
-key. Standalone release CLIs embed the same key used by desktop updates.
-The standalone archive contains the DX-only CLI. Runtime-enabled and app-bundled
-CLIs retain their existing source/application update owner.
-
-Native container development on Apple Silicon macOS 14+ requires libkrun 1.x,
-libkrunfw 5 and gvproxy. Declare the dependencies in your Homebrew Brewfile:
-
-```ruby
-tap "slp/krun"
-brew "slp/krun/libkrun"
-brew "slp/krun/gvproxy"
-```
-
-```sh
-vmux build
-./target/debug/vmux container start --data /tmp/vmux-container --shared "$PWD"
-docker --host unix:///tmp/vmux-container/docker.sock compose up
-./target/debug/vmux container status --data /tmp/vmux-container
-./target/debug/vmux container stop --data /tmp/vmux-container
-```
-
-Vmux starts its own Linux VM and Docker daemon. Wildcard-published container ports
-are forwarded to macOS localhost. Images and volumes survive VM restart on the
-dedicated data disk; the selected project directory is shared at the same path
-inside Linux. `container logs` reads the engine and guest logs.
-
-For the desktop workflow, build with `vmux build`, then open the app with
-`vmux run`. The default VM bookmark opens `vmux://vm/`. VM, Docker
-(`vmux://vm/docker`) and Containers (`vmux://vm/docker/containers`) have separate
-titles and icons while sharing the same workspace. `vmux://docker/containers`,
-`vmux://docker/` and the older `vmux://containers/` remain compatible.
-Opening a VM, Docker or Containers page starts the VM automatically once per app host,
-after inspecting its current state. Manually stopping it leaves it stopped until another
-Start request; reopening the app allows automatic startup again. While the daemon is
-unavailable, the main area shows a VM illustration and startup progress or a Start button,
-and the hierarchical side sheet remains visible. Once ready, VM shows its state, CPU
-allocation, memory and shared directory; Docker shows its connection and container count.
-Containers uses stacked boxes, while an individual container uses one box.
-The last successful inventory is saved per VM and restored when the app restarts, so known
-containers remain selectable while stopped. Live logs require the daemon.
-Containers created on this daemon appear automatically, including stopped containers and
-Compose groups. Selecting an entry opens its information and live logs. VM shutdown
-and settings belong to the VM row of the side sheet, which follows
-VM, Docker, Containers, Compose groups and their services. Each level links to its page.
-Compose groups
-offer Start all/Stop all beneath their names. Starting a service also starts its
-dependencies in the same Compose project and waits for their declared readiness,
-starting the VM first when needed.
-Container rows use play/pause icons; selected-container controls belong
-to the details toolbar. The initial share is
-the home directory.
-
-Point Docker CLI at the same daemon, then use normal Docker commands:
-
-```sh
-docker context create vmux --docker "host=unix://$HOME/Library/Application Support/Vmux/containers/docker.sock"
-docker --context vmux compose -f examples/containers/compose.yaml up -d --build
-```
-
-The bundled [Dockerfile](examples/containers/Dockerfile) builds a small nginx demo.
-The `vmux-demo` group and its `web` container appear in Containers. Open
-`http://localhost:8080` from the published port link, then select Logs to see requests.
-Remove the demo with `docker --context vmux compose -f examples/containers/compose.yaml down`.
-
-`docker build` creates an image. `docker run` and `docker compose up` create the
-containers that appear in the list; no registration step is needed.
+macOS is the primary host; iOS is the remote companion. Linux builds in CI but is
+not packaged. Windows and Android are not supported yet.
 
 ## License
 
