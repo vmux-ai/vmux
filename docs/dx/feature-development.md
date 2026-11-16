@@ -31,10 +31,24 @@ component names such as `ComposerFrame` and `IdentityOrb`. Each family has a dir
 follow the selected family. Reset restores the selected example and its local state.
 Resize the pane to check smaller layouts; appearance and language follow application settings.
 
-The catalog lives in `crates/feature/vmux_gallery`. Add examples there while keeping reusable
-controls in `crates/util/vmux_ui`. Add an executable gallery example when introducing a
-shared component, before integrating it into a feature page. Composer, menu and directory
-examples use fixed sample data and page-scoped interactions. The catalog is a desktop feature.
+Keep a component's metadata and conditions next to its implementation:
+
+```text
+crates/util/vmux_ui/src/components/button.rs
+crates/util/vmux_ui/src/components/button.stories.ron
+```
+
+The RON file describes its title, Controls, defaults and named presets. `catalog.rs` in
+`crates/feature/vmux_gallery` connects that file to a shared Rust renderer with one
+`#[story(metadata = "...", component = ...)]` entry. The registration attribute generates
+names, component URLs, search metadata and dispatch, and type-checks preset fields.
+Gallery Rust code stays focused on shared previews and Controls; it does not need a new
+adapter file for every component. Add an executable example before integrating a new
+shared component into a feature page.
+
+Args can change several conditions at once, including when the preview is disabled.
+Named presets replace previous conditions and reset component-local state. Composer,
+menu and directory callbacks update isolated sample state. The catalog is a desktop feature.
 
 ## Follow a behavior change
 

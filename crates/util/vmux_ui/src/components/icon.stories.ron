@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "icon",
+    title: "Icon",
+    components: ["Icon", "LineIconView", "BuiltinIconView", "GitIconView", "PageIconView", "GitSymbolView"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "error-state",
+    title: "ErrorState",
+    components: ["ErrorState"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

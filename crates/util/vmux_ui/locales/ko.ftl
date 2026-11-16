@@ -1243,6 +1243,7 @@ container-vm = VM
 
 gallery-title = UI 컴포넌트
 gallery-description = 네이티브 페이지 환경에서 공통 컴포넌트를 미리 봅니다.
+gallery-controls = 인수 / 컨트롤
 gallery-reset = 초기화
 gallery-search = 컴포넌트 검색
 gallery-disabled = 비활성화

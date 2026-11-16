@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "effort-menu",
+    title: "EffortMenu",
+    components: ["EffortMenu"],
+    controls: ["disabled", "menu", "cursor", "effort"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

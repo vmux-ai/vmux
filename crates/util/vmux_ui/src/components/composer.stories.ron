@@ -1,0 +1,15 @@
+#![enable(implicit_some)]
+(
+    id: "composer",
+    title: "PromptComposer",
+    components: ["PromptComposer", "ComposerFrame"],
+    controls: ["disabled", "text", "checked", "running", "has_attachment", "menu", "cursor", "agent", "model", "effort", "permission", "project", "branch", "status"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+        (name: "Running", args: (running: true, status: "streaming")),
+        (name: "WithAttachment", args: (has_attachment: true)),
+    ],
+)

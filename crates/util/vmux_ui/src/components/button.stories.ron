@@ -1,0 +1,14 @@
+#![enable(implicit_some)]
+(
+    id: "button",
+    title: "Button",
+    components: ["Button", "IconButton"],
+    controls: ["disabled", "text", "button_variant", "button_size"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+        (name: "DisabledOutline", args: (disabled: true, button_variant: "outline", button_size: "md", text: "Disabled preview")),
+    ],
+)

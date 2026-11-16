@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "badge",
+    title: "Badge",
+    components: ["Badge"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

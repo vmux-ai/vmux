@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "model-menu",
+    title: "ModelMenu",
+    components: ["ModelMenu"],
+    controls: ["disabled", "menu", "cursor", "model"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

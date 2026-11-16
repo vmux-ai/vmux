@@ -11,6 +11,7 @@ mod contract;
 mod page;
 mod service_message;
 mod store;
+mod story_catalog;
 mod string_id;
 mod tool_input;
 mod ui_event_variants;
@@ -40,6 +41,15 @@ pub fn app_plugin(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match app_plugin::expand(input) {
         Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn story_catalog(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match story_catalog::Catalog::parse(args.into(), item) {
+        Ok(catalog) => catalog.expand().into(),
         Err(error) => error.to_compile_error().into(),
     }
 }

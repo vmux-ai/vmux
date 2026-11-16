@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "type-icon",
+    title: "TypeIcon",
+    components: ["TypeIcon"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

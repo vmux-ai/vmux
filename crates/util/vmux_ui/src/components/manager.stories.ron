@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "manager",
+    title: "Manager",
+    components: ["ManagerPage", "WorkspaceLayout", "ManagerSearchRow", "ManagerSidebarSection", "ManagerSidebarItem", "ManagerTabs", "ManagerHeader", "ManagerToolbar", "ManagerControls", "ManagerSearch", "ManagerIconButton", "ManagerAddButton", "ManagerExpandableSearch", "ManagerSearchAction", "ManagerViewToggle", "ManagerList", "ManagerSection", "ManagerCollection", "ManagerRow", "ManagerCard", "ManagerDetails", "ManagerThumbnail", "ManagerBadge", "ManagerButton", "ManagerSelect", "ManagerSpinner", "ManagerEmpty", "ManagerSkeleton"],
+    controls: ["disabled", "text", "checked", "choice", "dialog_open", "menu"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+    ],
+)

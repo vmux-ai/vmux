@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "shell-code",
+    title: "ShellCode",
+    components: ["ShellCode"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

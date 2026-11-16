@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "favicon",
+    title: "Favicon",
+    components: ["Favicon", "GlobeIcon"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "agent-menu",
+    title: "AgentMenu",
+    components: ["AgentMenu"],
+    controls: ["disabled", "menu", "cursor", "agent"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

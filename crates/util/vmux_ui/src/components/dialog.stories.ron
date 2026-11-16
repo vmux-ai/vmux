@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "dialog",
+    title: "Dialog",
+    components: ["DialogRoot", "DialogContent", "DialogTitle", "DialogDescription"],
+    controls: ["disabled", "dialog_open"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "prompt-media-options",
+    title: "PromptMediaOptions",
+    components: ["PromptMediaOptions"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

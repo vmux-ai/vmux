@@ -1234,6 +1234,7 @@ container-vm = VM
 
 gallery-title = UI Components
 gallery-description = Preview shared components in the native page runtime.
+gallery-controls = Args / Controls
 gallery-reset = Reset
 gallery-search = Search components
 gallery-disabled = Disabled

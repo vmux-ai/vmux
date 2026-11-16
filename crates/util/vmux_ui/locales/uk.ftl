@@ -1246,6 +1246,7 @@ container-vm = VM
 
 gallery-title = Компоненти UI
 gallery-description = Перегляд спільних компонентів у середовищі нативної сторінки.
+gallery-controls = Аргументи / Елементи керування
 gallery-reset = Скинути
 gallery-search = Пошук компонентів
 gallery-disabled = Вимкнено

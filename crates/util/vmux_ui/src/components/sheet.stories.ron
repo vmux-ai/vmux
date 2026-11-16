@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "sheet",
+    title: "Sheet",
+    components: ["SheetHeaderAction", "SheetHeaderChevron", "SheetToggleRow", "SheetSelectorRow"],
+    controls: ["disabled", "checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

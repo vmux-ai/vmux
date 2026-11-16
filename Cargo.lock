@@ -10812,10 +10812,12 @@ dependencies = [
  "bevy_ecs",
  "dioxus",
  "rkyv",
+ "ron 0.12.1",
  "serde",
  "vmux_api",
  "vmux_ecs",
  "vmux_layout",
+ "vmux_macro",
  "vmux_page",
  "vmux_ui",
 ]

@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "back-button",
+    title: "BackButton",
+    components: ["BackButton"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

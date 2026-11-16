@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "page-address",
+    title: "PageAddress",
+    components: ["PageBreadcrumbs", "PageToolbar", "AddressSurface"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

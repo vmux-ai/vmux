@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "context-menu",
+    title: "ContextMenu",
+    components: ["ContextMenu", "ContextMenuTrigger", "ContextMenuContent", "ContextMenuItem"],
+    controls: ["disabled", "menu", "cursor", "checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

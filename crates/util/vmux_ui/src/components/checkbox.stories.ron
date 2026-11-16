@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "checkbox",
+    title: "Checkbox",
+    components: ["Checkbox"],
+    controls: ["disabled", "checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

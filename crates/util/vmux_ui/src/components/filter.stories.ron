@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "filter",
+    title: "Filter",
+    components: ["FilterTrigger", "FilterPill", "FilterMenu", "FilterOption"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

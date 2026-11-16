@@ -17,7 +17,7 @@
             "GalleryModelRequest", "GalleryEffortRequest", "GalleryPermissionRequest",
             "GalleryProjectRequest", "GalleryBranchRequest", "GallerySubmitRequest",
             "GalleryStopRequest", "GalleryAttachRequest", "GalleryRemoveAttachmentRequest",
-            "GalleryPasteRequest", "GalleryStatusRequest",
+            "GalleryPasteRequest", "GalleryStatusRequest", "GalleryConfigureRequest", "GalleryPresetRequest",
         ],
     )],
 )

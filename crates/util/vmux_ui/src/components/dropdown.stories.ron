@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "dropdown",
+    title: "Dropdown",
+    components: ["DropdownToggleIndicator", "DropdownTrigger", "DropdownOption", "DropdownSelector", "Dropdown", "DropdownPopup"],
+    controls: ["disabled", "menu", "choice"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

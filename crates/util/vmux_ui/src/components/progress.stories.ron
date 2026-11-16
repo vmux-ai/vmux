@@ -1,0 +1,11 @@
+#![enable(implicit_some)]
+(
+    id: "progress",
+    title: "Progress",
+    components: ["LoadingIcon", "Progress", "ProgressIndicator"],
+    controls: ["progress"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+    ],
+)

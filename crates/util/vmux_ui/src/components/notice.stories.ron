@@ -1,0 +1,11 @@
+#![enable(implicit_some)]
+(
+    id: "notice",
+    title: "Notice",
+    components: ["Notice"],
+    controls: ["checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+    ],
+)

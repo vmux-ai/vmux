@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "avatar",
+    title: "Avatar",
+    components: ["Avatar", "AgentThumbnail", "Identicon", "IdentityOrb"],
+    controls: ["text"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "WithContent", args: (text: "Sample content")),
+    ],
+)

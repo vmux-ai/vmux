@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "card",
+    title: "Card",
+    components: ["Card", "CardHeader", "CardTitle", "CardDescription", "CardContent"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

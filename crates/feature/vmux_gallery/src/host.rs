@@ -8,13 +8,13 @@ use vmux_ecs::{PageMetadata, UiState, UiStatePlugin, UiStateWrite};
 use vmux_layout::hosted_page::HostedUiPlugin;
 
 use crate::{
-    Examples, GalleryAgentRequest, GalleryAttachRequest, GalleryBranchRequest,
-    GalleryCheckedRequest, GalleryChoiceRequest, GalleryClickRequest, GalleryCursorRequest,
-    GalleryDialogRequest, GalleryDisabledRequest, GalleryEffortRequest, GalleryMenuRequest,
-    GalleryModelRequest, GalleryPasteRequest, GalleryPermissionRequest, GalleryProgressRequest,
-    GalleryProjectRequest, GalleryRemoveAttachmentRequest, GalleryResetRequest,
-    GalleryStatusRequest, GalleryStopRequest, GallerySubmitRequest, GalleryTextRequest,
-    GalleryUiState, Story,
+    ArgsPatch, Examples, GalleryAgentRequest, GalleryAttachRequest, GalleryBranchRequest,
+    GalleryCheckedRequest, GalleryChoiceRequest, GalleryClickRequest, GalleryConfigureRequest,
+    GalleryCursorRequest, GalleryDialogRequest, GalleryDisabledRequest, GalleryEffortRequest,
+    GalleryMenuRequest, GalleryModelRequest, GalleryPasteRequest, GalleryPermissionRequest,
+    GalleryPresetRequest, GalleryProgressRequest, GalleryProjectRequest,
+    GalleryRemoveAttachmentRequest, GalleryResetRequest, GalleryStatusRequest, GalleryStopRequest,
+    GallerySubmitRequest, GalleryTextRequest, GalleryUiState, Story, StoryDefinition,
 };
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::command_bar::CommandPaletteAgent;
@@ -59,6 +59,8 @@ impl Plugin for GalleryPlugin {
                 GalleryRemoveAttachmentRequest,
                 GalleryPasteRequest,
                 GalleryStatusRequest,
+                GalleryConfigureRequest,
+                GalleryPresetRequest,
             )>::default(),
             PreviewPlugin,
         ));
@@ -99,6 +101,8 @@ impl Plugin for PreviewPlugin {
             .add_observer(remove_attachment)
             .add_observer(paste)
             .add_observer(status)
+            .add_observer(configure)
+            .add_observer(preset)
             .add_systems(
                 Update,
                 (sync, publish)
@@ -133,6 +137,8 @@ struct Preview {
     has_attachment: bool,
     status: String,
     submitted: String,
+    button_variant: String,
+    button_size: String,
 }
 
 impl Default for Preview {
@@ -160,6 +166,8 @@ impl Default for Preview {
             has_attachment: false,
             status: "idle".into(),
             submitted: String::new(),
+            button_variant: "all".into(),
+            button_size: "all".into(),
         }
     }
 }
@@ -170,11 +178,18 @@ impl Preview {
         *self = Self::default();
         self.story = story;
         self.revision = revision;
+        let defaults = self.definition().defaults;
+        self.apply_args(&defaults);
     }
 
     fn record(&mut self, event: &str) {
         self.interaction_count = self.interaction_count.saturating_add(1);
         self.last_event = event.to_string();
+    }
+
+    fn definition(&self) -> StoryDefinition {
+        ron::from_str(self.story.metadata_source())
+            .expect("compiled story metadata must decode to typed args")
     }
 
     fn accepts(&self, revision: u64) -> bool {
@@ -207,6 +222,9 @@ impl Preview {
             has_attachment: self.has_attachment,
             status: self.status.clone(),
             submitted: self.submitted.clone(),
+            presets: self.definition().presets,
+            button_variant: self.button_variant.clone(),
+            button_size: self.button_size.clone(),
         }
     }
 }
@@ -342,9 +360,7 @@ fn initialize(event: On<Add, Preview>, mut previews: Query<(&PageMetadata, &mut 
         return;
     };
     let story = Story::from_url(&metadata.url).unwrap_or(Story::Button);
-    if preview.story != story {
-        preview.reset(story);
-    }
+    preview.reset(story);
 }
 
 fn sync(mut previews: Query<(&PageMetadata, &mut Preview), Changed<PageMetadata>>) {
@@ -661,6 +677,173 @@ fn status(event: On<UiInput<GalleryStatusRequest>>, mut previews: Query<&mut Pre
     preview.status = event.payload.status.clone();
 }
 
+impl Preview {
+    fn allows_args(&self, args: &ArgsPatch) -> bool {
+        if args.progress.is_some_and(|value| !value.is_finite())
+            || args.cursor.is_some_and(|value| value > 16)
+        {
+            return false;
+        }
+        for (value, allowed) in [
+            (
+                args.choice.as_deref(),
+                &["one", "two", "three", "list", "grid"][..],
+            ),
+            (
+                args.button_variant.as_deref(),
+                &[
+                    "all",
+                    "primary",
+                    "secondary",
+                    "destructive",
+                    "outline",
+                    "ghost",
+                ][..],
+            ),
+            (
+                args.button_size.as_deref(),
+                &["all", "xs", "sm", "md", "icon", "block"][..],
+            ),
+            (args.agent.as_deref(), &["codex", "claude"][..]),
+            (args.model.as_deref(), &["balanced", "fast"][..]),
+            (args.effort.as_deref(), &["", "low", "medium", "high"][..]),
+            (args.permission.as_deref(), &["default", "plan"][..]),
+            (
+                args.project.as_deref(),
+                &["/example/vmux", "/example/library"][..],
+            ),
+            (args.branch.as_deref(), &["main", "feature/ui"][..]),
+            (
+                args.status.as_deref(),
+                &[
+                    "idle",
+                    "streaming",
+                    "awaiting",
+                    "installing",
+                    "errored",
+                    "in_use",
+                ][..],
+            ),
+            (
+                args.menu.as_deref(),
+                &[
+                    "",
+                    "agent",
+                    "model",
+                    "effort",
+                    "permission",
+                    "project",
+                    "branch",
+                    "dropdown",
+                    "dropdown-selector",
+                    "breadcrumb",
+                    "prompt",
+                    "prompt-flat",
+                    "mcp",
+                    "project-select",
+                    "manager-search",
+                ][..],
+            ),
+        ] {
+            if value.is_some_and(|value| !allowed.contains(&value)) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn apply_args(&mut self, args: &ArgsPatch) {
+        if let Some(value) = args.disabled {
+            self.disabled = value;
+        }
+        if let Some(value) = args.checked {
+            self.checked = value;
+        }
+        if let Some(value) = &args.text {
+            self.text = value.chars().take(4096).collect();
+        }
+        if let Some(value) = args.dialog_open {
+            self.dialog_open = value;
+        }
+        if let Some(value) = args.progress {
+            self.progress = value.clamp(0.0, 100.0);
+        }
+        if let Some(value) = &args.menu {
+            self.menu = value.clone();
+        }
+        if let Some(value) = args.cursor {
+            self.cursor = value;
+        }
+        if let Some(value) = &args.agent {
+            self.agent = value.clone();
+        }
+        if let Some(value) = &args.model {
+            self.model = value.clone();
+        }
+        if let Some(value) = &args.effort {
+            self.effort = value.clone();
+        }
+        if let Some(value) = &args.permission {
+            self.permission = value.clone();
+        }
+        if let Some(value) = &args.project {
+            self.project = value.clone();
+        }
+        if let Some(value) = &args.branch {
+            self.branch = value.clone();
+        }
+        if let Some(value) = args.running {
+            self.running = value;
+        }
+        if let Some(value) = args.has_attachment {
+            self.has_attachment = value;
+        }
+        if let Some(value) = &args.status {
+            self.status = value.clone();
+        }
+        if let Some(value) = &args.choice {
+            self.choice = value.clone();
+        }
+        if let Some(value) = &args.button_variant {
+            self.button_variant = value.clone();
+        }
+        if let Some(value) = &args.button_size {
+            self.button_size = value.clone();
+        }
+    }
+}
+
+fn configure(event: On<UiInput<GalleryConfigureRequest>>, mut previews: Query<&mut Preview>) {
+    let Ok(mut preview) = previews.get_mut(event.webview) else {
+        return;
+    };
+    if preview.revision != event.payload.revision || !preview.allows_args(&event.payload.args) {
+        return;
+    }
+    preview.apply_args(&event.payload.args);
+    preview.record("GalleryConfigureRequest");
+}
+
+fn preset(event: On<UiInput<GalleryPresetRequest>>, mut previews: Query<&mut Preview>) {
+    let Ok(mut preview) = previews.get_mut(event.webview) else {
+        return;
+    };
+    if preview.revision != event.payload.revision {
+        return;
+    }
+    let definition = preview.definition();
+    let Some(selected) = definition.presets.get(event.payload.index) else {
+        return;
+    };
+    if !preview.allows_args(&selected.args) {
+        return;
+    }
+    let story = preview.story;
+    preview.reset(story);
+    preview.apply_args(&selected.args);
+    preview.record("GalleryPresetRequest");
+}
+
 type ChangedViews<'w, 's> = Query<
     'w,
     's,
@@ -677,9 +860,185 @@ fn publish(previews: ChangedViews, mut commands: Commands) {
         ));
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registered_ron_definitions_decode_and_accept_every_named_preset() {
+        let mut app = App::new();
+        app.add_plugins(PreviewPlugin);
+        for story in Story::ALL {
+            let page = app
+                .world_mut()
+                .spawn((
+                    PageMetadata {
+                        url: story.url(),
+                        ..Default::default()
+                    },
+                    Preview::default(),
+                ))
+                .id();
+            let preview = app.world().get::<Preview>(page).unwrap();
+            let definition = preview.definition();
+            assert!(
+                preview.allows_args(&definition.defaults),
+                "{}",
+                story.name()
+            );
+            for (index, preset) in definition.presets.iter().enumerate() {
+                let revision = app.world().get::<Preview>(page).unwrap().revision;
+                app.world_mut().trigger(UiInput {
+                    webview: page,
+                    payload: GalleryPresetRequest { revision, index },
+                });
+                app.update();
+                let preview = app.world().get::<Preview>(page).unwrap();
+                assert_eq!(
+                    preview.revision,
+                    revision + 1,
+                    "rejected RON preset: {} / {}",
+                    story.name(),
+                    preset.name,
+                );
+            }
+            app.world_mut().despawn(page);
+        }
+    }
+
+    #[test]
+    fn colocated_ron_presets_apply_typed_conditions_and_reset_prior_args() {
+        let mut app = App::new();
+        app.add_plugins(PreviewPlugin);
+        let page = app.world_mut().spawn(Preview::default()).id();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryConfigureRequest {
+                revision: 0,
+                args: ArgsPatch {
+                    text: Some("Prior content".into()),
+                    ..Default::default()
+                },
+            },
+        });
+        let definition = app.world().get::<Preview>(page).unwrap().definition();
+        let index = definition
+            .presets
+            .iter()
+            .position(|preset| preset.name == "DisabledOutline")
+            .expect("required Button preset");
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryPresetRequest { revision: 0, index },
+        });
+        app.update();
+        let preview = app.world().get::<Preview>(page).unwrap();
+        assert!(preview.disabled);
+        assert_eq!(preview.text, "Disabled preview");
+        assert_eq!(preview.button_variant, "outline");
+        assert_eq!(preview.button_size, "md");
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryPresetRequest {
+                revision: 1,
+                index: 0,
+            },
+        });
+        app.update();
+        let preview = app.world().get::<Preview>(page).unwrap();
+        assert!(!preview.disabled);
+        assert!(preview.text.is_empty());
+    }
+
+    #[test]
+    fn controls_change_multiple_conditions_while_the_preview_is_disabled() {
+        let mut app = App::new();
+        app.add_plugins(PreviewPlugin);
+        let page = app.world_mut().spawn(Preview::default()).id();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryConfigureRequest {
+                revision: 0,
+                args: ArgsPatch {
+                    disabled: Some(true),
+                    text: Some("Disabled preview".into()),
+                    model: Some("fast".into()),
+                    has_attachment: Some(true),
+                    ..Default::default()
+                },
+            },
+        });
+        app.update();
+        let preview = app.world().get::<Preview>(page).unwrap();
+        assert!(preview.disabled && preview.has_attachment);
+        assert_eq!(preview.text, "Disabled preview");
+        assert_eq!(preview.model, "fast");
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryTextRequest {
+                revision: 0,
+                text: "interactive input".into(),
+            },
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<Preview>(page).unwrap().text,
+            "Disabled preview"
+        );
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryConfigureRequest {
+                revision: 0,
+                args: ArgsPatch {
+                    text: Some("should not apply".into()),
+                    model: Some("unknown".into()),
+                    ..Default::default()
+                },
+            },
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<Preview>(page).unwrap().text,
+            "Disabled preview"
+        );
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GalleryConfigureRequest {
+                revision: 0,
+                args: ArgsPatch {
+                    text: Some("Controls still work".into()),
+                    ..Default::default()
+                },
+            },
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<Preview>(page).unwrap().text,
+            "Controls still work"
+        );
+    }
+
+    #[test]
+    fn every_gallery_link_is_claimed_by_the_registered_host() {
+        let mut app = App::new();
+        app.add_plugins(GalleryPlugin);
+        let mut registered = app.world_mut().query::<&vmux_ecs::page::HostedPage>();
+        for story in Story::ALL {
+            let url = story.url();
+            assert!(
+                registered
+                    .iter(app.world())
+                    .any(|page| page.answers_for(&url)),
+                "unregistered gallery link: {url}",
+            );
+        }
+        assert!(
+            !registered
+                .iter(app.world())
+                .any(|page| page.answers_for("vmux://uis/favicon")),
+        );
+    }
 
     #[test]
     fn component_routes_drive_selection_and_discard_stale_preview_callbacks() {

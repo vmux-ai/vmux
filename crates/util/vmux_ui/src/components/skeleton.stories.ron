@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "skeleton",
+    title: "Skeleton",
+    components: ["Skeleton"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

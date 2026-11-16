@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "file-tree",
+    title: "FileTree",
+    components: ["FileTree", "FileTreeSkeleton", "FileTreeHeader", "FileTreeScroller", "FileTreeRowGroup", "FileTreeChildren", "FileTreeRow"],
+    controls: ["disabled", "checked", "choice"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

@@ -1246,6 +1246,7 @@ container-vm = آلة افتراضية
 
 gallery-title = مكوّنات الواجهة
 gallery-description = معاينة المكوّنات المشتركة في بيئة الصفحة الأصلية.
+gallery-controls = المعاملات / عناصر التحكم
 gallery-reset = إعادة ضبط
 gallery-search = البحث عن المكوّنات
 gallery-disabled = معطّل

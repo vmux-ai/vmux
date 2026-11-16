@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "select",
+    title: "Select",
+    components: ["Select", "SelectTrigger", "SelectValue", "SelectList", "SelectGroup", "SelectOption", "SelectItemIndicator"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

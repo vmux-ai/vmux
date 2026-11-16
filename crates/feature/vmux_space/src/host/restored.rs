@@ -4,6 +4,7 @@ use bevy_world_serialization::{DynamicEntity, DynamicWorld};
 use std::any::TypeId;
 use std::collections::HashSet;
 use vmux_ecs::{Cwd, PageMetadata};
+use vmux_session::AgentId;
 
 pub(super) struct Snapshot(pub(super) DynamicWorld);
 
@@ -12,7 +13,7 @@ impl Snapshot {
         let owners: HashSet<Entity> = self.0.entities.iter().map(|entity| entity.entity).collect();
         let mut discarded = HashSet::new();
         for entity in &self.0.entities {
-            if StoredPage(entity).is_orphan(&owners) {
+            if StoredPage(entity).is_orphan(&owners) || StoredAgent(entity).is_orphan(&owners) {
                 discarded.insert(entity.entity);
             }
         }
@@ -52,13 +53,45 @@ impl Snapshot {
         }
         warn!(
             count = discarded.len(),
-            "Discarded saved transient page metadata with missing owners"
+            "Discarded saved transient metadata with missing owners"
         );
         Ok(self.0)
     }
 }
 
 struct StoredPage<'a>(&'a DynamicEntity);
+
+struct StoredAgent<'a>(&'a DynamicEntity);
+
+impl StoredAgent<'_> {
+    fn is_orphan(&self, owners: &HashSet<Entity>) -> bool {
+        if self.0.components.len() != 3 {
+            return false;
+        }
+        let mut agent = false;
+        let mut parent = None;
+        let mut children = None;
+        for component in &self.0.components {
+            let Some(info) = component.get_represented_type_info() else {
+                return false;
+            };
+            if info.type_id() == TypeId::of::<AgentId>() {
+                agent = true;
+            } else if info.type_id() == TypeId::of::<ChildOf>() {
+                parent = ChildOf::from_reflect(component.as_partial_reflect())
+                    .map(|value| value.parent());
+            } else if info.type_id() == TypeId::of::<Children>() {
+                children = Children::from_reflect(component.as_partial_reflect());
+            } else {
+                return false;
+            }
+        }
+        let (Some(parent), Some(children)) = (parent, children) else {
+            return false;
+        };
+        agent && !owners.contains(&parent) && children.iter().all(|child| !owners.contains(&child))
+    }
+}
 
 impl StoredPage<'_> {
     fn is_orphan(&self, owners: &HashSet<Entity>) -> bool {
@@ -93,6 +126,56 @@ mod tests {
     use bevy::ecs::relationship::RelationshipTarget;
     use vmux_ecs::store::WorkspaceRestoreValidator;
     use vmux_session::{Session, SessionId};
+
+    #[test]
+    fn recovery_discards_only_empty_orphaned_agent_scaffolds() {
+        let mut world = World::new();
+        let missing = world.spawn_empty().id();
+        let absent_child = world.spawn_empty().id();
+        let discarded = world.spawn_empty().id();
+        let retained = world.spawn_empty().id();
+        let saved_child = world.spawn_empty().id();
+        let snapshot = DynamicWorld {
+            resources: Vec::new(),
+            entities: vec![
+                DynamicEntity {
+                    entity: discarded,
+                    components: vec![
+                        Box::new(AgentId("codex-acp".into())),
+                        Box::new(ChildOf(missing)),
+                        Box::new(Children::from_collection_risky(vec![absent_child])),
+                    ],
+                },
+                DynamicEntity {
+                    entity: retained,
+                    components: vec![
+                        Box::new(AgentId("saved".into())),
+                        Box::new(ChildOf(missing)),
+                        Box::new(Children::from_collection_risky(vec![saved_child])),
+                    ],
+                },
+                DynamicEntity {
+                    entity: saved_child,
+                    components: vec![Box::new(Name::new("Saved content"))],
+                },
+            ],
+        };
+        let recovered = Snapshot(snapshot).recover().unwrap();
+        assert_eq!(
+            recovered
+                .entities
+                .iter()
+                .map(|entity| entity.entity)
+                .collect::<HashSet<_>>(),
+            HashSet::from([retained, saved_child]),
+        );
+        assert!(
+            (WorkspaceRestoreValidator::ownership::<vmux_layout::space::Space>().validate)(
+                &recovered
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn recovery_drops_only_orphaned_runtime_pages_and_preserves_session_children() {

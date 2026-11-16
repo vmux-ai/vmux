@@ -1243,6 +1243,7 @@ container-vm = 虚拟机
 
 gallery-title = UI 组件
 gallery-description = 在原生页面环境中预览共享组件。
+gallery-controls = 参数 / 控件
 gallery-reset = 重置
 gallery-search = 搜索组件
 gallery-disabled = 禁用

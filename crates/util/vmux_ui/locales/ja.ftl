@@ -1226,6 +1226,7 @@ container-vm = VM
 
 gallery-title = UI コンポーネント
 gallery-description = ネイティブページ環境で共通コンポーネントを確認します。
+gallery-controls = 引数 / コントロール
 gallery-reset = リセット
 gallery-search = コンポーネントを検索
 gallery-disabled = 無効

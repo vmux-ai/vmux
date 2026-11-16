@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "project-picker",
+    title: "ProjectPicker",
+    components: ["ProjectSelectTrigger", "ProjectSelectPopup", "ProjectPicker", "BranchPicker"],
+    controls: ["disabled", "menu", "cursor", "project"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

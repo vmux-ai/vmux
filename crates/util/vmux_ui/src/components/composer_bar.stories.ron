@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "composer-bar",
+    title: "ComposerBar",
+    components: ["StatusDot", "ComposerStatus", "WorkspaceBadges", "ComposerBar", "ComposerMenus", "ComposerChipIcon"],
+    controls: ["disabled", "menu", "cursor", "agent", "model", "effort", "permission", "project", "branch", "status"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "alert-dialog",
+    title: "AlertDialog",
+    components: ["AlertDialogRoot", "AlertDialogContent", "AlertDialogTitle", "AlertDialogDescription", "AlertDialogActions", "AlertDialogCancel", "AlertDialogAction"],
+    controls: ["disabled", "dialog_open"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

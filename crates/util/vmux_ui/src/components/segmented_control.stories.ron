@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "segmented-control",
+    title: "SegmentedControl",
+    components: ["SegmentedControl"],
+    controls: ["disabled", "choice"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

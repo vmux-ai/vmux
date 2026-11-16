@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "switch",
+    title: "Switch",
+    components: ["Switch", "SwitchThumb"],
+    controls: ["disabled", "checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)
