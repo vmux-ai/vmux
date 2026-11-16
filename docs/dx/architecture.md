@@ -42,6 +42,18 @@ The desktop hosts pages and native integration. Background services retain proce
 
 ### ECS ownership boundaries
 
+The desktop component catalog at `vmux://ui/` is an ordinary registered native page.
+`GalleryPlugin` composes hosted-page registration, typed IPC input, and `PreviewPlugin`.
+Each hosted surface owns its transient preview values and publishes `GalleryUiState` snapshots
+and patches; the Dioxus examples display those values and emit separate typed intents.
+The story discriminator is one canonical scalar on the preview, rather than a command union.
+Selection and reset replace the example and retire its local Dioxus state. Invalid or disabled
+input is refused by the preview observers, and revision checks reject callbacks from replaced
+examples. No preview values persist or mutate real project
+data. The search draft belongs to the mounted catalog renderer; component and variant names
+and the event inspector are technical diagnostic output. Normal application theme and locale
+projections apply to the catalog as to every other native page.
+
 Canonical entities own domain state and accepted operations. Registered systems own selection, reconciliation, queues and transitions. Resources represent global facts; indexes and UI views derive from canonical state. Independent operations use separate typed requests.
 
 Adapters translate foreign input or perform bounded filesystem, network, process and native IO. They do not retain a parallel business model or hide workflows. Native input enters ECS before shortcut or capture decisions. Native handles may stay in an adapter until delivery and cleanup finish.

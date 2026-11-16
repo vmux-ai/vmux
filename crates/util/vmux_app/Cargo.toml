@@ -43,6 +43,7 @@ desktop = [
     "editor",
     "extension",
     "git",
+    "gallery",
     "history",
     "knowledge",
     "layout",
@@ -114,6 +115,7 @@ acp = [
 knowledge = ["runtime", "dep:vmux_knowledge"]
 history = ["runtime", "dep:vmux_history"]
 simulator = ["layout-runtime", "dep:vmux_simulator"]
+gallery = ["layout-runtime", "dep:vmux_gallery"]
 shortcut = ["runtime", "dep:vmux_shortcut"]
 team = ["runtime", "profile-account", "dep:vmux_team"]
 space = ["layout-runtime", "dep:vmux_space"]
@@ -136,6 +138,7 @@ vmux_editor = { path = "../../feature/vmux_editor", optional = true }
 vmux_extension = { path = "../../feature/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
 vmux_git = { path = "../../feature/vmux_git", optional = true }
+vmux_gallery = { path = "../../feature/vmux_gallery", optional = true }
 vmux_history = { path = "../../feature/vmux_history", optional = true }
 vmux_input = { path = "../../feature/vmux_input", optional = true }
 vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }

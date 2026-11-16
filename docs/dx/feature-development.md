@@ -19,6 +19,19 @@ vmux run my-vmux
 
 Open Terminal and check that ordinary text is bold. This is a small CSS change with an obvious result; remove the line to undo it.
 
+## Preview shared UI components
+
+Open `vmux://ui/` in the desktop address bar, or search for `storybook` in the command bar.
+The component catalog renders the actual `vmux_ui` controls through the same native page
+and IPC path as other Vmux pages. Choose a component, try its variants, toggle disabled
+state, and inspect the last accepted event and current values. Reset restores the selected
+example, including its internal component state. Resize the pane to check smaller layouts;
+appearance and language follow the application's settings.
+
+The catalog lives in `crates/feature/vmux_gallery`. Add examples there while keeping reusable
+controls in `crates/util/vmux_ui`. It is a desktop feature: it does not require a web server,
+a separate renderer, or a remote service.
+
 ## Follow a behavior change
 
 Open `crates/feature/vmux_setting/src/ui.rs` and find `Page`, the Settings screen. Its `rsx!` markup is similar to JSX: it renders HTML-like elements and other components. The search input has this callback:
