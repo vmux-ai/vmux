@@ -371,6 +371,10 @@ mod profile_tests {
 mod account_tests {
     use super::*;
     use bevy_app::Update;
+    use bevy_ecs::prelude::*;
+    use std::collections::BTreeMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use vmux_feature::snapshot::Document;
 
     #[test]
     fn cloud_composition_revokes_availability_without_an_accepted_release_snapshot() {
@@ -394,11 +398,6 @@ mod account_tests {
 
     #[test]
     fn cloud_gate_keeps_its_release_source_when_administration_adds_another_provider() {
-        use bevy_ecs::prelude::*;
-        use std::collections::BTreeMap;
-        use std::time::{SystemTime, UNIX_EPOCH};
-        use vmux_feature::snapshot::Document;
-
         let mut app = App::new();
         app.add_plugins(VmuxPlugin::builder().jobs(true).account_cloud(true).build());
         #[cfg(feature = "feature-flags")]
