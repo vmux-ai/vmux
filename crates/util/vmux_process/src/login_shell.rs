@@ -65,6 +65,9 @@ impl LoginShellEnvironment {
                     | "XDG_CACHE_HOME"
                     | "XDG_DATA_HOME"
                     | "XDG_STATE_HOME"
+                    | "CODEX_HOME"
+                    | "CLAUDE_CONFIG_DIR"
+                    | "CLAUDE_SECURESTORAGE_CONFIG_DIR"
                     | "VIBE_HOME"
                     | "VIBE_TEST_DISABLE_KEYRING"
             ) {
@@ -151,6 +154,16 @@ impl LoginShellEnvironment {
             home.join(".vibe").to_string_lossy().into_owned(),
         ));
         environment.push(("VIBE_TEST_DISABLE_KEYRING".into(), "1".into()));
+        environment.push((
+            "CODEX_HOME".into(),
+            home.join(".codex").to_string_lossy().into_owned(),
+        ));
+        for key in ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"] {
+            environment.push((
+                key.into(),
+                home.join(".claude").to_string_lossy().into_owned(),
+            ));
+        }
         environment.push((
             "XDG_CONFIG_HOME".into(),
             home.join(".config").to_string_lossy().into_owned(),
@@ -344,6 +357,9 @@ mod tests {
                 .envs(environment.clone())
                 .env("HOME", "/personal")
                 .env("XDG_CONFIG_HOME", "/personal/config")
+                .env("CODEX_HOME", "/personal/codex")
+                .env("CLAUDE_CONFIG_DIR", "/personal/claude")
+                .env("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/personal/credentials")
                 .env("VIBE_HOME", "/personal/vibe")
                 .env("VIBE_TEST_DISABLE_KEYRING", "0")
                 .env("BROWSER", "scoped-browser-command");
@@ -353,6 +369,10 @@ mod tests {
             let output = String::from_utf8(result.stdout).unwrap();
             assert!(output.contains(&format!("VIBE_HOME={}\n", home.join(".vibe").display())));
             assert!(output.contains("VIBE_TEST_DISABLE_KEYRING=1\n"));
+            assert!(output.contains(&format!("CODEX_HOME={}\n", home.join(".codex").display())));
+            for key in ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"] {
+                assert!(output.contains(&format!("{key}={}\n", home.join(".claude").display())));
+            }
             assert!(output.contains("BROWSER=scoped-browser-command\n"));
             assert!(!output.contains("/personal"));
         }
