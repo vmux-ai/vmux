@@ -8,7 +8,7 @@
   --foreground: oklch(0.19 var(--surface-chroma) var(--surface-hue));
   --card: oklch(0.985 var(--surface-chroma) var(--surface-hue));
   --popover: oklch(1 var(--surface-chroma) var(--surface-hue));
-  --primary: oklch(0.646 0.222 41.116);
+  --primary: var(--primary-action-foreground);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.925 var(--surface-chroma) var(--surface-hue));
   --secondary-foreground: oklch(0.22 var(--surface-chroma) var(--surface-hue));
@@ -74,7 +74,7 @@
   --foreground: oklch(0.94 var(--surface-chroma) var(--surface-hue));
   --card: oklch(0.235 var(--surface-chroma) var(--surface-hue));
   --popover: oklch(0.285 var(--surface-chroma) var(--surface-hue));
-  --primary: oklch(0.75 0.183 55.934);
+  --primary: var(--primary-action-foreground);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.27 var(--surface-chroma) var(--surface-hue));
   --secondary-foreground: oklch(0.94 var(--surface-chroma) var(--surface-hue));
@@ -361,6 +361,11 @@
   display: none;
 }
 
+.vmux-primary-fill {
+  background: linear-gradient(135deg, var(--primary-action-start), var(--primary-action-middle), var(--primary-action-end));
+  color: #fff;
+}
+
 .vmux-primary-action {
   position: relative;
   background: transparent;
@@ -373,6 +378,21 @@
 
 .vmux-primary-action:active {
   transform: scale(0.98);
+}
+
+.vmux-primary-action[role="option"] {
+  transition: background-color 80ms ease-out;
+}
+
+.vmux-primary-action[role="option"]:active {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vmux-primary-action[role="option"] {
+    transition: none;
+  }
 }
 
 .vmux-primary-action::before {

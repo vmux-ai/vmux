@@ -3,6 +3,7 @@ use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkAddRequest, BookmarkPinUrlRequest};
 use vmux_ecs::PageMetadata;
 use vmux_ui::components::avatar::IdentityOrb;
+use vmux_ui::components::browser::ExternalBrowserMenuItem;
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
@@ -166,6 +167,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
+                ExternalBrowserMenuItem { url: stack.url.clone(), index: pin_index + 1 }
             }
         }
     }

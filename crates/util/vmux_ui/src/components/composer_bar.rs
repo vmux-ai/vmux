@@ -25,6 +25,8 @@ const COMPOSER_CHIP_SKELETON: &str = "h-2.5 rounded bg-muted-foreground/15";
 #[derive(Clone, PartialEq, Props)]
 pub struct ComposerBarProps {
     pub opened: Option<ComposerMenuKind>,
+    #[props(default = true)]
+    pub compact: bool,
     #[props(default)]
     pub agent: Option<ComposerChip>,
     #[props(default)]
@@ -166,6 +168,7 @@ pub fn WorkspaceBadges(
 pub fn ComposerBar(props: ComposerBarProps) -> Element {
     let ComposerBarProps {
         opened,
+        compact,
         agent,
         model,
         effort,
@@ -187,29 +190,29 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                 if let Some(chip) = agent {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Agent,
-                        chip,
+                        chip, compact,
                         open: opened == Some(ComposerMenuKind::Agent),
                     }
                 }
                 if let Some(chip) = model {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Model,
-                        chip,
+                        chip, compact,
                         open: opened == Some(ComposerMenuKind::Model),
                     }
                 }
                 if let Some(chip) = effort {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Effort,
-                        chip,
+                        chip, compact,
                         open: opened == Some(ComposerMenuKind::Effort),
                     }
                 }
                 if let Some(chip) = project {
-                    ComposerChipSlot { kind: ComposerMenuKind::Project, chip, open: opened == Some(ComposerMenuKind::Project) }
+                    ComposerChipSlot { kind: ComposerMenuKind::Project, chip, compact, open: opened == Some(ComposerMenuKind::Project) }
                 }
                 if let Some(chip) = branch {
-                    ComposerChipSlot { kind: ComposerMenuKind::Branch, chip, open: opened == Some(ComposerMenuKind::Branch) }
+                    ComposerChipSlot { kind: ComposerMenuKind::Branch, chip, compact, open: opened == Some(ComposerMenuKind::Branch) }
                 }
                 WorkspaceBadges {
                     is_git_repo,
@@ -222,7 +225,7 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                 if let Some(chip) = permission {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Permission,
-                        chip,
+                        chip, compact,
                         open: opened == Some(ComposerMenuKind::Permission),
                     }
                 }
@@ -392,10 +395,23 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
 }
 
 #[component]
-fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> Element {
+fn ComposerChipSlot(
+    kind: ComposerMenuKind,
+    chip: ComposerChip,
+    open: bool,
+    #[props(default = true)] compact: bool,
+) -> Element {
     if chip.loading {
         let width = kind.skeleton_width();
-        let label_class = cn([COMPOSER_CHIP_SKELETON, COMPOSER_CHIP_LABEL_TIGHT, width]);
+        let label_class = cn([
+            COMPOSER_CHIP_SKELETON,
+            if compact {
+                COMPOSER_CHIP_LABEL_TIGHT
+            } else {
+                ""
+            },
+            width,
+        ]);
         return rsx! {
             span { class: COMPOSER_CHIP,
                 ComposerChipIcon { kind }
@@ -412,7 +428,14 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
         };
     }
     let label_class = kind.label_class();
-    let label_class = cn([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
+    let label_class = cn([
+        label_class,
+        if compact {
+            COMPOSER_CHIP_LABEL_TIGHT
+        } else {
+            ""
+        },
+    ]);
     let icon = match chip.visual.clone() {
         ComposerChipVisual::Kind => rsx! { ComposerChipIcon { kind } },
         ComposerChipVisual::Agent { icon, seed } => {
@@ -472,6 +495,8 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
         button {
             class: chip_class,
             title: "{chip.title}",
+            aria_label: "{chip.title}",
+            r#type: "button",
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_open.call(()),
             {icon}

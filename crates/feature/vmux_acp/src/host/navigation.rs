@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -10,7 +12,6 @@ use vmux_ecs::{
     Cwd, EntityTarget, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet,
     PageOpenTask, PendingPrompt, PendingPromptAttachments, UiState, UiStateWriter,
 };
-use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
 use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
@@ -56,7 +57,9 @@ impl bevy::prelude::Plugin for NavigationPlugin {
                     start_workspace_checks,
                     release_transition,
                     discard_stale_inline_transitions,
-                    prepare,
+                    prepare_transition,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    prepare_workspace,
                     open,
                 )
                     .chain()
@@ -76,7 +79,8 @@ pub(super) struct PreparingAgentChatView;
 fn retry(
     trigger: On<UiInput<ChatRetrySession>>,
     views: Query<&ChildOf, With<SessionView>>,
-    targets: Query<&EntityTarget<Session>>,
+    targets: Query<(&EntityTarget<Session>, Has<vmux_session::host::SetupTarget>)>,
+    setup_views: Query<(), With<vmux_session::host::SetupView>>,
     sessions: Query<&SessionId, With<Session>>,
     mut opens: MessageWriter<vmux_ecs::PageOpenRequest>,
     mut preferences: MessageWriter<vmux_session::preferences::RetryPreferences>,
@@ -85,7 +89,7 @@ fn retry(
     let Ok(parent) = views.get(trigger.event().webview) else {
         return;
     };
-    let Ok(target) = targets.get(parent.parent()) else {
+    let Ok((target, setup_target)) = targets.get(parent.parent()) else {
         return;
     };
     let Ok(id) = sessions.get(target.entity()) else {
@@ -107,7 +111,11 @@ fn retry(
         .insert(RetryRequested);
     opens.write(vmux_ecs::PageOpenRequest {
         target: vmux_ecs::PageOpenTarget::Stack(parent.parent()),
-        url: Route::Session(id.clone()).url(),
+        url: if setup_target || setup_views.contains(trigger.event().webview) {
+            Route::Setup.url()
+        } else {
+            Route::Session(id.clone()).url()
+        },
         request_id: None,
     });
 }
@@ -242,6 +250,11 @@ fn ancestor_tab_entity(
 
 fn target_metadata(route: &Route, url: &str) -> PageMetadata {
     match route {
+        Route::Setup => PageMetadata {
+            url: Route::Setup.url(),
+            title: translate("onboarding-setup"),
+            ..default()
+        },
         Route::Manager => PageMetadata {
             url: Route::manager_url(url).unwrap_or_else(|| Route::Manager.url()),
             title: translate("sessions-title"),
@@ -260,26 +273,12 @@ fn target_metadata(route: &Route, url: &str) -> PageMetadata {
     }
 }
 
-fn prepare(
+fn prepare_transition(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     manager_views: Query<(Entity, &ChildOf), With<SessionManagerView>>,
     projection: TransitionProjection,
-    workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
-    child_of: Query<&ChildOf>,
-    space_hierarchy: vmux_layout::space::SpaceHierarchy,
-    mut tabs: Query<(
-        Entity,
-        &mut Tab,
-        Option<&TabWorkspace>,
-        Option<&TabWorktree>,
-        Option<&TabWorktreeReady>,
-        Option<&TabDirDecided>,
-    )>,
-    settings: Option<Res<AppSettings>>,
-    active_space: FocusedSpace,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -297,6 +296,9 @@ fn prepare(
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
+        if matches!(route, Route::Setup) {
+            continue;
+        }
         let transition = transitions.get(task.stack).ok();
         let transition_view = transition.map(|transition| transition.webview).or_else(|| {
             matches!(route, Route::Session(_) | Route::Provider { .. })
@@ -337,7 +339,34 @@ fn prepare(
                 .insert((PageOpenDeferred, AwaitingAgentTransitionPaint));
             continue;
         }
-        if matches!(route, Route::Manager | Route::Provider { .. }) {
+    }
+}
+
+fn prepare_workspace(
+    tasks: Query<(Entity, &PageOpenTask), (PendingPageOpen, Without<AwaitingAgentTransitionPaint>)>,
+    pending: Query<(), With<TabWorktreePending>>,
+    workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
+    child_of: Query<&ChildOf>,
+    workspace: AgentPageOpenWorkspace,
+    mut tabs: Query<(
+        Entity,
+        &mut Tab,
+        Option<&TabWorkspace>,
+        Option<&TabWorktree>,
+        Option<&TabWorktreeReady>,
+        Option<&TabDirDecided>,
+    )>,
+    settings: Option<Res<AppSettings>>,
+    mut commands: Commands,
+) {
+    for (task_entity, task) in &tasks {
+        let Some(route) = Route::parse(&task.url) else {
+            continue;
+        };
+        if matches!(
+            route,
+            Route::Manager | Route::Provider { .. } | Route::Setup
+        ) {
             continue;
         }
         if workspace_checks.contains(task_entity) {
@@ -353,13 +382,10 @@ fn prepare(
             ));
             continue;
         }
-        let configured_project_dir = settings.as_deref().and_then(|settings| {
-            let space_id = space_hierarchy
-                .id(task.stack)
-                .or_else(|| active_space.id().map(str::to_string))?;
-            vmux_setting::StartupDir::resolve(settings, &space_id, None)
-                .map(|dir| dir.path.to_string_lossy().into_owned())
-        });
+        let configured_project_dir = settings
+            .as_deref()
+            .and_then(|settings| workspace.startup_dir(task.stack, settings))
+            .map(|dir| dir.path.to_string_lossy().into_owned());
         let Ok((_, mut tab, workspace, metadata, ready, decided)) = tabs.get_mut(tab_entity) else {
             continue;
         };
@@ -521,46 +547,17 @@ fn open(
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
-        let default_cwd = if matches!(route, Route::Manager | Route::Provider { .. }) {
-            PathBuf::new()
-        } else {
-            let tab = opener.tab(task.stack);
-            let tab_dir = tab
-                .as_ref()
-                .and_then(|(_, startup_dir)| startup_dir.clone());
-            let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
-            let restored_cwd = restoring
-                .then(|| launches.get(task.stack).ok())
-                .flatten()
-                .map(|launch| PathBuf::from(&launch.cwd));
-            if let Some(cwd) = restored_cwd {
-                cwd
-            } else {
-                match vmux_space::WorkspaceCwd::from_tab(tab_dir.as_deref()) {
-                    Ok(Some(path)) => path,
-                    Ok(None) => match space_startup_dir {
-                        Some(dir) => dir.path,
-                        None => match projects.path() {
-                            Ok(path) => path.to_path_buf(),
-                            Err(message) => {
-                                opener
-                                    .commands
-                                    .entity(entity)
-                                    .insert(PageOpenError { message });
-                                continue;
-                            }
-                        },
-                    },
-                    Err(message) => {
-                        opener
-                            .commands
-                            .entity(entity)
-                            .insert(PageOpenError { message });
-                        continue;
-                    }
+        let default_cwd =
+            match workspace.cwd(&route, task.stack, restoring, &opener, &launches, &projects) {
+                Ok(cwd) => cwd,
+                Err(message) => {
+                    opener
+                        .commands
+                        .entity(entity)
+                        .insert(PageOpenError { message });
+                    continue;
                 }
-            }
-        };
+            };
         let (initial_prompt, initial_attachments) = open_q
             .p1()
             .get(task.stack)
@@ -842,6 +839,236 @@ mod tests {
     use super::*;
     use crate::host::acp::registry::Distribution;
 
+    struct SetupRouting {
+        app: App,
+        stack: Entity,
+        spare: Entity,
+    }
+
+    impl SetupRouting {
+        fn new(ready: bool) -> Self {
+            let mut registration = App::new();
+            registration
+                .add_plugins((vmux_start::StartPlugin, vmux_session::SessionPlugin))
+                .insert_resource(AppSettings::default());
+            registration.world_mut().run_schedule(bevy::app::PreStartup);
+            registration.world_mut().run_schedule(bevy::app::Startup);
+            let pools: Vec<_> = registration
+                .world_mut()
+                .query::<&vmux_ecs::page::PrewarmPage>()
+                .iter(registration.world())
+                .cloned()
+                .collect();
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_session::DomainPlugin,
+                vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
+                vmux_ecs::UiStatePlugin::<SessionDetailUiState>::default(),
+                vmux_layout::warm_page::PrewarmPagesPlugin,
+                super::NavigationPlugin,
+                super::super::attach::AttachPlugin,
+            ))
+            .insert_resource(AppSettings::default())
+            .add_message::<SwapStackSession>()
+            .add_message::<vmux_ecs::PageOpenRequest>();
+            let pool_count: usize = pools.iter().map(|pool| pool.pool_size).sum();
+            for pool in pools {
+                app.world_mut().spawn(pool);
+            }
+            let host = app.world_mut().spawn_empty().id();
+            let shell = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::window::VmuxWindow,
+                    bevy_cef::prelude::HostWindow(host),
+                ))
+                .id();
+            app.world_mut().spawn((
+                vmux_layout::cef::LayoutCef,
+                vmux_ecs::page::PageReady {},
+                ChildOf(shell),
+            ));
+            let stack = app.world_mut().spawn(ChildOf(shell)).id();
+            for _ in 0..pool_count {
+                app.update();
+            }
+            let spare = app
+                .world_mut()
+                .query_filtered::<
+                    (Entity, &PageMetadata),
+                    With<vmux_layout::warm_page::WarmPageSpare>,
+                >()
+                .iter(app.world())
+                .find(|(_, metadata)| metadata.url == Route::Setup.url())
+                .unwrap()
+                .0;
+            if ready {
+                app.world_mut()
+                    .entity_mut(spare)
+                    .insert(vmux_ecs::page::PageReady {});
+            }
+            Self { app, stack, spare }
+        }
+
+        fn open(&mut self) -> Entity {
+            let id = vmux_ecs::PageOpenId::new();
+            self.app
+                .world_mut()
+                .entity_mut(self.stack)
+                .insert(vmux_ecs::PageNavigation::new(id));
+            let task = self
+                .app
+                .world_mut()
+                .spawn(PageOpenTask {
+                    id,
+                    stack: self.stack,
+                    url: Route::Setup.url(),
+                    request_id: None,
+                })
+                .id();
+            self.app.update();
+            self.app.update();
+            task
+        }
+
+        fn view(&mut self) -> Entity {
+            self.app
+                .world_mut()
+                .query::<(Entity, &ChildOf, &PageMetadata)>()
+                .iter(self.app.world())
+                .find(|(_, parent, metadata)| {
+                    parent.parent() == self.stack && metadata.url == Route::Setup.url()
+                })
+                .unwrap()
+                .0
+        }
+    }
+
+    #[test]
+    fn selecting_an_agent_attaches_the_session_in_the_reused_setup_page() {
+        let mut fixture = SetupRouting::new(true);
+        fixture.open();
+        let view = fixture.view();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(view)
+            .insert(vmux_session::host::SetupView);
+        fixture
+            .app
+            .world_mut()
+            .spawn(registry_agent("mistral-vibe", "Mistral Vibe", None));
+        let session = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("vibe-setup".into()),
+                Name::new("New session"),
+                Cwd(PathBuf::from("/tmp")),
+                AgentId("mistral-vibe".into()),
+                vmux_session::SetupPending,
+                PromptQueue::default(),
+            ))
+            .id();
+        fixture.app.world_mut().entity_mut(fixture.stack).insert((
+            EntityTarget::<Session>::new(session),
+            vmux_session::host::SetupTarget,
+        ));
+        let task = fixture.open();
+        assert!(fixture.app.world().get::<PageOpenHandled>(task).is_some());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::ProcessAnchor>(session)
+                .is_some()
+        );
+        assert!(matches!(
+            fixture.app.world().get::<vmux_session::RunState>(session),
+            Some(vmux_session::RunState::Idle)
+        ));
+        assert_eq!(fixture.view(), view);
+        assert!(fixture.app.world().get::<SessionView>(view).is_some());
+        assert_eq!(
+            fixture.app.world().get::<PageMetadata>(view).unwrap().url,
+            "vmux://start/onboarding/agent"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<PageMetadata>(view)
+                .unwrap()
+                .title
+                .replace(['\u{2068}', '\u{2069}'], ""),
+            "Setup Mistral Vibe"
+        );
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .run_system_once(move |queues: vmux_session::QueuedPrompts| queues.empty(session))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn setup_opens_a_cold_page_when_its_prewarmed_renderer_is_not_ready() {
+        let mut fixture = SetupRouting::new(false);
+        let task = fixture.open();
+        assert!(fixture.app.world().get::<PageOpenHandled>(task).is_some());
+        assert_ne!(fixture.view(), fixture.spare);
+    }
+
+    #[derive(Resource)]
+    struct CaptureTarget(Entity);
+
+    fn capture(
+        target: Res<CaptureTarget>,
+        projection: TransitionProjection,
+        mut commands: Commands,
+    ) {
+        projection.capture(target.0, &mut commands);
+    }
+
+    #[test]
+    fn inline_capture_preserves_the_original_page_through_repeated_prepare_frames() {
+        let mut app = App::new();
+        app.add_systems(Update, capture);
+        let original = PageMetadata {
+            url: Route::Manager.url(),
+            title: "Original page".into(),
+            ..Default::default()
+        };
+        let view = app
+            .world_mut()
+            .spawn((
+                original.clone(),
+                SessionManagerView,
+                UiState::<ChatUiState>::default(),
+            ))
+            .id();
+        app.insert_resource(CaptureTarget(view));
+        app.update();
+        let snapshot = app.world().get::<InlineTransitionSnapshot>(view).unwrap();
+        assert_eq!(snapshot.metadata.as_ref(), Some(&original));
+        assert!(snapshot.session_manager_view);
+        assert!(!snapshot.session_view);
+        assert!(snapshot.chat_state.is_some());
+        app.world_mut().get_mut::<PageMetadata>(view).unwrap().title = "Incoming page".into();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<InlineTransitionSnapshot>(view)
+                .unwrap()
+                .metadata
+                .as_ref(),
+            Some(&original)
+        );
+    }
+
     fn registry_agent(id: &str, name: &str, icon: Option<&str>) -> RegistryAgent {
         RegistryAgent {
             id: id.to_string(),
@@ -965,6 +1192,11 @@ mod tests {
         let target = target_metadata(&Route::parse(&url).unwrap(), &url);
 
         assert_eq!(target.url, url);
+    }
+
+    #[test]
+    fn setup_route_does_not_prepare_a_work_conversation() {
+        assert!(Route::page_metadata(&Route::Setup.url()).is_none());
     }
 
     #[test]
@@ -1260,57 +1492,72 @@ mod tests {
 
     #[test]
     fn retry_reopens_the_same_session_and_preserves_its_resume_identity() {
-        let mut app = App::new();
-        app.add_plugins(super::NavigationPlugin);
-        app.add_message::<vmux_ecs::PageOpenRequest>();
-        let session = app
-            .world_mut()
-            .spawn((
-                Session,
-                SessionId("same-session".into()),
-                AcpSessionId("provider-session".into()),
-                vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
-                crate::host::acp::AcpLaunchStarted,
-                crate::host::acp::AcpSpawnQueued,
-            ))
-            .id();
-        let stack = app
-            .world_mut()
-            .spawn(EntityTarget::<Session>::new(session))
-            .id();
-        let view = app.world_mut().spawn((SessionView, ChildOf(stack))).id();
-        app.world_mut().trigger(UiInput {
-            webview: view,
-            payload: ChatRetrySession,
-        });
-        app.world_mut().flush();
-        assert!(app.world().get::<RetryRequested>(session).is_some());
-        assert!(
-            app.world()
-                .get::<crate::host::acp::AcpSpawnQueued>(session)
-                .is_none()
-        );
-        assert_eq!(
-            app.world().get::<AcpSessionId>(session).unwrap().0,
-            "provider-session"
-        );
-        assert!(
-            app.world()
-                .get::<vmux_ecs::ProcessAnchor>(session)
-                .is_some()
-        );
-        let opens = app
-            .world_mut()
-            .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(opens.len(), 1);
-        assert_eq!(
-            opens[0].url,
-            Route::Session(SessionId("same-session".into())).url()
-        );
-        assert!(
-            matches!(opens[0].target, vmux_ecs::PageOpenTarget::Stack(parent) if parent == stack)
-        );
+        for setup in 0..3 {
+            let mut app = App::new();
+            app.add_plugins(super::NavigationPlugin)
+                .add_message::<vmux_ecs::PageOpenRequest>();
+            let session = app
+                .world_mut()
+                .spawn((
+                    Session,
+                    SessionId("same-session".into()),
+                    AcpSessionId("provider-session".into()),
+                    vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
+                    crate::host::acp::AcpLaunchStarted,
+                    crate::host::acp::AcpSpawnQueued,
+                ))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn(EntityTarget::<Session>::new(session))
+                .id();
+            let view = app.world_mut().spawn((SessionView, ChildOf(stack))).id();
+            if setup == 1 {
+                app.world_mut()
+                    .entity_mut(view)
+                    .insert(vmux_session::host::SetupView);
+            } else if setup == 2 {
+                app.world_mut()
+                    .entity_mut(stack)
+                    .insert(vmux_session::host::SetupTarget);
+            }
+            app.world_mut().trigger(UiInput {
+                webview: view,
+                payload: ChatRetrySession,
+            });
+            app.world_mut().flush();
+            assert!(app.world().get::<RetryRequested>(session).is_some());
+            assert!(
+                app.world()
+                    .get::<crate::host::acp::AcpSpawnQueued>(session)
+                    .is_none()
+            );
+            assert_eq!(
+                app.world().get::<AcpSessionId>(session).unwrap().0,
+                "provider-session"
+            );
+            assert!(
+                app.world()
+                    .get::<vmux_ecs::ProcessAnchor>(session)
+                    .is_some()
+            );
+            let opens = app
+                .world_mut()
+                .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert_eq!(opens.len(), 1);
+            assert_eq!(
+                opens[0].url,
+                if setup == 0 {
+                    Route::Session(SessionId("same-session".into())).url()
+                } else {
+                    Route::Setup.url()
+                }
+            );
+            assert!(
+                matches!(opens[0].target, vmux_ecs::PageOpenTarget::Stack(parent) if parent == stack)
+            );
+        }
     }
 }

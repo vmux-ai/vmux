@@ -1,6 +1,7 @@
 pub use language_icon::LanguageIconPath;
 
 pub mod agent_accent;
+pub mod agent_logo;
 pub mod animation;
 
 pub mod dom;

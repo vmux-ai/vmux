@@ -117,6 +117,7 @@ impl Plugin for SimulatorPlugin {
             )
                 .chain(),
         )
+        .add_systems(PreUpdate, (sync_active_view, ApplyDeferred).chain())
         .add_systems(
             Update,
             (sync_active_view, ApplyDeferred)

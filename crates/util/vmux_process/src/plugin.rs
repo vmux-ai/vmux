@@ -1,5 +1,5 @@
+use bevy::ecs::system::Commands;
 use bevy::ecs::system::SystemParam;
-use bevy::platform::cell::SyncCell;
 use bevy::prelude::*;
 use tokio::sync::broadcast;
 use vmux_api::ProcessId;
@@ -15,6 +15,8 @@ impl Plugin for ProcessPlugin {
         app.add_systems(
             Update,
             (
+                receive_requests,
+                ApplyDeferred,
                 create,
                 ApplyDeferred,
                 (
@@ -57,11 +59,17 @@ impl Plugin for ProcessPlugin {
     }
 }
 
-#[derive(Component)]
-struct ProcessDriver(SyncCell<Process>);
-
 #[derive(Component, Clone)]
 pub(crate) struct ProcessShell(String);
+
+#[derive(Component)]
+struct Creation(Option<runtime::CreateRequest>);
+
+#[derive(Component)]
+struct Counting(Option<runtime::CountRequest>);
+
+#[derive(Component)]
+struct Shutdown(Option<runtime::ShutdownRequest>);
 
 #[derive(Component, Clone)]
 struct ProcessDirectory(String);
@@ -98,7 +106,7 @@ struct Exited;
 
 #[derive(SystemParam)]
 struct Processes<'w, 's> {
-    values: Query<'w, 's, (Entity, &'static ProcessId, &'static mut ProcessDriver)>,
+    values: Query<'w, 's, (Entity, &'static ProcessId, &'static mut Process)>,
 }
 
 impl Processes<'_, '_> {
@@ -120,12 +128,12 @@ impl Processes<'_, '_> {
         process_id: ProcessId,
         read: impl FnOnce(&Process) -> T,
     ) -> Result<T, String> {
-        let (_, _, mut driver) = self
+        let (_, _, driver) = self
             .values
             .iter_mut()
             .find(|(_, process, _)| **process == process_id)
             .ok_or_else(|| format!("process not found: {process_id}"))?;
-        Ok(read(driver.0.get()))
+        Ok(read(&driver))
     }
 
     fn mutate<T>(
@@ -138,17 +146,38 @@ impl Processes<'_, '_> {
             .iter_mut()
             .find(|(_, process, _)| **process == process_id)
             .ok_or_else(|| format!("process not found: {process_id}"))?;
-        Ok(mutate(driver.0.get()))
+        Ok(mutate(&mut driver))
+    }
+}
+
+fn receive_requests(
+    mut creations: Single<&mut RuntimeInbox<runtime::CreateRequest>>,
+    mut counts: Single<&mut RuntimeInbox<runtime::CountRequest>>,
+    mut shutdowns: Single<&mut RuntimeInbox<runtime::ShutdownRequest>>,
+    mut commands: Commands,
+) {
+    while let Ok(request) = creations.0.try_recv() {
+        commands.spawn((Name::new("Process creation"), Creation(Some(request))));
+    }
+    while let Ok(request) = counts.0.try_recv() {
+        commands.spawn((Name::new("Process count"), Counting(Some(request))));
+    }
+    while let Ok(request) = shutdowns.0.try_recv() {
+        commands.spawn((Name::new("Process shutdown"), Shutdown(Some(request))));
     }
 }
 
 fn create(
-    mut requests: Single<&mut RuntimeInbox<runtime::CreateRequest>>,
+    mut requests: Query<(Entity, &mut Creation)>,
     wake: Single<&ProcessWake>,
     mut processes: Processes,
     mut commands: Commands,
 ) {
-    while let Ok(request) = requests.0.try_recv() {
+    for (entity, mut creation) in &mut requests {
+        commands.entity(entity).despawn();
+        let Some(request) = creation.0.take() else {
+            continue;
+        };
         let runtime::CreateRequest { launch, reply } = request;
         let result = if processes.contains(launch.id) {
             Err(format!("process already exists: {}", launch.id))
@@ -189,7 +218,7 @@ fn create(
                     ProcessInput(input),
                     ProcessExit(process.process_exit()),
                     Running,
-                    ProcessDriver(SyncCell::new(process)),
+                    process,
                 ));
                 if launch.keep_after_exit {
                     entity.insert(KeepAfterExit);
@@ -455,13 +484,17 @@ fn copy_mode_key(
 }
 
 fn shutdown(
-    mut requests: Single<&mut RuntimeInbox<runtime::ShutdownRequest>>,
+    mut requests: Query<(Entity, &mut Shutdown)>,
     mut processes: Processes,
     mut commands: Commands,
 ) {
-    while let Ok(request) = requests.0.try_recv() {
+    for (entity, mut shutdown) in &mut requests {
+        commands.entity(entity).despawn();
+        let Some(request) = shutdown.0.take() else {
+            continue;
+        };
         for (entity, _, mut driver) in &mut processes.values {
-            driver.0.get().kill();
+            driver.kill();
             commands.entity(entity).despawn();
         }
         let _ = request.reply.send(());
@@ -470,16 +503,21 @@ fn shutdown(
 
 fn finish_shutdown(mut processes: Processes, mut commands: Commands) {
     for (entity, _, mut driver) in &mut processes.values {
-        driver.0.get().kill();
+        driver.kill();
         commands.entity(entity).despawn();
     }
 }
 
 fn count(
-    mut requests: Single<&mut RuntimeInbox<runtime::CountRequest>>,
-    processes: Query<&ProcessId, With<ProcessDriver>>,
+    mut requests: Query<(Entity, &mut Counting)>,
+    processes: Query<&ProcessId, With<Process>>,
+    mut commands: Commands,
 ) {
-    while let Ok(request) = requests.0.try_recv() {
+    for (entity, mut counting) in &mut requests {
+        commands.entity(entity).despawn();
+        let Some(request) = counting.0.take() else {
+            continue;
+        };
         let _ = request.reply.send(processes.iter().count() as u32);
     }
 }
@@ -550,7 +588,7 @@ fn exit_code(
 fn poll(
     mut processes: Query<(
         Entity,
-        &mut ProcessDriver,
+        &mut Process,
         &mut ProcessExit,
         &mut ProcessDirectory,
         Option<&KeepAfterExit>,
@@ -558,7 +596,7 @@ fn poll(
     mut commands: Commands,
 ) {
     for (entity, mut driver, mut exit, mut directory, keep_after_exit) in &mut processes {
-        let process = driver.0.get();
+        let process = &mut *driver;
         let exited = process.poll();
         if directory.0 != process.current_directory().0 {
             directory.0 = process.current_directory().0.to_string();
@@ -583,6 +621,76 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::ProcessRuntime;
+
+    #[tokio::test]
+    async fn runtime_creation_queries_and_shutdown_use_the_canonical_process_component() {
+        let (wake, _wake_rx) = mpsc::unbounded_channel();
+        let (runtime, inboxes) = ProcessRuntime::new(wake);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ProcessPlugin));
+        app.world_mut().spawn(inboxes);
+        let process_id = ProcessId::new();
+        let creator = runtime.clone();
+        let creation = tokio::spawn(async move {
+            creator
+                .create(crate::ProcessLaunch {
+                    id: process_id,
+                    command: "/bin/sh".into(),
+                    args: vec!["-c".into(), "printf ready".into()],
+                    cwd: String::new(),
+                    env: Vec::new(),
+                    cols: 80,
+                    rows: 24,
+                    keep_after_exit: true,
+                })
+                .await
+        });
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+            app.update();
+            if creation.is_finished() {
+                break;
+            }
+        }
+        assert!(
+            creation.is_finished(),
+            "creation must settle through the production schedule"
+        );
+        let created = creation.await.unwrap().unwrap();
+        let world = app.world_mut();
+        let mut processes = world.query::<(Entity, &ProcessId, &Process)>();
+        let (entity, identity, process) = processes.single(world).unwrap();
+        assert_eq!(*identity, created.id);
+        assert_eq!(process.pid, created.pid);
+        let counter = runtime.clone();
+        let count = tokio::spawn(async move { counter.count().await });
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+            app.update();
+            if count.is_finished() {
+                break;
+            }
+        }
+        assert!(
+            count.is_finished(),
+            "count must settle through the production schedule"
+        );
+        assert_eq!(count.await.unwrap().unwrap(), 1);
+        let removal = tokio::spawn(async move { runtime.shutdown().await });
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+            app.update();
+            if removal.is_finished() {
+                break;
+            }
+        }
+        assert!(
+            removal.is_finished(),
+            "removal must settle through the production schedule"
+        );
+        removal.await.unwrap().unwrap();
+        assert!(app.world().get_entity(entity).is_err());
+    }
 
     #[tokio::test]
     async fn missing_process_query_is_answered_by_ecs() {

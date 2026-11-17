@@ -75,6 +75,7 @@ impl Plugin for ChatPromptInputPlugin {
             app.add_plugins(crate::QueuePlugin);
         }
         app.add_message::<ServiceRequest>()
+            .add_message::<RecoverPrompt>()
             .add_plugins(UiEventPlugin::<(
                 ChatSubmit,
                 ChatCancel,
@@ -91,7 +92,66 @@ impl Plugin for ChatPromptInputPlugin {
             .add_observer(escape)
             .add_observer(resume)
             .add_observer(clear_queue)
-            .add_observer(cancel_queued);
+            .add_observer(cancel_queued)
+            .add_systems(
+                Update,
+                (recover, restore)
+                    .chain()
+                    .after(vmux_ecs::PageOpenSet::HandleKnownPages),
+            );
+    }
+}
+
+#[cfg(host)]
+#[derive(Message)]
+pub struct RecoverPrompt {
+    pub session: SessionId,
+    pub text: String,
+}
+
+#[cfg(host)]
+#[derive(Component)]
+pub(super) struct RecoveredDraft(String);
+
+#[cfg(host)]
+fn recover(
+    mut requests: MessageReader<RecoverPrompt>,
+    sessions: Query<(Entity, &SessionId), With<vmux_session::Session>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        for (entity, session) in &sessions {
+            if session == &request.session {
+                commands
+                    .entity(entity)
+                    .insert(RecoveredDraft(request.text.clone()));
+            }
+        }
+    }
+}
+
+#[cfg(host)]
+fn restore(
+    targets: super::session::SessionViews,
+    drafts: Query<&RecoveredDraft>,
+    mut views: Query<(Entity, &mut ComposerState), With<SessionView>>,
+    mut commands: Commands,
+) {
+    for (view, mut composer) in &mut views {
+        let Some(session) = targets.session(view) else {
+            continue;
+        };
+        let Ok(draft) = drafts.get(session) else {
+            continue;
+        };
+        if !composer.draft().is_empty() {
+            continue;
+        }
+        let effect = composer.effect(draft.0.clone(), true);
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(view, &effect),
+        );
+        commands.trigger(ComposerChanged::new(view));
     }
 }
 
@@ -103,7 +163,11 @@ fn submit(
         (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
         With<SessionView>,
     >,
-    mut sessions: Query<(&mut RunState, Option<&AgentConversationTitle>)>,
+    mut sessions: Query<(
+        &mut RunState,
+        Option<&AgentConversationTitle>,
+        Has<vmux_session::SetupPending>,
+    )>,
     mut queues: QueuedPrompts,
     mut commands: Commands,
 ) {
@@ -130,9 +194,12 @@ fn submit(
     let Some(session) = targets.session(webview) else {
         return;
     };
-    let Ok((mut state, title)) = sessions.get_mut(session) else {
+    let Ok((mut state, title, setup)) = sessions.get_mut(session) else {
         return;
     };
+    if setup {
+        return;
+    }
     if let RunState::Errored(error) = &*state
         && vmux_session::Failure(error).in_use()
     {
@@ -146,6 +213,7 @@ fn submit(
             .insert((title, vmux_session::TitlePending));
     }
     queues.enqueue(session, text, attachments, false);
+    commands.entity(session).remove::<RecoveredDraft>();
     if matches!(*state, RunState::Errored(_)) {
         *state = RunState::Idle;
     }
@@ -167,16 +235,32 @@ fn submit(
 fn stop(
     trigger: On<UiInput<ChatStop>>,
     targets: super::session::SessionViews,
-    mut sessions: Query<(&mut RunState, &SessionId)>,
+    mut sessions: Query<(
+        &mut RunState,
+        &SessionId,
+        Option<&crate::Preparation>,
+        Option<&crate::Authentication>,
+    )>,
     mut queues: QueuedPrompts,
     mut control: SessionControl,
+    mut commands: Commands,
 ) {
     let Some(session_entity) = targets.session(trigger.event().webview) else {
         return;
     };
-    let Ok((mut state, session)) = sessions.get_mut(session_entity) else {
+    let Ok((mut state, session, preparation, authentication)) = sessions.get_mut(session_entity)
+    else {
         return;
     };
+    if preparation.is_some_and(crate::Preparation::active)
+        || authentication.is_some_and(|authentication| authentication.active)
+    {
+        commands.trigger(UiInput {
+            webview: trigger.event().webview,
+            payload: crate::onboarding::ChatCancelSetup,
+        });
+        return;
+    }
     if queues.empty(session_entity) {
         if queues.flush_pending(session_entity) {
             queues.cancel_flush(session_entity);
@@ -199,16 +283,30 @@ fn stop(
 fn cancel(
     trigger: On<UiInput<ChatCancel>>,
     targets: super::session::SessionViews,
-    sessions: Query<&SessionId>,
+    sessions: Query<(
+        &SessionId,
+        Option<&crate::Preparation>,
+        Option<&crate::Authentication>,
+    )>,
     mut queues: QueuedPrompts,
     mut control: SessionControl,
+    mut commands: Commands,
 ) {
     let Some(session_entity) = targets.session(trigger.event().webview) else {
         return;
     };
-    let Ok(session) = sessions.get(session_entity) else {
+    let Ok((session, preparation, authentication)) = sessions.get(session_entity) else {
         return;
     };
+    if preparation.is_some_and(crate::Preparation::active)
+        || authentication.is_some_and(|authentication| authentication.active)
+    {
+        commands.trigger(UiInput {
+            webview: trigger.event().webview,
+            payload: crate::onboarding::ChatCancelSetup,
+        });
+        return;
+    }
     if queues.flush_pending(session_entity) {
         queues.cancel_flush(session_entity);
     }
@@ -220,7 +318,12 @@ fn escape(
     trigger: On<UiInput<ChatEscape>>,
     targets: super::session::SessionViews,
     mut composers: Query<&mut ComposerState, With<SessionView>>,
-    mut sessions: Query<(&mut RunState, &SessionId)>,
+    mut sessions: Query<(
+        &mut RunState,
+        &SessionId,
+        Option<&crate::Preparation>,
+        Option<&crate::Authentication>,
+    )>,
     mut queues: QueuedPrompts,
     mut commands: Commands,
     mut control: SessionControl,
@@ -229,9 +332,19 @@ fn escape(
     let Some(session_entity) = targets.session(webview) else {
         return;
     };
-    let Ok((mut state, session)) = sessions.get_mut(session_entity) else {
+    let Ok((mut state, session, preparation, authentication)) = sessions.get_mut(session_entity)
+    else {
         return;
     };
+    if preparation.is_some_and(crate::Preparation::active)
+        || authentication.is_some_and(|authentication| authentication.active)
+    {
+        commands.trigger(UiInput {
+            webview,
+            payload: crate::onboarding::ChatCancelSetup,
+        });
+        return;
+    }
     let running = matches!(
         *state,
         RunState::Streaming | RunState::AwaitingApproval { .. }
@@ -254,6 +367,7 @@ fn escape(
         return;
     };
     if !running && queues.empty(session_entity) && !composer.draft().is_empty() {
+        commands.entity(session_entity).remove::<RecoveredDraft>();
         let effect = composer.effect(String::new(), true);
         commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
@@ -485,6 +599,74 @@ fn remove_attachments(
 mod tests {
     use super::*;
     use bevy_ecs::system::RunSystemOnce;
+
+    #[cfg(host)]
+    #[test]
+    fn credential_recovery_survives_view_replacement_and_preserves_new_user_input() {
+        let mut app = App::new();
+        app.add_plugins((
+            ChatPromptInputPlugin,
+            super::super::composer::ChatComposerPlugin,
+        ));
+        let session = app
+            .world_mut()
+            .spawn((
+                TestSession::bundle(),
+                crate::PromptQueue::default(),
+                RunState::Idle,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::EntityTarget::<vmux_session::Session>::new(
+                session,
+            ))
+            .id();
+        let old_view = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        let id = app.world().get::<SessionId>(session).unwrap().clone();
+        app.world_mut().write_message(RecoverPrompt {
+            session: id,
+            text: "Explain the failing build".into(),
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<ComposerState>(old_view).unwrap().draft(),
+            "Explain the failing build"
+        );
+        let replacement = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ComposerState>(replacement)
+                .unwrap()
+                .draft(),
+            "Explain the failing build"
+        );
+        app.world_mut().trigger(UiInput {
+            webview: replacement,
+            payload: crate::event::ChatDraftChanged {
+                text: "Keep this newer request".into(),
+            },
+        });
+        app.world_mut().flush();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ComposerState>(replacement)
+                .unwrap()
+                .draft(),
+            "Keep this newer request"
+        );
+        let another_view = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<ComposerState>(another_view)
+                .unwrap()
+                .draft()
+                .is_empty()
+        );
+    }
 
     struct TestSession;
 
@@ -749,6 +931,38 @@ mod tests {
 
     #[cfg(host)]
     #[test]
+    fn unfinished_setup_refuses_work_after_cancellation_and_accepts_it_only_after_readiness() {
+        let mut fixture = InputFixture::new(RunState::Errored("ACP setup cancelled".into()));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(crate::SetupPending);
+        fixture.submit("yo");
+        assert!(fixture.queued().is_empty());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<AgentConversationTitle>(fixture.session)
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .remove::<crate::SetupPending>();
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<RunState>(fixture.session)
+            .unwrap() = RunState::Idle;
+        fixture.submit("yo");
+        assert_eq!(fixture.queued(), [(0, "yo".to_string())]);
+    }
+
+    #[cfg(host)]
+    #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
         let mut fixture = InputFixture::new(RunState::Errored("failed".into()));
         fixture.submit("retry");
@@ -833,6 +1047,11 @@ mod tests {
         fixture
             .app
             .world_mut()
+            .entity_mut(fixture.session)
+            .insert(RecoveredDraft("draft".into()));
+        fixture
+            .app
+            .world_mut()
             .get_mut::<ComposerState>(fixture.webview)
             .unwrap()
             .effect("draft", false);
@@ -850,6 +1069,115 @@ mod tests {
                 .draft(),
             ""
         );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<RecoveredDraft>(fixture.session)
+                .is_none()
+        );
+    }
+
+    #[cfg(host)]
+    #[derive(Resource, Default)]
+    struct Interrupted(Vec<Entity>);
+
+    #[cfg(host)]
+    fn record_interruption(
+        input: On<UiInput<crate::onboarding::ChatCancelSetup>>,
+        mut recorded: ResMut<Interrupted>,
+    ) {
+        recorded.0.push(input.event().webview);
+    }
+
+    #[cfg(host)]
+    #[test]
+    fn standard_stop_cancel_and_escape_route_to_setup_interruption_without_flushing_work() {
+        for status in [0, 1, 2] {
+            for request in [0, 1, 2] {
+                let mut app = App::new();
+                app.add_plugins(ChatPromptInputPlugin)
+                    .init_resource::<Interrupted>()
+                    .add_observer(record_interruption);
+                let state = RunState::Idle;
+                let preparation = match status {
+                    0 => crate::Preparation::starting(),
+                    1 => crate::Preparation::installing("Installing".into(), None),
+                    _ => crate::Preparation::default(),
+                };
+                let session = app
+                    .world_mut()
+                    .spawn((
+                        TestSession::bundle(),
+                        crate::PromptQueue::default(),
+                        state,
+                        preparation,
+                        crate::Authentication {
+                            active: status == 2,
+                            pending: status == 2,
+                            ..Default::default()
+                        },
+                    ))
+                    .id();
+                app.world_mut()
+                    .run_system_once(move |mut queues: QueuedPrompts| {
+                        queues.enqueue(
+                            session,
+                            "Preserve this real work request".into(),
+                            Vec::new(),
+                            false,
+                        );
+                    })
+                    .unwrap();
+                app.world_mut()
+                    .get_mut::<crate::PromptQueue>(session)
+                    .unwrap()
+                    .paused = true;
+                let stack = app
+                    .world_mut()
+                    .spawn(vmux_ecs::EntityTarget::<vmux_session::Session>::new(
+                        session,
+                    ))
+                    .id();
+                let view = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+                app.world_mut()
+                    .get_mut::<ComposerState>(view)
+                    .unwrap()
+                    .effect("Preserve this draft", false);
+                match request {
+                    0 => app.world_mut().trigger(UiInput {
+                        webview: view,
+                        payload: ChatStop,
+                    }),
+                    1 => app.world_mut().trigger(UiInput {
+                        webview: view,
+                        payload: ChatCancel,
+                    }),
+                    _ => app.world_mut().trigger(UiInput {
+                        webview: view,
+                        payload: ChatEscape,
+                    }),
+                }
+                app.world_mut().flush();
+                assert_eq!(app.world().resource::<Interrupted>().0, [view]);
+                let queue = app.world().get::<crate::PromptQueue>(session).unwrap();
+                assert!(queue.paused);
+                assert!(!queue.flush_pending());
+                assert_eq!(
+                    app.world_mut()
+                        .run_system_once(move |queues: crate::QueuedPromptReads| queues
+                            .visible(session)[0]
+                            .1
+                            .to_string())
+                        .unwrap(),
+                    "Preserve this real work request"
+                );
+                assert_eq!(
+                    app.world().get::<ComposerState>(view).unwrap().draft(),
+                    "Preserve this draft"
+                );
+            }
+        }
     }
 
     #[cfg(host)]
