@@ -34,6 +34,7 @@ impl Sdk {
         ("test-sdk-extension", "Test SDK Extension"),
         ("test-sdk-flex", "Test SDK Flex"),
         ("test-sdk-layout", "Test SDK Layout"),
+        ("test-sdk-lsp", "Test SDK LSP"),
         ("test-sdk-framework", "Test SDK Framework"),
         ("test-sdk-host", "Test SDK Host"),
     ];
@@ -102,6 +103,7 @@ fn configure_core(mut requests: ConfigureRequests<'_, '_>, mut io: Io) {
                 ("vmux_layout", "contracts,geometry", true),
                 ("vmux_layout", "store", true),
             ],
+            "test-sdk-lsp" => &[("vmux_lsp", "", true)],
             _ => continue,
         };
         let cargo = settings
@@ -332,6 +334,7 @@ mod tests {
             "test-sdk-extension",
             "test-sdk-flex",
             "test-sdk-layout",
+            "test-sdk-lsp",
         ] {
             fixture.fixture.run("sdk-test", &[suite]).unwrap();
         }
@@ -349,6 +352,7 @@ mod tests {
                 "test --locked -p vmux_layout --no-default-features --lib",
                 "test --locked -p vmux_layout --no-default-features --features contracts,geometry --lib",
                 "test --locked -p vmux_layout --no-default-features --features store --lib",
+                "test --locked -p vmux_lsp --no-default-features --lib",
             ]
         );
         let failed = SdkFixture::new(
@@ -368,14 +372,18 @@ mod tests {
 
     #[test]
     fn consumers_keep_graph_refusals_and_host_namespace_isolation() {
-        let framework = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\n";
+        let framework = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\nvmux_lsp v1\n";
         let fixture = SdkFixture::new(framework, "");
         fixture
             .fixture
             .run("sdk-test", &["test-sdk-framework"])
             .unwrap();
         assert_eq!(fixture.calls().len(), 2);
-        for tree in [format!("{framework}bevy_cef v1\n"), "vmux_app v1\n".into()] {
+        for tree in [
+            format!("{framework}bevy_cef v1\n"),
+            framework.replace("vmux_lsp v1\n", ""),
+            "vmux_app v1\n".into(),
+        ] {
             let fixture = SdkFixture::new(&tree, "");
             assert!(
                 fixture

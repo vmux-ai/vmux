@@ -14,6 +14,7 @@ impl Graph {
                 "vmux_extension",
                 "vmux_flex",
                 "vmux_layout",
+                "vmux_lsp",
             ],
             &[
                 "bevy",
