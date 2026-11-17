@@ -34,7 +34,7 @@ CI validates each PR's captured merge with its target branch once. Feature pushe
 
 A job can reuse an earlier successful check in the same PR when its target base, execution scope, tracked inputs and modes, CI definition, and tool settings match. Input claims are published before validation and accepted only with the matching completed successful job attempt. Missing evidence or a newer failed, cancelled, or incomplete job requires fresh validation; lookup errors also fall back to running checks. Fork, release, main, and manual runs do not reuse PR results. Rust fingerprints conservatively include workspace and dependency sources; this skips unaffected jobs, not individual crates or tests.
 
-The full ownership audit runs under Lint. Ordinary Rust tests exclude that same expensive audit while retaining the other tests; the required Lint status still gates it.
+The full ownership audit runs under Lint. Ordinary Rust tests exclude that same expensive audit while retaining the other tests; the required quality gate includes the audit's result.
 
 The CI names describe the validation target:
 
@@ -47,9 +47,11 @@ The CI names describe the validation target:
 | App configuration tests | Checks plugin selection, dependencies, and core lifecycles without desktop adapters. |
 | ECS Policy check, inside Lint | Checks ECS ownership rules and repository source conventions. |
 
-Lint, Test, and Build macOS retain their required GitHub status names. Lint contains separately named format, Clippy, CI-tool, and policy steps; Test aggregates the applicable test results.
+`Check Results` is the required GitHub gate for `main` and the `onboarding` integration branch. It waits for every selected job and checks the expected results, including verified reuse and intentionally skipped platform work. Matrix job names vary with the selected scope, so the stable gate enforces their combined result. Administrators cannot bypass this CI rule.
 
-Ordinary PRs do not build macOS/iOS apps or create signed packages. Main and manual validation build affected native products, and release PRs retain macOS release-artifact preparation. The required `Build macOS` status keeps its existing GitHub name and verifies this distribution policy; it does not claim that an ordinary PR compiled on macOS. Platform failures can therefore be detected after an ordinary PR merges. Check CI on the latest commit before merging, and request manual full validation when a change needs native packaging assurance.
+The repository rule is recorded in `.github/rulesets/required-ci.json`. Add other integration branches there before accepting dependent PRs, and apply the same configuration in GitHub's repository rulesets. Changes to protected integration branches go through PRs; ordinary feature branches keep normal pushes.
+
+Ordinary PRs do not build macOS/iOS apps or create signed packages. Main and manual validation build affected native products, and release PRs retain macOS release-artifact preparation. The quality gate verifies this distribution policy; it does not claim that an ordinary PR compiled on macOS. Platform failures can therefore be detected after an ordinary PR merges. Check CI on the latest commit before merging, and request manual full validation when a change needs native packaging assurance.
 
 ## Check a complete bundle
 
