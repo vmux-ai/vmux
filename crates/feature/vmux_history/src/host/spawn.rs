@@ -1,137 +1,203 @@
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Entity, MessageReader, Plugin, Query, With, World};
+use bevy_cef_core::prelude::{CefTransitionCore, WebviewCommittedNavigationEvent};
 use vmux_api::VmuxRoute;
+use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    CreatedAt, LastVisitedAt, PageMetadata, TransitionType, UnixMillis, Url, Visit, VisitCount,
-    VisitedUrl, page::PageReady,
+    CreatedAt, LastVisitedAt, Operation, OperationState, Order, PageMetadata, TransitionType,
+    UnixMillis, Url, Visit, VisitCount, VisitedUrl,
 };
 
 pub struct HistorySpawnPlugin;
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) struct HistoryWriteSet;
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct VisitWriter<'w, 's> {
-    urls: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static PageMetadata,
-            &'static mut VisitCount,
-            &'static mut LastVisitedAt,
-        ),
-        With<Url>,
-    >,
-    commands: Commands<'w, 's>,
-}
-
-impl VisitWriter<'_, '_> {
-    fn record(&mut self, url: &str, title: &str, transition: TransitionType, now: i64) {
-        let mut url_entity = None;
-        for (entity, metadata, mut count, mut last) in &mut self.urls {
-            if metadata.url == url {
-                count.0 = count.0.saturating_add(1);
-                last.0 = now;
-                url_entity = Some(entity);
-                break;
-            }
-        }
-
-        let url_entity = match url_entity {
-            Some(entity) => entity,
-            None => self
-                .commands
-                .spawn((
-                    Url,
-                    moonshine_save::prelude::Save,
-                    PageMetadata {
-                        url: url.to_string(),
-                        title: title.to_string(),
-                        ..default()
-                    },
-                    VisitCount(1),
-                    LastVisitedAt(now),
-                    CreatedAt(now),
-                ))
-                .id(),
-        };
-
-        if transition != TransitionType::BackForward {
-            self.commands.spawn((
-                Visit,
-                moonshine_save::prelude::Save,
-                CreatedAt(now),
-                VisitedUrl(url_entity),
-                transition,
-            ));
-        }
-    }
-}
 
 impl Plugin for HistorySpawnPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_ecs::event::RecordVisitRequest>()
             .add_systems(
                 Update,
-                (spawn, record_requested_visits, record_vmux_pages)
+                (committed, requested, ready, record)
                     .chain()
                     .in_set(HistoryWriteSet),
             );
     }
 }
 
-fn spawn(
-    mut events: bevy::ecs::message::MessageReader<
-        bevy_cef_core::prelude::WebviewCommittedNavigationEvent,
-    >,
-    mut visits: VisitWriter,
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct HistoryWriteSet;
+
+#[derive(Component)]
+struct Recording;
+
+fn committed(
+    mut events: MessageReader<WebviewCommittedNavigationEvent>,
+    orders: Query<&Order, With<Recording>>,
+    mut commands: Commands,
 ) {
-    for ev in events.read() {
-        if !ev.is_main_frame {
+    let mut next = 0;
+    for order in &orders {
+        next = next.max(order.0.saturating_add(1));
+    }
+    for event in events.read() {
+        if !event.is_main_frame || event.url.is_empty() || VmuxRoute::parse(&event.url).is_some() {
             continue;
         }
-        if VmuxRoute::parse(&ev.url).is_some() || ev.url.is_empty() {
-            continue;
-        }
-        let now = UnixMillis::now().0;
-        let transition =
-            super::transition::HistoryTransition::new(ev.transition, ev.qualifiers).kind();
-        visits.record(&ev.url, "", transition, now);
+        let transition = if event.qualifiers.forward_back {
+            TransitionType::BackForward
+        } else if event.qualifiers.client_redirect || event.qualifiers.server_redirect {
+            TransitionType::Redirect
+        } else {
+            match event.transition {
+                CefTransitionCore::Reload => TransitionType::Reload,
+                CefTransitionCore::Explicit
+                | CefTransitionCore::Generated
+                | CefTransitionCore::Keyword
+                | CefTransitionCore::KeywordGenerated => TransitionType::Typed,
+                CefTransitionCore::Link
+                | CefTransitionCore::FormSubmit
+                | CefTransitionCore::AutoBookmark => TransitionType::Link,
+                _ => TransitionType::Other,
+            }
+        };
+        commands.spawn((
+            Operation::bundle("history.record").expect("history record kind is valid"),
+            Name::new("Record history visit"),
+            Order(next),
+            CreatedAt(UnixMillis::now().0),
+            PageMetadata {
+                url: event.url.clone(),
+                ..default()
+            },
+            transition,
+            Recording,
+        ));
+        next = next.saturating_add(1);
     }
 }
 
-fn record_requested_visits(
-    mut reader: bevy::ecs::message::MessageReader<vmux_ecs::event::RecordVisitRequest>,
-    mut visits: VisitWriter,
+fn requested(
+    mut events: MessageReader<vmux_ecs::event::RecordVisitRequest>,
+    orders: Query<&Order, With<Recording>>,
+    mut commands: Commands,
 ) {
+    let mut next = 0;
+    for order in &orders {
+        next = next.max(order.0.saturating_add(1));
+    }
     let now = UnixMillis::now().0;
-    for req in reader.read() {
-        if req.url.is_empty() || VmuxRoute::parse(&req.url).is_some() {
+    for event in events.read() {
+        if event.url.is_empty() || VmuxRoute::parse(&event.url).is_some() {
             continue;
         }
-        visits.record(&req.url, &req.title, TransitionType::Typed, now);
+        commands.spawn((
+            Operation::bundle("history.record").expect("history record kind is valid"),
+            Name::new("Record history visit"),
+            Order(next),
+            CreatedAt(now),
+            PageMetadata {
+                url: event.url.clone(),
+                title: event.title.clone(),
+                ..default()
+            },
+            TransitionType::Typed,
+            Recording,
+        ));
+        next = next.saturating_add(1);
     }
 }
 
-fn record_vmux_pages(
-    pages: Query<&PageMetadata, (Added<PageReady>, Without<Url>)>,
-    mut visits: VisitWriter,
+type ReadyPages = (Added<PageReady>, Without<Url>, Without<Recording>);
+
+fn ready(
+    pages: Query<&PageMetadata, ReadyPages>,
+    orders: Query<&Order, With<Recording>>,
+    mut commands: Commands,
 ) {
+    let mut next = 0;
+    for order in &orders {
+        next = next.max(order.0.saturating_add(1));
+    }
     let now = UnixMillis::now().0;
     for page in &pages {
-        if !recordable_vmux_url(&page.url) {
+        let Some(route) = VmuxRoute::parse(&page.url) else {
+            continue;
+        };
+        if matches!(route.host(), "history" | "layout" | "command-bar") {
             continue;
         }
-        visits.record(&page.url, &page.title, TransitionType::Typed, now);
+        commands.spawn((
+            Operation::bundle("history.record").expect("history record kind is valid"),
+            Name::new("Record history visit"),
+            Order(next),
+            CreatedAt(now),
+            PageMetadata {
+                url: page.url.clone(),
+                title: page.title.clone(),
+                ..default()
+            },
+            TransitionType::Typed,
+            Recording,
+        ));
+        next = next.saturating_add(1);
     }
 }
 
-fn recordable_vmux_url(url: &str) -> bool {
-    let Some(route) = VmuxRoute::parse(url) else {
-        return false;
-    };
-    !matches!(route.host(), "history" | "layout" | "command-bar")
+fn record(world: &mut World) {
+    let mut pending = Vec::new();
+    let mut recordings = world.query_filtered::<
+        (Entity, &Order, &PageMetadata, &CreatedAt, &TransitionType),
+        With<Recording>,
+    >();
+    for (entity, order, metadata, created, transition) in recordings.iter(world) {
+        pending.push((order.0, entity, metadata.clone(), created.0, *transition));
+    }
+    pending.sort_by_key(|(order, ..)| *order);
+    for (_, operation, metadata, created, transition) in pending {
+        if !world
+            .get::<OperationState>(operation)
+            .is_some_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            world.despawn(operation);
+            continue;
+        }
+        world.entity_mut(operation).insert(OperationState::Running);
+        let mut existing = None;
+        let mut urls = world
+            .query_filtered::<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>();
+        for (entity, current, ..) in urls.iter(world) {
+            if current.url == metadata.url {
+                existing = Some(entity);
+                break;
+            }
+        }
+        let url = match existing {
+            Some(entity) => {
+                let mut count = world.get_mut::<VisitCount>(entity).unwrap();
+                count.0 = count.0.saturating_add(1);
+                world.get_mut::<LastVisitedAt>(entity).unwrap().0 = created;
+                entity
+            }
+            None => world
+                .spawn((
+                    Url,
+                    moonshine_save::prelude::Save,
+                    metadata,
+                    VisitCount(1),
+                    LastVisitedAt(created),
+                    CreatedAt(created),
+                ))
+                .id(),
+        };
+        if transition != TransitionType::BackForward {
+            world.spawn((
+                Visit,
+                moonshine_save::prelude::Save,
+                CreatedAt(created),
+                VisitedUrl(url),
+                transition,
+            ));
+        }
+        world.despawn(operation);
+    }
 }
 
 #[cfg(test)]
@@ -143,73 +209,165 @@ mod system_tests {
     };
     use vmux_ecs::PrimitivesPlugin;
 
-    fn app() -> App {
+    #[test]
+    fn cancellation_after_an_earlier_visit_prevents_later_pending_writes() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(PrimitivesPlugin)
+        app.add_plugins((MinimalPlugins, PrimitivesPlugin, HistorySpawnPlugin))
             .add_message::<WebviewCommittedNavigationEvent>()
-            .add_systems(Update, spawn);
-        app
+            .add_observer(
+                |_: On<Add, Visit>, mut operations: Query<&mut OperationState, With<Recording>>| {
+                    for mut state in &mut operations {
+                        if *state == OperationState::Pending {
+                            *state = OperationState::Canceled;
+                        }
+                    }
+                },
+            );
+        for _ in 0..2 {
+            app.world_mut()
+                .write_message(vmux_ecs::event::RecordVisitRequest {
+                    url: "https://example.com/canceled".into(),
+                    title: "Canceled".into(),
+                });
+        }
+        app.update();
+        let counts: Vec<_> = app
+            .world_mut()
+            .query_filtered::<&VisitCount, With<Url>>()
+            .iter(app.world())
+            .map(|count| count.0)
+            .collect();
+        assert_eq!(counts, [1]);
+        assert_eq!(
+            app.world_mut().query::<&Visit>().iter(app.world()).count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&Recording>()
+                .iter(app.world())
+                .count(),
+            0
+        );
     }
 
-    fn send(app: &mut App, url: &str, transition: CefTransitionCore, forward_back: bool) {
-        let mut writer = app
-            .world_mut()
-            .resource_mut::<Messages<WebviewCommittedNavigationEvent>>();
-        writer.write(WebviewCommittedNavigationEvent {
-            webview: Entity::PLACEHOLDER,
-            url: url.into(),
-            is_main_frame: true,
-            navigation_epoch: None,
-            transition,
-            qualifiers: CefTransitionQualifiers {
-                forward_back,
-                ..Default::default()
-            },
-        });
+    #[test]
+    fn same_update_recording_requests_share_one_url_and_keep_each_visit() {
+        for source in 0..3 {
+            let mut fixture = Fixture::new();
+            for event in 0..2 {
+                if source == 1 || source == 2 && event == 0 {
+                    fixture.send(
+                        "https://example.com/repeated",
+                        CefTransitionCore::Link,
+                        false,
+                    );
+                } else {
+                    fixture
+                        .app
+                        .world_mut()
+                        .write_message(vmux_ecs::event::RecordVisitRequest {
+                            url: "https://example.com/repeated".into(),
+                            title: "Repeated".into(),
+                        });
+                }
+            }
+            let app = &mut fixture.app;
+            app.update();
+            let urls: Vec<_> = app
+                .world_mut()
+                .query_filtered::<(Entity, &VisitCount), With<Url>>()
+                .iter(app.world())
+                .map(|(entity, count)| (entity, count.0))
+                .collect();
+            assert_eq!(urls.len(), 1);
+            assert_eq!(urls[0].1, 2);
+            let visits: Vec<_> = app
+                .world_mut()
+                .query_filtered::<&VisitedUrl, With<Visit>>()
+                .iter(app.world())
+                .map(|visited| visited.0)
+                .collect();
+            assert_eq!(visits, [urls[0].0, urls[0].0]);
+        }
+    }
+
+    struct Fixture {
+        app: App,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, PrimitivesPlugin, HistorySpawnPlugin))
+                .add_message::<WebviewCommittedNavigationEvent>();
+            Self { app }
+        }
+
+        fn send(&mut self, url: &str, transition: CefTransitionCore, forward_back: bool) {
+            self.app
+                .world_mut()
+                .write_message(WebviewCommittedNavigationEvent {
+                    webview: Entity::PLACEHOLDER,
+                    url: url.into(),
+                    is_main_frame: true,
+                    navigation_epoch: None,
+                    transition,
+                    qualifiers: CefTransitionQualifiers {
+                        forward_back,
+                        ..Default::default()
+                    },
+                });
+        }
     }
 
     #[test]
     fn first_visit_spawns_url_and_visit() {
-        let mut app = app();
-        send(
-            &mut app,
-            "https://example.com",
-            CefTransitionCore::Link,
-            false,
-        );
-        app.update();
-        let urls = app.world_mut().query::<&Url>().iter(app.world()).count();
-        let visits = app.world_mut().query::<&Visit>().iter(app.world()).count();
+        let mut fixture = Fixture::new();
+        fixture.send("https://example.com", CefTransitionCore::Link, false);
+        fixture.app.update();
+        let urls = fixture
+            .app
+            .world_mut()
+            .query::<&Url>()
+            .iter(fixture.app.world())
+            .count();
+        let visits = fixture
+            .app
+            .world_mut()
+            .query::<&Visit>()
+            .iter(fixture.app.world())
+            .count();
         assert_eq!(urls, 1);
         assert_eq!(visits, 1);
     }
 
     #[test]
     fn second_visit_same_url_increments_count() {
-        let mut app = app();
-        send(
-            &mut app,
-            "https://example.com",
-            CefTransitionCore::Link,
-            false,
-        );
-        app.update();
-        send(
-            &mut app,
-            "https://example.com",
-            CefTransitionCore::Link,
-            false,
-        );
-        app.update();
-        let urls = app.world_mut().query::<&Url>().iter(app.world()).count();
-        let visits = app.world_mut().query::<&Visit>().iter(app.world()).count();
+        let mut fixture = Fixture::new();
+        fixture.send("https://example.com", CefTransitionCore::Link, false);
+        fixture.app.update();
+        fixture.send("https://example.com", CefTransitionCore::Link, false);
+        fixture.app.update();
+        let urls = fixture
+            .app
+            .world_mut()
+            .query::<&Url>()
+            .iter(fixture.app.world())
+            .count();
+        let visits = fixture
+            .app
+            .world_mut()
+            .query::<&Visit>()
+            .iter(fixture.app.world())
+            .count();
         assert_eq!(urls, 1);
         assert_eq!(visits, 2);
-        let count = app
+        let count = fixture
+            .app
             .world_mut()
             .query::<&VisitCount>()
-            .iter(app.world())
+            .iter(fixture.app.world())
             .next()
             .unwrap()
             .0;
@@ -218,26 +376,22 @@ mod system_tests {
 
     #[test]
     fn back_forward_bumps_count_but_no_visit() {
-        let mut app = app();
-        send(
-            &mut app,
-            "https://example.com",
-            CefTransitionCore::Link,
-            false,
-        );
-        app.update();
-        send(
-            &mut app,
-            "https://example.com",
-            CefTransitionCore::Link,
-            true,
-        );
-        app.update();
-        let visits = app.world_mut().query::<&Visit>().iter(app.world()).count();
-        let count = app
+        let mut fixture = Fixture::new();
+        fixture.send("https://example.com", CefTransitionCore::Link, false);
+        fixture.app.update();
+        fixture.send("https://example.com", CefTransitionCore::Link, true);
+        fixture.app.update();
+        let visits = fixture
+            .app
+            .world_mut()
+            .query::<&Visit>()
+            .iter(fixture.app.world())
+            .count();
+        let count = fixture
+            .app
             .world_mut()
             .query::<&VisitCount>()
-            .iter(app.world())
+            .iter(fixture.app.world())
             .next()
             .unwrap()
             .0;
@@ -247,8 +401,9 @@ mod system_tests {
 
     #[test]
     fn subframe_skipped() {
-        let mut app = app();
-        let mut writer = app
+        let mut fixture = Fixture::new();
+        let mut writer = fixture
+            .app
             .world_mut()
             .resource_mut::<Messages<WebviewCommittedNavigationEvent>>();
         writer.write(WebviewCommittedNavigationEvent {
@@ -259,19 +414,32 @@ mod system_tests {
             transition: CefTransitionCore::Link,
             qualifiers: CefTransitionQualifiers::default(),
         });
-        app.update();
+        fixture.app.update();
         assert_eq!(
-            app.world_mut().query::<&Visit>().iter(app.world()).count(),
+            fixture
+                .app
+                .world_mut()
+                .query::<&Visit>()
+                .iter(fixture.app.world())
+                .count(),
             0
         );
     }
 
     #[test]
     fn committed_vmux_navigation_is_skipped_for_page_ready_recording() {
-        let mut app = app();
-        send(&mut app, "vmux://history", CefTransitionCore::Link, false);
-        app.update();
-        assert_eq!(app.world_mut().query::<&Url>().iter(app.world()).count(), 0);
+        let mut fixture = Fixture::new();
+        fixture.send("vmux://history", CefTransitionCore::Link, false);
+        fixture.app.update();
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&Url>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
     }
 
     #[test]
@@ -279,7 +447,8 @@ mod system_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(PrimitivesPlugin)
-            .add_systems(Update, record_vmux_pages);
+            .add_message::<WebviewCommittedNavigationEvent>()
+            .add_plugins(HistorySpawnPlugin);
         app.world_mut().spawn((
             PageMetadata {
                 url: "vmux://team/".into(),
@@ -318,7 +487,8 @@ mod system_tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(PrimitivesPlugin)
             .add_message::<vmux_ecs::event::RecordVisitRequest>()
-            .add_systems(Update, record_requested_visits);
+            .add_message::<WebviewCommittedNavigationEvent>()
+            .add_plugins(HistorySpawnPlugin);
         app.world_mut()
             .resource_mut::<Messages<vmux_ecs::event::RecordVisitRequest>>()
             .write(vmux_ecs::event::RecordVisitRequest {
