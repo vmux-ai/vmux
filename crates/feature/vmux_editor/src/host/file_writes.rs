@@ -14,7 +14,7 @@ impl Plugin for FileWritesPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (receive, expire)
+            (receive, ApplyDeferred, expire)
                 .chain()
                 .after(FileWriteSet)
                 .before(FileChangesSet),
@@ -45,33 +45,35 @@ impl WriteReceipts<'_, '_> {
     }
 }
 
-fn receive(world: &mut World) {
-    let inputs = match world.get_non_send_mut::<SelfWrites>() {
+fn receive(
+    input: Option<NonSendMut<SelfWrites>>,
+    mut receipts: Query<(&FileId, &mut WrittenAt)>,
+    mut commands: Commands,
+) {
+    let mut inputs = match input {
         Some(mut input) => input.0.take(),
         None => return,
     };
-    for input in inputs {
-        let path = input.path;
-        let mut existing = None;
-        let mut receipts = world.query::<(Entity, &FileId, &WrittenAt)>();
-        for (entity, file, _) in receipts.iter(world) {
-            if file.0 == path {
-                existing = Some(entity);
+    inputs.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut inputs = inputs.into_iter().peekable();
+    while let Some(mut input) = inputs.next() {
+        while inputs.peek().is_some_and(|next| next.path == input.path) {
+            input.at = input.at.max(inputs.next().unwrap().at);
+        }
+        let mut existing = false;
+        for (file, mut at) in &mut receipts {
+            if file.0 == input.path {
+                at.0 = at.0.max(input.at);
+                existing = true;
                 break;
             }
         }
-        match existing {
-            Some(entity) => {
-                let mut at = world.get_mut::<WrittenAt>(entity).unwrap();
-                at.0 = at.0.max(input.at);
-            }
-            None => {
-                world.spawn((
-                    Name::new("Editor file write receipt"),
-                    FileId(path),
-                    WrittenAt(input.at),
-                ));
-            }
+        if !existing {
+            commands.spawn((
+                Name::new("Editor file write receipt"),
+                FileId(input.path),
+                WrittenAt(input.at),
+            ));
         }
     }
 }
@@ -124,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_writes_reuse_one_receipt_and_expired_receipts_retire() {
+    fn out_of_order_writes_reuse_a_recent_receipt_until_it_expires() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("file.txt");
         let mut app = App::new();
@@ -136,6 +138,10 @@ mod tests {
                 .0
                 .insert(path.canonicalize().unwrap(), Instant::now());
         }
+        app.world_mut().non_send_mut::<SelfWrites>().0.insert(
+            path.canonicalize().unwrap(),
+            Instant::now() - Duration::from_secs(3),
+        );
         app.update();
         let receipts: Vec<_> = app
             .world_mut()
@@ -145,6 +151,12 @@ mod tests {
             .collect();
         assert_eq!(receipts.len(), 1);
         assert_eq!(receipts[0].1, path.canonicalize().unwrap());
+        app.world_mut().non_send_mut::<SelfWrites>().0.insert(
+            path.canonicalize().unwrap(),
+            Instant::now() - Duration::from_secs(3),
+        );
+        app.update();
+        assert!(app.world().get_entity(receipts[0].0).is_ok());
         app.world_mut()
             .get_mut::<WrittenAt>(receipts[0].0)
             .unwrap()
@@ -180,7 +192,6 @@ mod tests {
         FileLoadTask::settle(&mut app, view);
         app.world_mut()
             .trigger(EditRequest::new(view, vec![EditCommand::Save]));
-        app.update();
         app.world_mut().write_message(Observed(Ok(
             notify::Event::new(notify::EventKind::Any).add_path(path.clone())
         )));
