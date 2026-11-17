@@ -36,7 +36,9 @@ A page may keep a draft, caret or scroll position locally. Changes to shared wor
 | `crates/feature/` | User-facing capabilities, including their UI and behavior. |
 | `crates/util/` | Reusable infrastructure and composition. |
 
-`feature.ron` declares a feature's contributions. Domain state, host behavior and UI projection compose separately, so headless consumers can use host capabilities without importing a renderer. Private Cloud integrations remain outside the public client's dependency graph.
+`feature.ron` declares a feature's contributions and optional public compatibility contract. The existing feature entities own dependencies, capabilities, requested permissions and lifecycle metadata; the registry freezes their contributions. Application composition selects a target and the host's capability/policy facts. Registered validation refuses unsupported compositions before Startup. Metadata cannot install plugins, call lifecycle callbacks or grant OS access; feature systems and platform adapters retain those responsibilities.
+
+Domain state, host behavior and UI projection compose separately, so headless consumers can use host capabilities without importing a renderer. Applications finish and clean up plugins before running their selected runner. Feature-owned operation/job schedules govern accepted work, cancellation and IO drain. Private Cloud integrations remain outside the public client's dependency graph.
 
 The desktop hosts pages and native integration. Background services retain processes and conversations beyond a page's lifetime. Mobile connects to supported host capabilities. Ordinary websites do not receive unrestricted host access.
 

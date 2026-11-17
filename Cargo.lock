@@ -10671,6 +10671,7 @@ dependencies = [
  "moonshine-save",
  "rkyv",
  "ron 0.12.1",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

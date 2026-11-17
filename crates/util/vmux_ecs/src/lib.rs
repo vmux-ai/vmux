@@ -82,9 +82,13 @@ pub mod browser;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod component;
+#[cfg(feature = "cli")]
+mod composition;
 #[cfg(feature = "contracts")]
 pub mod event;
 mod external_identity;
+#[cfg(feature = "cli")]
+mod feature_metadata;
 #[cfg(all(host, feature = "host"))]
 mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
