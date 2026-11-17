@@ -8,6 +8,10 @@ Select an available agent for a new Session. If it needs setup or sign-in, compl
 
 For shopping, include the budget and delivery country. For cooking, include ingredients, portions, and dietary requirements. For software, select the Project and describe how to reproduce the problem.
 
+## Isolated development profiles
+
+Fresh development profiles keep Mistral Vibe configuration and sign-in credentials in their own tool home. Vibe stores the API key in an owner-only local file instead of the personal system keychain. Restarting the same profile retains that sign-in; another fresh profile starts separately. This development isolation does not change ordinary sign-in storage.
+
 ## Let tools support the task
 
 Connected agents can use the available tools alongside you: project management to choose the working context, Browser for sources, Knowledge for saved notes, Editor for local files, Git for changes, and Terminal for commands.
