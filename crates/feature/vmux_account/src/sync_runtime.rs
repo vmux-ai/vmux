@@ -18,7 +18,7 @@ use crate::mutations::{
 };
 use crate::sync::{Checkpoint, CheckpointChange, ExpectedScope, Origin, Pending};
 use crate::sync::{ListRequest, UploadRequest};
-use crate::sync_store::Store;
+use crate::sync_store::{Loaded, Store};
 use crate::wire::{ProfileChange, Response};
 use crate::{
     Account, Binding, CloudAvailable, Connection, Location, Owner, Phase, Profile, Root, Set,
@@ -54,26 +54,39 @@ impl bevy_app::Plugin for ProfileSyncPlugin {
         .add_systems(
             Update,
             (
-                resume,
-                reset,
-                receive_ack,
-                receive_conflict,
-                resolve_local,
-                resolve_remote,
-                import_remote,
-                receive_resolution,
-                finish_adoption,
-                refresh,
-                load,
-                receive_load,
-                seed,
-                enumerate,
-                receive_list,
-                reconcile,
-                seal,
-                receive_seal,
-                receive_upload,
-                delay,
+                (
+                    resume,
+                    reset,
+                    receive_ack,
+                    receive_conflict,
+                    retry_conflict,
+                    resolve_local,
+                    resolve_remote,
+                    import_remote,
+                    receive_resolution,
+                    finish_adoption,
+                )
+                    .chain(),
+                (
+                    refresh,
+                    load,
+                    receive_load,
+                    restore_outbound,
+                    restore_checkpoints,
+                    finish_load,
+                )
+                    .chain(),
+                (
+                    seed,
+                    enumerate,
+                    receive_list,
+                    reconcile,
+                    seal,
+                    receive_seal,
+                    receive_upload,
+                    delay,
+                )
+                    .chain(),
             )
                 .chain()
                 .after(Set::Publish),
@@ -189,6 +202,16 @@ struct Delayed;
 #[derive(Component)]
 struct OutboxLoading;
 
+#[derive(Component, Clone, Copy)]
+struct Inventory {
+    id: Uuid,
+    after: u32,
+    through: Option<u32>,
+}
+
+#[derive(Component)]
+struct Seen(Uuid);
+
 #[derive(Component)]
 struct Refresh;
 
@@ -246,6 +269,7 @@ type LoadRoots<'w, 's> = Query<
         &'static Location,
         Option<&'static Origin>,
         Has<Refresh>,
+        Option<&'static Inventory>,
     ),
     (With<Root>, Without<OutboxLoading>, Without<Delayed>),
 >;
@@ -725,26 +749,43 @@ fn refresh(mut completions: MessageReader<MutationCompleted>, mut commands: Comm
 struct Load {
     data: PathBuf,
     origin: Origin,
+    inventory: Inventory,
 }
 
 impl Job for Load {
-    type Output = Result<(Vec<Pending>, Vec<Checkpoint>), String>;
+    type Output = Result<Loaded, String>;
     fn run(self) -> Self::Output {
-        Store::load(&self.data, &self.origin)
+        Store::load(
+            &self.data,
+            &self.origin,
+            self.inventory.after,
+            self.inventory.through,
+        )
     }
 }
 
 fn load(roots: LoadRoots<'_, '_>, context: Context, mut commands: Commands) {
-    for (root, path, previous, refresh) in &roots {
+    for (root, path, previous, refresh, inventory) in &roots {
         let Some((origin, _)) = context.origin(root) else {
             continue;
         };
-        if previous == Some(&origin) && !refresh {
+        if previous == Some(&origin) && !refresh && inventory.is_none() {
             continue;
         }
+        let continuing = previous == Some(&origin) && inventory.is_some();
+        let inventory = if continuing {
+            *inventory.unwrap()
+        } else {
+            Inventory {
+                id: Uuid::new_v4(),
+                after: 0,
+                through: None,
+            }
+        };
         let request = Load {
             data: path.0.clone(),
             origin: origin.clone(),
+            inventory,
         };
         commands.spawn((
             Operation::bundle("account.profile-outbox-read").unwrap(),
@@ -752,10 +793,11 @@ fn load(roots: LoadRoots<'_, '_>, context: Context, mut commands: Commands) {
             request.clone(),
             JobRequest(request),
         ));
-        commands
-            .entity(root)
-            .insert((origin, OutboxLoading))
-            .remove::<Refresh>();
+        let mut root = commands.entity(root);
+        root.insert((origin, OutboxLoading, inventory));
+        if !continuing {
+            root.remove::<Refresh>().remove::<Seed>();
+        }
     }
 }
 
@@ -763,9 +805,7 @@ fn receive_load(
     mut results: Results<Load>,
     requests: Query<&Load>,
     context: Context,
-    outbound: Query<(Entity, &Id, &ChildOf, Has<Busy>), With<Outbound>>,
-    profiles: ReceiveLoadProfiles<'_, '_>,
-    accounts: Query<&ChildOf, With<Account>>,
+    inventories: Query<&Inventory, With<Root>>,
     mut commands: Commands,
 ) {
     for (operation, mut result, owner, parent) in &mut results {
@@ -776,96 +816,154 @@ fn receive_load(
             continue;
         };
         let root = parent.parent();
-        commands.entity(root).remove::<OutboxLoading>();
         let Ok(request) = requests.get(operation) else {
             continue;
         };
         let origin = &request.origin;
+        let current = inventories.get(root).is_ok_and(|current| {
+            current.id == request.inventory.id && current.after == request.inventory.after
+        });
+        if !current {
+            commands.entity(operation).despawn();
+            continue;
+        }
         if context.origin(root).as_ref().map(|value| &value.0) != Some(origin) {
+            commands
+                .entity(root)
+                .remove::<OutboxLoading>()
+                .remove::<Inventory>();
             commands.entity(operation).despawn();
             continue;
         }
         let value = std::mem::replace(&mut result.0, Err("consumed".into()));
-        if let Ok(Ok((entries, checkpoints))) = value {
-            commands.entity(root).insert(Seed);
-            for (entity, id, parent, busy) in &outbound {
-                if parent.parent() == root
-                    && !busy
-                    && !entries
-                        .iter()
-                        .any(|entry| entry.operation_id.to_string() == id.0)
-                {
-                    commands.entity(entity).despawn();
-                }
-            }
-            for (order, entry) in entries.into_iter().enumerate() {
-                if outbound.iter().any(|(_, id, parent, _)| {
-                    parent.parent() == root && id.0 == entry.operation_id.to_string()
-                }) {
-                    continue;
-                }
-                let mut entity = commands.spawn((
-                    Operation::bundle("account.profile-transfer").unwrap(),
-                    Outbound,
-                    Target(entry.profile_id),
-                    Origin {
-                        server: entry.origin.server,
-                        account: entry.origin.account,
-                    },
-                    Revision(entry.local_revision),
-                    BaseRevision(entry.base_revision),
-                    ChildOf(root),
-                    vmux_ecs::Order(order as u32),
-                ));
-                entity.insert(Id(entry.operation_id.to_string()));
-                if let Some(name) = entry.name {
-                    entity.insert(Name::new(name));
-                } else {
-                    entity.insert((Deleted, Name::new("Deleted profile")));
-                }
-                if entry.conflicted {
-                    entity.insert(Conflict(entry.conflict));
-                }
-            }
-            for checkpoint in checkpoints {
-                for (entity, id, owner, previous, remote, synced) in &profiles {
-                    if id.0 != checkpoint.profile_id.to_string()
-                        || !accounts
-                            .get(owner.0)
-                            .is_ok_and(|account| account.parent() == root)
-                    {
-                        continue;
-                    }
-                    if previous == Some(origin)
-                        && (remote.is_some_and(|remote| remote.0 > checkpoint.remote_revision)
-                            || synced.is_some_and(|synced| synced.0 > checkpoint.local_revision))
-                    {
-                        continue;
-                    }
-                    let mut entity = commands.entity(entity);
-                    entity.insert((
-                        origin.clone(),
-                        RemoteRevision(checkpoint.remote_revision),
-                        SyncedRevision(checkpoint.local_revision),
-                    ));
-                    if checkpoint.deleted {
-                        entity.insert(RemoteDeleted);
-                    } else {
-                        entity.remove::<RemoteDeleted>();
-                    }
-                }
-            }
+        if let Ok(Ok(loaded)) = value {
+            let loaded: Loaded = loaded;
+            commands
+                .entity(operation)
+                .insert(loaded)
+                .remove::<JobResult<Load>>()
+                .remove::<JobRequest<Load>>();
         } else {
-            commands.entity(root).insert((
+            commands.entity(root).remove::<OutboxLoading>().insert((
                 Refresh,
                 Pause {
                     duration: Duration::from_secs(1),
                 },
             ));
+            commands.entity(operation).despawn();
+        }
+    }
+}
+
+fn restore_outbound(
+    pages: Query<(&Load, &Loaded, &ChildOf)>,
+    outbound: Query<(Entity, &Id, &ChildOf), With<Outbound>>,
+    mut commands: Commands,
+) {
+    for (request, page, parent) in &pages {
+        let root = parent.parent();
+        for (order, entry) in &page.pending {
+            if let Some((entity, _, _)) = outbound.iter().find(|(_, id, parent)| {
+                parent.parent() == root && id.0 == entry.operation_id.to_string()
+            }) {
+                commands.entity(entity).insert(Seen(request.inventory.id));
+                continue;
+            }
+            let mut entity = commands.spawn((
+                Operation::bundle("account.profile-transfer").unwrap(),
+                Outbound,
+                Target(entry.profile_id),
+                entry.origin.clone(),
+                Revision(entry.local_revision),
+                BaseRevision(entry.base_revision),
+                ChildOf(root),
+                vmux_ecs::Order(*order),
+                Seen(request.inventory.id),
+            ));
+            entity.insert(Id(entry.operation_id.to_string()));
+            if let Some(name) = &entry.name {
+                entity.insert(Name::new(name.clone()));
+            } else {
+                entity.insert((Deleted, Name::new("Deleted profile")));
+            }
+            if entry.conflicted {
+                entity.insert(Conflict(entry.conflict.clone()));
+            }
+        }
+    }
+}
+
+fn restore_checkpoints(
+    pages: Query<(&Load, &Loaded, &ChildOf)>,
+    profiles: ReceiveLoadProfiles<'_, '_>,
+    accounts: Query<&ChildOf, With<Account>>,
+    mut commands: Commands,
+) {
+    for (request, page, parent) in &pages {
+        let root = parent.parent();
+        let origin = &request.origin;
+        for checkpoint in &page.checkpoints {
+            for (entity, id, owner, previous, remote, synced) in &profiles {
+                if id.0 != checkpoint.profile_id.to_string()
+                    || !accounts
+                        .get(owner.0)
+                        .is_ok_and(|account| account.parent() == root)
+                {
+                    continue;
+                }
+                if previous == Some(origin)
+                    && (remote.is_some_and(|remote| remote.0 > checkpoint.remote_revision)
+                        || synced.is_some_and(|synced| synced.0 > checkpoint.local_revision))
+                {
+                    continue;
+                }
+                let mut entity = commands.entity(entity);
+                entity.insert((
+                    origin.clone(),
+                    RemoteRevision(checkpoint.remote_revision),
+                    SyncedRevision(checkpoint.local_revision),
+                ));
+                if checkpoint.deleted {
+                    entity.insert(RemoteDeleted);
+                } else {
+                    entity.remove::<RemoteDeleted>();
+                }
+            }
+        }
+    }
+}
+
+fn finish_load(
+    pages: Query<(Entity, &Load, &Loaded, &ChildOf)>,
+    outbound: FinishLoadOutbound<'_, '_>,
+    mut commands: Commands,
+) {
+    for (operation, request, page, parent) in &pages {
+        let root = parent.parent();
+        commands.entity(root).remove::<OutboxLoading>();
+        if let Some(after) = page.next {
+            commands.entity(root).insert(Inventory {
+                id: request.inventory.id,
+                after,
+                through: Some(page.through),
+            });
+        } else {
+            for (entity, parent, busy, seen) in &outbound {
+                if parent.parent() == root
+                    && !busy
+                    && seen.is_none_or(|seen| seen.0 != request.inventory.id)
+                {
+                    commands.entity(entity).despawn();
+                }
+            }
+            commands.entity(root).remove::<Inventory>().insert(Seed);
         }
         commands.entity(operation).despawn();
     }
 }
+
+type FinishLoadOutbound<'w, 's> =
+    Query<'w, 's, (Entity, &'static ChildOf, Has<Busy>, Option<&'static Seen>), With<Outbound>>;
 
 fn seed(
     roots: SeedRoots<'_, '_>,
@@ -926,6 +1024,9 @@ fn enumerate(
 ) {
     for (root, previous) in &roots {
         let Some((connection, origin, revision)) = context.connection(root) else {
+            if previous.is_some() {
+                commands.entity(root).remove::<Enumerated>();
+            }
             continue;
         };
         if previous.is_some_and(|previous| previous.0 == connection) {
@@ -1032,6 +1133,7 @@ fn receive_list(
     mut requests: MessageWriter<ListRequest>,
     mut commands: Commands,
     wake: Option<Res<JobWake>>,
+    enumerated: Query<&Enumerated, With<Root>>,
 ) {
     for (entity, parent, origin, sent, mut cursor, mut reply) in &mut pending {
         let root = parent.parent();
@@ -1043,6 +1145,12 @@ fn receive_list(
                     && revision == sent.binding_revision
             })
         {
+            if enumerated
+                .get(root)
+                .is_ok_and(|current| current.0 == sent.connection)
+            {
+                commands.entity(root).remove::<Enumerated>();
+            }
             commands.entity(entity).despawn();
             continue;
         }
@@ -1176,15 +1284,17 @@ fn reconcile(
             let Ok(location) = locations.get(root) else {
                 continue;
             };
+            let request = SaveConflict {
+                data: location.0.clone(),
+                origin: origin.clone(),
+                operation: id.0.parse().unwrap(),
+                current: Some(record.0.clone()),
+            };
             commands.entity(outbound).insert((
                 Busy,
                 Conflict(Some(record.0.clone())),
-                JobRequest(SaveConflict {
-                    data: location.0.clone(),
-                    origin: origin.clone(),
-                    operation: id.0.parse().unwrap(),
-                    current: Some(record.0.clone()),
-                }),
+                request.clone(),
+                JobRequest(request),
             ));
         } else {
             let Ok(name) = RemoteProfile::name(&record.0, origin.account) else {
@@ -1373,7 +1483,7 @@ impl Job for Acknowledge {
     }
 }
 
-#[derive(Clone)]
+#[derive(Component, Clone)]
 struct SaveConflict {
     data: PathBuf,
     origin: Origin,
@@ -1425,14 +1535,16 @@ fn receive_upload(
                     if current.as_ref().is_none_or(|record| {
                         record.id == target.0 && RemoteProfile::name(record, origin.account).is_ok()
                     }) {
+                        let request = SaveConflict {
+                            data: path.0.clone(),
+                            origin: origin.clone(),
+                            operation: id.0.parse().unwrap(),
+                            current: current.clone(),
+                        };
                         commands.entity(entity).insert((
                             Conflict(current.clone()),
-                            JobRequest(SaveConflict {
-                                data: path.0.clone(),
-                                origin: origin.clone(),
-                                operation: id.0.parse().unwrap(),
-                                current,
-                            }),
+                            request.clone(),
+                            JobRequest(request),
                         ));
                     } else {
                         let count = Attempts(
@@ -1533,19 +1645,54 @@ fn receive_ack(
     }
 }
 
-fn receive_conflict(mut results: Results<SaveConflict>, mut commands: Commands) {
+fn receive_conflict(
+    mut results: Results<SaveConflict>,
+    attempts: Query<&Attempts>,
+    mut commands: Commands,
+) {
     for (entity, mut result, owner, parent) in &mut results {
         if !owner.accepts(parent) {
             continue;
         }
-        let _ = std::mem::replace(&mut result.0, Err("consumed".into()));
-        commands
-            .entity(entity)
-            .remove::<Busy>()
+        let value = std::mem::replace(&mut result.0, Err("consumed".into()));
+        let mut target = commands.entity(entity);
+        target
             .remove::<JobResult<SaveConflict>>()
             .remove::<JobRequest<SaveConflict>>();
+        if matches!(value, Ok(Ok(()))) {
+            target
+                .remove::<Busy>()
+                .remove::<Attempts>()
+                .remove::<SaveConflict>();
+        } else {
+            let count = Attempts(
+                attempts
+                    .get(entity)
+                    .map_or(1, |value| value.0.saturating_add(1)),
+            );
+            let duration = count.delay();
+            target.insert((Busy, count, Pause { duration }));
+        }
     }
 }
+
+fn retry_conflict(pending: ConflictRetries<'_, '_>, mut commands: Commands) {
+    for (entity, request) in &pending {
+        commands.entity(entity).insert(JobRequest(request.clone()));
+    }
+}
+
+type ConflictRetries<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static SaveConflict),
+    (
+        With<Busy>,
+        Without<JobRequest<SaveConflict>>,
+        Without<Delayed>,
+        Without<Pause>,
+    ),
+>;
 
 type Results<'w, 's, J> = Query<
     'w,
