@@ -160,9 +160,10 @@ mod tests {
                     .remove(label)
                     .expect("desktop schedule is registered");
                 let result = schedule.initialize(app.world_mut()).map(|_| ());
+                let result = result.map_err(|error| error.to_string(schedule.graph(), app.world()));
                 assert!(
                     result.is_ok(),
-                    "{label:?} must initialize without a cycle (feature_flags={feature_flags})"
+                    "{label:?} must initialize without a cycle (feature_flags={feature_flags}): {result:?}"
                 );
             }
         }
