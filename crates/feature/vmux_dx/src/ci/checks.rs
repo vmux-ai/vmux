@@ -1143,9 +1143,11 @@ impl Verification {
         Self::result(results, "tests", !matrix.include.is_empty(), false)?;
         Self::result(results, "lint", true, false)?;
         let compiler = Self::boolean(outputs, "compiler_lints")?;
-        let reused = outputs["reuse_lint"]
-            .as_str()
-            .ok_or("Missing lint reuse identity")?;
+        let reused = match outputs.get("reuse_lint") {
+            None => "",
+            Some(Value::String(value)) => value.as_str(),
+            _ => return Err("Invalid lint reuse identity".into()),
+        };
         Self::result(results, "lint-rust", code, !reused.is_empty())?;
         Self::result(results, "lint-ecs", code && compiler, !reused.is_empty())?;
         Self::result(
@@ -1471,6 +1473,20 @@ mod tests {
             .environment
             .set("VMUX_CI_RESULTS", results.to_string());
         fixture.run("checks-gate", &[]).unwrap();
+        results["changes"]["outputs"]
+            .as_object_mut()
+            .unwrap()
+            .remove("reuse_lint");
+        fixture
+            .environment
+            .set("VMUX_CI_RESULTS", results.to_string());
+        fixture.run("checks-gate", &[]).unwrap();
+        results["changes"]["outputs"]["reuse_lint"] = json!(42);
+        fixture
+            .environment
+            .set("VMUX_CI_RESULTS", results.to_string());
+        assert!(fixture.run("checks-gate", &[]).is_err());
+        results["changes"]["outputs"] = outputs.clone();
         for (name, result) in [
             ("tests", "failure"),
             ("tests", "cancelled"),
