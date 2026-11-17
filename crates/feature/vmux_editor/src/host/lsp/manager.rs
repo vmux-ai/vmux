@@ -270,17 +270,33 @@ where
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
-        let current = {
-            let manager = state.get_mut(world).expect("LSP lookup is available");
-            self.origin.current(&manager)
-        };
-        if current {
-            world.trigger(self.event);
-        }
+        world.trigger(Response {
+            origin: self.origin,
+            event: Some(self.event),
+        });
     }
 }
 
+#[derive(Event)]
+struct Response<E: Event> {
+    origin: LspOrigin,
+    event: Option<E>,
+}
+
+fn respond<E>(mut response: On<Response<E>>, manager: LspManager, mut commands: Commands)
+where
+    E: Event,
+    for<'a> E::Trigger<'a>: Default,
+{
+    if !response.origin.current(&manager) {
+        return;
+    }
+    if let Some(event) = response.event_mut().event.take() {
+        commands.trigger(event);
+    }
+}
+
+#[derive(Event)]
 struct GuardedOffer {
     origin: LspOrigin,
     actions: Vec<lsp_types::CodeActionOrCommand>,
@@ -290,18 +306,20 @@ impl Command for GuardedOffer {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
-        let current = {
-            let manager = state.get_mut(world).expect("LSP lookup is available");
-            self.origin.current(&manager)
-        };
-        if current {
-            world.entity_mut(self.origin.owner).insert((
-                OfferedCodeActions(self.actions, self.origin),
-                CodeActionSelection::default(),
-            ));
-        }
+        world.trigger(self);
     }
+}
+
+fn offer(mut request: On<GuardedOffer>, manager: LspManager, mut commands: Commands) {
+    if !request.origin.current(&manager) {
+        return;
+    }
+    let origin = request.origin;
+    let actions = std::mem::take(&mut request.event_mut().actions);
+    commands.entity(origin.owner).insert((
+        OfferedCodeActions(actions, origin),
+        CodeActionSelection::default(),
+    ));
 }
 
 #[derive(Message)]
@@ -1605,7 +1623,12 @@ struct RequestsPlugin;
 
 impl Plugin for RequestsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<LspGoto>()
+        app.add_observer(respond::<FileUiStateWrite>)
+            .add_observer(respond::<crate::host::feedback::EditFailure>)
+            .add_observer(respond::<crate::host::panel::ReferencesResult>)
+            .add_observer(respond::<crate::host::panel::CompletionResult>)
+            .add_observer(respond::<crate::host::editing::EditRequest>)
+            .add_message::<LspGoto>()
             .add_message::<LspCodeActionRequest>()
             .add_message::<LspFolds>()
             .add_message::<LspSemantic>()
@@ -2025,7 +2048,8 @@ impl Plugin for CodeActionsPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(move_code_action)
             .add_observer(file_code_action_pick)
-            .add_observer(dismiss_code_actions);
+            .add_observer(dismiss_code_actions)
+            .add_observer(offer);
     }
 }
 
@@ -3501,6 +3525,96 @@ mod tests {
                     .regions,
                 expected
             );
+        }
+    }
+
+    #[test]
+    fn queued_completion_guards_recheck_buffer_and_transport_before_delivery() {
+        for changed in 0..3 {
+            let mut fixture = RequestFixture::new();
+            let (operation, sender) = fixture.pending();
+            let request = fixture
+                .app
+                .world()
+                .get::<LspRequestOperation>(operation)
+                .unwrap();
+            let origin = LspOrigin {
+                owner: fixture.view,
+                stamp: request.stamp,
+                operation: None,
+            };
+            fixture.app.world_mut().entity_mut(fixture.view).insert((
+                crate::host::viewport::FileViewport {
+                    top_row: 0,
+                    rows: 0,
+                    wrap_columns: 0,
+                    word_wrap: Default::default(),
+                    word_wrap_column: 80,
+                    scroll_revision: 0,
+                },
+                vmux_git::GitDiffSource {
+                    content: "fn x() {}\n".into(),
+                    dirty: false,
+                },
+            ));
+            fixture
+                .app
+                .insert_non_send(crate::host::file_lifecycle::SelfWrites::default());
+            fixture
+                .app
+                .add_plugins(crate::host::editing::EditExecutionPlugin)
+                .insert_non_send(crate::host::editing::ClipboardHandle(None));
+
+            fixture.app.world_mut().commands().queue(GuardedResponse {
+                origin,
+                event: crate::host::editing::EditRequest::new(
+                    fixture.view,
+                    vec![crate::edit::EditCommand::InsertText("delivered".into())],
+                ),
+            });
+            match changed {
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<Editor>(fixture.view)
+                        .unwrap()
+                        .core
+                        .apply(crate::edit::EditCommand::InsertText("mine".into()));
+                }
+                2 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.server)
+                        .insert(Transport::new(ProbeTransport {
+                            replies: fixture.replies.clone(),
+                            recording: None,
+                            capabilities: Default::default(),
+                        }));
+                }
+                _ => {}
+            }
+            fixture.app.world_mut().flush();
+            let text = fixture
+                .app
+                .world()
+                .get::<Editor>(fixture.view)
+                .unwrap()
+                .core
+                .buffer
+                .text();
+            assert_eq!(
+                text,
+                if changed == 0 {
+                    "deliveredfn x() {}\n"
+                } else if changed == 1 {
+                    "minefn x() {}\n"
+                } else {
+                    "fn x() {}\n"
+                }
+            );
+            drop(sender);
         }
     }
 
