@@ -4,28 +4,27 @@ use std::sync::mpsc;
 
 use bevy::ecs::system::Commands;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_ecs::event::*;
 
-use super::editor::{Editor, FileView, ParkedEdits};
+use super::editor::{Editor, FileView};
 use super::explorer::OutlineDirty;
 use super::explorer::{
     ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
 };
-use super::highlight::{FILE_VIEW_MAX_BYTES, HIGHLIGHT_MAX_BYTES};
-use super::keymap::KeymapConfig;
+pub(super) use super::file_loading::FileLoadTask;
 use super::markdown::ParsedNote;
-use super::media::FileMedia;
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
-use crate::edit::{EditCore, highlight_cache::HighlightCache};
 
 pub(super) struct FileLifecyclePlugin;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct EditorFileLoadedSet;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct FileChangesSet;
 
 impl Plugin for FileLifecyclePlugin {
     fn build(&self, app: &mut App) {
@@ -52,7 +51,8 @@ impl Plugin for FileLifecyclePlugin {
             }
             Err(error) => tracing::warn!("file watcher init failed: {error}"),
         }
-        app.insert_non_send(SelfWrites::default())
+        app.add_plugins(super::file_loading::FileLoadingPlugin)
+            .insert_non_send(SelfWrites::default())
             .add_systems(
                 Update,
                 (
@@ -60,10 +60,9 @@ impl Plugin for FileLifecyclePlugin {
                     reconcile_file_watches,
                     drain_file_changes,
                     reload_changed_files,
-                    load_file_buffers,
-                    apply_loaded_file_buffers.in_set(EditorFileLoadedSet),
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(FileChangesSet),
             )
             .add_observer(reset_sent);
     }
@@ -88,7 +87,7 @@ pub struct FileBuffer {
 }
 
 impl FileBuffer {
-    fn failed(reason: LoadFailure, message: String) -> Self {
+    pub(super) fn failed(reason: LoadFailure, message: String) -> Self {
         Self {
             language: format!("{}{message}", reason.marker()),
         }
@@ -131,112 +130,6 @@ pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
 }
 
-#[derive(Component)]
-pub(super) struct FileLoadTask {
-    path: PathBuf,
-    task: Task<FileLoad>,
-}
-
-#[cfg(test)]
-impl FileLoadTask {
-    pub(super) fn settle(app: &mut App, entity: Entity) {
-        for _ in 0..10_000 {
-            app.update();
-            let world = app.world();
-            let loaded = world.get::<FileLoadTask>(entity).is_none()
-                && (world.get::<FileBuffer>(entity).is_some()
-                    || world.get::<FileDir>(entity).is_some()
-                    || world.get::<FileMedia>(entity).is_some()
-                    || world.get::<Editor>(entity).is_some());
-            if loaded {
-                return;
-            }
-            std::thread::yield_now();
-        }
-        panic!("file load did not settle");
-    }
-}
-
-enum FileLoad {
-    Directory(Vec<FileDirEntry>),
-    Media {
-        kind: vmux_api::media::MediaKind,
-        mime: String,
-    },
-    Text {
-        decoded: crate::encoding::DecodedText,
-        heavy: bool,
-    },
-    Failed {
-        reason: LoadFailure,
-        message: String,
-        missing: bool,
-    },
-}
-
-impl FileLoad {
-    fn read(path: &Path, forced: Option<FileEncoding>) -> Self {
-        let metadata = std::fs::metadata(path);
-        if metadata.as_ref().is_ok_and(|metadata| metadata.is_dir()) {
-            return Self::Directory(FileDir::read(path));
-        }
-
-        let path_text = path.to_string_lossy();
-        if let Some(kind) = vmux_api::media::MediaKind::from_path(&path_text) {
-            let mime = vmux_api::media::MediaKind::mime(&path_text)
-                .unwrap_or("application/octet-stream")
-                .to_string();
-            return Self::Media { kind, mime };
-        }
-
-        let size = match metadata {
-            Ok(metadata) => metadata.len(),
-            Err(error) => {
-                return Self::Failed {
-                    reason: LoadFailure::Fatal,
-                    message: format!("cannot open {}: {error}", path.display()),
-                    missing: error.kind() == std::io::ErrorKind::NotFound,
-                };
-            }
-        };
-        if size > FILE_VIEW_MAX_BYTES {
-            return Self::Failed {
-                reason: LoadFailure::Fatal,
-                message: format!("file too large ({size} bytes, max {})", FILE_VIEW_MAX_BYTES),
-                missing: false,
-            };
-        }
-
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                return Self::Failed {
-                    reason: LoadFailure::Fatal,
-                    message: format!("cannot read {}: {error}", path.display()),
-                    missing: error.kind() == std::io::ErrorKind::NotFound,
-                };
-            }
-        };
-        let decoded = match forced {
-            Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
-            None => match crate::encoding::DecodedText::decode(&bytes) {
-                Some(decoded) => decoded,
-                None => {
-                    return Self::Failed {
-                        reason: LoadFailure::Undecodable,
-                        message: format!("not a text file: {}", path.display()),
-                        missing: false,
-                    };
-                }
-            },
-        };
-        Self::Text {
-            decoded,
-            heavy: size > HIGHLIGHT_MAX_BYTES,
-        }
-    }
-}
-
 #[derive(Default)]
 pub(super) struct SelfWrites(pub(super) HashMap<PathBuf, std::time::Instant>);
 
@@ -250,7 +143,7 @@ pub(super) struct ForcedEncoding {
 }
 
 impl ForcedEncoding {
-    fn for_path(&self, path: &Path) -> Option<FileEncoding> {
+    pub(super) fn for_path(&self, path: &Path) -> Option<FileEncoding> {
         match self.path == path {
             true => Some(self.encoding),
             false => None,
@@ -259,146 +152,12 @@ impl ForcedEncoding {
 }
 
 #[derive(Component)]
-struct MissingFileView;
+pub(super) struct MissingFileView;
 
 struct FileWatch {
     watcher: RecommendedWatcher,
     rx: mpsc::Receiver<notify::Result<notify::Event>>,
     dirs: HashSet<PathBuf>,
-}
-
-type UnloadedFileView = (
-    Without<FileBuffer>,
-    Without<FileDir>,
-    Without<FileMedia>,
-    Without<Editor>,
-    Without<FileLoadTask>,
-);
-
-#[allow(clippy::type_complexity)]
-fn load_file_buffers(
-    mut files: Query<
-        (
-            Entity,
-            &FileView,
-            Option<&mut ParkedEdits>,
-            Option<&ForcedEncoding>,
-        ),
-        UnloadedFileView,
-    >,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let keymap = KeymapConfig::resolve(settings.as_deref());
-    for (entity, file, mut parked, forced) in &mut files {
-        let forced = forced.and_then(|encoding| encoding.for_path(&file.path));
-        let markdown = ParsedNote::supports(&file.path);
-        if forced.is_none()
-            && let Some(parked) = parked.as_mut()
-            && let Some(resumed) = parked.resume(&file.path)
-        {
-            let mut entity_commands = commands.entity(entity);
-            entity_commands
-                .insert((resumed.edit, keymap.keymap(), resumed.diff))
-                .remove::<MissingFileView>();
-            if markdown {
-                entity_commands.remove::<NoteSent>().insert(OutlineDirty);
-            }
-            continue;
-        }
-        let path = file.path.clone();
-        let task_path = path.clone();
-        let wake = proxy.as_deref().map(|wrapper| (**wrapper).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let loaded = FileLoad::read(&path, forced);
-            if let Some(proxy) = wake {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            loaded
-        });
-        commands.entity(entity).insert(FileLoadTask {
-            path: task_path,
-            task,
-        });
-    }
-}
-
-fn apply_loaded_file_buffers(
-    mut files: Query<(Entity, &FileView, &mut FileLoadTask)>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    mut commands: Commands,
-) {
-    let keymap = KeymapConfig::resolve(settings.as_deref());
-    for (entity, view, mut pending) in &mut files {
-        let Some(loaded) = future::block_on(future::poll_once(&mut pending.task)) else {
-            continue;
-        };
-        if pending.path != view.path {
-            commands.entity(entity).remove::<FileLoadTask>();
-            continue;
-        }
-        let mut entity_commands = commands.entity(entity);
-        entity_commands.remove::<FileLoadTask>();
-        match loaded {
-            FileLoad::Directory(entries) => {
-                entity_commands
-                    .remove::<MissingFileView>()
-                    .insert(FileDir { entries });
-            }
-            FileLoad::Media { kind, mime } => {
-                entity_commands
-                    .remove::<MissingFileView>()
-                    .insert(FileMedia { kind, mime });
-            }
-            FileLoad::Failed {
-                reason,
-                message,
-                missing,
-            } => {
-                entity_commands.insert(FileBuffer::failed(reason, message));
-                if missing {
-                    entity_commands.insert(MissingFileView);
-                } else {
-                    entity_commands.remove::<MissingFileView>();
-                }
-            }
-            FileLoad::Text { decoded, heavy } => {
-                let markdown = ParsedNote::supports(&view.path);
-                let crate::encoding::DecodedText { text, encoding } = decoded;
-                let highlight = match heavy {
-                    true => HighlightCache::plain(&view.path),
-                    false => HighlightCache::new(&view.path),
-                };
-                let mut core = EditCore::new(
-                    view.path.clone(),
-                    highlight.language.clone(),
-                    &text,
-                    keymap.initial_mode(),
-                );
-                core.buffer.encoding = encoding;
-                let mut folds = crate::fold::FoldState::default();
-                if !heavy {
-                    folds.set_indented(&core.buffer.rope);
-                }
-                core.fold_view = folds.view(core.buffer.len_lines() as u32);
-                let editor = Editor::new(core, highlight, folds);
-                entity_commands
-                    .insert((
-                        editor,
-                        keymap.keymap(),
-                        vmux_git::GitDiffSource {
-                            content: text,
-                            dirty: false,
-                        },
-                    ))
-                    .remove::<MissingFileView>();
-                if markdown {
-                    entity_commands.remove::<NoteSent>().insert(OutlineDirty);
-                }
-            }
-        }
-    }
 }
 
 fn reset_sent(

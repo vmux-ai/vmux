@@ -91,6 +91,8 @@ pub(crate) mod editor;
 pub(crate) mod explorer;
 pub(crate) mod feedback;
 pub(crate) mod file_lifecycle;
+mod file_loading;
+mod file_loading_io;
 pub(crate) mod history;
 pub(crate) mod language;
 pub(crate) mod media;
