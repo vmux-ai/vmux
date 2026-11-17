@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
-use crate::host::editor::{Editor, FileNavigateRequest, FileView, ParkedEdits};
+use crate::host::editor::{Editor, FileNavigateRequest, FileView};
+use crate::host::parked_edits::Parked;
 use vmux_ecs::store::StoreAppExt;
 
 impl Plugin for TabsPlugin {
@@ -18,7 +20,8 @@ impl Plugin for TabsPlugin {
             .add_observer(close_item)
             .add_observer(reopen_item)
             .add_observer(capture)
-            .add_observer(restore);
+            .add_observer(restore)
+            .add_observer(restore_buffers);
     }
 }
 
@@ -35,14 +38,10 @@ pub(crate) struct ArchivedEditorState {
 #[derive(Component, Default)]
 struct ClosedEditors(Vec<(PathBuf, i64)>);
 
-#[derive(Component, Default)]
-pub(crate) struct ArchivedEditorRuntime {
-    parked: ParkedEdits,
-    closed: ClosedEditors,
-}
-
+#[derive(EntityEvent)]
 pub(crate) struct RestoreEditors {
     pub(crate) stack: Entity,
+    #[event_target]
     pub(crate) view: Entity,
 }
 
@@ -50,36 +49,41 @@ impl Command for RestoreEditors {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let stack = self.stack;
-        let view = self.view;
+        world.trigger(self);
+    }
+}
+
+fn restore_buffers(request: On<RestoreEditors>, mut commands: Commands) {
+    let stack = request.stack;
+    let view = request.view;
+    commands.queue(move |world: &mut World| {
+        let Some(file) = world.get::<FileView>(view) else {
+            return;
+        };
+        let path = file.path.clone();
         let Ok(mut owner) = world.get_entity_mut(stack) else {
             return;
         };
         let Some(state) = owner.take::<ArchivedEditorState>() else {
             return;
         };
-        let mut runtime = owner.take::<ArchivedEditorRuntime>().unwrap_or_default();
+        let closed = owner.take::<ClosedEditors>().unwrap_or_default();
+        Parked::transfer(world, stack, view);
         let settings = world.get_resource::<vmux_setting::AppSettings>();
         let keymap = crate::host::keymap::KeymapConfig::resolve(settings).keymap();
-        let Ok(mut document) = world.get_entity_mut(view) else {
-            return;
-        };
-        let Some(file) = document.get::<FileView>() else {
-            return;
-        };
-        let path = file.path.clone();
-        let active = runtime.parked.resume(&path);
+        let active = Parked::resume(world, view, &path);
+        let mut document = world.entity_mut(view);
         if let Some(mut explorer) = document.get_mut::<ExplorerState>() {
             explorer.restore_editors(state.paths.iter().map(PathBuf::from).collect(), &path);
         }
-        if let Some((_, closed_at)) = runtime.closed.0.last() {
+        if let Some((_, closed_at)) = closed.0.last() {
             document.insert(vmux_ecs::page::PageItemHistory {
                 closed_at: *closed_at,
             });
         }
-        document.insert((runtime.parked, runtime.closed, OpenEditorsDirty));
-        if let Some(active) = active {
-            document.insert((active.edit, active.diff, keymap));
+        document.insert((closed, OpenEditorsDirty));
+        if let Some((edit, diff)) = active {
+            document.insert((edit, diff, keymap));
         }
         if !state.preview_checkout.is_empty() {
             document.insert(crate::host::navigation::CheckoutPreview(
@@ -91,7 +95,7 @@ impl Command for RestoreEditors {
                 },
             ));
         }
-    }
+    });
 }
 
 fn close_item(
@@ -185,31 +189,28 @@ fn capture(
             .unwrap_or_default(),
     };
     commands.queue(move |world: &mut World| {
+        if world.get_entity(archive).is_err() {
+            return;
+        }
         let Ok(mut document) = world.get_entity_mut(source) else {
             return;
         };
-        let mut parked = document.take::<ParkedEdits>().unwrap_or_default();
         if let Some(edit) = document.take::<Editor>() {
-            let path = edit.core.buffer.path.clone();
             let diff = document
                 .take::<vmux_git::GitDiffSource>()
                 .unwrap_or_else(|| vmux_git::GitDiffSource {
                     content: edit.core.buffer.text(),
                     dirty: edit.core.dirty,
                 });
-            let modified = ParkedEdits::modified_at(&path);
-            parked.insert(
-                path,
-                crate::host::editor::ParkedEdit {
-                    edit,
-                    diff,
-                    modified,
-                },
-            );
+            Parked::retain(world, source, edit, diff);
         }
-        let closed = document.take::<ClosedEditors>().unwrap_or_default();
+        let closed = world
+            .entity_mut(source)
+            .take::<ClosedEditors>()
+            .unwrap_or_default();
+        Parked::transfer(world, source, archive);
         if let Ok(mut entry) = world.get_entity_mut(archive) {
-            entry.insert((state, ArchivedEditorRuntime { parked, closed }));
+            entry.insert((state, closed));
         }
     });
 }
@@ -218,15 +219,19 @@ fn restore(request: On<vmux_ecs::page::ArchiveRestoreRequest>, mut commands: Com
     let archive = request.archive;
     let stack = request.stack;
     commands.queue(move |world: &mut World| {
+        if world.get_entity(stack).is_err() {
+            return;
+        }
         let Ok(mut entry) = world.get_entity_mut(archive) else {
             return;
         };
         let Some(state) = entry.take::<ArchivedEditorState>() else {
             return;
         };
-        let runtime = entry.take::<ArchivedEditorRuntime>().unwrap_or_default();
+        let closed = entry.take::<ClosedEditors>().unwrap_or_default();
+        Parked::transfer(world, archive, stack);
         if let Ok(mut stack) = world.get_entity_mut(stack) {
-            stack.insert((state, runtime));
+            stack.insert((state, closed));
         }
     });
 }
@@ -250,26 +255,39 @@ fn sync_open_editors(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct Delivery<'w, 's> {
+    views: Query<'w, 's, (), With<FileView>>,
+    browsers: Option<NonSend<'w, Browsers>>,
+}
+
+impl Delivery<'_, '_> {
+    fn available(&self, entity: Entity) -> bool {
+        self.views.contains(entity)
+            && self
+                .browsers
+                .as_ref()
+                .is_some_and(|browsers| browsers.can_emit_to(&entity))
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn emit_open_editors(
-    query: Query<
+    query: Query<(Entity, &FileView, &ExplorerState, Option<&Editor>), OpenEditorsDirtyReady>,
+    children: Query<&Children>,
+    parked: Query<
         (
-            Entity,
-            &FileView,
-            &ExplorerState,
-            Option<&Editor>,
-            Option<&ParkedEdits>,
+            &super::super::fold_preferences::FileId,
+            &Editor,
+            &super::super::parked_edits::Modified,
         ),
-        OpenEditorsDirtyReady,
+        With<Parked>,
     >,
-    browsers: Option<NonSend<Browsers>>,
+    delivery: Delivery,
     mut commands: Commands,
 ) {
-    let Some(browsers) = browsers else {
-        return;
-    };
-    for (entity, file_view, state, edit, parked) in &query {
-        if !browsers.can_emit_to(&entity) {
+    for (entity, file_view, state, edit) in &query {
+        if !delivery.available(entity) {
             continue;
         }
         let active_dirty = edit.map(|edit| edit.core.dirty).unwrap_or(false);
@@ -283,7 +301,13 @@ fn emit_open_editors(
             let active = *path == file_view.path;
             let dirty = match active {
                 true => active_dirty,
-                false => parked.is_some_and(|parked| parked.is_dirty(path)),
+                false => children.get(entity).is_ok_and(|children| {
+                    children.iter().any(|child| {
+                        parked
+                            .get(child)
+                            .is_ok_and(|(file, edit, _)| file.0 == *path && edit.core.dirty)
+                    })
+                }),
             };
             let name = OpenEditorPath::name(path);
             let context = match name_counts.get(&name).copied().unwrap_or_default() > 1 {

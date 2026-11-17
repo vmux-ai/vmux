@@ -9,7 +9,7 @@ use vmux_ecs::{
 };
 
 use super::edit::{EditCore, highlight_cache::HighlightCache};
-use super::editor::{Editor, FileView, ParkedEdits};
+use super::editor::{Editor, FileView};
 use super::explorer::OutlineDirty;
 use super::file_lifecycle::{
     EditorFileLoadedSet, FileBuffer, FileChangesSet, FileDir, ForcedEncoding, LoadFailure,
@@ -21,6 +21,7 @@ use super::keymap::KeymapConfig;
 use super::markdown::ParsedNote;
 use super::media::FileMedia;
 use super::note::NoteSent;
+use super::parked_edits::Parked;
 
 pub(super) struct FileLoadingPlugin;
 
@@ -148,69 +149,61 @@ impl Loads<'_, '_> {
     }
 }
 
-type UnloadedViews<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static FileView,
-        Option<&'static mut ParkedEdits>,
-        Option<&'static ForcedEncoding>,
-    ),
-    (
-        Without<FileBuffer>,
-        Without<FileDir>,
-        Without<FileMedia>,
-        Without<Editor>,
-        Without<FileLoadTask>,
-    ),
->;
-
+#[allow(clippy::type_complexity)]
 fn accept(
-    mut files: UnloadedViews,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    mut commands: Commands,
+    world: &mut World,
+    query: &mut QueryState<
+        (Entity, &FileView, Option<&ForcedEncoding>),
+        (
+            Without<FileBuffer>,
+            Without<FileDir>,
+            Without<FileMedia>,
+            Without<Editor>,
+            Without<FileLoadTask>,
+        ),
+    >,
 ) {
-    let keymap = KeymapConfig::resolve(settings.as_deref());
-    for (entity, file, mut parked, forced) in &mut files {
+    let keymap = KeymapConfig::resolve(world.get_resource::<vmux_setting::AppSettings>());
+    let mut files = Vec::new();
+    for (entity, file, forced) in query.iter(world) {
         let encoding = forced.and_then(|encoding| encoding.for_path(&file.path));
+        files.push((entity, file.path.clone(), encoding));
+    }
+    for (entity, path, encoding) in files {
         if encoding.is_none()
-            && let Some(parked) = parked.as_mut()
-            && let Some(resumed) = parked.resume(&file.path)
+            && let Some((edit, diff)) = Parked::resume(world, entity, &path)
         {
-            commands
-                .entity(entity)
-                .insert((resumed.edit, keymap.keymap(), resumed.diff))
+            world
+                .entity_mut(entity)
+                .insert((edit, keymap.keymap(), diff))
                 .remove::<MissingFileView>();
-            if ParsedNote::supports(&file.path) {
-                commands
-                    .entity(entity)
+            if ParsedNote::supports(&path) {
+                world
+                    .entity_mut(entity)
                     .remove::<NoteSent>()
                     .insert(OutlineDirty);
             }
             continue;
         }
-        let operation = commands
+        let operation = world
             .spawn((
                 Operation::bundle("editor.file.load").unwrap().running(),
                 Name::new("Load editor file"),
                 Load,
-                Source(file.path.clone()),
+                Source(path.clone()),
                 OperationTarget::new(entity),
             ))
             .id();
         if let Some(encoding) = encoding {
-            commands.entity(operation).insert(Encoding(encoding));
+            world.entity_mut(operation).insert(Encoding(encoding));
         }
-        commands.spawn((
+        world.spawn((
             Operation::bundle("editor.file.inspect").unwrap(),
             Name::new("Inspect editor file"),
             ChildOf(operation),
-            JobRequest(Inspect {
-                path: file.path.clone(),
-            }),
+            JobRequest(Inspect { path: path.clone() }),
         ));
-        commands.entity(entity).insert(FileLoadTask { operation });
+        world.entity_mut(entity).insert(FileLoadTask { operation });
     }
 }
 

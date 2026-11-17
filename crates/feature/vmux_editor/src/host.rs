@@ -104,6 +104,7 @@ pub(crate) mod navigation;
 pub(crate) mod note;
 pub(crate) mod page_open;
 pub(crate) mod panel;
+mod parked_edits;
 pub(crate) mod picker_driver;
 pub(crate) mod preview;
 pub(crate) mod project;
