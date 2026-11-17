@@ -5,8 +5,8 @@ use std::task::Waker;
 
 use bevy::app::{App, Plugin, Update};
 use bevy::ecs::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, TaskPool};
-use crossbeam_channel::{Receiver, bounded};
+use vmux_ecs::blocking::{BlockingRuntime, BlockingTask, Lane, SpawnError};
+use vmux_ecs::{Operation, OperationState};
 
 use crate::host::fold_preferences::{
     FileId, FoldSet, LoadCompleted, LoadRequest, Root, SaveCompleted, SaveRequest, Scope, Snapshot,
@@ -17,11 +17,11 @@ pub struct FilesystemPlugin;
 
 impl Plugin for FilesystemPlugin {
     fn build(&self, app: &mut App) {
-        IoTaskPool::get_or_init(TaskPool::new);
-        app.add_systems(Update, finish.before(FoldSet::Restore))
+        app.init_resource::<BlockingRuntime>()
+            .add_systems(Update, (loaded, saved).before(FoldSet::Restore))
             .add_systems(
                 Update,
-                (queue, start)
+                (queue_loads, queue_saves, load, save)
                     .chain()
                     .after(FoldSet::Save)
                     .before(FoldSet::Project),
@@ -31,6 +31,12 @@ impl Plugin for FilesystemPlugin {
 
 #[derive(Resource, Clone)]
 pub struct FileWake(pub Waker);
+
+impl FileWake {
+    fn notify(&self) {
+        let _ = catch_unwind(AssertUnwindSafe(|| self.0.wake_by_ref()));
+    }
+}
 
 pub struct FileStore;
 
@@ -52,67 +58,24 @@ impl FileStore {
     }
 }
 
-#[derive(Clone)]
-enum Work {
-    Read(Ticket),
-    Write(SaveRequest),
-}
-
-impl Work {
-    fn ticket(&self) -> &Ticket {
-        match self {
-            Self::Read(ticket) => ticket,
-            Self::Write(request) => &request.ticket,
-        }
-    }
-
-    fn run(&self, path: &Path) -> Result<Snapshot, String> {
-        match self {
-            Self::Read(_) => FileStore::read(path),
-            Self::Write(request) => {
-                FileStore::write(path, &request.snapshot)?;
-                Ok(Snapshot::default())
-            }
-        }
-    }
-
-    fn start(&self, path: &Path, wake: Option<Waker>) -> Running {
-        let work = self.clone();
-        let path = path.to_path_buf();
-        let (sender, receiver) = bounded(1);
-        let task = IoTaskPool::get().spawn(async move {
-            let result = match catch_unwind(AssertUnwindSafe(|| work.run(&path))) {
-                Ok(result) => result,
-                Err(_) => Err("fold filesystem worker panicked".into()),
-            };
-            if sender.send(result).is_ok()
-                && let Some(wake) = wake
-            {
-                let _ = catch_unwind(AssertUnwindSafe(|| wake.wake()));
-            }
-        });
-        Running {
-            work: self.clone(),
-            receiver,
-            _task: task,
-        }
-    }
-}
+#[derive(Component)]
+struct Load(Ticket);
 
 #[derive(Component)]
-struct Queued(Work);
+struct Save(SaveRequest);
 
 #[derive(Component)]
-struct Running {
-    work: Work,
-    receiver: Receiver<Result<Snapshot, String>>,
-    _task: Task<()>,
-}
+struct Loading(BlockingTask<Result<Snapshot, String>>);
 
-fn queue(
+#[derive(Component)]
+struct Saving(BlockingTask<Result<(), String>>);
+
+type ActiveFiles<'w, 's> = Query<'w, 's, &'static FileId, Or<(With<Loading>, With<Saving>)>>;
+
+fn queue_loads(
     mut reads: MessageReader<LoadRequest>,
-    mut writes: MessageReader<SaveRequest>,
     roots: Query<(Entity, &Root, &Scope)>,
+    wake: Option<Res<FileWake>>,
     mut completed: MessageWriter<LoadCompleted>,
     mut commands: Commands,
 ) {
@@ -132,39 +95,62 @@ fn queue(
                 ticket: ticket.clone(),
                 result: Err("fold store path has multiple owners".into()),
             });
+            if let Some(wake) = &wake {
+                wake.notify();
+            }
             continue;
         }
-        commands.spawn((FileId(path), Queued(Work::Read(ticket.clone()))));
+        commands.spawn((
+            Operation::bundle("editor.fold.load").unwrap(),
+            Name::new("Load fold preferences"),
+            FileId(path),
+            Load(ticket.clone()),
+        ));
     }
+}
+
+fn queue_saves(
+    mut writes: MessageReader<SaveRequest>,
+    roots: Query<(&Root, &Scope)>,
+    mut commands: Commands,
+) {
     for request in writes.read() {
         let ticket = &request.ticket;
         if !roots
             .get(ticket.owner)
-            .is_ok_and(|(_, root, scope)| root.0 == ticket.path && scope.0 == *ticket)
+            .is_ok_and(|(root, scope)| root.0 == ticket.path && scope.0 == *ticket)
         {
             continue;
         }
         let path = vmux_path::PathIdentity::resolve(&ticket.path).into_path_buf();
-        commands.spawn((FileId(path), Queued(Work::Write(request.clone()))));
+        commands.spawn((
+            Operation::bundle("editor.fold.save").unwrap(),
+            Name::new("Save fold preferences"),
+            FileId(path),
+            Save(request.clone()),
+        ));
     }
 }
 
-fn start(
-    queued: Query<(Entity, &FileId, &Queued)>,
-    active: Query<&FileId, With<Running>>,
+fn load(
+    queued: Query<(Entity, &FileId, &Load, &OperationState), Without<Loading>>,
+    active: ActiveFiles,
     roots: Query<(&Root, &Scope)>,
+    runtime: Res<BlockingRuntime>,
     wake: Option<Res<FileWake>>,
+    mut completed: MessageWriter<LoadCompleted>,
     mut commands: Commands,
 ) {
     let mut occupied = HashSet::new();
     for path in &active {
         occupied.insert(path.0.clone());
     }
-    for (entity, path, queued) in &queued {
-        let ticket = queued.0.ticket();
-        if !roots
-            .get(ticket.owner)
-            .is_ok_and(|(root, scope)| root.0 == ticket.path && scope.0 == *ticket)
+    for (entity, path, queued, state) in &queued {
+        let ticket = &queued.0;
+        if *state != OperationState::Pending
+            || !roots
+                .get(ticket.owner)
+                .is_ok_and(|(root, scope)| root.0 == ticket.path && scope.0 == *ticket)
         {
             commands.entity(entity).despawn();
             continue;
@@ -172,43 +158,130 @@ fn start(
         if !occupied.insert(path.0.clone()) {
             continue;
         }
-        let running = queued
-            .0
-            .start(&path.0, wake.as_ref().map(|wake| wake.0.clone()));
-        commands.entity(entity).remove::<Queued>().insert(running);
+        let path = path.0.clone();
+        match runtime.try_spawn(
+            Lane::Short,
+            wake.as_ref().map(|wake| wake.0.clone()),
+            move || FileStore::read(&path),
+        ) {
+            Ok(task) => {
+                commands
+                    .entity(entity)
+                    .insert((OperationState::Running, Loading(task)));
+            }
+            Err(SpawnError::Full) => {}
+            Err(error) => {
+                completed.write(LoadCompleted {
+                    ticket: ticket.clone(),
+                    result: Err(error.to_string()),
+                });
+                if let Some(wake) = &wake {
+                    wake.notify();
+                }
+                commands.entity(entity).despawn();
+            }
+        }
     }
 }
 
-fn finish(
-    tasks: Query<(Entity, &Running)>,
+fn save(
+    queued: Query<(Entity, &FileId, &Save, &OperationState), Without<Saving>>,
+    active: ActiveFiles,
+    roots: Query<(&Root, &Scope)>,
+    runtime: Res<BlockingRuntime>,
+    wake: Option<Res<FileWake>>,
+    mut completed: MessageWriter<SaveCompleted>,
+    mut commands: Commands,
+) {
+    let mut occupied = HashSet::new();
+    for path in &active {
+        occupied.insert(path.0.clone());
+    }
+    for (entity, path, queued, state) in &queued {
+        let request = &queued.0;
+        let ticket = &request.ticket;
+        if *state != OperationState::Pending
+            || !roots
+                .get(ticket.owner)
+                .is_ok_and(|(root, scope)| root.0 == ticket.path && scope.0 == *ticket)
+        {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if !occupied.insert(path.0.clone()) {
+            continue;
+        }
+        let path = path.0.clone();
+        let snapshot = request.snapshot.clone();
+        match runtime.try_spawn(
+            Lane::Short,
+            wake.as_ref().map(|wake| wake.0.clone()),
+            move || FileStore::write(&path, &snapshot),
+        ) {
+            Ok(task) => {
+                commands
+                    .entity(entity)
+                    .insert((OperationState::Running, Saving(task)));
+            }
+            Err(SpawnError::Full) => {}
+            Err(error) => {
+                completed.write(SaveCompleted {
+                    ticket: ticket.clone(),
+                    operation: request.operation,
+                    revision: request.revision,
+                    result: Err(error.to_string()),
+                });
+                if let Some(wake) = &wake {
+                    wake.notify();
+                }
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn loaded(
+    mut tasks: Query<(Entity, &Load, &mut Loading)>,
     mut loaded: MessageWriter<LoadCompleted>,
+    mut commands: Commands,
+) {
+    for (entity, request, mut loading) in &mut tasks {
+        if !loading.0.is_finished() {
+            continue;
+        }
+        let result = match loading.0.poll() {
+            Some(Ok(result)) => result,
+            Some(Err(_)) => Err("fold filesystem worker panicked".into()),
+            None => Err("fold filesystem worker disconnected".into()),
+        };
+        loaded.write(LoadCompleted {
+            ticket: request.0.clone(),
+            result,
+        });
+        commands.entity(entity).despawn();
+    }
+}
+
+fn saved(
+    mut tasks: Query<(Entity, &Save, &mut Saving)>,
     mut saved: MessageWriter<SaveCompleted>,
     mut commands: Commands,
 ) {
-    for (entity, running) in &tasks {
-        let result = match running.receiver.try_recv() {
-            Ok(result) => result,
-            Err(crossbeam_channel::TryRecvError::Empty) => continue,
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                Err("fold filesystem worker disconnected".into())
-            }
-        };
-        match &running.work {
-            Work::Read(ticket) => {
-                loaded.write(LoadCompleted {
-                    ticket: ticket.clone(),
-                    result,
-                });
-            }
-            Work::Write(request) => {
-                saved.write(SaveCompleted {
-                    ticket: request.ticket.clone(),
-                    operation: request.operation,
-                    revision: request.revision,
-                    result: result.map(|_| ()),
-                });
-            }
+    for (entity, request, mut saving) in &mut tasks {
+        if !saving.0.is_finished() {
+            continue;
         }
+        let result = match saving.0.poll() {
+            Some(Ok(result)) => result,
+            Some(Err(_)) => Err("fold filesystem worker panicked".into()),
+            None => Err("fold filesystem worker disconnected".into()),
+        };
+        saved.write(SaveCompleted {
+            ticket: request.0.ticket.clone(),
+            operation: request.0.operation,
+            revision: request.0.revision,
+            result,
+        });
         commands.entity(entity).despawn();
     }
 }
@@ -218,6 +291,7 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::task::Wake;
     use std::time::Duration;
+    use vmux_ecs::blocking::BlockingPool;
 
     use super::*;
     use crate::host::fold_preferences::{
@@ -308,44 +382,42 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().canonicalize().unwrap().join("folds.ron");
         let mut host = Host::new(&path);
+        host.app.insert_resource(BlockingRuntime::new(
+            BlockingPool::new("fold-replacement", 1, 1),
+            BlockingPool::new("fold-long", 0, 0),
+            BlockingPool::new("fold-process", 0, 0),
+        ));
         host.app.update();
         host.awakened_frame();
         let ticket = host.app.world().get::<Scope>(host.root).unwrap().0.clone();
-        let operation = host.app.world_mut().spawn_empty().id();
-        let snapshot = Snapshot {
-            files: [("/files/shared.rs".into(), vec![17])].into(),
-        };
-        let work = Work::Write(SaveRequest {
+        let (started, running) = mpsc::sync_channel(1);
+        let (release, blocked) = mpsc::sync_channel(1);
+        let blocker = host
+            .app
+            .world()
+            .resource::<BlockingRuntime>()
+            .try_spawn(Lane::Short, None, move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+            })
+            .unwrap();
+        running.recv_timeout(Duration::from_secs(5)).unwrap();
+        host.app.world_mut().write_message(UpdateRequest {
             ticket,
-            operation,
-            revision: 1,
-            snapshot: snapshot.clone(),
-        });
-        let (sender, receiver) = bounded(1);
-        let task = IoTaskPool::get().spawn(async {});
-        host.app.world_mut().spawn((
-            FileId(path.clone()),
-            Running {
-                work,
-                receiver,
-                _task: task,
+            file: FileId("/files/shared.rs".into()),
+            mutation: Mutation {
+                collapse: [17].into(),
+                expand: Default::default(),
             },
-        ));
+        });
+        host.app.update();
         host.app.world_mut().despawn(host.root);
         let replacement = host.app.world_mut().spawn(Root(path.clone())).id();
         host.app.update();
         assert!(host.app.world().get::<Loaded>(replacement).is_none());
-        assert_eq!(
-            host.app
-                .world_mut()
-                .query_filtered::<Entity, With<Queued>>()
-                .iter(host.app.world())
-                .count(),
-            1
-        );
-        FileStore::write(&path, &snapshot).unwrap();
-        sender.send(Ok(Snapshot::default())).unwrap();
-        host.app.update();
+        assert!(!path.exists());
+        release.send(()).unwrap();
+        host.awakened_frame();
         host.awakened_frame();
         assert!(host.app.world().get::<Loaded>(replacement).is_some());
         let mut records = host.app.world_mut().query::<(&Collapsed, &ChildOf)>();
@@ -355,5 +427,119 @@ mod tests {
                 .any(|(collapsed, parent)| parent.parent() == replacement
                     && collapsed.0 == [17].into())
         );
+        assert_eq!(
+            FileStore::read(&path).unwrap().files["/files/shared.rs"],
+            [17]
+        );
+        drop(blocker);
+    }
+
+    #[test]
+    fn saturated_native_queue_wakes_and_retries_pending_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().canonicalize().unwrap().join("folds.ron");
+        std::fs::write(&path, r#"(files:{"/files/shared.rs":[23]})"#).unwrap();
+        let runtime = BlockingRuntime::new(
+            BlockingPool::new("fold-queue", 1, 1),
+            BlockingPool::new("fold-long", 0, 0),
+            BlockingPool::new("fold-process", 0, 0),
+        );
+        let (started, running) = mpsc::sync_channel(1);
+        let (release, blocked) = mpsc::sync_channel(1);
+        let first = runtime
+            .try_spawn(Lane::Short, None, move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+            })
+            .unwrap();
+        running.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = runtime.try_spawn(Lane::Short, None, || ()).unwrap();
+        let mut host = Host::new(&path);
+        host.app.insert_resource(runtime);
+        host.app.update();
+        assert!(host.app.world().get::<Loaded>(host.root).is_none());
+        release.send(()).unwrap();
+        host.awakened_frame();
+        host.awakened_frame();
+        assert!(host.app.world().get::<Loaded>(host.root).is_some());
+        let mut records = host.app.world_mut().query::<(&Collapsed, &ChildOf)>();
+        assert!(records.iter(host.app.world()).any(|(collapsed, parent)| {
+            parent.parent() == host.root && collapsed.0 == [23].into()
+        }));
+        drop((first, second));
+    }
+
+    #[test]
+    fn queued_save_for_retired_owner_cannot_overwrite_replacement_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().canonicalize().unwrap().join("folds.ron");
+        std::fs::write(&path, r#"(files:{"/files/shared.rs":[7]})"#).unwrap();
+        let mut host = Host::new(&path);
+        host.app.insert_resource(BlockingRuntime::new(
+            BlockingPool::new("fold-stale", 1, 1),
+            BlockingPool::new("fold-long", 0, 0),
+            BlockingPool::new("fold-process", 0, 0),
+        ));
+        host.app.update();
+        host.awakened_frame();
+        let (started, running) = mpsc::sync_channel(1);
+        let (release, blocked) = mpsc::sync_channel(1);
+        let runtime = host.app.world().resource::<BlockingRuntime>();
+        let first = runtime
+            .try_spawn(Lane::Short, None, move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+            })
+            .unwrap();
+        running.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = runtime.try_spawn(Lane::Short, None, || ()).unwrap();
+        let ticket = host.app.world().get::<Scope>(host.root).unwrap().0.clone();
+        host.app.world_mut().write_message(UpdateRequest {
+            ticket,
+            file: FileId("/files/shared.rs".into()),
+            mutation: Mutation {
+                collapse: [17].into(),
+                expand: [7].into(),
+            },
+        });
+        host.app.update();
+        host.app.world_mut().despawn(host.root);
+        let replacement = host.app.world_mut().spawn(Root(path.clone())).id();
+        host.app.update();
+        assert!(host.app.world().get::<Loaded>(replacement).is_none());
+        release.send(()).unwrap();
+        host.awakened_frame();
+        host.awakened_frame();
+        assert!(host.app.world().get::<Loaded>(replacement).is_some());
+        assert_eq!(
+            FileStore::read(&path).unwrap().files["/files/shared.rs"],
+            [7]
+        );
+        let mut records = host.app.world_mut().query::<(&Collapsed, &ChildOf)>();
+        assert!(records.iter(host.app.world()).any(|(collapsed, parent)| {
+            parent.parent() == replacement && collapsed.0 == [7].into()
+        }));
+        drop((first, second));
+    }
+
+    #[test]
+    fn unavailable_native_pool_reports_load_failure_without_touching_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().canonicalize().unwrap().join("folds.ron");
+        let source = r#"(files:{"/files/shared.rs":[29]})"#;
+        std::fs::write(&path, source).unwrap();
+        let runtime = BlockingRuntime::new(
+            BlockingPool::new("fold-short", 0, 0),
+            BlockingPool::new("fold-long", 0, 0),
+            BlockingPool::new("fold-process", 0, 0),
+        );
+        let mut host = Host::new(&path);
+        host.app.insert_resource(runtime);
+        host.app.update();
+        host.awakened_frame();
+        let state = host.app.world().get::<State>(host.root).unwrap();
+        assert_eq!(state.phase(), crate::host::fold_preferences::Phase::Failed);
+        assert!(state.error().is_some());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), source);
     }
 }
