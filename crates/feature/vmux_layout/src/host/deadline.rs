@@ -19,6 +19,18 @@ pub(super) enum DeadlineOwner {
     PageSlot(Entity),
     Prewarm(Entity),
     Presentation(Entity),
+    Checkout(Entity),
+}
+
+pub(super) struct DeadlineRegistration {
+    scheduler: DeadlineScheduler,
+    owner: DeadlineOwner,
+}
+
+impl Drop for DeadlineRegistration {
+    fn drop(&mut self) {
+        self.scheduler.cancel(self.owner);
+    }
 }
 
 #[derive(Default)]
@@ -31,6 +43,19 @@ struct ScheduledDeadline {
 }
 
 impl DeadlineScheduler {
+    pub(super) fn register(
+        &self,
+        owner: DeadlineOwner,
+        deadline: std::time::Instant,
+        proxy: Option<&EventLoopProxyWrapper>,
+    ) -> DeadlineRegistration {
+        self.schedule(owner, deadline, proxy);
+        DeadlineRegistration {
+            scheduler: self.clone(),
+            owner,
+        }
+    }
+
     pub(super) fn schedule(
         &self,
         owner: DeadlineOwner,

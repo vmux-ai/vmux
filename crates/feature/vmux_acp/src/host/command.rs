@@ -2,7 +2,8 @@ use crate::host::event::CommandOrigin;
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentNotify};
 use vmux_command::WriteCommandRequests;
-use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_ecs::agent::AgentRequestReady;
+use vmux_ecs::agent::{AgentCommandResponse, AgentReply};
 use vmux_ecs::service::ServiceMessageSet;
 
 mod operation;
@@ -18,6 +19,9 @@ pub(super) struct CommandPlugin;
 
 impl bevy::prelude::Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::agent::AgentRequestDispatchPlugin>() {
+            app.add_plugins(vmux_ecs::agent::AgentRequestDispatchPlugin);
+        }
         app.add_plugins((operation::OperationPlugin, tool_call::ToolCallPlugin))
             .add_message::<AgentCommandResponse>()
             .configure_sets(
@@ -27,12 +31,17 @@ impl bevy::prelude::Plugin for CommandPlugin {
                     .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet),
             )
-            .add_systems(Update, notify.in_set(CommandSet::Commands));
+            .add_systems(
+                Update,
+                notify
+                    .in_set(CommandSet::Commands)
+                    .after(vmux_ecs::agent::AgentRequestDispatchSet),
+            );
     }
 }
 
 fn notify(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestReady>,
     agents: Query<(Entity, &vmux_ecs::team::Agent, Option<&vmux_ecs::ProcessId>)>,
     user: Query<Entity, With<vmux_ecs::team::User>>,
     mut attention: MessageWriter<vmux_ecs::notify::AgentAttention>,

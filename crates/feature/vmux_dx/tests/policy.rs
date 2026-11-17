@@ -1084,6 +1084,30 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
 }
 
 #[test]
+fn reviewed_app_extensions_reference_only_their_actual_framework_composition() {
+    for (binding, owner, installed, expected) in [
+        ("use bevy_app::App;", "App", "Root", true),
+        ("use bevy_app::App as Host;", "Host", "Root", true),
+        ("struct App;", "App", "Root", false),
+        ("use native::App;", "App", "Root", false),
+        ("use bevy_app::App;", "App", "Other", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::Plugin; use bevy_ecs::prelude::*; {binding} #[derive(Component)] struct State; fn read(state: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut bevy_app::App) {{ app.add_systems(Update, read); }} }} struct Other; impl Plugin for Other {{ fn build(&self, app: &mut bevy_app::App) {{}} }} trait Install {{}} impl Install for {owner} {{ fn install(&mut self) {{ self.add_plugins({installed}); }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, &format!("impl:Install for {owner}"));
+        boundary.interface = "Bevy App extension plugin installation".into();
+        boundary.input = "external: Bevy App composition".into();
+        boundary.output = format!("ECS: {}", inventory.key("struct:State"));
+        assert_eq!(
+            boundary.references(&inventory),
+            expected,
+            "{binding} {installed}"
+        );
+    }
+}
+
+#[test]
 fn generic_plugin_implementations_match_concrete_repeated_nested_and_const_patterns() {
     for (patterns, installed, expected) in [
         ("MarkerA,T", "MarkerB,State", false),
@@ -6787,6 +6811,15 @@ impl Inventory {
         visiting: &mut BTreeSet<String>,
     ) -> bool {
         let owner = match &adapter.owner {
+            Some(path)
+                if matches!(adapter.kind, Kind::Impl)
+                    && self
+                        .framework_handle(&adapter.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("App") =>
+            {
+                Some(adapter)
+            }
             Some(path) => self.resolve(&adapter.namespace, path, &mut BTreeSet::new()),
             None => Some(adapter),
         };

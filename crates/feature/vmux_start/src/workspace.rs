@@ -8,11 +8,14 @@ use vmux_api::command_bar::{
 };
 use vmux_command::CommandBarWorkDirectory;
 use vmux_ecs::launcher::{HostsLauncher, WorkspaceSelectionState};
-use vmux_ecs::{Cwd, PageMetadata, UiStateWrite};
-use vmux_git::{GitRuntime, GitTask};
+use vmux_ecs::{
+    Cwd, Operation, OperationState, OperationTarget, OperationTargetRevision, PageMetadata,
+    UiStateWrite,
+};
 use vmux_layout::tab::{Tab, TabWorkspace};
 use vmux_layout::worktree::{
-    BranchSelection, BranchWait, ManagedWorktreeRoot, TabWorktreeActivation,
+    CancelCheckout, CheckoutFailed, CheckoutPlugin, CheckoutPrepared, CheckoutTargetRevision,
+    CommitCheckout, ManagedWorktreeRoot, PreparedCheckout, SelectBranchCheckout,
 };
 use vmux_ui::i18n::translate;
 
@@ -20,8 +23,10 @@ pub(crate) struct WorkspacePlugin;
 
 impl bevy::app::Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GitRuntime>()
-            .init_resource::<ManagedWorktreeRoot>()
+        if !app.is_plugin_added::<CheckoutPlugin>() {
+            app.add_plugins(CheckoutPlugin);
+        }
+        app.init_resource::<ManagedWorktreeRoot>()
             .add_plugins(UiEventPlugin::<(StartSelectWorkspace, StartGoToBranch)>::default())
             .add_observer(select)
             .add_observer(pick)
@@ -31,7 +36,9 @@ impl bevy::app::Plugin for WorkspacePlugin {
             .add_systems(Update, (pin, release).in_set(Binding))
             .add_systems(
                 Update,
-                (prepare, finish, finish_pickers).chain().before(Binding),
+                (retire, finish, commit, failed, finish_pickers)
+                    .chain()
+                    .before(Binding),
             );
     }
 }
@@ -50,10 +57,14 @@ struct Picker {
 
 #[derive(Component)]
 struct Selection {
-    request: StartGoToBranch,
-    task: Option<GitTask<Result<BranchSelection, String>>>,
-    waiting: Option<BranchWait>,
+    operation: Entity,
 }
+
+#[derive(Component)]
+struct Applied;
+
+#[derive(Component)]
+struct LauncherCheckout;
 
 #[derive(EntityEvent)]
 struct Chosen {
@@ -145,14 +156,24 @@ fn pin(
     }
 }
 
-fn release(pages: Query<(Entity, &PageMetadata), With<Pinned>>, mut commands: Commands) {
-    for (webview, metadata) in &pages {
+fn release(
+    pages: Query<(Entity, &PageMetadata, Option<&Selection>), With<Pinned>>,
+    mut cancels: MessageWriter<CancelCheckout>,
+    mut commands: Commands,
+) {
+    for (webview, metadata, selection) in &pages {
         if !metadata.url.starts_with(crate::StartPlugin::URL) {
+            if let Some(selection) = selection {
+                cancels.write(CancelCheckout {
+                    operation: selection.operation,
+                });
+            }
             commands.entity(webview).remove::<(
                 Pinned,
                 CommandBarWorkDirectory,
                 Selection,
                 WorkspaceSelectionState,
+                Applied,
             )>();
         }
     }
@@ -160,26 +181,56 @@ fn release(pages: Query<(Entity, &PageMetadata), With<Pinned>>, mut commands: Co
 
 fn pick(
     trigger: On<UiInput<StartGoToBranch>>,
-    pages: Query<&PageMetadata, With<HostsLauncher>>,
+    pages: Query<(&PageMetadata, Option<&CheckoutTargetRevision>), With<HostsLauncher>>,
+    selections: Query<&Selection>,
+    root: Res<ManagedWorktreeRoot>,
+    mut requests: MessageWriter<SelectBranchCheckout>,
+    mut cancels: MessageWriter<CancelCheckout>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     if !pages
         .get(webview)
-        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::URL))
+        .is_ok_and(|(page, _)| page.url.starts_with(crate::StartPlugin::URL))
     {
         return;
     }
     let request = &trigger.event().payload;
     if request.checkout.trim().is_empty() && !request.branch.trim().is_empty() {
-        commands.entity(webview).insert((
-            Selection {
-                request: request.clone(),
-                task: None,
-                waiting: None,
-            },
-            WorkspaceSelectionState::Pending,
-        ));
+        if let Ok(selection) = selections.get(webview) {
+            cancels.write(CancelCheckout {
+                operation: selection.operation,
+            });
+        }
+        let revision = pages
+            .get(webview)
+            .ok()
+            .and_then(|(_, revision)| revision)
+            .map_or(1, |revision| revision.0.wrapping_add(1).max(1));
+        let operation = commands
+            .spawn((
+                Name::new("Launcher branch selection"),
+                vmux_ecs::Active,
+                LauncherCheckout,
+                Operation::bundle("launcher.checkout").expect("fixed launcher checkout kind"),
+                OperationTarget::new(webview),
+                OperationTargetRevision(revision),
+            ))
+            .id();
+        commands
+            .entity(webview)
+            .insert((
+                Selection { operation },
+                CheckoutTargetRevision(revision),
+                WorkspaceSelectionState::Pending,
+            ))
+            .remove::<Applied>();
+        requests.write(SelectBranchCheckout {
+            operation,
+            directory: PathBuf::from(request.project.trim()),
+            managed_root: root.0.clone(),
+            branch: request.branch.trim().to_string(),
+        });
         return;
     }
     let path = if request.checkout.trim().is_empty() {
@@ -196,6 +247,8 @@ fn pick(
 fn apply(
     trigger: On<Chosen>,
     pages: Query<&PageMetadata, With<HostsLauncher>>,
+    selections: Query<&Selection>,
+    mut cancels: MessageWriter<CancelCheckout>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
@@ -205,6 +258,12 @@ fn apply(
     {
         return;
     }
+    if let Ok(selection) = selections.get(request.webview) {
+        cancels.write(CancelCheckout {
+            operation: selection.operation,
+        });
+    }
+    commands.entity(request.webview).remove::<Applied>();
     match request.path.canonicalize() {
         Ok(path) if path.is_dir() => {
             commands
@@ -227,70 +286,125 @@ fn apply(
     }
 }
 
-fn prepare(
-    mut selections: Query<&mut Selection>,
-    runtime: Res<GitRuntime>,
-    root: Res<ManagedWorktreeRoot>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+fn retire(
+    selections: Query<(Entity, &Selection, Option<&PageMetadata>)>,
+    mut removed: RemovedComponents<Selection>,
+    operations: Query<(Entity, Option<&OperationTarget>, &OperationState), With<LauncherCheckout>>,
+    mut cancels: MessageWriter<CancelCheckout>,
+    mut commands: Commands,
 ) {
-    for mut selection in &mut selections {
-        if selection.task.is_some() {
+    for (page, selection, metadata) in &selections {
+        if metadata.is_some_and(|page| page.url.starts_with(crate::StartPlugin::URL)) {
             continue;
         }
-        if let Some(waiting) = &selection.waiting {
-            if !waiting.is_ready() {
-                continue;
-            }
-            selection.waiting = None;
-        }
-        let project = PathBuf::from(&selection.request.project);
-        let branch = selection.request.branch.clone();
-        let root = root.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        selection.task = runtime.spawn_operation(wake.clone(), move || {
-            TabWorktreeActivation::select_branch(&project, &branch, &root, wake)
+        cancels.write(CancelCheckout {
+            operation: selection.operation,
         });
+        commands
+            .entity(page)
+            .remove::<(Selection, Applied, WorkspaceSelectionState)>();
+    }
+    for page in removed.read() {
+        for (operation, target, state) in &operations {
+            if target.is_some_and(|target| target.entity() == page)
+                && !selections
+                    .get(page)
+                    .is_ok_and(|(_, selection, _)| selection.operation == operation)
+                && matches!(state, OperationState::Pending | OperationState::Running)
+            {
+                cancels.write(CancelCheckout { operation });
+            }
+        }
     }
 }
 
 fn finish(
-    mut selections: Query<(Entity, &mut Selection)>,
-    pages: Query<&PageMetadata, With<HostsLauncher>>,
+    mut prepared: MessageReader<CheckoutPrepared>,
+    operations: Query<(
+        &OperationTarget,
+        &OperationTargetRevision,
+        &PreparedCheckout,
+    )>,
+    selections: Query<&Selection>,
+    pages: Query<(&PageMetadata, &CheckoutTargetRevision), With<HostsLauncher>>,
     mut commands: Commands,
 ) {
-    for (webview, mut selection) in &mut selections {
-        let Some(task) = selection.task.as_mut() else {
+    for prepared in prepared.read() {
+        let Ok((target, revision, checkout)) = operations.get(prepared.operation) else {
             continue;
         };
-        let Some(result) = task.poll() else {
-            continue;
-        };
-        selection.task = None;
-        if !pages
-            .get(webview)
-            .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::URL))
+        let page = target.entity();
+        if !selections
+            .get(page)
+            .is_ok_and(|selection| selection.operation == prepared.operation)
         {
-            commands
-                .entity(webview)
-                .remove::<(Selection, WorkspaceSelectionState)>();
             continue;
         }
-        let result = result.unwrap_or_else(|_| Err("Git worktree worker panicked".to_string()));
-        match result {
-            Ok(BranchSelection::Ready(checkout)) => {
-                let activation = checkout.commit();
-                commands.trigger(Chosen {
-                    webview,
-                    path: activation.execution_dir,
-                });
+        if !pages.get(page).is_ok_and(|(metadata, current)| {
+            metadata.url.starts_with(crate::StartPlugin::URL) && current.0 == revision.0
+        }) {
+            continue;
+        }
+        commands.entity(page).insert((
+            Pinned,
+            Applied,
+            CommandBarWorkDirectory(
+                checkout
+                    .activation
+                    .execution_dir
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ));
+    }
+}
+
+fn commit(
+    selections: Query<(Entity, &Selection, &CheckoutTargetRevision), Added<Applied>>,
+    mut commits: MessageWriter<CommitCheckout>,
+) {
+    for (page, selection, revision) in &selections {
+        commits.write(CommitCheckout {
+            operation: selection.operation,
+            target: page,
+            revision: revision.0,
+        });
+    }
+}
+
+fn failed(
+    mut failures: MessageReader<CheckoutFailed>,
+    states: Query<&OperationState>,
+    selections: Query<(Entity, &Selection)>,
+    mut commands: Commands,
+) {
+    for failure in failures.read() {
+        for (page, selection) in &selections {
+            if selection.operation != failure.operation {
+                continue;
             }
-            Ok(BranchSelection::Waiting(waiting)) => selection.waiting = Some(waiting),
-            Err(error) => {
-                commands
-                    .entity(webview)
-                    .remove::<Selection>()
-                    .insert(WorkspaceSelectionState::Failed(error));
-            }
+            commands
+                .entity(page)
+                .remove::<(Selection, Applied)>()
+                .insert(WorkspaceSelectionState::Failed(failure.error.clone()));
+        }
+    }
+    for (page, selection) in &selections {
+        if states
+            .get(selection.operation)
+            .is_ok_and(|state| *state == OperationState::Succeeded)
+        {
+            commands
+                .entity(page)
+                .remove::<(Selection, Applied)>()
+                .insert(WorkspaceSelectionState::Ready);
+        } else if states
+            .get(selection.operation)
+            .is_ok_and(|state| *state == OperationState::Canceled)
+        {
+            commands
+                .entity(page)
+                .remove::<(Selection, Applied, WorkspaceSelectionState)>();
         }
     }
 }
@@ -642,12 +756,40 @@ mod tests {
         composers
             .app
             .insert_resource(ManagedWorktreeRoot(root.clone()));
-        let held =
-            TabWorktreeActivation::select_branch(composers.original.path(), "held", &root, None)
-                .unwrap();
-        let BranchSelection::Ready(held) = held else {
-            panic!("the initial checkout must be available");
-        };
+        let target = composers.app.world_mut().spawn_empty().id();
+        let held = composers
+            .app
+            .world_mut()
+            .spawn((
+                Name::new("Held branch checkout"),
+                Operation::bundle("held.checkout").unwrap(),
+                OperationTarget::new(target),
+                OperationTargetRevision(1),
+            ))
+            .id();
+        composers
+            .app
+            .world_mut()
+            .write_message(SelectBranchCheckout {
+                operation: held,
+                directory: composers.original.path().to_path_buf(),
+                managed_root: root.clone(),
+                branch: "held".into(),
+            });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while composers
+            .app
+            .world()
+            .get::<PreparedCheckout>(held)
+            .is_none()
+        {
+            composers.app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "held checkout was not prepared"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let repository =
             vmux_git::worktree::CheckoutInfo::try_from(composers.original.path()).unwrap();
         let checkout = repository
@@ -667,42 +809,24 @@ mod tests {
                 checkout: String::new(),
             },
         });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
+        for _ in 0..30 {
             composers.app.update();
-            let selection = composers
-                .app
-                .world()
-                .get::<Selection>(composers.first)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "selection disappeared: {:?}",
-                        composers
-                            .app
-                            .world()
-                            .get::<WorkspaceSelectionState>(composers.first)
-                    );
-                });
-            if selection.waiting.is_some() {
-                break;
-            }
-            assert!(std::time::Instant::now() < deadline);
+            assert!(
+                composers
+                    .app
+                    .world()
+                    .get::<WorkspaceSelectionState>(composers.first)
+                    .is_some_and(WorkspaceSelectionState::blocks)
+            );
+            assert_eq!(composers.cwd(composers.first), composers.original.path());
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        for _ in 0..16 {
-            composers.app.update();
-            let selection = composers
-                .app
-                .world()
-                .get::<Selection>(composers.first)
-                .unwrap();
-            assert!(selection.waiting.is_some());
-            assert!(selection.task.is_none());
-            assert_eq!(composers.cwd(composers.first), composers.original.path());
-        }
-        let checkout = held.commit();
+        composers
+            .app
+            .world_mut()
+            .write_message(CancelCheckout { operation: held });
         composers.settle(composers.first);
-        assert_eq!(composers.cwd(composers.first), checkout.execution_dir);
+        assert_eq!(composers.cwd(composers.first), checkout);
         assert_eq!(composers.cwd(composers.second), composers.original.path());
     }
 

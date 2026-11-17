@@ -15,11 +15,11 @@ impl Plugin for AcpPlugin {
         super::command_bar::add(app);
         app.add_plugins(super::approval::ApprovalPlugin);
         app.add_plugins(super::attach::AttachPlugin);
-        super::attention::add(app);
+        app.add_plugins(super::attention::AttentionPlugin);
         app.add_plugins(super::command::CommandPlugin);
         super::continuation::add(app);
         app.add_plugins(super::external::ExternalPlugin);
-        super::follow::add(app);
+        app.add_plugins(super::follow::FollowPlugin);
         super::handoff::add(app);
         app.add_plugins(super::ingress::IngressPlugin);
         app.add_plugins(super::navigation::NavigationPlugin);

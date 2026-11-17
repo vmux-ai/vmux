@@ -153,6 +153,11 @@ pub enum ClientMessage {
         cwd: String,
         path: String,
     },
+    RebindAcpWorkspaceWithReply {
+        request_id: AgentRequestId,
+        sid: String,
+        cwd: String,
+    },
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -296,6 +301,12 @@ pub enum ServiceMessage {
         cwd: String,
         path: String,
         directories: Vec<String>,
+        error: Option<String>,
+    },
+    AcpWorkspaceRebindResult {
+        request_id: AgentRequestId,
+        sid: String,
+        cwd: String,
         error: Option<String>,
     },
 }

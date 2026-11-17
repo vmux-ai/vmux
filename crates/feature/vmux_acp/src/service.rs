@@ -11,8 +11,8 @@ pub struct AcpServicePlugin;
 
 impl Plugin for AcpServicePlugin {
     fn build(&self, app: &mut App) {
-        crate::acp::add(app);
-        app.add_systems(Update, (register, ApplyDeferred).chain().in_set(Register));
+        app.add_plugins(crate::acp::AcpRuntimePlugin)
+            .add_systems(Update, (register, ApplyDeferred).chain().in_set(Register));
     }
 }
 

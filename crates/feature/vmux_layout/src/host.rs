@@ -21,6 +21,7 @@ pub mod apply;
 pub mod archive;
 pub mod bookmark;
 pub mod cef;
+mod checkout;
 mod command;
 pub mod contract;
 mod deadline;
