@@ -10,7 +10,7 @@ For shopping, include the budget and delivery country. For cooking, include ingr
 
 ## Isolated development profiles
 
-Fresh development profiles keep Mistral Vibe configuration and sign-in credentials in their own tool home. Vibe stores the API key in an owner-only local file instead of the personal system keychain. Restarting the same profile retains that sign-in; another fresh profile starts separately. This development isolation does not change ordinary sign-in storage.
+Fresh development profiles keep Codex, Claude Code, and Mistral Vibe configuration in their own tool home. Agent-provided environment overrides cannot redirect Codex or Claude Code configuration and credential directories to a personal directory. Their native credential-store behavior remains controlled by the provider CLI; Claude Code still uses macOS Keychain with a name derived from its isolated credential directory. Vibe stores its API key in an owner-only local file instead of the personal system keychain. Restarting the same profile retains its local state; another fresh profile starts separately. This development isolation does not change ordinary sign-in storage.
 
 ## Let tools support the task
 
