@@ -18,7 +18,8 @@ impl Plugin for WorkspaceEditPlugin {
                 apply_lsp
                     .in_set(crate::lsp::server_request::ServerRequestSet::Answer)
                     .in_set(super::file_writes::FileWriteSet),
-            );
+            )
+            .add_observer(apply);
     }
 }
 
@@ -35,6 +36,7 @@ fn apply_lsp(
     }
 }
 
+#[derive(Event)]
 struct ApplyWorkspaceEdit {
     request: Option<Entity>,
     target: Option<Entity>,
@@ -78,49 +80,66 @@ impl Command for ApplyWorkspaceEdit {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let mut state = bevy::ecs::system::SystemState::<WorkspaceEdits>::new(world);
-        let mut edits = state
-            .get_mut(world)
-            .expect("workspace edit resources are available");
-        let refusal = if self
-            .origin
-            .is_some_and(|origin| !origin.current(&edits.manager))
-        {
-            Some("document changed since the edit was computed".to_string())
-        } else if self
-            .server
-            .is_some_and(|server| !edits.manager.transport_current(server, self.transport))
-            && self.origin.is_none()
-        {
-            Some("language server instance is no longer current".to_string())
-        } else {
-            match self.result {
-                Err(error) => Some(error),
-                Ok(edit) => match WorkspaceEditPlan::within(&self.root, &edit) {
-                    Ok(plan) => edits.apply(plan, self.server, self.origin.as_ref()),
-                    Err(error) => Some(error.to_string()),
-                },
-            }
-        };
-        if let Some(request) = self.request {
-            edits
-                .replies
-                .write(crate::lsp::server_request::ServerReply {
-                    request,
-                    result: match &refusal {
-                        None => serde_json::json!({ "applied": true }),
-                        Some(reason) => {
-                            serde_json::json!({ "applied": false, "failureReason": reason })
-                        }
-                    },
-                });
-        } else if let (Some(target), Some(reason)) = (self.target, refusal) {
-            edits
-                .commands
-                .trigger(super::feedback::EditFailure::new(target, reason));
-        }
-        state.apply(world);
+        world.trigger(self);
     }
+}
+
+fn apply(request: On<ApplyWorkspaceEdit>, mut edits: WorkspaceEdits) {
+    let refusal = if request
+        .origin
+        .is_some_and(|origin| !origin.current(&edits.manager))
+    {
+        Some("document changed since the edit was computed".to_string())
+    } else if request
+        .server
+        .is_some_and(|server| !edits.manager.transport_current(server, request.transport))
+        && request.origin.is_none()
+    {
+        Some("language server instance is no longer current".to_string())
+    } else {
+        documents(&request, &mut edits)
+    };
+    if let Some(request) = request.request {
+        edits
+            .replies
+            .write(crate::lsp::server_request::ServerReply {
+                request,
+                result: match &refusal {
+                    None => serde_json::json!({ "applied": true }),
+                    Some(reason) => {
+                        serde_json::json!({ "applied": false, "failureReason": reason })
+                    }
+                },
+            });
+    } else if let (Some(target), Some(reason)) = (request.target, refusal) {
+        edits
+            .commands
+            .trigger(super::feedback::EditFailure::new(target, reason));
+    }
+}
+
+fn documents(request: &ApplyWorkspaceEdit, edits: &mut WorkspaceEdits) -> Option<String> {
+    let edit = match &request.result {
+        Ok(edit) => edit,
+        Err(reason) => return Some(reason.clone()),
+    };
+    let plan = match WorkspaceEditPlan::within(&request.root, edit) {
+        Ok(plan) => plan,
+        Err(error) => return Some(error.to_string()),
+    };
+    let mut prepared = Vec::with_capacity(plan.documents.len());
+    for document in plan.documents {
+        match edits.prepare_document(document, request.server, request.origin.as_ref()) {
+            Ok(document) => prepared.push(document),
+            Err(reason) => return Some(reason),
+        }
+    }
+    for document in prepared {
+        if let Err(reason) = edits.apply_document(document) {
+            return Some(reason);
+        }
+    }
+    None
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -134,37 +153,6 @@ struct WorkspaceEdits<'w, 's> {
 }
 
 impl WorkspaceEdits<'_, '_> {
-    fn apply(
-        &mut self,
-        plan: WorkspaceEditPlan,
-        server: Option<Entity>,
-        origin: Option<&crate::lsp::manager::LspOrigin>,
-    ) -> Option<String> {
-        let prepared = match self.prepare(plan, server, origin) {
-            Ok(prepared) => prepared,
-            Err(reason) => return Some(reason),
-        };
-        for document in prepared.documents {
-            if let Err(reason) = self.apply_document(document) {
-                return Some(reason);
-            }
-        }
-        None
-    }
-
-    fn prepare(
-        &self,
-        plan: WorkspaceEditPlan,
-        server: Option<Entity>,
-        origin: Option<&crate::lsp::manager::LspOrigin>,
-    ) -> Result<PreparedWorkspaceEdit, String> {
-        let mut documents = Vec::with_capacity(plan.documents.len());
-        for document in plan.documents {
-            documents.push(self.prepare_document(document, server, origin)?);
-        }
-        Ok(PreparedWorkspaceEdit { documents })
-    }
-
     fn prepare_document(
         &self,
         document: crate::lsp::workspace_edit::PlannedDocument,
@@ -257,10 +245,6 @@ impl WorkspaceEdits<'_, '_> {
         }
         Ok(())
     }
-}
-
-struct PreparedWorkspaceEdit {
-    documents: Vec<PreparedDocument>,
 }
 
 struct PreparedDocument {
