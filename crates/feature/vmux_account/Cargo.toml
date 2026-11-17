@@ -8,8 +8,10 @@ publish = false
 [features]
 default = []
 local = ["dep:rusqlite"]
+cloud = ["dep:quinn", "dep:tokio", "dep:vmux_transport", "dep:vmux_feature"]
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
@@ -18,6 +20,12 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["records", "jobs"] }
 vmux_profile = { path = "../../util/vmux_profile" }
+ring = "0.17"
+zeroize = "1"
+url = { workspace = true }
+quinn = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+vmux_transport = { path = "../../util/vmux_transport", optional = true }
 rusqlite = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -13,6 +13,7 @@ const ENVELOPE_HEADER: &[u8] = b"vmux-safe-storage-envelope-v1\0";
 const HKDF_SALT: &[u8] = b"vmux-safe-storage-hkdf-v1";
 const BROWSER_CONTEXT: &[u8] = b"vmux-safe-storage-browser-v1";
 const MCP_CONTEXT: &[u8] = b"vmux-safe-storage-mcp-v1";
+const ACCOUNT_CONTEXT: &[u8] = b"vmux-safe-storage-account-v1";
 const VAULT_CONTEXT: &[u8] = b"vmux-safe-storage-vault-wrap-v1";
 
 pub(super) struct SafeStorageCipher {
@@ -48,6 +49,24 @@ impl SafeStorageCipher {
     ) -> Result<Zeroizing<Vec<u8>>, SafeStorageError> {
         let key = self.data_key(MCP_CONTEXT, &[])?;
         self.open(key.as_bytes(), account.as_bytes(), envelope)
+    }
+
+    pub(super) fn seal_account(
+        &self,
+        scope: &str,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, SafeStorageError> {
+        let key = self.data_key(ACCOUNT_CONTEXT, &[])?;
+        self.seal(key.as_bytes(), scope.as_bytes(), plaintext)
+    }
+
+    pub(super) fn open_account(
+        &self,
+        scope: &str,
+        envelope: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, SafeStorageError> {
+        let key = self.data_key(ACCOUNT_CONTEXT, &[])?;
+        self.open(key.as_bytes(), scope.as_bytes(), envelope)
     }
 
     pub(super) fn wrap_vault_key(
@@ -210,6 +229,19 @@ mod tests {
                 .unwrap_vault_key("personal:linear", &encrypted)
                 .is_err()
         );
+        let device = cipher
+            .seal_account("local/server", b"private device key")
+            .unwrap();
+        assert_eq!(
+            cipher
+                .open_account("local/server", &device)
+                .unwrap()
+                .as_slice(),
+            b"private device key"
+        );
+        assert!(cipher.open_account("other/server", &device).is_err());
+        assert!(cipher.open_mcp("local/server", &device).is_err());
+        assert!(cipher.open_account("personal:linear", &encrypted).is_err());
     }
 
     #[test]

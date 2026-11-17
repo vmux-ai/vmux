@@ -6,7 +6,8 @@ use bevy_ecs::prelude::*;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use vmux_ecs::record::{Receipt, Record};
 use vmux_ecs::{
-    BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, Operation,
+    BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake,
+    Operation,
 };
 
 use crate::{
@@ -341,6 +342,7 @@ fn read(
     mut requests: MessageReader<ReadRequest>,
     locations: Query<&Location, With<Root>>,
     active: Query<&ChildOf, With<Operation>>,
+    wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -356,6 +358,9 @@ fn read(
         commands.entity(request.entity).insert(JobRequest(ReadJob {
             data: location.0.clone(),
         }));
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
     }
 }
 
@@ -363,6 +368,7 @@ fn write(
     mut requests: MessageReader<WriteRequest>,
     locations: Query<&Location, With<Root>>,
     active: Query<&ChildOf, With<Operation>>,
+    wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -379,6 +385,9 @@ fn write(
             data: location.0.clone(),
             request: request.clone(),
         }));
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
     }
 }
 

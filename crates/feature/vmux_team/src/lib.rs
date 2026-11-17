@@ -19,6 +19,9 @@ pub mod ui;
 #[cfg(host)]
 mod host;
 
+#[cfg(host)]
+mod cloud;
+
 mod projection;
 pub mod roster;
 #[cfg(host)]

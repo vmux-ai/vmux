@@ -26,6 +26,8 @@ pub use vmux_profile as host;
 #[cfg(feature = "project")]
 pub use vmux_project as project;
 
+#[cfg(feature = "release-flags")]
+mod feature_flags;
 #[cfg(feature = "daemon")]
 mod host_runtime;
 #[cfg(feature = "mobile")]

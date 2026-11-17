@@ -35,6 +35,8 @@ cli = [
 mcp = ["cli"]
 desktop = [
     "container",
+
+    "account-cloud",
     "acp",
     "bookmark",
     "browser",
@@ -81,8 +83,10 @@ capture = ["tool", "dep:vmux_input"]
 container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
+release-flags = ["ecs", "dep:bevy_ecs", "dep:vmux_feature"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
 account-local = ["account", "vmux_account/local"]
+account-cloud = ["account-local", "vmux_account/cloud", "release-flags"]
 profile-account = ["account-local", "runtime"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 flex = ["ecs", "dep:vmux_flex"]
@@ -126,6 +130,7 @@ vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
 vmux_container = { path = "../../feature/vmux_container", optional = true }
+vmux_feature = { path = "../../feature/vmux_feature", features = ["http"], optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_account = { path = "../../feature/vmux_account", optional = true }

@@ -10275,13 +10275,20 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
+ "quinn",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+ "url",
  "uuid",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_profile",
+ "vmux_transport",
+ "zeroize",
 ]
 
 [[package]]
@@ -10374,6 +10381,7 @@ dependencies = [
  "vmux_ecs",
  "vmux_editor",
  "vmux_extension",
+ "vmux_feature",
  "vmux_flex",
  "vmux_gallery",
  "vmux_git",

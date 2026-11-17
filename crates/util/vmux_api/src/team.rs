@@ -1,4 +1,4 @@
-#[vmux_api::ui_state(Default, Eq, version = 3)]
+#[vmux_api::ui_state(Default, Eq, version = 4)]
 pub struct TeamUiState {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
@@ -9,6 +9,60 @@ pub struct TeamUiState {
     pub agents: Vec<TeamAgentPresentation>,
     #[serde(default)]
     pub profile_form: Option<TeamProfileForm>,
+    #[serde(default)]
+    pub account: Option<TeamAccountState>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct TeamAccountState {
+    pub account_id: String,
+    pub binding_revision: u64,
+    pub server_account_id: Option<String>,
+    pub connected: bool,
+    pub cloud_available: bool,
+    pub pending: bool,
+    pub connection_id: Option<String>,
+    pub can_cancel: bool,
+    pub user_code: Option<String>,
+    pub verification_uri: Option<String>,
+    pub profile_id: Option<String>,
+    pub sync_enabled: bool,
+    pub sync_pending: bool,
+    pub error: Option<TeamAccountError>,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum TeamAccountError {
+    Unavailable,
+    SaveFailed,
+    AccountMismatch,
+    AccessDenied,
+    Expired,
+    NotLinked,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamAccountConnectRequest {
+    pub account_id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamAccountDisconnectRequest {
+    pub account_id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamAccountCancelRequest {
+    pub account_id: String,
+    pub connection_id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamProfileSyncRequest {
+    pub account_id: String,
+    pub binding_revision: u64,
+    pub profile_id: String,
+    pub enabled: bool,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -165,6 +219,7 @@ mod tests {
             }),
             agents: Vec::new(),
             profile_form: None,
+            account: None,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =

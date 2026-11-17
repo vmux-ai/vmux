@@ -5,6 +5,8 @@ pub use product::Product;
 pub use profile_driver::{ProfileMigration, ProfileRecord, ProfileStore};
 pub use service::{RemotePaths, ServicePaths};
 
+#[cfg(target_os = "macos")]
+pub mod account_credentials;
 mod lease;
 pub mod mcp_credentials;
 mod product;

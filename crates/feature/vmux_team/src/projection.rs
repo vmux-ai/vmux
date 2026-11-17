@@ -2,10 +2,11 @@ use vmux_api::team::{
     ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamUiState,
 };
 
-pub(crate) struct TeamStateProjection;
+#[derive(bevy_ecs::prelude::Component, Clone, Debug, Default, PartialEq)]
+pub(crate) struct TeamPresentation(pub(crate) TeamUiState);
 
-impl TeamStateProjection {
-    pub(crate) fn build(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> TeamUiState {
+impl TeamPresentation {
+    pub(crate) fn build(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> Self {
         let active_profile = profiles.iter().find(|profile| profile.is_active).cloned();
         let mut agents = Vec::new();
         for member in &members {
@@ -28,13 +29,14 @@ impl TeamStateProjection {
                 subtitle,
             });
         }
-        TeamUiState {
+        Self(TeamUiState {
             members,
             profiles,
             active_profile,
             agents,
             profile_form: None,
-        }
+            account: None,
+        })
     }
 }
 
@@ -44,7 +46,7 @@ mod tests {
 
     #[test]
     fn selects_the_active_profile_and_agent_subtitle() {
-        let state = TeamStateProjection::build(
+        let state = TeamPresentation::build(
             vec![
                 TeamMemberRow {
                     name: "You".to_string(),
@@ -73,10 +75,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(state.active_profile.as_ref().unwrap().id, "work");
-        assert_eq!(state.agents.len(), 1);
+        assert_eq!(state.0.active_profile.as_ref().unwrap().id, "work");
+        assert_eq!(state.0.agents.len(), 1);
         assert_eq!(
-            state.agents[0].subtitle,
+            state.0.agents[0].subtitle,
             TeamAgentSubtitle::Title("Reviewing the diff".to_string())
         );
     }
