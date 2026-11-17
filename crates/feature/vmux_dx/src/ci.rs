@@ -26,6 +26,7 @@ mod artifact;
 mod cache;
 mod checks;
 mod plan;
+mod retention;
 mod sdk;
 mod sources;
 #[cfg(test)]
@@ -61,6 +62,7 @@ impl bevy_app::Plugin for CiPlugin {
             cache::CiCachePlugin,
             checks::CiChecksPlugin,
             sdk::CiSdkPlugin,
+            retention::CiRetentionPlugin,
         ))
         .configure_sets(
             Update,

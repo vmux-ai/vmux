@@ -16,6 +16,7 @@ permissions:
   contents: read
   actions: read
   pull-requests: read
+  id-token: write
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -27,6 +28,11 @@ env:
   VMUX_CI_PREBUILT_DX: "1"
   VMUX_CI_FAST_RUST: "1"
   VMUX_CI_VALIDATION: "1"
+  VMUX_CI_GCS_ENABLED: "1"
+  CI_CACHE_BUCKET: ${{ vars.CI_CACHE_BUCKET }}
+  CI_CACHE_WIF_PROVIDER: ${{ vars.CI_CACHE_WIF_PROVIDER }}
+  CI_CACHE_READER_ACCOUNT: ${{ vars.CI_CACHE_READER_ACCOUNT }}
+  CI_CACHE_WRITER_ACCOUNT: ${{ vars.CI_CACHE_WRITER_ACCOUNT }}
 
 jobs:
   plan:
@@ -60,6 +66,11 @@ jobs:
           fi
           echo "Resolved CEF version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
 
   changes:
     name: Prepare
@@ -282,6 +293,11 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
+
   lint-rust:
     name: Lint Rust
     runs-on: ubuntu-latest
@@ -448,6 +464,11 @@ jobs:
         with:
           cache-key: lint
 
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
+
   lint-ecs:
     name: Lint ECS
     runs-on: ubuntu-latest
@@ -483,6 +504,11 @@ jobs:
       - uses: ./.github/actions/save-workspace
         with:
           cache-key: lint-ecs
+
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
 
   lint:
     name: Lint
@@ -609,6 +635,11 @@ jobs:
         with:
           cache-key: ${{ matrix.cache }}
 
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ matrix.key }}
+
   website:
     name: Build Web
     needs: [plan, changes]
@@ -656,6 +687,11 @@ jobs:
         with:
           cache-key: website
 
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
+
   dx-macos:
     name: Prepare macOS
     needs: [plan, changes]
@@ -691,6 +727,11 @@ jobs:
           path: .build-tools/artifact
           if-no-files-found: error
           retention-days: 1
+
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
 
   ios-build:
     name: Build iOS
@@ -764,6 +805,11 @@ jobs:
         with:
           cache-key: ios
 
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
+
   build-mac:
     name: Build macOS
     needs: [plan, changes, dx-macos]
@@ -771,6 +817,7 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
+      id-token: write
     env:
       CEF_VERSION: ${{ needs.plan.outputs.cef }}
       VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
@@ -988,6 +1035,11 @@ jobs:
         with:
           cache-key: build-mac
 
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
+
   ci:
     name: Check Results
     runs-on: ubuntu-latest
@@ -1010,3 +1062,7 @@ jobs:
           VMUX_CI_RESULTS: ${{ toJSON(needs) }}
           VMUX_CI_DISTRIBUTION: ${{ github.event_name != 'pull_request' || needs.plan.outputs.release == 'true' }}
         run: vmux-ci checks-gate
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: ${{ github.job }}
