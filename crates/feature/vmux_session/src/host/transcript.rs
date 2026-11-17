@@ -47,6 +47,8 @@ impl bevy::prelude::Plugin for TranscriptPlugin {
                     reset_navigated,
                     attach,
                     bevy::ecs::schedule::ApplyDeferred,
+                    select_push,
+                    push_queued,
                     push_to_page,
                     sync_ready_views,
                     resolve_queries,
@@ -79,7 +81,49 @@ impl PushState {
 }
 
 #[derive(Component)]
+struct PushTarget {
+    webview: Entity,
+    now: std::time::Instant,
+    context: [bool; 7],
+    initialized: bool,
+    moved: bool,
+    context_changed: bool,
+    conversation_changed: bool,
+    metadata_changed: bool,
+    choice_changed: bool,
+}
+
+#[derive(Component)]
 struct Binding;
+
+#[derive(SystemParam)]
+struct ViewBindings<'w, 's> {
+    entries:
+        Query<'w, 's, (Entity, &'static ChildOf, &'static EntityTarget<Session>), With<Binding>>,
+    commands: Commands<'w, 's>,
+}
+
+impl ViewBindings<'_, '_> {
+    fn ensure(&mut self, webview: Entity, session: Entity) {
+        if self
+            .entries
+            .iter()
+            .any(|(_, parent, target)| parent.parent() == webview && target.entity() == session)
+        {
+            return;
+        }
+        for (binding, parent, _) in &self.entries {
+            if parent.parent() == webview {
+                self.commands.entity(binding).despawn();
+            }
+        }
+        self.commands.spawn((
+            EntityTarget::<Session>::new(session),
+            ChildOf(webview),
+            Binding,
+        ));
+    }
+}
 
 fn attach(sessions: Query<Entity, (With<Session>, Without<PushState>)>, mut commands: Commands) {
     for session in &sessions {
@@ -151,7 +195,7 @@ type ChangedSession = (
     Option<Ref<'static, ImportedConversation>>,
     Option<Ref<'static, AgentConversationTitle>>,
     Has<vmux_session::TranscriptLoading>,
-    Ref<'static, Children>,
+    Option<Ref<'static, Children>>,
 );
 
 type ChangedConversationEvents<'w, 's> = Query<
@@ -179,6 +223,8 @@ type ProjectionView = (
 #[derive(SystemParam)]
 struct PushWorld<'w, 's> {
     sessions: Query<'w, 's, ChangedSession>,
+    authentication: Query<'w, 's, Ref<'static, crate::Authentication>>,
+    preparation: Query<'w, 's, Ref<'static, crate::Preparation>>,
     stacks: Query<
         'w,
         's,
@@ -201,6 +247,9 @@ struct PushWorld<'w, 's> {
     loading_started: Query<'w, 's, Entity, Added<vmux_session::TranscriptLoading>>,
     loading_finished: RemovedComponents<'w, 's, vmux_session::TranscriptLoading>,
     queued: QueuedPromptReads<'w, 's>,
+    setup: Query<'w, 's, (), With<vmux_session::SetupPending>>,
+    setup_started: Query<'w, 's, Entity, Added<vmux_session::SetupPending>>,
+    setup_finished: RemovedComponents<'w, 's, vmux_session::SetupPending>,
 }
 
 type ReadyViewFilter = (
@@ -211,10 +260,13 @@ type ReadyViewFilter = (
 
 #[derive(SystemParam)]
 struct ReadyWorld<'w, 's> {
+    setup: Query<'w, 's, (), With<vmux_session::SetupPending>>,
     targets: super::session::SessionViews<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     metadata: Query<'w, 's, &'static PageMetadata>,
     sessions: Query<'w, 's, SessionProjection>,
+    authentication: Query<'w, 's, &'static crate::Authentication>,
+    preparation: Query<'w, 's, &'static crate::Preparation>,
     transcripts: Transcripts<'w, 's>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     user_profiles: Query<'w, 's, &'static Profile, With<User>>,
@@ -257,7 +309,36 @@ fn track_turn_duration(
     }
 }
 
-fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut commands: Commands) {
+impl PushWorld<'_, '_> {
+    fn context_changed(&self, session: Entity, user_moved: bool, loading_changed: bool) -> bool {
+        let Ok((_, agent_id, name, state, turn_meta, profile, _, imported, title, _, _)) =
+            self.sessions.get(session)
+        else {
+            return false;
+        };
+        user_moved
+            || agent_id.is_changed()
+            || loading_changed
+            || name.is_changed()
+            || state.is_changed()
+            || self
+                .preparation
+                .get(session)
+                .is_ok_and(|preparation| preparation.is_changed())
+            || self
+                .authentication
+                .get(session)
+                .is_ok_and(|authentication| authentication.is_changed())
+            || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
+            || profile.as_ref().is_some_and(|profile| profile.is_changed())
+            || imported
+                .as_ref()
+                .is_some_and(|imported| imported.is_changed())
+            || title.as_ref().is_some_and(|title| title.is_changed())
+    }
+}
+
+fn select_push(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut commands: Commands) {
     let user_profile = world.user_profiles.single().ok();
     let user_moved = user_profile
         .as_ref()
@@ -274,35 +355,35 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
     for session in world.loading_finished.read() {
         loading_changes.insert(session);
     }
+    for session in &world.setup_started {
+        loading_changes.insert(session);
+    }
+    for session in world.setup_finished.read() {
+        loading_changes.insert(session);
+    }
     for (
         session,
-        agent_id,
-        name,
-        state,
+        _agent_id,
+        _name,
+        _state,
         turn_meta,
         profile,
         queue,
         imported,
         title,
-        transcript_loading,
+        _transcript_loading,
         children,
     ) in &world.sessions
     {
         let Ok(mut push) = pushes.get_mut(session) else {
             continue;
         };
-        let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
-        let context_changed = user_moved
-            || agent_id.is_changed()
-            || loading_changes.contains(&session)
-            || name.is_changed()
-            || state.is_changed()
-            || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
-            || profile.as_ref().is_some_and(|profile| profile.is_changed())
-            || imported
-                .as_ref()
-                .is_some_and(|imported| imported.is_changed())
-            || title.as_ref().is_some_and(|title| title.is_changed());
+        let conversation_changed = children
+            .as_ref()
+            .is_some_and(|children| children.is_changed())
+            || changed_transcripts.contains(&session);
+        let context_changed =
+            world.context_changed(session, user_moved, loading_changes.contains(&session));
         let moved = context_changed || queue.is_changed();
         if !moved && !conversation_changed && !push.pending {
             continue;
@@ -336,15 +417,39 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             .bindings
             .iter()
             .any(|(_, parent, target)| parent.parent() == webview && target.entity() == session);
+        commands.entity(session).insert(PushTarget {
+            webview,
+            now,
+            context,
+            initialized,
+            moved,
+            context_changed,
+            conversation_changed,
+            metadata_changed: meta.as_ref().is_some_and(|meta| meta.is_changed()),
+            choice_changed: choice.as_ref().is_some_and(|choice| choice.is_changed()),
+        });
+    }
+}
+
+fn push_queued(
+    mut world: PushWorld,
+    mut pushes: Query<(Entity, &mut PushState, &PushTarget)>,
+    mut commands: Commands,
+) {
+    for (session, mut push, target) in &mut pushes {
+        let Ok((_, _, _, state, _, _, queue, _, _, _, _)) = world.sessions.get(session) else {
+            continue;
+        };
+        let webview = target.webview;
         if queue.is_changed()
-            && !context_changed
-            && !conversation_changed
+            && !target.context_changed
+            && !target.conversation_changed
             && !push.pending
-            && initialized
+            && target.initialized
             && world.synced.contains(webview)
-            && context == push.context
-            && !meta.as_ref().is_some_and(|meta| meta.is_changed())
-            && !choice.as_ref().is_some_and(|choice| choice.is_changed())
+            && target.context == push.context
+            && !target.metadata_changed
+            && !target.choice_changed
             && let Ok((transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         {
             snapshot.0.queued = world.queued.snapshot(session);
@@ -360,16 +465,59 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             if !paths.is_empty() {
                 commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
             }
-            push.last = Some(now);
+            push.last = Some(target.now);
+            commands.entity(session).remove::<PushTarget>();
             continue;
         }
-        let elapsed = push.last.map(|last| now.saturating_duration_since(last));
-        if !PushState::due(matches!(*state, RunState::Streaming), moved, elapsed) {
+        let elapsed = push
+            .last
+            .map(|last| target.now.saturating_duration_since(last));
+        if !PushState::due(matches!(*state, RunState::Streaming), target.moved, elapsed) {
             if !push.pending {
                 push.pending = true;
             }
+            commands.entity(session).remove::<PushTarget>();
             continue;
         }
+    }
+}
+
+fn push_to_page(
+    mut world: PushWorld,
+    mut pushes: Query<(Entity, &mut PushState, &PushTarget)>,
+    mut bindings: ViewBindings,
+    mut commands: Commands,
+    mut publication: ViewPublication,
+) {
+    let user_profile = world.user_profiles.single().ok();
+    for (session, mut push, target) in &mut pushes {
+        commands.entity(session).remove::<PushTarget>();
+        let Ok((
+            _,
+            agent_id,
+            name,
+            state,
+            turn_meta,
+            profile,
+            queue,
+            imported,
+            title,
+            transcript_loading,
+            _,
+        )) = world.sessions.get(session)
+        else {
+            continue;
+        };
+        let webview = target.webview;
+        let initialized = target.initialized;
+        let meta = world
+            .stacks
+            .iter()
+            .find_map(|(owner, children, meta)| {
+                (owner.entity() == session && children.contains(&webview)).then_some(meta)
+            })
+            .flatten();
+        let choice = world.choices.get(webview).ok();
         push.pending = false;
         let session_id = world.session_ids.get(session).ok();
         let viewport = if initialized {
@@ -398,6 +546,13 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
                 &conversation.event_ids,
             )
         });
+        if let Ok(preparation) = world.preparation.get(session) {
+            projection.prepare(&preparation);
+        }
+        if let Ok(authentication) = world.authentication.get(session) {
+            projection.authenticate(&authentication);
+        }
+        projection.snapshot.setup_pending = world.setup.contains(session);
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         else {
             if !push.pending {
@@ -405,53 +560,27 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             }
             continue;
         };
-        let mut transcript_changed = transcript.merge_tail(projection.transcript);
-        transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
-        attachments.hydrate_snapshot(&mut projection.snapshot);
-        snapshot.0 = projection.snapshot;
-        if !initialized && let Some(session_id) = session_id {
-            commands.trigger(
-                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                    webview,
-                    &crate::state::ChatUiStatePatch {
-                        viewport: Some(ChatViewportState {
-                            session: session_id.0.clone(),
-                            position: world.viewports.get(session).ok().copied(),
-                        }),
-                        ..Default::default()
-                    },
-                ),
-            );
-        }
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
+        let viewport_patch = if !initialized && let Some(session_id) = session_id {
+            Some(ChatProjection::viewport(
+                Some(session_id),
+                world.viewports.get(session).ok().copied(),
+            ))
+        } else {
+            None
+        };
+        publication.publish(
+            projection,
+            webview,
+            &mut transcript,
+            &mut snapshot,
+            attachments,
+            viewport_patch,
         );
-        if transcript_changed {
-            commands.trigger(
-                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                    webview,
-                    &transcript.state,
-                ),
-            );
-        }
-        let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
-        if !paths.is_empty() {
-            commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
-        }
         if !initialized {
-            for (binding, parent, _) in &world.bindings {
-                if parent.parent() == webview {
-                    commands.entity(binding).despawn();
-                }
-            }
-            commands.spawn((
-                EntityTarget::<Session>::new(session),
-                ChildOf(webview),
-                Binding,
-            ));
+            bindings.ensure(webview, session);
         }
-        push.context = context;
-        push.last = Some(now);
+        push.context = target.context;
+        push.last = Some(target.now);
     }
 }
 
@@ -479,7 +608,100 @@ impl QueuedPromptReads<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+struct ViewPublication<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl ViewPublication<'_, '_> {
+    fn publish(
+        &mut self,
+        mut projection: ChatProjection,
+        webview: Entity,
+        transcript: &mut ChatTranscriptProjection,
+        snapshot: &mut ChatSnapshotProjection,
+        attachments: &ChatAttachmentProjection,
+        viewport: Option<crate::state::ChatUiStatePatch>,
+    ) {
+        let mut transcript_changed = transcript.merge_tail(projection.transcript);
+        transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
+        attachments.hydrate_snapshot(&mut projection.snapshot);
+        snapshot.0 = projection.snapshot;
+        if let Some(viewport) = viewport {
+            self.commands.trigger(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &viewport),
+            );
+        }
+        self.commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
+        );
+        if transcript_changed {
+            self.commands.trigger(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                    webview,
+                    &transcript.state,
+                ),
+            );
+        }
+        let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
+        if !paths.is_empty() {
+            self.commands
+                .trigger(ChatAttachmentHydrationRequest { webview, paths });
+        }
+    }
+}
+
 impl ChatProjection {
+    fn viewport(
+        session: Option<&SessionId>,
+        position: Option<ChatViewport>,
+    ) -> crate::state::ChatUiStatePatch {
+        crate::state::ChatUiStatePatch {
+            viewport: Some(ChatViewportState {
+                session: session.map(|id| id.0.clone()).unwrap_or_default(),
+                position,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn prepare(&mut self, preparation: &crate::Preparation) {
+        if !preparation.active() {
+            return;
+        }
+        self.snapshot.status = if preparation.phase == crate::PreparationPhase::Installing {
+            "installing"
+        } else {
+            "preparing"
+        }
+        .into();
+        self.snapshot.error = preparation.detail.clone();
+        self.snapshot.install_percent = preparation.percent;
+    }
+
+    fn authenticate(&mut self, authentication: &crate::Authentication) {
+        if !authentication.active {
+            return;
+        }
+        self.snapshot.status = "authentication".into();
+        self.snapshot.authentication_methods = authentication.methods.clone();
+        self.snapshot.authentication_pending = authentication.pending;
+    }
+
+    fn approval(state: &RunState) -> Option<PendingApproval> {
+        match state {
+            RunState::AwaitingApproval {
+                call_id,
+                name,
+                args,
+            } => {
+                let args = vmux_api::json::JsonValue::from(args.clone());
+                Some(PendingApproval::new(call_id.clone(), name.clone(), &args))
+            }
+            _ => None,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn new(
         agent_id: &AgentId,
@@ -521,17 +743,7 @@ impl ChatProjection {
             RunState::Errored(message) => message.clone(),
             _ => String::new(),
         };
-        let approval = match state {
-            RunState::AwaitingApproval {
-                call_id,
-                name,
-                args,
-            } => {
-                let args = vmux_api::json::JsonValue::from(args.clone());
-                Some(PendingApproval::new(call_id.clone(), name.clone(), &args))
-            }
-            _ => None,
-        };
+        let approval = Self::approval(state);
         let (agent_name, accent_color) = profile
             .map(|p| (p.name.clone(), p.avatar.color.clone()))
             .unwrap_or_default();
@@ -612,7 +824,7 @@ fn sync_ready_views(
         ReadyViewFilter,
     >,
     world: ReadyWorld,
-    bindings: Query<(Entity, &ChildOf, &EntityTarget<Session>), With<Binding>>,
+    mut bindings: ViewBindings,
     mut commands: Commands,
 ) {
     let user_profile = world.user_profiles.single().ok();
@@ -663,6 +875,13 @@ fn sync_ready_views(
                 &conversation.event_ids,
             )
         });
+        if let Ok(preparation) = world.preparation.get(session_entity) {
+            projection.prepare(preparation);
+        }
+        if let Ok(authentication) = world.authentication.get(session_entity) {
+            projection.authenticate(authentication);
+        }
+        projection.snapshot.setup_pending = world.setup.contains(session_entity);
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
@@ -670,17 +889,10 @@ fn sync_ready_views(
         commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview,
-                &crate::state::ChatUiStatePatch {
-                    viewport: Some(ChatViewportState {
-                        session: world
-                            .session_ids
-                            .get(session_entity)
-                            .map(|id| id.0.clone())
-                            .unwrap_or_default(),
-                        position: viewport.copied(),
-                    }),
-                    ..Default::default()
-                },
+                &ChatProjection::viewport(
+                    world.session_ids.get(session_entity).ok(),
+                    viewport.copied(),
+                ),
             ),
         );
         commands.trigger(
@@ -703,20 +915,7 @@ fn sync_ready_views(
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
         commands.entity(webview).insert(ChatSynced);
-        if !bindings.iter().any(|(_, parent, target)| {
-            parent.parent() == webview && target.entity() == session_entity
-        }) {
-            for (binding, parent, _) in &bindings {
-                if parent.parent() == webview {
-                    commands.entity(binding).despawn();
-                }
-            }
-            commands.spawn((
-                EntityTarget::<Session>::new(session_entity),
-                ChildOf(webview),
-                Binding,
-            ));
-        }
+        bindings.ensure(webview, session_entity);
     }
 }
 
@@ -1331,6 +1530,46 @@ mod tests {
         assert_eq!(transcript.total, 160);
         assert!(matches!(&transcript.items[0], ChatItem::User { text, .. } if text == "message 0"));
         assert!(!transcript.loading);
+    }
+
+    #[test]
+    fn setup_lifecycle_reaches_a_synced_page_without_messages_or_status_changes() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, TranscriptPlugin))
+            .init_resource::<Published>()
+            .add_observer(Published::record);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("setup-lifecycle".into()),
+                AgentId("codex".into()),
+                Name::new("Setup"),
+                RunState::Errored("connection failed".into()),
+                PromptQueue::default(),
+                vmux_session::SetupPending,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((SessionView, PageReady {}, ChildOf(stack)))
+            .id();
+        app.update();
+        app.update();
+        assert!(app.world().get::<ChatSynced>(view).is_some());
+        assert!(app.world().resource::<Published>().0.snapshot.setup_pending);
+        app.world_mut()
+            .entity_mut(session)
+            .remove::<vmux_session::SetupPending>();
+        app.update();
+        let state = &app.world().resource::<Published>().0;
+        assert!(!state.snapshot.setup_pending);
+        assert_eq!(state.snapshot.status, "errored");
+        assert!(state.transcript.items.is_empty());
     }
 
     #[test]

@@ -33,12 +33,13 @@ use vmux_flex::prelude::*;
 
 pub(crate) struct PresentPlugin;
 
-impl Plugin for PresentPlugin {
-    fn build(&self, app: &mut App) {
+impl bevy::prelude::Plugin for PresentPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
             .add_plugins(crate::viewport::ViewportPlugin)
             .init_resource::<FrameSyncMemory>()
             .add_plugins(crate::layout_placement::LayoutPlacementPlugin)
+            .configure_sets(PostUpdate, (LayoutChildrenSet, RepaintSet))
             .add_systems(
                 PostUpdate,
                 (
@@ -70,10 +71,10 @@ impl Plugin for PresentPlugin {
     }
 }
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RepaintSet;
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct LayoutChildrenSet;
 
 type LayoutKeyboardCapture = Or<(
@@ -143,7 +144,7 @@ fn sync_keyboard_target(
     focus: vmux_layout::stack::FocusedStack,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    modal_q: Query<(Entity, &Node, Has<KeyboardOwner>), With<WindowOverlay>>,
+    modal_q: Query<(Entity, &Node, Has<KeyboardOwner>, Option<&HostWindow>), With<WindowOverlay>>,
     layout_keyboard_q: Query<(Entity, &HostWindow), LayoutKeyboardHost>,
     focused_window: vmux_layout::window::FocusedWindow,
     content_q: Query<
@@ -155,11 +156,17 @@ fn sync_keyboard_target(
         ),
         With<Browser>,
     >,
-    mut commands: Commands,
+    mut commands: bevy::prelude::Commands,
 ) {
-    if let Some(modal) = modal_q.iter().find_map(|(entity, node, keyboard_target)| {
-        (node.display != Display::None && keyboard_target).then_some(entity)
-    }) {
+    if let Some(modal) = modal_q
+        .iter()
+        .find_map(|(entity, node, keyboard_target, host)| {
+            (node.display != Display::None
+                && keyboard_target
+                && host.is_none_or(|host| Some(host.0) == focused_window.entity()))
+            .then_some(entity)
+        })
+    {
         for (browser_e, has_kb, _, _) in &content_q {
             if browser_e != modal && has_kb {
                 commands.entity(browser_e).try_remove::<KeyboardOwner>();

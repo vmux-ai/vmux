@@ -90,6 +90,8 @@ pub struct CliArgumentManifest {
     pub trailing: bool,
     #[serde(default)]
     pub global: bool,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Clone, Component, Debug)]

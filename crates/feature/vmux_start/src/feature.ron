@@ -13,6 +13,7 @@
                 "PageAddressPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
+                "SetupReadinessUiState",
                 "PageReady",
                 "ThemeUiState",
                 "StartSelectWorkspace",

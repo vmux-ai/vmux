@@ -12,6 +12,8 @@ mod attention_driver;
 mod command;
 mod command_bar;
 mod continuation;
+#[cfg(target_os = "macos")]
+mod credentials;
 mod event;
 mod external;
 mod follow;
@@ -22,6 +24,7 @@ mod ingress;
 mod model_selection;
 mod navigation;
 mod navigation_driver;
+mod onboarding;
 mod runtime;
 mod runtime_driver;
 mod toast;

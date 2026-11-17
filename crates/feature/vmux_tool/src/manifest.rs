@@ -198,10 +198,8 @@ impl Default for ToolStore {
 
 impl ToolStore {
     pub fn current() -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"));
-        Self::new(vmux_profile::ProfilePaths::current().config(), home)
+        let paths = vmux_profile::ProfilePaths::current();
+        Self::new(paths.config(), paths.tool_home())
     }
 
     pub fn new(config_dir: impl Into<PathBuf>, home: impl Into<PathBuf>) -> Self {

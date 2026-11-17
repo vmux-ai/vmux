@@ -15,9 +15,11 @@ use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 
 mod active_session;
 mod bookmark;
+mod browser_modal;
 mod error;
 mod extension;
 mod header;
+mod popup;
 mod remote;
 mod side_sheet;
 mod stack;
@@ -49,7 +51,8 @@ pub fn Page() -> Element {
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
     let layout = layout_ui.use_selector(|state| state.layout.unwrap_or_default());
-    let center_offset = layout().main_cef_center_offset();
+    let geometry: crate::event::LayoutGeometry = layout();
+    let center_offset = geometry.main_cef_center_offset();
 
     rsx! {
         div {
@@ -59,8 +62,18 @@ pub fn Page() -> Element {
             HeaderView {}
             CommandBarPanel {}
             ExtensionPopup {}
+            AuthenticationPopup {}
         }
     }
+}
+
+#[component]
+fn AuthenticationPopup() -> Element {
+    let popup = LayoutUi::current().use_selector(|state| state.browser_modal.clone())();
+    if popup.id.is_empty() {
+        return rsx! {};
+    }
+    rsx! { browser_modal::BrowserModal { key: "{popup.id}", popup } }
 }
 
 #[component]

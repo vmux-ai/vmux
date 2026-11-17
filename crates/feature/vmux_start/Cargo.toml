@@ -43,3 +43,6 @@ workspace = true
 [dev-dependencies]
 tempfile = "3"
 moonshine-save = { workspace = true }
+
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }
+dioxus-ssr = "=0.7.9"
