@@ -15,9 +15,7 @@ impl Plugin for WorkspaceEditPlugin {
         app.add_message::<crate::lsp::manager::LspRequestedEdit>()
             .add_systems(
                 Update,
-                apply_lsp
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer)
-                    .in_set(super::file_writes::FileWriteSet),
+                apply_lsp.in_set(crate::lsp::server_request::ServerRequestSet::Answer),
             );
     }
 }
