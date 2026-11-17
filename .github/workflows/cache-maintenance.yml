@@ -1,0 +1,31 @@
+name: Compiler cache maintenance
+
+on:
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: compiler-cache-maintenance
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: ./.github/actions/setup-ci
+      - name: Retain current cache generations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VMUX_CACHE_CLOSED_PR: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || '' }}
+        run: vmux-ci cache-prune --apply

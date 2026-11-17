@@ -1,0 +1,18 @@
+name: Report compiler cache
+description: Retain raw sccache counters for hit-rate and uncacheable-reason analysis
+inputs:
+  name:
+    description: Unique job or suite identity
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Capture compiler cache statistics
+      shell: bash
+      run: sccache --show-stats --stats-format=json > sccache-stats.json
+    - uses: actions/upload-artifact@v6
+      with:
+        name: compiler-cache-${{ inputs.name }}-${{ github.run_attempt }}
+        path: sccache-stats.json
+        if-no-files-found: error
+        retention-days: 7

@@ -31,6 +31,8 @@ runs:
         toolchain: ${{ steps.rust.outputs.channel }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
+    - uses: ./.github/actions/setup-compiler-cache
+      if: env.VMUX_CI_RUNTIME_READY != '1'
     - uses: Swatinem/rust-cache@v2
       if: env.VMUX_CI_RUNTIME_READY != '1'
       with:
