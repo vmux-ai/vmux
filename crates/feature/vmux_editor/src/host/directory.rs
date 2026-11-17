@@ -55,7 +55,8 @@ impl Plugin for DirectoryPlugin {
             .add_observer(open)
             .add_observer(back)
             .add_observer(toggle_hidden)
-            .add_observer(breadcrumb);
+            .add_observer(breadcrumb)
+            .add_observer(emit);
     }
 }
 
@@ -287,7 +288,9 @@ fn finish_breadcrumb(
     }
 }
 
+#[derive(EntityEvent)]
 struct BreadcrumbReady {
+    #[event_target]
     entity: Entity,
     state: FileBreadcrumbState,
 }
@@ -296,18 +299,37 @@ impl Command for BreadcrumbReady {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let Some(view) = world.get::<FileView>(self.entity) else {
-            return;
-        };
-        if !view.path.starts_with(&self.state.path) {
-            return;
-        }
-        if world.non_send::<Browsers>().can_emit_to(&self.entity) {
-            world.trigger(vmux_ecs::FileUiStateWrite::from_event(
-                self.entity,
-                &self.state,
-            ));
-        }
+        world.trigger(self);
+    }
+}
+
+fn emit(
+    request: On<BreadcrumbReady>,
+    views: Query<&FileView>,
+    delivery: Delivery,
+    mut commands: Commands,
+) {
+    let Ok(view) = views.get(request.entity) else {
+        return;
+    };
+    if !view.path.starts_with(&request.state.path) || !delivery.available(request.entity) {
+        return;
+    }
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        request.entity,
+        &request.state,
+    ));
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct Delivery<'w, 's> {
+    views: Query<'w, 's, (), With<FileView>>,
+    browsers: NonSend<'w, Browsers>,
+}
+
+impl Delivery<'_, '_> {
+    fn available(&self, entity: Entity) -> bool {
+        self.views.contains(entity) && self.browsers.can_emit_to(&entity)
     }
 }
 
@@ -681,6 +703,55 @@ mod tests {
 
     fn deliver(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
         event.mark_delivered();
+    }
+
+    #[test]
+    fn queued_breadcrumb_completion_rechecks_document_scope_and_retirement() {
+        for changed in 0..3 {
+            let mut fixture = BreadcrumbFixture::new();
+            let path = fixture.root.path().join("child");
+            fixture.app.world_mut().commands().queue(BreadcrumbReady {
+                entity: fixture.entity,
+                state: FileBreadcrumbState {
+                    path: path.to_string_lossy().into_owned(),
+                    entries: vec![FileDirEntry {
+                        name: "file.rs".into(),
+                        path: path.join("file.rs").to_string_lossy().into_owned(),
+                        is_dir: false,
+                    }],
+                    pending: false,
+                },
+            });
+            match changed {
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<FileView>(fixture.entity)
+                        .unwrap()
+                        .path = PathBuf::from("/other/file.rs");
+                }
+                2 => {
+                    fixture.app.world_mut().despawn(fixture.entity);
+                }
+                _ => {}
+            }
+            fixture.app.world_mut().flush();
+            fixture.app.update();
+            let state = fixture
+                .app
+                .world()
+                .get::<vmux_ecs::UiState<vmux_ecs::event::FileUiState>>(fixture.entity)
+                .and_then(vmux_ecs::UiState::current);
+            if changed == 0 {
+                let state = &state.unwrap().document.breadcrumb;
+                assert_eq!(state.path, path.to_string_lossy());
+                assert_eq!(state.entries[0].name, "file.rs");
+                assert!(!state.pending);
+            } else {
+                assert!(state.is_none());
+            }
+        }
     }
 
     #[test]
