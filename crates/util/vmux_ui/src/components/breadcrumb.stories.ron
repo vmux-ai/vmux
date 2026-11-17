@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "breadcrumbs",
+    title: "Breadcrumbs",
+    category: "gallery-category-navigation",
+    components: ["Breadcrumbs", "BreadcrumbItem", "BreadcrumbSeparator", "BreadcrumbDropdown", "BreadcrumbSelector", "BreadcrumbOptionIcon"],
+    controls: ["disabled", "menu", "choice"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

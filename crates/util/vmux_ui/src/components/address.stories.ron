@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "address",
+    title: "Address",
+    category: "gallery-category-navigation",
+    components: ["AddressTrail", "AddressControls"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

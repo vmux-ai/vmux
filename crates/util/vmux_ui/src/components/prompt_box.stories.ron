@@ -1,0 +1,14 @@
+#![enable(implicit_some)]
+(
+    id: "prompt-box",
+    title: "PromptBox",
+    category: "gallery-category-composition",
+    components: ["PromptBox", "PromptPopup"],
+    controls: ["disabled", "text", "menu"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+    ],
+)

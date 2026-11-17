@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "motion",
+    title: "Motion",
+    category: "gallery-category-feedback",
+    components: ["ContentTransition", "Collapse", "Collapsible"],
+    controls: ["checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+    ],
+)

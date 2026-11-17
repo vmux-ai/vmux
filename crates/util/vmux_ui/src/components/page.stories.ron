@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "page",
+    title: "Page",
+    category: "gallery-category-navigation",
+    components: ["PageShell", "PageToolbarRow", "PageSidebarToggle", "PageHeader", "PageContent"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

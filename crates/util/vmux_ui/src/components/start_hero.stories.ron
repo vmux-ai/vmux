@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "start-hero",
+    title: "StartHero",
+    category: "gallery-category-composition",
+    components: ["StartBackdrop", "StartHero"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

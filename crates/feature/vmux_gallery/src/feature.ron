@@ -1,0 +1,23 @@
+(
+    pages: [(
+        url: "vmux://ui/",
+        owns_subtree: true,
+        title: "UI Components",
+        title_message_id: "gallery-title",
+        keywords: ["ui", "components", "storybook", "gallery", "design system"],
+        icon: "Layers",
+        command_bar: true,
+        permissions: [
+            "PageAddressPublish", "PageAddressRequest", "PageAddressUiState",
+            "PageReady", "ThemeUiState", "GalleryUiState",
+            "OpenRequest", "GalleryDisabledRequest", "GalleryTextRequest",
+            "GalleryCheckedRequest", "GalleryChoiceRequest", "GalleryDialogRequest",
+            "GalleryProgressRequest", "GalleryClickRequest", "GalleryResetRequest",
+            "GalleryMenuRequest", "GalleryCursorRequest", "GalleryAgentRequest",
+            "GalleryModelRequest", "GalleryEffortRequest", "GalleryPermissionRequest",
+            "GalleryProjectRequest", "GalleryBranchRequest", "GallerySubmitRequest",
+            "GalleryStopRequest", "GalleryAttachRequest", "GalleryRemoveAttachmentRequest",
+            "GalleryPasteRequest", "GalleryStatusRequest", "GalleryConfigureRequest", "GalleryPresetRequest",
+        ],
+    )],
+)

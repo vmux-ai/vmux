@@ -1,0 +1,14 @@
+#![enable(implicit_some)]
+(
+    id: "textarea",
+    title: "Textarea",
+    category: "gallery-category-forms",
+    components: ["Textarea"],
+    controls: ["disabled", "text"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+    ],
+)

@@ -10375,6 +10375,7 @@ dependencies = [
  "vmux_editor",
  "vmux_extension",
  "vmux_flex",
+ "vmux_gallery",
  "vmux_git",
  "vmux_history",
  "vmux_input",
@@ -10803,6 +10804,26 @@ dependencies = [
  "bevy_math",
  "bevy_window",
  "taffy",
+]
+
+[[package]]
+name = "vmux_gallery"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "fluent-syntax",
+ "rkyv",
+ "ron 0.12.1",
+ "serde",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_layout",
+ "vmux_macro",
+ "vmux_page",
+ "vmux_ui",
 ]
 
 [[package]]

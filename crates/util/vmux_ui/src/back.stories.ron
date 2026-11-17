@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "back-button",
+    title: "BackButton",
+    category: "gallery-category-navigation",
+    components: ["BackButton"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

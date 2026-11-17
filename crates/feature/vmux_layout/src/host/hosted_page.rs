@@ -29,12 +29,13 @@ impl<M: Component + Default> HostedUiPlugin<M> {
 
 impl<M: Component + Default> Plugin for HostedUiPlugin<M> {
     fn build(&self, app: &mut App) {
+        let hosted = if self.manifest.owns_subtree {
+            HostedPage::subtree(self.manifest.url, self.manifest.title)
+        } else {
+            HostedPage::page(self.manifest.url, self.manifest.title)
+        };
         app.insert_resource(HostedUiManifest::<M>::new(self.manifest))
-            .add_plugins(
-                self.manifest
-                    .plugin()
-                    .hosted(HostedPage::page(self.manifest.url, self.manifest.title)),
-            )
+            .add_plugins(self.manifest.plugin().hosted(hosted))
             .add_systems(
                 Update,
                 sync_hosted_view::<M>.after(PageOpenSet::HandleKnownPages),
@@ -945,6 +946,46 @@ mod tests {
 
     #[derive(Component, Default)]
     struct HostedView;
+
+    #[test]
+    fn hosted_ui_registration_preserves_exact_and_subtree_route_scopes() {
+        for subtree in [false, true] {
+            let page = PageManifest {
+                route: "vmux://debug/",
+                url: "vmux://debug/",
+                asset_host: "debug",
+                owns_subtree: subtree,
+                title: "Debug",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: true,
+                startup: false,
+                reports_title: false,
+                placement: vmux_ecs::page::PagePlacement::DEFAULT,
+            };
+            let mut app = App::new();
+            app.add_plugins(HostedUiPlugin::<HostedView>::new(page));
+            let mut hosts = app.world_mut().query::<&HostedPage>();
+            assert!(
+                hosts
+                    .iter(app.world())
+                    .any(|host| host.answers_for("vmux://debug/"))
+            );
+            assert_eq!(
+                hosts
+                    .iter(app.world())
+                    .any(|host| host.answers_for("vmux://debug/panel")),
+                subtree,
+            );
+            assert!(
+                !hosts
+                    .iter(app.world())
+                    .any(|host| host.answers_for("vmux://debugger/panel"))
+            );
+        }
+    }
 
     #[test]
     fn hosted_marker_tracks_the_page_that_the_view_currently_hosts() {

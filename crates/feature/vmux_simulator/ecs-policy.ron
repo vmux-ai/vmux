@@ -17,7 +17,6 @@ legacy: [
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:AttachmentPhase", fingerprint: "55f07eb9eb4c1b96", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:AttachmentProgress", fingerprint: "b50fbdbe60a25791", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:DeviceAttachment", fingerprint: "1593d6ecba58975a", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||impl:Plugin for SimulatorPlugin", fingerprint: "a007c448ee2557c9", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:SimulatorDevice", fingerprint: "7d861550e0f81483", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:SimulatorPlugin", fingerprint: "dbfe3e8d12745762", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:SimulatorScreenshot", fingerprint: "a92b5c58a6c08c2b", issue: "VMX-253"),
@@ -172,6 +171,9 @@ legacy: [
     (key: "crates/feature/vmux_simulator/src/url.rs||impl:std :: fmt :: Display for IosVersion", fingerprint: "4a3aff5ddbb35cbd", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/url.rs||struct:InvalidSimulatorRoute", fingerprint: "c94b3acb75d856d5", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/url.rs||struct:IosVersion", fingerprint: "d7dd669b4e300381", issue: "VMX-253"),
+],
+boundaries: [
+    (key: "crates/feature/vmux_simulator/src/host.rs||impl:Plugin for SimulatorPlugin", fingerprint: "03778fa4d37337a0", interface: "Bevy simulator feature and schedule registration", input: "external: Bevy App installation and declared simulator feature metadata", output: "ECS: crates/feature/vmux_simulator/src/host.rs||struct:ActiveSimulatorView", lifetime: "One installed simulator host runtime", bounds: "Registers existing lifecycle, typed input and projection systems; prepares focus in PreUpdate for keyboard claims and reconciles current layout focus in Update without a dependency back into command routing", teardown: "App teardown releases registered systems and simulator-owned entities; device adapters retain their existing cleanup ownership", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   debt: [

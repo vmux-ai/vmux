@@ -80,13 +80,7 @@ impl Plugin for SimulatorPlugin {
         .add_plugins(SimulatorToolPlugin)
         .configure_sets(
             Update,
-            (
-                SimulatorFocusSet,
-                NativeKeyClaimSet,
-                NativeKeyInputSet,
-                SimulatorInputSet,
-            )
-                .chain(),
+            (NativeKeyClaimSet, NativeKeyInputSet, SimulatorInputSet).chain(),
         )
         .add_message::<HardwareButtonRequest>()
         .add_message::<SimulatorClipboardRequest>()
@@ -105,6 +99,12 @@ impl Plugin for SimulatorPlugin {
         .add_tool_query::<AgentSimulatorTypeText>()
         .add_tool_query::<AgentSimulatorKeyPress>()
         .add_tool_query::<AgentSimulatorButtonPress>()
+        .add_systems(
+            PreUpdate,
+            (sync_active_view, ApplyDeferred)
+                .chain()
+                .in_set(SimulatorFocusSet),
+        )
         .add_message::<ServiceRequest>()
         .add_systems(
             Update,
@@ -119,16 +119,15 @@ impl Plugin for SimulatorPlugin {
             Update,
             (sync_active_view, ApplyDeferred)
                 .chain()
-                .in_set(SimulatorFocusSet)
                 .after(ComputeFocusSet),
         )
         .add_systems(
             Update,
             sync_stream_activity
                 .after(finish_device_attachments)
-                .after(SimulatorFocusSet),
+                .after(sync_active_view),
         )
-        .add_systems(Update, handle_screenshot_requests.in_set(SimulatorInputSet))
+        .add_systems(Update, handle_screenshot_requests.after(sync_active_view))
         .add_systems(
             Update,
             (

@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "matrix-rain",
+    title: "MatrixRain",
+    category: "gallery-category-feedback",
+    components: ["MatrixRain", "MatrixLoader"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

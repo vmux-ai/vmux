@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "tooltip",
+    title: "Tooltip",
+    category: "gallery-category-primitives",
+    components: ["Tooltip"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

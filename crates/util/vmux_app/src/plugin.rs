@@ -56,6 +56,8 @@ pub enum VmuxPlugin {
     Extension(vmux_extension::ExtensionHostPlugin),
     #[plugin(feature = "git", desktop, requires(layout_runtime))]
     Git(vmux_git::GitPlugin),
+    #[plugin(feature = "gallery", desktop, requires(layout_runtime))]
+    Gallery(vmux_gallery::GalleryPlugin),
     #[plugin(
         feature = "acp",
         desktop,

@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "filter",
+    title: "Filter",
+    category: "gallery-category-forms",
+    components: ["FilterTrigger", "FilterPill", "FilterMenu", "FilterOption"],
+    controls: ["disabled"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

@@ -1,0 +1,14 @@
+#![enable(implicit_some)]
+(
+    id: "input",
+    title: "Input",
+    category: "gallery-category-forms",
+    components: ["Input", "ActionInput"],
+    controls: ["disabled", "text"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+    ],
+)

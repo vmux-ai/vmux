@@ -52,7 +52,6 @@ legacy: [
     (key: "crates/app/vmux_desktop/src/glass.rs||struct:GlassState", fingerprint: "1b800ca495c06358", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/glass.rs||struct:WindowGlass", fingerprint: "2c7d05dffab931c7", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/lib.rs|tests|fn:cef_create_probe", fingerprint: "aa52ac418f4cd0e6", issue: "VMX-253"),
-    (key: "crates/app/vmux_desktop/src/lib.rs|tests|fn:ui_event_flush_probe", fingerprint: "25256302c7edad9b", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/lib.rs||const:DEFAULT_WINDOW_HEIGHT", fingerprint: "e797818424c9a3fe", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/lib.rs||const:DEFAULT_WINDOW_WIDTH", fingerprint: "d4c94c13fe4c9ba4", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/lib.rs||impl:Plugin for VmuxPlugin", fingerprint: "8ff203d414a004b2", issue: "VMX-253"),

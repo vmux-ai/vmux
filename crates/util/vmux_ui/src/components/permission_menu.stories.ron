@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    id: "permission-menu",
+    title: "PermissionMenu",
+    category: "gallery-category-composition",
+    components: ["PermissionMenu"],
+    controls: ["disabled", "menu", "cursor", "permission"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+    ],
+)

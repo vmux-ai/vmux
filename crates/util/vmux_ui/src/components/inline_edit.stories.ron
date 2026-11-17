@@ -1,0 +1,14 @@
+#![enable(implicit_some)]
+(
+    id: "inline-edit",
+    title: "InlineEdit",
+    category: "gallery-category-forms",
+    components: ["EditableText", "InlineEdit", "InlineTextarea"],
+    controls: ["disabled", "text"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+        (name: "Disabled", args: (disabled: true)),
+        (name: "WithContent", args: (text: "Sample content")),
+    ],
+)

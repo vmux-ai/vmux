@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    id: "notice",
+    title: "Notice",
+    category: "gallery-category-feedback",
+    components: ["Notice"],
+    controls: ["checked"],
+    defaults: (),
+    presets: [
+        (name: "Default", args: ()),
+    ],
+)

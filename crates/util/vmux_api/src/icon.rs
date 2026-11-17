@@ -1,6 +1,7 @@
 #[cfg_attr(bevy_linked, derive(bevy_reflect::Reflect))]
 #[cfg_attr(bevy_linked, type_path = "vmux_api::icon")]
 #[vmux_api::contract(Copy, Eq)]
+#[vmux_macro::variant_names]
 pub enum BuiltinIcon {
     Terminal,
     Files,

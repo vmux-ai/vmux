@@ -288,7 +288,7 @@ shape: (
     (key: "crates/util/vmux_api/src/vault.rs||enum:VaultProvider", fingerprint: "e2bea4e857a119a7", issue: "VMX-253", finding: "AU-13"),
   ],
   enums: [
-    (key: "crates/util/vmux_api/src/icon.rs||enum:BuiltinIcon", fingerprint: "7d02725026dd9cb9", role: Boundary, owner: "crates/util/vmux_ui/src/icon.rs|wasm|fn:BuiltinIconView", reason: "Immutable declared icon codec vocabulary mapped to SVG or glyph presentation by the mounted renderer; no commands or state transitions."),
+    (key: "crates/util/vmux_api/src/icon.rs||enum:BuiltinIcon", fingerprint: "9c8a3df2d35d317b", role: Boundary, owner: "crates/util/vmux_ui/src/icon.rs|wasm|fn:BuiltinIconView", reason: "Immutable declared icon codec vocabulary mapped to SVG or glyph presentation by the mounted renderer; no commands or state transitions."),
   ],
   bodies: [
   ],

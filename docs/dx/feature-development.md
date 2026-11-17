@@ -19,6 +19,50 @@ vmux run my-vmux
 
 Open Terminal and check that ordinary text is bold. This is a small CSS change with an obvious result; remove the line to undo it.
 
+## Preview shared UI components
+
+Open `vmux://ui/` in the desktop address bar, or search for `storybook` in the command bar.
+The component catalog renders the actual `vmux_ui` controls through the same native page
+and IPC path as other Vmux pages. Choose a component, try its presets, edit the disabled
+property in Controls, and inspect the last accepted event and current values. The sidebar and content
+scroll independently, using the same workspace layout as Tools and Git. Search accepts
+component names such as `ComposerFrame` and `IdentityOrb`. Each family has a direct URL:
+`vmux://ui/composer` opens the composer, and the shared breadcrumb and browser history
+follow the selected family. The Default preset restores the example and its local state.
+Resize the pane to check smaller layouts; appearance and language follow application settings.
+
+The sidebar groups stories into Primitives, Forms, Composition, Navigation, Feedback,
+and Icons. The breadcrumb includes the selected category. The preview appears before
+the inspector; wider panes place Controls beside it, and Events expand when needed.
+Open `vmux://ui/icon` for the searchable icon library. Line, builtin and Git icons are
+enumerated from their declared variants, alongside file types, favicons and agent logos.
+Change the icon size to compare them at the sizes used in feature pages.
+
+Keep a component's metadata and conditions next to its implementation:
+
+```text
+crates/util/vmux_ui/src/components/button.rs
+crates/util/vmux_ui/src/components/button.stories.ron
+```
+
+The RON file describes its category, title, Controls, defaults and named presets. `catalog.rs` in
+`crates/feature/vmux_gallery` connects that file to a shared Rust renderer with one
+`#[story(metadata = "...", component = ...)]` entry. The registration attribute generates
+names, component URLs, search metadata and dispatch, and type-checks preset fields.
+Gallery Rust code stays focused on shared previews and Controls; it does not need a new
+adapter file for every component. Add an executable example before integrating a new
+shared component into a feature page.
+
+Args can change several conditions at once, including when the preview is disabled.
+Named presets replace previous conditions and reset component-local state. Composer,
+menu and directory callbacks update isolated sample state. The catalog is a desktop feature.
+
+Preset names remain stable developer identifiers in RON. Their display labels use Fluent
+messages named `gallery-preset-` followed by the name in lowercase kebab case, such as
+`gallery-preset-with-content` for `WithContent`. Add that message to every bundled locale
+when introducing a new preset. Component names, property keys and fixture values remain
+as authored.
+
 ## Follow a behavior change
 
 Open `crates/feature/vmux_setting/src/ui.rs` and find `Page`, the Settings screen. Its `rsx!` markup is similar to JSX: it renders HTML-like elements and other components. The search input has this callback:

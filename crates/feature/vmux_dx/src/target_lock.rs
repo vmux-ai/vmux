@@ -148,11 +148,41 @@ impl TargetLock {
 
 impl Drop for TargetLock {
     fn drop(&mut self) {
-        if self.file.is_none()
-            && fs::read_to_string(&self.path)
-                .is_ok_and(|owner| owner.trim() == std::process::id().to_string())
+        if let Some(file) = &self.file {
+            let _ = file.unlock();
+            return;
+        }
+        if fs::read_to_string(&self.path)
+            .is_ok_and(|owner| owner.trim() == std::process::id().to_string())
         {
             let _ = fs::remove_file(&self.path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn releasing_a_target_lock_unlocks_a_still_open_duplicate_handle() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("target.lock");
+        let file = File::create(&path).unwrap();
+        file.try_lock().unwrap();
+        let duplicate = file.try_clone().unwrap();
+        let lock = TargetLock {
+            path: path.clone(),
+            file: Some(file),
+        };
+        let contender = OpenOptions::new().write(true).open(&path).unwrap();
+        assert!(matches!(
+            contender.try_lock(),
+            Err(TryLockError::WouldBlock)
+        ));
+        drop(lock);
+        contender.try_lock().unwrap();
+        contender.unlock().unwrap();
+        drop(duplicate);
     }
 }
