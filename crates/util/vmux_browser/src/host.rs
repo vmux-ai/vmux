@@ -23,6 +23,7 @@ mod agent_pane;
 
 #[derive(Clone, Copy, Debug, Message)]
 pub struct WebviewLoadCompleted {
+    pub at: std::time::Instant,
     pub webview: Entity,
 }
 

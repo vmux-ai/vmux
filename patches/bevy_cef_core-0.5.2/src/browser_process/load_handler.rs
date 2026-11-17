@@ -8,9 +8,11 @@ use cef::{
     Browser, Frame, ImplFrame, ImplLoadHandler, LoadHandler, TransitionType, WrapLoadHandler, sys,
 };
 use std::os::raw::c_int;
+use std::time::Instant;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Message)]
 pub struct WebviewLoadingStateEvent {
+    pub at: Instant,
     pub webview: Entity,
     pub surface_generation: u64,
     pub navigation_epoch: u64,
@@ -23,6 +25,7 @@ pub type WebviewLoadingStateSenderInner = Sender<WebviewLoadingStateEvent>;
 
 #[derive(Clone, Debug, Message)]
 pub struct WebviewCommittedNavigationEvent {
+    pub at: Instant,
     pub webview: Entity,
     pub url: String,
     pub is_main_frame: bool,
@@ -98,8 +101,10 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
         can_go_back: c_int,
         can_go_forward: c_int,
     ) {
+        let at = Instant::now();
         let loading = is_loading != 0;
         let _ = self.tx.send_blocking(WebviewLoadingStateEvent {
+            at,
             webview: self.webview,
             surface_generation: self.bin_ipc_context.surface_generation(),
             navigation_epoch: self.bin_ipc_context.navigation_epoch(),
@@ -115,6 +120,7 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
         frame: Option<&mut Frame>,
         transition_type: TransitionType,
     ) {
+        let at = Instant::now();
         let Some(frame) = frame else { return };
         let is_main_frame = frame.is_main() != 0;
         let url = cef::CefString::from(&frame.url()).to_string();
@@ -123,6 +129,7 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
         }
         let (transition, qualifiers) = decode_transition(transition_type.get_raw());
         let _ = self.nav_tx.send_blocking(WebviewCommittedNavigationEvent {
+            at,
             webview: self.webview,
             url,
             is_main_frame,

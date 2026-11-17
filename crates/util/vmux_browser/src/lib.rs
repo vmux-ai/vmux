@@ -12,7 +12,7 @@ pub use host::WebviewLoadCompleted;
 pub use host_focus::HostFocusIntent;
 pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
 pub use input::WindowPointerRegions;
-pub use native_bridge::{NativeBridge, NativeHistoryPhase};
+pub use native_bridge::NativeBridge;
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use navigation::OpenHistoryRequest;

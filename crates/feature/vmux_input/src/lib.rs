@@ -10,6 +10,7 @@ pub use pointer::{
     PointerCapture, PointerInbox, PointerInput, PointerPlugin, PointerSet, PointerState,
     PointerUpdated, WindowGesture,
 };
+pub use wheel::{NativeWheelInput, WheelInbox, WheelInputSet, WheelPhase, WheelPlugin};
 
 pub(crate) struct Feature;
 
@@ -24,11 +25,15 @@ mod keyboard;
 mod keyboard_native;
 mod native_key;
 mod pointer;
+mod wheel;
 
 pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<WheelPlugin>() {
+            app.add_plugins(WheelPlugin);
+        }
         app.add_plugins((
             PointerPlugin,
             capture::CapturePlugin,

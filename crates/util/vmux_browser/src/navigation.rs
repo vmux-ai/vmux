@@ -535,6 +535,7 @@ mod committed_navigation_tests {
         for webview in [infrastructure, visible] {
             sender
                 .send_blocking(WebviewCommittedNavigationEvent {
+                    at: std::time::Instant::now(),
                     webview,
                     url: "https://example.com".into(),
                     is_main_frame: true,

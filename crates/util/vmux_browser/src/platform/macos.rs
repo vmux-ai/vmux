@@ -12,8 +12,8 @@ use bevy::ecs::world::EntityRef;
 use bevy::prelude::*;
 use bevy::prelude::{
     App, ChildOf, Commands, Component, Entity, EntityEvent, Has, MessageReader, MessageWriter,
-    NonSend, NonSendMut, On, Plugin, Query, Ref, Remove, Res, ResMut, Resource, Window, With,
-    Without,
+    NonSend, NonSendMut, On, Plugin, Query, Ref, Remove, Res, ResMut, Resource, Single, Window,
+    With, Without,
 };
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
@@ -74,7 +74,11 @@ impl Plugin for MacosBrowserPlugin {
         .add_systems(Update, dismiss_popups)
         .add_observer(stop_loading)
         .add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
-        .add_plugins((NativeFocusPlugin, SurfacePresentationPlugin))
+        .add_plugins((
+            NativeFocusPlugin,
+            SurfacePresentationPlugin,
+            PageLifecyclePlugin,
+        ))
         .init_non_send::<PageRenderer>()
         .init_resource::<OpenPageDropdown>()
         .add_systems(Startup, move |mut commands: Commands| {
@@ -98,8 +102,7 @@ impl Plugin for MacosBrowserPlugin {
                 open.after(PageOpenSet::HandleKnownPages),
                 bevy::ecs::schedule::ApplyDeferred,
                 sync_surface_interaction,
-                apply_lifecycle,
-                apply_metadata,
+                apply_metadata.after(PageLifecycleSet),
                 dismiss_page_dropdowns,
                 mark_handoff_painted,
                 sync_appearance,
@@ -906,7 +909,9 @@ struct PageMetadataSender(PageMetadataMailbox);
 #[derive(Component)]
 struct PageMetadataReceiver(PageMetadataMailbox);
 
+#[derive(Message)]
 struct PageLifecycleEnvelope {
+    at: std::time::Instant,
     webview: Entity,
     generation: u64,
     navigation_revision: u64,
@@ -935,6 +940,7 @@ impl From<&PageLifecycleEnvelope> for PageLifecycleKey {
 
 #[derive(Default)]
 struct PageLifecycleBatch {
+    document_observed_at: Option<std::time::Instant>,
     mounts: u64,
     ready: Option<u64>,
     remounts: u64,
@@ -952,8 +958,23 @@ struct PageLifecycleBatch {
     measurement_delta: i64,
 }
 
+#[derive(Message)]
+struct PageLifecycleBatchEnvelope {
+    key: PageLifecycleKey,
+    batch: PageLifecycleBatch,
+}
+
 impl PageLifecycleBatch {
-    fn record(&mut self, update: LifecycleUpdate) {
+    fn record(&mut self, update: LifecycleUpdate, at: std::time::Instant) {
+        if matches!(
+            update,
+            LifecycleUpdate::Mounted | LifecycleUpdate::Remounted | LifecycleUpdate::Ready(_)
+        ) {
+            self.document_observed_at = Some(
+                self.document_observed_at
+                    .map_or(at, |previous| previous.max(at)),
+            );
+        }
         match update {
             LifecycleUpdate::Mounted => self.mounts = self.mounts.saturating_add(1),
             LifecycleUpdate::Ready(revision) => self.ready = Some(revision),
@@ -1036,7 +1057,7 @@ impl PageLifecycleMailbox {
             .batches
             .entry(PageLifecycleKey::from(&envelope))
             .or_default()
-            .record(envelope.update);
+            .record(envelope.update, envelope.at);
     }
 
     fn drain_into(
@@ -1063,6 +1084,23 @@ struct PageLifecycleReceiver(PageLifecycleMailbox);
 
 #[derive(Resource, Default)]
 struct OpenPageDropdown(Option<Entity>);
+
+impl OpenPageDropdown {
+    fn opened(&mut self, surface: Entity) -> Option<Entity> {
+        self.0
+            .replace(surface)
+            .filter(|previous| *previous != surface)
+    }
+
+    fn interacted(&mut self, surface: Entity) -> Option<Entity> {
+        let previous = self.0?;
+        if previous == surface {
+            return None;
+        }
+        self.0 = None;
+        Some(previous)
+    }
+}
 
 const CLOSE_PAGE_DROPDOWNS: &str = "for (const popup of document.querySelectorAll('[data-vmux-dropdown-popup]:popover-open')) popup.hidePopover();";
 
@@ -1105,11 +1143,97 @@ fn apply_metadata(
     }
 }
 
-fn apply_lifecycle(
+struct PageLifecyclePlugin;
+
+impl Plugin for PageLifecyclePlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::native_bridge::NativeHistoryPlugin>() {
+            app.add_plugins(crate::native_bridge::NativeHistoryPlugin);
+        }
+        app.init_resource::<OpenPageDropdown>()
+            .add_message::<PageLifecycleEnvelope>()
+            .add_message::<PageLifecycleBatchEnvelope>()
+            .add_systems(
+                Update,
+                (
+                    receive_lifecycle,
+                    invalidate_documents,
+                    apply_semantic,
+                    apply_batches,
+                )
+                    .chain()
+                    .in_set(PageLifecycleSet)
+                    .after(sync_surface_interaction),
+            );
+    }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PageLifecycleSet;
+
+fn receive_lifecycle(
     receiver: Single<&PageLifecycleReceiver>,
+    mut batch_events: MessageWriter<PageLifecycleBatchEnvelope>,
+    mut semantic_events: MessageWriter<PageLifecycleEnvelope>,
+) {
+    let mut batches = Vec::new();
+    let mut semantic = Vec::new();
+    receiver.0.drain_into(&mut batches, &mut semantic);
+    for (key, batch) in batches {
+        batch_events.write(PageLifecycleBatchEnvelope { key, batch });
+    }
+    for envelope in semantic {
+        semantic_events.write(envelope);
+    }
+}
+
+fn invalidate_documents(
+    mut batches: MessageReader<PageLifecycleBatchEnvelope>,
+    mut semantic: MessageReader<PageLifecycleEnvelope>,
+    pages: Query<(
+        &HostedSurfaceGeneration,
+        &BinIpcEpoch,
+        &BinIpcNavigationRevision,
+    )>,
+    mut history: crate::native_bridge::HistoryClaims,
+) {
+    let semantic: Vec<_> = semantic.read().collect();
+    for envelope in batches.read() {
+        let key = &envelope.key;
+        let batch = &envelope.batch;
+        let Some(at) = batch.document_observed_at else {
+            continue;
+        };
+        let Ok((generation, epoch, navigation)) = pages.get(key.webview) else {
+            continue;
+        };
+        if generation.0 != key.generation || epoch.0 != key.ipc_epoch {
+            continue;
+        }
+        let mut latest_navigation = navigation.0;
+        for envelope in &semantic {
+            if envelope.webview != key.webview
+                || envelope.generation != key.generation
+                || envelope.ipc_epoch != key.ipc_epoch
+            {
+                continue;
+            }
+            if let LifecycleUpdate::Navigated(revision) = envelope.update
+                && revision == envelope.navigation_revision
+                && revision >= latest_navigation
+            {
+                latest_navigation = revision;
+            }
+        }
+        if latest_navigation == key.navigation_revision {
+            history.invalidate(key.webview, at);
+        }
+    }
+}
+
+fn apply_semantic(
+    mut semantic: MessageReader<PageLifecycleEnvelope>,
     renderer: Option<NonSend<PageRenderer>>,
-    mut batches: Local<Vec<(PageLifecycleKey, PageLifecycleBatch)>>,
-    mut semantic: Local<Vec<PageLifecycleEnvelope>>,
     mut pages: Query<(
         &HostedSurfaceGeneration,
         &BinIpcEpoch,
@@ -1117,14 +1241,13 @@ fn apply_lifecycle(
         &mut crate::HostedPageLifecycle,
     )>,
     blocked: Query<(), With<vmux_layout::hosted_page::SurfaceBlocked>>,
-    handoffs: Query<(), With<vmux_layout::hosted_page::SurfaceHandoff>>,
     source_hosts: Query<&HostWindow, Without<LayoutCef>>,
     mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
     mut open_dropdown: ResMut<OpenPageDropdown>,
+    mut history: crate::native_bridge::HistoryClaims,
     mut commands: Commands,
 ) {
-    receiver.0.drain_into(&mut batches, &mut semantic);
-    for envelope in semantic.drain(..) {
+    for envelope in semantic.read() {
         let Ok((generation, epoch, mut navigation, mut page)) = pages.get_mut(envelope.webview)
         else {
             continue;
@@ -1138,6 +1261,7 @@ fn apply_lifecycle(
                     continue;
                 }
                 navigation.0 = revision;
+                history.invalidate(envelope.webview, envelope.at);
                 page.navigation_revision = page.navigation_revision.max(revision);
                 page.hydration_frame_count = None;
                 continue;
@@ -1150,13 +1274,13 @@ fn apply_lifecycle(
         if navigation.0 != envelope.navigation_revision || blocked.contains(envelope.webview) {
             continue;
         }
-        match envelope.update {
+        let previous = match envelope.update {
             LifecycleUpdate::HistoryRequested(direction) => {
                 let operation = match direction {
                     vmux_page::HistoryDirection::Back => crate::NavigationOperation::Back,
                     vmux_page::HistoryDirection::Forward => crate::NavigationOperation::Forward,
                 };
-                if !crate::NativeBridge::claim_history_input(envelope.webview, operation) {
+                if !history.claim(envelope.webview, operation, envelope.at) {
                     continue;
                 }
                 commands.write_message(crate::NavigationRequest::surface(
@@ -1165,30 +1289,16 @@ fn apply_lifecycle(
                 ));
                 continue;
             }
-            LifecycleUpdate::DropdownOpened => {
-                if let Some(previous) = open_dropdown.0.replace(envelope.webview)
-                    && previous != envelope.webview
-                    && let Some(surface) = renderer
-                        .as_ref()
-                        .and_then(|renderer| renderer.active.get(&previous))
-                {
-                    surface.evaluate_script(CLOSE_PAGE_DROPDOWNS);
-                }
-            }
-            LifecycleUpdate::PageInteracted => {
-                if let Some(previous) = open_dropdown.0
-                    && previous != envelope.webview
-                {
-                    if let Some(surface) = renderer
-                        .as_ref()
-                        .and_then(|renderer| renderer.active.get(&previous))
-                    {
-                        surface.evaluate_script(CLOSE_PAGE_DROPDOWNS);
-                    }
-                    open_dropdown.0 = None;
-                }
-            }
+            LifecycleUpdate::DropdownOpened => open_dropdown.opened(envelope.webview),
+            LifecycleUpdate::PageInteracted => open_dropdown.interacted(envelope.webview),
             _ => continue,
+        };
+        if let Some(previous) = previous
+            && let Some(surface) = renderer
+                .as_ref()
+                .and_then(|renderer| renderer.active.get(&previous))
+        {
+            surface.evaluate_script(CLOSE_PAGE_DROPDOWNS);
         }
         let Ok(source_host) = source_hosts.get(envelope.webview) else {
             continue;
@@ -1206,7 +1316,22 @@ fn apply_lifecycle(
             ),
         );
     }
-    for (key, batch) in batches.drain(..) {
+}
+
+fn apply_batches(
+    mut batches: MessageReader<PageLifecycleBatchEnvelope>,
+    mut pages: Query<(
+        &HostedSurfaceGeneration,
+        &BinIpcEpoch,
+        &BinIpcNavigationRevision,
+        &mut crate::HostedPageLifecycle,
+    )>,
+    handoffs: Query<(), With<vmux_layout::hosted_page::SurfaceHandoff>>,
+    mut commands: Commands,
+) {
+    for envelope in batches.read() {
+        let key = &envelope.key;
+        let batch = &envelope.batch;
         let Ok((generation, epoch, navigation, mut page)) = pages.get_mut(key.webview) else {
             continue;
         };
@@ -2538,16 +2663,8 @@ struct PageLifecycleOutbox {
 
 impl LifecycleSink for PageLifecycleOutbox {
     fn update(&self, update: LifecycleUpdate) {
-        if matches!(
-            update,
-            LifecycleUpdate::Mounted
-                | LifecycleUpdate::Remounted
-                | LifecycleUpdate::Navigated(_)
-                | LifecycleUpdate::Ready(_)
-        ) {
-            crate::NativeBridge::invalidate_history_input(self.webview);
-        }
         self.sender.0.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: self.webview,
             generation: self.generation,
             navigation_revision: self.navigation_revision.get(),
@@ -3084,6 +3201,7 @@ mod tests {
             ))
             .id();
         sender.0.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3326,7 +3444,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ReadyEvents>()
             .init_resource::<OpenPageDropdown>()
-            .add_systems(Update, super::apply_lifecycle)
+            .add_plugins(super::PageLifecyclePlugin)
             .add_observer(record_ready);
         let lifecycle = PageLifecycleMailbox::default();
         app.world_mut()
@@ -3341,6 +3459,7 @@ mod tests {
             ))
             .id();
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3348,6 +3467,7 @@ mod tests {
             update: LifecycleUpdate::Mounted,
         });
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3370,6 +3490,7 @@ mod tests {
             LifecycleUpdate::FramePainted(1),
         ] {
             lifecycle.send(PageLifecycleEnvelope {
+                at: std::time::Instant::now(),
                 webview: page,
                 generation: 4,
                 navigation_revision: 1,
@@ -3392,7 +3513,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ReadyEvents>()
             .init_resource::<OpenPageDropdown>()
-            .add_systems(Update, super::apply_lifecycle)
+            .add_plugins(super::PageLifecyclePlugin)
             .add_observer(record_ready);
         let lifecycle = PageLifecycleMailbox::default();
         app.world_mut()
@@ -3408,6 +3529,7 @@ mod tests {
             .id();
 
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3418,6 +3540,7 @@ mod tests {
         assert_eq!(app.world().resource::<ReadyEvents>().0, 0);
 
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 2,
@@ -3433,7 +3556,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ReadyEvents>()
             .init_resource::<OpenPageDropdown>()
-            .add_systems(Update, super::apply_lifecycle)
+            .add_plugins(super::PageLifecyclePlugin)
             .add_observer(record_ready);
         let lifecycle = PageLifecycleMailbox::default();
         app.world_mut()
@@ -3449,6 +3572,7 @@ mod tests {
             ))
             .id();
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 2,
@@ -3456,6 +3580,7 @@ mod tests {
             update: LifecycleUpdate::Navigated(2),
         });
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3467,6 +3592,7 @@ mod tests {
         assert_eq!(app.world().resource::<ReadyEvents>().0, 0);
 
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 2,
@@ -3489,7 +3615,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ReadyEvents>()
             .init_resource::<OpenPageDropdown>()
-            .add_systems(Update, super::apply_lifecycle)
+            .add_plugins(super::PageLifecyclePlugin)
             .add_observer(record_ready);
         let lifecycle = PageLifecycleMailbox::default();
         app.world_mut()
@@ -3504,6 +3630,7 @@ mod tests {
             ))
             .id();
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3511,6 +3638,7 @@ mod tests {
             update: LifecycleUpdate::Ready(1),
         });
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 2,
@@ -3518,6 +3646,7 @@ mod tests {
             update: LifecycleUpdate::Navigated(2),
         });
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 2,
@@ -3538,7 +3667,7 @@ mod tests {
     fn exhausted_frame_recovery_fails_the_surface_handoff() {
         let mut app = App::new();
         app.init_resource::<OpenPageDropdown>()
-            .add_systems(Update, super::apply_lifecycle);
+            .add_plugins(super::PageLifecyclePlugin);
         let lifecycle = PageLifecycleMailbox::default();
         app.world_mut()
             .spawn(PageLifecycleReceiver(lifecycle.clone()));
@@ -3558,6 +3687,7 @@ mod tests {
             ))
             .id();
         lifecycle.send(PageLifecycleEnvelope {
+            at: std::time::Instant::now(),
             webview: page,
             generation: 4,
             navigation_revision: 1,
@@ -3581,6 +3711,7 @@ mod tests {
         let second = bevy::prelude::Entity::from_bits(2);
         for webview in [first, second] {
             lifecycle.send(PageLifecycleEnvelope {
+                at: std::time::Instant::now(),
                 webview,
                 generation: 1,
                 navigation_revision: 1,
@@ -3610,20 +3741,253 @@ mod tests {
             .init_resource::<OpenPageDropdown>()
             .insert_resource(LifecycleSender(lifecycle.clone()))
             .add_observer(record_ready)
+            .add_plugins(super::PageLifecyclePlugin)
             .add_systems(
                 Update,
-                (
-                    queue_ready_surface,
-                    bevy::ecs::schedule::ApplyDeferred,
-                    super::apply_lifecycle,
-                )
-                    .chain(),
+                (queue_ready_surface, bevy::ecs::schedule::ApplyDeferred)
+                    .chain()
+                    .before(super::PageLifecycleSet),
             );
         app.world_mut().spawn(PageLifecycleReceiver(lifecycle));
 
         app.update();
 
         assert_eq!(app.world().resource::<ReadyEvents>().0, 1);
+    }
+
+    #[test]
+    fn native_document_timestamps_preserve_only_a_later_history_gesture() {
+        for begin_after_document in [false, true] {
+            let mut fixture = HistoryLifecycleFixture::new();
+            let at = std::time::Instant::now();
+            let begin = if begin_after_document {
+                at + std::time::Duration::from_millis(32)
+            } else {
+                at
+            };
+            fixture.wheel(begin);
+            fixture.send(
+                4,
+                1,
+                7,
+                at + std::time::Duration::from_millis(16),
+                LifecycleUpdate::Mounted,
+            );
+            fixture.send(
+                4,
+                1,
+                7,
+                at + std::time::Duration::from_millis(33),
+                LifecycleUpdate::HistoryRequested(vmux_page::HistoryDirection::Back),
+            );
+            let events = fixture.events();
+            let expected = if begin_after_document {
+                vec![crate::NavigationRequest::surface(
+                    fixture.surface,
+                    crate::NavigationOperation::Back,
+                )]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(events, expected);
+        }
+    }
+
+    #[test]
+    fn old_native_history_requests_and_stale_document_generations_cannot_consume_new_input() {
+        for stale in 0..4 {
+            let mut fixture = HistoryLifecycleFixture::new();
+            let at = std::time::Instant::now();
+            fixture.wheel(at + std::time::Duration::from_millis(32));
+            match stale {
+                0 => fixture.send(
+                    5,
+                    1,
+                    7,
+                    at + std::time::Duration::from_millis(40),
+                    LifecycleUpdate::Mounted,
+                ),
+                1 => fixture.send(
+                    4,
+                    1,
+                    8,
+                    at + std::time::Duration::from_millis(40),
+                    LifecycleUpdate::Mounted,
+                ),
+                2 => fixture.send(
+                    4,
+                    0,
+                    7,
+                    at + std::time::Duration::from_millis(40),
+                    LifecycleUpdate::Mounted,
+                ),
+                3 => fixture.send(
+                    4,
+                    1,
+                    7,
+                    at + std::time::Duration::from_millis(16),
+                    LifecycleUpdate::HistoryRequested(vmux_page::HistoryDirection::Back),
+                ),
+                _ => unreachable!(),
+            }
+            assert!(fixture.events().is_empty());
+            fixture.send(
+                4,
+                1,
+                7,
+                at + std::time::Duration::from_millis(41),
+                LifecycleUpdate::HistoryRequested(vmux_page::HistoryDirection::Back),
+            );
+            assert_eq!(
+                fixture.events(),
+                vec![crate::NavigationRequest::surface(
+                    fixture.surface,
+                    crate::NavigationOperation::Back
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn native_navigation_and_document_batches_keep_history_correlated_to_the_new_revision() {
+        let mut fixture = HistoryLifecycleFixture::new();
+        let at = std::time::Instant::now();
+        fixture.send(
+            4,
+            2,
+            7,
+            at + std::time::Duration::from_millis(16),
+            LifecycleUpdate::Navigated(2),
+        );
+        fixture.send(
+            4,
+            2,
+            7,
+            at + std::time::Duration::from_millis(24),
+            LifecycleUpdate::Mounted,
+        );
+        fixture.send(
+            4,
+            1,
+            7,
+            at + std::time::Duration::from_millis(48),
+            LifecycleUpdate::Mounted,
+        );
+        fixture.wheel(at + std::time::Duration::from_millis(32));
+        fixture.send(
+            4,
+            2,
+            7,
+            at + std::time::Duration::from_millis(33),
+            LifecycleUpdate::HistoryRequested(vmux_page::HistoryDirection::Back),
+        );
+        assert_eq!(
+            fixture.events(),
+            vec![crate::NavigationRequest::surface(
+                fixture.surface,
+                crate::NavigationOperation::Back
+            )]
+        );
+    }
+
+    struct HistoryLifecycleFixture {
+        app: App,
+        mailbox: PageLifecycleMailbox,
+        window: bevy::prelude::Entity,
+        surface: bevy::prelude::Entity,
+        requests: bevy::ecs::message::MessageCursor<crate::NavigationRequest>,
+    }
+
+    impl HistoryLifecycleFixture {
+        fn new() -> Self {
+            let mailbox = PageLifecycleMailbox::default();
+            let mut app = App::new();
+            app.add_plugins(super::PageLifecyclePlugin)
+                .add_message::<crate::NavigationRequest>();
+            app.world_mut()
+                .spawn(PageLifecycleReceiver(mailbox.clone()));
+            let window = app.world_mut().spawn(bevy::window::Window::default()).id();
+            let stack = app
+                .world_mut()
+                .spawn(bevy_cef::prelude::HostWindow(window))
+                .id();
+            let surface = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::Browser,
+                    PaneFrame {
+                        left: 10.0,
+                        top: 20.0,
+                        width: 200.0,
+                        height: 100.0,
+                    },
+                    bevy::prelude::ChildOf(stack),
+                    HostedSurfaceGeneration(4),
+                    BinIpcNavigationRevision(1),
+                    BinIpcEpoch(7),
+                    crate::HostedPageLifecycle::default(),
+                ))
+                .id();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(vmux_layout::page_slot::Current::new(
+                    Some(surface),
+                    vmux_ecs::PageMetadata::default(),
+                ));
+            app.update();
+            Self {
+                app,
+                mailbox,
+                window,
+                surface,
+                requests: Default::default(),
+            }
+        }
+
+        fn wheel(&mut self, at: std::time::Instant) {
+            self.app
+                .world_mut()
+                .write_message(vmux_input::NativeWheelInput {
+                    window: Some(self.window),
+                    position: bevy::prelude::Vec2::new(50.0, 50.0),
+                    delta: bevy::prelude::Vec2::new(-240.0, 0.0),
+                    phase: vmux_input::WheelPhase::Begin,
+                    at,
+                    has_native_event: true,
+                    precise: true,
+                    modifiers: Default::default(),
+                });
+        }
+
+        fn send(
+            &self,
+            generation: u64,
+            navigation_revision: u64,
+            ipc_epoch: u64,
+            at: std::time::Instant,
+            update: LifecycleUpdate,
+        ) {
+            self.mailbox.send(PageLifecycleEnvelope {
+                webview: self.surface,
+                generation,
+                navigation_revision,
+                ipc_epoch,
+                at,
+                update,
+            });
+        }
+
+        fn events(&mut self) -> Vec<crate::NavigationRequest> {
+            self.app.update();
+            self.requests
+                .read(
+                    self.app
+                        .world()
+                        .resource::<bevy::prelude::Messages<crate::NavigationRequest>>(),
+                )
+                .copied()
+                .collect()
+        }
     }
 
     #[test]

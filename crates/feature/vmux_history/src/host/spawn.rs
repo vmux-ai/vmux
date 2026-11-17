@@ -308,6 +308,7 @@ mod system_tests {
             self.app
                 .world_mut()
                 .write_message(WebviewCommittedNavigationEvent {
+                    at: std::time::Instant::now(),
                     webview: Entity::PLACEHOLDER,
                     url: url.into(),
                     is_main_frame: true,
@@ -407,6 +408,7 @@ mod system_tests {
             .world_mut()
             .resource_mut::<Messages<WebviewCommittedNavigationEvent>>();
         writer.write(WebviewCommittedNavigationEvent {
+            at: std::time::Instant::now(),
             webview: Entity::PLACEHOLDER,
             url: "https://example.com".into(),
             is_main_frame: false,
