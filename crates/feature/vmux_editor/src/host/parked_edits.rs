@@ -13,32 +13,43 @@ pub(super) struct Parked;
 #[derive(Component)]
 pub(super) struct Modified(Option<SystemTime>);
 
-impl Parked {
-    pub(super) fn retain(
-        world: &mut World,
-        owner: Entity,
-        edit: Editor,
-        diff: vmux_git::GitDiffSource,
-    ) {
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Buffers<'w, 's> {
+    owners: Query<'w, 's, ()>,
+    children: Query<'w, 's, &'static Children>,
+    parked: Query<'w, 's, (), With<Parked>>,
+    buffers: Query<
+        'w,
+        's,
+        (
+            &'static FileId,
+            &'static Order,
+            &'static Editor,
+            &'static Modified,
+        ),
+        With<Parked>,
+    >,
+    commands: Commands<'w, 's>,
+}
+
+impl Buffers<'_, '_> {
+    pub(super) fn retain(&mut self, owner: Entity, edit: Editor, diff: vmux_git::GitDiffSource) {
+        if !self.owners.contains(owner) {
+            return;
+        }
         let path = edit.core.buffer.path.clone();
         let modified = super::file_loading_io::Inspect::modified_at(&path);
         let mut entries = Vec::new();
         let mut existing = None;
-        if let Some(children) = world.get::<Children>(owner) {
+        if let Ok(children) = self.children.get(owner) {
             for entity in children.iter() {
-                if world.get::<Self>(entity).is_none() {
+                let Ok((file, order, edit, _)) = self.buffers.get(entity) else {
                     continue;
-                }
-                let file = world.get::<FileId>(entity).unwrap();
-                let order = world.get::<Order>(entity).unwrap();
+                };
                 if file.0 == path {
                     existing = Some(entity);
                 } else {
-                    entries.push((
-                        entity,
-                        order.0,
-                        world.get::<Editor>(entity).unwrap().core.dirty,
-                    ));
+                    entries.push((entity, order.0, edit.core.dirty));
                 }
             }
         }
@@ -46,19 +57,20 @@ impl Parked {
         let dirty = edit.core.dirty;
         let entity = match existing {
             Some(entity) => {
-                world
-                    .entity_mut(entity)
+                self.commands
+                    .entity(entity)
                     .insert((Modified(modified), edit, diff));
                 entity
             }
-            None => world
+            None => self
+                .commands
                 .spawn((
                     Name::new("Parked editor"),
                     FileId(path),
                     ChildOf(owner),
                     Order(entries.len() as u32),
                     Modified(modified),
-                    Self,
+                    Parked,
                     edit,
                     diff,
                 ))
@@ -66,66 +78,74 @@ impl Parked {
         };
         entries.push((entity, entries.len() as u32, dirty));
         for (order, (entity, _, _)) in entries.iter().enumerate() {
-            world.entity_mut(*entity).insert(Order(order as u32));
+            self.commands.entity(*entity).insert(Order(order as u32));
         }
         while entries.len() > 8 {
             let Some(index) = entries.iter().position(|(_, _, dirty)| !dirty) else {
                 break;
             };
             let (evicted, _, _) = entries.remove(index);
-            world.despawn(evicted);
+            self.commands.entity(evicted).despawn();
         }
     }
 
     pub(super) fn resume(
-        world: &mut World,
+        &mut self,
         owner: Entity,
         path: &Path,
-    ) -> Option<(Editor, vmux_git::GitDiffSource)> {
+        keymap: super::keymap::EditorKeymap,
+    ) -> bool {
         let mut selected = None;
-        if let Some(children) = world.get::<Children>(owner) {
+        if let Ok(children) = self.children.get(owner) {
             for entity in children.iter() {
-                if world.get::<Self>(entity).is_none() {
+                let Ok((file, _, edit, modified)) = self.buffers.get(entity) else {
                     continue;
-                }
-                let file = world.get::<FileId>(entity).unwrap();
+                };
                 if file.0 == path {
-                    selected = Some((entity, world.get::<Modified>(entity).unwrap().0));
+                    selected = Some((entity, edit.core.dirty, modified.0));
                     break;
                 }
             }
         }
-        let (entity, modified) = selected?;
-        let mut parked = world.entity_mut(entity);
-        let edit = parked.take::<Editor>()?;
-        let diff = parked.take::<vmux_git::GitDiffSource>()?;
-        world.despawn(entity);
-        if edit.core.dirty || modified == super::file_loading_io::Inspect::modified_at(path) {
-            return Some((edit, diff));
+        let Some((entity, dirty, modified)) = selected else {
+            return false;
+        };
+        if !dirty && modified != super::file_loading_io::Inspect::modified_at(path) {
+            self.commands.entity(entity).despawn();
+            return false;
         }
-        None
+        self.commands.queue(move |world: &mut World| {
+            if world.get_entity(owner).is_err() {
+                return;
+            }
+            let Ok(mut entry) = world.get_entity_mut(entity) else {
+                return;
+            };
+            let Some((edit, diff)) = entry.take::<(Editor, vmux_git::GitDiffSource)>() else {
+                return;
+            };
+            entry.despawn();
+            world.entity_mut(owner).insert((edit, diff, keymap));
+        });
+        true
     }
 
-    pub(super) fn transfer(world: &mut World, source: Entity, target: Entity) {
-        if source == target || world.get_entity(target).is_err() {
+    pub(super) fn transfer(&mut self, source: Entity, target: Entity) {
+        if source == target || !self.owners.contains(target) {
             return;
         }
-        let children = world
-            .get::<Children>(target)
-            .map(|children| children.to_vec())
-            .unwrap_or_default();
-        for entity in children {
-            if world.get::<Self>(entity).is_some() {
-                world.despawn(entity);
+        if let Ok(children) = self.children.get(target) {
+            for entity in children.iter() {
+                if self.parked.contains(entity) {
+                    self.commands.entity(entity).despawn();
+                }
             }
         }
-        let children = world
-            .get::<Children>(source)
-            .map(|children| children.to_vec())
-            .unwrap_or_default();
-        for entity in children {
-            if world.get::<Self>(entity).is_some() {
-                world.entity_mut(entity).insert(ChildOf(target));
+        if let Ok(children) = self.children.get(source) {
+            for entity in children.iter() {
+                if self.parked.contains(entity) {
+                    self.commands.entity(entity).insert(ChildOf(target));
+                }
             }
         }
     }

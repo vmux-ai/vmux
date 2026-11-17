@@ -7,7 +7,7 @@ use vmux_ecs::PageMetadata;
 use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen, RecordVisitRequest};
 
 use super::media::FileMedia;
-use super::parked_edits::Parked;
+use super::parked_edits::Buffers;
 use crate::edit::Selection;
 use crate::host::editor::{Editor, FileDocumentRevision, FileNavigateRequest, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir};
@@ -361,20 +361,30 @@ fn apply_file(
         if document.contains::<Editor>() && document.contains::<vmux_git::GitDiffSource>() {
             let edit = document.take::<Editor>().unwrap();
             let diff = document.take::<vmux_git::GitDiffSource>().unwrap();
-            Parked::retain(world, entity, edit, diff);
+            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
+            buffers
+                .get_mut(world)
+                .expect("parked buffer access")
+                .retain(entity, edit, diff);
+            buffers.apply(world);
         }
         let forced = world
             .entity(entity)
             .get::<super::file_lifecycle::ForcedEncoding>()
             .is_some_and(|encoding| encoding.path == requested);
         let resumed = if forced {
-            None
+            false
         } else {
-            Parked::resume(world, entity, &requested)
+            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
+            let resumed = buffers
+                .get_mut(world)
+                .expect("parked buffer access")
+                .resume(entity, &requested, resumed_keymap);
+            buffers.apply(world);
+            resumed
         };
         let mut document = world.entity_mut(entity);
-        if let Some((edit, diff)) = resumed {
-            document.insert((edit, diff, resumed_keymap));
+        if resumed {
             if super::markdown::ParsedNote::supports(&requested) {
                 document.insert(super::explorer::OutlineDirty);
             }

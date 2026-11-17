@@ -21,7 +21,7 @@ use super::keymap::KeymapConfig;
 use super::markdown::ParsedNote;
 use super::media::FileMedia;
 use super::note::NoteSent;
-use super::parked_edits::Parked;
+use super::parked_edits::Buffers;
 
 pub(super) struct FileLoadingPlugin;
 
@@ -151,8 +151,7 @@ impl Loads<'_, '_> {
 
 #[allow(clippy::type_complexity)]
 fn accept(
-    world: &mut World,
-    query: &mut QueryState<
+    files: Query<
         (Entity, &FileView, Option<&ForcedEncoding>),
         (
             Without<FileBuffer>,
@@ -162,30 +161,25 @@ fn accept(
             Without<FileLoadTask>,
         ),
     >,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut buffers: Buffers,
+    mut commands: Commands,
 ) {
-    let keymap = KeymapConfig::resolve(world.get_resource::<vmux_setting::AppSettings>());
-    let mut files = Vec::new();
-    for (entity, file, forced) in query.iter(world) {
+    let keymap = KeymapConfig::resolve(settings.as_deref());
+    for (entity, file, forced) in &files {
         let encoding = forced.and_then(|encoding| encoding.for_path(&file.path));
-        files.push((entity, file.path.clone(), encoding));
-    }
-    for (entity, path, encoding) in files {
-        if encoding.is_none()
-            && let Some((edit, diff)) = Parked::resume(world, entity, &path)
-        {
-            world
-                .entity_mut(entity)
-                .insert((edit, keymap.keymap(), diff))
-                .remove::<MissingFileView>();
-            if ParsedNote::supports(&path) {
-                world
-                    .entity_mut(entity)
+        let path = &file.path;
+        if encoding.is_none() && buffers.resume(entity, path, keymap.keymap()) {
+            commands.entity(entity).remove::<MissingFileView>();
+            if ParsedNote::supports(path) {
+                commands
+                    .entity(entity)
                     .remove::<NoteSent>()
                     .insert(OutlineDirty);
             }
             continue;
         }
-        let operation = world
+        let operation = commands
             .spawn((
                 Operation::bundle("editor.file.load").unwrap().running(),
                 Name::new("Load editor file"),
@@ -195,15 +189,15 @@ fn accept(
             ))
             .id();
         if let Some(encoding) = encoding {
-            world.entity_mut(operation).insert(Encoding(encoding));
+            commands.entity(operation).insert(Encoding(encoding));
         }
-        world.spawn((
+        commands.spawn((
             Operation::bundle("editor.file.inspect").unwrap(),
             Name::new("Inspect editor file"),
             ChildOf(operation),
             JobRequest(Inspect { path: path.clone() }),
         ));
-        world.entity_mut(entity).insert(FileLoadTask { operation });
+        commands.entity(entity).insert(FileLoadTask { operation });
     }
 }
 
