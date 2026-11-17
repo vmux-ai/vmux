@@ -239,7 +239,7 @@ impl Checks {
             "daemon,mcp,account-local,jobs;legacy={}",
             Self::boolean(settings, "VMUX_LEGACY_DESKTOP")
         );
-        let profiles = vec![
+        let mut profiles = vec![
             Profile::new(
                 settings,
                 &inputs,
@@ -255,14 +255,6 @@ impl Checks {
                 "Test Rust",
                 "VMUX_RUST_REQUIRED",
                 rust,
-            ),
-            Profile::new(
-                settings,
-                &inputs,
-                "test-sdk",
-                "Test SDK",
-                "VMUX_SDK_REQUIRED",
-                "sdk-path+host".into(),
             ),
             Profile::new(
                 settings,
@@ -297,6 +289,16 @@ impl Checks {
                 "website-release".into(),
             ),
         ];
+        for (key, name) in super::sdk::Sdk::PROFILES {
+            profiles.push(Profile::new(
+                settings,
+                &inputs,
+                key,
+                name,
+                "VMUX_SDK_REQUIRED",
+                key.to_string(),
+            ));
+        }
         for profile in &profiles {
             if profile.paths.len() > 4096
                 || profile.scope.len() > 65536
@@ -335,7 +337,9 @@ impl Profile {
         }
         let matrix = match key {
             "test-rust" => Some(("test", "test", "true")),
-            "test-sdk" => Some(("sdk-path", "sdk-path", "true")),
+            key if key.starts_with("test-sdk-") => {
+                Some((key.strip_prefix("test-").unwrap(), "sdk-path", "true"))
+            }
             "test-desktop" => Some(("desktop", "test", "true")),
             "test-features" => Some(("headless", "headless", "true")),
             "test-ecs" => Some(("ecs", "lint", "false")),
@@ -359,6 +363,11 @@ impl Profile {
         inputs: &BTreeMap<String, Vec<String>>,
         key: &str,
     ) -> Vec<String> {
+        let key = if key.starts_with("test-sdk-") {
+            "test-sdk"
+        } else {
+            key
+        };
         let mut paths = Vec::new();
         for path in [
             ".github/**",
@@ -1098,7 +1107,7 @@ impl Verification {
         let matrix: Matrix =
             serde_json::from_str(outputs["tests"].as_str().ok_or("Missing CI matrix")?)
                 .map_err(|error| error.to_string())?;
-        if matrix.include.len() > 5
+        if matrix.include.len() > 4 + super::sdk::Sdk::PROFILES.len()
             || outputs["test_count"].as_str() != Some(&matrix.include.len().to_string())
         {
             return Err("Invalid CI test matrix count".into());
@@ -1111,7 +1120,6 @@ impl Verification {
         }
         for (key, required) in [
             ("test-rust", code && rust),
-            ("test-sdk", code && sdk),
             ("test-desktop", code && desktop),
             ("test-features", code && (headless || legacy)),
             ("test-ecs", code),
@@ -1121,11 +1129,23 @@ impl Verification {
             }
             selected.remove(key);
         }
+        for (key, _) in super::sdk::Sdk::PROFILES {
+            if selected.contains(key) != (code && sdk) {
+                return Err(format!("CI matrix differs from required scope: {key}"));
+            }
+            selected.remove(key);
+        }
         if !selected.is_empty() {
             return Err("Unknown CI matrix suite".into());
         }
         Self::result(results, "tests", !matrix.include.is_empty(), false)?;
         Self::result(results, "lint", true, false)?;
+        let compiler = Self::boolean(outputs, "compiler_lints")?;
+        let reused = outputs["reuse_lint"]
+            .as_str()
+            .ok_or("Missing lint reuse identity")?;
+        Self::result(results, "lint-rust", code, !reused.is_empty())?;
+        Self::result(results, "lint-ecs", code && compiler, !reused.is_empty())?;
         Self::result(
             results,
             "website",
@@ -1294,6 +1314,7 @@ type VerifyRequests<'w, 's> =
 mod tests {
     use crate::ci::testing::Fixture;
     use serde_json::{Value, json};
+    use std::collections::BTreeSet;
     #[cfg(test)]
     struct Runs {
         fixture: Fixture,
@@ -1441,8 +1462,8 @@ mod tests {
     fn the_gate_rejects_failures_duplicates_unknown_suites_and_unneeded_jobs() {
         let mut fixture = Fixture::new();
         let matrix = json ! ({ "include" : [{ "key" : "test-rust" , "name" : "Test Rust" , "cache" : "test" , "dependencies" : "test" , "native" : "true" , "claim" : "" , "reuse" : "99" } , { "key" : "test-ecs" , "name" : "Test ECS Composition" , "cache" : "ecs" , "dependencies" : "lint" , "native" : "false" , "claim" : "" , "reuse" : "" }] });
-        let mut outputs = json ! ({ "code" : "true" , "rust" : "true" , "contracts" : "false" , "desktop" : "false" , "headless" : "false" , "legacy_desktop" : "false" , "website" : "false" , "macos" : "false" , "ios" : "false" , "macos_tooling" : "false" , "tests" : matrix . to_string () , "test_count" : "2" , "reuse_website" : "" });
-        let mut results = json ! ({ "plan" : { "result" : "success" } , "changes" : { "result" : "success" , "outputs" : outputs } , "lint" : { "result" : "success" } , "tests" : { "result" : "success" } , "website" : { "result" : "skipped" } , "dx-macos" : { "result" : "skipped" } , "build-mac" : { "result" : "skipped" } , "ios-build" : { "result" : "skipped" } });
+        let mut outputs = json ! ({ "code" : "true" , "rust" : "true" , "contracts" : "false" , "desktop" : "false" , "headless" : "false" , "legacy_desktop" : "false" , "website" : "false" , "macos" : "false" , "ios" : "false" , "macos_tooling" : "false" , "tests" : matrix . to_string () , "test_count" : "2" , "reuse_website" : "", "compiler_lints": "true", "reuse_lint": "" });
+        let mut results = json ! ({ "plan" : { "result" : "success" } , "changes" : { "result" : "success" , "outputs" : outputs } , "lint" : { "result" : "success" }, "lint-rust": {"result": "success"}, "lint-ecs": {"result": "success"}, "tests" : { "result" : "success" } , "website" : { "result" : "skipped" } , "dx-macos" : { "result" : "skipped" } , "build-mac" : { "result" : "skipped" } , "ios-build" : { "result" : "skipped" } });
         fixture.environment.set("VMUX_CI_DISTRIBUTION", "false");
         fixture
             .environment
@@ -1453,6 +1474,9 @@ mod tests {
             ("tests", "cancelled"),
             ("tests", "skipped"),
             ("lint", "skipped"),
+            ("lint-rust", "failure"),
+            ("lint-ecs", "failure"),
+            ("lint-ecs", "skipped"),
             ("website", "success"),
         ] {
             let original = results[name]["result"].clone();
@@ -1473,5 +1497,73 @@ mod tests {
                 .set("VMUX_CI_RESULTS", results.to_string());
             assert!(fixture.run("checks-gate", &[]).is_err());
         }
+        outputs["tests"] = json!(matrix.to_string());
+        outputs["reuse_lint"] = json!("99");
+        results["changes"]["outputs"] = outputs.clone();
+        results["lint-rust"]["result"] = json!("skipped");
+        results["lint-ecs"]["result"] = json!("skipped");
+        fixture
+            .environment
+            .set("VMUX_CI_RESULTS", results.to_string());
+        fixture.run("checks-gate", &[]).unwrap();
+        results["lint-ecs"]["result"] = json!("success");
+        fixture
+            .environment
+            .set("VMUX_CI_RESULTS", results.to_string());
+        assert!(fixture.run("checks-gate", &[]).is_err());
+    }
+
+    #[test]
+    fn sdk_selection_requires_all_seven_feature_and_consumer_groups() {
+        let mut runs = Runs::new();
+        runs.fixture.environment.set("VMUX_SDK_REQUIRED", "true");
+        let outputs = runs.plan();
+        let mut matrix: Value = serde_json::from_str(&outputs["tests"]).unwrap();
+        let mut sdk = BTreeSet::new();
+        for row in matrix["include"].as_array().unwrap() {
+            if row["key"].as_str().unwrap().starts_with("test-sdk-") {
+                sdk.insert(row["key"].as_str().unwrap().to_owned());
+            }
+        }
+        assert_eq!(
+            sdk,
+            BTreeSet::from(
+                [
+                    "test-sdk-ecs",
+                    "test-sdk-project",
+                    "test-sdk-extension",
+                    "test-sdk-flex",
+                    "test-sdk-layout",
+                    "test-sdk-framework",
+                    "test-sdk-host"
+                ]
+                .map(str::to_string)
+            )
+        );
+        let mut selected = json!({"code": "true", "rust": "true", "contracts": "true", "desktop": "false", "headless": "false", "legacy_desktop": "false", "website": "false", "macos": "false", "ios": "false", "macos_tooling": "false", "compiler_lints": "true", "reuse_lint": "", "reuse_website": "", "tests": matrix.to_string(), "test_count": matrix["include"].as_array().unwrap().len().to_string()});
+        let mut results = json!({"plan": {"result": "success"}, "changes": {"result": "success", "outputs": selected}, "lint": {"result": "success"}, "lint-rust": {"result": "success"}, "lint-ecs": {"result": "success"}, "tests": {"result": "success"}, "website": {"result": "skipped"}, "dx-macos": {"result": "skipped"}, "build-mac": {"result": "skipped"}, "ios-build": {"result": "skipped"}});
+        runs.fixture
+            .environment
+            .set("VMUX_CI_DISTRIBUTION", "false");
+        runs.fixture
+            .environment
+            .set("VMUX_CI_RESULTS", results.to_string());
+        runs.fixture.run("checks-gate", &[]).unwrap();
+        matrix["include"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|row| row["key"] != "test-sdk-host");
+        selected["tests"] = json!(matrix.to_string());
+        selected["test_count"] = json!(matrix["include"].as_array().unwrap().len().to_string());
+        results["changes"]["outputs"] = selected;
+        runs.fixture
+            .environment
+            .set("VMUX_CI_RESULTS", results.to_string());
+        assert!(
+            runs.fixture
+                .run("checks-gate", &[])
+                .unwrap_err()
+                .contains("test-sdk-host")
+        );
     }
 }

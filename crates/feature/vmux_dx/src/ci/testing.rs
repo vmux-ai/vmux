@@ -147,8 +147,21 @@ impl Fixture {
 
     pub(super) fn outputs(text: &str) -> BTreeMap<String, String> {
         let mut values = BTreeMap::new();
-        for line in text.lines() {
-            if let Some((key, value)) = line.split_once('=') {
+        let mut lines = text.lines();
+        while let Some(line) = lines.next() {
+            if let Some((key, delimiter)) = line.split_once("<<") {
+                let mut value = Vec::new();
+                let mut closed = false;
+                for line in lines.by_ref() {
+                    if line == delimiter {
+                        closed = true;
+                        break;
+                    }
+                    value.push(line);
+                }
+                assert!(closed, "Unclosed GitHub output: {key}");
+                values.insert(key.into(), value.join("\n"));
+            } else if let Some((key, value)) = line.split_once('=') {
                 values.insert(key.into(), value.into());
             }
         }

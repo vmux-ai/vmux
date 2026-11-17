@@ -24,6 +24,7 @@ use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState, Order};
 mod artifact;
 mod checks;
 mod plan;
+mod sdk;
 mod sources;
 #[cfg(test)]
 mod testing;
@@ -54,6 +55,7 @@ impl bevy_app::Plugin for CiPlugin {
             artifact::CiArtifactPlugin,
             sources::CiSourcesPlugin,
             checks::CiChecksPlugin,
+            sdk::CiSdkPlugin,
         ))
         .configure_sets(
             Update,

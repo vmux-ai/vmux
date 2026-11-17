@@ -22,6 +22,7 @@
             (id: "dx.ci.checks-plan", name: "checks-plan"),
             (id: "dx.ci.checks-record", name: "checks-record"),
             (id: "dx.ci.checks-gate", name: "checks-gate"),
+            (id: "dx.ci.sdk-test", name: "sdk-test", arguments: [(id: "forward", index: Some(1), trailing: true)]),
         ],
     )])),
 )
