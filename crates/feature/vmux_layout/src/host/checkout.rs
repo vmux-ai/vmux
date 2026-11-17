@@ -2644,6 +2644,7 @@ fn claim(
         Has<Restored>,
     )>,
     leases: lease::Leases,
+    holds: Query<(), With<CleanupHold>>,
     journals: Query<&lease::JournalPath, With<lease::Checkout>>,
     mut effects: Effects,
 ) {
@@ -2655,6 +2656,13 @@ fn claim(
             continue;
         }
         match leases.find(&destination.0) {
+            Some((checkout, lease::Phase::Prepared, Some(owner))) if holds.contains(owner) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert((LeaseCheckout(checkout), Progress(Phase::Waiting)))
+                    .remove::<RepositoryGuard>();
+            }
             Some((checkout, lease::Phase::Prepared, _)) if existing => {
                 if restored {
                     effects.commands.entity(checkout).insert(lease::Durable);
@@ -2727,7 +2735,8 @@ fn claim(
 
 fn resume_waiters(
     operations: Query<(Entity, &Progress, &LeaseCheckout)>,
-    states: Query<&lease::Lease>,
+    states: Query<(&lease::Lease, Option<&OperationTarget>)>,
+    holds: Query<(), With<CleanupHold>>,
     observations: Query<(Entity, &ChildOf), Or<(With<Registration>, With<LocalBranch>)>>,
     mut commands: Commands,
 ) {
@@ -2735,10 +2744,10 @@ fn resume_waiters(
         if progress.0 != Phase::Waiting {
             continue;
         }
-        if states
-            .get(checkout.0)
-            .is_ok_and(|state| matches!(state.0, lease::Phase::Reserved | lease::Phase::Cleaning))
-        {
+        if states.get(checkout.0).is_ok_and(|(state, owner)| {
+            matches!(state.0, lease::Phase::Reserved | lease::Phase::Cleaning)
+                || owner.is_some_and(|owner| holds.contains(owner.entity()))
+        }) {
             continue;
         }
         for (observation, parent) in &observations {
@@ -4385,6 +4394,64 @@ mod tests {
                         .status
                         .success()
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn native_cleanup_holds_delay_adoption_and_protect_canceled_waiters() {
+        for cancel_waiter in [false, true] {
+            let mut fixture = CheckoutFixture::new();
+            let original = fixture.operation;
+            let activation = fixture.finish_creation();
+            let owner = fixture
+                .app
+                .world_mut()
+                .spawn(Operation::bundle("native-rebind").unwrap().running())
+                .id();
+            fixture.app.world_mut().write_message(HoldCheckout {
+                operation: original,
+                owner,
+            });
+            fixture.app.update();
+            let adopter = fixture.select("vmux/work");
+            fixture.wait_for_phase(Phase::Waiting);
+            for _ in 0..10 {
+                fixture.app.update();
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<PreparedCheckout>(adopter)
+                        .is_none()
+                );
+                assert_eq!(
+                    std::fs::read(activation.execution_dir.join("seed.txt")).unwrap(),
+                    b"seed\n"
+                );
+            }
+            if cancel_waiter {
+                fixture.cancel();
+                assert_eq!(fixture.complete(), OperationState::Canceled);
+                assert!(activation.execution_dir.join("seed.txt").is_file());
+            }
+            fixture.app.world_mut().write_message(ReleaseCheckout {
+                operation: original,
+                owner,
+            });
+            if !cancel_waiter {
+                let selected = fixture.finish_creation();
+                assert_eq!(selected.execution_dir, activation.execution_dir);
+            }
+            fixture.operation = original;
+            fixture.cancel();
+            assert_eq!(fixture.complete(), OperationState::Canceled);
+            assert_eq!(activation.execution_dir.exists(), !cancel_waiter);
+            if !cancel_waiter {
+                fixture.operation = adopter;
+                fixture.cancel();
+                assert_eq!(fixture.complete(), OperationState::Canceled);
+                assert!(!activation.execution_dir.exists());
             }
         }
     }

@@ -11,7 +11,7 @@ use vmux_ecs::agent::{
     AgentRequestDispatchSet, AgentRequestGate, AgentRequestGateFailed, AgentRequestInput,
     AgentRequestPrerequisiteSet, AgentRequestReleaseSet, PendingAgentRequest,
 };
-use vmux_ecs::service::{ServiceInbound, ServiceMessageSet, ServiceRequest};
+use vmux_ecs::service::{ServiceConnected, ServiceInbound, ServiceMessageSet, ServiceRequest};
 use vmux_session::host::USER_CHOICE_REQUESTED;
 use vmux_setting::{AppSettings, StartupDir};
 
@@ -79,6 +79,7 @@ impl Plugin for AgentWorkspaceRequestPlugin {
                         applied,
                         begin_directory,
                         receive_rebind,
+                        retry_rebind,
                         apply_rebind,
                         begin_return,
                         complete_return,
@@ -129,6 +130,7 @@ struct WaitingRebind {
     previous: PathBuf,
     returns: u8,
     checkout_root: Option<PathBuf>,
+    connection: Option<(Entity, u32)>,
 }
 
 #[derive(Component)]
@@ -788,6 +790,7 @@ fn applied(
     mut workspace: AgentWorkspaceState,
     mut service: MessageWriter<ServiceRequest>,
     mut holds: MessageWriter<vmux_layout::worktree::HoldCheckout>,
+    connections: Query<(Entity, Ref<ServiceConnected>)>,
     mut commands: Commands,
 ) {
     for prepared in prepared.read() {
@@ -827,6 +830,10 @@ fn applied(
                     previous,
                     returns: 0,
                     checkout_root: Some(PathBuf::from(&checkout.activation.metadata.checkout_dir)),
+                    connection: connections
+                        .single()
+                        .ok()
+                        .map(|(entity, connected)| (entity, connected.last_changed().get())),
                 });
                 continue;
             }
@@ -909,6 +916,7 @@ fn begin_directory(
     actors: Actors,
     mut workspace: AgentWorkspaceState,
     mut service: MessageWriter<ServiceRequest>,
+    connections: Query<(Entity, Ref<ServiceConnected>)>,
     mut commands: Commands,
 ) {
     for (operation, gate, intent) in &requests {
@@ -940,6 +948,10 @@ fn begin_directory(
                 previous,
                 returns: 0,
                 checkout_root: None,
+                connection: connections
+                    .single()
+                    .ok()
+                    .map(|(entity, connected)| (entity, connected.last_changed().get())),
             });
             continue;
         }
@@ -987,6 +999,28 @@ fn receive_rebind(
                 error: error.clone(),
             });
         }
+    }
+}
+
+fn retry_rebind(
+    connections: Query<(Entity, Ref<ServiceConnected>)>,
+    mut requests: Query<&mut WaitingRebind, (Without<ObservedRebind>, Without<ReturnRebind>)>,
+    mut service: MessageWriter<ServiceRequest>,
+) {
+    let Ok((entity, connected)) = connections.single() else {
+        return;
+    };
+    let connection = Some((entity, connected.last_changed().get()));
+    for mut waiting in &mut requests {
+        if waiting.connection == connection {
+            continue;
+        }
+        service.write(ServiceRequest(ClientMessage::RebindAcpWorkspaceWithReply {
+            request_id: waiting.request_id,
+            sid: waiting.sid.clone(),
+            cwd: waiting.directory.to_string_lossy().into_owned(),
+        }));
+        waiting.connection = connection;
     }
 }
 
@@ -1111,6 +1145,7 @@ fn begin_return(
     mut requests: Query<(Entity, &mut WaitingRebind), With<ReturnRebind>>,
     workspace: AgentWorkspaceState,
     mut service: MessageWriter<ServiceRequest>,
+    connections: Query<(Entity, Ref<ServiceConnected>)>,
     mut commands: Commands,
 ) {
     for (operation, mut waiting) in &mut requests {
@@ -1119,6 +1154,10 @@ fn begin_return(
             .session_directory(waiting.session, &waiting.sid)
             .unwrap_or_else(|| waiting.previous.clone());
         waiting.returns += 1;
+        waiting.connection = connections
+            .single()
+            .ok()
+            .map(|(entity, connected)| (entity, connected.last_changed().get()));
         service.write(ServiceRequest(ClientMessage::RebindAcpWorkspaceWithReply {
             request_id: waiting.request_id,
             sid: waiting.sid.clone(),
@@ -1660,9 +1699,113 @@ mod tests {
     }
 
     #[test]
+    fn reconnecting_resends_the_correlated_rebind_and_releases_the_workspace_gate() {
+        let mut fixture = WorkspaceFixture::new();
+        let connection = fixture.app.world_mut().spawn(ServiceConnected).id();
+        let setup = fixture.named("feature/reconnected-rebind");
+        let following = fixture.following();
+        let initial = fixture.wait_for_rebind();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(connection)
+            .remove::<ServiceConnected>();
+        for _ in 0..4 {
+            fixture.app.update();
+            assert!(Path::new(&initial.2).exists());
+            assert!(
+                !fixture
+                    .ready
+                    .read(
+                        fixture
+                            .app
+                            .world()
+                            .resource::<Messages<AgentRequestReady>>()
+                    )
+                    .any(|request| request.request_id == following)
+            );
+        }
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(connection)
+            .insert(ServiceConnected);
+        let replayed = fixture.wait_for_rebind();
+        assert_eq!(replayed, initial);
+        for _ in 0..4 {
+            fixture.app.update();
+            assert!(
+                fixture
+                    .service
+                    .read(fixture.app.world().resource::<Messages<ServiceRequest>>())
+                    .all(|request| !matches!(
+                        request.0,
+                        ClientMessage::RebindAcpWorkspaceWithReply { .. }
+                    ))
+            );
+        }
+        fixture.app.world_mut().write_message(ServiceInbound(
+            vmux_api::protocol::ServiceMessage::AcpWorkspaceRebindResult {
+                request_id: replayed.0,
+                sid: replayed.1,
+                cwd: replayed.2.clone(),
+                error: None,
+            },
+        ));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut replied = false;
+        loop {
+            fixture.app.update();
+            for request in fixture
+                .service
+                .read(fixture.app.world().resource::<Messages<ServiceRequest>>())
+            {
+                if let ClientMessage::AgentCommandResponse { request_id, result } = &request.0
+                    && *request_id == setup
+                {
+                    assert!(matches!(result, AgentCommandResult::Text(_)));
+                    replied = true;
+                }
+            }
+            if fixture
+                .ready
+                .read(
+                    fixture
+                        .app
+                        .world()
+                        .resource::<Messages<AgentRequestReady>>(),
+                )
+                .any(|request| request.request_id == following)
+            {
+                assert!(replied);
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "reconnected workspace did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            fixture.app.world().get::<Cwd>(fixture.session).unwrap().0,
+            PathBuf::from(replayed.2)
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_layout::tab::TabWorktree>(fixture.tab)
+                .unwrap()
+                .branch,
+            "feature/reconnected-rebind"
+        );
+    }
+
+    #[test]
     fn removing_the_tab_during_rebind_drains_native_rollback_before_checkout_cleanup() {
         for rollback_fails in [false, true] {
             let mut fixture = WorkspaceFixture::new();
+            let connection = fixture.app.world_mut().spawn(ServiceConnected).id();
             let setup = fixture.named("feature/retired-owner");
             let following = fixture.following();
             let (request_id, sid, cwd) = fixture.wait_for_rebind();
@@ -1702,6 +1845,22 @@ mod tests {
                         .any(|request| request.request_id == following)
                 );
             }
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(connection)
+                .remove::<ServiceConnected>();
+            for _ in 0..4 {
+                fixture.app.update();
+                assert!(Path::new(&cwd).exists());
+            }
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(connection)
+                .insert(ServiceConnected);
+            let replayed = fixture.wait_for_rebind();
+            assert_eq!(replayed, (request_id, sid.clone(), restored.clone()));
             let error = rollback_fails.then(|| "controlled rollback refusal".to_string());
             fixture
                 .app
