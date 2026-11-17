@@ -1,4 +1,4 @@
-#[vmux_api::ui_state(Default, Eq, version = 4)]
+#[vmux_api::ui_state(Default, Eq, version = 5)]
 pub struct TeamUiState {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
@@ -28,7 +28,63 @@ pub struct TeamAccountState {
     pub profile_id: Option<String>,
     pub sync_enabled: bool,
     pub sync_pending: bool,
+    #[serde(default)]
+    pub transfer_available: bool,
+    #[serde(default)]
+    pub transfer_pending: bool,
+    #[serde(default)]
+    pub transfer_active: bool,
+    #[serde(default)]
+    pub transfer_conflicted: bool,
+    #[serde(default)]
+    pub conflict_id: Option<String>,
+    #[serde(default)]
+    pub local_revision: u64,
+    #[serde(default)]
+    pub remote_deleted: bool,
+    #[serde(default)]
+    pub remote_name: Option<String>,
+    #[serde(default)]
+    pub remote_revision: u64,
+    #[serde(default)]
+    pub remote_profiles: Vec<TeamRemoteProfile>,
     pub error: Option<TeamAccountError>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct TeamRemoteProfile {
+    pub id: String,
+    pub name: String,
+    pub revision: u64,
+    pub deleted: bool,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamProfileImportRequest {
+    pub account_id: String,
+    pub profile_id: String,
+    pub binding_revision: u64,
+    pub remote_revision: u64,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamProfileKeepLocalRequest {
+    pub account_id: String,
+    pub profile_id: String,
+    pub binding_revision: u64,
+    pub local_revision: u64,
+    pub remote_revision: u64,
+    pub conflict_id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamProfileUseRemoteRequest {
+    pub account_id: String,
+    pub profile_id: String,
+    pub binding_revision: u64,
+    pub local_revision: u64,
+    pub remote_revision: u64,
+    pub conflict_id: String,
 }
 
 #[vmux_api::contract(Eq)]

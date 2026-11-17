@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] la caméra, le microphone et l’écran
     }
 
-team-profile-invalid-name = Saisissez un nom de 1 à 256 caractères.
+team-profile-invalid-name = Le nom est vide, trop long ou contient des caractères de contrôle.
 team-profiles-unavailable = Les profils sont indisponibles. Réessayez de les charger.
 team-profile-conflict = Une autre modification a été enregistrée. Enregistrez à nouveau pour appliquer la vôtre.
 team-profile-save-failed = Impossible d’enregistrer le profil. Réessayez.
@@ -1303,3 +1303,26 @@ gallery-model-description = Exemple de modèle : { $id }
 gallery-mode-description = Exemple de mode d’autorisation : { $id }
 gallery-example-review = Examinez ce composant UI
 gallery-completion = et décrivez le comportement attendu
+live-attention = Vérification nécessaire
+live-auto-pair = Ouvre Vmux et associe automatiquement
+live-connect-device = Connecter un appareil
+live-copied = Copié
+live-no-phone = Aucun téléphone associé
+live-pairing-expiry = Les informations d’association sont masquées après 2 minutes.
+live-phone-paired = Téléphone associé
+live-scan-phone = Scannez avec votre téléphone
+live-show-qr = Afficher le QR
+live-starting = Démarrage…
+live-stopping = Arrêt…
+live-title = Live
+live-toggle = Activer ou désactiver Live
+profile-sync-active = Synchronisation des métadonnées du profil sélectionné…
+profile-sync-conflict = Les profils local et distant diffèrent. Choisissez la valeur à garder.
+profile-sync-current = Les métadonnées du profil sélectionné sont synchronisées.
+profile-sync-deleted = Supprimé à distance ; les fichiers locaux sont conservés
+profile-sync-import = Importer et synchroniser
+profile-sync-keep-local = Garder la valeur locale
+profile-sync-note = Seul le nom de ce profil est synchronisé (jusqu’à 256 octets UTF-8). Les identifiants, les fichiers locaux et les conversations restent sur cet appareil.
+profile-sync-pending = Les modifications locales sont enregistrées et attendent la synchronisation.
+profile-sync-remote-profiles = Profils de ce compte
+profile-sync-use-remote = Utiliser la valeur distante

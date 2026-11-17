@@ -1162,7 +1162,7 @@ media-permission-devices = { $kind ->
     [7] 카메라, 마이크 및 화면
     }
 
-team-profile-invalid-name = 1~256자의 이름을 입력하세요.
+team-profile-invalid-name = 이름이 비어 있거나 너무 길거나 제어 문자를 포함하고 있습니다.
 team-profiles-unavailable = 프로필을 사용할 수 없습니다. 다시 불러오세요.
 team-profile-conflict = 다른 변경 사항이 저장되었습니다. 변경 사항을 적용하려면 다시 저장하세요.
 team-profile-save-failed = 프로필을 저장할 수 없습니다. 다시 시도하세요.
@@ -1300,3 +1300,26 @@ gallery-model-description = 예제 모델: { $id }
 gallery-mode-description = 예제 권한 모드: { $id }
 gallery-example-review = 이 UI 컴포넌트를 검토하고
 gallery-completion = 예상 동작을 설명하세요
+live-attention = 확인이 필요합니다
+live-auto-pair = Vmux를 열고 자동으로 페어링합니다
+live-connect-device = 기기 연결
+live-copied = 복사됨
+live-no-phone = 페어링된 휴대전화 없음
+live-pairing-expiry = 페어링 정보는 2분 후 자동으로 숨겨집니다.
+live-phone-paired = 휴대전화 페어링됨
+live-scan-phone = 휴대전화로 스캔하세요
+live-show-qr = QR 표시
+live-starting = 시작 중…
+live-stopping = 중지 중…
+live-title = Live
+live-toggle = Live 전환
+profile-sync-active = 선택한 프로필 메타데이터 동기화 중…
+profile-sync-conflict = 로컬 프로필과 원격 프로필이 다릅니다. 유지할 값을 선택하세요.
+profile-sync-current = 선택한 프로필 메타데이터가 동기화되었습니다.
+profile-sync-deleted = 원격에서 삭제됨; 로컬 파일은 유지됩니다
+profile-sync-import = 가져와서 동기화
+profile-sync-keep-local = 로컬 값 유지
+profile-sync-note = 이 프로필의 이름만 동기화합니다(UTF-8 기준 최대 256바이트). 인증 정보, 로컬 파일, 대화는 이 기기에 남습니다.
+profile-sync-pending = 로컬 변경사항을 저장했으며 동기화를 기다리고 있습니다.
+profile-sync-remote-profiles = 이 계정의 프로필
+profile-sync-use-remote = 원격 값 사용

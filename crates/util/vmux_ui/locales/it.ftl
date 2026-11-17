@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] la fotocamera, il microfono e lo schermo
     }
 
-team-profile-invalid-name = Inserisci un nome da 1 a 256 caratteri.
+team-profile-invalid-name = Il nome è vuoto, troppo lungo o contiene caratteri di controllo.
 team-profiles-unavailable = I profili non sono disponibili. Riprova a caricarli.
 team-profile-conflict = È stata salvata un’altra modifica. Salva di nuovo per applicare la tua.
 team-profile-save-failed = Impossibile salvare il profilo. Riprova.
@@ -1303,3 +1303,26 @@ gallery-model-description = Modello di esempio: { $id }
 gallery-mode-description = Modalità di autorizzazione di esempio: { $id }
 gallery-example-review = Esamina questo componente UI
 gallery-completion = e descrivi il comportamento previsto
+live-attention = Richiede attenzione
+live-auto-pair = Apre Vmux e associa automaticamente
+live-connect-device = Collega un dispositivo
+live-copied = Copiato
+live-no-phone = Nessun telefono associato
+live-pairing-expiry = I dettagli di associazione vengono nascosti dopo 2 minuti.
+live-phone-paired = Telefono associato
+live-scan-phone = Scansiona con il telefono
+live-show-qr = Mostra QR
+live-starting = Avvio…
+live-stopping = Arresto…
+live-title = Live
+live-toggle = Attiva o disattiva Live
+profile-sync-active = Sincronizzazione dei metadati del profilo selezionato…
+profile-sync-conflict = I profili locale e remoto sono diversi. Scegli quale valore mantenere.
+profile-sync-current = I metadati del profilo selezionato sono sincronizzati.
+profile-sync-deleted = Eliminato da remoto; i file locali sono conservati
+profile-sync-import = Importa e sincronizza
+profile-sync-keep-local = Mantieni valore locale
+profile-sync-note = Viene sincronizzato solo il nome di questo profilo (fino a 256 byte UTF-8). Credenziali, file locali e conversazioni rimangono su questo dispositivo.
+profile-sync-pending = Le modifiche locali sono salvate e attendono la sincronizzazione.
+profile-sync-remote-profiles = Profili di questo account
+profile-sync-use-remote = Usa valore remoto

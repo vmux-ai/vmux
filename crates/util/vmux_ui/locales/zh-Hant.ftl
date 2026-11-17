@@ -1162,7 +1162,7 @@ media-permission-devices = { $kind ->
     [7] 相機、麥克風和螢幕
     }
 
-team-profile-invalid-name = 請輸入 1 到 256 個字元的名稱。
+team-profile-invalid-name = 名稱為空、過長或包含控制字元。
 team-profiles-unavailable = 個人資料目前無法使用。請重新載入。
 team-profile-conflict = 另一個更新已儲存。請再次儲存以套用你的變更。
 team-profile-save-failed = 無法儲存個人資料。請重試。
@@ -1300,3 +1300,26 @@ gallery-model-description = 範例模型：{ $id }
 gallery-mode-description = 範例權限模式：{ $id }
 gallery-example-review = 檢查此 UI 元件
 gallery-completion = 並描述預期行為
+live-attention = 需要處理
+live-auto-pair = 開啟 Vmux 並自動配對
+live-connect-device = 連接裝置
+live-copied = 已複製
+live-no-phone = 沒有已配對的手機
+live-pairing-expiry = 配對資訊將在 2 分鐘後自動隱藏。
+live-phone-paired = 手機已配對
+live-scan-phone = 使用手機掃描
+live-show-qr = 顯示 QR 碼
+live-starting = 正在啟動…
+live-stopping = 正在停止…
+live-title = Live
+live-toggle = 切換 Live
+profile-sync-active = 正在同步所選 Profile 的中繼資料…
+profile-sync-conflict = 本機與遠端 Profile 不同。請選擇要保留的值。
+profile-sync-current = 所選 Profile 的中繼資料已同步。
+profile-sync-deleted = 已在遠端刪除；本機檔案仍保留
+profile-sync-import = 匯入並同步
+profile-sync-keep-local = 保留本機值
+profile-sync-note = 僅同步此設定檔的名稱（最多 256 個 UTF-8 位元組）。憑證、本機檔案和對話保留在此裝置上。
+profile-sync-pending = 本機變更已儲存，等待同步。
+profile-sync-remote-profiles = 此 Account 的 Profile
+profile-sync-use-remote = 使用遠端值

@@ -1153,7 +1153,7 @@ media-permission-devices = { $kind ->
     [7] camera, microphone, and screen
     }
 
-team-profile-invalid-name = Enter a name between 1 and 256 characters.
+team-profile-invalid-name = Name is empty, too long, or contains control characters.
 team-profiles-unavailable = Profiles are unavailable. Retry loading them.
 team-profile-conflict = Another update was saved. Save again to apply your change.
 team-profile-save-failed = Could not save the profile. Try again.
@@ -1291,3 +1291,26 @@ gallery-model-description = Example model: { $id }
 gallery-mode-description = Example permission mode: { $id }
 gallery-example-review = Review this UI component
 gallery-completion = and describe the expected behavior
+live-attention = Needs attention
+live-auto-pair = Opens Vmux and pairs automatically
+live-connect-device = Connect a device
+live-copied = Copied
+live-no-phone = No phone paired
+live-pairing-expiry = Pairing details hide automatically after 2 minutes.
+live-phone-paired = Phone paired
+live-scan-phone = Scan with your phone
+live-show-qr = Show QR
+live-starting = Starting…
+live-stopping = Stopping…
+live-title = Live
+live-toggle = Toggle Live
+profile-sync-active = Synchronizing selected Profile metadata…
+profile-sync-conflict = The local and remote Profile differ. Choose which value to keep.
+profile-sync-current = Selected Profile metadata is synchronized.
+profile-sync-deleted = Deleted remotely; local files are retained
+profile-sync-import = Import and synchronize
+profile-sync-keep-local = Keep local value
+profile-sync-note = Only this Profile’s name is synchronized (up to 256 UTF-8 bytes). Credentials, local files and conversations stay on this device.
+profile-sync-pending = Local changes are saved and waiting to synchronize.
+profile-sync-remote-profiles = Profiles on this Account
+profile-sync-use-remote = Use remote value

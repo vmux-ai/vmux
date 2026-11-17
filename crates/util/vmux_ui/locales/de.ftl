@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] Kamera, Mikrofon und Bildschirm
     }
 
-team-profile-invalid-name = Gib einen Namen mit 1 bis 256 Zeichen ein.
+team-profile-invalid-name = Der Name ist leer, zu lang oder enthält Steuerzeichen.
 team-profiles-unavailable = Profile sind nicht verfügbar. Lade sie erneut.
 team-profile-conflict = Eine andere Änderung wurde gespeichert. Speichere erneut, um deine Änderung anzuwenden.
 team-profile-save-failed = Das Profil konnte nicht gespeichert werden. Versuche es erneut.
@@ -1303,3 +1303,26 @@ gallery-model-description = Beispielmodell: { $id }
 gallery-mode-description = Beispielberechtigungsmodus: { $id }
 gallery-example-review = Diese UI-Komponente prüfen
 gallery-completion = und das erwartete Verhalten beschreiben
+live-attention = Überprüfung erforderlich
+live-auto-pair = Öffnet Vmux und koppelt automatisch
+live-connect-device = Gerät verbinden
+live-copied = Kopiert
+live-no-phone = Kein Telefon gekoppelt
+live-pairing-expiry = Kopplungsdetails werden nach 2 Minuten ausgeblendet.
+live-phone-paired = Telefon gekoppelt
+live-scan-phone = Mit dem Telefon scannen
+live-show-qr = QR anzeigen
+live-starting = Wird gestartet…
+live-stopping = Wird beendet…
+live-title = Live
+live-toggle = Live umschalten
+profile-sync-active = Metadaten des ausgewählten Profils werden synchronisiert…
+profile-sync-conflict = Lokales und entferntes Profil unterscheiden sich. Wählen Sie den gewünschten Wert.
+profile-sync-current = Metadaten des ausgewählten Profils sind synchronisiert.
+profile-sync-deleted = Entfernt gelöscht; lokale Dateien bleiben erhalten
+profile-sync-import = Importieren und synchronisieren
+profile-sync-keep-local = Lokalen Wert behalten
+profile-sync-note = Nur der Name dieses Profils wird synchronisiert (bis zu 256 UTF-8-Bytes). Zugangsdaten, lokale Dateien und Unterhaltungen bleiben auf diesem Gerät.
+profile-sync-pending = Lokale Änderungen sind gespeichert und warten auf die Synchronisierung.
+profile-sync-remote-profiles = Profile dieses Kontos
+profile-sync-use-remote = Entfernten Wert verwenden

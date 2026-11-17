@@ -44,15 +44,15 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
                 button {
                     r#type: "button",
                     class: "flex h-full items-center gap-1.5 pl-2 pr-1.5 text-[10px] font-semibold",
-                    aria_label: "Live",
+                    aria_label: translate("live-title"),
                     onclick: move |_| open.set(!open()),
                     span { class: if remote.enabled { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-muted-foreground/50" } }
-                    "Live"
+                    {translate("live-title")}
                 }
                 button {
                     r#type: "button",
                     class: "relative mx-1 h-4 w-7 shrink-0 rounded-full bg-foreground/15",
-                    aria_label: "Toggle Live",
+                    aria_label: translate("live-toggle"),
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
                         let _ = send(&RemoteRequest {
@@ -97,9 +97,9 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
     let transitioning = remote.phase == RemotePhase::Starting;
     let status = match remote.phase {
         RemotePhase::Disabled | RemotePhase::Enabled => None,
-        RemotePhase::Starting if remote.enabled => Some("Starting…"),
-        RemotePhase::Starting => Some("Stopping…"),
-        RemotePhase::Error => Some("Needs attention"),
+        RemotePhase::Starting if remote.enabled => Some(translate("live-starting")),
+        RemotePhase::Starting => Some(translate("live-stopping")),
+        RemotePhase::Error => Some(translate("live-attention")),
     };
     let qr = if active && remote.pairing_visible && !remote.pairing_deep_link.is_empty() {
         PairingCode::svg(&remote.pairing_deep_link)
@@ -122,7 +122,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                     }
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: "text-ui font-semibold", "Live" }
+                    div { class: "text-ui font-semibold", {translate("live-title")} }
                     if let Some(status) = status {
                         div {
                             class: if remote.phase == RemotePhase::Error {
@@ -141,7 +141,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                     } else {
                         "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
                     },
-                    aria_label: "Toggle Live",
+                    aria_label: translate("live-toggle"),
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
                         let _ = send(&RemoteRequest {
@@ -168,7 +168,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                                 enabled: remote.enabled,
                             });
                         },
-                        "Retry"
+                        {translate("common-retry")}
                     }
                 }
             } else if transitioning {
@@ -182,14 +182,14 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
             } else if active {
                 if let Some(svg) = qr {
                     div { class: "mt-2 flex items-center justify-between gap-2",
-                        div { class: "text-[10px] font-semibold text-foreground", "Connect a device" }
+                        div { class: "text-[10px] font-semibold text-foreground", {translate("live-connect-device")} }
                         button {
                             r#type: "button",
                             class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |_| {
                                 let _ = send(&RemotePairingDismissRequest);
                             },
-                            "Close"
+                            {translate("common-close")}
                         }
                     }
                     div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
@@ -197,8 +197,8 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                             class: "w-full rounded-sm [&>svg]:block [&>svg]:aspect-square [&>svg]:h-auto [&>svg]:w-full",
                             dangerous_inner_html: "{svg}",
                         }
-                        div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
-                        div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux and pairs automatically" }
+                        div { class: "mt-1.5 text-center text-[10px] font-semibold", {translate("live-scan-phone")} }
+                        div { class: "mt-0.5 text-center text-[9px] text-zinc-500", {translate("live-auto-pair")} }
                     }
                     div { class: "mt-2 flex items-center gap-1.5 rounded-md bg-foreground/5 py-1 pl-2 pr-1",
                         div {
@@ -213,17 +213,17 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                                 let _ = send(&RemoteCopyEvent);
                                 copied.set(true);
                             },
-                            if copied() { "Copied" } else { "Copy" }
+                            if copied() { {translate("live-copied")} } else { {translate("common-copy")} }
                         }
                     }
                     div { class: "mt-1.5 text-[9px] leading-4 text-muted-foreground",
-                        "Pairing details hide automatically after 2 minutes."
+                        {translate("live-pairing-expiry")}
                     }
                 } else {
                     div { class: "mt-2 flex items-center gap-2",
                         div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-success" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
                             span { class: if remote.paired { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-foreground/25" } }
-                            if remote.paired { "Phone paired" } else { "No phone paired" }
+                            if remote.paired { {translate("live-phone-paired")} } else { {translate("live-no-phone")} }
                         }
                         button {
                             r#type: "button",
@@ -232,7 +232,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                                 copied.set(false);
                                 let _ = send(&RemotePairingShowRequest);
                             },
-                            if remote.paired { "Show QR" } else { "Connect device" }
+                            if remote.paired { {translate("live-show-qr")} } else { {translate("live-connect-device")} }
                         }
                     }
                 }

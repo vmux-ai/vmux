@@ -67,7 +67,13 @@ mod tests {
     };
     use crate::{CreateRequest, Error, Failure, MutationCompleted, RenameRequest, Root};
     use crate::{Owner, Profile};
+    #[cfg(feature = "profile-sync")]
+    use bevy_ecs::system::RunSystemOnce;
+    #[cfg(feature = "profile-sync")]
+    use ring::rand::SecureRandom;
     use ring::signature::KeyPair;
+    #[cfg(feature = "profile-sync")]
+    use std::io::{Read, Write};
     use uuid::Uuid;
     use vmux_ecs::{ProfileId, Ready, Revision, Uuid as Id};
 
@@ -105,7 +111,7 @@ mod tests {
         }
 
         fn phase(&mut self, expected: Phase) -> Entity {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
             loop {
                 self.app.update();
                 if let Some(entity) = self.connection()
@@ -116,7 +122,14 @@ mod tests {
                 if let Some(error) = self.app.world().get::<crate::ConnectionError>(self.root) {
                     panic!("connection failed: {:?}", error.0);
                 }
-                assert!(std::time::Instant::now() < deadline, "connection timed out");
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "connection timed out waiting for {:?}; current: {:?}",
+                    std::mem::discriminant(&expected),
+                    self.connection()
+                        .and_then(|entity| self.app.world().get::<Phase>(entity))
+                        .map(std::mem::discriminant)
+                );
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
         }
@@ -167,6 +180,264 @@ mod tests {
             let mut fixture = Self { app, root };
             fixture.ready();
             fixture
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn transfer(&mut self) {
+            self.app.add_plugins(crate::sync_runtime::ProfileSyncPlugin);
+            let provider = self
+                .app
+                .world_mut()
+                .spawn(vmux_feature::Provider::bundle("development"))
+                .id();
+            self.app.world_mut().write_message(vmux_feature::Tick(1000));
+            let document = vmux_feature::snapshot::Document::decode(br#"{"schema_version":1,"environment":"development","revision":1,"issued_at":1000,"valid_until":2000,"flags":{"profile.sync":true}}"#).unwrap();
+            self.app.world_mut().write_message(vmux_feature::Receive {
+                provider,
+                generation: 0,
+                document,
+            });
+            self.app.update();
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn upload(&mut self) -> crate::sync::UploadRequest {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                self.app.update();
+                let request = self
+                    .app
+                    .world_mut()
+                    .resource_mut::<Messages<crate::sync::UploadRequest>>()
+                    .drain()
+                    .next();
+                if let Some(request) = request {
+                    return request;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "selected Profile was not dispatched"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn listed(&mut self, records: Vec<vmux_ecs::record::Record>) {
+            self.page(records, None);
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn page(&mut self, records: Vec<vmux_ecs::record::Record>, next: Option<Uuid>) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                self.app.update();
+                let request = self
+                    .app
+                    .world_mut()
+                    .resource_mut::<Messages<crate::sync::ListRequest>>()
+                    .drain()
+                    .next();
+                if let Some(request) = request {
+                    self.app.world_mut().entity_mut(request.entity).insert(
+                        crate::cloud::transport::Reply(Some(Ok(crate::wire::Response::Entities {
+                            entities: records,
+                            next,
+                        }))),
+                    );
+                    self.app.update();
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "remote Profile enumeration did not start"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn native(&mut self) {
+            let port = std::env::var("VMUX_LOCAL_CLOUD_TEST_ACCOUNT_PORT")
+                .expect("local Account test port")
+                .parse()
+                .unwrap();
+            std::env::var("VMUX_LOCAL_QUIC_FINGERPRINT")
+                .expect("exact local certificate fingerprint");
+            let mut seed = [0; 32];
+            ring::rand::SystemRandom::new().fill(&mut seed).unwrap();
+            self.app
+                .add_plugins((crate::cloud::transport::TransportPlugin, GatewayPlugin));
+            self.app.world_mut().entity_mut(self.root).insert((
+                crate::CloudAvailable,
+                Server {
+                    host: "localhost".into(),
+                    port,
+                },
+            ));
+            self.app.world_mut().spawn((
+                NativeIdentity,
+                ChildOf(self.root),
+                DeviceKey {
+                    id: Uuid::new_v4(),
+                    seed: zeroize::Zeroizing::new(seed),
+                    reused: false,
+                },
+            ));
+            self.connect();
+            let connection = self.phase(Phase::AwaitingApproval);
+            let code = self
+                .app
+                .world()
+                .get::<crate::Authorization>(connection)
+                .unwrap()
+                .user_code
+                .clone();
+            let port = std::env::var("VMUX_LOCAL_CLOUD_TEST_HTTP_PORT")
+                .expect("local approval test port")
+                .parse()
+                .unwrap();
+            let form = NativeHttp::request(port, "GET", "/development/devices", "");
+            let token = form
+                .split("name=\"token\" value=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
+            let body = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("user_code", &code)
+                .append_pair("token", token)
+                .finish();
+            NativeHttp::request(port, "POST", "/development/devices/approve", &body);
+            self.phase(Phase::Connected);
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn synced(&mut self, profile: Uuid, remote_revision: u64) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+            loop {
+                self.app.update();
+                let world = self.app.world_mut();
+                let committed = world
+                    .query_filtered::<(
+                        &Id,
+                        &Revision,
+                        &crate::RemoteRevision,
+                        &crate::SyncedRevision,
+                    ), (With<Profile>, Without<crate::mutations::Proposal>)>()
+                    .iter(world)
+                    .any(|(id, local, remote, synced)| {
+                        id.0 == profile.to_string()
+                            && remote.0 == remote_revision
+                            && synced.0 == local.0
+                    });
+                if committed {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "native Profile synchronization did not commit"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn remote(&mut self, profile: Uuid, revision: u64) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+            loop {
+                self.app.update();
+                let world = self.app.world_mut();
+                let found = world
+                    .query_filtered::<(&Id, &Revision), With<crate::RemoteProfile>>()
+                    .iter(world)
+                    .any(|(id, current)| id.0 == profile.to_string() && current.0 == revision);
+                if found {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "native remote Profile enumeration did not complete"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn conflict(&mut self, profile: Uuid) -> Uuid {
+            let root = self.root;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                self.app.update();
+                let current = self
+                    .app
+                    .world_mut()
+                    .run_system_once(move |projection: crate::SyncProjection| {
+                        let (_, busy, conflicted) = projection.activity(root, profile);
+                        if busy || !conflicted {
+                            return None;
+                        }
+                        projection.conflict(root, profile).map(|value| value.0)
+                    })
+                    .unwrap();
+                if let Some(current) = current {
+                    return current;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "Profile conflict did not settle"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn received(
+            &self,
+            id: Uuid,
+            revision: u64,
+            name: Option<&str>,
+        ) -> vmux_ecs::record::Record {
+            let account = self
+                .app
+                .world()
+                .get::<Binding>(self.account().0)
+                .unwrap()
+                .account_id
+                .as_ref()
+                .unwrap()
+                .clone();
+            let mut components =
+                vec![serde_json::json!({"key":"profile","version":1,"value":null})];
+            if let Some(name) = name {
+                components.push(serde_json::json!({"key":"name","version":1,"value":name}));
+            }
+            serde_json::from_value(serde_json::json!({"id":id,"scope_id":account,"revision":revision,"components":components,"relationships":[{"key":"account","version":1,"target":account,"position":0,"owned":true}],"deleted":name.is_none()})).unwrap()
+        }
+
+        #[cfg(feature = "profile-sync")]
+        fn imported(&mut self, id: Uuid, name: &str) -> (Entity, String) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                self.app.update();
+                let world = self.app.world_mut();
+                let found = world
+                    .query_filtered::<(Entity, &Id, &Name, &ProfileId), (With<Profile>, Without<crate::mutations::Proposal>)>()
+                    .iter(world)
+                    .find(|(_, current, current_name, _)| {
+                        current.0 == id.to_string() && current_name.as_str() == name
+                    })
+                    .map(|(entity, _, _, directory)| (entity, directory.0.clone()));
+                if let Some(found) = found {
+                    return found;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "remote Profile name was not committed"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
         }
 
         fn ready(&mut self) {
@@ -272,6 +543,38 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "profile-sync")]
+    #[derive(Component)]
+    struct NativeIdentity;
+
+    #[cfg(feature = "profile-sync")]
+    struct NativeHttp;
+
+    #[cfg(feature = "profile-sync")]
+    impl NativeHttp {
+        fn request(port: u16, method: &str, path: &str, body: &str) -> String {
+            let mut stream = std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                std::time::Duration::from_secs(5),
+            )
+            .unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            write!(stream, "{method} {path} HTTP/1.1\r\nHost: localhost:{port}\r\nOrigin: http://localhost:{port}\r\nConnection: close\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+            let mut output = String::new();
+            stream.take(32 * 1024).read_to_string(&mut output).unwrap();
+            assert!(
+                output.starts_with("HTTP/1.1 200"),
+                "local HTTP operation failed: {output}"
+            );
+            output
+        }
+    }
+
     struct GatewayPlugin;
 
     impl bevy_app::Plugin for GatewayPlugin {
@@ -288,11 +591,16 @@ mod tests {
 
     fn open(
         mut requests: MessageReader<OpenRequest>,
-        active: Query<(), With<Connection>>,
+        active: Query<&ChildOf, With<Connection>>,
+        gateways: Query<&ChildOf, With<Gateway>>,
         mut commands: Commands,
     ) {
         for request in requests.read() {
-            if active.contains(request.entity) {
+            if active.get(request.entity).is_ok_and(|parent| {
+                gateways
+                    .iter()
+                    .any(|gateway| gateway.parent() == parent.parent())
+            }) {
                 commands.entity(request.entity).insert(TransportReady);
             }
         }
@@ -301,9 +609,29 @@ mod tests {
     fn key(
         mut requests: MessageReader<KeyRequest>,
         active: Query<(), With<Connection>>,
+        #[cfg(feature = "profile-sync")] connections: Query<&ChildOf, With<Connection>>,
+        #[cfg(feature = "profile-sync")] identities: Query<
+            (&ChildOf, &DeviceKey),
+            With<NativeIdentity>,
+        >,
         mut commands: Commands,
     ) {
         for request in requests.read() {
+            #[cfg(feature = "profile-sync")]
+            if let Ok(parent) = connections.get(request.entity)
+                && let Some((_, key)) = identities
+                    .iter()
+                    .find(|(owner, _)| owner.parent() == parent.parent())
+            {
+                commands
+                    .entity(request.entity)
+                    .insert(KeyPrepared(Some(Ok(DeviceKey {
+                        id: key.id,
+                        seed: key.seed.clone(),
+                        reused: key.reused,
+                    }))));
+                continue;
+            }
             if active.contains(request.entity) {
                 commands
                     .entity(request.entity)
@@ -326,10 +654,12 @@ mod tests {
             let Ok(owner) = active.get(request.entity) else {
                 continue;
             };
-            let (_, remote_id, approved) = gateways
+            let Some((_, remote_id, approved)) = gateways
                 .iter()
                 .find(|(parent, _, _)| parent.parent() == owner.parent())
-                .unwrap();
+            else {
+                continue;
+            };
             let mut target = commands.entity(request.entity);
             match &request.request {
                 Request::AuthorizeDevice => {
@@ -379,20 +709,496 @@ mod tests {
                 Request::Account => {
                     target.insert(RemoteAccount(remote_id.0.parse().unwrap()));
                 }
+                #[cfg(feature = "cloud")]
+                Request::Profiles { .. } | Request::ChangeProfile(_) => {
+                    panic!("Profile synchronization needs the dedicated gateway fixture")
+                }
             }
         }
     }
 
     fn delay(
         mut requests: MessageReader<PollRequest>,
-        active: Query<(), With<Connection>>,
+        active: Query<&ChildOf, With<Connection>>,
+        gateways: Query<&ChildOf, With<Gateway>>,
         mut commands: Commands,
     ) {
         for request in requests.read() {
-            if active.contains(request.entity) {
+            if active.get(request.entity).is_ok_and(|parent| {
+                gateways
+                    .iter()
+                    .any(|gateway| gateway.parent() == parent.parent())
+            }) {
                 commands.entity(request.entity).insert(PollReady);
             }
         }
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    #[ignore = "requires an explicitly selected isolated local Account and approval service"]
+    fn two_native_clients_sync_through_the_local_account_without_application_launch() {
+        let first_data = tempfile::tempdir().unwrap();
+        let second_data = tempfile::tempdir().unwrap();
+        let mut first = Fixture::at(first_data.path());
+        first.transfer();
+        first.native();
+        let first_account = first.account().1;
+        let profile = first.profile("personal").0;
+        first
+            .rename(Uuid::new_v4(), profile, "Native shared name")
+            .result
+            .unwrap();
+        first.select(profile, true).result.unwrap();
+        first.synced(profile, 1);
+        let mut second = Fixture::at(second_data.path());
+        second.transfer();
+        second.native();
+        let second_account = second.account().1;
+        assert_ne!(first_account, second_account);
+        second.remote(profile, 1);
+        let second_binding = second.account().2;
+        second.app.world_mut().write_message(crate::ImportRequest {
+            root: second.root,
+            profile_id: profile,
+            binding_revision: second_binding,
+            remote_revision: 1,
+        });
+        let (entity, directory) = second.imported(profile, "Native shared name");
+        assert_eq!(
+            second.app.world().get::<Owner>(entity).unwrap().0,
+            second.account().0
+        );
+        let note = second_data
+            .path()
+            .join("profiles")
+            .join(&directory)
+            .join("native-fixture.txt");
+        std::fs::write(&note, "local data stays on this device").unwrap();
+        second
+            .rename(Uuid::new_v4(), profile, "Native second device name")
+            .result
+            .unwrap();
+        second.synced(profile, 2);
+        first.imported(profile, "Native second device name");
+        assert_eq!(
+            std::fs::read_to_string(&note).unwrap(),
+            "local data stays on this device"
+        );
+        drop(second);
+        let mut reopened = Fixture::at(second_data.path());
+        assert_eq!(reopened.profile(&directory).0, profile);
+        assert_eq!(reopened.profile(&directory).1, "Native second device name");
+        assert_eq!(reopened.account().1, second_account);
+        reopened.transfer();
+        reopened
+            .rename(Uuid::new_v4(), profile, "Native offline edit")
+            .result
+            .unwrap();
+        assert!(reopened.connection().is_none());
+        reopened.native();
+        reopened.synced(profile, 3);
+        first.imported(profile, "Native offline edit");
+        assert_eq!(
+            std::fs::read_to_string(&note).unwrap(),
+            "local data stays on this device"
+        );
+    }
+
+    #[test]
+    fn synchronized_names_refuse_oversized_utf8_without_losing_offline_edits() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let profile = fixture.profile("personal").0;
+        let long_name = "日".repeat(86);
+        fixture
+            .rename(Uuid::new_v4(), profile, &long_name)
+            .result
+            .unwrap();
+        assert_eq!(
+            fixture.select(profile, true).result.unwrap_err().kind(),
+            crate::FailureKind::InvalidName
+        );
+        let boundary_name = format!("{}a", "日".repeat(85));
+        fixture
+            .rename(Uuid::new_v4(), profile, &boundary_name)
+            .result
+            .unwrap();
+        fixture.select(profile, true).result.unwrap();
+        let committed = fixture.profile("personal");
+        assert_eq!(
+            fixture
+                .rename(Uuid::new_v4(), profile, &long_name)
+                .result
+                .unwrap_err()
+                .kind(),
+            crate::FailureKind::InvalidName
+        );
+        assert_eq!(fixture.profile("personal"), committed);
+        fixture.select(profile, false).result.unwrap();
+        fixture
+            .rename(Uuid::new_v4(), profile, &long_name)
+            .result
+            .unwrap();
+        drop(fixture);
+        let mut reopened = Fixture::at(data.path());
+        assert_eq!(reopened.profile("personal").1, long_name);
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn malformed_remote_pages_are_rejected_before_any_profile_or_cursor_is_published() {
+        for case in [
+            "duplicate",
+            "descending",
+            "cursor",
+            "partial",
+            "scope",
+            "name",
+            "tombstone",
+        ] {
+            let data = tempfile::tempdir().unwrap();
+            let mut fixture = Fixture::at(data.path());
+            fixture.transfer();
+            fixture.gateway(Uuid::from_u128(99), true);
+            fixture.connect();
+            fixture.phase(Phase::Connected);
+            let first = fixture.received(Uuid::from_u128(1), 1, Some("First"));
+            let mut second = fixture.received(Uuid::from_u128(2), 1, Some("Second"));
+            let mut next = None;
+            let records = match case {
+                "duplicate" => vec![first.clone(), first],
+                "descending" => vec![second, first],
+                "cursor" => {
+                    next = Some(Uuid::from_u128(99));
+                    (1..=16)
+                        .map(|id| fixture.received(Uuid::from_u128(id), 1, Some("Page")))
+                        .collect()
+                }
+                "partial" => {
+                    next = Some(second.id);
+                    vec![first, second]
+                }
+                "scope" => {
+                    second.scope_id = Uuid::from_u128(100);
+                    vec![first, second]
+                }
+                "name" => {
+                    second.components[1].value = serde_json::Value::String("日".repeat(86));
+                    vec![first, second]
+                }
+                "tombstone" => {
+                    second.deleted = true;
+                    second.components[1].key = "private_path".into();
+                    vec![first, second]
+                }
+                _ => unreachable!(),
+            };
+            fixture.page(records, next);
+            let world = fixture.app.world_mut();
+            assert_eq!(
+                world
+                    .query_filtered::<Entity, With<crate::sync_runtime::RemoteProfile>>()
+                    .iter(world)
+                    .count(),
+                0,
+                "{case}"
+            );
+            assert_eq!(
+                world
+                    .resource_mut::<Messages<crate::sync::ListRequest>>()
+                    .drain()
+                    .count(),
+                0,
+                "{case}"
+            );
+        }
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn enabling_transfer_honors_saved_consent_without_uploading_unselected_profiles() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let selected = fixture.profile("personal").0;
+        let unselected = fixture
+            .create(Uuid::new_v4(), "Unselected profile")
+            .result
+            .unwrap()
+            .entity_id;
+        fixture.select(selected, true).result.unwrap();
+        drop(fixture);
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let upload = fixture.upload();
+        assert_eq!(upload.change.id, selected);
+        assert_ne!(upload.change.id, unselected);
+        let database = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
+        let queued: Vec<String> = database
+            .prepare("select distinct profile_id from profile_outbox")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(queued, vec![selected.to_string()]);
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn remote_conflict_resolution_rejects_stale_intent_and_rolls_back_a_failed_checkpoint() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let profile = fixture.profile("personal").0;
+        fixture.select(profile, true).result.unwrap();
+        let upload = fixture.upload();
+        let remote = fixture.received(profile, 4, Some("Remote name"));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(upload.entity)
+            .insert(crate::cloud::transport::Reply(Some(Ok(
+                crate::wire::Response::Conflict {
+                    current: Some(remote),
+                },
+            ))));
+        let conflict = fixture.conflict(profile);
+        let local = fixture.profile("personal");
+        let binding_revision = fixture.account().2;
+        let mut request = crate::UseRemoteRequest {
+            root: fixture.root,
+            profile_id: profile,
+            binding_revision: binding_revision - 1,
+            local_revision: local.3,
+            remote_revision: 4,
+            conflict_id: conflict,
+        };
+        fixture.app.world_mut().write_message(request);
+        fixture.app.update();
+        assert_eq!(fixture.profile("personal"), local);
+        assert_eq!(fixture.conflict(profile), conflict);
+        fixture
+            .rename(Uuid::new_v4(), profile, "New local edit")
+            .result
+            .unwrap();
+        request = crate::UseRemoteRequest {
+            root: fixture.root,
+            profile_id: profile,
+            binding_revision,
+            local_revision: local.3,
+            remote_revision: 4,
+            conflict_id: conflict,
+        };
+        fixture.app.world_mut().write_message(request);
+        fixture.app.update();
+        let current = fixture.profile("personal");
+        assert_eq!(current.1, "New local edit");
+        assert_eq!(fixture.conflict(profile), conflict);
+        let database = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
+        let pending: Vec<String> = database
+            .prepare("select value from profile_outbox order by sequence")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        database.execute_batch("create trigger refuse_checkpoint before insert on profile_checkpoint begin select raise(abort, 'checkpoint refused'); end;").unwrap();
+        fixture
+            .app
+            .world_mut()
+            .write_message(crate::UseRemoteRequest {
+                root: fixture.root,
+                profile_id: profile,
+                binding_revision,
+                local_revision: current.3,
+                remote_revision: 4,
+                conflict_id: conflict,
+            });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        loop {
+            fixture.app.update();
+            let failed = fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<MutationCompleted>>()
+                .drain()
+                .any(|result| result.result.is_err());
+            if failed {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "failed adoption was not reported"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(fixture.profile("personal"), current);
+        assert_eq!(fixture.conflict(profile), conflict);
+        let retained: Vec<String> = database
+            .prepare("select value from profile_outbox order by sequence")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(retained, pending);
+        database
+            .execute_batch("drop trigger refuse_checkpoint;")
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .write_message(crate::UseRemoteRequest {
+                root: fixture.root,
+                profile_id: profile,
+                binding_revision,
+                local_revision: current.3,
+                remote_revision: 4,
+                conflict_id: conflict,
+            });
+        fixture.imported(profile, "Remote name");
+        drop(fixture);
+        let mut reopened = Fixture::at(data.path());
+        assert_eq!(reopened.profile("personal").1, "Remote name");
+        let count: u64 = database
+            .query_row("select count(*) from profile_outbox", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn edits_during_a_send_use_the_acknowledged_base_and_keep_the_committed_local_name() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let profile = fixture.profile("personal").0;
+        fixture.select(profile, true).result.unwrap();
+        let first = fixture.upload();
+        fixture
+            .rename(Uuid::new_v4(), profile, "Later committed name")
+            .result
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first.entity)
+            .insert(crate::cloud::transport::Reply(Some(Ok(
+                crate::wire::Response::Committed(vmux_ecs::record::Receipt {
+                    operation_id: first.change.operation_id,
+                    entity_id: profile,
+                    revision: 1,
+                }),
+            ))));
+        let later = fixture.upload();
+        assert_eq!(later.change.base_revision, 1);
+        assert_ne!(later.change.operation_id, first.change.operation_id);
+        assert_eq!(fixture.profile("personal").1, "Later committed name");
+        assert_eq!(later.change.name.as_deref(), Some("Later committed name"));
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn revoking_consent_closes_the_dispatch_of_an_already_prepared_frame() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let profile = fixture.profile("personal").0;
+        fixture.select(profile, true).result.unwrap();
+        let request = fixture.upload();
+        let entity = request.entity;
+        let connection = request.connection;
+        let change = request.change.clone();
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .run_system_once(move |context: crate::sync_runtime::Context| context
+                    .permits(entity, connection, &change))
+                .unwrap()
+        );
+        fixture.select(profile, false).result.unwrap();
+        let change = request.change;
+        assert!(
+            !fixture
+                .app
+                .world_mut()
+                .run_system_once(move |context: crate::sync_runtime::Context| context
+                    .permits(entity, connection, &change))
+                .unwrap()
+        );
+        assert!(data.path().join("profiles/personal").exists());
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn remote_import_updates_and_tombstones_preserve_local_account_identity_and_files() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        let local_account = fixture.account().1;
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let profile = Uuid::new_v4();
+        fixture.listed(vec![fixture.received(profile, 1, Some("Imported name"))]);
+        let binding_revision = fixture.account().2;
+        fixture.app.world_mut().write_message(crate::ImportRequest {
+            root: fixture.root,
+            profile_id: profile,
+            binding_revision,
+            remote_revision: 1,
+        });
+        let (entity, directory) = fixture.imported(profile, "Imported name");
+        let file = data
+            .path()
+            .join("profiles")
+            .join(&directory)
+            .join("private-fixture");
+        std::fs::write(&file, b"retained local contents").unwrap();
+        fixture.listed(vec![fixture.received(profile, 2, Some("Changed remotely"))]);
+        assert_eq!(fixture.imported(profile, "Changed remotely").1, directory);
+        fixture.listed(vec![fixture.received(profile, 3, None)]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while fixture
+            .app
+            .world()
+            .get::<SyncEnabled>(entity)
+            .is_some_and(|enabled| enabled.0)
+        {
+            fixture.app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "remote deletion did not close transfer"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(fixture.account().1, local_account);
+        assert_eq!(std::fs::read(file).unwrap(), b"retained local contents");
+        drop(fixture);
+        let mut restored = Fixture::at(data.path());
+        assert_eq!(restored.account().1, local_account);
+        assert_eq!(restored.profile(&directory).0, profile);
+        assert_eq!(restored.profile(&directory).1, "Changed remotely");
     }
 
     #[test]

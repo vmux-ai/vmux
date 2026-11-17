@@ -1,6 +1,8 @@
 use crate::account::Set;
 use crate::catalog::{Catalog, Error, Loading, Root};
 use crate::profile::{Account, Binding, Failure, Profile, SyncEnabled};
+#[cfg(feature = "profile-sync")]
+use crate::sync::{CheckpointChange, ExpectedScope};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::QueryData;
@@ -19,6 +21,8 @@ impl bevy_app::Plugin for MutationsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CreateRequest>()
             .add_message::<RenameRequest>()
+            .add_message::<ImportProfileRequest>()
+            .add_message::<RemoteRenameRequest>()
             .add_message::<LinkRequest>()
             .add_message::<SyncRequest>()
             .add_message::<MutationCompleted>()
@@ -26,12 +30,30 @@ impl bevy_app::Plugin for MutationsPlugin {
             .add_message::<WriteCompleted>()
             .add_systems(
                 Update,
-                (create, rename, link, select_sync)
+                (
+                    create,
+                    rename,
+                    import_profile,
+                    remote_rename,
+                    link,
+                    select_sync,
+                )
                     .chain()
                     .in_set(Set::Receive),
             )
-            .add_systems(Update, (select, prepare).chain().in_set(Set::Prepare))
-            .add_systems(Update, write.in_set(Set::Write))
+            .add_systems(
+                Update,
+                (
+                    validate_scope,
+                    validate_name,
+                    select,
+                    prepare_binding,
+                    prepare,
+                )
+                    .chain()
+                    .in_set(Set::Prepare),
+            )
+            .add_systems(Update, (propose, write).chain().in_set(Set::Write))
             .add_systems(
                 Update,
                 (collect, initialize, apply).chain().in_set(Set::Apply),
@@ -54,6 +76,33 @@ pub struct RenameRequest {
     pub profile_id: Uuid,
     pub name: String,
 }
+
+#[derive(Message)]
+pub(crate) struct ImportProfileRequest {
+    pub root: Entity,
+    pub operation_id: Uuid,
+    pub profile_id: Uuid,
+    pub name: String,
+    #[cfg(feature = "profile-sync")]
+    pub scope: ExpectedScope,
+    #[cfg(feature = "profile-sync")]
+    pub checkpoint: CheckpointChange,
+}
+
+#[derive(Message)]
+pub(crate) struct RemoteRenameRequest {
+    pub root: Entity,
+    pub operation_id: Uuid,
+    pub profile_id: Uuid,
+    pub name: String,
+    #[cfg(feature = "profile-sync")]
+    pub scope: ExpectedScope,
+    #[cfg(feature = "profile-sync")]
+    pub checkpoint: CheckpointChange,
+}
+
+#[derive(Component)]
+pub(crate) struct NoUpload;
 
 #[derive(Message)]
 pub struct LinkRequest {
@@ -105,6 +154,12 @@ pub struct WriteRequest {
     pub records: Vec<Record>,
     pub directory: Option<String>,
     pub exclusive: bool,
+    #[cfg(feature = "profile-sync")]
+    pub outbound: Option<crate::sync::Pending>,
+    #[cfg(feature = "profile-sync")]
+    pub scope: Option<ExpectedScope>,
+    #[cfg(feature = "profile-sync")]
+    pub checkpoint: Option<CheckpointChange>,
 }
 
 #[derive(Message)]
@@ -164,10 +219,21 @@ struct Committed(Commit);
 #[derive(Component)]
 struct Accepted(Commit);
 
+#[cfg(feature = "profile-sync")]
+type LocalOperations<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Id, &'static ChildOf),
+    (With<Operation>, Without<crate::sync_runtime::Outbound>),
+>;
+
 #[derive(SystemParam)]
 struct Queue<'w, 's> {
     roots: WritableRoots<'w, 's>,
+    #[cfg(not(feature = "profile-sync"))]
     operations: Query<'w, 's, (&'static Id, &'static ChildOf), With<Operation>>,
+    #[cfg(feature = "profile-sync")]
+    operations: LocalOperations<'w, 's>,
 }
 
 impl Queue<'_, '_> {
@@ -251,6 +317,91 @@ fn rename(
                 order,
             ))
             .insert(Id(request.operation_id.to_string()));
+    }
+}
+
+fn import_profile(
+    mut requests: MessageReader<ImportProfileRequest>,
+    mut queue: Queue,
+    catalog: Catalog,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let id = Id(request.operation_id.to_string());
+        if request.profile_id.is_nil()
+            || catalog.profile(request.root, request.profile_id).is_some()
+        {
+            replies.write(MutationCompleted::failed(
+                request.root,
+                &id,
+                Failure::conflict(),
+                true,
+            ));
+            continue;
+        }
+        let name = Profile::name(&request.name);
+        let order = queue.reserve(request.root, request.operation_id);
+        let (name, order) = match (name, order) {
+            (Ok(name), Ok(order)) => (name, order),
+            (Err(error), _) | (_, Err(error)) => {
+                replies.write(MutationCompleted::failed(request.root, &id, error, true));
+                continue;
+            }
+        };
+        let mut entity = commands.spawn((
+            Operation::bundle("account.profile-import").unwrap(),
+            Creation,
+            NoUpload,
+            Target(request.profile_id),
+            Name::new(name),
+            SyncEnabled(true),
+            ChildOf(request.root),
+            order,
+        ));
+        entity.insert(id);
+        #[cfg(feature = "profile-sync")]
+        entity.insert((request.scope.clone(), request.checkpoint.clone()));
+        #[cfg(not(feature = "profile-sync"))]
+        let _ = &mut entity;
+    }
+}
+
+fn remote_rename(
+    mut requests: MessageReader<RemoteRenameRequest>,
+    mut queue: Queue,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let id = Id(request.operation_id.to_string());
+        let name = Profile::name(&request.name);
+        let order = queue.reserve(request.root, request.operation_id);
+        let (name, order) = match (name, order) {
+            (Ok(name), Ok(order)) => (name, order),
+            (Err(error), _) | (_, Err(error)) => {
+                replies.write(MutationCompleted::failed(request.root, &id, error, false));
+                continue;
+            }
+        };
+        let mut entity = commands.spawn((
+            Operation::bundle("account.profile-adopt").unwrap(),
+            NoUpload,
+            Target(request.profile_id),
+            Name::new(name),
+            ChildOf(request.root),
+            order,
+        ));
+        entity.insert(id);
+        #[cfg(feature = "profile-sync")]
+        {
+            entity.insert((request.scope.clone(), request.checkpoint.clone()));
+            if request.checkpoint.deleted {
+                entity.insert(SyncEnabled(false));
+            }
+        }
+        #[cfg(not(feature = "profile-sync"))]
+        let _ = &mut entity;
     }
 }
 
@@ -370,6 +521,12 @@ struct PendingData {
     binding: Option<&'static Binding>,
     sync: Option<&'static SyncEnabled>,
     expected: Option<&'static ExpectedBinding>,
+    #[cfg(feature = "profile-sync")]
+    scope: Option<&'static ExpectedScope>,
+    #[cfg(feature = "profile-sync")]
+    checkpoint: Option<&'static CheckpointChange>,
+    #[cfg(feature = "profile-sync")]
+    outbound: Has<crate::sync_runtime::Outbound>,
     selected: Has<Selected>,
 }
 
@@ -385,6 +542,96 @@ type Pending<'w, 's> = Query<
         Or<(With<Creation>, With<Target>, With<Binding>)>,
     ),
 >;
+
+fn validate_scope(
+    pending: Pending,
+    catalog: Catalog,
+    #[cfg(feature = "profile-sync")] context: crate::sync_runtime::Context,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for input in &pending {
+        #[cfg(feature = "profile-sync")]
+        {
+            let Some(scope) = input.scope else {
+                continue;
+            };
+            if input.outbound {
+                continue;
+            }
+            let root = input.parent.parent();
+            let current_revision = input
+                .target
+                .and_then(|target| catalog.profile(root, target.0))
+                .and_then(|entity| catalog.profiles.get(entity).ok())
+                .map(|value| value.5.0);
+            let result = if !context.accepts_scope(root, scope) {
+                Err(Failure::account_mismatch())
+            } else if !input.creation
+                && input
+                    .checkpoint
+                    .is_some_and(|change| current_revision != Some(change.through_local_revision))
+            {
+                Err(Failure::conflict())
+            } else {
+                Ok(())
+            };
+            if let Err(error) = result {
+                replies.write(MutationCompleted::failed(
+                    root,
+                    input.id,
+                    error,
+                    input.creation,
+                ));
+                commands.entity(input.entity).despawn();
+            }
+        }
+        #[cfg(not(feature = "profile-sync"))]
+        let _ = (&input, &catalog, &mut replies, &mut commands);
+    }
+}
+
+fn validate_name(
+    pending: Pending,
+    catalog: Catalog,
+    consent: Query<&SyncEnabled, With<Profile>>,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for input in &pending {
+        #[cfg(feature = "profile-sync")]
+        if input.outbound {
+            continue;
+        }
+        let root = input.parent.parent();
+        let Some(profile) = input
+            .target
+            .and_then(|target| catalog.profile(root, target.0))
+        else {
+            continue;
+        };
+        let enabled = input.sync.map_or_else(
+            || consent.get(profile).is_ok_and(|value| value.0),
+            |value| value.0,
+        );
+        if !enabled {
+            continue;
+        }
+        let Ok((_, _, _, current_name, _, _, _)) = catalog.profiles.get(profile) else {
+            continue;
+        };
+        let name = input.name.unwrap_or(current_name).as_str();
+        if name.len() > 256 {
+            replies.write(MutationCompleted::failed(
+                root,
+                input.id,
+                Failure::invalid_name(),
+                false,
+            ));
+            commands.entity(input.entity).despawn();
+        }
+    }
+}
 
 fn select(
     pending: Pending,
@@ -402,6 +649,10 @@ fn select(
         busy.insert(parent.parent());
     }
     for input in ordered {
+        #[cfg(feature = "profile-sync")]
+        if input.outbound {
+            continue;
+        }
         let operation = input.entity;
         let root = input.parent.parent();
         let (binding, sync, expected) = (input.binding, input.sync, input.expected);
@@ -446,17 +697,69 @@ fn select(
     }
 }
 
+fn prepare_binding(
+    pending: Pending,
+    catalog: Catalog,
+    available: AvailableRoots,
+    revisions: Query<&Revision, With<Account>>,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+) {
+    for input in &pending {
+        if !input.selected || input.binding.is_none() {
+            continue;
+        }
+        let root = input.parent.parent();
+        let operation = input.entity;
+        if !available.contains(root) {
+            commands.entity(operation).remove::<Selected>();
+            continue;
+        }
+        let Some((account, scope)) = catalog.account(root) else {
+            continue;
+        };
+        let Some(revision) = revisions
+            .get(account)
+            .ok()
+            .and_then(|revision| revision.0.checked_add(1))
+            .filter(|revision| *revision <= i64::MAX as u64)
+        else {
+            replies.write(MutationCompleted::failed(
+                root,
+                input.id,
+                Failure::not_ready(),
+                false,
+            ));
+            commands.entity(operation).despawn();
+            continue;
+        };
+        commands.entity(root).insert(Writing);
+        commands.entity(operation).remove::<Selected>().insert((
+            Prepared,
+            Target(scope),
+            Revision(revision),
+            CaptureRequest {
+                scope_id: scope,
+                entities: catalog.entities(root),
+            },
+        ));
+    }
+}
+
 fn prepare(
     pending: Pending,
     catalog: Catalog,
     available: AvailableRoots,
     mut replies: MessageWriter<MutationCompleted>,
-    account_state: Query<(&Revision, Option<&Binding>), With<Account>>,
     mut commands: Commands,
 ) {
     let mut ordered: Vec<_> = pending.iter().collect();
     ordered.sort_by_key(|input| input.order.0);
     for input in ordered {
+        #[cfg(feature = "profile-sync")]
+        if input.outbound {
+            continue;
+        }
         let operation = input.entity;
         let root = input.parent.parent();
         let (name, target) = (input.name, input.target);
@@ -472,31 +775,17 @@ fn prepare(
             commands.entity(operation).remove::<Selected>();
             continue;
         };
-        let (account_revision, _) = account_state.get(account).unwrap();
         let id = input.id;
         if binding.is_some() {
-            let revision = account_revision.0.checked_add(1);
-            let Some(revision) = revision.filter(|revision| *revision <= i64::MAX as u64) else {
-                let failure = Failure::not_ready();
-                replies.write(MutationCompleted::failed(root, id, failure, false));
-                commands.entity(operation).despawn();
-                continue;
-            };
-            commands.entity(root).insert(Writing);
-            commands.entity(operation).remove::<Selected>().insert((
-                Prepared,
-                Target(scope),
-                Revision(revision),
-                CaptureRequest {
-                    scope_id: scope,
-                    entities: catalog.entities(root),
-                },
-            ));
             continue;
         }
         let (target_id, directory, revision) = if creation {
             let directory = catalog.available_directory(account, name.unwrap().as_str());
-            (Uuid::new_v4(), directory, 1)
+            (
+                target.map_or_else(Uuid::new_v4, |target| target.0),
+                directory,
+                1,
+            )
         } else {
             let target_id = target.unwrap().0;
             let Some(entity) = catalog.profile(root, target_id) else {
@@ -532,6 +821,7 @@ fn prepare(
             let proposal = commands
                 .spawn((
                     Profile::bundle(scope, target_id, &directory, label, account),
+                    SyncEnabled(input.sync.is_some_and(|sync| sync.0)),
                     Proposal,
                     ChildOf(operation),
                 ))
@@ -568,29 +858,108 @@ struct Capture {
     initializing: Has<Initializing>,
     binding: Option<&'static Binding>,
     sync: Option<&'static SyncEnabled>,
+    #[cfg(feature = "profile-sync")]
+    scope: Option<&'static ExpectedScope>,
+    #[cfg(feature = "profile-sync")]
+    checkpoint: Option<&'static CheckpointChange>,
 }
 
-type Captures<'w, 's> = Query<'w, 's, Capture, Without<Sent>>;
+#[derive(Component)]
+struct Writable;
 
-fn write(
-    mut captures: Captures,
-    generations: Query<&Revision, With<Root>>,
+fn propose(
+    mut captures: Query<Capture, (Without<Sent>, Without<Writable>)>,
     registry: Res<AppTypeRegistry>,
-    mut requests: MessageWriter<WriteRequest>,
-    mut replies: MessageWriter<MutationCompleted>,
     mut commands: Commands,
 ) {
     let registry = registry.read();
+    for mut capture in &mut captures {
+        if capture.initializing || capture.creation {
+            commands.entity(capture.entity).insert(Writable);
+            continue;
+        }
+        let (target, name, binding, sync) =
+            (capture.target, capture.name, capture.binding, capture.sync);
+        let revision = capture.revision.unwrap().0;
+        let mut value = std::mem::replace(&mut capture.captured.0, Err("capture consumed".into()));
+        if let Ok(records) = &mut value {
+            let mut failure = None;
+            for record in records {
+                if record.id != target.0 {
+                    if binding.is_some_and(|binding| !binding.is_linked()) {
+                        match record
+                            .revision
+                            .checked_add(1)
+                            .filter(|revision| *revision <= i64::MAX as u64)
+                        {
+                            Some(next) => record.revision = next,
+                            None => {
+                                failure = Some("profile revision exhausted".into());
+                                break;
+                            }
+                        }
+                        if let Err(error) = record.set(&registry, &SyncEnabled(false)) {
+                            failure = Some(error);
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                record.revision = revision;
+                let result = if let Some(binding) = binding {
+                    record.set(&registry, binding)
+                } else if let Some(sync) = sync {
+                    record.set(&registry, sync)
+                } else {
+                    record.set(&registry, name.unwrap())
+                };
+                if let Err(error) = result {
+                    failure = Some(error);
+                    break;
+                }
+            }
+            if let Some(error) = failure {
+                value = Err(error);
+            }
+        }
+        capture.captured.0 = value;
+        commands.entity(capture.entity).insert(Writable);
+    }
+}
+
+fn write(
+    mut captures: Query<Capture, (Without<Sent>, With<Writable>)>,
+    generations: Query<&Revision, With<Root>>,
+    mut requests: MessageWriter<WriteRequest>,
+    mut replies: MessageWriter<MutationCompleted>,
+    mut commands: Commands,
+    #[cfg(feature = "profile-sync")] sync_context: crate::sync_runtime::Context,
+) {
     for mut capture in &mut captures {
         let root = capture.parent.parent();
         let (entity, id, target) = (capture.entity, capture.id, capture.target);
         let (name, binding, sync) = (capture.name, capture.binding, capture.sync);
         let (creation, initializing) = (capture.creation, capture.initializing);
+        #[cfg(feature = "profile-sync")]
+        if capture
+            .scope
+            .is_some_and(|scope| !sync_context.accepts_scope(root, scope))
+        {
+            replies.write(MutationCompleted::failed(
+                root,
+                id,
+                Failure::account_mismatch(),
+                creation,
+            ));
+            commands.entity(root).remove::<Writing>();
+            commands.entity(entity).despawn();
+            continue;
+        }
         let Ok(generation) = generations.get(root) else {
             continue;
         };
         let value = std::mem::replace(&mut capture.captured.0, Err("capture consumed".into()));
-        let mut records = match value {
+        let records = match value {
             Ok(records) => records,
             Err(error) => {
                 let failure = Failure::storage(error);
@@ -613,46 +982,6 @@ fn write(
             let name = name.unwrap().as_str();
             serde_json::json!({"create": name}).to_string()
         } else {
-            let mut failed = None;
-            for record in &mut records {
-                if record.id != target.0 {
-                    if binding.is_some_and(|binding| !binding.is_linked()) {
-                        let Some(next) = record
-                            .revision
-                            .checked_add(1)
-                            .filter(|revision| *revision <= i64::MAX as u64)
-                        else {
-                            failed = Some("profile revision exhausted".to_string());
-                            break;
-                        };
-                        record.revision = next;
-                        if let Err(error) = record.set(&registry, &SyncEnabled(false)) {
-                            failed = Some(error);
-                            break;
-                        }
-                    }
-                    continue;
-                }
-                record.revision = capture.revision.unwrap().0;
-                let result = if let Some(binding) = binding {
-                    record.set(&registry, binding)
-                } else if let Some(sync) = sync {
-                    record.set(&registry, sync)
-                } else {
-                    record.set(&registry, name.unwrap())
-                };
-                if let Err(error) = result {
-                    failed = Some(error);
-                    break;
-                }
-            }
-            if let Some(error) = failed {
-                let failure = Failure::storage(error);
-                replies.write(MutationCompleted::failed(root, id, failure, false));
-                commands.entity(root).remove::<Writing>();
-                commands.entity(entity).despawn();
-                continue;
-            }
             if let Some(binding) = binding {
                 serde_json::json!({"link": target.0, "binding": binding}).to_string()
             } else if let Some(sync) = sync {
@@ -660,6 +989,12 @@ fn write(
             } else {
                 serde_json::json!({"rename": target.0, "name": name.unwrap().as_str()}).to_string()
             }
+        };
+        #[cfg(feature = "profile-sync")]
+        let intent = if let (Some(scope), Some(checkpoint)) = (capture.scope, capture.checkpoint) {
+            serde_json::json!({"profile_adopt": target.0, "name": name.map(|name| name.as_str()), "scope": scope, "checkpoint": checkpoint, "creation": creation}).to_string()
+        } else {
+            intent
         };
         requests.write(WriteRequest {
             entity,
@@ -675,6 +1010,12 @@ fn write(
                 capture.ensure.map(|directory| directory.0.clone())
             },
             exclusive: creation,
+            #[cfg(feature = "profile-sync")]
+            outbound: None,
+            #[cfg(feature = "profile-sync")]
+            scope: capture.scope.cloned(),
+            #[cfg(feature = "profile-sync")]
+            checkpoint: capture.checkpoint.cloned(),
         });
         commands.entity(entity).insert(Sent).remove::<Captured>();
     }

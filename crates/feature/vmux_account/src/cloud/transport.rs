@@ -16,6 +16,7 @@ use crate::connection::{
     Authorization, Authorized, Challenge, Grant, OpenRequest, PollReady, PollRequest, Registered,
     Rejected, RemoteAccount, SendRequest, SessionToken, Slowed, TransportReady, Verified, Waiting,
 };
+use crate::sync::{ListRequest, UploadRequest};
 use crate::wire::{Request, Response};
 use crate::{Connection, Failure, Server, Set};
 
@@ -28,7 +29,10 @@ impl bevy_app::Plugin for TransportPlugin {
             JobPlugin::<RoundTrip>::default(),
             JobPlugin::<Delay>::default(),
         ))
-        .add_systems(Update, (open, send, delay).in_set(Set::Dispatch))
+        .add_systems(
+            Update,
+            (open, send, list, upload, delay).in_set(Set::Dispatch),
+        )
         .add_systems(
             Update,
             (
@@ -64,6 +68,7 @@ impl Drop for Transport {
 struct Open {
     server: Server,
     wake: Option<Waker>,
+    trust: Trust,
 }
 
 impl Job for Open {
@@ -83,7 +88,7 @@ impl Job for Open {
                 _ = canceled => Err("account connection canceled".to_string()),
                 result = tokio::time::timeout(Duration::from_secs(10), async {
                     let address = vmux_transport::quic::endpoint::resolve_preferring_ipv4(&self.server.host, self.server.port).await?;
-                    let endpoint = Trust::Relay.endpoint(address)?;
+                    let endpoint = self.trust.endpoint(address)?;
                     let connection = endpoint.connect(address, &self.server.host).map_err(|error| error.to_string())?.await.map_err(|error| error.to_string())?;
                     Ok::<_, String>((endpoint, connection))
                 }) => result.map_err(|_| "account connection timed out".to_string())?,
@@ -184,6 +189,7 @@ fn open(
             continue;
         }
         commands.entity(request.entity).insert(JobRequest(Open {
+            trust: Trust::Relay,
             server: request.server.clone(),
             wake: wake.as_ref().map(|wake| wake.0.clone()),
         }));
@@ -212,6 +218,78 @@ fn send(
             }));
         if let Some(wake) = &wake {
             wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn list(
+    mut requests: MessageReader<ListRequest>,
+    peers: Query<&Transport, With<Connection>>,
+    wake: Option<Res<JobWake>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let Ok(peer) = peers.get(request.connection) else {
+            if let Ok(mut entity) = commands.get_entity(request.entity) {
+                entity.insert(Reply(Some(Err("Account connection disappeared".into()))));
+            }
+            continue;
+        };
+        commands
+            .entity(request.entity)
+            .insert(JobRequest(RoundTrip {
+                runtime: peer.runtime.clone(),
+                connection: peer.connection.clone(),
+                request: Request::Profiles {
+                    after: request.after,
+                },
+            }));
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn upload(
+    mut requests: MessageReader<UploadRequest>,
+    #[cfg(feature = "profile-sync")] peers: Query<&Transport, With<Connection>>,
+    #[cfg(feature = "profile-sync")] wake: Option<Res<JobWake>>,
+    #[cfg(feature = "profile-sync")] context: crate::sync_runtime::Context,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        #[cfg(not(feature = "profile-sync"))]
+        if let Ok(mut entity) = commands.get_entity(request.entity) {
+            entity.insert(Reply(Some(Err(
+                "Profile synchronization is unavailable".into()
+            ))));
+        }
+        #[cfg(feature = "profile-sync")]
+        {
+            if !context.permits(request.entity, request.connection, &request.change) {
+                if let Ok(mut entity) = commands.get_entity(request.entity) {
+                    entity.insert(Reply(Some(Err(
+                        "Profile synchronization context changed".into()
+                    ))));
+                }
+                continue;
+            }
+            let Ok(peer) = peers.get(request.connection) else {
+                if let Ok(mut entity) = commands.get_entity(request.entity) {
+                    entity.insert(Reply(Some(Err("Account connection disappeared".into()))));
+                }
+                continue;
+            };
+            commands
+                .entity(request.entity)
+                .insert(JobRequest(RoundTrip {
+                    runtime: peer.runtime.clone(),
+                    connection: peer.connection.clone(),
+                    request: Request::ChangeProfile(request.change.clone()),
+                }));
+            if let Some(wake) = &wake {
+                wake.0.wake_by_ref();
+            }
         }
     }
 }
@@ -258,7 +336,7 @@ fn receive_open(mut results: Results<Open>, mut commands: Commands) {
 }
 
 #[derive(Component)]
-struct Reply(Option<Result<Response, String>>);
+pub(crate) struct Reply(pub(crate) Option<Result<Response, String>>);
 
 fn receive(mut results: Results<RoundTrip>, mut commands: Commands) {
     for (entity, mut result, owner, parent) in &mut results {
@@ -351,6 +429,12 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
             }
             Response::RegistrationRefused => {
                 target.insert(Rejected(Failure::account_mismatch()));
+            }
+            Response::Entities { .. }
+            | Response::Committed(_)
+            | Response::Conflict { .. }
+            | Response::ProfileRefused => {
+                target.insert(Rejected(Failure::invalid_store()));
             }
             Response::Busy | Response::Failed | Response::Malformed => {
                 target.insert(Rejected(Failure::storage("account request refused".into())));

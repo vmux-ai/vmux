@@ -3,6 +3,8 @@ use serde::Deserialize;
 use serde::Serialize;
 #[cfg(feature = "cloud")]
 use uuid::Uuid;
+#[cfg(feature = "cloud")]
+use vmux_ecs::record::{Receipt, Record};
 
 #[derive(Clone, Serialize)]
 pub(crate) enum Request {
@@ -24,6 +26,21 @@ pub(crate) enum Request {
         signature: String,
     },
     Account,
+    #[cfg(feature = "cloud")]
+    Profiles {
+        after: Option<Uuid>,
+    },
+    #[cfg(feature = "cloud")]
+    ChangeProfile(ProfileChange),
+}
+
+#[cfg(feature = "cloud")]
+#[derive(Clone, Serialize)]
+pub(crate) struct ProfileChange {
+    pub operation_id: Uuid,
+    pub id: Uuid,
+    pub base_revision: u64,
+    pub name: Option<String>,
 }
 
 #[cfg(feature = "cloud")]
@@ -53,6 +70,15 @@ pub(crate) enum Response {
     Account {
         id: Uuid,
     },
+    Entities {
+        entities: Vec<Record>,
+        next: Option<Uuid>,
+    },
+    Committed(Receipt),
+    Conflict {
+        current: Option<Record>,
+    },
+    ProfileRefused,
     Busy,
     Failed,
     Malformed,
@@ -83,6 +109,11 @@ impl Request {
                 Self::Challenge { .. } => matches!(response, Response::Challenge { .. }),
                 Self::Authenticate { .. } => matches!(response, Response::Authenticated),
                 Self::Account => matches!(response, Response::Account { .. }),
+                Self::Profiles { .. } => matches!(response, Response::Entities { .. }),
+                Self::ChangeProfile(_) => matches!(
+                    response,
+                    Response::Committed(_) | Response::Conflict { .. } | Response::ProfileRefused
+                ),
             },
         }
     }

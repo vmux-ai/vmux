@@ -17,6 +17,14 @@ pub use profile::{Failure, FailureKind};
 #[cfg(feature = "cloud")]
 pub use availability::AccountCloudFlag;
 
+#[cfg(feature = "profile-sync")]
+pub use sync::{CheckpointChange, ExpectedScope, Origin as SyncOrigin, Pending as ProfileOutbox};
+#[cfg(feature = "profile-sync")]
+pub use sync_runtime::{
+    Conflict, ImportRequest, KeepLocalRequest, RemoteDeleted, RemoteProfile, RemoteRevision,
+    SyncProjection, SyncedRevision, UseRemoteRequest,
+};
+
 mod account;
 #[cfg(feature = "cloud")]
 mod availability;
@@ -31,3 +39,11 @@ pub mod local;
 
 #[cfg(feature = "cloud")]
 pub mod cloud;
+
+#[cfg(feature = "cloud")]
+mod sync;
+#[cfg(feature = "profile-sync")]
+mod sync_store;
+
+#[cfg(feature = "profile-sync")]
+mod sync_runtime;

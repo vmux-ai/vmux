@@ -6,6 +6,8 @@ Use the iPhone companion to return to supported workspace pages and ongoing Sess
 
 Enable Remote on the Mac and follow the pairing flow with the phone. Keep the Mac available while you want to reach its work.
 
+In development and local builds, open **Live** in the header. Turn it on and choose **Connect device** to show the pairing QR code. Pairing details hide after two minutes; **Show QR** displays them again.
+
 Pairing gives the phone access to that host. You can revoke a paired device or disable Remote when you want to end access.
 
 ## Pick up a task
@@ -19,3 +21,11 @@ The available pages depend on the phone app and host capabilities. For a trip, y
 Your Mac runs the work. The connection to it is encrypted; the relay forwards traffic and cannot read the workspace contents. Task permissions still apply at the host.
 
 See [Agents](agents.md) and [Projects and Sessions](workspace.md).
+
+## Select Profile metadata to synchronize
+
+When Profile transfer is available, connect your Account from the Account section and explicitly enable synchronization for the current Profile. Signing in alone uploads nothing. This slice synchronizes the Profile name and identity; it does not copy browser data, local files, credentials, or running Sessions.
+
+Remote Profiles appear in the same section. Choose **Import and synchronize** to create a local Profile with that identity and a new local directory. This enables name synchronization for that Profile. Each device keeps its own files.
+
+Offline edits remain local and wait for the connection to return. If another device changed the same Profile, choose **Keep local** or **Use remote** after reviewing the conflict. A remotely deleted Profile keeps its local files and stops synchronizing.

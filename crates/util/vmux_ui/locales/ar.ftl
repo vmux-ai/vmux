@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] الكاميرا والميكروفون والشاشة
     }
 
-team-profile-invalid-name = أدخل اسمًا يتكون من حرف واحد إلى 256 حرفًا.
+team-profile-invalid-name = الاسم فارغ أو طويل جدًا أو يحتوي على محارف تحكم.
 team-profiles-unavailable = الملفات الشخصية غير متاحة. أعد محاولة تحميلها.
 team-profile-conflict = تم حفظ تعديل آخر. احفظ مرة أخرى لتطبيق تعديلك.
 team-profile-save-failed = تعذّر حفظ الملف الشخصي. حاول مرة أخرى.
@@ -1303,3 +1303,26 @@ gallery-model-description = نموذج تجريبي: { $id }
 gallery-mode-description = وضع أذونات تجريبي: { $id }
 gallery-example-review = راجع مكوّن واجهة المستخدم هذا
 gallery-completion = وصِف السلوك المتوقع
+live-attention = يتطلب الانتباه
+live-auto-pair = يفتح Vmux ويقترن تلقائيًا
+live-connect-device = توصيل جهاز
+live-copied = تم النسخ
+live-no-phone = لا يوجد هاتف مقترن
+live-pairing-expiry = تُخفى تفاصيل الاقتران تلقائيًا بعد دقيقتين.
+live-phone-paired = الهاتف مقترن
+live-scan-phone = امسح بهاتفك
+live-show-qr = عرض رمز QR
+live-starting = جارٍ البدء…
+live-stopping = جارٍ الإيقاف…
+live-title = Live
+live-toggle = تبديل Live
+profile-sync-active = جارٍ مزامنة بيانات ملف التعريف المحدد…
+profile-sync-conflict = يختلف ملف التعريف المحلي عن البعيد. اختر القيمة التي تريد الاحتفاظ بها.
+profile-sync-current = تمت مزامنة بيانات ملف التعريف المحدد.
+profile-sync-deleted = حُذف عن بُعد؛ تُحفظ الملفات المحلية
+profile-sync-import = استيراد ومزامنة
+profile-sync-keep-local = الاحتفاظ بالقيمة المحلية
+profile-sync-note = تتم مزامنة اسم هذا الملف الشخصي فقط (حتى 256 بايت بترميز UTF-8). تبقى بيانات الاعتماد والملفات المحلية والمحادثات على هذا الجهاز.
+profile-sync-pending = تم حفظ التغييرات المحلية وتنتظر المزامنة.
+profile-sync-remote-profiles = ملفات تعريف هذا الحساب
+profile-sync-use-remote = استخدام القيمة البعيدة

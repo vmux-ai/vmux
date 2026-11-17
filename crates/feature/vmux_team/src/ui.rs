@@ -5,8 +5,9 @@ use vmux_api::team::{
     ProfileRow, TeamAccountCancelRequest, TeamAccountConnectRequest, TeamAccountDisconnectRequest,
     TeamAccountError, TeamAccountState, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow,
     TeamProfileCreateRequest, TeamProfileError, TeamProfileForm, TeamProfileFormCloseRequest,
-    TeamProfileFormInputRequest, TeamProfileFormOpenRequest, TeamProfileSwitchRequest,
-    TeamProfileSyncRequest, TeamProfileUpdateRequest, TeamProfilesRetryRequest, TeamUiState,
+    TeamProfileFormInputRequest, TeamProfileFormOpenRequest, TeamProfileImportRequest,
+    TeamProfileKeepLocalRequest, TeamProfileSwitchRequest, TeamProfileSyncRequest,
+    TeamProfileUpdateRequest, TeamProfileUseRemoteRequest, TeamProfilesRetryRequest, TeamUiState,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
@@ -120,7 +121,7 @@ fn AccountSection(state: TeamAccountState) -> Element {
             }
             if state.server_account_id.is_some() && state.profile_id.is_some() {
                 label { class: "mt-3 flex items-center gap-2 px-0.5 text-sm",
-                    Switch { id: "profile-sync-enabled", checked: Some(state.sync_enabled), disabled: state.pending || state.sync_pending,
+                    Switch { id: "profile-sync-enabled", checked: Some(state.sync_enabled), disabled: state.pending || state.sync_pending || (state.remote_deleted && !state.sync_enabled),
                         on_checked_change: move |enabled| {
                             if let Some(profile_id) = &selection.profile_id {
                                 let _ = send(&TeamProfileSyncRequest { account_id: selection.account_id.clone(), binding_revision: selection.binding_revision, profile_id: profile_id.clone(), enabled });
@@ -130,7 +131,48 @@ fn AccountSection(state: TeamAccountState) -> Element {
                     }
                     {translate("team-account-sync-profile")}
                 }
-                p { class: "mt-1 px-0.5 text-xs text-muted-foreground", {translate("team-account-sync-note")} }
+                p { class: "mt-1 px-0.5 text-xs text-muted-foreground", if state.transfer_available { {translate("profile-sync-note")} } else { {translate("team-account-sync-note")} } }
+            }
+            if state.sync_enabled {
+                p { class: "mt-2 text-xs text-muted-foreground",
+                    if state.transfer_conflicted { {translate("profile-sync-conflict")} }
+                    else if state.transfer_active { {translate("profile-sync-active")} }
+                    else if state.transfer_pending { {translate("profile-sync-pending")} }
+                    else if state.remote_revision > 0 { {translate("profile-sync-current")} }
+                }
+            }
+            if state.transfer_conflicted {
+                if let Some(profile_id) = state.profile_id.clone() {
+                    div { class: "mt-2 flex gap-2",
+                        button { r#type: "button", class: "text-xs text-primary hover:underline",
+                            disabled: !state.transfer_available || !state.sync_enabled || state.remote_deleted,
+                            onclick: { let account_id = state.account_id.clone(); let profile_id = profile_id.clone(); let binding_revision = state.binding_revision; let local_revision = state.local_revision; let remote_revision = state.remote_revision; let conflict_id = state.conflict_id.clone().unwrap_or_default(); move |_| { let _ = send(&TeamProfileKeepLocalRequest { account_id: account_id.clone(), profile_id: profile_id.clone(), binding_revision, local_revision, remote_revision, conflict_id: conflict_id.clone() }); } },
+                            {translate("profile-sync-keep-local")}
+                        }
+                        button { r#type: "button", class: "text-xs text-primary hover:underline",
+                            disabled: !state.transfer_available || !state.sync_enabled || (!state.remote_deleted && state.remote_name.is_none()),
+                            onclick: { let account_id = state.account_id.clone(); let binding_revision = state.binding_revision; let local_revision = state.local_revision; let remote_revision = state.remote_revision; let conflict_id = state.conflict_id.clone().unwrap_or_default(); move |_| { let _ = send(&TeamProfileUseRemoteRequest { account_id: account_id.clone(), profile_id: profile_id.clone(), binding_revision, local_revision, remote_revision, conflict_id: conflict_id.clone() }); } },
+                            {translate("profile-sync-use-remote")}
+                        }
+                    }
+                }
+            }
+            if !state.remote_profiles.is_empty() {
+                div { class: "mt-3 space-y-1",
+                    div { class: "text-xs font-medium", {translate("profile-sync-remote-profiles")} }
+                    for profile in &state.remote_profiles {
+                        div { class: "flex items-center justify-between text-xs",
+                            span { "{profile.name}" }
+                            if !profile.deleted {
+                                button { r#type: "button", class: "text-primary hover:underline",
+                                    disabled: !state.transfer_available,
+                                    onclick: { let account_id = state.account_id.clone(); let profile_id = profile.id.clone(); let binding_revision = state.binding_revision; let remote_revision = profile.revision; move |_| { let _ = send(&TeamProfileImportRequest { account_id: account_id.clone(), profile_id: profile_id.clone(), binding_revision, remote_revision }); } },
+                                    {translate("profile-sync-import")}
+                                }
+                            } else { span { {translate("profile-sync-deleted")} } }
+                        }
+                    }
+                }
             }
             if let Some(error) = state.error {
                 AccountError { error }

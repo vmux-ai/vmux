@@ -9,7 +9,8 @@ use vmux_account::{
 };
 use vmux_api::team::{
     ProfileRow, TeamAccountCancelRequest, TeamAccountConnectRequest, TeamAccountDisconnectRequest,
-    TeamAccountError, TeamAccountState, TeamProfileSyncRequest,
+    TeamAccountError, TeamAccountState, TeamProfileImportRequest, TeamProfileKeepLocalRequest,
+    TeamProfileSyncRequest, TeamProfileUseRemoteRequest,
 };
 use vmux_ecs::{Active, ProfileId, Ready, Revision, Uuid as Id};
 
@@ -24,12 +25,19 @@ impl bevy_app::Plugin for AccountLinkPlugin {
             TeamAccountDisconnectRequest,
             TeamAccountCancelRequest,
             TeamProfileSyncRequest,
+            TeamProfileImportRequest,
+            TeamProfileKeepLocalRequest,
+            TeamProfileUseRemoteRequest,
         )>::default())
             .add_observer(connect)
             .add_observer(disconnect)
             .add_observer(cancel)
             .add_observer(select)
             .add_systems(Update, complete.after(Set::Reply).before(Set::Publish));
+        #[cfg(feature = "profile-sync")]
+        app.add_observer(import_profile)
+            .add_observer(keep_local)
+            .add_observer(use_remote);
     }
 }
 
@@ -41,6 +49,32 @@ struct PendingSync {
 
 #[derive(SystemParam)]
 pub(crate) struct Projection<'w, 's> {
+    #[cfg(feature = "profile-sync")]
+    sync: vmux_account::SyncProjection<'w, 's>,
+    #[cfg(feature = "profile-sync")]
+    remote: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static Id,
+            &'static Name,
+            &'static Revision,
+            Has<vmux_ecs::record::Deleted>,
+        ),
+        With<vmux_account::RemoteProfile>,
+    >,
+    #[cfg(feature = "profile-sync")]
+    checkpoints: Query<
+        'w,
+        's,
+        (
+            &'static Revision,
+            Option<&'static vmux_account::RemoteRevision>,
+            Has<vmux_account::RemoteDeleted>,
+        ),
+    >,
+
     roots: Query<
         'w,
         's,
@@ -69,6 +103,7 @@ pub(crate) struct Projection<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static Id,
             &'static ProfileId,
             &'static Owner,
@@ -131,12 +166,51 @@ impl Projection<'_, '_> {
                 state.verification_uri = Some(authorization.verification_uri.clone());
             }
         }
-        for (id, directory, owner, enabled) in &self.profiles {
+        for (entity, id, directory, owner, enabled) in &self.profiles {
             if owner.0 != account || active.is_none_or(|active| active.id != directory.0) {
                 continue;
             }
             state.profile_id = Some(id.0.clone());
             state.sync_enabled = enabled.is_some_and(|enabled| enabled.0);
+            #[cfg(feature = "profile-sync")]
+            if let Ok((local, remote, deleted)) = self.checkpoints.get(entity) {
+                state.local_revision = local.0;
+                state.remote_revision = remote.map_or(0, |revision| revision.0);
+                state.remote_deleted = deleted;
+            }
+            #[cfg(not(feature = "profile-sync"))]
+            let _ = entity;
+        }
+        #[cfg(feature = "profile-sync")]
+        {
+            state.transfer_available = self.sync.available(root);
+            for (parent, id, name, revision, deleted) in &self.remote {
+                if parent.parent() == root && self.sync.visible(root, &id.0) {
+                    state
+                        .remote_profiles
+                        .push(vmux_api::team::TeamRemoteProfile {
+                            id: id.0.clone(),
+                            name: name.as_str().into(),
+                            revision: revision.0,
+                            deleted,
+                        });
+                }
+            }
+            state
+                .remote_profiles
+                .sort_by(|left, right| left.name.cmp(&right.name));
+            if let Some(profile) = state.profile_id.as_deref().and_then(|id| id.parse().ok()) {
+                let (pending, active, conflicted) = self.sync.activity(root, profile);
+                state.transfer_pending = pending;
+                state.transfer_active = active;
+                state.transfer_conflicted = conflicted;
+                if let Some((id, revision, deleted, name)) = self.sync.conflict(root, profile) {
+                    state.conflict_id = Some(id.to_string());
+                    state.remote_revision = revision;
+                    state.remote_deleted = deleted;
+                    state.remote_name = name;
+                }
+            }
         }
         Some(state)
     }
@@ -238,6 +312,91 @@ fn select(
         binding_revision: payload.binding_revision,
         profile_id,
         enabled: payload.enabled,
+    });
+}
+
+#[cfg(feature = "profile-sync")]
+fn import_profile(
+    input: On<UiInput<TeamProfileImportRequest>>,
+    views: Query<(), With<Team>>,
+    projection: Projection,
+    mut requests: MessageWriter<vmux_account::ImportRequest>,
+) {
+    if !views.contains(input.event().webview) {
+        return;
+    }
+    let payload = &input.event().payload;
+    let Some((root, _)) = projection.root(&payload.account_id) else {
+        return;
+    };
+    let Ok(profile_id) = payload.profile_id.parse() else {
+        return;
+    };
+    requests.write(vmux_account::ImportRequest {
+        root,
+        profile_id,
+        binding_revision: payload.binding_revision,
+        remote_revision: payload.remote_revision,
+    });
+}
+
+#[cfg(feature = "profile-sync")]
+fn keep_local(
+    input: On<UiInput<TeamProfileKeepLocalRequest>>,
+    views: Query<(), With<Team>>,
+    projection: Projection,
+    mut requests: MessageWriter<vmux_account::KeepLocalRequest>,
+) {
+    if !views.contains(input.event().webview) {
+        return;
+    }
+    let payload = &input.event().payload;
+    let Some((root, _)) = projection.root(&payload.account_id) else {
+        return;
+    };
+    let Ok(profile_id) = payload.profile_id.parse() else {
+        return;
+    };
+    let Ok(conflict_id) = payload.conflict_id.parse() else {
+        return;
+    };
+    requests.write(vmux_account::KeepLocalRequest {
+        root,
+        profile_id,
+        binding_revision: payload.binding_revision,
+        remote_revision: payload.remote_revision,
+        local_revision: payload.local_revision,
+        conflict_id,
+    });
+}
+
+#[cfg(feature = "profile-sync")]
+fn use_remote(
+    input: On<UiInput<TeamProfileUseRemoteRequest>>,
+    views: Query<(), With<Team>>,
+    projection: Projection,
+    mut requests: MessageWriter<vmux_account::UseRemoteRequest>,
+) {
+    if !views.contains(input.event().webview) {
+        return;
+    }
+    let payload = &input.event().payload;
+    let Some((root, _)) = projection.root(&payload.account_id) else {
+        return;
+    };
+    let Ok(profile_id) = payload.profile_id.parse() else {
+        return;
+    };
+    let Ok(conflict_id) = payload.conflict_id.parse() else {
+        return;
+    };
+    requests.write(vmux_account::UseRemoteRequest {
+        root,
+        profile_id,
+        binding_revision: payload.binding_revision,
+        remote_revision: payload.remote_revision,
+        local_revision: payload.local_revision,
+        conflict_id,
     });
 }
 

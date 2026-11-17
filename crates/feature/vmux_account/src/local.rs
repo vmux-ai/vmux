@@ -165,6 +165,8 @@ impl Database {
 
     fn write(data: &Path, request: &WriteRequest) -> Result<Commit, WriteFailure> {
         let mut connection = Self::connect(data).map_err(WriteFailure::Storage)?;
+        #[cfg(feature = "profile-sync")]
+        crate::sync_store::Store::schema(&connection).map_err(WriteFailure::Storage)?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| WriteFailure::Storage(error.to_string()))?;
@@ -275,6 +277,22 @@ impl Database {
         if BlockingCancellation::canceled() {
             return Err(WriteFailure::Storage("account IO canceled".into()));
         }
+        #[cfg(feature = "profile-sync")]
+        if let Some(outbound) = &request.outbound {
+            crate::sync_store::Store::enqueue(&transaction, outbound)
+                .map_err(WriteFailure::Storage)?;
+        }
+        #[cfg(feature = "profile-sync")]
+        if let (Some(scope), Some(change)) = (&request.scope, &request.checkpoint) {
+            crate::sync_store::Store::apply_checkpoint(
+                &transaction,
+                &scope.origin,
+                request.target_id,
+                receipt.revision,
+                change,
+            )
+            .map_err(WriteFailure::Storage)?;
+        }
         transaction
             .commit()
             .map_err(|error| WriteFailure::Storage(error.to_string()))?;
@@ -370,12 +388,26 @@ fn write(
     active: Query<&ChildOf, With<Operation>>,
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
+    #[cfg(feature = "profile-sync")] sync_context: crate::sync_runtime::Context,
+    #[cfg(feature = "profile-sync")] mut replies: MessageWriter<WriteCompleted>,
 ) {
     for request in requests.read() {
         let Ok(parent) = active.get(request.entity) else {
             continue;
         };
         if parent.parent() != request.root {
+            continue;
+        }
+        #[cfg(feature = "profile-sync")]
+        if request
+            .scope
+            .as_ref()
+            .is_some_and(|scope| !sync_context.accepts_scope(request.root, scope))
+        {
+            replies.write(WriteCompleted {
+                entity: request.entity,
+                result: Some(Err(WriteFailure::Conflict)),
+            });
             continue;
         }
         let Ok(location) = locations.get(request.root) else {

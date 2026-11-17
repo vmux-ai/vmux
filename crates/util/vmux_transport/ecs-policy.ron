@@ -1,4 +1,7 @@
 (
+boundaries: [
+    (key: "crates/util/vmux_transport/src/quic/endpoint.rs||impl:Trust", fingerprint: "7ed62f241f965a60", interface: "Quinn client endpoint and Rustls certificate-verification IO", input: "ECS: crates/feature/vmux_account/src/connection.rs||struct:OpenRequest", output: "external: native QUIC endpoint and TLS handshake result", lifetime: "one caller-owned native endpoint and its scoped QUIC exchange", bounds: "native TLS configuration only; exact local pins apply solely to resolved loopback sockets in dev/local products; release roots and tunnel peer pins remain unchanged", teardown: "endpoint owner closes the socket and drains its native connection; no domain workflow or retry", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_account/src/cloud/transport.rs||struct:Open")),
+],
 legacy: [
     (key: "crates/util/vmux_transport/src/device.rs||impl:DeviceId", fingerprint: "100de7140462aa8c", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/device.rs||impl:From < & str > for DeviceId", fingerprint: "8d6767984f1a5586", issue: "VMX-253"),
@@ -52,7 +55,6 @@ legacy: [
     (key: "crates/util/vmux_transport/src/quic/endpoint.rs||impl:PinnedCertificate", fingerprint: "993fcbcc27e53277", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/quic/endpoint.rs||impl:SelfSignedIdentity", fingerprint: "d5b23f5a1973f61f", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/quic/endpoint.rs||impl:ServerCertVerifier for PinnedCertificate", fingerprint: "9c7298b6680e9d89", issue: "VMX-253"),
-    (key: "crates/util/vmux_transport/src/quic/endpoint.rs||impl:Trust", fingerprint: "518107516bf0bd9c", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/quic/endpoint.rs||struct:PinnedCertificate", fingerprint: "c8008023b81c798e", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/quic/endpoint.rs||struct:SelfSignedIdentity", fingerprint: "fd309df7aedb83be", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/quic/tunnel.rs||const:INBOX_DEPTH", fingerprint: "01dd86e94bf44ae1", issue: "VMX-253"),

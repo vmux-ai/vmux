@@ -1165,7 +1165,7 @@ media-permission-devices = { $kind ->
     [7] la cámara, el micrófono y la pantalla
     }
 
-team-profile-invalid-name = Introduce un nombre de entre 1 y 256 caracteres.
+team-profile-invalid-name = El nombre está vacío, es demasiado largo o contiene caracteres de control.
 team-profiles-unavailable = Los perfiles no están disponibles. Vuelve a cargarlos.
 team-profile-conflict = Se guardó otra actualización. Guarda de nuevo para aplicar tu cambio.
 team-profile-save-failed = No se pudo guardar el perfil. Inténtalo de nuevo.
@@ -1303,3 +1303,26 @@ gallery-model-description = Modelo de ejemplo: { $id }
 gallery-mode-description = Modo de permisos de ejemplo: { $id }
 gallery-example-review = Revisar este componente de UI
 gallery-completion = y describir el comportamiento esperado
+live-attention = Requiere atención
+live-auto-pair = Abre Vmux y empareja automáticamente
+live-connect-device = Conectar un dispositivo
+live-copied = Copiado
+live-no-phone = Ningún teléfono emparejado
+live-pairing-expiry = Los datos de emparejamiento se ocultan después de 2 minutos.
+live-phone-paired = Teléfono emparejado
+live-scan-phone = Escanea con tu teléfono
+live-show-qr = Mostrar QR
+live-starting = Iniciando…
+live-stopping = Deteniendo…
+live-title = Live
+live-toggle = Activar o desactivar Live
+profile-sync-active = Sincronizando los metadatos del perfil seleccionado…
+profile-sync-conflict = Los perfiles local y remoto difieren. Elige el valor que quieres conservar.
+profile-sync-current = Los metadatos del perfil seleccionado están sincronizados.
+profile-sync-deleted = Eliminado remotamente; se conservan los archivos locales
+profile-sync-import = Importar y sincronizar
+profile-sync-keep-local = Conservar valor local
+profile-sync-note = Solo se sincroniza el nombre de este perfil (hasta 256 bytes UTF-8). Las credenciales, los archivos locales y las conversaciones permanecen en este dispositivo.
+profile-sync-pending = Los cambios locales están guardados y esperan sincronización.
+profile-sync-remote-profiles = Perfiles de esta cuenta
+profile-sync-use-remote = Usar valor remoto
