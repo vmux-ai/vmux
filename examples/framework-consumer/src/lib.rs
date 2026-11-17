@@ -1,3 +1,5 @@
+pub mod counter;
+
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;

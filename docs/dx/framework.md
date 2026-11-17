@@ -32,6 +32,48 @@ This tests the examples against your local source. `vmux dx test sdk --git` test
 
 ## Choose the parts you need
 
+### Load a web application package
+
+Enable `vmux_app/hosting` for `vmux_app::manifest::hosting`. The versioned package contract
+accepts an existing HTTP(S) application without changing its presentation:
+
+```ron
+(
+    schema_version: 1,
+    sdk_revision: "<the host's full 40-character SDK commit>",
+    entry: "https://example.test/app/",
+    manifest: (
+        metadata: Some((id: "example.web", version: "1.0.0")),
+        pages: [(
+            url: "https://example.test/app/",
+            title: "Example",
+            startup: true,
+            permissions: ["PageReady"],
+        )],
+    ),
+)
+```
+
+Decode the bounded envelope with `Package::try_parse`, then add
+`WebHostPlugin::new(Contract::new(verified_sdk_revision), package)` to the selected application
+composition. The contract comes from the host's verified build identity. It must match the
+package revision. A registered observer validates the schema, the declared startup page and
+the host's typed page-event surface before Startup. The same canonical feature entity receives
+`HostedApplication`, `EffectiveStartupUrl` and `Ready`; `HostedApplicationReady` publishes its
+entity once during Startup. Renderer adapters read that entity's current startup URL.
+
+Web packages declare pages and compatibility metadata. They cannot claim embedded asset hosts,
+provide native capabilities or register native commands/tools/CLI/MCP handlers. Native code
+comes from statically linked feature plugins: name them in metadata dependencies and compose
+their actual adapters. `Contract::event::<Request>()` exposes an already-supported typed page
+event. The page's permissions and the host's per-origin/OS checks remain explicit. The
+[host consumer](https://github.com/vmux-ai/vmux/blob/main/examples/framework-consumer/tests/hosting.rs)
+keeps the same URL while adding a linked native feature and its authoritative Rust request.
+
+This defines the SDK package/host boundary. The application still supplies its renderer,
+platform adapters and runner. Generic prebuilt binary distribution and the five-minute
+bootstrap journey belong to VMX-222; no binary or release is published by this contract.
+
 ### Register an external feature
 
 Enable `vmux_app`'s `manifest` Cargo feature to use `vmux_app::manifest`. It exposes the existing
