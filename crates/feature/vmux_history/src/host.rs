@@ -9,7 +9,6 @@ pub mod prune;
 pub mod query;
 pub mod spawn;
 mod state;
-pub mod transition;
 
 #[vmux_page::page]
 pub struct HistoryPlugin;
