@@ -50,6 +50,7 @@ mod compiler_lint;
 mod compiler_lint_io;
 #[cfg(feature = "development")]
 mod consumer;
+mod consumer_graph;
 #[cfg(feature = "development")]
 mod debug;
 #[cfg(feature = "development")]

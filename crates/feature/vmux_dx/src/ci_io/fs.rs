@@ -487,10 +487,10 @@ impl SourceFacts {
                 }
                 let entry = entry.map_err(|error| error.to_string())?;
                 let kind = entry.file_type().map_err(|error| error.to_string())?;
-                if kind.is_symlink() {
-                    continue;
-                }
-                let metadata = entry.metadata().map_err(|error| error.to_string())?;
+                let metadata = entry
+                    .path()
+                    .symlink_metadata()
+                    .map_err(|error| error.to_string())?;
                 entries.push(SourceEntry {
                     name: entry
                         .path()

@@ -63,13 +63,14 @@ impl bevy_app::Plugin for CiSourcesPlugin {
     }
 }
 #[derive(Serialize, Deserialize, Clone)]
-struct Configuration {
+pub(super) struct Configuration {
+    pub(super) artifacts: Vec<String>,
     prefix: String,
     restore_prefix: String,
     key: String,
-    paths: String,
-    snapshot: String,
-    target: String,
+    pub(super) paths: String,
+    pub(super) snapshot: String,
+    pub(super) target: String,
     receipt: String,
     workspace: String,
     save: bool,
@@ -90,6 +91,7 @@ impl Configuration {
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{snapshot}.restore"));
         Self {
+            artifacts: Vec::new(),
             prefix: String::new(),
             restore_prefix: String::new(),
             key: String::new(),
@@ -259,6 +261,9 @@ impl Inputs {
         let members = metadata["workspace_members"]
             .as_array()
             .ok_or("Missing Cargo workspace members")?;
+        if members.is_empty() {
+            return Err("No workspace packages to cache".into());
+        }
         let packages = metadata["packages"]
             .as_array()
             .ok_or("Missing Cargo workspace packages")?;
@@ -632,6 +637,17 @@ impl Inputs {
         if count == 0 {
             return Err("No workspace packages to cache".into());
         }
+        for (partition, consumer) in [
+            ("sdk-framework", "framework-consumer"),
+            ("sdk-host", "host-consumer"),
+        ] {
+            if self.partition == partition {
+                paths.insert(format!("{target}/{consumer}/**"));
+            }
+        }
+        paths.insert(format!("!{target}/**/incremental"));
+        paths.insert(format!("!{target}/**/incremental/**"));
+        paths.insert(format!("!{target}/**/.cargo-lock"));
         for extension in ["app", "dmg", "zip", "tar", "tar.*"] {
             paths.insert(format!("!{target}/**/*.{extension}"));
             paths.insert(format!("!{target}/**/*.{extension}/**"));
@@ -683,14 +699,14 @@ impl Inputs {
             return Err("Invalid cache Git identity".into());
         }
         let profiles = Self::profiles(manifest)?;
-        let mut paths = self.artifacts(metadata, &profiles)?;
+        let paths = self.artifacts(metadata, &profiles)?;
         let snapshot = format!(".build-tools/source-cache-{}.json", self.partition);
-        paths.insert(snapshot.clone());
         Ok(Configuration {
             key: format!("{prefix}-{sha}"),
             prefix,
             restore_prefix,
-            paths: Self::ordered(paths),
+            artifacts: Self::ordered(paths).lines().map(str::to_owned).collect(),
+            paths: format!(".build-tools/workspace-cache-{}", self.partition),
             receipt: format!("{snapshot}.{}.restore", Snapshot::now()),
             snapshot,
             target: self
@@ -711,12 +727,21 @@ fn inputs_encode(mut requests: InputsEncodeRequests<'_, '_>, mut io: Io, results
         let Some(facts) = results.facts_slot_captured_sources.get(entity) else {
             continue;
         };
-        let Some(metadata) = results
-            .metadata_slot_captured
-            .get(entity)
-            .map(crate::ci_io::process::Captured::text)
-        else {
+        let Some(metadata) = results.metadata_slot_captured.get(entity) else {
             continue;
+        };
+        let Some(manifest) = results.workspace_manifest_slot_bytes.get(entity) else {
+            continue;
+        };
+        let metadata: Value = match metadata
+            .text()
+            .and_then(|text| serde_json::from_str(text).map_err(|error| error.to_string()))
+        {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                io.fail(entity, error);
+                continue;
+            }
         };
         let Some(compiler) = results
             .compiler_slot_captured
@@ -724,18 +749,6 @@ fn inputs_encode(mut requests: InputsEncodeRequests<'_, '_>, mut io: Io, results
             .map(crate::ci_io::process::Captured::text)
         else {
             continue;
-        };
-        let Some(manifest) = results.workspace_manifest_slot_bytes.get(entity) else {
-            continue;
-        };
-        let metadata: Value = match metadata
-            .and_then(|text| serde_json::from_str(text).map_err(|error| error.to_string()))
-        {
-            Ok(value) => value,
-            Err(error) => {
-                io.fail(entity, error);
-                continue;
-            }
         };
         let (prefix, restore_prefix) =
             match compiler.and_then(|compiler| inputs.digest(settings, facts, compiler)) {
@@ -1656,11 +1669,7 @@ mod tests {
             first["restore-prefix"],
             Fixture::outputs(&output)["restore-prefix"]
         );
-        assert!(
-            output
-                .lines()
-                .any(|line| line == "target/custom/.fingerprint/vmux_cli-*")
-        );
+        assert_eq!(first["paths"], Fixture::outputs(&output)["paths"]);
         fixture.git(&["rm", "--cached", "Cargo.lock"]);
         let before = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
         let lock = std::fs::read_to_string(fixture.root().join("Cargo.lock")).unwrap();
@@ -1668,6 +1677,53 @@ mod tests {
         let after = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
         assert_ne!(before["prefix"], after["prefix"]);
         assert_eq!(before["restore-prefix"], after["restore-prefix"]);
+        assert_eq!(before["paths"], after["paths"]);
+    }
+
+    #[test]
+    fn adding_workspace_members_and_targets_keeps_the_cache_archive_version_stable() {
+        let mut fixture = Fixture::new();
+        fixture.cli();
+        fixture.environment.set("VMUX_CACHE_PARTITION", "fixture");
+        fixture.environment.set("VMUX_CACHE_TARGET", "target");
+        fixture
+            .environment
+            .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
+        let first = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        fixture.write(
+            "crates/util/added/Cargo.toml",
+            "[package]\nname = \"added\"\nversion = \"1.0.0\"\nedition = \"2021\"\n",
+        );
+        fixture.write(
+            "crates/util/added/src/lib.rs",
+            "pub fn value() -> u32 { 1 }\n",
+        );
+        let manifest = std::fs::read_to_string(fixture.root().join("Cargo.toml")).unwrap();
+        fixture.write(
+            "Cargo.toml",
+            manifest.replace(
+                "members = [\"crates/app/vmux_cli\"]",
+                "members = [\"crates/app/vmux_cli\", \"crates/util/added\"]",
+            ),
+        );
+        fixture.execute("cargo", &["generate-lockfile", "--offline"]);
+        fixture.commit();
+        let added = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        assert_ne!(first["key"], added["key"]);
+        assert_eq!(first["restore-prefix"], added["restore-prefix"]);
+        assert_eq!(first["paths"], added["paths"]);
+        let manifest =
+            std::fs::read_to_string(fixture.root().join("crates/app/vmux_cli/Cargo.toml")).unwrap();
+        fixture.write(
+            "crates/app/vmux_cli/Cargo.toml",
+            format!("{manifest}\n[[bin]]\nname = \"extra\"\npath = \"src/extra.rs\"\n"),
+        );
+        fixture.write("crates/app/vmux_cli/src/extra.rs", "fn main() {}\n");
+        fixture.commit();
+        let extra = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        assert_ne!(added["key"], extra["key"]);
+        assert_eq!(added["restore-prefix"], extra["restore-prefix"]);
+        assert_eq!(added["paths"], extra["paths"]);
     }
 
     #[test]

@@ -1,10 +1,10 @@
-use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
+use crate::consumer_graph::Graph;
 use crate::environment::Environment;
 use crate::execution::Execution;
 use crate::temporary::Temporary;
@@ -285,78 +285,6 @@ impl GitManifest {
         }
         result.push('"');
         result
-    }
-}
-
-struct Graph;
-
-impl Graph {
-    fn check(tree: &str) -> Result<()> {
-        Self::packages(
-            tree,
-            &[
-                "vmux_app",
-                "vmux_ecs",
-                "vmux_project",
-                "vmux_extension",
-                "vmux_flex",
-                "vmux_layout",
-            ],
-            &[
-                "bevy",
-                "bevy_cef",
-                "bevy_cef_core",
-                "bevy_winit",
-                "vmux_profile",
-                "vmux_editor",
-                "vmux_ui",
-                "vmux_pane",
-                "wry",
-            ],
-        )
-    }
-
-    fn host(tree: &str) -> Result<()> {
-        Self::packages(
-            tree,
-            &["vmux_app", "vmux_profile"],
-            &[
-                "bevy",
-                "bevy_cef",
-                "bevy_cef_core",
-                "bevy_winit",
-                "vmux_ecs",
-                "vmux_editor",
-                "vmux_ui",
-                "vmux_layout",
-                "vmux_service",
-                "vmux_browser",
-                "wry",
-            ],
-        )
-    }
-
-    fn packages(tree: &str, required: &[&str], forbidden: &[&str]) -> Result<()> {
-        let mut packages = HashSet::new();
-        for line in tree.lines() {
-            if let Some(package) = line.split_whitespace().next() {
-                packages.insert(package);
-            }
-        }
-        for required in required {
-            if !packages.contains(required) {
-                return Err(format!("The consumer must exercise SDK package {required}").into());
-            }
-        }
-        for forbidden in forbidden {
-            if packages.contains(forbidden) {
-                return Err(format!(
-                    "Framework consumer links native application dependency {forbidden}"
-                )
-                .into());
-            }
-        }
-        Ok(())
     }
 }
 
