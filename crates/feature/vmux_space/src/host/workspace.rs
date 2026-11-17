@@ -12,9 +12,7 @@ use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Cwd, EntityTarget};
 use vmux_git::worktree::CheckoutInfo;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
-use vmux_layout::worktree::{
-    ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
-};
+use vmux_layout::worktree::{TabWorktreeActivation, TabWorktreeReady, WorktreeName};
 use vmux_session::event::ChatChoiceSelected;
 use vmux_session::host::{ChatSynced, PendingAgentChoice, SessionView};
 use vmux_session::{Session, SessionId};
@@ -237,7 +235,6 @@ pub(super) struct AgentWorkspaceState<'w, 's> {
     pub(super) worktrees: Query<'w, 's, &'static TabWorktree>,
     pub(super) workspaces: Query<'w, 's, &'static TabWorkspace>,
     pub(super) pending_projects: Query<'w, 's, &'static PendingProject>,
-    pub(super) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
     sessions: Query<'w, 's, (&'static SessionId, &'static mut Cwd), With<Session>>,
     session_targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
@@ -675,12 +672,31 @@ mod tests {
         let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let managed_root = tempfile::tempdir().unwrap();
-        let activation = vmux_layout::worktree::TabWorktreeActivation::create_branch(
-            &project_dir,
-            "feature/fun-terminal",
-            managed_root.path(),
+        let native = CheckoutInfo::try_from(project_dir.as_path()).unwrap();
+        let path = managed_root.path().join("workspace-test");
+        native
+            .add_worktree(&path, "feature/fun-terminal", "HEAD")
+            .unwrap();
+        let checkout = CheckoutInfo::try_from(path.as_path()).unwrap();
+        let metadata = TabWorktree {
+            repo_root: project_dir.to_string_lossy().into_owned(),
+            checkout_dir: path.canonicalize().unwrap().to_string_lossy().into_owned(),
+            branch: "feature/fun-terminal".into(),
+            base_ref: "main".into(),
+        };
+        let directory = path.canonicalize().unwrap();
+        let ready = TabWorktreeReady::new(
+            &directory,
+            &project_dir.to_string_lossy(),
+            &metadata,
+            &checkout,
         )
         .unwrap();
+        let activation = TabWorktreeActivation {
+            execution_dir: directory,
+            metadata,
+            ready,
+        };
         let execution_dir = activation.execution_dir.clone();
         let anchor = ProcessId::new();
         let projects_dir = tempfile::tempdir().unwrap();

@@ -9,6 +9,31 @@ use std::{
 
 use crate::host::repository::{GitCommand, GitError};
 
+#[derive(Clone)]
+pub struct WorktreeCommand {
+    pub directory: PathBuf,
+    pub arguments: Vec<String>,
+    pub guard: Option<Arc<File>>,
+}
+
+impl vmux_ecs::Job for WorktreeCommand {
+    type Output = Result<(String, String, bool), GitError>;
+
+    fn lane(&self) -> vmux_ecs::blocking::Lane {
+        vmux_ecs::blocking::Lane::Process
+    }
+
+    fn run(self) -> Self::Output {
+        let mut arguments = Vec::with_capacity(self.arguments.len());
+        for argument in &self.arguments {
+            arguments.push(argument.as_str());
+        }
+        let result = GitCommand::run(&self.directory, &arguments);
+        drop(self.guard);
+        result
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
     pub path: PathBuf,

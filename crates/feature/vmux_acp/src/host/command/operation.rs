@@ -4,7 +4,8 @@ use vmux_api::protocol::{
     AgentTurnEnded,
 };
 use vmux_ecs::PageOpenTarget;
-use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_ecs::agent::AgentRequestReady;
+use vmux_ecs::agent::{AgentCommandResponse, AgentReply};
 use vmux_session::host::StartRequest;
 use vmux_session::{Created, SessionId};
 
@@ -27,7 +28,8 @@ impl bevy::prelude::Plugin for OperationPlugin {
                     create_session,
                     list_agents,
                 )
-                    .in_set(CommandSet::Commands),
+                    .in_set(CommandSet::Commands)
+                    .after(vmux_ecs::agent::AgentRequestDispatchSet),
             );
     }
 }
@@ -51,7 +53,7 @@ fn open_created_session(
 }
 
 fn acknowledge_file_touched(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestReady>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -62,7 +64,7 @@ fn acknowledge_file_touched(
 }
 
 fn acknowledge_file_search(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestReady>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -73,7 +75,7 @@ fn acknowledge_file_search(
 }
 
 fn acknowledge_turn_ended(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestReady>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -84,7 +86,7 @@ fn acknowledge_turn_ended(
 }
 
 fn create_session(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestReady>,
     contributed_pages: vmux_command::ContributedPages,
     mut session_requests: MessageWriter<StartRequest>,
     mut pending: ResMut<PendingSessionCreations>,
@@ -123,7 +125,7 @@ fn create_session(
 }
 
 fn list_agents(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestReady>,
     catalog: Query<&RegistryAgent>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {

@@ -2,13 +2,12 @@ use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    Operation, OperationError, OperationPlugin, OperationState, OperationTarget,
-    OperationTargetRevision, PageMetadata,
+    Cwd, JobRequest, JobResult, Operation, OperationError, OperationPlugin, OperationState,
+    OperationTarget, OperationTargetRevision, PageMetadata,
 };
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
 
@@ -17,8 +16,8 @@ use crate::tab::{
     Tab, TabDirDecided, TabHierarchy, TabWorkspace, TabWorktree, TabWorktreeUnavailable,
 };
 use crate::worktree::{
-    ManagedCheckoutCleanup, ManagedCheckoutWait, ManagedWorktreeRoot, TabWorktreeCheckoutResult,
-    TabWorktreeReady,
+    CancelCheckout, CheckoutFailed, CheckoutPlugin, CheckoutPrepared, CheckoutTargetRevision,
+    CommitCheckout, ManagedWorktreeRoot, PreparedCheckout, SelectBranchCheckout, TabWorktreeReady,
 };
 
 pub struct PageContextPlugin;
@@ -28,17 +27,59 @@ impl Plugin for PageContextPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.init_resource::<vmux_git::GitRuntime>()
-            .init_resource::<ProjectActivations>()
+        if !app.is_plugin_added::<CheckoutPlugin>() {
+            app.add_plugins(CheckoutPlugin);
+        }
+        app.init_resource::<ProjectActivations>()
+            .init_resource::<ManagedWorktreeRoot>()
             .add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
             .add_observer(git_page_ready)
             .add_observer(git_page_activated)
             .add_observer(project_activate)
+            .add_observer(selection_changed)
             .add_systems(Update, sync_git_pages)
             .add_systems(Update, bootstrap_git_pages)
             .add_systems(
                 Update,
-                poll_project_activations.after(crate::stack::ComputeFocusSet),
+                (
+                    (
+                        retire,
+                        canonical_project,
+                        validate_project,
+                        choose_checkout,
+                        canonical_checkout,
+                        checkout_info,
+                    )
+                        .chain(),
+                    (
+                        source_info,
+                        head,
+                        git_directory,
+                        project_root,
+                        configured_project_root,
+                        canonical_project_root,
+                    )
+                        .chain(),
+                    (
+                        execution_directory,
+                        base_remote,
+                        base_candidate,
+                        base_configuration,
+                        base_verify,
+                    )
+                        .chain(),
+                    (
+                        selection_ready,
+                        checkout_prepared,
+                        apply_selection,
+                        commit_selection,
+                        finish_selection,
+                        cancel_drained,
+                    )
+                        .chain(),
+                )
+                    .chain()
+                    .after(crate::stack::ComputeFocusSet),
             );
     }
 }
@@ -107,56 +148,119 @@ impl Context<'_, '_> {
     }
 }
 
-struct TabWorkspaceSelection {
+#[derive(Component, Clone)]
+struct ResolvedWorkspace {
     startup_dir: String,
     project_dir: String,
     branch: String,
     worktree: Option<(TabWorktree, TabWorktreeReady)>,
-    cleanup: Option<ManagedCheckoutCleanup>,
 }
 
 #[derive(Component)]
 struct ProjectActivation {
     webview: Entity,
     branch: String,
-    request: ProjectActivationRequest,
-    work: ProjectActivationWork,
-}
-
-#[derive(Clone)]
-struct ProjectActivationRequest {
-    path: String,
-    branch: String,
     checkout: String,
-    managed_root: PathBuf,
 }
 
-enum TabWorkspaceResolution {
-    Ready(Box<TabWorkspaceSelection>),
-    Waiting(ManagedCheckoutWait),
+#[derive(Component)]
+struct ResolutionWork(Entity);
+#[derive(Component)]
+struct CheckoutWork(Entity);
+#[derive(Component)]
+struct TargetDirectory(PathBuf);
+#[derive(Component)]
+struct TargetCheckout(vmux_git::worktree::CheckoutInfo);
+#[derive(Component)]
+struct RelativeProject(PathBuf);
+#[derive(Component)]
+struct MainProject(PathBuf);
+#[derive(Component)]
+struct RepositoryRoot(PathBuf);
+#[derive(Component)]
+struct GitDirectory(PathBuf);
+#[derive(Component)]
+struct ObservedBranch(String);
+#[derive(Component)]
+struct DefaultBase(String);
+#[derive(Component)]
+struct ConfiguredBase(String);
+#[derive(Component)]
+struct BaseAttempt(usize);
+#[derive(Component)]
+struct ResolvedBase(String);
+#[derive(Component)]
+struct ExecutionDirectory(PathBuf);
+#[derive(Component)]
+struct ResolutionError(String);
+#[derive(Component)]
+struct ErrorObserved;
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct ResolutionProgress(ResolvePhase);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResolvePhase {
+    CanonicalProject,
+    ValidateProject,
+    ChooseCheckout,
+    CanonicalCheckout,
+    CheckoutInfo,
+    SourceInfo,
+    Head,
+    GitDirectory,
+    ProjectRoot,
+    ConfiguredProjectRoot,
+    CanonicalProjectRoot,
+    ExecutionDirectory,
+    DefaultBase,
+    BaseCandidate,
+    BaseConfiguration,
+    BaseVerify,
+    Ready,
+    AwaitCheckout,
+    Applied,
+    Committing,
+    Failed,
+    CancelDrain,
 }
 
-impl TabWorkspaceResolution {
-    fn ready(selection: TabWorkspaceSelection) -> Self {
-        Self::Ready(Box::new(selection))
+#[derive(bevy::ecs::system::SystemParam)]
+struct ResolutionEffects<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl ResolutionEffects<'_, '_> {
+    fn request<J: vmux_ecs::Job>(&mut self, operation: Entity, request: J) -> Entity {
+        self.commands
+            .spawn((
+                Name::new("Workspace resolution IO"),
+                Operation::bundle("workspace.resolve.io").expect("fixed resolution IO kind"),
+                JobRequest(request),
+                ChildOf(operation),
+            ))
+            .id()
     }
-}
 
-enum ProjectActivationWork {
-    Running(vmux_git::GitTask<Result<TabWorkspaceResolution, String>>),
-    Waiting(ManagedCheckoutWait),
-    Rejected {
-        observed: bool,
-        error: String,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    },
-}
+    fn finish(&mut self, operation: Entity, job: Entity, phase: ResolvePhase) {
+        self.commands.entity(job).try_despawn();
+        self.commands
+            .entity(operation)
+            .remove::<ResolutionWork>()
+            .insert(ResolutionProgress(phase));
+    }
 
-enum ProjectActivationPoll {
-    Pending,
-    Ready(std::thread::Result<Result<TabWorkspaceResolution, String>>),
-    Retry,
-    Rejected(String),
+    fn fail(&mut self, operation: Entity, job: Option<Entity>, error: String) {
+        if let Some(job) = job {
+            self.commands.entity(job).try_despawn();
+        }
+        self.commands
+            .entity(operation)
+            .remove::<ResolutionWork>()
+            .insert((
+                ResolutionError(error),
+                ResolutionProgress(ResolvePhase::Failed),
+            ));
+    }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -208,135 +312,9 @@ struct ProjectActivations {
     next_revision: u64,
 }
 
-struct ProjectActivationInstall {
-    tab: Entity,
-    revision: u64,
-    activation: ProjectActivation,
-}
-
-impl Command for ProjectActivationInstall {
-    type Out = ();
-
-    fn apply(self, world: &mut World) {
-        let tab = self.tab;
-        let revision = self.revision;
-        let mut activation = self.activation;
-        let mut operations = world.query::<(Entity, &OperationTarget, &mut ProjectActivation)>();
-        let mut canceled = Vec::new();
-        for (entity, target, mut activation) in operations.iter_mut(world) {
-            if target.entity() == tab {
-                activation.cancel();
-                canceled.push(entity);
-            }
-        }
-        for entity in canceled {
-            world
-                .entity_mut(entity)
-                .remove::<ProjectActivation>()
-                .insert(OperationState::Canceled);
-        }
-        let operation = world.spawn((
-            Operation::bundle("project.activate").unwrap(),
-            OperationTargetRevision(revision),
-        ));
-        let entity = operation.id();
-        if world.get::<Tab>(tab).is_none() {
-            activation.cancel();
-            world.entity_mut(entity).insert(OperationState::Canceled);
-            return;
-        }
-        world.entity_mut(entity).insert((
-            OperationState::Running,
-            OperationTarget::new(tab),
-            activation,
-        ));
-    }
-}
-
-impl ProjectActivation {
-    fn poll(&mut self) -> ProjectActivationPoll {
-        match &mut self.work {
-            ProjectActivationWork::Running(task) => task
-                .poll()
-                .map(ProjectActivationPoll::Ready)
-                .unwrap_or(ProjectActivationPoll::Pending),
-            ProjectActivationWork::Waiting(wait) => {
-                if wait.is_ready() {
-                    ProjectActivationPoll::Retry
-                } else {
-                    ProjectActivationPoll::Pending
-                }
-            }
-            ProjectActivationWork::Rejected {
-                observed,
-                error,
-                wake,
-            } => {
-                if !*observed {
-                    *observed = true;
-                    if let Some(wake) = wake {
-                        let _ = wake.send_event(WinitUserEvent::WakeUp);
-                    }
-                    return ProjectActivationPoll::Pending;
-                }
-                ProjectActivationPoll::Rejected(error.clone())
-            }
-        }
-    }
-
-    fn cancel(&mut self) {
-        if let ProjectActivationWork::Running(task) = &mut self.work {
-            task.cancel();
-        }
-    }
-
-    fn wait(
-        &mut self,
-        wait: ManagedCheckoutWait,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) {
-        wait.subscribe(wake);
-        self.work = ProjectActivationWork::Waiting(wait);
-    }
-
-    fn retry(
-        &mut self,
-        runtime: &vmux_git::GitRuntime,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) {
-        self.work = self.request.start(runtime, wake);
-    }
-}
-
-impl ProjectActivationRequest {
-    fn start(
-        &self,
-        runtime: &vmux_git::GitRuntime,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) -> ProjectActivationWork {
-        let request = self.clone();
-        let worker_wake = wake.clone();
-        let Some(task) = runtime.spawn_operation(worker_wake, move || request.resolve()) else {
-            if let Some(wake) = wake.as_ref() {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            return ProjectActivationWork::Rejected {
-                observed: false,
-                error: "Git operation queue is busy".to_string(),
-                wake,
-            };
-        };
-        ProjectActivationWork::Running(task)
-    }
-
-    fn resolve(&self) -> Result<TabWorkspaceResolution, String> {
-        TabWorkspaceSelection::resolve(&self.path, &self.branch, &self.checkout, &self.managed_root)
-    }
-}
-
 impl ProjectActivations {
-    fn next_revision(&mut self) -> u64 {
-        self.next_revision = self.next_revision.wrapping_add(1).max(1);
+    fn next_revision(&mut self, after: u64) -> u64 {
+        self.next_revision = self.next_revision.max(after).wrapping_add(1).max(1);
         self.next_revision
     }
 }
@@ -409,15 +387,14 @@ impl ProjectActivationContext<'_, '_> {
 
     fn apply(
         &mut self,
-        selection: TabWorkspaceSelection,
+        selection: ResolvedWorkspace,
         tab_entity: Entity,
     ) -> Result<(String, String), String> {
-        let TabWorkspaceSelection {
+        let ResolvedWorkspace {
             startup_dir,
             project_dir,
             branch,
             worktree,
-            cleanup,
         } = selection;
         let mut tab = self
             .tabs
@@ -444,150 +421,7 @@ impl ProjectActivationContext<'_, '_> {
                 entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
             }
         }
-        if let Some(mut cleanup) = cleanup {
-            let checkout_dir = cleanup.path().to_string_lossy().into_owned();
-            let cleanup_branch = cleanup.branch().to_string();
-            self.commands.queue(move |world: &mut World| {
-                let applied = world
-                    .get::<TabWorktree>(tab_entity)
-                    .is_some_and(|worktree| {
-                        worktree.checkout_dir == checkout_dir && worktree.branch == cleanup_branch
-                    });
-                if applied {
-                    cleanup.commit();
-                }
-            });
-        }
         Ok((startup_dir, branch))
-    }
-}
-
-impl TabWorkspaceSelection {
-    fn resolve(
-        path: &str,
-        branch: &str,
-        checkout: &str,
-        managed_root: &std::path::Path,
-    ) -> Result<TabWorkspaceResolution, String> {
-        let project_dir = std::path::Path::new(path.trim())
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        if !project_dir.is_dir() {
-            return Err("project path is not a directory".to_string());
-        }
-        if !checkout.trim().is_empty() {
-            let checkout = std::path::Path::new(checkout);
-            if checkout.is_dir() {
-                return Self::from_checkout(
-                    &project_dir,
-                    checkout,
-                    (!branch.trim().is_empty()).then_some(branch.trim()),
-                )
-                .map(TabWorkspaceResolution::ready);
-            }
-        }
-        if !branch.trim().is_empty() {
-            let activation = match crate::worktree::TabWorktreeActivation::checkout_branch(
-                &project_dir,
-                branch.trim(),
-                managed_root,
-            )? {
-                TabWorktreeCheckoutResult::Ready(activation) => *activation,
-                TabWorktreeCheckoutResult::Retry(wait) => {
-                    return Ok(TabWorkspaceResolution::Waiting(wait));
-                }
-            };
-            let (activation, cleanup) = activation.into_parts();
-            return Ok(TabWorkspaceResolution::ready(Self {
-                startup_dir: activation.execution_dir.to_string_lossy().into_owned(),
-                project_dir: project_dir.to_string_lossy().into_owned(),
-                branch: activation.metadata.branch.clone(),
-                worktree: Some((activation.metadata, activation.ready)),
-                cleanup,
-            }));
-        }
-        Self::from_checkout(&project_dir, &project_dir, None).map(TabWorkspaceResolution::ready)
-    }
-
-    fn from_checkout(
-        project_dir: &std::path::Path,
-        checkout_dir: &std::path::Path,
-        expected_branch: Option<&str>,
-    ) -> Result<Self, String> {
-        let project_dir = project_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout_dir = checkout_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid checkout directory: {error}"))?;
-        let Some(info) = vmux_git::worktree::RepoInfo::read(&checkout_dir) else {
-            if expected_branch.is_some() {
-                return Err("branch checkout is no longer available".to_string());
-            }
-            return Ok(Self {
-                startup_dir: checkout_dir.to_string_lossy().into_owned(),
-                project_dir: checkout_dir.to_string_lossy().into_owned(),
-                branch: String::new(),
-                worktree: None,
-                cleanup: None,
-            });
-        };
-        if let Some(expected_branch) = expected_branch
-            && info.branch != expected_branch
-        {
-            return Err(format!(
-                "branch {expected_branch} is no longer checked out at {}",
-                checkout_dir.display()
-            ));
-        }
-        let source = vmux_git::worktree::CheckoutInfo::try_from(project_dir.as_path())
-            .map_err(|error| error.0)?;
-        let relative_dir = project_dir
-            .strip_prefix(&source.root)
-            .map_err(|_| "project directory is outside its checkout".to_string())?;
-        let project_dir = info
-            .project_root()
-            .join(relative_dir)
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout = vmux_git::worktree::CheckoutInfo::try_from(checkout_dir.as_path())
-            .map_err(|error| error.0)?;
-        if source.common_dir != checkout.common_dir {
-            return Err("worktree belongs to a different repository".to_string());
-        }
-        let execution_dir = checkout
-            .root
-            .join(relative_dir)
-            .canonicalize()
-            .map_err(|error| format!("project directory is missing from checkout: {error}"))?;
-        if !execution_dir.is_dir() || !execution_dir.starts_with(&checkout.root) {
-            return Err("project directory escapes checkout".to_string());
-        }
-        let project_dir_text = project_dir.to_string_lossy().into_owned();
-        if !info.is_worktree {
-            return Ok(Self {
-                startup_dir: execution_dir.to_string_lossy().into_owned(),
-                project_dir: project_dir_text,
-                branch: info.branch,
-                worktree: None,
-                cleanup: None,
-            });
-        }
-        let branch = info.branch.clone();
-        let metadata = TabWorktree {
-            repo_root: info.project_root().to_string_lossy().into_owned(),
-            checkout_dir: checkout.root.to_string_lossy().into_owned(),
-            branch: info.branch,
-            base_ref: info.base_ref,
-        };
-        let ready = TabWorktreeReady::new(&execution_dir, &project_dir_text, &metadata, &checkout)?;
-        Ok(Self {
-            startup_dir: execution_dir.to_string_lossy().into_owned(),
-            project_dir: project_dir_text,
-            branch,
-            worktree: Some((metadata, ready)),
-            cleanup: None,
-        })
     }
 }
 
@@ -700,10 +534,8 @@ fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
     scope: crate::window::WindowScope,
-    managed_root: Res<ManagedWorktreeRoot>,
-    runtime: Res<vmux_git::GitRuntime>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
     mut activations: ResMut<ProjectActivations>,
+    target_revisions: Query<&CheckoutTargetRevision>,
     mut context: ProjectActivationContext,
 ) {
     let webview = trigger.event().webview;
@@ -752,7 +584,11 @@ fn project_activate(
         );
         return;
     };
-    let revision = activations.next_revision();
+    let revision = activations.next_revision(
+        target_revisions
+            .get(tab_entity)
+            .map_or(0, |revision| revision.0),
+    );
     context
         .commands
         .entity(tab_entity)
@@ -761,114 +597,1262 @@ fn project_activate(
             branch.clone(),
             revision,
         ));
-    let request = ProjectActivationRequest {
-        path: path.clone(),
-        branch: branch.clone(),
-        checkout: checkout.clone(),
-        managed_root: managed_root.0.clone(),
-    };
-    let wake = wake.as_deref().map(|wake| (**wake).clone());
-    let work = request.start(&runtime, wake);
-    let activation = ProjectActivation {
-        webview,
-        branch: request.branch.clone(),
-        request,
-        work,
-    };
-    context.commands.queue(ProjectActivationInstall {
-        tab: tab_entity,
-        revision,
-        activation,
-    });
+    context
+        .commands
+        .entity(tab_entity)
+        .insert(CheckoutTargetRevision(revision));
+    context.commands.spawn((
+        Name::new("Project workspace activation"),
+        Operation::bundle("project.activate")
+            .expect("fixed project activation kind")
+            .running(),
+        OperationTarget::new(tab_entity),
+        OperationTargetRevision(revision),
+        Cwd(PathBuf::from(path.trim())),
+        ProjectActivation {
+            webview,
+            branch: branch.trim().to_string(),
+            checkout: checkout.trim().to_string(),
+        },
+        ResolutionProgress(ResolvePhase::CanonicalProject),
+    ));
 }
 
-fn poll_project_activations(
-    runtime: Res<vmux_git::GitRuntime>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
+fn selection_changed(
+    changed: On<Insert, PendingWorkspaceSelection>,
     pending: Query<&PendingWorkspaceSelection>,
-    mut operations: Query<(
+    operations: Query<
+        (
+            Entity,
+            &OperationTarget,
+            &OperationTargetRevision,
+            Option<&ResolutionWork>,
+            Option<&CheckoutWork>,
+        ),
+        With<ProjectActivation>,
+    >,
+    mut cancels: MessageWriter<CancelCheckout>,
+    mut commands: Commands,
+) {
+    let Ok(current) = pending.get(changed.entity) else {
+        return;
+    };
+    for (operation, target, revision, io, checkout) in &operations {
+        if target.entity() != changed.entity || revision.0 == current.revision() {
+            continue;
+        }
+        if let Some(checkout) = checkout {
+            cancels.write(CancelCheckout {
+                operation: checkout.0,
+            });
+        }
+        if io.is_none() && checkout.is_none() {
+            commands
+                .entity(operation)
+                .remove::<(ProjectActivation, ResolutionProgress)>()
+                .insert(OperationState::Canceled);
+        } else {
+            commands
+                .entity(operation)
+                .insert(ResolutionProgress(ResolvePhase::CancelDrain));
+        }
+    }
+}
+
+fn retire(
+    pending: Query<&PendingWorkspaceSelection>,
+    tabs: Query<(), (With<Tab>, Without<Retiring>)>,
+    operations: Query<
+        (
+            Entity,
+            Option<&OperationTarget>,
+            &OperationTargetRevision,
+            &ResolutionProgress,
+            Option<&CheckoutWork>,
+        ),
+        With<ProjectActivation>,
+    >,
+    mut cancels: MessageWriter<CancelCheckout>,
+    mut commands: Commands,
+) {
+    for (operation, target, revision, progress, checkout) in &operations {
+        if progress.0 == ResolvePhase::CancelDrain {
+            continue;
+        }
+        if target.is_some_and(|target| {
+            tabs.contains(target.entity())
+                && pending
+                    .get(target.entity())
+                    .is_ok_and(|current| current.revision() == revision.0)
+        }) {
+            continue;
+        }
+        if let Some(checkout) = checkout {
+            cancels.write(CancelCheckout {
+                operation: checkout.0,
+            });
+        }
+        commands
+            .entity(operation)
+            .insert(ResolutionProgress(ResolvePhase::CancelDrain));
+    }
+}
+
+fn canonical_project(
+    operations: Query<(Entity, &Cwd, &ResolutionProgress, Option<&ResolutionWork>)>,
+    completed: Query<&JobResult<super::checkout::Canonicalize>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, cwd, progress, job) in &operations {
+        if progress.0 != ResolvePhase::CanonicalProject {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(operation, super::checkout::Canonicalize(cwd.0.clone()));
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(path)) => {
+                effects.commands.entity(operation).insert(Cwd(path.clone()));
+                effects.finish(operation, job.0, ResolvePhase::ValidateProject);
+            }
+            Ok(Err(error)) | Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn validate_project(
+    operations: Query<(Entity, &Cwd, &ResolutionProgress, Option<&ResolutionWork>)>,
+    completed: Query<&JobResult<super::checkout::Inspect>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, cwd, progress, job) in &operations {
+        if progress.0 != ResolvePhase::ValidateProject {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(operation, super::checkout::Inspect(cwd.0.clone()));
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(Some(metadata))) if metadata.is_dir() => {
+                effects.finish(operation, job.0, ResolvePhase::ChooseCheckout)
+            }
+            Ok(Ok(_)) => effects.fail(
+                operation,
+                Some(job.0),
+                "project path is not a directory".into(),
+            ),
+            Ok(Err(error)) | Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn choose_checkout(
+    operations: Query<(
         Entity,
-        Option<&OperationTarget>,
+        &ProjectActivation,
+        &Cwd,
+        &OperationTarget,
         &OperationTargetRevision,
-        &mut ProjectActivation,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Inspect>>,
+    root: Res<ManagedWorktreeRoot>,
+    mut requests: MessageWriter<SelectBranchCheckout>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, request, project, target, revision, progress, job) in &operations {
+        if progress.0 != ResolvePhase::ChooseCheckout {
+            continue;
+        }
+        if !request.checkout.is_empty() {
+            let Some(job) = job else {
+                let task = effects.request(
+                    operation,
+                    super::checkout::Inspect(PathBuf::from(&request.checkout)),
+                );
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(ResolutionWork(task));
+                continue;
+            };
+            let Ok(result) = completed.get(job.0) else {
+                continue;
+            };
+            if let Ok(Ok(Some(metadata))) = &result.0
+                && (metadata.is_dir() || metadata.is_symlink())
+            {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(TargetDirectory(request.checkout.clone().into()));
+                effects.finish(operation, job.0, ResolvePhase::CanonicalCheckout);
+                continue;
+            }
+            effects.commands.entity(job.0).try_despawn();
+            effects
+                .commands
+                .entity(operation)
+                .remove::<ResolutionWork>();
+        }
+        if request.branch.is_empty() {
+            effects.commands.entity(operation).insert((
+                TargetDirectory(project.0.clone()),
+                ResolutionProgress(ResolvePhase::CanonicalCheckout),
+            ));
+            continue;
+        }
+        let checkout = effects
+            .commands
+            .spawn((
+                Name::new("Project branch acquisition"),
+                Operation::bundle("project.checkout").expect("fixed project checkout kind"),
+                OperationTarget::new(target.entity()),
+                OperationTargetRevision(revision.0),
+            ))
+            .id();
+        requests.write(SelectBranchCheckout {
+            operation: checkout,
+            directory: project.0.clone(),
+            managed_root: root.0.clone(),
+            branch: request.branch.clone(),
+        });
+        effects.commands.entity(operation).insert((
+            CheckoutWork(checkout),
+            ResolutionProgress(ResolvePhase::AwaitCheckout),
+        ));
+    }
+}
+
+fn canonical_checkout(
+    operations: Query<(
+        Entity,
+        &TargetDirectory,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Canonicalize>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, directory, progress, job) in &operations {
+        if progress.0 != ResolvePhase::CanonicalCheckout {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                super::checkout::Canonicalize(directory.0.clone()),
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(path)) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(TargetDirectory(path.clone()));
+                effects.finish(operation, job.0, ResolvePhase::CheckoutInfo);
+            }
+            Ok(Err(error)) | Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn checkout_info(
+    operations: Query<(
+        Entity,
+        &TargetDirectory,
+        &ProjectActivation,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Identify>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, directory, request, progress, job) in &operations {
+        if progress.0 != ResolvePhase::CheckoutInfo {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(operation, super::checkout::Identify(directory.0.clone()));
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(checkout)) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(TargetCheckout(checkout.clone()));
+                effects.finish(operation, job.0, ResolvePhase::SourceInfo);
+            }
+            _ if request.branch.is_empty() => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(ResolvedWorkspace {
+                        startup_dir: directory.0.to_string_lossy().into_owned(),
+                        project_dir: directory.0.to_string_lossy().into_owned(),
+                        branch: String::new(),
+                        worktree: None,
+                    });
+                effects.finish(operation, job.0, ResolvePhase::Ready);
+            }
+            _ => effects.fail(
+                operation,
+                Some(job.0),
+                "branch checkout is no longer available".into(),
+            ),
+        }
+    }
+}
+
+fn source_info(
+    operations: Query<(
+        Entity,
+        &Cwd,
+        &TargetCheckout,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Identify>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, directory, checkout, progress, job) in &operations {
+        if progress.0 != ResolvePhase::SourceInfo {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(operation, super::checkout::Identify(directory.0.clone()));
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(source)) if source.common_dir == checkout.0.common_dir => {
+                let Ok(relative) = directory.0.strip_prefix(&source.root) else {
+                    effects.fail(
+                        operation,
+                        Some(job.0),
+                        "project directory is outside its checkout".into(),
+                    );
+                    continue;
+                };
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(RelativeProject(relative.to_path_buf()));
+                effects.finish(operation, job.0, ResolvePhase::Head);
+            }
+            Ok(Ok(_)) => effects.fail(
+                operation,
+                Some(job.0),
+                "worktree belongs to a different repository".into(),
+            ),
+            Ok(Err(error)) | Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn head(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &ProjectActivation,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, checkout, request, progress, job) in &operations {
+        if progress.0 != ResolvePhase::Head {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: checkout.0.root.clone(),
+                    arguments: vec!["status".into(), "--porcelain=v2".into(), "--branch".into()],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok((output, _, true))) => {
+                let mut branch = String::new();
+                for line in output.lines() {
+                    if let Some(value) = line.strip_prefix("# branch.head ")
+                        && value != "(detached)"
+                    {
+                        branch = value.into();
+                        break;
+                    }
+                }
+                if !request.branch.is_empty() && request.branch != branch {
+                    effects.fail(
+                        operation,
+                        Some(job.0),
+                        format!(
+                            "branch {} is no longer checked out at {}",
+                            request.branch,
+                            checkout.0.root.display()
+                        ),
+                    );
+                    continue;
+                }
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(ObservedBranch(branch));
+                effects.finish(operation, job.0, ResolvePhase::GitDirectory);
+            }
+            Ok(Ok((_, error, _))) => effects.fail(operation, Some(job.0), error.trim().into()),
+            Ok(Err(error)) => effects.fail(operation, Some(job.0), error.0.clone()),
+            Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn git_directory(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, checkout, progress, job) in &operations {
+        if progress.0 != ResolvePhase::GitDirectory {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: checkout.0.root.clone(),
+                    arguments: vec!["rev-parse".into(), "--absolute-git-dir".into()],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok((path, _, true))) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(GitDirectory(PathBuf::from(
+                        path.strip_suffix('\n').unwrap_or(path),
+                    )));
+                effects.finish(operation, job.0, ResolvePhase::ProjectRoot);
+            }
+            Ok(Ok((_, error, _))) => effects.fail(operation, Some(job.0), error.trim().into()),
+            Ok(Err(error)) => effects.fail(operation, Some(job.0), error.0.clone()),
+            Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn project_root(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, checkout, progress, job) in &operations {
+        if progress.0 != ResolvePhase::ProjectRoot {
+            continue;
+        }
+        if checkout
+            .0
+            .common_dir
+            .file_name()
+            .is_some_and(|name| name == ".git")
+        {
+            let root = checkout.0.common_dir.parent().unwrap_or(&checkout.0.root);
+            effects.commands.entity(operation).insert((
+                MainProject(root.to_path_buf()),
+                ResolutionProgress(ResolvePhase::CanonicalProjectRoot),
+            ));
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: checkout.0.root.clone(),
+                    arguments: vec![
+                        "--git-dir".into(),
+                        checkout.0.common_dir.to_string_lossy().into_owned(),
+                        "config".into(),
+                        "--path".into(),
+                        "--get".into(),
+                        "core.worktree".into(),
+                    ],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok((root, _, true))) if !root.trim().is_empty() => {
+                let mut root = PathBuf::from(root.strip_suffix('\n').unwrap_or(root));
+                if !root.is_absolute() {
+                    root = checkout.0.common_dir.join(root);
+                }
+                effects.commands.entity(operation).insert(MainProject(root));
+                effects.finish(operation, job.0, ResolvePhase::ConfiguredProjectRoot);
+            }
+            _ => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(MainProject(checkout.0.root.clone()));
+                effects.finish(operation, job.0, ResolvePhase::CanonicalProjectRoot);
+            }
+        }
+    }
+}
+
+fn configured_project_root(
+    operations: Query<(
+        Entity,
+        &MainProject,
+        &TargetCheckout,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Canonicalize>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, root, checkout, progress, job) in &operations {
+        if progress.0 != ResolvePhase::ConfiguredProjectRoot {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(operation, super::checkout::Canonicalize(root.0.clone()));
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        let root = match &result.0 {
+            Ok(Ok(root)) => root.clone(),
+            _ => checkout.0.root.clone(),
+        };
+        effects.commands.entity(operation).insert(MainProject(root));
+        effects.finish(operation, job.0, ResolvePhase::CanonicalProjectRoot);
+    }
+}
+
+fn canonical_project_root(
+    operations: Query<(
+        Entity,
+        &MainProject,
+        &RelativeProject,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Canonicalize>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, root, relative, progress, job) in &operations {
+        if progress.0 != ResolvePhase::CanonicalProjectRoot {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                super::checkout::Canonicalize(root.0.join(&relative.0)),
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(path)) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert((RepositoryRoot(root.0.clone()), MainProject(path.clone())));
+                effects.finish(operation, job.0, ResolvePhase::ExecutionDirectory);
+            }
+            Ok(Err(error)) | Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn execution_directory(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &GitDirectory,
+        &RelativeProject,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<super::checkout::Canonicalize>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, checkout, git, relative, progress, job) in &operations {
+        if progress.0 != ResolvePhase::ExecutionDirectory {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                super::checkout::Canonicalize(checkout.0.root.join(&relative.0)),
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok(path)) if path.starts_with(&checkout.0.root) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(ExecutionDirectory(path.clone()));
+                let next = if git.0 == checkout.0.common_dir {
+                    ResolvePhase::Ready
+                } else {
+                    ResolvePhase::DefaultBase
+                };
+                effects.finish(operation, job.0, next);
+            }
+            Ok(Ok(_)) => effects.fail(
+                operation,
+                Some(job.0),
+                "project directory escapes checkout".into(),
+            ),
+            Ok(Err(error)) | Err(error) => effects.fail(operation, Some(job.0), error.clone()),
+        }
+    }
+}
+
+fn selection_ready(
+    operations: Query<
+        (
+            Entity,
+            &TargetCheckout,
+            &GitDirectory,
+            &ExecutionDirectory,
+            &MainProject,
+            &RepositoryRoot,
+            &ObservedBranch,
+            Option<&ResolvedBase>,
+            &ResolutionProgress,
+        ),
+        Without<ResolvedWorkspace>,
+    >,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, checkout, git, directory, project, repository, branch, base, progress) in
+        &operations
+    {
+        if progress.0 != ResolvePhase::Ready {
+            continue;
+        }
+        let project = project.0.to_string_lossy().into_owned();
+        let worktree = if git.0 != checkout.0.common_dir {
+            let metadata = TabWorktree {
+                repo_root: repository.0.to_string_lossy().into_owned(),
+                checkout_dir: checkout.0.root.to_string_lossy().into_owned(),
+                branch: branch.0.clone(),
+                base_ref: base.map_or_else(String::new, |base| base.0.clone()),
+            };
+            let ready = match TabWorktreeReady::new(&directory.0, &project, &metadata, &checkout.0)
+            {
+                Ok(ready) => ready,
+                Err(error) => {
+                    effects.fail(operation, None, error);
+                    continue;
+                }
+            };
+            Some((metadata, ready))
+        } else {
+            None
+        };
+        effects
+            .commands
+            .entity(operation)
+            .insert(ResolvedWorkspace {
+                startup_dir: directory.0.to_string_lossy().into_owned(),
+                project_dir: project,
+                branch: branch.0.clone(),
+                worktree,
+            });
+    }
+}
+
+fn checkout_prepared(
+    mut prepared: MessageReader<CheckoutPrepared>,
+    mut failed: MessageReader<CheckoutFailed>,
+    operations: Query<(Entity, &CheckoutWork, &Cwd, &ResolutionProgress)>,
+    checkouts: Query<&PreparedCheckout>,
+    mut effects: ResolutionEffects,
+) {
+    for prepared in prepared.read() {
+        let Ok(checkout) = checkouts.get(prepared.operation) else {
+            continue;
+        };
+        for (operation, child, project, progress) in &operations {
+            if child.0 != prepared.operation || progress.0 != ResolvePhase::AwaitCheckout {
+                continue;
+            }
+            let activation = &checkout.activation;
+            effects.commands.entity(operation).insert((
+                ResolvedWorkspace {
+                    startup_dir: activation.execution_dir.to_string_lossy().into_owned(),
+                    project_dir: project.0.to_string_lossy().into_owned(),
+                    branch: activation.metadata.branch.clone(),
+                    worktree: Some((activation.metadata.clone(), activation.ready.clone())),
+                },
+                ResolutionProgress(ResolvePhase::Ready),
+            ));
+        }
+    }
+    for failure in failed.read() {
+        for (operation, child, _, progress) in &operations {
+            if child.0 == failure.operation
+                && matches!(
+                    progress.0,
+                    ResolvePhase::AwaitCheckout | ResolvePhase::Committing
+                )
+            {
+                effects.fail(operation, None, failure.error.clone());
+            }
+        }
+    }
+}
+
+fn apply_selection(
+    operations: Query<(
+        Entity,
+        &OperationTarget,
+        &ResolvedWorkspace,
+        &ResolutionProgress,
     )>,
     mut context: ProjectActivationContext,
 ) {
-    let wake = wake.as_deref().map(|wake| (**wake).clone());
-    for (entity, target, revision, mut activation) in &mut operations {
-        let Some(target) = target else {
-            activation.cancel();
-            context
-                .commands
-                .entity(entity)
-                .remove::<ProjectActivation>()
-                .insert(OperationState::Canceled);
-            continue;
-        };
-        let tab = target.entity();
-        let current_revision = pending
-            .get(tab)
-            .ok()
-            .map(PendingWorkspaceSelection::revision);
-        if !revision.accepts(current_revision) || !context.tabs.contains(tab) {
-            activation.cancel();
-            context
-                .commands
-                .entity(entity)
-                .remove::<ProjectActivation>()
-                .insert(OperationState::Canceled);
+    for (operation, target, selection, progress) in &operations {
+        if progress.0 != ResolvePhase::Ready {
             continue;
         }
-        let mut result = match activation.poll() {
-            ProjectActivationPoll::Pending => continue,
-            ProjectActivationPoll::Retry => {
-                activation.retry(&runtime, wake.clone());
-                continue;
-            }
-            ProjectActivationPoll::Ready(output) => match output {
-                Ok(Ok(TabWorkspaceResolution::Ready(selection))) => context.apply(*selection, tab),
-                Ok(Ok(TabWorkspaceResolution::Waiting(wait))) => {
-                    activation.wait(wait, wake.clone());
-                    continue;
-                }
-                Ok(Err(error)) => Err(error),
-                Err(_) => Err("Git workspace worker panicked".to_string()),
-            },
-            ProjectActivationPoll::Rejected(error) => Err(error),
-        };
-        if let Err(error) = &mut result
-            && error.trim().is_empty()
-        {
-            *error = "Git workspace operation failed".to_string();
-        }
-        let mut operation = context.commands.entity(entity);
-        operation.remove::<ProjectActivation>();
-        match &result {
+        match context.apply(selection.clone(), target.entity()) {
             Ok(_) => {
-                operation.insert(OperationState::Succeeded);
+                context
+                    .commands
+                    .entity(operation)
+                    .insert(ResolutionProgress(ResolvePhase::Applied));
             }
             Err(error) => {
-                operation.insert(OperationState::Failed);
-                if let Ok(error) = OperationError::new(error.clone()) {
-                    operation.insert(error);
-                }
+                context.commands.entity(operation).insert((
+                    ResolutionError(error),
+                    ResolutionProgress(ResolvePhase::Failed),
+                ));
             }
         }
+    }
+}
+
+fn commit_selection(
+    operations: Query<(
+        Entity,
+        &OperationTarget,
+        &OperationTargetRevision,
+        Option<&CheckoutWork>,
+        &ResolutionProgress,
+    )>,
+    mut commits: MessageWriter<CommitCheckout>,
+    mut commands: Commands,
+) {
+    for (operation, target, revision, checkout, progress) in &operations {
+        if progress.0 != ResolvePhase::Applied {
+            continue;
+        }
+        if let Some(checkout) = checkout {
+            commits.write(CommitCheckout {
+                operation: checkout.0,
+                target: target.entity(),
+                revision: revision.0,
+            });
+            commands
+                .entity(operation)
+                .insert(ResolutionProgress(ResolvePhase::Committing));
+        }
+    }
+}
+
+fn finish_selection(
+    operations: Query<(
+        Entity,
+        Option<&OperationTarget>,
+        &ProjectActivation,
+        &ResolutionProgress,
+        Option<&CheckoutWork>,
+        Option<&ResolvedWorkspace>,
+        Option<&ResolutionError>,
+        Has<ErrorObserved>,
+    )>,
+    states: Query<&OperationState>,
+    mut context: ProjectActivationContext,
+) {
+    for (operation, target, activation, progress, checkout, selected, error, observed) in
+        &operations
+    {
+        let result = match progress.0 {
+            ResolvePhase::Applied if checkout.is_none() => selected
+                .map(|selection| Ok((selection.startup_dir.clone(), selection.branch.clone()))),
+            ResolvePhase::Committing => match checkout
+                .and_then(|checkout| states.get(checkout.0).ok())
+            {
+                Some(OperationState::Succeeded) => selected
+                    .map(|selection| Ok((selection.startup_dir.clone(), selection.branch.clone()))),
+                Some(OperationState::Canceled) => {
+                    context
+                        .commands
+                        .entity(operation)
+                        .insert(ResolutionProgress(ResolvePhase::CancelDrain));
+                    continue;
+                }
+                _ => None,
+            },
+            ResolvePhase::Failed if !observed => {
+                context.commands.entity(operation).insert(ErrorObserved);
+                continue;
+            }
+            ResolvePhase::Failed => {
+                let error = error
+                    .map(|error| error.0.trim())
+                    .filter(|error| !error.is_empty())
+                    .unwrap_or("Git workspace operation failed");
+                Some(Err(error.to_string()))
+            }
+            _ => None,
+        };
+        let Some(result) = result else {
+            continue;
+        };
+        let state = if result.is_ok() {
+            OperationState::Succeeded
+        } else {
+            OperationState::Failed
+        };
         context
             .commands
-            .entity(tab)
-            .remove::<PendingWorkspaceSelection>();
+            .entity(operation)
+            .insert(state)
+            .remove::<(ProjectActivation, ResolutionProgress)>();
+        if let Err(error) = &result
+            && let Ok(error) = OperationError::new(error.clone())
+        {
+            context.commands.entity(operation).insert(error);
+        }
+        if let Some(target) = target {
+            context
+                .commands
+                .entity(target.entity())
+                .remove::<PendingWorkspaceSelection>();
+        }
         context.publish(
             ProjectActivationOutcome::from_result(activation.branch.clone(), result),
             activation.webview,
-            Some(tab),
+            target.map(|target| target.entity()),
         );
+    }
+}
+
+fn cancel_drained(
+    operations: Query<(
+        Entity,
+        Option<&OperationTarget>,
+        &OperationTargetRevision,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+        Option<&CheckoutWork>,
+    )>,
+    canonical: Query<&JobResult<super::checkout::Canonicalize>>,
+    inspect: Query<&JobResult<super::checkout::Inspect>>,
+    identity: Query<&JobResult<super::checkout::Identify>>,
+    git: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    states: Query<&OperationState>,
+    pending: Query<&PendingWorkspaceSelection>,
+    mut commands: Commands,
+) {
+    for (operation, target, revision, progress, job, checkout) in &operations {
+        if progress.0 != ResolvePhase::CancelDrain {
+            continue;
+        }
+        if let Some(job) = job {
+            if !canonical.contains(job.0)
+                && !inspect.contains(job.0)
+                && !identity.contains(job.0)
+                && !git.contains(job.0)
+            {
+                continue;
+            }
+            commands.entity(job.0).try_despawn();
+        }
+        if let Some(checkout) = checkout
+            && !states.get(checkout.0).is_ok_and(|state| {
+                matches!(
+                    state,
+                    OperationState::Succeeded | OperationState::Failed | OperationState::Canceled
+                )
+            })
+        {
+            continue;
+        }
+        if let Some(target) = target
+            && pending
+                .get(target.entity())
+                .is_ok_and(|current| current.revision() == revision.0)
+        {
+            commands
+                .entity(target.entity())
+                .remove::<PendingWorkspaceSelection>();
+        }
+        commands
+            .entity(operation)
+            .remove::<(ProjectActivation, ResolutionProgress, ResolutionWork)>()
+            .insert(OperationState::Canceled);
+    }
+}
+
+impl ResolvedBase {
+    fn native(reference: &str) -> Self {
+        let reference = reference
+            .strip_prefix("refs/remotes/origin/")
+            .or_else(|| reference.strip_prefix("refs/heads/"))
+            .unwrap_or(reference);
+        Self(reference.into())
+    }
+}
+
+fn base_remote(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, repository, progress, job) in &operations {
+        if progress.0 != ResolvePhase::DefaultBase {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: repository.0.root.clone(),
+                    arguments: vec!["symbolic-ref".into(), "refs/remotes/origin/HEAD".into()],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok((reference, _, true))) if !reference.trim().is_empty() => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(DefaultBase(reference.trim().to_string()));
+                effects.finish(operation, job.0, ResolvePhase::BaseConfiguration);
+            }
+            _ => {
+                effects.commands.entity(operation).insert(BaseAttempt(0));
+                effects.finish(operation, job.0, ResolvePhase::BaseCandidate);
+            }
+        }
+    }
+}
+
+fn base_candidate(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &BaseAttempt,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, repository, attempt, progress, job) in &operations {
+        if progress.0 != ResolvePhase::BaseCandidate {
+            continue;
+        }
+        let candidate = match attempt.0 {
+            0 => "refs/remotes/origin/main",
+            1 => "refs/remotes/origin/master",
+            2 => "refs/heads/main",
+            3 => "refs/heads/master",
+            _ => {
+                effects.commands.entity(operation).insert((
+                    DefaultBase(String::new()),
+                    ResolutionProgress(ResolvePhase::BaseConfiguration),
+                ));
+                continue;
+            }
+        };
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: repository.0.root.clone(),
+                    arguments: vec![
+                        "rev-parse".into(),
+                        "--verify".into(),
+                        "--quiet".into(),
+                        candidate.into(),
+                    ],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok((_, _, true))) => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(DefaultBase(candidate.into()));
+                effects.finish(operation, job.0, ResolvePhase::BaseConfiguration);
+            }
+            _ => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(BaseAttempt(attempt.0 + 1));
+                effects.finish(operation, job.0, ResolvePhase::BaseCandidate);
+            }
+        }
+    }
+}
+
+fn base_configuration(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &DefaultBase,
+        Option<&ObservedBranch>,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, repository, default, branch, progress, job) in &operations {
+        if progress.0 != ResolvePhase::BaseConfiguration {
+            continue;
+        }
+        let Some(branch) = branch else {
+            effects.commands.entity(operation).insert((
+                ResolvedBase::native(&default.0),
+                ResolutionProgress(ResolvePhase::Ready),
+            ));
+            continue;
+        };
+        if branch.0.is_empty() {
+            effects.commands.entity(operation).insert((
+                ResolvedBase::native(&default.0),
+                ResolutionProgress(ResolvePhase::Ready),
+            ));
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: repository.0.root.clone(),
+                    arguments: vec![
+                        "config".into(),
+                        "--get".into(),
+                        format!("branch.{}.vmux-base", branch.0),
+                    ],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        match &result.0 {
+            Ok(Ok((reference, _, true))) if !reference.trim().is_empty() => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(ConfiguredBase(reference.trim().to_string()));
+                effects.finish(operation, job.0, ResolvePhase::BaseVerify);
+            }
+            _ => {
+                effects
+                    .commands
+                    .entity(operation)
+                    .insert(ResolvedBase::native(&default.0));
+                effects.finish(operation, job.0, ResolvePhase::Ready);
+            }
+        }
+    }
+}
+
+fn base_verify(
+    operations: Query<(
+        Entity,
+        &TargetCheckout,
+        &DefaultBase,
+        &ConfiguredBase,
+        &ResolutionProgress,
+        Option<&ResolutionWork>,
+    )>,
+    completed: Query<&JobResult<vmux_git::worktree::WorktreeCommand>>,
+    mut effects: ResolutionEffects,
+) {
+    for (operation, repository, default, configured, progress, job) in &operations {
+        if progress.0 != ResolvePhase::BaseVerify {
+            continue;
+        }
+        let Some(job) = job else {
+            let task = effects.request(
+                operation,
+                vmux_git::worktree::WorktreeCommand {
+                    directory: repository.0.root.clone(),
+                    arguments: vec![
+                        "rev-parse".into(),
+                        "--verify".into(),
+                        "--quiet".into(),
+                        configured.0.clone(),
+                    ],
+                    guard: None,
+                },
+            );
+            effects
+                .commands
+                .entity(operation)
+                .insert(ResolutionWork(task));
+            continue;
+        };
+        let Ok(result) = completed.get(job.0) else {
+            continue;
+        };
+        let reference = match &result.0 {
+            Ok(Ok((_, _, true))) => &configured.0,
+            _ => &default.0,
+        };
+        effects
+            .commands
+            .entity(operation)
+            .insert(ResolvedBase::native(reference));
+        effects.finish(operation, job.0, ResolvePhase::Ready);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[derive(Resource, Default)]
     struct ContextWrites(Vec<GitPageContext>);
@@ -892,6 +1876,53 @@ mod tests {
         if let Some(workspace) = &trigger.event().update().workspace {
             writes.0.push(trigger.event().webview());
             writes.1.push(workspace.error.clone());
+        }
+    }
+
+    struct WorkspaceProbe {
+        app: App,
+        tab: Entity,
+        webview: Entity,
+    }
+
+    impl WorkspaceProbe {
+        fn new(root: &std::path::Path) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, PageContextPlugin))
+                .insert_resource(ManagedWorktreeRoot(root.to_path_buf()));
+            let tab = app.world_mut().spawn(Tab::default()).id();
+            let webview = app.world_mut().spawn(ChildOf(tab)).id();
+            Self { app, tab, webview }
+        }
+
+        fn request(&mut self, path: &std::path::Path, branch: &str, checkout: &str) {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.webview,
+                payload: ProjectActivateRequest {
+                    path: path.to_string_lossy().into_owned(),
+                    branch: branch.into(),
+                    checkout: checkout.into(),
+                    pane_id: None,
+                },
+            });
+            self.app.world_mut().flush();
+        }
+
+        fn settle(&mut self) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while self
+                .app
+                .world()
+                .get::<PendingWorkspaceSelection>(self.tab)
+                .is_some()
+            {
+                self.app.update();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "workspace activation did not finish"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
     }
 
@@ -1221,126 +2252,32 @@ mod tests {
     }
 
     #[test]
-    fn rejected_activation_exposes_then_rolls_back_optimistic_branch() {
-        for (error, expected) in [
-            ("Git operation queue is busy", "Git operation queue is busy"),
-            ("", "Git workspace operation failed"),
-            (" \t", "Git workspace operation failed"),
-        ] {
-            let mut app = App::new();
-            app.add_plugins((MinimalPlugins, PageContextPlugin))
-                .init_resource::<WorkspaceWrites>()
-                .add_observer(capture_workspace);
-            let tab = app
-                .world_mut()
-                .spawn((
-                    Tab::default(),
-                    PendingWorkspaceSelection::new("/project".into(), "feature".into(), 1),
-                ))
-                .id();
-            let webview = app
-                .world_mut()
-                .spawn((
-                    PageMetadata {
-                        url: "vmux://git/".into(),
-                        ..Default::default()
-                    },
-                    ChildOf(tab),
-                ))
-                .id();
-            let operation = app
-                .world_mut()
-                .spawn((
-                    Operation,
-                    OperationState::Running,
-                    OperationTarget::new(tab),
-                    OperationTargetRevision(1),
-                    ProjectActivation {
-                        webview,
-                        branch: "feature".into(),
-                        request: ProjectActivationRequest {
-                            path: "/project".into(),
-                            branch: "feature".into(),
-                            checkout: String::new(),
-                            managed_root: PathBuf::new(),
-                        },
-                        work: ProjectActivationWork::Rejected {
-                            observed: false,
-                            error: error.to_string(),
-                            wake: None,
-                        },
-                    },
-                ))
-                .id();
-
-            app.update();
-            assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_some());
-            assert!(app.world().get::<ProjectActivation>(operation).is_some());
-
-            app.update();
-            assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_none());
-            assert!(app.world().get::<ProjectActivation>(operation).is_none());
-            assert_eq!(
-                app.world().get::<OperationState>(operation),
-                Some(&OperationState::Failed)
-            );
-            assert_eq!(
-                app.world()
-                    .get::<OperationError>(operation)
-                    .unwrap()
-                    .message(),
-                expected
-            );
-            assert_eq!(
-                app.world().resource::<WorkspaceWrites>().1,
-                vec![expected.to_string()]
-            );
-        }
-    }
-
-    #[test]
     fn removing_the_selection_or_its_tab_cancels_the_stale_activation() {
         for remove_tab in [false, true] {
-            let mut app = App::new();
-            app.add_plugins((MinimalPlugins, PageContextPlugin));
-            let tab = app.world_mut().spawn(Tab::default()).id();
-            let operation = app
-                .world_mut()
-                .spawn((
-                    Operation,
-                    OperationState::Running,
-                    OperationTarget::new(tab),
-                    OperationTargetRevision(1),
-                    ProjectActivation {
-                        webview: Entity::PLACEHOLDER,
-                        branch: "feature".into(),
-                        request: ProjectActivationRequest {
-                            path: "/project".into(),
-                            branch: "feature".into(),
-                            checkout: String::new(),
-                            managed_root: PathBuf::new(),
-                        },
-                        work: ProjectActivationWork::Rejected {
-                            observed: false,
-                            error: "cancelled".into(),
-                            wake: None,
-                        },
-                    },
-                ))
-                .id();
-
+            let managed = tempfile::tempdir().unwrap();
+            let project = tempfile::tempdir().unwrap();
+            let mut probe = WorkspaceProbe::new(managed.path());
+            probe.request(project.path(), "", "");
             if remove_tab {
-                app.world_mut().despawn(tab);
-                assert!(app.world().get::<OperationTarget>(operation).is_none());
+                probe.app.world_mut().despawn(probe.tab);
+            } else {
+                probe
+                    .app
+                    .world_mut()
+                    .entity_mut(probe.tab)
+                    .remove::<PendingWorkspaceSelection>();
             }
-            app.update();
-
-            assert!(app.world().get::<ProjectActivation>(operation).is_none());
-            assert!(app.world().get::<TabWorkspace>(tab).is_none());
-            assert_eq!(
-                app.world().get::<OperationState>(operation),
-                Some(&OperationState::Canceled)
+            probe.app.update();
+            let mut states = probe
+                .app
+                .world_mut()
+                .query_filtered::<&OperationState, With<OperationTargetRevision>>();
+            assert!(
+                states
+                    .iter(probe.app.world())
+                    .all(|state| *state == OperationState::Canceled)
             );
+            assert!(probe.app.world().get::<TabWorkspace>(probe.tab).is_none());
         }
     }
 
@@ -1358,27 +2295,36 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        let managed_root = tempfile::tempdir().unwrap();
-
-        let resolution = TabWorkspaceSelection::resolve(
-            repository.path().to_string_lossy().as_ref(),
-            "feature",
-            "",
-            managed_root.path(),
-        )
-        .unwrap();
-        let TabWorkspaceResolution::Ready(selection) = resolution else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let checkout = PathBuf::from(&selection.startup_dir);
-        assert!(checkout.is_dir());
-
-        drop(selection);
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while checkout.exists() {
+        let managed = tempfile::tempdir().unwrap();
+        let hook = repository.path().join(".git/hooks/post-checkout");
+        std::fs::write(&hook, "#!/bin/sh\ncommon=$(git rev-parse --path-format=absolute --git-common-dir) || exit 1\ntouch \"$common/started\"\nwhile [ ! -f \"$common/release\" ]; do sleep 0.01; done\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut probe = WorkspaceProbe::new(managed.path());
+        probe.request(repository.path(), "feature", "");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !repository.path().join(".git/started").exists() {
+            probe.app.update();
             assert!(std::time::Instant::now() < deadline);
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let checkout = source
+            .worktree_registrations()
+            .unwrap()
+            .into_iter()
+            .find(|row| row.branch.as_deref() == Some("feature"))
+            .unwrap()
+            .path;
+        let world = probe.app.world_mut();
+        let mut work = world.query::<&CheckoutWork>();
+        let operation = work.single(world).unwrap().0;
+        probe.app.world_mut().despawn(probe.tab);
+        std::fs::write(repository.path().join(".git/release"), []).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while probe.app.world().get::<OperationState>(operation) != Some(&OperationState::Canceled)
+        {
+            probe.app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert!(!checkout.exists());
         assert!(
@@ -1386,7 +2332,7 @@ mod tests {
                 .worktree_registrations()
                 .unwrap()
                 .iter()
-                .all(|registration| registration.branch.as_deref() != Some("feature"))
+                .all(|row| row.branch.as_deref() != Some("feature"))
         );
     }
 
@@ -1460,22 +2406,27 @@ mod tests {
         source.add_worktree(&checkout, "feature", "HEAD").unwrap();
         let managed_root = tempfile::tempdir().unwrap();
 
-        let resolution = TabWorkspaceSelection::resolve(
-            nested.to_string_lossy().as_ref(),
+        let mut probe = WorkspaceProbe::new(managed_root.path());
+        probe.request(
+            &nested,
             "feature",
-            checkout.join("crates/app").to_string_lossy().as_ref(),
-            managed_root.path(),
-        )
-        .unwrap();
-        let TabWorkspaceResolution::Ready(selection) = resolution else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-
+            checkout.join("crates/app").to_str().unwrap(),
+        );
+        probe.settle();
+        let selection = probe.app.world().get::<TabWorkspace>(probe.tab).unwrap();
+        let metadata = probe.app.world().get::<TabWorktree>(probe.tab).unwrap();
+        let startup = probe
+            .app
+            .world()
+            .get::<Tab>(probe.tab)
+            .unwrap()
+            .startup_dir
+            .as_deref()
+            .unwrap();
         let expected_project = nested.canonicalize().unwrap();
         let expected_checkout = checkout.join("crates/app").canonicalize().unwrap();
-        let (metadata, _) = selection.worktree.unwrap();
         assert_eq!(selection.project_dir, expected_project.to_string_lossy());
-        assert_eq!(selection.startup_dir, expected_checkout.to_string_lossy());
+        assert_eq!(startup, expected_checkout.to_string_lossy());
         assert_eq!(
             metadata.repo_root,
             repository.path().canonicalize().unwrap().to_string_lossy()
@@ -1498,15 +2449,11 @@ mod tests {
         source.add_worktree(&checkout, "feature", "HEAD").unwrap();
         let managed_root = tempfile::tempdir().unwrap();
 
-        let error = TabWorkspaceSelection::resolve(
-            repository.path().to_string_lossy().as_ref(),
-            "other",
-            checkout.to_string_lossy().as_ref(),
-            managed_root.path(),
-        )
-        .err()
-        .unwrap();
-
+        let mut probe = WorkspaceProbe::new(managed_root.path());
+        probe.request(repository.path(), "other", checkout.to_str().unwrap());
+        probe.settle();
+        let mut errors = probe.app.world_mut().query::<&OperationError>();
+        let error = errors.iter(probe.app.world()).next().unwrap().message();
         assert!(error.contains("no longer checked out"));
     }
 }

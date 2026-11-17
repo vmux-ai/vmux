@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::agent::AgentRequestReady;
 
 use crate::host::event::AgentRequestInput;
 use crate::host::model_selection::{
@@ -28,6 +29,9 @@ pub(in crate::host) struct ConfigPlugin;
 
 impl bevy::prelude::Plugin for ConfigPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::agent::AgentRequestDispatchPlugin>() {
+            app.add_plugins(vmux_ecs::agent::AgentRequestDispatchPlugin);
+        }
         app.add_plugins(crate::host::model_selection::ModelSelectionPlugin);
         app.add_message::<AgentRequestInput>()
             .add_message::<ServiceRequest>()
@@ -50,7 +54,9 @@ impl bevy::prelude::Plugin for ConfigPlugin {
             .add_systems(
                 Update,
                 (
-                    answer_remote_model_commands.after(ServiceMessageSet),
+                    answer_remote_model_commands
+                        .after(ServiceMessageSet)
+                        .after(vmux_ecs::agent::AgentRequestDispatchSet),
                     apply_session_selection.before(ModelSelectionSet),
                     push_state_to_page,
                     remove_state,
@@ -77,7 +83,7 @@ struct SessionConfigSelectRequest {
 }
 
 fn answer_remote_model_commands(
-    mut reader: MessageReader<AgentRequestInput>,
+    mut reader: MessageReader<AgentRequestReady>,
     sessions: Query<(&SessionId, &AcpSessionConfigState), With<Session>>,
     mut selects: MessageWriter<SessionConfigSelectRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,

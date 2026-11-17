@@ -2,6 +2,7 @@ use bevy::prelude::*;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{AgentTurnEnded, ProcessId};
+use vmux_ecs::agent::AgentRequestReady;
 use vmux_ecs::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Agent, Profile};
@@ -12,31 +13,43 @@ use vmux_layout::stack::ComputeFocusSet;
 use vmux_layout::stack::Stack;
 
 use super::attention_driver::AttentionContext;
+#[cfg(test)]
 use crate::host::event::AgentRequestInput;
 use vmux_session::SessionId;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct TurnEndedSet;
 
-pub(super) fn add(app: &mut App) {
-    app.add_systems(
-        Update,
-        (
-            bell,
-            handle_turn_ended
-                .in_set(TurnEndedSet)
-                .after(ServiceMessageSet),
-        )
-            .chain()
-            .after(ComputeFocusSet),
-    )
-    .add_systems(
-        Update,
-        (mark_done, clear_done)
-            .chain()
-            .after(ComputeFocusSet)
-            .after(super::tidy::TidySet),
-    );
+pub(super) struct AttentionPlugin;
+
+impl Plugin for AttentionPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::agent::AgentRequestDispatchPlugin>() {
+            app.add_plugins(vmux_ecs::agent::AgentRequestDispatchPlugin);
+        }
+        app.add_message::<BellReceived>()
+            .add_message::<AgentAttention>()
+            .add_message::<OsNotify>()
+            .add_systems(
+                Update,
+                (
+                    bell,
+                    handle_turn_ended
+                        .in_set(TurnEndedSet)
+                        .after(vmux_ecs::agent::AgentRequestDispatchSet)
+                        .after(ServiceMessageSet),
+                )
+                    .chain()
+                    .after(ComputeFocusSet),
+            )
+            .add_systems(
+                Update,
+                (mark_done, clear_done)
+                    .chain()
+                    .after(ComputeFocusSet)
+                    .after(super::tidy::TidySet),
+            );
+    }
 }
 
 fn bell(
@@ -142,7 +155,7 @@ fn clear_done(
 }
 
 fn handle_turn_ended(
-    mut reader: MessageReader<AgentRequestInput>,
+    mut reader: MessageReader<AgentRequestReady>,
     agents: Query<(Entity, &ProcessId), With<Agent>>,
     mut attention: MessageWriter<AgentAttention>,
 ) {
@@ -171,7 +184,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<BellReceived>()
             .add_message::<AgentAttention>()
-            .add_systems(Update, bell);
+            .add_plugins(AttentionPlugin);
         app
     }
 
@@ -199,7 +212,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentRequestInput>()
             .add_message::<AgentAttention>()
-            .add_systems(Update, handle_turn_ended);
+            .add_plugins(AttentionPlugin);
         app
     }
 

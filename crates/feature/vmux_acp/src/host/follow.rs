@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use vmux_ecs::agent::AgentRequestReady;
 
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, FileTouchKind, ProcessId};
@@ -32,17 +33,38 @@ use vmux_path::FileUrl;
 use vmux_setting::AppSettings;
 
 use super::follow_driver::AgentFileLayout;
-use crate::host::event::{AgentRequestInput, CommandOrigin};
+#[cfg(test)]
+use crate::host::event::AgentRequestInput;
+use crate::host::event::CommandOrigin;
 
-pub(super) fn add(app: &mut App) {
-    app.add_systems(
-        Update,
-        (file_touch.before(TabDirectoryRebindSet), file_search)
-            .chain()
-            .in_set(WriteCommandRequests)
-            .after(ServiceMessageSet)
-            .after(super::command::CommandSet::Commands),
-    );
+pub(super) struct FollowPlugin;
+
+impl Plugin for FollowPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::agent::AgentRequestDispatchPlugin>() {
+            app.add_plugins(vmux_ecs::agent::AgentRequestDispatchPlugin);
+        }
+        app.add_message::<ActivatePane>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<OpenBesideRequest>()
+            .add_message::<TabDirectoryObserved>()
+            .add_message::<GlobalSearchRequest>()
+            .add_message::<PendingFilePreview>()
+            .add_systems(
+                Update,
+                (
+                    (collect_file_touch, file_touch)
+                        .chain()
+                        .before(TabDirectoryRebindSet),
+                    file_search,
+                )
+                    .chain()
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet)
+                    .after(super::command::CommandSet::Commands)
+                    .after(vmux_ecs::agent::AgentRequestDispatchSet),
+            );
+    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -54,6 +76,7 @@ struct AgentFileResolve<'w, 's> {
     layout: AgentFileLayout<'w, 's>,
 }
 
+#[derive(Message, Clone)]
 struct PendingFilePreview {
     anchor: ProcessId,
     agent_pane: Entity,
@@ -63,15 +86,12 @@ struct PendingFilePreview {
     kind: FileTouchKind,
 }
 
-fn file_touch(
-    mut reader: MessageReader<AgentRequestInput>,
+fn collect_file_touch(
+    mut reader: MessageReader<AgentRequestReady>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
-    mut file_view_mode: Option<MessageWriter<FileViewModeRequest>>,
+    mut previews: MessageWriter<PendingFilePreview>,
 ) {
-    let mut previews: std::collections::HashMap<Entity, Vec<PendingFilePreview>> =
-        std::collections::HashMap::new();
-    let mut request_diff_mode = false;
     for request in reader.read() {
         let Ok(Some(command)) = request.decode::<AgentFileTouched>() else {
             continue;
@@ -112,18 +132,31 @@ fn file_touch(
         if !settings.agent.follow_files {
             continue;
         }
-        request_diff_mode |= *kind == FileTouchKind::Edit;
+        previews.write(PendingFilePreview {
+            anchor: *anchor,
+            agent_pane,
+            url: FileUrl::from_path(Path::new(path), *line, *col, *end_col),
+            request_id: request.request_id.0,
+            user_origin: !request.origin.is_agent(),
+            kind: *kind,
+        });
+    }
+}
+
+fn file_touch(
+    mut reader: MessageReader<PendingFilePreview>,
+    mut resolve: AgentFileResolve,
+    mut file_view_mode: Option<MessageWriter<FileViewModeRequest>>,
+) {
+    let mut previews: std::collections::HashMap<Entity, Vec<PendingFilePreview>> =
+        std::collections::HashMap::new();
+    let mut request_diff_mode = false;
+    for preview in reader.read() {
+        request_diff_mode |= preview.kind == FileTouchKind::Edit;
         previews
-            .entry(agent_pane)
+            .entry(preview.agent_pane)
             .or_default()
-            .push(PendingFilePreview {
-                anchor: *anchor,
-                agent_pane,
-                url: FileUrl::from_path(Path::new(path), *line, *col, *end_col),
-                request_id: request.request_id.0,
-                user_origin: !request.origin.is_agent(),
-                kind: *kind,
-            });
+            .push(preview.clone());
     }
     if request_diff_mode && let Some(file_view_mode) = file_view_mode.as_mut() {
         file_view_mode.write(FileViewModeRequest(FileViewMode::Diff));
@@ -194,7 +227,7 @@ fn file_touch(
 }
 
 fn file_search(
-    mut reader: MessageReader<AgentRequestInput>,
+    mut reader: MessageReader<AgentRequestReady>,
     mut writer: MessageWriter<GlobalSearchRequest>,
 ) {
     for request in reader.read() {
@@ -243,6 +276,23 @@ mod tests {
     use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, AgentRequestId, ProcessId};
     use vmux_layout::pane::PaneSplit;
 
+    #[test]
+    fn workspace_prerequisites_compose_with_command_dispatch_and_file_follow() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_space::SpacePlugin,
+            super::super::command::CommandPlugin,
+            FollowPlugin,
+        ));
+        let mut schedule = app
+            .world_mut()
+            .resource_mut::<bevy::ecs::schedule::Schedules>()
+            .remove(Update)
+            .unwrap();
+        schedule.initialize(app.world_mut()).unwrap();
+    }
+
     #[vmux_api::agent]
     struct AgentRunProbe {
         anchor: ProcessId,
@@ -270,7 +320,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, file_touch);
+            .add_plugins(FollowPlugin);
         app
     }
 
@@ -431,7 +481,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, EditorContractPlugin))
             .add_message::<AgentRequestInput>()
-            .add_systems(Update, file_search);
+            .insert_resource(test_settings())
+            .add_plugins(FollowPlugin);
         let anchor = ProcessId::new();
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -603,7 +654,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, file_touch);
+            .add_plugins(FollowPlugin);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -649,7 +700,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(settings)
-            .add_systems(Update, file_touch);
+            .add_plugins(FollowPlugin);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -708,7 +759,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(settings)
-            .add_systems(Update, file_touch);
+            .add_plugins(FollowPlugin);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -744,29 +795,26 @@ mod tests {
         assert_eq!(cursor.read(messages).count(), 0);
     }
 
-    #[test]
-    fn edit_file_touch_rebinds_tab_in_same_frame() {
-        #[derive(Resource)]
-        struct RunTab(Entity);
+    #[derive(Component, Default)]
+    struct CapturedRunCwd(Option<PathBuf>);
 
-        #[derive(Resource, Default)]
-        struct CapturedRunCwd(Option<PathBuf>);
-
-        fn capture_run_cwd(
-            mut reader: MessageReader<AgentRequestInput>,
-            run_tab: Res<RunTab>,
-            tabs: Query<&Tab>,
-            mut captured: ResMut<CapturedRunCwd>,
-        ) {
-            for request in reader.read() {
-                if matches!(request.decode::<AgentRunProbe>(), Ok(Some(_))) {
-                    let tab = tabs.get(run_tab.0).unwrap();
-                    captured.0 =
-                        vmux_space::WorkspaceCwd::resolve(tab.startup_dir.as_deref(), None).ok();
-                }
+    fn capture_run_cwd(
+        mut reader: MessageReader<AgentRequestReady>,
+        mut tabs: Query<(&Tab, &mut CapturedRunCwd)>,
+    ) {
+        for request in reader.read() {
+            if !matches!(request.decode::<AgentRunProbe>(), Ok(Some(_))) {
+                continue;
+            }
+            for (tab, mut captured) in &mut tabs {
+                captured.0 =
+                    vmux_space::WorkspaceCwd::resolve(tab.startup_dir.as_deref(), None).ok();
             }
         }
+    }
 
+    #[test]
+    fn edit_file_touch_rebinds_tab_in_same_frame() {
         let current = TestRepo::new("current");
         let observed = TestRepo::new("observed");
         let expected = observed
@@ -786,23 +834,19 @@ mod tests {
         ))
         .add_message::<AgentRequestInput>()
         .add_message::<PageOpenRequest>()
-        .init_resource::<CapturedRunCwd>()
         .insert_resource(settings)
-        .add_systems(
-            Update,
-            (
-                file_touch.before(TabDirectoryRebindSet),
-                capture_run_cwd.after(TabDirectoryRebindSet),
-            ),
-        );
+        .add_plugins(FollowPlugin)
+        .add_systems(Update, capture_run_cwd.after(TabDirectoryRebindSet));
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "test".into(),
-                startup_dir: Some(current.path().to_string_lossy().into_owned()),
-            })
+            .spawn((
+                Tab {
+                    name: "test".into(),
+                    startup_dir: Some(current.path().to_string_lossy().into_owned()),
+                },
+                CapturedRunCwd::default(),
+            ))
             .id();
-        app.insert_resource(RunTab(tab));
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
         let anchor = ProcessId::new();
@@ -847,7 +891,7 @@ mod tests {
             Some(expected.as_str())
         );
         assert_eq!(
-            app.world().resource::<CapturedRunCwd>().0.as_deref(),
+            app.world().get::<CapturedRunCwd>(tab).unwrap().0.as_deref(),
             Some(observed.path().canonicalize().unwrap().as_path())
         );
     }

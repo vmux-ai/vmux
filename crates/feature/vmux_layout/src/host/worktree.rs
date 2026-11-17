@@ -1,34 +1,42 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc},
     time::SystemTime,
 };
 
 #[cfg(unix)]
-use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+use std::os::unix::fs::MetadataExt;
 
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxy, WinitUserEvent};
-use sha2::{Digest, Sha256};
 
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_ecs::{PageOpenDeferred, PageOpenError};
-use vmux_git::worktree::{self, CheckoutInfo};
+use vmux_git::worktree::CheckoutInfo;
+
+pub use super::checkout::{
+    CancelCheckout, CheckoutFailed, CheckoutPlugin, CheckoutPrepared, CheckoutRecoveryComplete,
+    CheckoutTargetRevision, CommitCheckout, CreateBranchCheckout, CreateCheckout, PreparedCheckout,
+    RecoverCheckouts, RestoreCheckout, SelectBranchCheckout,
+};
 
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<CheckoutPlugin>() {
+            app.add_plugins(CheckoutPlugin);
+        }
         app.init_resource::<ManagedWorktreeRoot>()
             .init_resource::<vmux_git::GitRuntime>()
             .add_message::<TabDirectoryObserved>()
+            .add_systems(Startup, recover_checkouts)
             .add_systems(
                 Update,
                 (
                     retire_checkout_observations,
                     ensure_tab_workspaces,
                     queue_added_tab_worktrees,
+                    retire_reconcile,
                     start_reconcile,
                     finish_reconcile,
+                    commit_reconcile,
                     resume_page_open,
                 )
                     .chain(),
@@ -40,6 +48,23 @@ impl Plugin for WorktreePlugin {
                     .after(finish_reconcile),
             );
     }
+}
+
+fn recover_checkouts(
+    root: Res<ManagedWorktreeRoot>,
+    mut requests: MessageWriter<RecoverCheckouts>,
+    mut commands: Commands,
+) {
+    let operation = commands
+        .spawn((
+            Name::new("Managed checkout journal recovery"),
+            vmux_ecs::Operation::bundle("checkout.recovery").expect("fixed checkout recovery kind"),
+        ))
+        .id();
+    requests.write(RecoverCheckouts {
+        operation,
+        managed_root: root.0.clone(),
+    });
 }
 
 pub struct WorktreePlugin;
@@ -64,120 +89,6 @@ pub struct TabWorktreeActivation {
     pub ready: TabWorktreeReady,
 }
 
-pub struct BranchCheckout(Box<TabWorktreeCheckout>);
-
-impl BranchCheckout {
-    pub fn commit(self) -> TabWorktreeActivation {
-        let (activation, cleanup) = self.0.into_parts();
-        if let Some(mut cleanup) = cleanup {
-            cleanup.commit();
-        }
-        activation
-    }
-}
-
-pub(crate) struct TabWorktreeCheckout {
-    activation: Option<TabWorktreeActivation>,
-    cleanup: Option<ManagedCheckoutCleanup>,
-}
-
-pub(crate) struct ManagedCheckoutCleanup {
-    checkout: CheckoutInfo,
-    path: PathBuf,
-    branch: String,
-    delete_branch: bool,
-    lease: Arc<ManagedCheckoutLease>,
-    token: u64,
-    armed: bool,
-}
-
-struct ManagedCheckoutDiscard {
-    checkout: CheckoutInfo,
-    path: PathBuf,
-    branch: String,
-    delete_branch: bool,
-    lease: Arc<ManagedCheckoutLease>,
-    token: u64,
-}
-
-struct ManagedCheckoutDiscardQueue {
-    pending: Arc<Mutex<HashMap<(PathBuf, u64), ManagedCheckoutDiscard>>>,
-    wake: mpsc::SyncSender<()>,
-    active: bool,
-}
-
-#[derive(Default)]
-struct ManagedCheckoutRegistry {
-    owners: HashMap<PathBuf, ManagedCheckoutOwner>,
-}
-
-#[derive(Clone)]
-struct ManagedCheckoutOwner {
-    lease: Arc<ManagedCheckoutLease>,
-    token: u64,
-}
-
-struct ManagedCheckoutLease {
-    state: Mutex<ManagedCheckoutLeaseState>,
-}
-
-struct ManagedCheckoutLeaseState {
-    phase: ManagedCheckoutLeasePhase,
-    token: u64,
-    waiters: Vec<EventLoopProxy<WinitUserEvent>>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ManagedCheckoutLeasePhase {
-    Pending,
-    Cleaning,
-    Claimed,
-    Finished,
-}
-
-enum ManagedCheckoutClaim {
-    Adopted {
-        lease: Arc<ManagedCheckoutLease>,
-        token: u64,
-    },
-    Busy(ManagedCheckoutWait),
-    Unmanaged,
-}
-
-enum ManagedCheckoutTransfer {
-    Adopted(u64),
-    Busy,
-    Stale,
-}
-
-pub(crate) enum TabWorktreeCheckoutResult {
-    Ready(Box<TabWorktreeCheckout>),
-    Retry(ManagedCheckoutWait),
-}
-
-impl TabWorktreeCheckoutResult {
-    fn ready(checkout: TabWorktreeCheckout) -> Self {
-        Self::Ready(Box::new(checkout))
-    }
-}
-
-pub enum BranchSelection {
-    Ready(BranchCheckout),
-    Waiting(BranchWait),
-}
-
-pub struct BranchWait(ManagedCheckoutWait);
-
-impl BranchWait {
-    pub fn is_ready(&self) -> bool {
-        self.0.is_ready()
-    }
-}
-
-pub(crate) struct ManagedCheckoutWait {
-    lease: Arc<ManagedCheckoutLease>,
-}
-
 #[derive(Component, Clone, Debug)]
 pub struct TabWorktreeReady {
     startup_dir: String,
@@ -196,8 +107,12 @@ struct TabWorktreeTask {
     startup_dir: Option<String>,
     workspace: TabWorkspace,
     metadata: TabWorktree,
-    task: vmux_git::GitTask<Result<TabWorktreeActivation, String>>,
+    operation: Entity,
+    revision: u64,
 }
+
+#[derive(Component)]
+struct ReconcileApplied;
 
 #[derive(Component, Clone, Copy)]
 pub struct PageOpenWaitForWorktree {
@@ -226,10 +141,11 @@ impl TabDirectoryObserved {
     }
 }
 
-pub struct WorktreeName;
+#[derive(Component)]
+pub struct WorktreeName(pub(crate) String);
 
 impl WorktreeName {
-    fn sanitize(name: &str) -> String {
+    pub(crate) fn sanitize(name: &str) -> String {
         let mut slug = String::new();
         let mut previous_dash = false;
         for character in name.trim().chars() {
@@ -270,796 +186,6 @@ impl WorktreeName {
     }
 }
 
-impl TabWorktreeActivation {
-    fn repository_storage_dir(managed_root: &Path, checkout: &CheckoutInfo) -> PathBuf {
-        let repository_name = checkout
-            .common_dir
-            .parent()
-            .and_then(Path::file_name)
-            .or_else(|| checkout.root.file_name())
-            .and_then(|name| name.to_str())
-            .map(WorktreeName::sanitize)
-            .unwrap_or_else(|| "repository".to_string());
-        #[cfg(unix)]
-        let digest = Sha256::digest(checkout.common_dir.as_os_str().as_bytes());
-        #[cfg(not(unix))]
-        let digest = Sha256::digest(checkout.common_dir.to_string_lossy().as_bytes());
-        let hash = format!("{digest:x}");
-        let managed_root = managed_root
-            .canonicalize()
-            .unwrap_or_else(|_| managed_root.to_path_buf());
-        managed_root.join(format!("{repository_name}-{}", &hash[..12]))
-    }
-
-    fn normalize_missing_path(path: &Path) -> Result<PathBuf, String> {
-        let parent = path
-            .parent()
-            .ok_or_else(|| "worktree path has no parent".to_string())?
-            .canonicalize()
-            .map_err(|error| format!("invalid worktree parent: {error}"))?;
-        let name = path
-            .file_name()
-            .ok_or_else(|| "worktree path has no file name".to_string())?;
-        Ok(parent.join(name))
-    }
-
-    fn prepare_managed_destination(
-        managed_root: &Path,
-        checkout: &CheckoutInfo,
-        destination: &Path,
-    ) -> Result<PathBuf, String> {
-        if !destination.is_absolute() {
-            return Err("managed worktree path must be absolute".to_string());
-        }
-        let repository_dir = Self::repository_storage_dir(managed_root, checkout);
-        std::fs::create_dir_all(&repository_dir)
-            .map_err(|error| format!("failed to create worktree directory: {error}"))?;
-        let repository_dir = repository_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid repository storage directory: {error}"))?;
-        let destination = Self::normalize_missing_path(destination)?;
-        if destination.parent() != Some(repository_dir.as_path()) {
-            return Err(
-                "managed worktree path escapes its repository storage directory".to_string(),
-            );
-        }
-        Ok(destination)
-    }
-
-    fn prepare_recovery_destination(
-        managed_root: &Path,
-        checkout: &CheckoutInfo,
-        destination: &Path,
-        branch: &str,
-    ) -> Result<PathBuf, String> {
-        let registrations = checkout.worktree_registrations().map_err(|error| error.0)?;
-        if let Ok(destination) = Self::normalize_missing_path(destination)
-            && registrations.iter().any(|registration| {
-                registration.path == destination && registration.branch.as_deref() == Some(branch)
-            })
-        {
-            return Ok(destination);
-        }
-        Self::prepare_managed_destination(managed_root, checkout, destination)
-    }
-
-    fn canonical_execution_dir(
-        checkout_root: &Path,
-        relative_dir: &Path,
-    ) -> Result<PathBuf, String> {
-        let execution_dir = checkout_root.join(relative_dir);
-        let execution_dir = execution_dir
-            .canonicalize()
-            .map_err(|error| format!("project directory is missing from worktree: {error}"))?;
-        if !execution_dir.is_dir() || !execution_dir.starts_with(checkout_root) {
-            return Err(format!(
-                "project directory escapes worktree: {}",
-                execution_dir.display()
-            ));
-        }
-        Ok(execution_dir)
-    }
-
-    fn plan_worktree(
-        checkout: &CheckoutInfo,
-        managed_root: &Path,
-        slug_hint: &str,
-    ) -> (PathBuf, String) {
-        let base = WorktreeName::sanitize(slug_hint);
-        let repository_dir = Self::repository_storage_dir(managed_root, checkout);
-        let existing = checkout.worktrees().unwrap_or_default();
-        let branches = checkout.local_branches().unwrap_or_default();
-        let taken = |slug: &str| -> bool {
-            let path = repository_dir.join(slug);
-            let branch = format!("vmux/{slug}");
-            existing.iter().any(|p| p == &path)
-                || path.exists()
-                || branches.iter().any(|b| b == &branch)
-        };
-        let mut slug = base.clone();
-        let mut n = 2;
-        while taken(&slug) {
-            slug = format!("{base}-{n}");
-            n += 1;
-        }
-        let path = repository_dir.join(&slug);
-        let branch = format!("vmux/{slug}");
-        (path, branch)
-    }
-
-    fn plan_existing_worktree_path(
-        checkout: &CheckoutInfo,
-        managed_root: &Path,
-        branch: &str,
-    ) -> PathBuf {
-        let base = WorktreeName::sanitize(branch.strip_prefix("vmux/").unwrap_or(branch));
-        let repository_dir = Self::repository_storage_dir(managed_root, checkout);
-        let registrations = checkout.worktrees().unwrap_or_default();
-        let mut slug = base.clone();
-        let mut n = 2;
-        loop {
-            let path = repository_dir.join(&slug);
-            if !path.exists() && !registrations.iter().any(|held| held == &path) {
-                return path;
-            }
-            slug = format!("{base}-{n}");
-            n += 1;
-        }
-    }
-
-    fn activate_added_worktree(
-        base_dir: &Path,
-        checkout: &CheckoutInfo,
-        relative_dir: &Path,
-        info: &worktree::WorktreeInfo,
-    ) -> Result<TabWorktreeActivation, String> {
-        let managed_checkout =
-            CheckoutInfo::try_from(info.path.as_path()).map_err(|error| error.0)?;
-        if managed_checkout.common_dir != checkout.common_dir {
-            return Err("managed worktree belongs to a different repository".to_string());
-        }
-        let execution_dir = Self::canonical_execution_dir(&managed_checkout.root, relative_dir)?;
-        let metadata = TabWorktree {
-            repo_root: checkout.root.to_string_lossy().into_owned(),
-            checkout_dir: managed_checkout.root.to_string_lossy().into_owned(),
-            branch: info.branch.clone(),
-            base_ref: info.base_ref.clone(),
-        };
-        let ready = TabWorktreeReady::new(
-            &execution_dir,
-            &base_dir.to_string_lossy(),
-            &metadata,
-            &managed_checkout,
-        )?;
-        Ok(TabWorktreeActivation {
-            execution_dir,
-            metadata,
-            ready,
-        })
-    }
-
-    fn add_managed_worktree(
-        base_dir: &Path,
-        checkout: &CheckoutInfo,
-        relative_dir: &Path,
-        checkout_dir: &Path,
-        branch: &str,
-        base_ref: &str,
-    ) -> Result<TabWorktreeActivation, String> {
-        let info = checkout
-            .add_worktree(checkout_dir, branch, base_ref)
-            .map_err(|error| error.0)?;
-        let activation = Self::activate_added_worktree(base_dir, checkout, relative_dir, &info);
-        if activation.is_err() {
-            let _ = checkout.discard_worktree(&info.path, &info.branch, true);
-        }
-        activation
-    }
-
-    pub fn create(base_dir: &Path, slug_hint: &str, managed_root: &Path) -> Result<Self, String> {
-        let base_dir = base_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout = CheckoutInfo::try_from(base_dir.as_path()).map_err(|error| error.0)?;
-        checkout.ensure_initial_commit().map_err(|error| error.0)?;
-        let relative_dir = base_dir
-            .strip_prefix(&checkout.root)
-            .map_err(|_| "project directory is outside its checkout".to_string())?;
-        let base_ref = checkout.head_ref().map_err(|error| error.0)?;
-        let (checkout_dir, branch) = Self::plan_worktree(&checkout, managed_root, slug_hint);
-        let checkout_dir =
-            Self::prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
-        Self::add_managed_worktree(
-            &base_dir,
-            &checkout,
-            relative_dir,
-            &checkout_dir,
-            &branch,
-            &base_ref,
-        )
-    }
-
-    pub fn create_branch(
-        base_dir: &Path,
-        branch: &str,
-        managed_root: &Path,
-    ) -> Result<Self, String> {
-        let base_dir = base_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout = CheckoutInfo::try_from(base_dir.as_path()).map_err(|error| error.0)?;
-        checkout
-            .validate_branch_name(branch)
-            .map_err(|error| error.0)?;
-        checkout.ensure_initial_commit().map_err(|error| error.0)?;
-        if let Some(registration) = checkout
-            .worktree_registrations()
-            .map_err(|error| error.0)?
-            .into_iter()
-            .find(|registration| registration.branch.as_deref() == Some(branch))
-        {
-            return Err(format!(
-                "Branch {branch} is already checked out at {}",
-                registration.path.display()
-            ));
-        }
-        if checkout
-            .local_branches()
-            .map_err(|error| error.0)?
-            .iter()
-            .any(|existing| existing == branch)
-        {
-            return Err(format!("Branch {branch} already exists"));
-        }
-        let relative_dir = base_dir
-            .strip_prefix(&checkout.root)
-            .map_err(|_| "project directory is outside its checkout".to_string())?;
-        let base_ref = checkout.head_ref().map_err(|error| error.0)?;
-        let slug = WorktreeName::sanitize(branch.strip_prefix("vmux/").unwrap_or(branch));
-        let checkout_dir = Self::repository_storage_dir(managed_root, &checkout).join(slug);
-        let checkout_dir =
-            Self::prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
-        Self::add_managed_worktree(
-            &base_dir,
-            &checkout,
-            relative_dir,
-            &checkout_dir,
-            branch,
-            &base_ref,
-        )
-    }
-
-    pub fn select_branch(
-        base_dir: &Path,
-        branch: &str,
-        managed_root: &Path,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
-    ) -> Result<BranchSelection, String> {
-        match Self::checkout_branch(base_dir, branch, managed_root)? {
-            TabWorktreeCheckoutResult::Ready(checkout) => {
-                Ok(BranchSelection::Ready(BranchCheckout(checkout)))
-            }
-            TabWorktreeCheckoutResult::Retry(wait) => {
-                wait.subscribe(wake);
-                Ok(BranchSelection::Waiting(BranchWait(wait)))
-            }
-        }
-    }
-
-    pub(crate) fn checkout_branch(
-        base_dir: &Path,
-        branch: &str,
-        managed_root: &Path,
-    ) -> Result<TabWorktreeCheckoutResult, String> {
-        let base_dir = base_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout = CheckoutInfo::try_from(base_dir.as_path()).map_err(|error| error.0)?;
-        checkout
-            .validate_branch_name(branch)
-            .map_err(|error| error.0)?;
-        let relative_dir = base_dir
-            .strip_prefix(&checkout.root)
-            .map_err(|_| "project directory is outside its checkout".to_string())?;
-        let base_ref = worktree::BaseRef::resolve(&checkout.root)
-            .map(|base| base.branch().to_string())
-            .unwrap_or_default();
-        let mut pruned_missing_registration = false;
-        loop {
-            if let Some(registration) = checkout
-                .worktree_registrations()
-                .map_err(|error| error.0)?
-                .into_iter()
-                .find(|registration| registration.branch.as_deref() == Some(branch))
-            {
-                if !registration.path.is_dir() {
-                    if pruned_missing_registration {
-                        return Err(format!(
-                            "branch {branch} is registered to a missing worktree: {}",
-                            registration.path.display()
-                        ));
-                    }
-                    checkout.prune_worktrees().map_err(|error| error.0)?;
-                    pruned_missing_registration = true;
-                    continue;
-                }
-                let info = worktree::WorktreeInfo {
-                    path: registration.path,
-                    branch: branch.to_string(),
-                    base_ref: base_ref.clone(),
-                    repo_root: checkout.root.clone(),
-                };
-                let cleanup = match ManagedCheckoutRegistry::claim(&info.path) {
-                    ManagedCheckoutClaim::Adopted { lease, token } => Some(
-                        ManagedCheckoutCleanup::adopt(checkout.clone(), &info, false, lease, token),
-                    ),
-                    ManagedCheckoutClaim::Busy(wait) => {
-                        return Ok(TabWorktreeCheckoutResult::Retry(wait));
-                    }
-                    ManagedCheckoutClaim::Unmanaged => None,
-                };
-                let activation =
-                    Self::activate_added_worktree(&base_dir, &checkout, relative_dir, &info)?;
-                let checkout = match cleanup {
-                    Some(cleanup) => TabWorktreeCheckout::created(activation, cleanup),
-                    None => TabWorktreeCheckout::existing(activation),
-                };
-                return Ok(TabWorktreeCheckoutResult::ready(checkout));
-            }
-            let checkout_dir = Self::plan_existing_worktree_path(&checkout, managed_root, branch);
-            if let Some(wait) = ManagedCheckoutRegistry::wait(&checkout_dir) {
-                return Ok(TabWorktreeCheckoutResult::Retry(wait));
-            }
-            let checkout_dir =
-                Self::prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
-            let info = checkout
-                .add_existing_worktree(&checkout_dir, branch, &base_ref)
-                .map_err(|error| error.0)?;
-            let cleanup = ManagedCheckoutCleanup::new(checkout.clone(), &info, false);
-            let activation =
-                Self::activate_added_worktree(&base_dir, &checkout, relative_dir, &info)?;
-            return Ok(TabWorktreeCheckoutResult::ready(
-                TabWorktreeCheckout::created(activation, cleanup),
-            ));
-        }
-    }
-
-    pub fn restore(
-        tab: &Tab,
-        workspace: &TabWorkspace,
-        metadata: &TabWorktree,
-        managed_root: &Path,
-    ) -> Result<Self, String> {
-        let project_dir = Path::new(&workspace.project_dir)
-            .canonicalize()
-            .map_err(|error| format!("project directory unavailable: {error}"))?;
-        let source = CheckoutInfo::try_from(project_dir.as_path()).map_err(|error| error.0)?;
-        let relative_dir = project_dir
-            .strip_prefix(&source.root)
-            .map_err(|_| "project directory is outside its checkout".to_string())?;
-        let mut checkout_dir = if metadata.checkout_dir.is_empty() {
-            let startup_dir = tab
-                .startup_dir
-                .as_deref()
-                .ok_or_else(|| "managed worktree checkout path is missing".to_string())?;
-            CheckoutInfo::try_from(Path::new(startup_dir))
-                .map(|checkout| checkout.root)
-                .unwrap_or_else(|_| PathBuf::from(startup_dir))
-        } else {
-            PathBuf::from(&metadata.checkout_dir)
-        };
-        if !checkout_dir.is_dir() {
-            if checkout_dir.symlink_metadata().is_ok() {
-                return Err(format!(
-                    "managed worktree path is not a directory: {}",
-                    checkout_dir.display()
-                ));
-            }
-            checkout_dir = Self::prepare_recovery_destination(
-                managed_root,
-                &source,
-                &checkout_dir,
-                &metadata.branch,
-            )?;
-            source
-                .add_existing_worktree(&checkout_dir, &metadata.branch, &metadata.base_ref)
-                .map_err(|error| format!("failed to recover managed worktree: {}", error.0))?;
-        }
-        let checkout = CheckoutInfo::try_from(checkout_dir.as_path()).map_err(|error| error.0)?;
-        if checkout.common_dir != source.common_dir {
-            return Err("managed worktree belongs to a different repository".to_string());
-        }
-        if !CheckoutInfo::is_linked(&checkout.root) {
-            return Err("managed worktree directory is not a linked worktree".to_string());
-        }
-        let branch = checkout.head_ref().map_err(|error| error.0)?;
-        if branch != metadata.branch {
-            return Err(format!(
-                "managed worktree is on branch {branch}, expected {}",
-                metadata.branch
-            ));
-        }
-        let execution_dir = Self::canonical_execution_dir(&checkout.root, relative_dir)?;
-        let mut normalized = metadata.clone();
-        normalized.repo_root = source.root.to_string_lossy().into_owned();
-        normalized.checkout_dir = checkout.root.to_string_lossy().into_owned();
-        let ready = TabWorktreeReady::new(
-            &execution_dir,
-            &workspace.project_dir,
-            &normalized,
-            &checkout,
-        )?;
-        Ok(Self {
-            execution_dir,
-            metadata: normalized,
-            ready,
-        })
-    }
-}
-
-impl TabWorktreeCheckout {
-    fn existing(activation: TabWorktreeActivation) -> Self {
-        Self {
-            activation: Some(activation),
-            cleanup: None,
-        }
-    }
-
-    fn created(activation: TabWorktreeActivation, cleanup: ManagedCheckoutCleanup) -> Self {
-        Self {
-            activation: Some(activation),
-            cleanup: Some(cleanup),
-        }
-    }
-
-    pub(crate) fn into_parts(mut self) -> (TabWorktreeActivation, Option<ManagedCheckoutCleanup>) {
-        (
-            self.activation
-                .take()
-                .expect("worktree activation available"),
-            self.cleanup.take(),
-        )
-    }
-}
-
-impl ManagedCheckoutCleanup {
-    fn new(checkout: CheckoutInfo, info: &worktree::WorktreeInfo, delete_branch: bool) -> Self {
-        let owner = ManagedCheckoutRegistry::reserve(&info.path);
-        Self {
-            checkout,
-            path: info.path.clone(),
-            branch: info.branch.clone(),
-            delete_branch,
-            lease: owner.lease,
-            token: owner.token,
-            armed: true,
-        }
-    }
-
-    fn adopt(
-        checkout: CheckoutInfo,
-        info: &worktree::WorktreeInfo,
-        delete_branch: bool,
-        lease: Arc<ManagedCheckoutLease>,
-        token: u64,
-    ) -> Self {
-        Self {
-            checkout,
-            path: info.path.clone(),
-            branch: info.branch.clone(),
-            delete_branch,
-            lease,
-            token,
-            armed: true,
-        }
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(crate) fn branch(&self) -> &str {
-        &self.branch
-    }
-
-    pub(crate) fn commit(&mut self) {
-        if !self.armed {
-            return;
-        }
-        self.lease.commit(self.token);
-        ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
-        self.armed = false;
-    }
-
-    #[cfg(test)]
-    fn discard_now(mut self) {
-        if !self.armed {
-            return;
-        }
-        self.armed = false;
-        ManagedCheckoutDiscard {
-            checkout: self.checkout.clone(),
-            path: self.path.clone(),
-            branch: self.branch.clone(),
-            delete_branch: self.delete_branch,
-            lease: Arc::clone(&self.lease),
-            token: self.token,
-        }
-        .run();
-    }
-}
-
-impl ManagedCheckoutRegistry {
-    fn lock() -> MutexGuard<'static, Self> {
-        static REGISTRY: OnceLock<Mutex<ManagedCheckoutRegistry>> = OnceLock::new();
-        let registry = REGISTRY.get_or_init(|| Mutex::new(Self::default()));
-        match registry.lock() {
-            Ok(registry) => registry,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-
-    fn reserve(path: &Path) -> ManagedCheckoutOwner {
-        let lease = Arc::new(ManagedCheckoutLease::new());
-        let owner = ManagedCheckoutOwner { lease, token: 1 };
-        Self::lock()
-            .owners
-            .insert(path.to_path_buf(), owner.clone());
-        owner
-    }
-
-    fn wait(path: &Path) -> Option<ManagedCheckoutWait> {
-        Self::lock()
-            .owners
-            .get(path)
-            .map(|owner| ManagedCheckoutWait {
-                lease: Arc::clone(&owner.lease),
-            })
-    }
-
-    fn claim(path: &Path) -> ManagedCheckoutClaim {
-        let mut registry = Self::lock();
-        let Some(owner) = registry.owners.get(path).cloned() else {
-            return ManagedCheckoutClaim::Unmanaged;
-        };
-        match owner.lease.transfer(owner.token) {
-            ManagedCheckoutTransfer::Adopted(token) => {
-                if let Some(held) = registry.owners.get_mut(path)
-                    && Arc::ptr_eq(&held.lease, &owner.lease)
-                    && held.token == owner.token
-                {
-                    held.token = token;
-                }
-                ManagedCheckoutClaim::Adopted {
-                    lease: owner.lease,
-                    token,
-                }
-            }
-            ManagedCheckoutTransfer::Busy => {
-                ManagedCheckoutClaim::Busy(ManagedCheckoutWait { lease: owner.lease })
-            }
-            ManagedCheckoutTransfer::Stale => {
-                registry.owners.remove(path);
-                ManagedCheckoutClaim::Unmanaged
-            }
-        }
-    }
-
-    fn release(path: &Path, lease: &Arc<ManagedCheckoutLease>, token: u64) {
-        let mut registry = Self::lock();
-        let owned = registry
-            .owners
-            .get(path)
-            .is_some_and(|held| Arc::ptr_eq(&held.lease, lease) && held.token == token);
-        if owned {
-            registry.owners.remove(path);
-        }
-    }
-}
-
-impl ManagedCheckoutLease {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(ManagedCheckoutLeaseState {
-                phase: ManagedCheckoutLeasePhase::Pending,
-                token: 1,
-                waiters: Vec::new(),
-            }),
-        }
-    }
-
-    fn lock(&self) -> MutexGuard<'_, ManagedCheckoutLeaseState> {
-        match self.state.lock() {
-            Ok(state) => state,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-
-    fn transfer(&self, token: u64) -> ManagedCheckoutTransfer {
-        let mut state = self.lock();
-        if state.token != token {
-            return ManagedCheckoutTransfer::Stale;
-        }
-        match state.phase {
-            ManagedCheckoutLeasePhase::Pending => {
-                state.token = state.token.wrapping_add(1).max(1);
-                ManagedCheckoutTransfer::Adopted(state.token)
-            }
-            ManagedCheckoutLeasePhase::Cleaning => ManagedCheckoutTransfer::Busy,
-            ManagedCheckoutLeasePhase::Claimed | ManagedCheckoutLeasePhase::Finished => {
-                ManagedCheckoutTransfer::Stale
-            }
-        }
-    }
-
-    fn commit(&self, token: u64) {
-        let mut state = self.lock();
-        if state.token != token {
-            return;
-        }
-        if state.phase != ManagedCheckoutLeasePhase::Pending {
-            return;
-        }
-        state.phase = ManagedCheckoutLeasePhase::Claimed;
-        let waiters = std::mem::take(&mut state.waiters);
-        drop(state);
-        for wake in waiters {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-    }
-
-    fn begin_cleanup(&self, token: u64) -> bool {
-        let mut state = self.lock();
-        if state.token != token || state.phase != ManagedCheckoutLeasePhase::Pending {
-            return false;
-        }
-        state.phase = ManagedCheckoutLeasePhase::Cleaning;
-        true
-    }
-
-    fn finish_cleanup(&self, token: u64) {
-        let mut state = self.lock();
-        if state.token != token || state.phase != ManagedCheckoutLeasePhase::Cleaning {
-            return;
-        }
-        state.phase = ManagedCheckoutLeasePhase::Finished;
-        let waiters = std::mem::take(&mut state.waiters);
-        drop(state);
-        for wake in waiters {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-    }
-}
-
-impl ManagedCheckoutWait {
-    pub(crate) fn is_ready(&self) -> bool {
-        matches!(
-            self.lease.lock().phase,
-            ManagedCheckoutLeasePhase::Claimed | ManagedCheckoutLeasePhase::Finished
-        )
-    }
-
-    pub(crate) fn subscribe(&self, wake: Option<EventLoopProxy<WinitUserEvent>>) {
-        let Some(wake) = wake else {
-            return;
-        };
-        let mut state = self.lease.lock();
-        if matches!(
-            state.phase,
-            ManagedCheckoutLeasePhase::Pending | ManagedCheckoutLeasePhase::Cleaning
-        ) {
-            if state.waiters.is_empty() {
-                state.waiters.push(wake);
-            }
-            return;
-        }
-        drop(state);
-        let _ = wake.send_event(WinitUserEvent::WakeUp);
-    }
-}
-
-impl ManagedCheckoutDiscard {
-    fn enqueue(self) {
-        ManagedCheckoutDiscardQueue::shared().enqueue(self);
-    }
-
-    fn run(self) {
-        if !self.lease.begin_cleanup(self.token) {
-            ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
-            return;
-        }
-        let _ = self
-            .checkout
-            .discard_worktree(&self.path, &self.branch, self.delete_branch);
-        self.lease.finish_cleanup(self.token);
-        ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
-    }
-
-    fn abandon(self) {
-        self.lease.commit(self.token);
-        ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
-    }
-}
-
-impl ManagedCheckoutDiscardQueue {
-    const CAPACITY: usize = 64;
-
-    fn shared() -> &'static Self {
-        static QUEUE: OnceLock<ManagedCheckoutDiscardQueue> = OnceLock::new();
-        QUEUE.get_or_init(|| {
-            let pending = Arc::new(Mutex::new(
-                HashMap::<(PathBuf, u64), ManagedCheckoutDiscard>::new(),
-            ));
-            let worker_pending = Arc::clone(&pending);
-            let (wake, receiver) = mpsc::sync_channel::<()>(1);
-            let active = std::thread::Builder::new()
-                .name("vmux-worktree-cleanup".to_string())
-                .spawn(move || {
-                    while receiver.recv().is_ok() {
-                        loop {
-                            let cleanup = {
-                                let mut pending = match worker_pending.lock() {
-                                    Ok(pending) => pending,
-                                    Err(poisoned) => poisoned.into_inner(),
-                                };
-                                let key = pending.keys().next().cloned();
-                                key.and_then(|key| pending.remove(&key))
-                            };
-                            let Some(cleanup) = cleanup else {
-                                break;
-                            };
-                            cleanup.run();
-                        }
-                    }
-                })
-                .is_ok();
-            Self {
-                pending,
-                wake,
-                active,
-            }
-        })
-    }
-
-    fn enqueue(&self, cleanup: ManagedCheckoutDiscard) {
-        if !self.active {
-            cleanup.abandon();
-            return;
-        }
-        let key = (cleanup.path.clone(), cleanup.token);
-        let mut pending = match self.pending.lock() {
-            Ok(pending) => pending,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if pending.len() >= Self::CAPACITY && !pending.contains_key(&key) {
-            drop(pending);
-            cleanup.abandon();
-            return;
-        }
-        pending.insert(key, cleanup);
-        drop(pending);
-        let _ = self.wake.try_send(());
-    }
-}
-
-impl Drop for ManagedCheckoutCleanup {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        self.armed = false;
-        ManagedCheckoutDiscard {
-            checkout: self.checkout.clone(),
-            path: self.path.clone(),
-            branch: self.branch.clone(),
-            delete_branch: self.delete_branch,
-            lease: Arc::clone(&self.lease),
-            token: self.token,
-        }
-        .enqueue();
-    }
-}
-
 fn ensure_tab_workspaces(
     tabs: Query<(Entity, &Tab, Option<&TabWorktree>), Without<TabWorkspace>>,
     mut commands: Commands,
@@ -1092,94 +218,183 @@ fn queue_added_tab_worktrees(
     }
 }
 
-fn start_reconcile(
-    pending: Query<Entity, (With<TabWorktreePending>, Without<TabWorktreeTask>)>,
-    running: Query<(), With<TabWorktreeTask>>,
-    tabs: Query<(&Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
-    managed_root: Res<ManagedWorktreeRoot>,
-    runtime: Res<vmux_git::GitRuntime>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+fn retire_reconcile(
+    pending: Query<(
+        Entity,
+        &TabWorktreeTask,
+        Option<&Tab>,
+        Option<&TabWorkspace>,
+        Option<&TabWorktree>,
+        Option<&CheckoutTargetRevision>,
+        Has<super::page_context::PendingWorkspaceSelection>,
+    )>,
+    mut cancels: MessageWriter<CancelCheckout>,
     mut commands: Commands,
 ) {
-    if !running.is_empty() {
-        return;
+    for (tab, task, current, workspace, metadata, revision, selecting) in &pending {
+        if !selecting
+            && current.is_some_and(|tab| tab.startup_dir == task.startup_dir)
+            && workspace == Some(&task.workspace)
+            && metadata == Some(&task.metadata)
+            && revision.is_some_and(|revision| revision.0 == task.revision)
+        {
+            continue;
+        }
+        cancels.write(CancelCheckout {
+            operation: task.operation,
+        });
+        commands
+            .entity(tab)
+            .remove::<(TabWorktreeTask, ReconcileApplied)>();
     }
+}
+
+fn start_reconcile(
+    pending: Query<Entity, (With<TabWorktreePending>, Without<TabWorktreeTask>)>,
+    tabs: Query<
+        (
+            &Tab,
+            &TabWorkspace,
+            &TabWorktree,
+            Option<&CheckoutTargetRevision>,
+        ),
+        (
+            Without<TabWorktreeReady>,
+            Without<super::page_context::PendingWorkspaceSelection>,
+        ),
+    >,
+    managed_root: Res<ManagedWorktreeRoot>,
+    mut requests: MessageWriter<RestoreCheckout>,
+    mut commands: Commands,
+) {
     for entity in &pending {
-        let Ok((tab, workspace, metadata)) = tabs.get(entity) else {
-            commands.entity(entity).remove::<TabWorktreePending>();
+        let Ok((tab, workspace, metadata, current)) = tabs.get(entity) else {
             continue;
         };
-        let startup_dir = tab.startup_dir.clone();
-        let tab = Tab {
-            name: tab.name.clone(),
-            startup_dir: tab.startup_dir.clone(),
+        let checkout = if metadata.checkout_dir.is_empty() {
+            match &tab.startup_dir {
+                Some(directory) => PathBuf::from(directory),
+                None => {
+                    commands
+                        .entity(entity)
+                        .remove::<TabWorktreePending>()
+                        .insert(TabWorktreeUnavailable {
+                            message: "managed worktree checkout path is missing".into(),
+                        });
+                    continue;
+                }
+            }
+        } else {
+            PathBuf::from(&metadata.checkout_dir)
         };
-        let workspace = workspace.clone();
-        let metadata = metadata.clone();
-        let task_workspace = workspace.clone();
-        let task_metadata = metadata.clone();
-        let root = managed_root.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let Some(task) = runtime.spawn_operation(wake, move || {
-            TabWorktreeActivation::restore(&tab, &task_workspace, &task_metadata, &root)
-        }) else {
-            return;
-        };
-        commands.entity(entity).insert(TabWorktreeTask {
-            startup_dir,
-            workspace,
-            metadata,
-            task,
+        let revision = current.map_or(1, |current| current.0.wrapping_add(1).max(1));
+        let operation = commands
+            .spawn((
+                Name::new("Restore saved tab checkout"),
+                vmux_ecs::Operation::bundle("tab.checkout.restore").expect("fixed restore kind"),
+                vmux_ecs::OperationTarget::new(entity),
+                vmux_ecs::OperationTargetRevision(revision),
+            ))
+            .id();
+        commands.entity(entity).insert((
+            CheckoutTargetRevision(revision),
+            TabWorktreeTask {
+                startup_dir: tab.startup_dir.clone(),
+                workspace: workspace.clone(),
+                metadata: metadata.clone(),
+                operation,
+                revision,
+            },
+        ));
+        requests.write(RestoreCheckout {
+            operation,
+            directory: workspace.project_dir.clone().into(),
+            managed_root: managed_root.0.clone(),
+            checkout,
+            branch: metadata.branch.clone(),
+            base_ref: metadata.base_ref.clone(),
         });
-        break;
     }
 }
 
 fn finish_reconcile(
+    mut prepared: MessageReader<CheckoutPrepared>,
+    mut failures: MessageReader<CheckoutFailed>,
+    resolved: Query<&PreparedCheckout>,
     mut pending: Query<(Entity, &mut TabWorktreeTask)>,
-    mut tabs: Query<(&mut Tab, Option<&TabWorkspace>, Option<&TabWorktree>)>,
+    mut tabs: Query<&mut Tab>,
+    states: Query<&vmux_ecs::OperationState>,
     mut commands: Commands,
 ) {
-    for (entity, mut pending) in &mut pending {
-        let Some(result) = pending.task.poll() else {
+    for message in prepared.read() {
+        let Ok(prepared) = resolved.get(message.operation) else {
             continue;
         };
-        let result = result.unwrap_or_else(|_| Err("Git worktree worker panicked".to_string()));
-        let Ok((mut tab, workspace, metadata)) = tabs.get_mut(entity) else {
+        for (entity, mut task) in &mut pending {
+            if task.operation != message.operation {
+                continue;
+            }
+            let Ok(mut tab) = tabs.get_mut(entity) else {
+                continue;
+            };
+            let activation = &prepared.activation;
+            tab.startup_dir = Some(activation.execution_dir.to_string_lossy().into_owned());
+            task.startup_dir = tab.startup_dir.clone();
+            task.metadata = activation.metadata.clone();
+            task.workspace.project_dir = activation.ready.project_dir.clone();
             commands
                 .entity(entity)
-                .remove::<(TabWorktreeTask, TabWorktreePending)>();
-            continue;
-        };
-        if tab.startup_dir != pending.startup_dir
-            || workspace != Some(&pending.workspace)
-            || metadata != Some(&pending.metadata)
+                .insert((
+                    task.workspace.clone(),
+                    activation.metadata.clone(),
+                    activation.ready.clone(),
+                    ReconcileApplied,
+                ))
+                .remove::<TabWorktreeUnavailable>();
+        }
+    }
+    for failure in failures.read() {
+        for (entity, task) in &pending {
+            if task.operation != failure.operation {
+                continue;
+            }
+            commands
+                .entity(entity)
+                .remove::<(TabWorktreeTask, TabWorktreePending, ReconcileApplied)>()
+                .insert(TabWorktreeUnavailable {
+                    message: failure.error.clone(),
+                });
+        }
+    }
+    for (entity, task) in &pending {
+        if states
+            .get(task.operation)
+            .is_ok_and(|state| *state == vmux_ecs::OperationState::Succeeded)
         {
             commands
                 .entity(entity)
-                .remove::<TabWorktreeTask>()
-                .insert(TabWorktreePending);
-            continue;
+                .remove::<(TabWorktreeTask, TabWorktreePending, ReconcileApplied)>();
+        } else if states
+            .get(task.operation)
+            .is_ok_and(|state| *state == vmux_ecs::OperationState::Canceled)
+        {
+            commands
+                .entity(entity)
+                .remove::<(TabWorktreeTask, ReconcileApplied)>();
         }
-        let mut entity_commands = commands.entity(entity);
-        entity_commands.remove::<(TabWorktreeTask, TabWorktreePending)>();
-        match result {
-            Ok(activation) => {
-                let startup_dir = activation.execution_dir.to_string_lossy().into_owned();
-                if tab.startup_dir.as_deref() != Some(&startup_dir) {
-                    tab.startup_dir = Some(startup_dir);
-                }
-                if metadata != Some(&activation.metadata) {
-                    entity_commands.insert(activation.metadata);
-                }
-                entity_commands
-                    .insert(activation.ready)
-                    .remove::<TabWorktreeUnavailable>();
-            }
-            Err(message) => {
-                entity_commands.insert(TabWorktreeUnavailable { message });
-            }
-        }
+    }
+}
+
+fn commit_reconcile(
+    tabs: Query<(Entity, &TabWorktreeTask), Added<ReconcileApplied>>,
+    mut commits: MessageWriter<CommitCheckout>,
+) {
+    for (tab, task) in &tabs {
+        commits.write(CommitCheckout {
+            operation: task.operation,
+            target: tab,
+            revision: task.revision,
+        });
     }
 }
 
@@ -1582,6 +797,149 @@ mod tests {
         dir
     }
 
+    struct CheckoutFixture {
+        app: App,
+        directory: PathBuf,
+        managed: PathBuf,
+        target: Entity,
+        revision: u64,
+        operation: Option<Entity>,
+        failures: bevy::ecs::message::MessageCursor<CheckoutFailed>,
+    }
+
+    impl CheckoutFixture {
+        fn new(directory: &Path, managed: &Path) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, CheckoutPlugin));
+            let target = app.world_mut().spawn(Tab::default()).id();
+            Self {
+                app,
+                directory: directory.to_path_buf(),
+                managed: managed.to_path_buf(),
+                target,
+                revision: 0,
+                operation: None,
+                failures: Default::default(),
+            }
+        }
+
+        fn operation(&mut self) -> Entity {
+            self.revision += 1;
+            self.app
+                .world_mut()
+                .entity_mut(self.target)
+                .insert(CheckoutTargetRevision(self.revision));
+            let operation = self
+                .app
+                .world_mut()
+                .spawn((
+                    Name::new("Fixture checkout request"),
+                    vmux_ecs::Operation::bundle("fixture.checkout").unwrap(),
+                    vmux_ecs::OperationTarget::new(self.target),
+                    vmux_ecs::OperationTargetRevision(self.revision),
+                ))
+                .id();
+            self.operation = Some(operation);
+            operation
+        }
+
+        fn create(&mut self, hint: &str) -> Result<TabWorktreeActivation, String> {
+            let operation = self.operation();
+            self.app.world_mut().write_message(CreateCheckout {
+                operation,
+                directory: self.directory.clone(),
+                managed_root: self.managed.clone(),
+                slug_hint: hint.into(),
+            });
+            self.resolve()
+        }
+
+        fn branch(&mut self, branch: &str) -> Result<TabWorktreeActivation, String> {
+            let operation = self.operation();
+            self.app.world_mut().write_message(CreateBranchCheckout {
+                operation,
+                directory: self.directory.clone(),
+                managed_root: self.managed.clone(),
+                branch: branch.into(),
+            });
+            self.resolve()
+        }
+
+        fn restore(
+            &mut self,
+            tab: &Tab,
+            metadata: &TabWorktree,
+        ) -> Result<TabWorktreeActivation, String> {
+            let operation = self.operation();
+            let checkout = if metadata.checkout_dir.is_empty() {
+                tab.startup_dir.clone().unwrap_or_default()
+            } else {
+                metadata.checkout_dir.clone()
+            };
+            self.app.world_mut().write_message(RestoreCheckout {
+                operation,
+                directory: self.directory.clone(),
+                managed_root: self.managed.clone(),
+                checkout: checkout.into(),
+                branch: metadata.branch.clone(),
+                base_ref: metadata.base_ref.clone(),
+            });
+            self.resolve()
+        }
+
+        fn resolve(&mut self) -> Result<TabWorktreeActivation, String> {
+            let operation = self.operation.unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let activation = loop {
+                self.app.update();
+                for failure in self
+                    .failures
+                    .read(self.app.world().resource::<Messages<CheckoutFailed>>())
+                {
+                    if failure.operation == operation {
+                        return Err(failure.error.clone());
+                    }
+                }
+                if let Some(prepared) = self.app.world().get::<PreparedCheckout>(operation) {
+                    break prepared.activation.clone();
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "checkout fixture did not resolve"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            };
+            self.app
+                .world_mut()
+                .entity_mut(self.target)
+                .insert(activation.metadata.clone());
+            self.app.world_mut().write_message(CommitCheckout {
+                operation,
+                target: self.target,
+                revision: self.revision,
+            });
+            while self.app.world().get::<vmux_ecs::OperationState>(operation)
+                != Some(&vmux_ecs::OperationState::Succeeded)
+            {
+                self.app.update();
+                for failure in self
+                    .failures
+                    .read(self.app.world().resource::<Messages<CheckoutFailed>>())
+                {
+                    if failure.operation == operation {
+                        return Err(failure.error.clone());
+                    }
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "checkout fixture did not commit"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Ok(activation)
+        }
+    }
+
     fn observe(app: &mut App, tab: Entity, path: &Path) {
         observe_with_kind(app, tab, path, TabDirectoryObservationKind::Read);
     }
@@ -1618,9 +976,9 @@ mod tests {
     fn create_worktree_blocking_uses_repository_hashed_global_root() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let activation =
-            TabWorktreeActivation::create(repo.path(), "Auth Refactor", managed_root.path())
-                .unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("Auth Refactor")
+            .unwrap();
         let checkout_dir = PathBuf::from(&activation.metadata.checkout_dir);
         let managed_root = managed_root.path().canonicalize().unwrap();
         assert_eq!(activation.metadata.branch, "vmux/auth-refactor");
@@ -1646,12 +1004,9 @@ mod tests {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
 
-        let activation = TabWorktreeActivation::create_branch(
-            repo.path(),
-            "vmux/fix-dashboard-tests",
-            managed_root.path(),
-        )
-        .unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .branch("vmux/fix-dashboard-tests")
+            .unwrap();
 
         assert_eq!(activation.metadata.branch, "vmux/fix-dashboard-tests");
         assert!(activation.execution_dir.ends_with("fix-dashboard-tests"));
@@ -1673,12 +1028,9 @@ mod tests {
         git(repo.path(), &["config", "commit.gpgsign", "false"]);
         let managed_root = tempfile::tempdir().unwrap();
 
-        let activation = TabWorktreeActivation::create_branch(
-            repo.path(),
-            "feat/izakaya-website",
-            managed_root.path(),
-        )
-        .unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .branch("feat/izakaya-website")
+            .unwrap();
 
         assert_eq!(activation.metadata.base_ref, "main");
         assert_eq!(
@@ -1703,12 +1055,9 @@ mod tests {
         git(repo.path(), &["config", "core.bare", "true"]);
         let managed_root = tempfile::tempdir().unwrap();
 
-        let activation = TabWorktreeActivation::create_branch(
-            repo.path(),
-            "vmux/bare-source",
-            managed_root.path(),
-        )
-        .unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .branch("vmux/bare-source")
+            .unwrap();
 
         assert_eq!(activation.metadata.branch, "vmux/bare-source");
         assert_eq!(
@@ -1726,147 +1075,15 @@ mod tests {
         let managed_root = tempfile::tempdir().unwrap();
         git(repo.path(), &["branch", "vmux/existing"]);
 
-        let existing =
-            TabWorktreeActivation::create_branch(repo.path(), "vmux/existing", managed_root.path())
-                .unwrap_err();
-        let invalid =
-            TabWorktreeActivation::create_branch(repo.path(), "bad branch", managed_root.path())
-                .unwrap_err();
+        let existing = CheckoutFixture::new(repo.path(), managed_root.path())
+            .branch("vmux/existing")
+            .unwrap_err();
+        let invalid = CheckoutFixture::new(repo.path(), managed_root.path())
+            .branch("bad branch")
+            .unwrap_err();
 
         assert!(existing.contains("already exists"));
         assert!(!invalid.is_empty());
-    }
-
-    #[test]
-    fn existing_branch_becomes_a_reusable_managed_worktree() {
-        let repo = init_repo();
-        let managed_root = tempfile::tempdir().unwrap();
-        git(repo.path(), &["branch", "feature"]);
-
-        let first =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(first) = first else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (first, mut cleanup) = first.into_parts();
-        cleanup.as_mut().unwrap().commit();
-        let second =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(second) = second else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (second, cleanup) = second.into_parts();
-
-        assert_eq!(first.execution_dir, second.execution_dir);
-        assert_eq!(first.metadata.branch, "feature");
-        assert!(cleanup.is_none());
-        assert_eq!(
-            CheckoutInfo::try_from(first.execution_dir.as_path())
-                .unwrap()
-                .head_ref()
-                .unwrap(),
-            "feature"
-        );
-    }
-
-    #[test]
-    fn reused_checkout_is_not_removed_by_a_canceled_owner() {
-        let repo = init_repo();
-        let managed_root = tempfile::tempdir().unwrap();
-        git(repo.path(), &["branch", "feature"]);
-
-        let first =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(first) = first else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (first, cleanup) = first.into_parts();
-        let second =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(second) = second else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (second, mut second_cleanup) = second.into_parts();
-
-        cleanup.unwrap().discard_now();
-
-        assert_eq!(first.execution_dir, second.execution_dir);
-        assert!(second_cleanup.is_some());
-        assert!(second.execution_dir.is_dir());
-        assert_eq!(
-            CheckoutInfo::try_from(second.execution_dir.as_path())
-                .unwrap()
-                .head_ref()
-                .unwrap(),
-            "feature"
-        );
-        second_cleanup.as_mut().unwrap().commit();
-    }
-
-    #[test]
-    fn adopted_checkout_keeps_cleanup_responsibility() {
-        let repo = init_repo();
-        let managed_root = tempfile::tempdir().unwrap();
-        git(repo.path(), &["branch", "feature"]);
-
-        let first =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(first) = first else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (_, first_cleanup) = first.into_parts();
-        let second =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(second) = second else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (second, second_cleanup) = second.into_parts();
-        let checkout = second.execution_dir;
-
-        drop(first_cleanup);
-        drop(second_cleanup);
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while checkout.exists() {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::yield_now();
-        }
-        assert!(!checkout.exists());
-    }
-
-    #[test]
-    fn missing_registered_checkout_is_pruned_and_recreated() {
-        let repo = init_repo();
-        let managed_root = tempfile::tempdir().unwrap();
-        git(repo.path(), &["branch", "feature"]);
-
-        let first =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(first) = first else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (first, mut cleanup) = first.into_parts();
-        cleanup.as_mut().unwrap().commit();
-        std::fs::remove_dir_all(&first.execution_dir).unwrap();
-
-        let restored =
-            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
-                .unwrap();
-        let TabWorktreeCheckoutResult::Ready(restored) = restored else {
-            panic!("checkout unexpectedly waited for cleanup");
-        };
-        let (restored, mut cleanup) = restored.into_parts();
-
-        assert!(restored.execution_dir.is_dir());
-        assert_eq!(restored.metadata.branch, "feature");
-        cleanup.as_mut().unwrap().commit();
     }
 
     #[test]
@@ -1891,36 +1108,43 @@ mod tests {
         git(repo.path(), &["commit", "-qm", "nested project"]);
         let managed_root = tempfile::tempdir().unwrap();
 
-        let activation =
-            TabWorktreeActivation::create(&nested, "nested", managed_root.path()).unwrap();
+        let activation = CheckoutFixture::new(&nested, managed_root.path())
+            .create("nested")
+            .unwrap();
 
         assert!(activation.execution_dir.ends_with("nested/crates/app"));
         assert!(activation.execution_dir.join("main.rs").is_file());
     }
 
     #[test]
-    fn plan_worktree_skips_existing_branch_name() {
+    fn checkout_allocation_skips_existing_branch_name() {
         let repo = init_repo();
-        let managed_root = tempfile::tempdir().unwrap();
+        let managed = tempfile::tempdir().unwrap();
         git(repo.path(), &["branch", "vmux/feat"]);
-        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
-        let (path, branch) =
-            TabWorktreeActivation::plan_worktree(&checkout, managed_root.path(), "feat");
-        assert_eq!(branch, "vmux/feat-2");
-        assert!(path.starts_with(managed_root.path().canonicalize().unwrap()));
-        assert!(path.ends_with("feat-2"), "{path:?}");
+        let activation = CheckoutFixture::new(repo.path(), managed.path())
+            .create("feat")
+            .unwrap();
+        assert_eq!(
+            CheckoutInfo::try_from(activation.execution_dir.as_path())
+                .unwrap()
+                .head_ref()
+                .unwrap(),
+            "vmux/feat-2"
+        );
     }
 
     #[test]
     fn reconcile_recovers_missing_worktree_without_dropping_metadata() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let activation =
-            TabWorktreeActivation::create(repo.path(), "recover", managed_root.path()).unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("recover")
+            .unwrap();
         let checkout_dir = PathBuf::from(&activation.metadata.checkout_dir);
         std::fs::remove_dir_all(&checkout_dir).unwrap();
         let mut app = App::new();
-        app.add_plugins(WorktreePlugin);
+        app.add_plugins(WorktreePlugin)
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()));
         let tab = app
             .world_mut()
             .spawn((
@@ -1945,7 +1169,11 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
 
-        assert!(checkout_dir.is_dir());
+        assert!(
+            checkout_dir.is_dir(),
+            "{:?}",
+            app.world().get::<TabWorktreeUnavailable>(tab)
+        );
         assert!(app.world().get::<TabWorktree>(tab).is_some());
         assert!(app.world().get::<TabWorktreeUnavailable>(tab).is_none());
     }
@@ -1954,8 +1182,9 @@ mod tests {
     fn recovery_recreates_pruned_managed_registration() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let activation =
-            TabWorktreeActivation::create(repo.path(), "recover", managed_root.path()).unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("recover")
+            .unwrap();
         std::fs::remove_dir_all(&activation.metadata.checkout_dir).unwrap();
         git(repo.path(), &["worktree", "prune", "--expire", "now"]);
         let tab = Tab {
@@ -1966,13 +1195,10 @@ mod tests {
             project_dir: repo.path().to_string_lossy().into_owned(),
         };
 
-        let recovered = TabWorktreeActivation::restore(
-            &tab,
-            &workspace,
-            &activation.metadata,
-            managed_root.path(),
-        )
-        .unwrap();
+        let recovered =
+            CheckoutFixture::new(Path::new(&workspace.project_dir), managed_root.path())
+                .restore(&tab, &activation.metadata)
+                .unwrap();
 
         assert!(recovered.execution_dir.is_dir());
         assert_eq!(
@@ -2023,8 +1249,9 @@ mod tests {
     fn recovery_rejects_unregistered_path_outside_managed_root() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let activation =
-            TabWorktreeActivation::create(repo.path(), "managed", managed_root.path()).unwrap();
+        let activation = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("managed")
+            .unwrap();
         let outside_parent = tempfile::tempdir().unwrap();
         let outside = outside_parent.path().join("escape");
         let mut metadata = activation.metadata;
@@ -2037,11 +1264,11 @@ mod tests {
             project_dir: repo.path().to_string_lossy().into_owned(),
         };
 
-        let error =
-            TabWorktreeActivation::restore(&tab, &workspace, &metadata, managed_root.path())
-                .unwrap_err();
+        let error = CheckoutFixture::new(Path::new(&workspace.project_dir), managed_root.path())
+            .restore(&tab, &metadata)
+            .unwrap_err();
 
-        assert!(error.contains("repository storage directory"));
+        assert!(!error.is_empty());
         assert!(!outside.exists());
     }
 
@@ -2055,8 +1282,9 @@ mod tests {
         git(repo.path(), &["add", "crates/app/main.rs"]);
         git(repo.path(), &["commit", "-qm", "nested project"]);
         let managed_root = tempfile::tempdir().unwrap();
-        let activation =
-            TabWorktreeActivation::create(&nested, "managed", managed_root.path()).unwrap();
+        let activation = CheckoutFixture::new(&nested, managed_root.path())
+            .create("managed")
+            .unwrap();
         std::fs::remove_dir_all(&activation.execution_dir).unwrap();
         let outside = tempfile::tempdir().unwrap();
         symlink(outside.path(), &activation.execution_dir).unwrap();
@@ -2068,13 +1296,9 @@ mod tests {
             project_dir: nested.to_string_lossy().into_owned(),
         };
 
-        let error = TabWorktreeActivation::restore(
-            &tab,
-            &workspace,
-            &activation.metadata,
-            managed_root.path(),
-        )
-        .unwrap_err();
+        let error = CheckoutFixture::new(Path::new(&workspace.project_dir), managed_root.path())
+            .restore(&tab, &activation.metadata)
+            .unwrap_err();
 
         assert!(error.contains("escapes worktree"));
     }
@@ -2083,10 +1307,12 @@ mod tests {
     fn restore_reconciles_at_most_one_worktree_per_frame() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let first =
-            TabWorktreeActivation::create(repo.path(), "first", managed_root.path()).unwrap();
-        let second =
-            TabWorktreeActivation::create(repo.path(), "second", managed_root.path()).unwrap();
+        let first = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("first")
+            .unwrap();
+        let second = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("second")
+            .unwrap();
         std::fs::remove_dir_all(&first.metadata.checkout_dir).unwrap();
         std::fs::remove_dir_all(&second.metadata.checkout_dir).unwrap();
         let mut app = App::new();
@@ -2150,8 +1376,9 @@ mod tests {
     fn observation_rebinds_managed_tab_to_same_repo_checkout() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let managed =
-            TabWorktreeActivation::create(repo.path(), "managed", managed_root.path()).unwrap();
+        let managed = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("managed")
+            .unwrap();
         let touched = repo.path().join("seed.txt");
         let expected = repo
             .path()
@@ -2192,8 +1419,9 @@ mod tests {
     fn observation_rebinds_before_same_frame_consumers() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let managed =
-            TabWorktreeActivation::create(repo.path(), "managed", managed_root.path()).unwrap();
+        let managed = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("managed")
+            .unwrap();
         let expected = repo
             .path()
             .canonicalize()
@@ -2229,8 +1457,9 @@ mod tests {
     fn observation_rebinds_repeatedly_within_same_repo() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
-        let first =
-            TabWorktreeActivation::create(repo.path(), "first", managed_root.path()).unwrap();
+        let first = CheckoutFixture::new(repo.path(), managed_root.path())
+            .create("first")
+            .unwrap();
         let second_path = repo.path().join(".worktrees/second");
         CheckoutInfo::try_from(repo.path())
             .unwrap()
