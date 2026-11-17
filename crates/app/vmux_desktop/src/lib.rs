@@ -140,10 +140,7 @@ mod tests {
                 .add_plugins(crate::window::WindowPlugin);
             vmux_browser::BrowserPlugin::configure_schedule(&mut app).add_systems(
                 Update,
-                (
-                    ui_event_flush_probe.in_set(bevy_cef::prelude::UiEventSystems::Flush),
-                    cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
-                ),
+                cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
             );
             let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
             let mut schedule = schedules.remove(Update).unwrap();
