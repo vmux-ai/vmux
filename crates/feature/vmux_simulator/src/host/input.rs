@@ -86,7 +86,9 @@ impl Plugin for SimulatorNativeKeyPlugin {
                 Update,
                 (sync_native_key_bindings, ApplyDeferred)
                     .chain()
-                    .in_set(NativeKeyClaimSet),
+                    .after(super::SimulatorFocusSet)
+                    .before(NativeKeyClaimSet)
+                    .before(SimulatorInputSet),
             )
             .add_systems(
                 Update,

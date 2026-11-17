@@ -1,5 +1,6 @@
 [package]
 name = "vmux_feature"
+build = "../../build_cfg.rs"
 description = "Feature declarations and cloud-controlled release availability"
 version.workspace = true
 edition.workspace = true
@@ -9,6 +10,7 @@ publish = false
 default = ["ecs"]
 ecs = ["dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:sha2"]
 http = ["ecs", "dep:reqwest", "dep:async-io", "dep:getrandom", "vmux_ecs/jobs"]
+page = ["ecs", "http", "dep:bevy", "dep:bevy_cef", "dep:vmux_api", "dep:vmux_macro", "dep:vmux_page", "dep:vmux_ui", "dep:dioxus", "dep:inventory", "dep:uuid", "dep:rkyv", "dep:chrono"]
 
 [dependencies]
 bevy_app = { workspace = true, optional = true }
@@ -21,6 +23,20 @@ async-io = { version = "2", optional = true }
 getrandom = { version = "0.4", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
+bevy = { workspace = true, optional = true }
+bevy_cef = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+inventory = { version = "0.3", optional = true }
+rkyv = { workspace = true, optional = true }
+chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
+uuid = { workspace = true, optional = true }
+vmux_api = { path = "../../util/vmux_api", optional = true }
+vmux_macro = { path = "../../util/vmux_macro", optional = true }
+vmux_page = { path = "../../util/vmux_page", optional = true }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dioxus-ssr = "=0.7.9"

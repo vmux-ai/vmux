@@ -966,6 +966,8 @@ mod tests {
                     ("host", &["dep:portable"]),
                     ("daemon", &["dep:vmux_session"]),
                     ("mcp", &["dep:vmux_mcp"]),
+                    ("account-local", &["dep:portable"]),
+                    ("jobs", &["dep:vmux_ecs"]),
                     ("desktop", &["dep:renderer"]),
                 ],
                 &[

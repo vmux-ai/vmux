@@ -36,6 +36,12 @@ pub enum VmuxPlugin {
     Flex(vmux_flex::FlexPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
+    #[plugin(
+        feature = "feature-flags",
+        desktop,
+        requires(runtime, jobs, release_flags)
+    )]
+    FeatureFlags(crate::feature_flags::FeatureFlagsPlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
     Command(vmux_command::CommandPlugin),
     #[plugin(feature = "setting", desktop, requires(runtime))]
@@ -202,6 +208,53 @@ mod tests {
     }
 }
 
+#[cfg(all(test, feature = "account-local", feature = "jobs"))]
+mod composition_tests {
+    use super::*;
+    use bevy_ecs::prelude::{Name, With};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn shared_jobs_compose_with_account_local_and_restore_profiles() {
+        for shared_jobs in [true, false] {
+            let data = tempfile::tempdir().unwrap();
+            let directory = data.path().join("profiles/personal");
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("display_name"), "Restored profile").unwrap();
+            let mut app = App::new();
+            app.add_plugins(
+                VmuxPlugin::builder()
+                    .account_local(true)
+                    .jobs(shared_jobs)
+                    .build(),
+            );
+            let root = app
+                .world_mut()
+                .spawn(vmux_account::Root::at(data.path(), "personal"))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                app.update();
+                if app.world().get::<vmux_ecs::Ready>(root).is_some() {
+                    break;
+                }
+                if let Some(error) = app.world().get::<vmux_account::Error>(root) {
+                    panic!("account load failed: {:?}", error.0);
+                }
+                assert!(Instant::now() < deadline, "account load timed out");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let world = app.world_mut();
+            let (id, name) = world
+                .query_filtered::<(&vmux_ecs::ProfileId, &Name), With<vmux_account::Profile>>()
+                .single(world)
+                .unwrap();
+            assert_eq!(id.0, "personal");
+            assert_eq!(name.as_str(), "Restored profile");
+        }
+    }
+}
+
 #[cfg(all(test, feature = "daemon"))]
 mod profile_tests {
     use super::*;
@@ -318,6 +371,10 @@ mod profile_tests {
 mod account_tests {
     use super::*;
     use bevy_app::Update;
+    use bevy_ecs::prelude::*;
+    use std::collections::BTreeMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use vmux_feature::snapshot::Document;
 
     #[test]
     fn cloud_composition_revokes_availability_without_an_accepted_release_snapshot() {
@@ -337,5 +394,60 @@ mod account_tests {
                 .get::<vmux_account::CloudAvailable>(root)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn cloud_gate_keeps_its_release_source_when_administration_adds_another_provider() {
+        let mut app = App::new();
+        app.add_plugins(VmuxPlugin::builder().jobs(true).account_cloud(true).build());
+        #[cfg(feature = "feature-flags")]
+        app.add_plugins(crate::feature_flags::FeatureFlagsPlugin);
+        app.finish();
+        app.cleanup();
+        app.world_mut().run_schedule(bevy_app::Startup);
+        let world = app.world_mut();
+        let release = world
+            .query_filtered::<&ChildOf, With<vmux_account::AccountCloudFlag>>()
+            .single(world)
+            .unwrap()
+            .parent();
+        let environment = world.get::<Name>(release).unwrap().as_str().to_string();
+        app.world_mut()
+            .entity_mut(release)
+            .remove::<vmux_feature::http::Endpoint>();
+        let other = app
+            .world_mut()
+            .spawn(vmux_feature::Provider::bundle("administration-only"))
+            .id();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for (index, enabled) in [true, false].into_iter().enumerate() {
+            for (provider, name, decision) in [
+                (release, environment.as_str(), enabled),
+                (other, "administration-only", !enabled),
+            ] {
+                app.world_mut().write_message(vmux_feature::Receive {
+                    provider,
+                    generation: 0,
+                    document: Document {
+                        schema_version: 1,
+                        environment: name.into(),
+                        revision: index as u64 + 1,
+                        issued_at: now,
+                        valid_until: now + 600,
+                        flags: BTreeMap::from([("account.cloud".into(), decision)]),
+                    },
+                });
+            }
+            app.world_mut().run_schedule(Update);
+            let world = app.world_mut();
+            let current = world
+                .query_filtered::<&vmux_feature::Current, With<vmux_account::AccountCloudFlag>>()
+                .single(world)
+                .unwrap();
+            assert_eq!(current.0, enabled);
+        }
     }
 }

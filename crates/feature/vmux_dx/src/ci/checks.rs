@@ -236,7 +236,7 @@ impl Checks {
             Self::boolean(settings, "VMUX_RECORDS")
         );
         let features = format!(
-            "daemon,mcp;legacy={}",
+            "daemon,mcp,account-local,jobs;legacy={}",
             Self::boolean(settings, "VMUX_LEGACY_DESKTOP")
         );
         let profiles = vec![

@@ -34,6 +34,7 @@ cli = [
 ]
 mcp = ["cli"]
 desktop = [
+    "feature-flags",
     "container",
 
     "account-cloud",
@@ -84,6 +85,7 @@ container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 release-flags = ["ecs", "dep:bevy_ecs", "dep:vmux_feature", "dep:vmux_profile"]
+feature-flags = ["release-flags", "runtime", "jobs", "host", "dep:bevy_ecs", "dep:tracing", "dep:vmux_feature", "vmux_feature/page"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
 account-local = ["account", "vmux_account/local"]
 account-cloud = ["account-local", "vmux_account/cloud", "vmux_account/profile-sync", "release-flags", "vmux_team?/profile-sync"]
@@ -130,7 +132,7 @@ vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
 vmux_container = { path = "../../feature/vmux_container", optional = true }
-vmux_feature = { path = "../../feature/vmux_feature", features = ["http"], optional = true }
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["http"], optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_account = { path = "../../feature/vmux_account", optional = true }
@@ -173,6 +175,7 @@ vmux_transport = { path = "../vmux_transport", optional = true }
 
 [dev-dependencies]
 bevy_ecs.workspace = true
+tempfile = "3"
 
 [[bin]]
 name = "vmux_service"

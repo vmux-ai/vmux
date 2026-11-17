@@ -25,6 +25,7 @@ Start with [Start with Vmux](ux/getting-things-done.md), written for someone com
 - [Terminal](ux/terminal.md): run commands and return to processes.
 - [VM and Docker](ux/containers.md): manage the Linux VM, containers and Compose groups.
 - [Remote access](ux/remote.md): continue supported host work from the phone.
+- [Feature flags](ux/features.md): inspect values and review proposed publications.
 
 ## DX: build and change Vmux
 
