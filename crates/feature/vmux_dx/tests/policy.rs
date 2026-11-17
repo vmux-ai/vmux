@@ -739,6 +739,10 @@ fn scheduled_sets_require_a_registered_schedule_edge() {
     for (registration, expected) in [
         ("app.add_systems(Update, read.in_set(Phase::Input));", true),
         (
+            "app.insert_non_send(()).add_systems(Update, read.in_set(Phase::Input));",
+            true,
+        ),
+        (
             "#[cfg(test)] { app.add_systems(Update, read.in_set(Phase::Input)); }",
             false,
         ),
@@ -12112,6 +12116,7 @@ impl AppComposition {
                         | "configure_sets"
                         | "init_resource"
                         | "insert_resource"
+                        | "insert_non_send"
                         | "init_non_send"
                         | "register_stored"
                         | "register_type"

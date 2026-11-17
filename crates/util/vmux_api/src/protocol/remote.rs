@@ -153,7 +153,204 @@ pub enum ClientMessage {
         cwd: String,
         path: String,
     },
+    RebindAcpWorkspaceWithReply {
+        request_id: AgentRequestId,
+        sid: String,
+        cwd: String,
     },
     AuthenticateAcpAgent {
         sid: String,
         method_id: String,
+    },
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ServiceMessage {
+    ProcessCreated {
+        process_id: ProcessId,
+        pid: u32,
+    },
+    ProcessCreateFailed {
+        process_id: ProcessId,
+        reason: String,
+    },
+    ProcessOutput {
+        process_id: ProcessId,
+        data: Vec<u8>,
+    },
+    ViewportPatch {
+        process_id: ProcessId,
+        changed_lines: Vec<(u32, TermLine)>,
+        cursor: TermCursor,
+        cols: u16,
+        rows: u16,
+        selection: Option<TermSelectionRange>,
+        copy_mode: bool,
+        full: bool,
+        first_row: u32,
+        total_rows: u32,
+        alt: bool,
+        mouse: bool,
+        evicted_total: u64,
+    },
+    ProcessExited {
+        process_id: ProcessId,
+        exit_code: Option<i32>,
+    },
+    ProcessTitle {
+        process_id: ProcessId,
+        title: String,
+    },
+    CommandLifecycle {
+        process_id: ProcessId,
+        kind: CommandLifecycleKind,
+    },
+    ProcessList {
+        processes: Vec<ProcessInfo>,
+    },
+    Snapshot {
+        process_id: ProcessId,
+        lines: Vec<TermLine>,
+        cursor: TermCursor,
+        cols: u16,
+        rows: u16,
+    },
+    Error {
+        message: String,
+    },
+    SelectionText {
+        process_id: ProcessId,
+        text: String,
+    },
+    TerminalMode {
+        process_id: ProcessId,
+        mouse_capture: bool,
+        copy_mode: bool,
+        alt_screen: bool,
+        focus_reporting: bool,
+    },
+    AgentRequest {
+        request_id: AgentRequestId,
+        anchor: Option<ProcessId>,
+        request: AgentRequest,
+    },
+    AgentQuery {
+        request_id: AgentRequestId,
+        query: AgentRequest,
+    },
+    AgentQueryResult(AgentQueryResult),
+    AgentCommandResult {
+        request_id: AgentRequestId,
+        result: AgentCommandResult,
+    },
+    Bell {
+        process_id: ProcessId,
+    },
+    AgentToolCall {
+        request_id: AgentRequestId,
+        sid: String,
+        name: String,
+        args: JsonValue,
+    },
+    AcpTerminalCreated {
+        sid: String,
+        terminal_id: String,
+        process_id: ProcessId,
+        command: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+    },
+    AcpProposedDiff {
+        sid: String,
+        call_id: String,
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
+    },
+    StatusResponse {
+        uptime_secs: u64,
+        process_count: u32,
+    },
+    AcpSessionCreated {
+        sid: String,
+        acp_session_id: String,
+    },
+    Shared(SharedEvent),
+    AcpSessionConfigState {
+        sid: String,
+        configs: Vec<AcpSessionConfig>,
+    },
+    AcpSessionConfigSelectionResult {
+        sid: String,
+        request_id: u64,
+        config_id: Option<String>,
+        value: String,
+        succeeded: bool,
+    },
+    AcpSessionCatalog {
+        request_id: u64,
+        agent_id: String,
+        agent_name: String,
+        supported: bool,
+        sessions: Vec<AcpProviderSession>,
+        error: Option<String>,
+    },
+    ProcessDirectory {
+        process_id: ProcessId,
+        cwd: String,
+        ready: bool,
+    },
+    ProcessDirectories {
+        process_id: ProcessId,
+        cwd: String,
+        path: String,
+        directories: Vec<String>,
+        error: Option<String>,
+    },
+    AcpWorkspaceRebindResult {
+        request_id: AgentRequestId,
+        sid: String,
+        cwd: String,
+        error: Option<String>,
+    },
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpProviderSession {
+    pub id: String,
+    pub cwd: String,
+    pub title: String,
+    pub updated_at: String,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpSessionConfig {
+    pub config_id: Option<String>,
+    pub name: String,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub current_value: String,
+    pub values: Vec<AcpSessionConfigValue>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpSessionConfigValue {
+    pub value: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub group: Option<String>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpModelOption {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpModeOption {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}

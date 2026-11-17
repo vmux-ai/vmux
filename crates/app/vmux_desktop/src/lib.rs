@@ -119,6 +119,8 @@ mod tests {
     use super::*;
     use bevy::ecs::schedule::Schedules;
 
+    fn ui_event_flush_probe() {}
+
     fn cef_create_probe() {}
 
     #[test]
@@ -158,7 +160,10 @@ mod tests {
                     .remove(label)
                     .expect("desktop schedule is registered");
                 let result = schedule.initialize(app.world_mut()).map(|_| ());
-                assert!(result.is_ok(), "{label:?} must initialize without a cycle (feature_flags={feature_flags})");
+                assert!(
+                    result.is_ok(),
+                    "{label:?} must initialize without a cycle (feature_flags={feature_flags})"
+                );
             }
         }
     }
