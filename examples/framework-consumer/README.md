@@ -13,9 +13,9 @@ vmux dx test sdk --git
 ```
 
 The second command copies this workspace to a temporary directory and replaces its Vmux path
-dependencies with Git dependencies pinned to the current committed revision. It runs the same
-tests and rejects native dependencies, a missing public core, or mixed SDK revisions. Commit
-the candidate first; this mode intentionally tests committed source.
+dependencies with Git dependencies pinned to the current committed revision. It runs the
+consumer tests and dependency/revision checks; the local command also runs the core package
+tests. Commit the candidate first; Git mode intentionally tests committed source.
 The verification runs through the Rust builder with Git and Cargo.
 
 For another application, select the required `vmux_app` Cargo features and use
