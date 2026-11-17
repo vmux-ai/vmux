@@ -258,11 +258,13 @@ fn collect(
         }
         retention.page += 1;
         let mut endpoint = format!(
-            "repos/{}/actions/caches?per_page=100&page={}",
+            "repos/{}/actions/caches?per_page=100&page={}&sort=created_at&direction=asc",
             retention.repository, retention.page
         );
         if let Some(number) = retention.closed_pr {
             endpoint.push_str(&format!("&ref=refs%2Fpull%2F{number}%2Fmerge"));
+        } else {
+            endpoint.push_str("&key=vmux-source-v4-");
         }
         io.request(
             entity,
@@ -557,7 +559,32 @@ mod tests {
             "second.json",
             &json!({"total_count": 3, "actions_caches": &rows[2..]}),
         );
-        fixture.mock_gh("#!/bin/sh\ncase \"$*\" in\n*DELETE*) test -f complete || exit 1; echo \"$*\" >> deleted ;;\n*'&page=1') cat first.json ;;\n*'&page=2') touch complete; cat second.json ;;\n*) exit 1 ;;\nesac\n");
+        fixture.mock_gh(
+            r#"#!/bin/sh
+case "$*" in
+    *DELETE*) test -f complete || exit 1; echo "$*" >> deleted; exit 0 ;;
+esac
+query=${2#*\?}
+cache_page=
+cache_sort=
+cache_direction=
+IFS='&'
+for parameter in $query; do
+    case "$parameter" in
+        page=*) cache_page=${parameter#page=} ;;
+        sort=*) cache_sort=${parameter#sort=} ;;
+        direction=*) cache_direction=${parameter#direction=} ;;
+    esac
+done
+test "$cache_sort" = created_at || exit 1
+test "$cache_direction" = asc || exit 1
+case "$cache_page" in
+    1) cat first.json ;;
+    2) touch complete; cat second.json ;;
+    *) exit 1 ;;
+esac
+"#,
+        );
         fixture.run("cache-prune", &["--apply"]).unwrap();
         assert_eq!(
             std::fs::read_to_string(fixture.root().join("deleted")).unwrap(),
@@ -601,5 +628,45 @@ mod tests {
         );
         fixture.write("refuse", "");
         assert!(fixture.run("cache-prune", &["--apply"]).is_err());
+    }
+
+    #[test]
+    fn unrelated_compiler_objects_do_not_consume_the_source_inventory_bound() {
+        let mut fixture = Fixture::new();
+        fixture.environment.set("VMUX_CACHE_CLOSED_PR", "");
+        let prefix = format!(
+            "vmux-source-v4-Linux-X64-test-{}-{}",
+            "c".repeat(64),
+            "d".repeat(64)
+        );
+        let mut rows = Vec::new();
+        for id in 1..=2 {
+            rows.push(json!({"id": id, "key": format!("{prefix}-{id:040x}"), "ref": "refs/heads/main", "created_at": format!("2026-01-0{id}T00:00:00Z"), "last_accessed_at": "2026-01-01T00:00:00Z", "size_in_bytes": 100}));
+        }
+        fixture.json(
+            "sources.json",
+            &json!({"total_count": 2, "actions_caches": rows}),
+        );
+        fixture.json(
+            "all.json",
+            &json!({"total_count": 2001, "actions_caches": []}),
+        );
+        fixture.mock_gh(
+            r#"#!/bin/sh
+case "$*" in
+    *DELETE*) echo "$*" >> deleted ;;
+    *)
+        case "&${2#*\?}&" in
+            *'&key=vmux-source-v4-&'*) cat sources.json ;;
+            *) cat all.json ;;
+        esac ;;
+esac
+"#,
+        );
+        fixture.run("cache-prune", &["--apply"]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fixture.root().join("deleted")).unwrap(),
+            "api --method DELETE repos/fixture/repository/actions/caches/1\n"
+        );
     }
 }

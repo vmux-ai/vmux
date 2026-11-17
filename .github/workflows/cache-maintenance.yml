@@ -14,6 +14,7 @@ permissions:
 
 concurrency:
   group: compiler-cache-maintenance
+  queue: max
   cancel-in-progress: false
 
 jobs:
