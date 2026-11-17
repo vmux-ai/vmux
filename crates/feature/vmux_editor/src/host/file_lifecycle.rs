@@ -1,11 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 
 use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_ecs::event::*;
 
 use super::editor::{Editor, FileView};
@@ -14,6 +12,9 @@ use super::explorer::{
     ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
 };
 pub(super) use super::file_loading::FileLoadTask;
+use super::file_watch::{FileWatchPlugin, Observed, Reconciled};
+pub(super) use super::file_write_io::SelfWrites;
+use super::file_writes::{FileWritesPlugin, WriteReceipts};
 use super::markdown::ParsedNote;
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
@@ -28,43 +29,18 @@ pub(super) struct FileChangesSet;
 
 impl Plugin for FileLifecyclePlugin {
     fn build(&self, app: &mut App) {
-        let (tx, rx) = mpsc::channel();
-        let proxy = app
-            .world()
-            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            let wake = result
-                .as_ref()
-                .is_ok_and(|event| !matches!(event.kind, notify::EventKind::Access(_)));
-            let _ = tx.send(result);
-            if wake && let Some(proxy) = proxy.as_ref() {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        }) {
-            Ok(watcher) => {
-                app.insert_non_send(FileWatch {
-                    watcher,
-                    rx,
-                    dirs: HashSet::new(),
-                });
-            }
-            Err(error) => tracing::warn!("file watcher init failed: {error}"),
-        }
-        app.add_plugins(super::file_loading::FileLoadingPlugin)
-            .insert_non_send(SelfWrites::default())
-            .add_systems(
-                Update,
-                (
-                    sync_file_git,
-                    reconcile_file_watches,
-                    drain_file_changes,
-                    reload_changed_files,
-                )
-                    .chain()
-                    .in_set(FileChangesSet),
-            )
-            .add_observer(reset_sent);
+        app.add_plugins((
+            FileWatchPlugin,
+            FileWritesPlugin,
+            super::file_loading::FileLoadingPlugin,
+        ))
+        .add_systems(
+            Update,
+            (sync_file_git, drain_file_changes, reload_changed_files)
+                .chain()
+                .in_set(FileChangesSet),
+        )
+        .add_observer(reset_sent);
     }
 }
 
@@ -130,9 +106,6 @@ pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
 }
 
-#[derive(Default)]
-pub(super) struct SelfWrites(pub(super) HashMap<PathBuf, std::time::Instant>);
-
 #[derive(Component)]
 struct FileReloadRequested;
 
@@ -153,12 +126,6 @@ impl ForcedEncoding {
 
 #[derive(Component)]
 pub(super) struct MissingFileView;
-
-struct FileWatch {
-    watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
-    dirs: HashSet<PathBuf>,
-}
 
 fn reset_sent(
     trigger: On<UiInput<vmux_ecs::page::PageReady>>,
@@ -186,85 +153,46 @@ fn reset_sent(
     }
 }
 
-fn watch_dir_for(path: &Path) -> Option<PathBuf> {
-    let mut dir = if path.is_dir() { path } else { path.parent()? };
-    loop {
-        if dir.is_dir() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}
-
-fn ensure_file_watch(watch: &mut FileWatch, dir: PathBuf) {
-    if !watch.dirs.contains(&dir)
-        && watch
-            .watcher
-            .watch(&dir, RecursiveMode::NonRecursive)
-            .is_ok()
-    {
-        watch.dirs.insert(dir);
-    }
-}
-
-fn reconcile_file_watches(
-    views: Query<&FileView>,
-    trees: Query<&ExplorerTree>,
-    watch: Option<NonSendMut<FileWatch>>,
-) {
-    let Some(mut watch) = watch else {
-        return;
-    };
-    for file in &views {
-        if let Some(dir) = watch_dir_for(&file.path) {
-            ensure_file_watch(&mut watch, dir);
-        }
-    }
-    for tree in &trees {
-        for dir in tree.expanded_dirs() {
-            ensure_file_watch(&mut watch, dir.clone());
-        }
-    }
-}
-
 fn drain_file_changes(
-    watch: Option<NonSend<FileWatch>>,
-    self_writes: Option<NonSendMut<SelfWrites>>,
+    mut observations: MessageReader<Observed>,
+    mut reconciled: MessageReader<Reconciled>,
+    self_writes: WriteReceipts,
     views: Query<(Entity, &FileView, Has<MissingFileView>)>,
     mut trees: Query<(Entity, &mut ExplorerTree)>,
     mut commands: Commands,
 ) {
-    let Some(watch) = watch else {
-        return;
-    };
     let mut changed = HashSet::new();
-    while let Ok(result) = watch.rx.try_recv() {
-        if let Ok(event) = result {
-            for path in event.paths {
-                changed.insert(vmux_path::PathIdentity::resolve(&path).into_path_buf());
+    for observation in observations.read() {
+        match &observation.0 {
+            Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => {}
+            Ok(event) => {
+                for path in &event.paths {
+                    changed.insert(vmux_path::PathIdentity::resolve(path).into_path_buf());
+                }
             }
+            Err(error) => tracing::warn!("file watcher observation failed: {error}"),
         }
     }
-    if changed.is_empty() {
-        return;
+    let mut reconciled_dirs = HashSet::new();
+    for directory in reconciled.read() {
+        reconciled_dirs.insert(directory.0.clone());
     }
-    let mut self_writes = self_writes;
-    if let Some(self_writes) = self_writes.as_mut() {
-        self_writes
-            .0
-            .retain(|_, written| written.elapsed() < std::time::Duration::from_secs(2));
+    if changed.is_empty() && reconciled_dirs.is_empty() {
+        return;
     }
     for (entity, file, missing) in &views {
         let path = vmux_path::PathIdentity::resolve(&file.path).into_path_buf();
-        let self_written = self_writes
-            .as_ref()
-            .is_some_and(|self_writes| self_writes.0.contains_key(&path));
-        let ancestor_changed = missing && changed.iter().any(|changed| path.starts_with(changed));
+        let self_written = self_writes.recent(&path);
+        let ancestor_changed = missing
+            && (changed.iter().any(|changed| path.starts_with(changed))
+                || reconciled_dirs
+                    .iter()
+                    .any(|directory| path.starts_with(directory)));
         if (changed.contains(&path) || ancestor_changed) && !self_written {
             commands.entity(entity).insert(FileReloadRequested);
         }
     }
-    let mut changed_dirs = HashSet::new();
+    let mut changed_dirs = reconciled_dirs;
     for path in &changed {
         if let Some(parent) = path.parent() {
             changed_dirs.insert(vmux_path::PathIdentity::resolve(parent).into_path_buf());
@@ -379,14 +307,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let parent = temp.path().join("created-after-open");
         let path = parent.join("file.txt");
-        let (tx, rx) = mpsc::channel();
-        let watcher = notify::recommended_watcher(|_| {}).unwrap();
         let mut app = app();
-        app.world_mut().insert_non_send(FileWatch {
-            watcher,
-            rx,
-            dirs: HashSet::new(),
-        });
         let entity = app.world_mut().spawn(file_view(path.clone())).id();
 
         FileLoadTask::settle(&mut app, entity);
@@ -400,10 +321,9 @@ mod tests {
 
         std::fs::create_dir(&parent).unwrap();
         std::fs::write(&path, "created\n").unwrap();
-        tx.send(Ok(
+        app.world_mut().write_message(Observed(Ok(
             notify::Event::new(notify::EventKind::Any).add_path(parent)
-        ))
-        .unwrap();
+        )));
         FileLoadTask::settle(&mut app, entity);
 
         assert_eq!(
