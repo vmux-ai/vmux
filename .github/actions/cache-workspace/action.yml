@@ -31,7 +31,9 @@ runs:
       with:
         path: ${{ steps.inputs.outputs.paths }}
         key: ${{ steps.inputs.outputs.key }}
-        restore-keys: ${{ steps.inputs.outputs.prefix }}-
+        restore-keys: |
+          ${{ steps.inputs.outputs.prefix }}-
+          ${{ steps.inputs.outputs.restore-prefix }}-
     - uses: ./.github/actions/cache-sources
       with:
         snapshot: ${{ steps.inputs.outputs.snapshot }}

@@ -65,6 +65,7 @@ impl bevy_app::Plugin for CiSourcesPlugin {
 #[derive(Serialize, Deserialize, Clone)]
 struct Configuration {
     prefix: String,
+    restore_prefix: String,
     key: String,
     paths: String,
     snapshot: String,
@@ -90,6 +91,7 @@ impl Configuration {
             .unwrap_or_else(|| format!("{snapshot}.restore"));
         Self {
             prefix: String::new(),
+            restore_prefix: String::new(),
             key: String::new(),
             paths: String::new(),
             snapshot: snapshot.into(),
@@ -101,8 +103,9 @@ impl Configuration {
     }
     fn output(&self) -> String {
         format!(
-            "prefix={}\nkey={}\npaths<<VMUX_CACHE_PATHS\n{}\nVMUX_CACHE_PATHS\nsnapshot={}\ntarget={}\nreceipt={}\nworkspace={}\nsave={}\n",
+            "prefix={}\nrestore-prefix={}\nkey={}\npaths<<VMUX_CACHE_PATHS\n{}\nVMUX_CACHE_PATHS\nsnapshot={}\ntarget={}\nreceipt={}\nworkspace={}\nsave={}\n",
             self.prefix,
+            self.restore_prefix,
             self.key,
             self.paths,
             self.snapshot,
@@ -518,9 +521,14 @@ impl Inputs {
         settings: &Settings,
         facts: &CapturedSources,
         compiler: &str,
-    ) -> Result<String, String> {
+    ) -> Result<(String, String), String> {
         let mut hash = Sha256::new();
         hash.update(compiler);
+        hash.update(format!(
+            "workspace={}\0target={}\0",
+            self.workspace,
+            self.target.display()
+        ));
         for name in settings.0.names() {
             let Some(key) = name.to_str() else {
                 continue;
@@ -549,6 +557,7 @@ impl Inputs {
                 hash.update(format!("{key}={value}\0"));
             }
         }
+        let mut compatibility = hash.clone();
         for file in &facts.files {
             if file.name.ends_with("Cargo.toml")
                 || file.name.ends_with("Cargo.lock")
@@ -560,14 +569,21 @@ impl Inputs {
                 )
             {
                 hash.update(format!("{}\0{}\0{}\0", file.name, file.mode, file.hash));
+                if !file.name.ends_with("Cargo.toml") && !file.name.ends_with("Cargo.lock") {
+                    compatibility.update(format!("{}\0{}\0{}\0", file.name, file.mode, file.hash));
+                }
             }
         }
         let os = Arguments::text(&settings.0, "RUNNER_OS")?;
         let arch = Arguments::text(&settings.0, "RUNNER_ARCH")?;
-        Ok(format!(
-            "vmux-source-v3-{os}-{arch}-{}-{:x}",
+        let restore_prefix = format!(
+            "vmux-source-v4-{os}-{arch}-{}-{:x}",
             self.partition,
-            hash.finalize()
+            compatibility.finalize()
+        );
+        Ok((
+            format!("{restore_prefix}-{:x}", hash.finalize()),
+            restore_prefix,
         ))
     }
     fn artifacts(
@@ -658,6 +674,7 @@ impl Inputs {
         &self,
         settings: &Settings,
         prefix: String,
+        restore_prefix: String,
         metadata: &Value,
         manifest: &[u8],
     ) -> Result<Configuration, String> {
@@ -672,6 +689,7 @@ impl Inputs {
         Ok(Configuration {
             key: format!("{prefix}-{sha}"),
             prefix,
+            restore_prefix,
             paths: Self::ordered(paths),
             receipt: format!("{snapshot}.{}.restore", Snapshot::now()),
             snapshot,
@@ -719,20 +737,22 @@ fn inputs_encode(mut requests: InputsEncodeRequests<'_, '_>, mut io: Io, results
                 continue;
             }
         };
-        let prefix = match compiler.and_then(|compiler| inputs.digest(settings, facts, compiler)) {
-            Ok(value) => value,
-            Err(error) => {
-                io.fail(entity, error);
-                continue;
-            }
-        };
-        let configuration = match inputs.configuration(settings, prefix, &metadata, &manifest.0) {
-            Ok(value) => value,
-            Err(error) => {
-                io.fail(entity, error);
-                continue;
-            }
-        };
+        let (prefix, restore_prefix) =
+            match compiler.and_then(|compiler| inputs.digest(settings, facts, compiler)) {
+                Ok(value) => value,
+                Err(error) => {
+                    io.fail(entity, error);
+                    continue;
+                }
+            };
+        let configuration =
+            match inputs.configuration(settings, prefix, restore_prefix, &metadata, &manifest.0) {
+                Ok(value) => value,
+                Err(error) => {
+                    io.fail(entity, error);
+                    continue;
+                }
+            };
         let output = configuration.output().into_bytes();
         let bytes = match serde_json::to_vec(&configuration) {
             Ok(value) => value,
@@ -1624,26 +1644,155 @@ mod tests {
         fixture
             .environment
             .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
-        let first = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap())["prefix"].clone();
+        let first = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
         let manifest = std::fs::read_to_string(fixture.root().join("Cargo.toml")).unwrap();
         fixture.write(
             "Cargo.toml",
             format!("{manifest}\n[profile.custom]\ninherits = \"dev\"\n"),
         );
         let output = fixture.run("cache-inputs", &[]).unwrap();
-        assert_ne!(first, Fixture::outputs(&output)["prefix"]);
+        assert_ne!(first["prefix"], Fixture::outputs(&output)["prefix"]);
+        assert_eq!(
+            first["restore-prefix"],
+            Fixture::outputs(&output)["restore-prefix"]
+        );
         assert!(
             output
                 .lines()
                 .any(|line| line == "target/custom/.fingerprint/vmux_cli-*")
         );
         fixture.git(&["rm", "--cached", "Cargo.lock"]);
-        let before = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap())["prefix"].clone();
+        let before = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
         let lock = std::fs::read_to_string(fixture.root().join("Cargo.lock")).unwrap();
         fixture.write("Cargo.lock", format!("{lock}\n"));
-        assert_ne!(
-            before,
-            Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap())["prefix"]
+        let after = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        assert_ne!(before["prefix"], after["prefix"]);
+        assert_eq!(before["restore-prefix"], after["restore-prefix"]);
+    }
+
+    #[test]
+    fn fallback_cache_partitions_refuse_different_compiler_settings() {
+        let mut fixture = Fixture::new();
+        fixture.cli();
+        fixture.environment.set("VMUX_CACHE_PARTITION", "fixture");
+        fixture.environment.set("VMUX_CACHE_TARGET", "target");
+        fixture
+            .environment
+            .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
+        let original = fixture.environment.clone();
+        let first = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        for (key, value) in [
+            ("RUSTFLAGS", "-C opt-level=0"),
+            ("CARGO_ENCODED_RUSTFLAGS", "-C\u{1f}opt-level=0"),
+            ("CARGO_PROFILE_DEV_LTO", "thin"),
+            ("CARGO_BUILD_TARGET", "aarch64-apple-darwin"),
+            ("RUNNER_OS", "macOS"),
+            ("RUNNER_ARCH", "ARM64"),
+            ("VMUX_CI_VALIDATION", "0"),
+            ("VMUX_CACHE_PARTITION", "other"),
+            ("VMUX_CACHE_TARGET", "other-target"),
+        ] {
+            fixture.environment = original.clone();
+            fixture.environment.set(key, value);
+            let changed = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+            assert_ne!(first["restore-prefix"], changed["restore-prefix"], "{key}");
+        }
+        fixture.environment = original;
+        fixture.write(
+            ".cargo/config.toml",
+            "[build]\nrustflags = [\"-C\", \"opt-level=0\"]\n",
         );
+        fixture.commit();
+        let changed = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        assert_ne!(first["restore-prefix"], changed["restore-prefix"]);
+    }
+
+    #[test]
+    fn fallback_restore_keeps_unchanged_dependencies_fresh_and_rebuilds_changed_sources() {
+        let mut fixture = Fixture::new();
+        fixture.cli();
+        fixture.write(
+            "crates/util/cache_dependency/Cargo.toml",
+            "[package]\nname = \"cache_dependency\"\nversion = \"1.0.0\"\nedition = \"2021\"\n",
+        );
+        fixture.write(
+            "crates/util/cache_dependency/src/lib.rs",
+            "pub fn value() -> u32 { 7 }\n",
+        );
+        let manifest =
+            std::fs::read_to_string(fixture.root().join("crates/app/vmux_cli/Cargo.toml")).unwrap();
+        fixture.write("crates/app/vmux_cli/Cargo.toml", format!("{manifest}\n[dependencies]\ncache_dependency = {{ path = \"../../util/cache_dependency\" }}\n"));
+        fixture.write(
+            "crates/app/vmux_cli/src/main.rs",
+            "fn main() { println!(\"{}\", cache_dependency::value()); }\n",
+        );
+        fixture.execute("cargo", &["generate-lockfile", "--offline"]);
+        fixture.commit();
+        for (key, value) in [
+            ("VMUX_CACHE_PARTITION", "fixture"),
+            ("VMUX_CACHE_TARGET", "target"),
+            ("VMUX_CACHE_SAVE", "true"),
+        ] {
+            fixture.environment.set(key, value);
+        }
+        fixture
+            .environment
+            .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
+        let first = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        for (input, output) in [
+            ("INPUT_SNAPSHOT", "snapshot"),
+            ("INPUT_TARGET", "target"),
+            ("INPUT_RECEIPT", "receipt"),
+        ] {
+            fixture.environment.set(input, &first[output]);
+        }
+        fixture.environment.set("INPUT_SAVE", "true");
+        fixture.run("cache-restore", &[]).unwrap();
+        fixture.execute("cargo", &["build", "--offline", "--quiet"]);
+        fixture.run("cache-checkpoint", &[]).unwrap();
+        let mut dependency = None;
+        for entry in std::fs::read_dir(fixture.root().join("target/debug/deps")).unwrap() {
+            let path = entry.unwrap().path();
+            if path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("libcache_dependency-")
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "rlib")
+            {
+                dependency = Some(path);
+                break;
+            }
+        }
+        let dependency = dependency.unwrap();
+        let compiled = std::fs::metadata(&dependency).unwrap().modified().unwrap();
+        fixture.write("crates/app/vmux_cli/Cargo.toml", format!("{manifest}\n[dependencies]\ncache_dependency = {{ path = \"../../util/cache_dependency\" }}\n[package.metadata.fixture]\nrevision = 2\n"));
+        let lock = std::fs::read_to_string(fixture.root().join("Cargo.lock")).unwrap();
+        fixture.write("Cargo.lock", format!("{lock}\n"));
+        fixture.write(
+            "crates/app/vmux_cli/src/main.rs",
+            "fn main() { println!(\"{}\", cache_dependency::value() + 1); }\n",
+        );
+        let changed = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
+        assert_ne!(first["key"], changed["key"]);
+        assert_eq!(first["restore-prefix"], changed["restore-prefix"]);
+        for (input, output) in [
+            ("INPUT_SNAPSHOT", "snapshot"),
+            ("INPUT_TARGET", "target"),
+            ("INPUT_RECEIPT", "receipt"),
+        ] {
+            fixture.environment.set(input, &changed[output]);
+        }
+        fixture.run("cache-restore", &[]).unwrap();
+        fixture.execute("cargo", &["build", "--offline", "--quiet"]);
+        assert_eq!(
+            compiled,
+            std::fs::metadata(dependency).unwrap().modified().unwrap()
+        );
+        let output = fixture.execute("target/debug/vmux_cli", &[]);
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "8");
+        fixture.run("cache-checkpoint", &[]).unwrap();
     }
 }
