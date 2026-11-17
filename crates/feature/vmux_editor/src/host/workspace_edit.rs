@@ -16,8 +16,7 @@ impl Plugin for WorkspaceEditPlugin {
             .add_systems(
                 Update,
                 apply_lsp
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer)
-                    .in_set(super::file_writes::FileWriteSet),
+                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
             )
             .add_observer(apply);
     }
