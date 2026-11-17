@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -232,54 +231,6 @@ impl Editor {
     }
 }
 
-#[derive(Component, Default)]
-pub(super) struct ParkedEdits {
-    pub(super) by_path: HashMap<PathBuf, ParkedEdit>,
-    recent: Vec<PathBuf>,
-}
-
-pub(super) struct ParkedEdit {
-    pub(super) edit: Editor,
-    pub(super) diff: vmux_git::GitDiffSource,
-    pub(super) modified: Option<std::time::SystemTime>,
-}
-
-impl ParkedEdits {
-    pub(super) const CAPACITY: usize = 8;
-
-    pub(super) fn insert(&mut self, path: PathBuf, edit: ParkedEdit) {
-        self.recent.retain(|recent| recent != &path);
-        self.recent.push(path.clone());
-        self.by_path.insert(path, edit);
-        while self.recent.len() > Self::CAPACITY {
-            let Some(index) = self.recent.iter().position(|path| !self.is_dirty(path)) else {
-                break;
-            };
-            let evicted = self.recent.remove(index);
-            self.by_path.remove(&evicted);
-        }
-    }
-
-    pub(super) fn resume(&mut self, path: &Path) -> Option<ParkedEdit> {
-        let parked = self.by_path.remove(path)?;
-        self.recent.retain(|recent| recent != path);
-        if parked.edit.core.dirty || parked.modified == Self::modified_at(path) {
-            return Some(parked);
-        }
-        None
-    }
-
-    pub(super) fn is_dirty(&self, path: &Path) -> bool {
-        self.by_path
-            .get(path)
-            .is_some_and(|parked| parked.edit.core.dirty)
-    }
-
-    pub(crate) fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
-        std::fs::metadata(path).ok()?.modified().ok()
-    }
-}
-
 struct CachedWrapView {
     generation: u64,
     mode: vmux_api::editor::WordWrap,
@@ -297,7 +248,7 @@ mod tests {
         FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileOpenEvent,
     };
 
-    use crate::host::edit::{EditCommand, EditMode};
+    use crate::host::edit::EditCommand;
     use crate::host::editing::{ClipboardHandle, EditExecutionPlugin};
     use crate::host::file_lifecycle::{FileBuffer, FileLifecyclePlugin, FileLoadTask, LoadFailure};
     use crate::host::navigation::NavigationPlugin;
@@ -756,7 +707,12 @@ mod tests {
                 crate::host::explorer::ExplorerState::default(),
             ))
             .id();
-        crate::host::explorer::RestoreEditors { stack, view }.apply(session.app.world_mut());
+        session
+            .app
+            .world_mut()
+            .commands()
+            .queue(crate::host::explorer::RestoreEditors { stack, view });
+        session.app.world_mut().flush();
         session.entity = view;
         assert_eq!(session.text(), "EDIToriginal\n");
         assert_eq!(session.bytes("main.rs"), b"original\n");
@@ -864,29 +820,172 @@ mod tests {
     }
 
     #[test]
-    fn only_the_most_recent_files_are_held() {
-        let mut edits = ParkedEdits::default();
-        for index in 0..ParkedEdits::CAPACITY + 3 {
-            let path = PathBuf::from(format!("/tmp/{index}.rs"));
-            let core = EditCore::new(path.clone(), "Rust".into(), "x\n", EditMode::Normal);
-            edits.insert(
-                path,
-                ParkedEdit {
-                    edit: Editor::new(
-                        core,
-                        HighlightCache::new(Path::new("/tmp/a.rs")),
-                        crate::fold::FoldState::default(),
-                    ),
-                    diff: vmux_git::GitDiffSource {
-                        content: String::new(),
-                        dirty: false,
-                    },
-                    modified: None,
-                },
-            );
+    fn unsaved_files_are_retained_when_clean_buffer_capacity_is_exceeded() {
+        let mut session = Session::open("0.rs");
+        for index in 0..12 {
+            session.write(&format!("{index}.rs"), "original\n");
         }
-        assert_eq!(edits.by_path.len(), ParkedEdits::CAPACITY);
-        assert!(edits.by_path.contains_key(Path::new("/tmp/10.rs")));
-        assert!(!edits.by_path.contains_key(Path::new("/tmp/0.rs")));
+        session.settle();
+        for index in 0..11 {
+            session.type_into_buffer(&format!("edit{index}:"));
+            session.navigate_to(&format!("{}.rs", index + 1));
+        }
+        session.write("0.rs", "external\n");
+        session.navigate_to("0.rs");
+        assert_eq!(session.text(), "edit0:original\n");
+        session.navigate_to("10.rs");
+        assert_eq!(session.text(), "edit10:original\n");
+    }
+
+    #[test]
+    fn parked_edits_do_not_cross_between_pages_of_the_same_file() {
+        let mut session = Session::open("main.rs");
+        session.write("main.rs", "original\n");
+        session.write("other.rs", "other\n");
+        session.settle();
+        session.type_into_buffer("first:");
+        session.navigate_to("other.rs");
+        let first = session.entity;
+        let viewport = *session.app.world().get::<FileViewport>(first).unwrap();
+        session.entity = session
+            .app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: session.dir.path().join("main.rs"),
+                },
+                viewport,
+                PageMetadata::default(),
+            ))
+            .id();
+        session.settle();
+        assert_eq!(session.text(), "original\n");
+        session.type_into_buffer("second:");
+        session.navigate_to("other.rs");
+        session.navigate_to("main.rs");
+        assert_eq!(session.text(), "second:original\n");
+        session.entity = first;
+        session.navigate_to("main.rs");
+        assert_eq!(session.text(), "first:original\n");
+    }
+
+    #[test]
+    fn least_recent_clean_buffer_reloads_after_capacity_eviction() {
+        let mut session = Session::open("0.rs");
+        for index in 0..11 {
+            session.write(&format!("{index}.rs"), "first\nsecond\n");
+        }
+        session.settle();
+        session
+            .app
+            .world_mut()
+            .trigger(crate::host::editing::EditRequest::new(
+                session.entity,
+                vec![EditCommand::Move(crate::host::edit::Motion::GotoLine(1))],
+            ));
+        session.app.world_mut().flush();
+        let line = session
+            .app
+            .world()
+            .get::<Editor>(session.entity)
+            .unwrap()
+            .cursor_line();
+        assert_eq!(line, 1);
+        session.navigate_to("1.rs");
+        session.navigate_to("0.rs");
+        assert_eq!(
+            session
+                .app
+                .world()
+                .get::<Editor>(session.entity)
+                .unwrap()
+                .cursor_line(),
+            line
+        );
+        for index in 1..11 {
+            session.navigate_to(&format!("{index}.rs"));
+        }
+        session.navigate_to("0.rs");
+        assert_eq!(
+            session
+                .app
+                .world()
+                .get::<Editor>(session.entity)
+                .unwrap()
+                .cursor_line(),
+            0
+        );
+        assert_eq!(session.text(), "first\nsecond\n");
+    }
+
+    #[test]
+    fn archive_transfers_unsaved_buffers_and_retirement_releases_them() {
+        let mut session = Session::open("main.rs");
+        session.app.add_plugins(crate::host::explorer::TabsPlugin);
+        session
+            .app
+            .world_mut()
+            .entity_mut(session.entity)
+            .insert(crate::host::explorer::ExplorerState::default());
+        session.write("main.rs", "main\n");
+        session.write("other.rs", "other\n");
+        session.settle();
+        session.type_into_buffer("first:");
+        session.navigate_to("other.rs");
+        session.type_into_buffer("second:");
+        let viewport = *session
+            .app
+            .world()
+            .get::<FileViewport>(session.entity)
+            .unwrap();
+        let archive = session.app.world_mut().spawn_empty().id();
+        session
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveCaptureRequest {
+                archive,
+                source: session.entity,
+            });
+        session.app.world_mut().flush();
+        session.app.world_mut().despawn(session.entity);
+        let stack = session.app.world_mut().spawn_empty().id();
+        session
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveRestoreRequest { archive, stack });
+        session.app.world_mut().flush();
+        session.app.world_mut().despawn(archive);
+        session.entity = session
+            .app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: session.dir.path().join("other.rs"),
+                },
+                viewport,
+                PageMetadata::default(),
+                crate::host::explorer::ExplorerState::default(),
+            ))
+            .id();
+        session
+            .app
+            .world_mut()
+            .commands()
+            .trigger(crate::host::explorer::RestoreEditors {
+                stack,
+                view: session.entity,
+            });
+        session.app.world_mut().flush();
+        session.app.world_mut().despawn(stack);
+        session.settle();
+        assert_eq!(session.text(), "second:other\n");
+        session.navigate_to("main.rs");
+        assert_eq!(session.text(), "first:main\n");
+        session.app.world_mut().despawn(session.entity);
+        let mut parked = session
+            .app
+            .world_mut()
+            .query::<&crate::host::parked_edits::Parked>();
+        assert_eq!(parked.iter(session.app.world()).count(), 0);
     }
 }
