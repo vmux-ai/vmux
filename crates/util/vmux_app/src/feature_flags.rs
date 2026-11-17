@@ -17,14 +17,14 @@ fn configure_release(mut commands: Commands) {
     let mut endpoint = Some(
         Endpoint::new("https://api.vmux.ai/v1/flags/snapshot").expect("compiled release endpoint"),
     );
-    if matches!(vmux_profile::build_profile(), "dev" | "local") {
-        if let Ok(url) = std::env::var("VMUX_RELEASE_FLAGS_ENDPOINT") {
-            environment = std::env::var("VMUX_RELEASE_FLAGS_ENVIRONMENT")
-                .unwrap_or_else(|_| "development".into());
-            endpoint = None;
-            if url.starts_with("http://") {
-                endpoint = Endpoint::new(&url).ok();
-            }
+    if matches!(vmux_profile::build_profile(), "dev" | "local")
+        && let Ok(url) = std::env::var("VMUX_RELEASE_FLAGS_ENDPOINT")
+    {
+        environment = std::env::var("VMUX_RELEASE_FLAGS_ENVIRONMENT")
+            .unwrap_or_else(|_| "development".into());
+        endpoint = None;
+        if url.starts_with("http://") {
+            endpoint = Endpoint::new(&url).ok();
         }
     }
     let provider = commands.spawn(Provider::bundle(&environment)).id();
