@@ -6,6 +6,9 @@ use vmux_flex::prelude::*;
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowOverlay;
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FixedWindowOverlay;
+
 #[derive(Message, Clone, Copy, Debug, Default)]
 pub struct PopupDismissRequest;
 

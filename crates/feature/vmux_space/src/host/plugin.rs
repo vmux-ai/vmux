@@ -29,8 +29,8 @@ use vmux_layout::state::LayoutUiState;
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
 use vmux_layout::{
-    LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
-    TabLayoutSpawnRequest,
+    LayoutCef, LayoutContractPlugin, LayoutRestoreRequest, LayoutStartupSet, LayoutUiStateUpdates,
+    TabLayoutSpawnContent, TabLayoutSpawnRequest,
 };
 #[cfg(test)]
 use vmux_setting::{AgentSettings, SpaceOverrides, SpaceProject, TerminalSettings};
@@ -155,6 +155,7 @@ fn ensure_bootstrap(
     restore: Query<&WorkspaceRestore>,
     profile: vmux_ecs::profile::CurrentProfile,
     identity: SpaceIdentity,
+    mut layout: MessageWriter<LayoutRestoreRequest>,
     mut commands: Commands,
 ) {
     if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
@@ -168,6 +169,7 @@ fn ensure_bootstrap(
             name: profile.label().unwrap_or("Personal").to_string(),
         },
     ));
+    layout.write(LayoutRestoreRequest);
 }
 
 #[vmux_command::command(message)]

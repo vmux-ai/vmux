@@ -16,6 +16,7 @@ pub(super) enum AcpWorkspaceState {
 
 #[derive(SystemParam)]
 pub(super) struct PromptWorkspace<'w, 's> {
+    projects: vmux_ecs::profile::Projects<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     session_views: Query<'w, 's, (Entity, &'static EntityTarget<Session>)>,
     tabs: Query<'w, 's, &'static Tab>,
@@ -63,6 +64,14 @@ impl PromptWorkspace<'_, '_> {
         loop {
             if let Ok(tab) = self.tabs.get(current) {
                 let state = match tab.startup_dir.as_deref() {
+                    Some(directory)
+                        if self
+                            .projects
+                            .path()
+                            .is_ok_and(|root| std::path::Path::new(directory) == root) =>
+                    {
+                        AcpWorkspaceState::Unbound
+                    }
                     Some(_) if self.worktrees.contains(current) => {
                         AcpWorkspaceState::RepositoryNeedsWorktree
                     }

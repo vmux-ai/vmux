@@ -217,12 +217,8 @@ legacy: [
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||const:POPUP_SIZE_CHANNEL", fingerprint: "fc9023079bb9d8ae", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:dismiss", fingerprint: "749451a97fdf4f0a", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:inject_sizing", fingerprint: "7eb942b8e8944ede", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:present", fingerprint: "5e74482094e5575e", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:size", fingerprint: "8b519ea4cc08a19d", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||impl:PopupHost < \'_ , \'_ >", fingerprint: "5f50fe4a97cc4f5a", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||struct:DismissRequest", fingerprint: "9abdcd9324d9f22e", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||struct:ExtensionPopupSizeRequest", fingerprint: "b7c6f3b02d1bf757", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||struct:PopupHost", fingerprint: "f9bc894c8a5f74a4", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/web_store.rs||const:ADD_CHANNEL", fingerprint: "5df4407b978e0992", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/web_store.rs||const:INJECTOR_JS", fingerprint: "60c63350851e7e15", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/web_store.rs||const:MANAGE_CHANNEL", fingerprint: "fbcbe6870bce1492", issue: "VMX-253"),
@@ -428,6 +424,7 @@ boundaries: [
 
 ],
 values: [
+    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:size", fingerprint: "10469602993452b2", interface: "extension popup DOM sizing to layout UI projection", input: "ECS: crates/feature/vmux_extension/src/host/model.rs||struct:ExtensionPopup", output: "external: bounded popup preferred-size presentation", lifetime: "one current extension popup sizing notification", bounds: "validated channel and finite document dimensions only; popup lifecycle stays in registered systems", teardown: "popup closure drops sizing notifications and projected values", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_extension/src/install.rs||struct:ResolvedInstall", owner: "crates/feature/vmux_extension/src/install.rs||struct:Resolved", lifetime: "resolved foreign download URL, archive path and profile facts stored directly on one canonical installation operation"),
     (key: "crates/feature/vmux_extension/src/snapshot.rs||struct:ExtensionGrants", owner: "crates/feature/vmux_extension/src/core.rs||struct:Grants", lifetime: "permission and host-pattern scalar lists stored directly on one canonical association or grant operation"),
     (key: "crates/feature/vmux_extension/src/core.rs||struct:Ticket", owner: "crates/feature/vmux_extension/src/core.rs||struct:Scope", lifetime: "root identity, directory and generation carried by one canonical extension scope; invalidated when that root is replaced"),
@@ -445,7 +442,6 @@ shape: (
     (key: "crates/feature/vmux_extension/src/snapshot.rs||enum:EnableForProfileResult", fingerprint: "61e48ffe1f1a4638", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/match_pattern.rs||enum:Scheme", fingerprint: "5577e15c8ae6e333", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/host/bridge_page.rs||enum:ExtensionBridgeRole", fingerprint: "593a20dde9d6eb67", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||impl:PopupHost < \'_ , \'_ >::show", fingerprint: "0b247e0d2bc0ca52", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_extension/src/bin/vmux-extension-conformance.rs||enum:ConformanceCommand", fingerprint: "b2ba6f9ee0915662", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/protocol.rs||enum:BridgeServerMessage", fingerprint: "3b0e6c450696cca7", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/protocol.rs||enum:ExtensionContextKind", fingerprint: "ad50559ea95aba80", issue: "VMX-253", finding: "AU-13"),

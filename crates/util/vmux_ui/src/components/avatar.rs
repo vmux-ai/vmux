@@ -89,10 +89,20 @@ pub fn AgentThumbnail(
     background: String,
     #[props(default)] alt: String,
     #[props(default)] class: String,
+    #[props(default)] inverted: bool,
 ) -> Element {
     let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
-    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
+    let theme_class = if src.as_deref().is_some_and(FaviconSource::is_theme_icon) {
+        if inverted {
+            "[&_img]:invert dark:[&_img]:invert-0"
+        } else {
+            "dark:[&_img]:invert"
+        }
+    } else {
+        ""
+    };
+    let class = cn([AGENT_THUMBNAIL, theme_class, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }
@@ -102,7 +112,16 @@ struct AgentThumbnailSource;
 
 impl AgentThumbnailSource {
     fn resolve(src: Option<String>, seed: &str) -> Option<String> {
-        FaviconSource::agent(seed).or(src)
+        if let Some(source) = src {
+            if source.trim().is_empty() {
+                return FaviconSource::agent(seed);
+            }
+            if source == "vmux://acp/assets/favicons/acp.svg" {
+                return FaviconSource::agent(seed).or(Some(source));
+            }
+            return FaviconSource::registry(&source).or(Some(source));
+        }
+        FaviconSource::agent(seed)
     }
 }
 
@@ -274,16 +293,22 @@ mod tests {
 
     #[test]
     fn known_agent_brand_overrides_a_generic_profile_icon() {
-        assert_eq!(
-            AgentThumbnailSource::resolve(
-                Some("vmux://acp/assets/favicons/acp.svg".into()),
-                "codex"
-            ),
-            Some("assets/agent-logos/codex.png".into())
-        );
+        let resolved = AgentThumbnailSource::resolve(
+            Some("vmux://acp/assets/favicons/acp.svg".into()),
+            "codex",
+        )
+        .unwrap();
+        assert!(resolved.starts_with("data:image/svg+xml;base64,"));
         assert_eq!(
             AgentThumbnailSource::resolve(Some("custom.svg".into()), "custom-agent"),
             Some("custom.svg".into())
+        );
+        assert_eq!(
+            AgentThumbnailSource::resolve(
+                Some("https://provider.example/claude.svg".into()),
+                "claude-acp"
+            ),
+            Some("https://provider.example/claude.svg".into())
         );
     }
 

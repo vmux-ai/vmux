@@ -387,12 +387,12 @@ legacy: [
     (key: "crates/feature/vmux_command/src/ui/readline_driver.rs||struct:Edited", fingerprint: "5324161b8f6c362d", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||fn:PendingRow", fingerprint: "494c2dd4ff915c9c", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||fn:ResultRow", fingerprint: "f5276fbe444ed7b0", issue: "VMX-253"),
-    (key: "crates/feature/vmux_command/src/ui/row.rs||fn:RowIcon", fingerprint: "83a05aeafbe3e024", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||fn:SectionRow", fingerprint: "dd06b3245746af7b", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||impl:AgentRow", fingerprint: "a639099c186dc594", issue: "VMX-253"),
     (key: "crates/feature/vmux_command/src/ui/row.rs||struct:AgentRow", fingerprint: "afc7726d387b4662", issue: "VMX-253"),
 ],
 boundaries: [
+    (key: "crates/feature/vmux_command/src/ui/row.rs||fn:RowIcon", fingerprint: "83a05aeafbe3e024", interface: "Dioxus mounted rendering and typed UI intent delivery", input: "ECS: crates/util/vmux_api/src/command_bar/palette.rs||struct:CommandBarResultItem", output: "external: mounted DOM nodes and component callbacks", lifetime: "one mounted component scope and its current host binding", bounds: "presentation and immediate DOM state only; typed intent enters the host before product state changes", teardown: "unmount releases DOM signals and callbacks; host rejects expired page bindings", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/ui.rs|tests|struct:FocusPage", fingerprint: "86ab22f35b16e84b", interface: "Mounted Start VirtualDom and current typed FocusHost frame source", input: "ECS: crates/util/vmux_api/src/command_bar/state.rs||struct:CommandBarUiState", output: "external: mounted DOM or isolated fixture observation", lifetime: "One isolated Start document fixture", bounds: "Two test-owned DOMs at most; serialized UI frames, listener/focus IDs and observed DOM edits only", teardown: "VirtualDom and host drop release listeners, focus observations and retained frames", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/ui.rs|tests|impl:FocusPage", fingerprint: "79cf9c128ec0a396", interface: "Mounted Start VirtualDom and current typed FocusHost frame source", input: "ECS: crates/util/vmux_api/src/command_bar/state.rs||struct:CommandBarUiState", output: "external: mounted DOM or isolated fixture observation", lifetime: "One isolated Start document fixture", bounds: "Two test-owned DOMs at most; serialized UI frames, listener/focus IDs and observed DOM edits only", teardown: "VirtualDom and host drop release listeners, focus observations and retained frames", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_command/src/host/command_bar/driver.rs||impl:Composer", fingerprint: "5b234bef3b67779d", interface: "Read-only command palette composer presentation from published prompt context", input: "ECS: crates/util/vmux_api/src/command_bar/palette.rs||struct:CommandPaletteComposer", output: "external: scoped projection, native IO or framework registration output", lifetime: "One canonical prompt-context projection", bounds: "Projects labels, identicons, model choices and navigation descriptions; no workspace assignment or prompt acceptance", teardown: "Projection is replaced with its current context", architecture: "ECS ownership boundaries"),
@@ -455,8 +455,8 @@ shape: (
     (key: "crates/feature/vmux_command/src/ui/readline_driver.rs||enum:TextEditCommand", fingerprint: "81b1de8e96da0104", issue: "VMX-253", finding: "AU-13"),
   ],
   enums: [
-  ],
+],
   bodies: [
-  ],
+],
 ),
 )

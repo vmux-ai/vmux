@@ -4,7 +4,7 @@ An agent is an assistant you can give a task: research a trip, compare products,
 
 ## Start a conversation
 
-Select an available agent for a new Session. If it needs setup or sign-in, complete that first. Then describe the result you want and the details that matter.
+Select an available agent for a new Session. If it needs setup or sign-in, complete that first. Setup progress stays in the conversation. The normal composer remains visible with its message input and attachment control disabled until setup finishes; its send position offers Continue, Stop, or Resume as the current action. Choose 1. Connect to sign in through the provider page, or 2. Use an API key, then Continue. Press 1 or 2 to select a method. Confirmed choices appear as your messages in the conversation and remain visible when you return; an unfinished API-key response reopens at the same step. Provider sign-in opens a compact popup showing the site favicon and domain. Stop pauses active setup; Resume continues the current step. Then describe the result you want and the details that matter.
 
 For shopping, include the budget and delivery country. For cooking, include ingredients, portions, and dietary requirements. For software, select the Project and describe how to reproduce the problem.
 

@@ -1,7 +1,8 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::address::{
-    AddressEffect, AddressIntent, AddressOption, PageAddress, PageAddressPublish,
+    AddressCrumb, AddressEffect, AddressIntent, AddressOption, PageAddress, PageAddressPublish,
     PageAddressUiState, PageAddressUiStatePatch,
 };
 
@@ -59,7 +60,112 @@ type Sources<'w, 's> = Query<
     With<HostsPage>,
 >;
 
-fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands) {
+#[derive(SystemParam)]
+struct RouteLabels<'w, 's> {
+    pages: Query<'w, 's, &'static PageManifest>,
+    features: Query<'w, 's, &'static FeatureManifest>,
+}
+
+impl RouteLabels<'_, '_> {
+    fn current(&self, url: &str) -> Option<AddressOption> {
+        let mut selected = None;
+        let mut specificity = None;
+        for page in &self.pages {
+            let pattern = vmux_api::RoutePattern::new(page.route, page.owns_subtree);
+            if !pattern.matches(url) {
+                continue;
+            }
+            let rank = pattern.specificity(url);
+            if selected.is_none() || rank > specificity {
+                selected = Some(RouteLabel(page).option());
+                specificity = rank;
+            }
+        }
+        for feature in &self.features {
+            for page in &feature.pages {
+                let pattern = vmux_api::RoutePattern::new(&page.url, page.owns_subtree);
+                if !pattern.matches(url) {
+                    continue;
+                }
+                let rank = pattern.specificity(url);
+                if selected.is_some() && rank <= specificity {
+                    continue;
+                }
+                selected = Some(AddressOption {
+                    label: page.title.clone(),
+                    label_key: page.title_message_id.clone(),
+                    icon: serde_json::from_value(serde_json::Value::String(page.icon.clone())).ok(),
+                    intent: Some(AddressIntent::Navigate {
+                        url: page.url.clone(),
+                    }),
+                    ..Default::default()
+                });
+                specificity = rank;
+            }
+        }
+        selected
+    }
+
+    fn accepts(&self, entry: &AddressOption, url: &str) -> bool {
+        let Some(AddressIntent::Navigate { url: base }) = &entry.intent else {
+            return true;
+        };
+        for page in &self.pages {
+            if (page.url == base || page.route == base)
+                && vmux_api::RoutePattern::new(page.route, page.owns_subtree).matches(url)
+            {
+                return true;
+            }
+        }
+        for feature in &self.features {
+            for page in &feature.pages {
+                if page.url == *base
+                    && vmux_api::RoutePattern::new(&page.url, page.owns_subtree).matches(url)
+                {
+                    return true;
+                }
+            }
+        }
+        base == url
+    }
+
+    fn parents(&self, url: &str, current: &AddressOption) -> Vec<AddressCrumb> {
+        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
+            return Vec::new();
+        };
+        let mut parents = Vec::new();
+        let root = format!("vmux://{}", route.host());
+        for (index, _) in route.path().match_indices('/') {
+            let path = if index == 0 {
+                "/"
+            } else {
+                &route.path()[..index]
+            };
+            let parent = format!("{root}{path}");
+            let Some(entry) = self.current(&parent) else {
+                continue;
+            };
+            if entry.intent == current.intent
+                || !matches!(&entry.intent, Some(AddressIntent::Navigate { url }) if url == &parent)
+            {
+                continue;
+            }
+            if parents
+                .iter()
+                .any(|crumb: &AddressCrumb| crumb.entry.intent == entry.intent)
+            {
+                continue;
+            }
+            parents.push(AddressCrumb {
+                entry,
+                ..Default::default()
+            });
+        }
+        parents
+    }
+}
+
+fn project(routes: RouteLabels, pages: Sources, mut commands: Commands) {
     for (owner, metadata, current, automatic, scope) in &pages {
         if let Some(current) = current
             && current.0.url != metadata.url
@@ -124,26 +230,14 @@ fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands)
             }
             continue;
         }
-        let mut route = None;
-        let mut specificity = None;
-        for candidate in &routes {
-            let pattern = vmux_api::RoutePattern::new(candidate.route, candidate.owns_subtree);
-            if !pattern.matches(&metadata.url) {
-                continue;
-            }
-            let rank = pattern.specificity(&metadata.url);
-            if route.is_none() || rank > specificity {
-                route = Some(candidate);
-                specificity = rank;
-            }
-        }
-        let Some(route) = route else {
+        let Some(current_route) = routes.current(&metadata.url) else {
             continue;
         };
         let mut address = PageAddress {
             owner: owner.to_bits(),
             url: metadata.url.clone(),
-            current: RouteLabel(route).option(),
+            fixed: routes.parents(&metadata.url, &current_route),
+            current: current_route,
             ..Default::default()
         };
         address.revision = current.map_or(1, |current| current.0.revision);
@@ -210,6 +304,7 @@ impl AddressContribution {
 fn publish(
     event: On<UiInput<PageAddressPublish>>,
     pages: Query<(&PageMetadata, Option<&AddressContribution>)>,
+    routes: RouteLabels,
     mut commands: Commands,
 ) {
     let owner = event.webview;
@@ -221,6 +316,12 @@ fn publish(
     }
     let mut address = event.payload.address.clone();
     address.url = metadata.url.clone();
+    if !routes.accepts(&address.current, &metadata.url)
+        && let Some(current_route) = routes.current(&metadata.url)
+    {
+        address.fixed = routes.parents(&metadata.url, &current_route);
+        address.current = current_route;
+    }
     address.owner = owner.to_bits();
     address.revision = current.map_or(1, |current| current.0.revision);
     if current.is_some_and(|current| current.0 == address) {
@@ -375,6 +476,56 @@ mod tests {
                 intent,
             });
             self.app.world_mut().flush();
+        }
+    }
+
+    #[test]
+    fn feature_manifest_routes_supply_setup_breadcrumbs_without_manual_registration() {
+        let mut trail = Trail::new();
+        let url = "vmux://start/onboarding/agent";
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = url.into();
+        trail.app.world_mut().spawn(FeatureManifest::parse(r#"(pages: [
+            (url: "vmux://start/", title: "Start", title_message_id: "start-title"),
+            (url: "vmux://start/onboarding/agent", title: "Setup Agent", title_message_id: "onboarding-setup"),
+        ])"#));
+        trail.app.update();
+        let address = trail.address();
+        assert_eq!(address.url, url);
+        assert_eq!(address.current.label_key, "onboarding-setup");
+        assert_eq!(address.fixed.len(), 1);
+        assert_eq!(address.fixed[0].entry.label, "Start");
+        assert_eq!(
+            address.fixed[0].entry.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://start/".into()
+            })
+        );
+        let revision = address.revision;
+        for _ in 0..2 {
+            trail.app.world_mut().trigger(UiInput {
+                webview: trail.page,
+                payload: PageAddressPublish {
+                    address: PageAddress {
+                        url: url.into(),
+                        current: AddressOption {
+                            label: "Sessions".into(),
+                            intent: Some(AddressIntent::Navigate {
+                                url: "vmux://sessions/".into(),
+                            }),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                },
+            });
+            trail.app.world_mut().flush();
+            assert_eq!(trail.address().current.label_key, "onboarding-setup");
+            assert_eq!(trail.address().revision, revision);
         }
     }
 

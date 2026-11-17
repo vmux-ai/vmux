@@ -43,18 +43,15 @@ impl AgentConfigAccess {
 
 impl AgentConfigPaths {
     fn from_env() -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"));
-        let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".claude"));
-        let codex = std::env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".codex"));
-        let vibe = std::env::var_os("VIBE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".vibe"));
+        let paths = vmux_ecs::profile::ProfilePaths::current();
+        let claude = paths.agent_config_directory(
+            std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
+            ".claude",
+        );
+        let codex = paths
+            .agent_config_directory(std::env::var_os("CODEX_HOME").map(PathBuf::from), ".codex");
+        let vibe =
+            paths.agent_config_directory(std::env::var_os("VIBE_HOME").map(PathBuf::from), ".vibe");
         Self {
             claude_instructions: claude.join("CLAUDE.md"),
             claude_settings: claude.join("settings.json"),

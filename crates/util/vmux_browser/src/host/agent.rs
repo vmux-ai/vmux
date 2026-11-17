@@ -1,4 +1,8 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_api::browser::{AgentOpenBrowser, OpenExternalBrowserRequest, Url};
+use vmux_api::open_target::PaneDirection;
 use vmux_api::protocol::{AgentCommandResult, AgentQueryResult, AgentRequestId, ClientMessage};
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentReply, AgentRequestAppExt, AgentRequestMessage,
@@ -10,8 +14,11 @@ use vmux_ecs::browser::{
 };
 use vmux_ecs::profile::Projects;
 use vmux_ecs::service::ServiceRequest;
-use vmux_history::HistoryOpenIntent;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_flex::prelude::ComputedNode;
+use vmux_history::{HistoryOpenIntent, LastActivatedAt};
 use vmux_layout::active_pane::ActivatePane;
+use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, OpenBesideRequest,
     OpenInNewStackRequest,
@@ -64,9 +71,29 @@ pub(crate) struct AgentOpenInNewStack {
 
 pub(crate) struct AgentBrowserPlugin;
 
+pub(super) struct BrowserOpenPlugin;
+
+impl Plugin for BrowserOpenPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(super::authentication::AuthenticationPlugin)
+            .add_agent_request::<AgentOpenBrowser>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<OpenBesideRequest>()
+            .add_message::<AgentCommandResponse>()
+            .add_plugins(UiEventPlugin::<(OpenExternalBrowserRequest,)>::default())
+            .add_observer(open_external)
+            .add_systems(
+                Update,
+                open.in_set(vmux_ecs::agent::AgentRequestApplySet)
+                    .after(AgentRequestRouteSet),
+            );
+    }
+}
+
 impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_request::<AgentBrowserNavigate>()
+        app.add_plugins(BrowserOpenPlugin)
+            .add_agent_request::<AgentBrowserNavigate>()
             .add_agent_request::<AgentBrowserGoBack>()
             .add_agent_request::<AgentBrowserGoForward>()
             .add_agent_request::<AgentBrowserHistorySearch>()
@@ -397,5 +424,777 @@ fn open_in_new_stack(
             url: request.payload.url.clone(),
         });
         responses.write(request.reply.ok());
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct OpenResolver<'w, 's> {
+    focused: FocusedStack<'w, 's>,
+    stacks: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static vmux_ecs::PageMetadata,
+            Option<&'static vmux_ecs::EntityTarget<vmux_session::Session>>,
+        ),
+        With<Stack>,
+    >,
+    sessions: Query<
+        'w,
+        's,
+        (
+            &'static vmux_session::SessionId,
+            Has<vmux_session::SetupPending>,
+            Option<&'static vmux_ecs::ProcessAnchor>,
+        ),
+    >,
+    parents: Query<'w, 's, &'static ChildOf>,
+    children: Query<'w, 's, &'static Children>,
+    views: Query<
+        'w,
+        's,
+        (
+            &'static vmux_ecs::PageMetadata,
+            &'static bevy_cef::prelude::HostWindow,
+        ),
+        (
+            With<vmux_session::host::SessionView>,
+            Without<vmux_ecs::page::PrewarmedPage>,
+            Without<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+    >,
+    layouts: Query<
+        'w,
+        's,
+        (Entity, &'static bevy_cef::prelude::HostWindow),
+        With<vmux_layout::LayoutCef>,
+    >,
+    nodes: Query<'w, 's, &'static ComputedNode>,
+}
+
+impl OpenResolver<'_, '_> {
+    fn accepts_launch(&self, source: &str, anchor: vmux_api::ProcessId) -> bool {
+        self.sessions.iter().any(|(id, _, current)| {
+            id.0 == source && current.is_some_and(|current| current.0 == anchor)
+        })
+    }
+
+    fn resolve(&self, source: Option<&str>) -> Result<(Entity, bool), String> {
+        let stack = if let Some(source) = source {
+            let mut route =
+                url::Url::parse("vmux://sessions/").expect("static Session route is valid");
+            route
+                .path_segments_mut()
+                .expect("Session route supports path segments")
+                .push(source);
+            let url = route.as_str();
+            self.stacks.iter().find_map(|(stack, metadata, target)| {
+                let matches = match target {
+                    Some(target) => self
+                        .sessions
+                        .get(target.entity())
+                        .is_ok_and(|(id, _, _)| id.0 == source),
+                    None => metadata.url == url,
+                };
+                matches.then_some(stack)
+            })
+        } else {
+            self.focused.stack
+        }
+        .ok_or("browser source conversation is unavailable")?;
+        let pane = self
+            .parents
+            .get(stack)
+            .map_err(|_| "browser source pane is unavailable")?
+            .parent();
+        let width = self
+            .nodes
+            .get(pane)
+            .map(|node| node.size.x * node.inverse_scale_factor)
+            .unwrap_or_default();
+        Ok((pane, width.is_finite() && width >= 1120.0))
+    }
+
+    fn authentication(
+        &self,
+        id: String,
+        url: &str,
+        source: Option<&str>,
+    ) -> Result<Option<super::authentication::Open>, String> {
+        if !cfg!(target_os = "macos") {
+            return Ok(None);
+        }
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        let Some((stack, session)) = self.stacks.iter().find_map(|(stack, _, target)| {
+            let target = target?;
+            let (candidate, setup, _) = self.sessions.get(target.entity()).ok()?;
+            (setup && candidate.0 == source).then_some((stack, target.entity()))
+        }) else {
+            return Ok(None);
+        };
+        let (view, metadata, window) = self
+            .children
+            .get(stack)
+            .ok()
+            .and_then(|children| {
+                children.iter().find_map(|view| {
+                    self.views
+                        .get(view)
+                        .ok()
+                        .map(|(metadata, host)| (view, metadata, host.0))
+                })
+            })
+            .ok_or("authentication source view is unavailable")?;
+        let owner = self
+            .layouts
+            .iter()
+            .find_map(|(entity, host)| (host.0 == window).then_some(entity))
+            .ok_or("authentication source window is unavailable")?;
+        Ok(Some(super::authentication::Open {
+            id,
+            owner,
+            window,
+            session,
+            view,
+            url: url.to_string(),
+            title: metadata.title.clone(),
+            icon: metadata.icon.clone(),
+        }))
+    }
+}
+
+fn open(
+    mut requests: MessageReader<AgentRequestMessage<AgentOpenBrowser>>,
+    target: OpenResolver,
+    mut responses: MessageWriter<AgentCommandResponse>,
+    mut beside: MessageWriter<OpenBesideRequest>,
+    mut pages: MessageWriter<PageOpenRequest>,
+    mut authentication: MessageWriter<super::authentication::Open>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        if let Err(error) = Url::parse(&request.payload.url) {
+            responses.write(request.reply.response(AgentCommandResult::Error(error)));
+            continue;
+        }
+        if let CommandOrigin::Agent {
+            anchor: Some(anchor),
+            ..
+        } = &request.origin
+            && request
+                .payload
+                .source
+                .as_deref()
+                .is_none_or(|source| !target.accepts_launch(source, *anchor))
+        {
+            responses.write(request.reply.response(AgentCommandResult::Error(
+                "browser source launch is no longer active".into(),
+            )));
+            continue;
+        }
+        match target.authentication(
+            request.reply.request_id.to_string(),
+            &request.payload.url,
+            request.payload.source.as_deref(),
+        ) {
+            Ok(Some(modal)) => {
+                authentication.write(modal);
+                responses.write(request.reply.ok());
+                continue;
+            }
+            Err(error) => {
+                responses.write(request.reply.response(AgentCommandResult::Error(error)));
+                continue;
+            }
+            Ok(None) => {}
+        }
+        match target.resolve(request.payload.source.as_deref()) {
+            Ok((pane, wide)) => {
+                if wide {
+                    beside.write(OpenBesideRequest {
+                        pane,
+                        direction: Some(PaneDirection::Right),
+                        url: request.payload.url.clone(),
+                        request_id: request.reply.request_id.0,
+                        focus: true,
+                    });
+                } else {
+                    let stack = commands
+                        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    pages.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url: request.payload.url.clone(),
+                        request_id: None,
+                    });
+                    commands.trigger(vmux_ecs::ActivateRequest { entity: stack });
+                }
+                responses.write(request.reply.ok());
+            }
+            Err(error) => {
+                responses.write(request.reply.response(AgentCommandResult::Error(error)));
+            }
+        }
+    }
+}
+
+struct External(Url);
+
+impl External {
+    fn open(self) -> std::io::Result<()> {
+        let program = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        let mut child = std::process::Command::new(program)
+            .arg(self.0.as_str())
+            .spawn()?;
+        std::thread::Builder::new()
+            .name("external-browser".into())
+            .spawn(move || {
+                let _ = child.wait();
+            })?;
+        Ok(())
+    }
+}
+
+fn open_external(trigger: On<UiInput<OpenExternalBrowserRequest>>) {
+    let Ok(url) = Url::parse(&trigger.event().payload.url) else {
+        return;
+    };
+    if let Err(error) = External(url).open() {
+        bevy::log::warn!("external browser could not be opened: {error}");
+    }
+}
+
+#[cfg(test)]
+mod opening_tests {
+    use super::*;
+    use vmux_layout::active_pane::ActiveStack;
+
+    #[cfg(target_os = "macos")]
+    struct ModalFixture {
+        app: App,
+        window: Entity,
+        owner: Entity,
+        stack: Entity,
+        session: Entity,
+        view: Entity,
+        request_id: String,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl ModalFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_ecs::PrimitivesPlugin,
+                vmux_ecs::UiStatePlugin::<vmux_layout::state::LayoutUiState>::with_post_update_flush(),
+                BrowserOpenPlugin,
+            ))
+            .insert_non_send(bevy_cef::prelude::Browsers::default());
+            let window = app.world_mut().spawn(Window::default()).id();
+            let owner = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::LayoutCef,
+                    bevy_cef::prelude::HostWindow(window),
+                    vmux_ecs::PageMetadata {
+                        url: "vmux://layout/".into(),
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            let pane = app.world_mut().spawn(ComputedNode::default()).id();
+            let session = app
+                .world_mut()
+                .spawn((
+                    vmux_session::Session,
+                    vmux_session::SessionId("source".into()),
+                    vmux_session::SetupPending,
+                    vmux_session::RunState::Idle,
+                    vmux_session::Authentication {
+                        active: true,
+                        pending: true,
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn((
+                    Stack::bundle(),
+                    ChildOf(pane),
+                    vmux_ecs::EntityTarget::<vmux_session::Session>::new(session),
+                ))
+                .insert(vmux_ecs::PageMetadata {
+                    url: "vmux://start/onboarding/agent".into(),
+                    ..Default::default()
+                })
+                .id();
+            let view = app
+                .world_mut()
+                .spawn((
+                    vmux_session::host::SessionView,
+                    ChildOf(stack),
+                    bevy_cef::prelude::HostWindow(window),
+                    vmux_ecs::PageMetadata {
+                        url: "vmux://start/onboarding/agent".into(),
+                        title: "Setup Mistral Vibe".into(),
+                        icon: vmux_api::PageIcon::favicon("https://example.test/favicon.svg"),
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            Self {
+                app,
+                window,
+                owner,
+                stack,
+                session,
+                view,
+                request_id: String::new(),
+            }
+        }
+
+        fn request(&mut self, url: &str) {
+            let request_id = AgentRequestId::new();
+            self.request_id = request_id.to_string();
+            self.app.world_mut().write_message(AgentRequestMessage {
+                reply: AgentReply::new(request_id),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: None,
+                },
+                payload: AgentOpenBrowser {
+                    url: url.into(),
+                    source: Some("source".into()),
+                },
+            });
+        }
+
+        fn open(&mut self, url: &str) -> Entity {
+            self.request(url);
+            self.app.update();
+            self.app.update();
+            self.app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::PopupWebview>>()
+                .single(self.app.world())
+                .unwrap()
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_replaced_launch_cannot_open_a_popup_for_the_same_setup_session() {
+        let mut fixture = ModalFixture::new();
+        let old = vmux_api::ProcessId::new();
+        let current = vmux_api::ProcessId::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(vmux_ecs::ProcessAnchor(current));
+        for (anchor, allowed) in [(old, false), (current, true)] {
+            fixture.app.world_mut().write_message(AgentRequestMessage {
+                reply: AgentReply::new(AgentRequestId::new()),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                payload: AgentOpenBrowser {
+                    source: Some("source".into()),
+                    url: "https://example.test/auth".into(),
+                },
+            });
+            fixture.app.update();
+            fixture.app.update();
+            assert_eq!(
+                fixture
+                    .app
+                    .world_mut()
+                    .query_filtered::<Entity, With<crate::PopupWebview>>()
+                    .iter(fixture.app.world())
+                    .count(),
+                usize::from(allowed)
+            );
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .resource::<Messages<PageOpenRequest>>()
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn authentication_keyboard_ownership_tracks_its_window_and_preserves_the_popup() {
+        let mut fixture = ModalFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.window)
+            .insert(vmux_ecs::Active);
+        let popup = fixture.open("https://example.test/auth");
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.owner,
+            payload: vmux_api::browser::BrowserModalBoundsRequest {
+                id: fixture.request_id.clone(),
+                left: 10.0,
+                top: 20.0,
+                width: 360.0,
+                height: 560.0,
+            },
+        });
+        fixture.app.world_mut().flush();
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::KeyboardOwner>(popup)
+                .is_some()
+        );
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.window)
+            .remove::<vmux_ecs::Active>();
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::KeyboardOwner>(popup)
+                .is_none()
+        );
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(other)
+            .remove::<vmux_ecs::Active>();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.window)
+            .insert(vmux_ecs::Active);
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::KeyboardOwner>(popup)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::InfrastructureWebview>(popup)
+                .is_some()
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn sign_in_requests_in_one_frame_keep_only_the_latest_modal() {
+        let mut fixture = ModalFixture::new();
+        fixture.request("https://example.test/auth?attempt=1");
+        let url = "https://example.test/auth?attempt=2";
+        fixture.request(url);
+        fixture.app.update();
+        fixture.app.update();
+        let popup = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::PopupWebview>>()
+            .single(fixture.app.world())
+            .unwrap();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(popup)
+                .unwrap()
+                .url,
+            url
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn setup_sign_in_opens_a_source_window_modal_without_replacing_the_conversation() {
+        let mut fixture = ModalFixture::new();
+        let url = "https://example.test/auth?state=%2B%2F&challenge=a+b";
+        let popup = fixture.open(url);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(popup)
+                .unwrap()
+                .url,
+            url
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<bevy_cef::prelude::HostWindow>(popup)
+                .unwrap()
+                .0,
+            fixture.window
+        );
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(popup).unwrap().parent(),
+            fixture.owner
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(fixture.stack)
+                .unwrap()
+                .url,
+            "vmux://start/onboarding/agent"
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::FixedWindowOverlay>(popup)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<PageOpenRequest>>()
+                .is_empty()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<OpenBesideRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn setup_sign_in_stays_open_during_preparation_and_closes_on_failure() {
+        let mut fixture = ModalFixture::new();
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_session::Preparation>(fixture.session)
+            .unwrap() = vmux_session::Preparation::starting();
+        let popup = fixture.open("https://example.test/auth");
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_session::Authentication>(fixture.session)
+            .unwrap() = vmux_session::Authentication {
+            active: true,
+            pending: true,
+            ..Default::default()
+        };
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_session::RunState>(fixture.session)
+            .unwrap() = vmux_session::RunState::Errored("setup cancelled".into());
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn modal_bounds_and_close_intents_are_scoped_to_the_current_window_and_request() {
+        let mut fixture = ModalFixture::new();
+        let old = fixture.open("https://example.test/auth?attempt=1");
+        let id = fixture.request_id.clone();
+        let popup = fixture.open("https://example.test/auth?attempt=2");
+        assert!(fixture.app.world().get_entity(old).is_err());
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.owner,
+            payload: vmux_api::browser::BrowserModalCloseRequest { id },
+        });
+        fixture.app.world_mut().flush();
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        let current = fixture.request_id.clone();
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.view,
+            payload: vmux_api::browser::BrowserModalBoundsRequest {
+                id: current.clone(),
+                left: 10.0,
+                top: 20.0,
+                width: 500.0,
+                height: 600.0,
+            },
+        });
+        fixture.app.world_mut().flush();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::PopupBounds>(popup)
+                .is_none()
+        );
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.owner,
+            payload: vmux_api::browser::BrowserModalBoundsRequest {
+                id: current.clone(),
+                left: 10.0,
+                top: 20.0,
+                width: 500.0,
+                height: 600.0,
+            },
+        });
+        fixture.app.world_mut().flush();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::PopupBounds>(popup)
+                .is_some()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .remove::<vmux_session::SetupPending>();
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_err());
+    }
+
+    #[test]
+    fn account_pages_preserve_the_source_and_choose_layout_from_logical_width() {
+        for (physical_width, inverse_scale, wide) in [
+            (2400.0, 0.5, true),
+            (1200.0, 0.5, false),
+            (600.0, 1.0, false),
+        ] {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+                .add_plugins(vmux_ecs::UiStatePlugin::<
+                    vmux_layout::state::LayoutUiState,
+                >::with_post_update_flush())
+                .add_plugins(BrowserOpenPlugin)
+                .insert_non_send(bevy_cef::prelude::Browsers::default())
+                .add_message::<AgentRequestMessage<AgentOpenBrowser>>()
+                .add_message::<AgentCommandResponse>()
+                .add_message::<OpenBesideRequest>()
+                .add_message::<PageOpenRequest>();
+            let pane = app
+                .world_mut()
+                .spawn(ComputedNode {
+                    size: Vec2::new(physical_width, 900.0),
+                    inverse_scale_factor: inverse_scale,
+                    ..Default::default()
+                })
+                .id();
+            let source = "sign-in/source?draft#1";
+            let source_url = "vmux://start/onboarding/agent";
+            let session = app
+                .world_mut()
+                .spawn((
+                    vmux_session::Session,
+                    vmux_session::SessionId(source.into()),
+                ))
+                .id();
+            if !cfg!(target_os = "macos") {
+                app.world_mut()
+                    .entity_mut(session)
+                    .insert(vmux_session::SetupPending);
+            }
+            let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
+            app.world_mut().entity_mut(stack).insert((
+                vmux_ecs::EntityTarget::<vmux_session::Session>::new(session),
+                vmux_ecs::PageMetadata {
+                    url: source_url.into(),
+                    ..Default::default()
+                },
+            ));
+            let other_pane = app.world_mut().spawn_empty().id();
+            let other_stack = app
+                .world_mut()
+                .spawn((Stack::bundle(), ChildOf(other_pane)))
+                .id();
+            app.world_mut().spawn(
+                ActiveStack {
+                    pane: Some(other_pane),
+                    stack: Some(other_stack),
+                    ..Default::default()
+                }
+                .local_bundle(),
+            );
+            let url = "https://example.test/auth?state=%2B%2F&challenge=a+b";
+            app.world_mut().write_message(AgentRequestMessage {
+                reply: AgentReply::new(AgentRequestId::new()),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: None,
+                },
+                payload: AgentOpenBrowser {
+                    url: url.into(),
+                    source: Some(source.into()),
+                },
+            });
+            app.update();
+            assert_eq!(
+                app.world()
+                    .get::<vmux_ecs::PageMetadata>(stack)
+                    .unwrap()
+                    .url,
+                source_url
+            );
+            let beside = app
+                .world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            let pages = app
+                .world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            if wide {
+                assert_eq!(beside.len(), 1);
+                assert_eq!(beside[0].pane, pane);
+                assert_eq!(beside[0].direction, Some(PaneDirection::Right));
+                assert_eq!(beside[0].url, url);
+                assert!(pages.is_empty());
+            } else {
+                assert!(beside.is_empty());
+                assert_eq!(pages.len(), 1);
+                assert_eq!(pages[0].url, url);
+                let PageOpenTarget::Stack(opened) = pages[0].target else {
+                    panic!("a narrow pane must open a new Stack");
+                };
+                assert_ne!(opened, stack);
+                assert_eq!(app.world().get::<ChildOf>(opened).unwrap().parent(), pane);
+                assert!(app.world().get::<LastActivatedAt>(pane).is_some());
+            }
+        }
     }
 }

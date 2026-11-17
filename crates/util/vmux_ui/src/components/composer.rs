@@ -29,9 +29,13 @@ pub fn PromptComposer(
     accent_color: String,
     accent_gradient: String,
     #[props(default)] footer: Option<Element>,
+    #[props(default)] action: Option<Element>,
     #[props(default)] shared_transition: bool,
     #[props(default)] disabled: bool,
+    #[props(default)] input_disabled: bool,
+    #[props(default)] input: Option<Element>,
     #[props(default = true)] show_send_button: bool,
+    #[props(default = true)] show_add_button: bool,
     #[props(default = true)] caret_visible: bool,
     #[props(default = PROMPT_INPUT_ID.to_string())] input_id: String,
     #[props(default = translate("composer-attach-files"))] attach_title: String,
@@ -46,6 +50,7 @@ pub fn PromptComposer(
     on_remove_attachment: EventHandler<usize>,
     on_action: EventHandler<()>,
 ) -> Element {
+    let field_disabled = disabled || input_disabled;
     let mut add_menu_open = use_signal(|| false);
     Dismissal::use_listener(
         add_menu_open(),
@@ -60,17 +65,6 @@ pub fn PromptComposer(
     let has_ghost = ghost.is_some();
     let overlaid = !overlay.is_empty();
     let typed_text_class = if overlaid { "text-transparent" } else { "" };
-    let mode_class = if action_enabled && !disabled {
-        match mode {
-            PromptComposerMode::Send => cn([
-                "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
-                accent_gradient.as_str(),
-            ]),
-            PromptComposerMode::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
-        }
-    } else {
-        "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/[0.055] text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-white/[0.08] sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/25 sm:ring-black/[0.06] dark:sm:bg-white/[0.055] dark:sm:ring-white/[0.08]".to_string()
-    };
     let shared_transition_class = if shared_transition {
         "vmux-agent-composer-shared"
     } else {
@@ -98,8 +92,9 @@ pub fn PromptComposer(
             PromptBox {
                 class: prompt_box_class,
                 style: "--vmux-prompt-accent:{accent_color};",
+                if show_add_button {
                 button {
-                    class: if disabled {
+                    class: if field_disabled {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 cursor-not-allowed self-center items-center justify-center rounded-xl text-muted-foreground/35 sm:h-8 sm:w-8 sm:rounded-lg"
                     } else if add_menu_open() {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-foreground/10 text-foreground transition sm:h-8 sm:w-8 sm:rounded-lg"
@@ -107,19 +102,19 @@ pub fn PromptComposer(
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg"
                     },
                     r#type: "button",
-                    disabled,
+                    disabled: field_disabled,
                     title: translate("common-add"),
                     aria_label: translate("common-add"),
-                    aria_expanded: add_menu_open() && !disabled,
+                    aria_expanded: add_menu_open() && !field_disabled,
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
-                        if !disabled {
+                        if !field_disabled {
                             add_menu_open.set(!add_menu_open());
                         }
                     },
                     LineIconView { icon: LineIcon::Plus, class: "size-4".to_string() }
                 }
-                if add_menu_open() && !disabled {
+                if add_menu_open() && !field_disabled {
                     PromptPopup {
                         placement: PromptPopupPlacement::Upward,
                         on_dismiss: move |_| add_menu_open.set(false),
@@ -147,6 +142,7 @@ pub fn PromptComposer(
                             span { {translate("editor-paste")} }
                         }
                     }
+                }
                 }
 
                 if !attachments.is_empty() {
@@ -201,6 +197,9 @@ pub fn PromptComposer(
                 }
                 div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-1 sm:px-2",
                     div { class: "relative min-w-32 flex-1 overflow-hidden",
+                        if let Some(input) = input {
+                            {input}
+                        } else {
                         if value.is_empty() {
                             if !preview.is_empty() {
                                 div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
@@ -224,9 +223,9 @@ pub fn PromptComposer(
                         textarea {
                             id: "{input_id}",
                             class: textarea_class,
-                            autofocus: !disabled,
-                            disabled,
-                            aria_disabled: disabled,
+                            autofocus: !field_disabled,
+                            disabled: field_disabled,
+                            aria_disabled: field_disabled,
                             rows: "1",
                             spellcheck: "false",
                             autocapitalize: "off",
@@ -235,7 +234,7 @@ pub fn PromptComposer(
                             placeholder: if preview.is_empty() && !has_ghost && !overlaid { placeholder } else { String::new() },
                             value: "{value}",
                             oninput: move |event| {
-                                if disabled {
+                                if field_disabled {
                                     return;
                                 }
                                 if let Some(value) = ime.input(event.value()) {
@@ -243,7 +242,7 @@ pub fn PromptComposer(
                                 }
                             },
                             onpaste: move |event| {
-                                if disabled {
+                                if field_disabled {
                                     event.prevent_default();
                                     return;
                                 }
@@ -251,7 +250,7 @@ pub fn PromptComposer(
                             },
                             oncompositionstart: move |_| ime.start(),
                             oncompositionend: move |_| {
-                                if disabled {
+                                if field_disabled {
                                     return;
                                 }
                                 if let Some(value) = ime.commit_input() {
@@ -259,27 +258,69 @@ pub fn PromptComposer(
                                 }
                             },
                             onkeydown: move |event| {
-                                if disabled || ime.swallows(&event) {
+                                if field_disabled || ime.swallows(&event) {
                                     return;
                                 }
                                 on_keydown.call(event);
                             },
                         }
+                        }
                     }
                 }
-                if mode == PromptComposerMode::Stop || show_send_button {
+                if let Some(action) = action { {action} } else if mode == PromptComposerMode::Stop || show_send_button {
+                    ComposerButton { mode, action_title, enabled: !disabled && action_enabled, accent_gradient, on_action }
+                }
+                if let Some(footer) = footer {
+                    div { class: "relative z-10 order-last w-full px-2 pb-1", {footer} }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ComposerButton(
+    #[props(default)] mode: PromptComposerMode,
+    action_title: String,
+    #[props(default)] label: Option<String>,
+    #[props(default)] icon: Option<LineIcon>,
+    #[props(default)] icon_class: String,
+    #[props(default = true)] enabled: bool,
+    #[props(default)] accent_gradient: String,
+    on_action: EventHandler<()>,
+) -> Element {
+    let mode_class = if enabled {
+        match mode {
+            PromptComposerMode::Send => cn([
+                "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
+                if accent_gradient.is_empty() { "vmux-primary-fill" } else { "bg-gradient-to-br" },
+                accent_gradient.as_str(),
+            ]),
+            PromptComposerMode::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
+        }
+    } else {
+        "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/[0.055] text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-white/[0.08] sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/25 sm:ring-black/[0.06] dark:sm:bg-white/[0.055] dark:sm:ring-white/[0.08]".to_string()
+    };
+    rsx! {
                     button {
                         class: "{mode_class}",
+                        style: label.is_some().then_some("width:auto;min-width:2rem;padding:0 .75rem;gap:.375rem;white-space:nowrap;"),
                         r#type: "button",
-                        disabled: disabled || !action_enabled,
+                        disabled: !enabled,
                         title: "{action_title}",
+                        aria_label: "{action_title}",
                         onmousedown: move |event| event.prevent_default(),
+                        onkeydown: move |event| {
+                            if event.key() == Key::Enter || matches!(event.key(), Key::Character(key) if key == " ") {
+                                event.stop_propagation();
+                            }
+                        },
                         onclick: move |_| {
-                            if !disabled && action_enabled {
+                            if enabled {
                                 on_action.call(());
                             }
                         },
-                        if mode == PromptComposerMode::Stop {
+                        if let Some(icon) = icon { LineIconView { icon, class: format!("h-4 w-4 {icon_class}") } } else if mode == PromptComposerMode::Stop {
                             svg {
                                 class: "h-4 w-4",
                                 view_box: "0 0 24 24",
@@ -299,35 +340,70 @@ pub fn PromptComposer(
                                 path { d: "M5 12l7-7 7 7" }
                             }
                         }
+                        if let Some(label) = &label { span { class: "text-sm font-medium", "{label}" } }
                     }
-                }
-                if let Some(footer) = footer {
-                    div { class: "relative z-10 order-last w-full px-2 pb-1", {footer} }
-                }
-            }
+    }
+}
+
+#[component]
+pub fn ShortcutHint(shortcut: String, label: String) -> Element {
+    rsx! {
+        div { class: "flex items-center gap-2 text-[10px] text-muted-foreground/60",
+            kbd { class: "inline-flex h-5 items-center rounded border border-foreground/15 bg-foreground/[0.06] px-1.5 font-mono text-[10px] font-medium text-foreground/60", "{shortcut}" }
+            span { "{label}" }
         }
     }
 }
 
 #[component]
-pub fn ComposerFrame(#[props(default)] notice: Option<Element>, children: Element) -> Element {
+pub fn ComposerFrame(
+    #[props(default)] notice: Option<Element>,
+    #[props(default)] muted: bool,
+    #[props(default)] borderless: bool,
+    #[props(default)] content_class: String,
+    children: Element,
+) -> Element {
     let attached = notice.is_some();
     rsx! {
         div {
             "data-slot": "composer-frame",
-            class: if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
+            class: if attached && borderless && !muted { "rounded-[14px] bg-card text-foreground" } else if attached && borderless { "relative text-foreground/85" } else if attached && muted { "rounded-[14px] bg-foreground/[0.035] p-px text-foreground/85 ring-1 ring-inset ring-foreground/10" } else if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
             if let Some(notice) = notice {
                 {notice}
             }
             div {
                 "data-slot": "composer-content",
                 class: if attached {
-                    "rounded-[13px] bg-background text-foreground [&_.vmux-prompt-box]:rounded-[13px] [&_.vmux-prompt-box]:ring-0"
+                    format!("rounded-[13px] bg-background text-foreground [&_.vmux-prompt-box]:rounded-[13px] [&_.vmux-prompt-box]:ring-0 {content_class}")
                 } else {
-                    "relative"
+                    format!("relative {content_class}")
                 },
                 {children}
             }
+        }
+    }
+}
+
+#[component]
+pub fn ComposerNotice(
+    #[props(default)] content: Option<Element>,
+    #[props(default)] class: String,
+) -> Element {
+    let mut retained = use_signal(|| content.clone());
+    use_effect(use_reactive!(|content| {
+        if content.is_some() {
+            retained.set(content.clone());
+        }
+    }));
+    let expanded = content.is_some();
+    let shown = if expanded { content } else { retained() };
+    rsx! {
+        div {
+            class: "grid transition-[grid-template-rows,opacity] duration-150 ease-in-out motion-reduce:transition-none {class}",
+            style: if expanded { "grid-template-rows:1fr;opacity:1" } else { "grid-template-rows:0fr;opacity:0" },
+            aria_hidden: (!expanded).to_string(),
+            inert: (!expanded).then_some("true"),
+            div { class: "composer-notice-content min-h-0 overflow-hidden", {shown} }
         }
     }
 }
@@ -348,6 +424,46 @@ mod tests {
     use crate::components::composer_bar::{ComposerBar, ComposerChip, ComposerMenuKind};
     use std::io::Write;
     use std::process::{Command, Stdio};
+
+    #[component]
+    fn TaskFixture() -> Element {
+        rsx! {
+            crate::components::progress::TaskSteps {
+                steps: vec!["Choose ACP".to_string(), "Install ACP".to_string(), "Connect ACP".to_string()],
+                completed_steps: vec![0],
+                pending_step: Some(1),
+                on_select: Some(EventHandler::new(move |_| {})),
+            }
+        }
+    }
+
+    #[test]
+    fn setup_task_exposes_an_actionable_step_and_ordered_progress() {
+        let mut dom = VirtualDom::new(TaskFixture);
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert_eq!(html.matches("<button").count(), 1);
+        assert!(!html.contains("role=\"checkbox\""));
+        let list = html.split("<ol ").nth(1).expect("ordered setup steps");
+        let list = list.split("</ol>").next().unwrap();
+        assert_eq!(list.matches("<li ").count(), 3);
+        assert_eq!(list.matches("aria-current=\"step\"").count(), 1);
+        assert_eq!(
+            list.matches(&format!("aria-label=\"{}\"", translate("common-done")))
+                .count(),
+            1
+        );
+        for (index, row) in list.split("<li ").skip(1).enumerate() {
+            let number = row.split("<span ").nth(1).unwrap();
+            let (_, content) = number.split_once('>').unwrap();
+            let number = content.split('<').next().unwrap();
+            assert_eq!(number, format!("{}.", index + 1));
+        }
+        let action = list.split("<button ").nth(1).expect("explicit step action");
+        let attributes = action.split('>').next().unwrap();
+        assert!(!attributes.contains(" disabled=") && !attributes.ends_with(" disabled"));
+        assert!(action.contains(&translate("common-continue")));
+    }
 
     #[component]
     fn ComposerFixture(disabled: bool, #[props(default)] attached: bool) -> Element {
