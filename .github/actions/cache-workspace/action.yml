@@ -34,6 +34,11 @@ runs:
         restore-keys: |
           ${{ steps.inputs.outputs.prefix }}-
           ${{ steps.inputs.outputs.restore-prefix }}-
+    - name: Restore staged compiler artifacts
+      shell: bash
+      env:
+        VMUX_CACHE_PARTITION: ${{ inputs.cache-key }}
+      run: vmux-ci cache-unstage "$VMUX_CACHE_PARTITION"
     - uses: ./.github/actions/cache-sources
       with:
         snapshot: ${{ steps.inputs.outputs.snapshot }}

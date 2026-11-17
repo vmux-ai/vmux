@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use vmux_ecs::OperationState;
 use vmux_ecs::blocking::Lane;
 use vmux_ecs::jobs::{Job, JobPlugin, JobResult, JobSet};
+pub(crate) mod cache;
 pub(crate) mod fs;
 pub(crate) mod process;
 pub(crate) trait IoJob: Job<Output = Result<Self::Data, String>> {

@@ -224,7 +224,10 @@ fn advance(
             let text = match captured.text() {
                 Ok(text) => text,
                 Err(error) => {
-                    io.fail(entity, error);
+                    io.fail(
+                        entity,
+                        format!("{error}\n{}", String::from_utf8_lossy(&captured.0.stdout)),
+                    );
                     continue;
                 }
             };
@@ -350,15 +353,14 @@ mod tests {
         );
         let failed = SdkFixture::new(
             "",
-            "case \"$*\" in *'--features contracts'*) echo 'compiler failed' >&2; exit 42 ;; esac",
+            "case \"$*\" in *'--features contracts'*) echo 'assertion details'; echo 'compiler failed' >&2; exit 42 ;; esac",
         );
-        assert!(
-            failed
-                .fixture
-                .run("sdk-test", &["test-sdk-ecs"])
-                .unwrap_err()
-                .contains("compiler failed")
-        );
+        let error = failed
+            .fixture
+            .run("sdk-test", &["test-sdk-ecs"])
+            .unwrap_err();
+        assert!(error.contains("compiler failed"));
+        assert!(error.contains("assertion details"));
         assert_eq!(failed.calls().len(), 2);
         assert!(failed.fixture.run("sdk-test", &["unknown"]).is_err());
         assert_eq!(failed.calls().len(), 2);

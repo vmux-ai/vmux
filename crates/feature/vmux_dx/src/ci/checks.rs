@@ -908,7 +908,7 @@ impl Record {
         };
         number.parse::<u64>().is_ok_and(|value| value > 0)
             && Checks::sha(base)
-            && matches!(
+            && (matches!(
                 key,
                 "lint"
                     | "test-rust"
@@ -917,7 +917,9 @@ impl Record {
                     | "test-features"
                     | "test-ecs"
                     | "website"
-            )
+            ) || super::sdk::Sdk::PROFILES
+                .iter()
+                .any(|(suite, _)| *suite == key))
             && digest.len() == 64
             && digest
                 .bytes()
@@ -1523,6 +1525,10 @@ mod tests {
         for row in matrix["include"].as_array().unwrap() {
             if row["key"].as_str().unwrap().starts_with("test-sdk-") {
                 sdk.insert(row["key"].as_str().unwrap().to_owned());
+                runs.fixture
+                    .environment
+                    .set("VMUX_CHECK_NAME", row["claim"].as_str().unwrap());
+                runs.fixture.run("checks-record", &[]).unwrap();
             }
         }
         assert_eq!(

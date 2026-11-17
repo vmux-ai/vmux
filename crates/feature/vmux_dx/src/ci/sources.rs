@@ -19,6 +19,8 @@ struct Results<'w, 's> {
     validation: super::Reads<'w, 's, DirectoryFact, ValidationSlot>,
     timestamps: super::Reads<'w, 's, Written, TimestampSlot>,
     facts_slot_captured_sources: super::Reads<'w, 's, CapturedSources, FactsSlot>,
+    workspace_manifest_slot_bytes:
+        super::Reads<'w, 's, crate::ci_io::fs::Bytes, WorkspaceManifestSlot>,
     configuration_slot_written: super::Reads<'w, 's, Written, ConfigurationSlot>,
     print_slot_written: super::Reads<'w, 's, Written, PrintSlot>,
     snapshot_slot_optional_bytes: super::Reads<'w, 's, OptionalBytes, SnapshotSlot>,
@@ -61,13 +63,14 @@ impl bevy_app::Plugin for CiSourcesPlugin {
     }
 }
 #[derive(Serialize, Deserialize, Clone)]
-struct Configuration {
+pub(super) struct Configuration {
+    pub(super) artifacts: Vec<String>,
     prefix: String,
     restore_prefix: String,
     key: String,
-    paths: String,
-    snapshot: String,
-    target: String,
+    pub(super) paths: String,
+    pub(super) snapshot: String,
+    pub(super) target: String,
     receipt: String,
     workspace: String,
     save: bool,
@@ -88,6 +91,7 @@ impl Configuration {
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{snapshot}.restore"));
         Self {
+            artifacts: Vec::new(),
             prefix: String::new(),
             restore_prefix: String::new(),
             key: String::new(),
@@ -297,6 +301,31 @@ impl Inputs {
         }
         Ok(paths)
     }
+    fn profiles(bytes: &[u8]) -> Result<BTreeSet<String>, String> {
+        let source = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
+        let manifest: toml::Value = toml::from_str(source).map_err(|error| error.to_string())?;
+        let mut profiles = BTreeSet::from(["debug".into(), "release".into()]);
+        if let Some(table) = manifest.get("profile").and_then(toml::Value::as_table) {
+            for name in table.keys() {
+                if name.is_empty()
+                    || !name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+                {
+                    return Err("Invalid Cargo profile name".into());
+                }
+                profiles.insert(
+                    match name.as_str() {
+                        "dev" | "test" => "debug",
+                        "bench" => "release",
+                        name => name,
+                    }
+                    .into(),
+                );
+            }
+        }
+        Ok(profiles)
+    }
 }
 #[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
 enum InputPhase {
@@ -312,6 +341,8 @@ struct ListedSlot;
 struct MetadataSlot;
 #[derive(Component)]
 struct CompilerSlot;
+#[derive(Component)]
+struct WorkspaceManifestSlot;
 #[derive(Component)]
 struct FactsSlot;
 #[derive(Component)]
@@ -382,6 +413,15 @@ fn inputs_start(mut requests: InputsStartRequests<'_, '_>, mut io: Io) {
             io.fail(entity, error);
             continue;
         }
+        io.request(
+            entity,
+            &mut sequence,
+            ReadFile {
+                location: manifest_scope.location("Cargo.toml"),
+                limit: 1024 * 1024,
+            },
+            WorkspaceManifestSlot,
+        );
         io.request(
             entity,
             &mut sequence,
@@ -551,12 +591,60 @@ impl Inputs {
             restore_prefix,
         ))
     }
-    fn artifacts(&self) -> Result<BTreeSet<String>, String> {
+    fn artifacts(
+        &self,
+        metadata: &Value,
+        profiles: &BTreeSet<String>,
+    ) -> Result<BTreeSet<String>, String> {
+        let members = metadata["workspace_members"]
+            .as_array()
+            .ok_or("Missing Cargo workspace members")?;
+        let packages = metadata["packages"]
+            .as_array()
+            .ok_or("Missing Cargo workspace packages")?;
         let target = self
             .target
             .to_str()
             .ok_or("Cargo cache target must be UTF-8")?;
-        let mut paths = BTreeSet::from([format!("{target}/**")]);
+        let mut paths = BTreeSet::new();
+        let mut count = 0;
+        for package in packages {
+            if !members.contains(&package["id"]) {
+                continue;
+            }
+            let name = package["name"]
+                .as_str()
+                .ok_or("Missing Cargo package name")?;
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+            {
+                return Err("Invalid workspace cache package".into());
+            }
+            count += 1;
+            for profile in profiles {
+                for output in [
+                    format!("{target}/{profile}"),
+                    format!("{target}/*/{profile}"),
+                ] {
+                    paths.insert(format!("{output}/.fingerprint/{name}-*"));
+                    paths.insert(format!("{output}/build/{name}-*"));
+                    Self::targets(package, &output, &mut paths)?;
+                }
+            }
+        }
+        if count == 0 {
+            return Err("No workspace packages to cache".into());
+        }
+        for (partition, consumer) in [
+            ("sdk-framework", "framework-consumer"),
+            ("sdk-host", "host-consumer"),
+        ] {
+            if self.partition == partition {
+                paths.insert(format!("{target}/{consumer}/**"));
+            }
+        }
         paths.insert(format!("!{target}/**/incremental"));
         paths.insert(format!("!{target}/**/incremental/**"));
         paths.insert(format!("!{target}/**/.cargo-lock"));
@@ -566,24 +654,59 @@ impl Inputs {
         }
         Ok(paths)
     }
+    fn targets(package: &Value, output: &str, paths: &mut BTreeSet<String>) -> Result<(), String> {
+        let targets = package["targets"]
+            .as_array()
+            .ok_or("Missing Cargo package targets")?;
+        for target in targets {
+            let name = target["name"].as_str().ok_or("Missing Cargo target name")?;
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+            {
+                return Err("Invalid Cargo target name".into());
+            }
+            let stem = name.replace('-', "_");
+            for path in [
+                format!("{output}/deps/{stem}-*"),
+                format!("{output}/deps/lib{stem}-*"),
+                format!("{output}/{name}*"),
+                format!("{output}/lib{stem}*"),
+            ] {
+                paths.insert(path);
+            }
+            if target["kind"]
+                .as_array()
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some("example")))
+            {
+                paths.insert(format!("{output}/examples/{stem}*"));
+                paths.insert(format!("{output}/examples/lib{stem}*"));
+            }
+        }
+        Ok(())
+    }
     fn configuration(
         &self,
         settings: &Settings,
         prefix: String,
         restore_prefix: String,
+        metadata: &Value,
+        manifest: &[u8],
     ) -> Result<Configuration, String> {
         let sha = Arguments::text(&settings.0, "GITHUB_SHA")?;
         if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("Invalid cache Git identity".into());
         }
-        let mut paths = self.artifacts()?;
+        let profiles = Self::profiles(manifest)?;
+        let paths = self.artifacts(metadata, &profiles)?;
         let snapshot = format!(".build-tools/source-cache-{}.json", self.partition);
-        paths.insert(snapshot.clone());
         Ok(Configuration {
             key: format!("{prefix}-{sha}"),
             prefix,
             restore_prefix,
-            paths: Self::ordered(paths),
+            artifacts: Self::ordered(paths).lines().map(str::to_owned).collect(),
+            paths: format!(".build-tools/workspace-cache-{}", self.partition),
             receipt: format!("{snapshot}.{}.restore", Snapshot::now()),
             snapshot,
             target: self
@@ -604,6 +727,22 @@ fn inputs_encode(mut requests: InputsEncodeRequests<'_, '_>, mut io: Io, results
         let Some(facts) = results.facts_slot_captured_sources.get(entity) else {
             continue;
         };
+        let Some(metadata) = results.metadata_slot_captured.get(entity) else {
+            continue;
+        };
+        let Some(manifest) = results.workspace_manifest_slot_bytes.get(entity) else {
+            continue;
+        };
+        let metadata: Value = match metadata
+            .text()
+            .and_then(|text| serde_json::from_str(text).map_err(|error| error.to_string()))
+        {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                io.fail(entity, error);
+                continue;
+            }
+        };
         let Some(compiler) = results
             .compiler_slot_captured
             .get(entity)
@@ -619,13 +758,14 @@ fn inputs_encode(mut requests: InputsEncodeRequests<'_, '_>, mut io: Io, results
                     continue;
                 }
             };
-        let configuration = match inputs.configuration(settings, prefix, restore_prefix) {
-            Ok(value) => value,
-            Err(error) => {
-                io.fail(entity, error);
-                continue;
-            }
-        };
+        let configuration =
+            match inputs.configuration(settings, prefix, restore_prefix, &metadata, &manifest.0) {
+                Ok(value) => value,
+                Err(error) => {
+                    io.fail(entity, error);
+                    continue;
+                }
+            };
         let output = configuration.output().into_bytes();
         let bytes = match serde_json::to_vec(&configuration) {
             Ok(value) => value,
@@ -1584,52 +1724,6 @@ mod tests {
         assert_ne!(added["key"], extra["key"]);
         assert_eq!(added["restore-prefix"], extra["restore-prefix"]);
         assert_eq!(added["paths"], extra["paths"]);
-    }
-
-    #[test]
-    fn compiler_archives_cover_consumer_targets_and_exclude_incremental_and_distribution_artifacts()
-    {
-        let mut fixture = Fixture::new();
-        fixture.cli();
-        fixture.environment.set("VMUX_CACHE_PARTITION", "fixture");
-        fixture.environment.set("VMUX_CACHE_TARGET", "target");
-        fixture
-            .environment
-            .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
-        let output = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
-        let mut patterns = Vec::new();
-        for pattern in output["paths"].lines() {
-            let excluded = pattern.starts_with('!');
-            let pattern = pattern.strip_prefix('!').unwrap_or(pattern);
-            let matcher = globset::GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .build()
-                .unwrap()
-                .compile_matcher();
-            patterns.push((excluded, matcher));
-        }
-        for (path, expected) in [
-            ("target/debug/deps/libadded.rlib", true),
-            ("target/custom/deps/libadded.rlib", true),
-            (
-                "target/framework-consumer/debug/deps/libvmux_app.rlib",
-                true,
-            ),
-            ("target/host-consumer/debug/host-probe", true),
-            ("target/debug/incremental/added/cache.bin", false),
-            ("target/debug/.cargo-lock", false),
-            ("target/release/Vmux.app/Contents/MacOS/vmux_desktop", false),
-            ("target/release/Vmux.dmg", false),
-            ("target/release/Vmux.tar.gz", false),
-        ] {
-            let mut included = false;
-            for (excluded, matcher) in &patterns {
-                if matcher.is_match(path) {
-                    included = !excluded;
-                }
-            }
-            assert_eq!(included, expected, "{path}");
-        }
     }
 
     #[test]

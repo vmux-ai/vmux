@@ -1,4 +1,5 @@
 use crate::Settings;
+use crate::ci_io::cache::{RestoreFiles, StageFiles};
 use crate::ci_io::fs::{
     DirectoryProbe, Location, OptionalRead, Print, ProbeRead, Publish, ReadFile, RemoveDirectory,
     RemoveFile, RemoveLink, SetTimes, SourceFacts,
@@ -22,6 +23,7 @@ use vmux_ecs::jobs::{JobRequest, JobSet, JobWake};
 use vmux_ecs::manifest::{FeatureManifest, FeatureManifestSource, FeaturePlugin};
 use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState, Order};
 mod artifact;
+mod cache;
 mod checks;
 mod plan;
 mod sdk;
@@ -49,11 +51,14 @@ impl bevy_app::Plugin for CiPlugin {
             IoPlugin::<RemoveDirectory>::default(),
             IoPlugin::<SetTimes>::default(),
             IoPlugin::<SourceFacts>::default(),
+            IoPlugin::<StageFiles>::default(),
+            IoPlugin::<RestoreFiles>::default(),
         ))
         .add_plugins((
             plan::CiPlanPlugin,
             artifact::CiArtifactPlugin,
             sources::CiSourcesPlugin,
+            cache::CiCachePlugin,
             checks::CiChecksPlugin,
             sdk::CiSdkPlugin,
         ))
