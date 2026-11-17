@@ -218,6 +218,7 @@ fn load(
     mut requests: MessageReader<ReadRequested>,
     mut contexts: Query<&mut Context>,
     endpoints: Query<&Endpoint>,
+    owned: OwnedPageValues,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -233,6 +234,16 @@ fn load(
         let Ok(endpoint) = endpoints.get(request.endpoint) else {
             continue;
         };
+        if !context.loaded || context.configuration != endpoint.fingerprint() {
+            for (entity, owner) in &owned {
+                if owner.parent() == request.page {
+                    commands.entity(entity).despawn();
+                }
+            }
+            context.loaded = false;
+            context.revision = 0;
+            context.capabilities = Capabilities::default();
+        }
         context.configuration = endpoint.fingerprint();
         context.environment = endpoint.environment.clone();
         let operation = commands
@@ -256,6 +267,21 @@ fn load(
 
 #[derive(Component)]
 struct PublicationAttempt(crate::administration::Publish);
+
+impl PublicationAttempt {
+    fn settled_by(&self, snapshot: &Snapshot) -> bool {
+        snapshot
+            .history
+            .iter()
+            .any(|publication| publication.operation_id == self.0.operation_id)
+            || snapshot.revision != self.0.base_revision
+            || snapshot.draft.as_ref().is_none_or(|draft| {
+                draft.id != self.0.draft_id
+                    || draft.revision != self.0.expected_revision
+                    || draft.base_revision != self.0.base_revision
+            })
+    }
+}
 
 #[derive(SystemParam)]
 struct Requested<'w, 's> {
@@ -1026,11 +1052,7 @@ fn adopt(
             ));
         }
         if let Ok(attempt) = attempts.get(received.page)
-            && (snapshot
-                .history
-                .iter()
-                .any(|publication| publication.operation_id == attempt.0.operation_id)
-                || snapshot.revision != attempt.0.base_revision)
+            && attempt.settled_by(snapshot)
         {
             commands
                 .entity(received.page)
@@ -1350,6 +1372,115 @@ mod tests {
             .unwrap()
             .1;
         assert!(!declared.unsaved());
+    }
+
+    #[test]
+    fn failed_environment_switch_cannot_display_the_previous_environment_values() {
+        let server = Server::new();
+        let mut fixture = Fixture::new(&server);
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        assert_eq!(fixture.flags(), ["published.flag"]);
+        let other = Server::new();
+        fixture
+            .app
+            .world_mut()
+            .spawn(Endpoint::new(&other.url, "other", Some("other-credential".into())).unwrap());
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FeaturesOpenRequest {
+                environment: "other".into(),
+            },
+        });
+        fixture.wait_for_request(&other);
+        other.release.send(()).unwrap();
+        fixture.drain();
+        let context = fixture.app.world().get::<Context>(fixture.page).unwrap();
+        assert_eq!(context.environment, "other");
+        assert!(!context.error.is_empty());
+        assert!(!context.capabilities.publish);
+        assert!(fixture.flags().is_empty());
+    }
+
+    #[test]
+    fn publication_refresh_unblocks_edits_only_after_the_reviewed_draft_is_retired() {
+        for (draft_id, revision, editable) in [
+            (Some("reviewed"), 2, false),
+            (Some("reviewed"), 3, true),
+            (Some("replacement"), 2, true),
+            (None, 0, true),
+        ] {
+            let server = Server::new();
+            let mut fixture = Fixture::new(&server);
+            fixture.wait_for_request(&server);
+            server.release.send(()).unwrap();
+            fixture.drain();
+            let operation_id = uuid::Uuid::new_v4().to_string();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(fixture.page)
+                .insert(PublicationAttempt(crate::administration::Publish {
+                    operation_id: operation_id.clone(),
+                    draft_id: "reviewed".into(),
+                    expected_revision: 2,
+                    base_revision: 1,
+                }));
+            let configuration = fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .configuration;
+            fixture.app.world_mut().write_message(Received {
+                page: fixture.page,
+                endpoint: fixture.endpoint,
+                generation: 0,
+                configuration,
+                preserve: true,
+                snapshot: Snapshot {
+                    schema_version: 1,
+                    environment: "development".into(),
+                    revision: 1,
+                    capabilities: Capabilities {
+                        edit: true,
+                        review: true,
+                        publish: true,
+                    },
+                    flags: BTreeMap::from([("published.flag".into(), true)]),
+                    draft: draft_id.map(|id| crate::administration::Draft {
+                        id: id.into(),
+                        revision,
+                        base_revision: 1,
+                        reviewed_revision: None,
+                        flags: BTreeMap::from([("published.flag".into(), true)]),
+                    }),
+                    history: Vec::new(),
+                },
+            });
+            fixture.app.update();
+            fixture.app.world_mut().trigger(UiInput {
+                webview: fixture.page,
+                payload: DraftEditRequest {
+                    key: "published.flag".into(),
+                    enabled: false,
+                },
+            });
+            let world = fixture.app.world_mut();
+            let flag = world.query::<&Flag>().single(world).unwrap();
+            assert_eq!(flag.unsaved(), editable);
+            if !editable {
+                assert_eq!(
+                    world
+                        .get::<PublicationAttempt>(fixture.page)
+                        .unwrap()
+                        .0
+                        .operation_id,
+                    operation_id
+                );
+            }
+        }
     }
 
     #[test]

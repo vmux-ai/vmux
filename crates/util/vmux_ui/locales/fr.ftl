@@ -926,7 +926,7 @@ agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
 
 mobile-pair-title = Se connecter à votre Mac
-mobile-pair-subtitle = Dans Vmux, ouvrez Remote et choisissez Connect device.
+mobile-pair-subtitle = Dans Vmux, ouvrez { live-title } et choisissez { live-connect-device }.
 mobile-pair-scan = Scanner le code QR
 mobile-pair-show-link = Saisir le lien d’appairage
 mobile-pair-hide-link = Masquer le lien d’appairage

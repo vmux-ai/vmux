@@ -145,10 +145,11 @@ mod tests {
             let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
             let mut schedule = schedules.remove(Update).unwrap();
 
-            let initialized = schedule.initialize(app.world_mut()).is_ok();
+            let initialized = schedule.initialize(app.world_mut());
             assert!(
-                initialized,
-                "desktop update schedule must be acyclic (feature_flags={feature_flags})"
+                initialized.is_ok(),
+                "desktop update schedule must be acyclic (feature_flags={feature_flags}): {:?}",
+                initialized.err()
             );
         }
     }

@@ -923,7 +923,7 @@ agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
 
 mobile-pair-title = Mac에 연결
-mobile-pair-subtitle = Vmux에서 Remote를 열고 기기 연결을 선택하세요.
+mobile-pair-subtitle = Vmux에서 { live-title }를 열고 { live-connect-device }을 선택하세요.
 mobile-pair-scan = QR 코드 스캔
 mobile-pair-show-link = 페어링 링크 직접 입력
 mobile-pair-hide-link = 페어링 링크 숨기기

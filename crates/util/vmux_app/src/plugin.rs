@@ -406,11 +406,12 @@ mod account_tests {
         app.cleanup();
         app.world_mut().run_schedule(bevy_app::Startup);
         let world = app.world_mut();
-        let (release, environment) = world
-            .query_filtered::<(Entity, &Name), With<vmux_feature::Provider>>()
+        let release = world
+            .query_filtered::<&ChildOf, With<vmux_account::AccountCloudFlag>>()
             .single(world)
-            .unwrap();
-        let environment = environment.as_str().to_string();
+            .unwrap()
+            .parent();
+        let environment = world.get::<Name>(release).unwrap().as_str().to_string();
         app.world_mut()
             .entity_mut(release)
             .remove::<vmux_feature::http::Endpoint>();

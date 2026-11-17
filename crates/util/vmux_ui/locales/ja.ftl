@@ -971,7 +971,7 @@ agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
 
 mobile-pair-title = Mac に接続
-mobile-pair-subtitle = Vmux で Remote を開き、「デバイスを接続」を選択してください。
+mobile-pair-subtitle = Vmux で { live-title } を開き、「{ live-connect-device }」を選択してください。
 mobile-pair-scan = QRコードをスキャン
 mobile-pair-show-link = ペアリングリンクを手入力
 mobile-pair-hide-link = ペアリングリンクを隠す

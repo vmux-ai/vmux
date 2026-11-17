@@ -22,7 +22,8 @@ use std::sync::mpsc;
 use vmux_api::input::KeyModifiers;
 use vmux_ecs::Active;
 use vmux_input::{
-    ConsumesNativeKey, NativeKey, NativeKeyInput, NativeKeyInputSet, PassesNativeKey,
+    ConsumesNativeKey, NativeKey, NativeKeyClaimSet, NativeKeyInput, NativeKeyInputSet,
+    PassesNativeKey,
 };
 
 pub(super) struct SimulatorInputPlugin;
@@ -86,6 +87,7 @@ impl Plugin for SimulatorNativeKeyPlugin {
                 (sync_native_key_bindings, ApplyDeferred)
                     .chain()
                     .after(super::SimulatorFocusSet)
+                    .before(NativeKeyClaimSet)
                     .before(SimulatorInputSet),
             )
             .add_systems(
