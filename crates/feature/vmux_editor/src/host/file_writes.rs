@@ -51,7 +51,7 @@ fn receive(world: &mut World) {
         None => return,
     };
     for input in inputs {
-        let path = vmux_path::PathIdentity::resolve(input.path).into_path_buf();
+        let path = input.path;
         let mut existing = None;
         let mut receipts = world.query::<(Entity, &FileId, &WrittenAt)>();
         for (entity, file, _) in receipts.iter(world) {
@@ -95,6 +95,34 @@ mod tests {
     use super::*;
     use bevy_cef::prelude::Browsers;
 
+    #[cfg(unix)]
+    #[test]
+    fn completed_write_keeps_its_identity_when_the_path_becomes_a_symlink() {
+        let directory = tempfile::tempdir().unwrap();
+        let written = directory.path().join("written.txt");
+        let target = directory.path().join("target.txt");
+        std::fs::write(&written, "saved").unwrap();
+        std::fs::write(&target, "external").unwrap();
+        let identity = written.canonicalize().unwrap();
+        let mut app = App::new();
+        app.add_plugins(FileWritesPlugin);
+        app.world_mut()
+            .non_send_mut::<SelfWrites>()
+            .0
+            .insert(identity.clone(), Instant::now());
+        std::fs::remove_file(&written).unwrap();
+        std::os::unix::fs::symlink(&target, &written).unwrap();
+        app.update();
+        let mut receipts = app.world_mut().query::<&FileId>();
+        let paths: Vec<_> = receipts
+            .iter(app.world())
+            .map(|file| file.0.clone())
+            .collect();
+        assert_eq!(paths, [identity]);
+        assert_ne!(paths[0], target.canonicalize().unwrap());
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "external");
+    }
+
     #[test]
     fn completed_writes_reuse_one_receipt_and_expired_receipts_retire() {
         let directory = tempfile::tempdir().unwrap();
@@ -106,7 +134,7 @@ mod tests {
             app.world_mut()
                 .non_send_mut::<SelfWrites>()
                 .0
-                .insert(path.clone(), Instant::now());
+                .insert(path.canonicalize().unwrap(), Instant::now());
         }
         app.update();
         let receipts: Vec<_> = app

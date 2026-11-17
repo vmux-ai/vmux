@@ -23,7 +23,7 @@ impl Plugin for FileWatchPlugin {
             .add_message::<Reconciled>()
             .add_systems(
                 Update,
-                (wake, select, retire, register, receive)
+                (wake, receive, invalidate, select, retire, register)
                     .chain()
                     .before(FileChangesSet),
             );
@@ -44,6 +44,9 @@ struct Watching;
 
 #[derive(Component)]
 struct Failure(String);
+
+#[derive(Component)]
+struct Reset;
 
 fn wake(transport: Option<NonSend<Transport>>, wake: Option<Res<JobWake>>) {
     if let Some(transport) = transport
@@ -143,9 +146,10 @@ type RetiringRegistrations<'w, 's> = Query<
         Entity,
         &'static Cwd,
         Has<Watching>,
+        Has<Active>,
         Option<&'static Failure>,
     ),
-    (With<Watch>, Without<Active>),
+    (With<Watch>, Or<(Without<Active>, With<Reset>)>),
 >;
 
 fn retire(
@@ -156,24 +160,54 @@ fn retire(
     let Some(mut transport) = transport else {
         return;
     };
-    for (entity, path, watching, failure) in &registrations {
-        if !watching {
+    for (entity, path, watching, active, failure) in &registrations {
+        if watching {
+            match transport.unwatch(&path.0) {
+                Ok(()) => {}
+                Err(error) if matches!(error.kind, notify::ErrorKind::WatchNotFound) => {}
+                Err(error) => {
+                    let message = error.to_string();
+                    if failure.is_none_or(|failure| failure.0 != message) {
+                        tracing::warn!(path = %path.0.display(), "file unwatch failed: {message}");
+                        commands.entity(entity).insert(Failure(message));
+                    }
+                    continue;
+                }
+            }
+        }
+        if active {
+            commands
+                .entity(entity)
+                .remove::<(Watching, Reset, Failure)>();
+        } else {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn invalidate(
+    mut observations: MessageReader<Observed>,
+    registrations: Query<(Entity, &Cwd), With<Watching>>,
+    mut commands: Commands,
+) {
+    for observation in observations.read() {
+        let Ok(event) = &observation.0 else {
+            continue;
+        };
+        if !matches!(
+            event.kind,
+            notify::EventKind::Remove(_)
+                | notify::EventKind::Modify(notify::event::ModifyKind::Name(
+                    notify::event::RenameMode::From
+                        | notify::event::RenameMode::Both
+                        | notify::event::RenameMode::Any
+                ))
+        ) {
             continue;
         }
-        match transport.unwatch(&path.0) {
-            Ok(()) => {
-                commands.entity(entity).despawn();
-            }
-            Err(error) if matches!(error.kind, notify::ErrorKind::WatchNotFound) => {
-                commands.entity(entity).despawn();
-            }
-            Err(error) => {
-                let message = error.to_string();
-                if failure.is_none_or(|failure| failure.0 != message) {
-                    tracing::warn!(path = %path.0.display(), "file unwatch failed: {message}");
-                    commands.entity(entity).insert(Failure(message));
-                }
+        for (entity, directory) in &registrations {
+            if event.paths.contains(&directory.0) {
+                commands.entity(entity).insert(Reset);
             }
         }
     }
@@ -271,6 +305,70 @@ mod tests {
         fixture.app.world_mut().despawn(second);
         fixture.app.update();
         assert!(fixture.registrations().is_empty());
+    }
+
+    #[test]
+    fn removed_directory_observation_reconciles_an_active_recreated_registration() {
+        let mut fixture = Fixture::new();
+        fixture.open("file.txt");
+        let directory = fixture.directory.path().canonicalize().unwrap();
+        let mut cursor = fixture
+            .app
+            .world()
+            .resource::<Messages<Reconciled>>()
+            .get_cursor();
+        cursor
+            .read(fixture.app.world().resource::<Messages<Reconciled>>())
+            .for_each(drop);
+        fixture
+            .app
+            .world_mut()
+            .write_message(Observed(Ok(notify::Event::new(notify::EventKind::Remove(
+                notify::event::RemoveKind::Folder,
+            ))
+            .add_path(directory.clone()))));
+        fixture.app.update();
+        let roots: Vec<_> = cursor
+            .read(fixture.app.world().resource::<Messages<Reconciled>>())
+            .map(|fact| fact.0.clone())
+            .collect();
+        assert_eq!(roots.as_slice(), std::slice::from_ref(&directory));
+        assert_eq!(fixture.registrations(), [directory]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_deleted_and_recreated_directory_watches_reload_later_edits() {
+        let mut fixture = Fixture::new();
+        let directory = fixture.directory.path().join("recreated");
+        std::fs::create_dir(&directory).unwrap();
+        let view = fixture.open("recreated/file.txt");
+        fixture.discard_wakes();
+        std::fs::remove_dir_all(&directory).unwrap();
+        fixture.wake.recv_timeout(Duration::from_secs(5)).unwrap();
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("file.txt");
+        std::fs::write(&path, "recreated\n").unwrap();
+        fixture.app.update();
+        FileLoadTask::settle(&mut fixture.app, view);
+        fixture.discard_wakes();
+        std::fs::write(&path, "later\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture
+                .wake
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap();
+            fixture.app.update();
+            if fixture
+                .app
+                .world()
+                .get::<Editor>(view)
+                .is_some_and(|editor| editor.core.buffer.text() == "later\n")
+            {
+                break;
+            }
+        }
     }
 
     #[test]
