@@ -1,3 +1,7 @@
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::{
+    App, Commands, MessageReader, MessageWriter, NonSend, Plugin, Query, Res, Time, With,
+};
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_ecs::page::PageManifest;
@@ -15,17 +19,19 @@ pub(crate) struct PageLifePlugin;
 
 impl Plugin for PageLifePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                apply_fallback_page_icons.after(vmux_layout::LayoutCefStateSet::Apply),
-                drain_loading_state
-                    .in_set(crate::BrowserSystemSet::DrainLoadingState)
-                    .in_set(crate::BrowserLoadSet),
-                finish_windowed_handoffs.after(crate::BrowserSystemSet::DrainLoadingState),
-                spawn_popup_stacks.in_set(crate::BrowserSystemSet::SpawnPopupStacks),
-            ),
-        );
+        app.add_message::<bevy_cef_core::prelude::WebviewLoadingStateEvent>()
+            .add_systems(
+                Update,
+                (
+                    apply_fallback_page_icons.after(vmux_layout::LayoutCefStateSet::Apply),
+                    receive.before(drain_loading_state),
+                    drain_loading_state
+                        .in_set(crate::BrowserSystemSet::DrainLoadingState)
+                        .in_set(crate::BrowserLoadSet),
+                    finish_windowed_handoffs.after(crate::BrowserSystemSet::DrainLoadingState),
+                    spawn_popup_stacks.in_set(crate::BrowserSystemSet::SpawnPopupStacks),
+                ),
+            );
     }
 }
 
@@ -45,19 +51,25 @@ fn finish_windowed_handoffs(
     }
 }
 
-fn drain_loading_state(
+fn receive(
     receiver: Res<WebviewLoadingStateReceiver>,
-    browsers: Option<NonSend<Browsers>>,
+    mut events: MessageWriter<bevy_cef_core::prelude::WebviewLoadingStateEvent>,
+) {
+    while let Ok(event) = receiver.0.try_recv() {
+        events.write(event);
+    }
+}
+
+fn drain_loading_state(
+    mut events: MessageReader<bevy_cef_core::prelude::WebviewLoadingStateEvent>,
+    native: LoadingIdentity,
     time: Res<Time>,
     mut handoffs: Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
     mut commands: Commands,
     mut completed: MessageWriter<WebviewLoadCompleted>,
 ) {
-    while let Ok(ev) = receiver.0.try_recv() {
-        if !browsers.as_ref().is_some_and(|browsers| {
-            browsers.loading_identity(&ev.webview)
-                == Some((ev.surface_generation, ev.navigation_epoch))
-        }) {
+    for ev in events.read() {
+        if native.identity(ev.webview) != Some((ev.surface_generation, ev.navigation_epoch)) {
             continue;
         }
         if ev.is_loading
@@ -75,6 +87,7 @@ fn drain_loading_state(
         } else {
             ecmds.remove::<Loading>();
             completed.write(WebviewLoadCompleted {
+                at: ev.at,
                 webview: ev.webview,
             });
         }
@@ -82,6 +95,18 @@ fn drain_loading_state(
             can_go_back: ev.can_go_back,
             can_go_forward: ev.can_go_forward,
         });
+    }
+}
+
+#[derive(SystemParam)]
+struct LoadingIdentity<'w> {
+    browsers: Option<NonSend<'w, Browsers>>,
+}
+
+impl LoadingIdentity<'_> {
+    fn identity(&self, webview: Entity) -> Option<(u64, u64)> {
+        let browsers = self.browsers.as_ref()?;
+        browsers.loading_identity(&webview)
     }
 }
 

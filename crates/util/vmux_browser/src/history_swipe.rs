@@ -1,3 +1,4 @@
+use crate::native_bridge::HistoryClaims;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{
     App, Commands, Component, Entity, EntityEvent, IntoScheduleConfigs, MessageReader,
@@ -14,11 +15,14 @@ pub(crate) struct HistorySwipePlugin;
 
 impl Plugin for HistorySwipePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::native_bridge::NativeHistoryPlugin)
+        if !app.is_plugin_added::<crate::native_bridge::NativeHistoryPlugin>() {
+            app.add_plugins(crate::native_bridge::NativeHistoryPlugin);
+        }
+        app.add_message::<HistorySwipeRaw>()
             .add_observer(retire)
             .add_systems(
                 Update,
-                (initialize, sync)
+                (initialize, receive, sync)
                     .chain()
                     .after(crate::BrowserLoadSet)
                     .before(ReadCommandRequests),
@@ -83,10 +87,16 @@ impl NativeDocuments<'_> {
     }
 }
 
+fn receive(receiver: Res<HistorySwipeEventReceiver>, mut events: MessageWriter<HistorySwipeRaw>) {
+    while let Ok(event) = receiver.0.try_recv() {
+        events.write(event);
+    }
+}
+
 fn sync(
     mut navigated: MessageReader<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
     mut loaded: MessageReader<WebviewLoadCompleted>,
-    receiver: Res<HistorySwipeEventReceiver>,
+    mut events: MessageReader<HistorySwipeRaw>,
     native: NativeDocuments,
     mut installations: Query<(Entity, &mut Installation), With<vmux_layout::Browser>>,
     owners: Query<(), With<vmux_layout::Browser>>,
@@ -98,10 +108,11 @@ fn sync(
         )>,
     >,
     mut requests: MessageWriter<NavigationRequest>,
+    mut history: HistoryClaims,
 ) {
     for event in navigated.read() {
         if event.is_main_frame {
-            crate::NativeBridge::invalidate_history_input(event.webview);
+            history.invalidate(event.webview, event.at);
             if let Ok((_, mut installation)) = installations.get_mut(event.webview) {
                 installation.token.clear();
             }
@@ -113,7 +124,7 @@ fn sync(
         }
     }
     for event in loaded.read() {
-        crate::NativeBridge::invalidate_history_input(event.webview);
+        history.invalidate(event.webview, event.at);
         if !owners.contains(event.webview) {
             continue;
         }
@@ -132,7 +143,7 @@ fn sync(
             *current = installation;
         }
     }
-    while let Ok(event) = receiver.0.try_recv() {
+    for event in events.read() {
         if blocked.contains(event.webview) {
             continue;
         }
@@ -142,14 +153,14 @@ fn sync(
         let Some(url) = native.url(event.webview) else {
             continue;
         };
-        if !installation.accepts(&event, &url) {
+        if !installation.accepts(event, &url) {
             continue;
         }
         let operation = match event.direction {
             HistorySwipeDirection::Back => NavigationOperation::Back,
             HistorySwipeDirection::Forward => NavigationOperation::Forward,
         };
-        if !crate::NativeBridge::claim_history_input(event.webview, operation) {
+        if !history.claim(event.webview, operation, event.at) {
             continue;
         }
         requests.write(NavigationRequest::surface(event.webview, operation));
@@ -199,6 +210,7 @@ mod tests {
         let mut fixture = InstallationFixture::new();
         let installation = Installation::new();
         let event = HistorySwipeRaw {
+            at: std::time::Instant::now(),
             webview: fixture.owner,
             page_url: "https://example.com/".to_string(),
             token: installation.token.clone(),
@@ -230,6 +242,7 @@ mod tests {
         let mut fixture = InstallationFixture::new();
         let installation = Installation::new();
         let event = HistorySwipeRaw {
+            at: std::time::Instant::now(),
             webview: fixture.owner,
             page_url: "https://example.com/".to_string(),
             token: installation.token.clone(),
@@ -249,6 +262,7 @@ mod tests {
     fn a_previous_document_cannot_reuse_a_history_notification() {
         let installation = Installation::new();
         let mut event = HistorySwipeRaw {
+            at: std::time::Instant::now(),
             webview: Entity::PLACEHOLDER,
             page_url: "https://example.com/".to_string(),
             token: installation.token.clone(),
