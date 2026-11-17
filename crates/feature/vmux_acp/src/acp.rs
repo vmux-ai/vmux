@@ -31,33 +31,37 @@ mod projection_driver;
 mod session_driver;
 mod workspace_driver;
 
-pub(crate) fn add(app: &mut App) {
-    projection::add(app);
-    app.add_systems(
-        Update,
-        (
-            receive,
-            ApplyDeferred,
-            spawn,
-            project_info,
-            project_config_state,
-            project_selected_config,
-            project_status,
-            project_approval_requested,
-            project_approval_resolved,
-            snapshot_selection,
-            route_input,
-            subscribe,
-            read,
-            list,
-            rebind,
-            close,
-            reap,
+pub(crate) struct AcpRuntimePlugin;
+
+impl bevy::prelude::Plugin for AcpRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        projection::add(app);
+        app.add_systems(
+            Update,
+            (
+                receive,
+                ApplyDeferred,
+                spawn,
+                project_info,
+                project_config_state,
+                project_selected_config,
+                project_status,
+                project_approval_requested,
+                project_approval_resolved,
+                snapshot_selection,
+                route_input,
+                subscribe,
+                read,
+                list,
+                rebind,
+                close,
+                reap,
+            )
+                .chain(),
         )
-            .chain(),
-    )
-    .add_systems(Shutdown, begin_shutdown)
-    .add_systems(ShutdownComplete, shutdown);
+        .add_systems(Shutdown, begin_shutdown)
+        .add_systems(ShutdownComplete, shutdown);
+    }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -182,7 +186,7 @@ struct FindAcpSession {
 struct RebindAcpSession {
     sid: String,
     cwd: PathBuf,
-    response: Option<oneshot::Sender<Result<(), String>>>,
+    response: Option<oneshot::Sender<Result<PathBuf, String>>>,
 }
 
 #[derive(Component)]
@@ -794,7 +798,10 @@ fn rebind(
         let mut result = Err("ACP session not found".to_string());
         for (sid, shared) in &sessions {
             if sid.0 == request.sid {
-                result = shared.0.rebind_cwd(std::mem::take(&mut request.cwd));
+                result = shared
+                    .0
+                    .rebind_cwd(std::mem::take(&mut request.cwd))
+                    .map(|()| shared.0.cwd());
                 break;
             }
         }

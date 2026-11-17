@@ -454,7 +454,33 @@ impl AcpServiceConnection {
 
 impl ServiceProtocolConnection for AcpServiceConnection {
     fn dispatch(&mut self, message: ClientMessage) -> RemoteFuture<'_, Result<(), ClientMessage>> {
-        Box::pin(AcpServiceConnection::dispatch(self, message))
+        match message {
+            ClientMessage::RebindAcpWorkspaceWithReply {
+                request_id,
+                sid,
+                cwd,
+            } => Box::pin(async move {
+                let result = self
+                    .service
+                    .sessions
+                    .rebind_cwd(sid.clone(), PathBuf::from(&cwd))
+                    .await;
+                let (cwd, error) = match result {
+                    Ok(cwd) => (cwd.to_string_lossy().into_owned(), None),
+                    Err(error) => (cwd, Some(error)),
+                };
+                let _ = self
+                    .outbound
+                    .send(ServiceMessage::AcpWorkspaceRebindResult {
+                        request_id,
+                        sid,
+                        cwd,
+                        error,
+                    });
+                Ok(())
+            }),
+            other => Box::pin(AcpServiceConnection::dispatch(self, other)),
+        }
     }
 }
 
@@ -507,5 +533,76 @@ impl TryFrom<ServiceMessage> for AgentContent {
             content: result.content,
             is_error: result.is_error,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::{App, MinimalPlugins};
+
+    #[tokio::test]
+    async fn checked_rebind_reports_a_correlated_failure_from_the_native_runtime() {
+        let (wake, _wake_receiver) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+        let (service, native) = AcpService::new(Handle::current(), wake, processes);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::service::AcpServicePlugin));
+        app.world_mut().spawn((service.clone(), native));
+        let (outbound, mut received) = mpsc::unbounded_channel();
+        let mut connection = service.connection(outbound);
+        let request_id = AgentRequestId::new();
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        vmux_transport::service::ServiceCodec::write_client(
+            &mut client,
+            &ClientMessage::RebindAcpWorkspaceWithReply {
+                request_id,
+                sid: "missing-session".into(),
+                cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+            },
+        )
+        .await
+        .unwrap();
+        let request = vmux_transport::service::ServiceCodec::read_client(&mut server)
+            .await
+            .unwrap()
+            .unwrap();
+        let task = tokio::spawn(async move {
+            ServiceProtocolConnection::dispatch(&mut connection, request)
+                .await
+                .unwrap();
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.update();
+            if let Ok(message) = received.try_recv() {
+                vmux_transport::service::ServiceCodec::write_service(&mut server, &message)
+                    .await
+                    .unwrap();
+                let message = vmux_transport::service::ServiceCodec::read_service(&mut client)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let ServiceMessage::AcpWorkspaceRebindResult {
+                    request_id: actual,
+                    sid,
+                    error,
+                    ..
+                } = message
+                else {
+                    panic!("checked rebind returned an uncorrelated response");
+                };
+                assert_eq!(actual, request_id);
+                assert_eq!(sid, "missing-session");
+                assert!(error.is_some_and(|error| error.contains("not found")));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "native rebind did not return its failure"
+            );
+            tokio::task::yield_now().await;
+        }
+        task.await.unwrap();
     }
 }

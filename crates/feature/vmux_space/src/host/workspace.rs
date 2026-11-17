@@ -241,6 +241,25 @@ pub(super) struct AgentWorkspaceState<'w, 's> {
 }
 
 impl AgentWorkspaceState<'_, '_> {
+    pub(super) fn session(&self, agent: Entity) -> Option<(Entity, String, PathBuf)> {
+        let entity = self.ancestor_session(agent)?;
+        let (id, cwd) = self.sessions.get(entity).ok()?;
+        Some((entity, id.0.clone(), cwd.0.clone()))
+    }
+
+    pub(super) fn session_directory(&self, entity: Entity, id: &str) -> Option<PathBuf> {
+        let (sid, cwd) = self.sessions.get(entity).ok()?;
+        (sid.0 == id).then(|| cwd.0.clone())
+    }
+
+    pub(super) fn set_session_directory(&mut self, entity: Entity, id: &str, directory: &Path) {
+        if let Ok((sid, mut cwd)) = self.sessions.get_mut(entity)
+            && sid.0 == id
+        {
+            cwd.0 = directory.to_path_buf();
+        }
+    }
+
     pub(super) fn activate_worktree(
         &mut self,
         tab_entity: Entity,

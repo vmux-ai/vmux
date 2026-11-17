@@ -221,7 +221,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub async fn rebind_cwd(&self, sid: String, cwd: PathBuf) -> Result<(), String> {
+    pub async fn rebind_cwd(&self, sid: String, cwd: PathBuf) -> Result<PathBuf, String> {
         let (response, receiver) = oneshot::channel();
         self.rebinds
             .send(RebindAcpSession {

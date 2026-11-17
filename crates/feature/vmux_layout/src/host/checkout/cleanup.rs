@@ -1,8 +1,8 @@
 use super::super::deadline::DeadlineOwner;
 use super::{
-    CleanupFinished, Destination, Effects, Job, JournalPath, LeaseCheckout, Phase, Progress,
-    RepositoryGuard, RepositoryIdentity, RequestedBranch, RetainedReason, RetryDeadline, custody,
-    io, lease,
+    CleanupFinished, CleanupHold, Destination, Effects, Job, JournalPath, KeepCheckout,
+    LeaseCheckout, Phase, Progress, RepositoryGuard, RepositoryIdentity, RequestedBranch,
+    RetainedReason, RetryDeadline, custody, io, lease,
 };
 use bevy::prelude::*;
 use std::os::fd::AsRawFd;
@@ -17,6 +17,7 @@ impl Plugin for CleanupPlugin {
         app.add_systems(
             Update,
             (
+                hold,
                 lock,
                 registration,
                 identity,
@@ -48,6 +49,31 @@ struct ReferenceObservation {
 #[derive(Component)]
 struct ReferenceAttempts(u8);
 
+fn hold(
+    operations: Query<(Entity, &Progress, &CleanupHold)>,
+    owners: Query<&vmux_ecs::OperationState>,
+    mut effects: Effects,
+) {
+    for (operation, progress, hold) in &operations {
+        if progress.0 != Phase::CleanupLock {
+            continue;
+        }
+        if owners.get(hold.0).is_ok_and(|state| {
+            matches!(
+                state,
+                vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+            )
+        }) {
+            continue;
+        }
+        effects.retain(
+            operation,
+            None,
+            "checkout retained because its native cleanup hold ended without a release".into(),
+        );
+    }
+}
+
 fn lock(
     operations: Query<(
         Entity,
@@ -56,14 +82,18 @@ fn lock(
         &Progress,
         Option<&RepositoryGuard>,
         Option<&Job>,
+        Has<KeepCheckout>,
+        Option<&RetainedReason>,
+        Has<CleanupHold>,
     )>,
     leases: lease::Leases,
     completed: Query<&JobResult<io::Acquire>>,
     durable: Query<(), With<lease::Durable>>,
     mut effects: Effects,
 ) {
-    for (operation, repository, checkout, progress, guard, job) in &operations {
-        if progress.0 != Phase::CleanupLock {
+    for (operation, repository, checkout, progress, guard, job, keep, retained, held) in &operations
+    {
+        if progress.0 != Phase::CleanupLock || held {
             continue;
         }
         if !leases.owns(checkout.0, operation) {
@@ -79,6 +109,14 @@ fn lock(
                 None,
                 "checkout retained for its persisted workspace".into(),
             );
+            continue;
+        }
+        if keep {
+            let reason = retained.map_or_else(
+                || "checkout retained by its current owner".to_string(),
+                |retained| retained.0.clone(),
+            );
+            effects.retain(operation, None, reason);
             continue;
         }
         effects

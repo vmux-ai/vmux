@@ -1,16 +1,17 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_api::protocol::ProcessId;
 #[cfg(test)]
-use vmux_api::protocol::{AgentRequest, AgentRequestId};
+use vmux_api::protocol::AgentRequest;
+use vmux_api::protocol::ProcessId;
 use vmux_command::WriteCommandRequests;
 use vmux_ecs::agent::CommandOrigin;
 use vmux_ecs::agent::{
-    AgentRequestBlocked, AgentRequestDispatchPlugin, AgentRequestDispatchSet, AgentRequestGate,
-    AgentRequestGateFailed, AgentRequestInput, AgentRequestPrerequisiteSet, AgentRequestReleaseSet,
+    AgentRequestAvailable, AgentRequestBlocked, AgentRequestCanceled, AgentRequestDispatchPlugin,
+    AgentRequestDispatchSet, AgentRequestGate, AgentRequestGateFailed, AgentRequestInput,
+    AgentRequestPrerequisiteSet, AgentRequestReleaseSet, PendingAgentRequest,
 };
-use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::service::{ServiceInbound, ServiceMessageSet, ServiceRequest};
 use vmux_session::host::USER_CHOICE_REQUESTED;
 use vmux_setting::{AppSettings, StartupDir};
 
@@ -23,7 +24,7 @@ use super::workspace::{
     WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
 };
 
-use vmux_api::protocol::{AgentCommandResult, ClientMessage};
+use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
 
 struct WorkspaceDirectory;
 
@@ -52,9 +53,11 @@ impl Plugin for AgentWorkspaceRequestPlugin {
         app.add_message::<AgentRequestInput>()
             .add_message::<AgentRequestBlocked>()
             .add_message::<ServiceRequest>()
+            .add_message::<ServiceInbound>()
             .add_systems(
                 Update,
-                accept
+                (cancel_queued, accept)
+                    .chain()
                     .before(AgentRequestDispatchSet)
                     .after(AgentRequestReleaseSet),
             )
@@ -71,7 +74,20 @@ impl Plugin for AgentWorkspaceRequestPlugin {
                         submit_branch,
                     )
                         .chain(),
-                    (retire, applied, commit, finish, reply).chain(),
+                    (
+                        retire,
+                        applied,
+                        begin_directory,
+                        receive_rebind,
+                        apply_rebind,
+                        begin_return,
+                        complete_return,
+                        commit,
+                        finish,
+                        finish_directory,
+                        reply,
+                    )
+                        .chain(),
                 )
                     .chain()
                     .in_set(AgentWorkspaceRequestSet)
@@ -94,6 +110,38 @@ struct WaitingCheckout {
     project: PathBuf,
     revision: u64,
 }
+
+#[derive(Component)]
+struct PendingDirectory {
+    agent: Entity,
+    tab: Entity,
+    project: PathBuf,
+    directory: PathBuf,
+    previous_startup: Option<String>,
+}
+
+#[derive(Component)]
+struct WaitingRebind {
+    request_id: AgentRequestId,
+    session: Entity,
+    sid: String,
+    directory: PathBuf,
+    previous: PathBuf,
+    returns: u8,
+    checkout_root: Option<PathBuf>,
+}
+
+#[derive(Component)]
+struct ObservedRebind {
+    directory: PathBuf,
+    error: Option<String>,
+}
+
+#[derive(Component)]
+struct ReturnRebind;
+
+#[derive(Component)]
+struct ReturningRebind;
 
 #[derive(Component)]
 struct PlainReply;
@@ -166,12 +214,17 @@ impl Actors<'_, '_> {
 }
 
 fn accept(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestAvailable>,
+    pending: Query<&PendingAgentRequest>,
     gates: Query<&AgentRequestGate>,
     mut commands: Commands,
 ) {
     let mut accepted = std::collections::HashSet::new();
-    for request in requests.read() {
+    for available in requests.read() {
+        let Ok(pending) = pending.get(available.0) else {
+            continue;
+        };
+        let request = &pending.0;
         let Some(anchor) = workspace_request_anchor(request) else {
             continue;
         };
@@ -209,6 +262,31 @@ fn accept(
             operation.insert(CreateInput(payload));
         } else if let Ok(Some(payload)) = request.decode::<AgentCreateWorktreeOnBranch>() {
             operation.insert(NamedInput(payload));
+        }
+    }
+}
+
+fn cancel_queued(
+    mut canceled: MessageReader<AgentRequestCanceled>,
+    operations: Query<(Entity, &AgentRequestGate), With<WorkspaceOperation>>,
+    mut commands: Commands,
+) {
+    for canceled in canceled.read() {
+        for (operation, gate) in &operations {
+            if gate.active || gate.request_id != canceled.0 {
+                continue;
+            }
+            commands
+                .entity(operation)
+                .insert(vmux_ecs::OperationState::Canceled)
+                .remove::<(
+                    AgentRequestGate,
+                    WorkspaceOperation,
+                    PrepareInput,
+                    CreateInput,
+                    NamedInput,
+                    ChoiceInput,
+                )>();
         }
     }
 }
@@ -388,8 +466,7 @@ fn prepare(
 
 fn prepare_candidate(
     requests: Query<(Entity, &PrepareInput, &CandidateIntent)>,
-    mut workspace: AgentWorkspaceState,
-    mut service: MessageWriter<ServiceRequest>,
+    workspace: AgentWorkspaceState,
     mut commands: Commands,
 ) {
     for (operation, input, candidate) in &requests {
@@ -409,25 +486,17 @@ fn prepare_candidate(
         };
         match candidate {
             Ok(Some(candidate)) => {
-                let result = match workspace.activate_directory(
-                    tab,
+                commands.entity(operation).insert(PendingDirectory {
                     agent,
-                    &project,
-                    &candidate.execution_dir,
-                    &mut commands,
-                ) {
-                    Ok(rebind) => {
-                        if let Some(message) = rebind {
-                            service.write(ServiceRequest(message));
-                        }
-                        AgentCommandResult::Text(format!(
-                            "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
-                            candidate.execution_dir.display()
-                        ))
-                    }
-                    Err(error) => AgentCommandResult::Error(error),
-                };
-                commands.entity(operation).insert(WorkspaceResult(result));
+                    tab,
+                    project,
+                    directory: candidate.execution_dir,
+                    previous_startup: workspace
+                        .tabs
+                        .get(tab)
+                        .ok()
+                        .and_then(|tab| tab.startup_dir.clone()),
+                });
             }
             Ok(None) => {
                 let name = input
@@ -707,10 +776,18 @@ fn submit_branch(
 fn applied(
     mut prepared: MessageReader<vmux_layout::worktree::CheckoutPrepared>,
     resolved: Query<&vmux_layout::worktree::PreparedCheckout>,
-    requests: Query<(Entity, &WaitingCheckout)>,
+    requests: Query<
+        (Entity, &WaitingCheckout),
+        (
+            Without<WorkspaceFailure>,
+            Without<WaitingRebind>,
+            Without<AppliedCheckout>,
+        ),
+    >,
     revisions: Query<&vmux_layout::worktree::CheckoutTargetRevision>,
     mut workspace: AgentWorkspaceState,
     mut service: MessageWriter<ServiceRequest>,
+    mut holds: MessageWriter<vmux_layout::worktree::HoldCheckout>,
     mut commands: Commands,
 ) {
     for prepared in prepared.read() {
@@ -728,6 +805,29 @@ fn applied(
                 commands.entity(operation).insert(WorkspaceFailure(
                     "workspace selection changed before activation".into(),
                 ));
+                continue;
+            }
+            if let Some((session, sid, previous)) = workspace.session(waiting.agent) {
+                let directory = checkout.activation.execution_dir.clone();
+                let request_id = AgentRequestId::new();
+                holds.write(vmux_layout::worktree::HoldCheckout {
+                    operation: waiting.checkout,
+                    owner: operation,
+                });
+                service.write(ServiceRequest(ClientMessage::RebindAcpWorkspaceWithReply {
+                    request_id,
+                    sid: sid.clone(),
+                    cwd: directory.to_string_lossy().into_owned(),
+                }));
+                commands.entity(operation).insert(WaitingRebind {
+                    request_id,
+                    session,
+                    sid,
+                    directory,
+                    previous,
+                    returns: 0,
+                    checkout_root: Some(PathBuf::from(&checkout.activation.metadata.checkout_dir)),
+                });
                 continue;
             }
             match workspace.activate_worktree(
@@ -752,13 +852,18 @@ fn applied(
 }
 
 fn retire(
-    requests: Query<(Entity, &AgentRequestGate, &WaitingCheckout)>,
+    requests: Query<(
+        Entity,
+        &AgentRequestGate,
+        &WaitingCheckout,
+        Has<WaitingRebind>,
+    )>,
     actors: Actors,
     revisions: Query<&vmux_layout::worktree::CheckoutTargetRevision>,
     mut cancels: MessageWriter<vmux_layout::worktree::CancelCheckout>,
     mut commands: Commands,
 ) {
-    for (operation, gate, waiting) in &requests {
+    for (operation, gate, waiting, rebind) in &requests {
         if actors
             .resolve(gate.anchor)
             .is_ok_and(|(agent, tab)| agent == waiting.agent && tab == waiting.tab)
@@ -768,9 +873,11 @@ fn retire(
         {
             continue;
         }
-        cancels.write(vmux_layout::worktree::CancelCheckout {
-            operation: waiting.checkout,
-        });
+        if !rebind {
+            cancels.write(vmux_layout::worktree::CancelCheckout {
+                operation: waiting.checkout,
+            });
+        }
         commands.entity(operation).insert(WorkspaceFailure(
             "worktree owner or workspace selection changed".into(),
         ));
@@ -790,6 +897,310 @@ fn commit(
     }
 }
 
+fn begin_directory(
+    requests: Query<
+        (Entity, &AgentRequestGate, &PendingDirectory),
+        (
+            Without<WaitingRebind>,
+            Without<WorkspaceResult>,
+            Without<WorkspaceFailure>,
+        ),
+    >,
+    actors: Actors,
+    mut workspace: AgentWorkspaceState,
+    mut service: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
+) {
+    for (operation, gate, intent) in &requests {
+        if !actors
+            .resolve(gate.anchor)
+            .is_ok_and(|(agent, tab)| agent == intent.agent && tab == intent.tab)
+            || !workspace
+                .tabs
+                .get(intent.tab)
+                .is_ok_and(|tab| tab.startup_dir == intent.previous_startup)
+        {
+            commands.entity(operation).insert(WorkspaceFailure(
+                "workspace owner changed before activation".into(),
+            ));
+            continue;
+        }
+        if let Some((session, sid, previous)) = workspace.session(intent.agent) {
+            let request_id = AgentRequestId::new();
+            service.write(ServiceRequest(ClientMessage::RebindAcpWorkspaceWithReply {
+                request_id,
+                sid: sid.clone(),
+                cwd: intent.directory.to_string_lossy().into_owned(),
+            }));
+            commands.entity(operation).insert(WaitingRebind {
+                request_id,
+                session,
+                sid,
+                directory: intent.directory.clone(),
+                previous,
+                returns: 0,
+                checkout_root: None,
+            });
+            continue;
+        }
+        let result = match workspace.activate_directory(
+            intent.tab,
+            intent.agent,
+            &intent.project,
+            &intent.directory,
+            &mut commands,
+        ) {
+            Ok(_) => AgentCommandResult::Text(format!(
+                "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
+                intent.directory.display()
+            )),
+            Err(error) => AgentCommandResult::Error(error),
+        };
+        commands
+            .entity(operation)
+            .insert(WorkspaceResult(result))
+            .remove::<PendingDirectory>();
+    }
+}
+
+fn receive_rebind(
+    mut completed: MessageReader<ServiceInbound>,
+    requests: Query<(Entity, &WaitingRebind)>,
+    mut commands: Commands,
+) {
+    for completed in completed.read() {
+        let vmux_api::protocol::ServiceMessage::AcpWorkspaceRebindResult {
+            request_id,
+            sid,
+            cwd,
+            error,
+        } = &completed.0
+        else {
+            continue;
+        };
+        for (operation, waiting) in &requests {
+            if waiting.request_id != *request_id || waiting.sid != *sid {
+                continue;
+            }
+            commands.entity(operation).insert(ObservedRebind {
+                directory: PathBuf::from(cwd),
+                error: error.clone(),
+            });
+        }
+    }
+}
+
+fn apply_rebind(
+    requests: Query<
+        (
+            Entity,
+            &AgentRequestGate,
+            &WaitingRebind,
+            &ObservedRebind,
+            Option<&WaitingCheckout>,
+            Option<&PendingDirectory>,
+            Has<WorkspaceFailure>,
+        ),
+        Without<ReturningRebind>,
+    >,
+    resolved: Query<&vmux_layout::worktree::PreparedCheckout>,
+    revisions: Query<&vmux_layout::worktree::CheckoutTargetRevision>,
+    actors: Actors,
+    mut workspace: AgentWorkspaceState,
+    mut releases: MessageWriter<vmux_layout::worktree::ReleaseCheckout>,
+    mut commands: Commands,
+) {
+    for (operation, gate, waiting, observed, checkout, directory, failed) in &requests {
+        if let Some(error) = &observed.error {
+            if let Some(checkout) = checkout {
+                releases.write(vmux_layout::worktree::ReleaseCheckout {
+                    operation: checkout.checkout,
+                    owner: operation,
+                });
+            }
+            commands
+                .entity(operation)
+                .insert(WorkspaceFailure(error.clone()))
+                .remove::<(WaitingRebind, ObservedRebind)>();
+            continue;
+        }
+        commands
+            .entity(operation)
+            .insert(vmux_ecs::Cwd(observed.directory.clone()));
+        let actor = actors.resolve(gate.anchor);
+        let current = match (checkout, directory) {
+            (Some(checkout), _) => {
+                actor.is_ok_and(|(agent, tab)| agent == checkout.agent && tab == checkout.tab)
+                    && revisions
+                        .get(checkout.tab)
+                        .is_ok_and(|revision| revision.0 == checkout.revision)
+            }
+            (_, Some(directory)) => {
+                actor.is_ok_and(|(agent, tab)| agent == directory.agent && tab == directory.tab)
+                    && workspace
+                        .tabs
+                        .get(directory.tab)
+                        .is_ok_and(|tab| tab.startup_dir == directory.previous_startup)
+            }
+            _ => false,
+        };
+        if failed || !current || observed.directory != waiting.directory {
+            commands
+                .entity(operation)
+                .insert((
+                    ReturnRebind,
+                    WorkspaceFailure(
+                        "workspace owner or native directory changed before activation".into(),
+                    ),
+                ))
+                .remove::<ObservedRebind>();
+            continue;
+        }
+        let result = match (checkout, directory) {
+            (Some(checkout), _) => match resolved.get(checkout.checkout) {
+                Ok(prepared) => workspace
+                    .activate_worktree(
+                        checkout.tab,
+                        checkout.agent,
+                        &checkout.project,
+                        prepared.activation.clone(),
+                        &mut commands,
+                    )
+                    .map(|_| ()),
+                Err(_) => Err("prepared checkout is unavailable after rebind".into()),
+            },
+            (_, Some(directory)) => workspace
+                .activate_directory(
+                    directory.tab,
+                    directory.agent,
+                    &directory.project,
+                    &directory.directory,
+                    &mut commands,
+                )
+                .map(|_| ()),
+            _ => Err("workspace activation is unavailable after rebind".into()),
+        };
+        match result {
+            Ok(()) => {
+                if let Some(checkout) = checkout {
+                    releases.write(vmux_layout::worktree::ReleaseCheckout {
+                        operation: checkout.checkout,
+                        owner: operation,
+                    });
+                }
+                if checkout.is_some() {
+                    commands.entity(operation).insert(AppliedCheckout);
+                } else if let Some(directory) = directory {
+                    commands.entity(operation).insert(WorkspaceResult(AgentCommandResult::Text(format!("Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.", directory.directory.display())))).remove::<PendingDirectory>();
+                }
+                commands
+                    .entity(operation)
+                    .remove::<(WaitingRebind, ObservedRebind)>();
+            }
+            Err(error) => {
+                commands
+                    .entity(operation)
+                    .insert((ReturnRebind, WorkspaceFailure(error)))
+                    .remove::<ObservedRebind>();
+            }
+        }
+    }
+}
+
+fn begin_return(
+    mut requests: Query<(Entity, &mut WaitingRebind), With<ReturnRebind>>,
+    workspace: AgentWorkspaceState,
+    mut service: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
+) {
+    for (operation, mut waiting) in &mut requests {
+        waiting.request_id = AgentRequestId::new();
+        waiting.directory = workspace
+            .session_directory(waiting.session, &waiting.sid)
+            .unwrap_or_else(|| waiting.previous.clone());
+        waiting.returns += 1;
+        service.write(ServiceRequest(ClientMessage::RebindAcpWorkspaceWithReply {
+            request_id: waiting.request_id,
+            sid: waiting.sid.clone(),
+            cwd: waiting.directory.to_string_lossy().into_owned(),
+        }));
+        commands
+            .entity(operation)
+            .insert(ReturningRebind)
+            .remove::<ReturnRebind>();
+    }
+}
+
+fn complete_return(
+    requests: Query<
+        (
+            Entity,
+            &WaitingRebind,
+            &ObservedRebind,
+            &vmux_ecs::Cwd,
+            Option<&WaitingCheckout>,
+        ),
+        (With<ReturningRebind>, Without<vmux_session::Session>),
+    >,
+    mut workspace: AgentWorkspaceState,
+    mut retained: MessageWriter<vmux_layout::worktree::RetainCheckout>,
+    mut releases: MessageWriter<vmux_layout::worktree::ReleaseCheckout>,
+    mut commands: Commands,
+) {
+    for (operation, waiting, observed, known, checkout) in &requests {
+        let actual = if observed.error.is_some() {
+            &known.0
+        } else {
+            &observed.directory
+        };
+        let desired = workspace
+            .session_directory(waiting.session, &waiting.sid)
+            .unwrap_or_else(|| waiting.previous.clone());
+        if observed.error.is_none() && actual != &desired && waiting.returns < 2 {
+            commands
+                .entity(operation)
+                .insert((ReturnRebind, vmux_ecs::Cwd(actual.clone())))
+                .remove::<(ObservedRebind, ReturningRebind)>();
+            continue;
+        }
+        workspace.set_session_directory(waiting.session, &waiting.sid, actual);
+        if let Some(checkout) = checkout
+            && waiting
+                .checkout_root
+                .as_ref()
+                .is_some_and(|root| actual.starts_with(root))
+        {
+            retained.write(vmux_layout::worktree::RetainCheckout { operation: checkout.checkout, reason: "checkout retained because the native session still uses it after canceled activation".into() });
+        }
+        if let Some(checkout) = checkout {
+            releases.write(vmux_layout::worktree::ReleaseCheckout {
+                operation: checkout.checkout,
+                owner: operation,
+            });
+        }
+        if let Some(error) = &observed.error {
+            commands.entity(operation).insert(WorkspaceFailure(format!(
+                "native workspace rollback failed: {error}"
+            )));
+        }
+        commands
+            .entity(operation)
+            .remove::<(WaitingRebind, ObservedRebind, ReturningRebind)>();
+    }
+}
+
+fn finish_directory(
+    requests: Query<(Entity, &WorkspaceFailure), (With<PendingDirectory>, Without<WaitingRebind>)>,
+    mut commands: Commands,
+) {
+    for (operation, error) in &requests {
+        commands
+            .entity(operation)
+            .insert(WorkspaceResult(AgentCommandResult::Error(error.0.clone())))
+            .remove::<PendingDirectory>();
+    }
+}
+
 fn finish(
     mut failed: MessageReader<vmux_layout::worktree::CheckoutFailed>,
     requests: Query<(
@@ -797,6 +1208,7 @@ fn finish(
         &WaitingCheckout,
         Has<PlainReply>,
         Option<&WorkspaceFailure>,
+        Has<WaitingRebind>,
     )>,
     resolved: Query<&vmux_layout::worktree::PreparedCheckout>,
     states: Query<&vmux_ecs::OperationState>,
@@ -804,7 +1216,7 @@ fn finish(
     mut commands: Commands,
 ) {
     for failure in failed.read() {
-        for (operation, waiting, _, _) in &requests {
+        for (operation, waiting, _, _, _) in &requests {
             if waiting.checkout == failure.operation {
                 commands
                     .entity(operation)
@@ -812,7 +1224,10 @@ fn finish(
             }
         }
     }
-    for (operation, waiting, plain, error) in &requests {
+    for (operation, waiting, plain, error, rebind) in &requests {
+        if rebind {
+            continue;
+        }
         if let Some(error) = error {
             cancels.write(vmux_layout::worktree::CancelCheckout {
                 operation: waiting.checkout,
@@ -1030,6 +1445,31 @@ mod tests {
             });
             request_id
         }
+
+        fn wait_for_rebind(&mut self) -> (AgentRequestId, String, String) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                self.app.update();
+                for request in self
+                    .service
+                    .read(self.app.world().resource::<Messages<ServiceRequest>>())
+                {
+                    if let ClientMessage::RebindAcpWorkspaceWithReply {
+                        request_id,
+                        sid,
+                        cwd,
+                    } = &request.0
+                    {
+                        return (*request_id, sid.clone(), cwd.clone());
+                    }
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "native rebind was not requested"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
     }
 
     #[test]
@@ -1042,21 +1482,59 @@ mod tests {
         let mut replied = false;
         loop {
             fixture.app.update();
-            for request in fixture
+            let requests: Vec<_> = fixture
                 .service
                 .read(fixture.app.world().resource::<Messages<ServiceRequest>>())
-            {
-                match &request.0 {
-                    ClientMessage::RebindAcpWorkspace { sid, cwd } => {
+                .map(|request| request.0.clone())
+                .collect();
+            for request in requests {
+                match request {
+                    ClientMessage::RebindAcpWorkspaceWithReply {
+                        request_id,
+                        sid,
+                        cwd,
+                    } => {
                         assert_eq!(sid, "routing-session");
                         assert_eq!(
                             fixture.app.world().get::<Cwd>(fixture.session).unwrap().0,
-                            PathBuf::from(cwd)
+                            fixture.repository.path().canonicalize().unwrap()
                         );
+                        for _ in 0..8 {
+                            fixture.app.update();
+                        }
+                        assert!(
+                            !fixture
+                                .ready
+                                .read(
+                                    fixture
+                                        .app
+                                        .world()
+                                        .resource::<Messages<AgentRequestReady>>()
+                                )
+                                .any(|request| request.request_id == following)
+                        );
+                        assert!(
+                            fixture
+                                .app
+                                .world()
+                                .get::<vmux_layout::tab::TabWorktree>(fixture.tab)
+                                .is_none()
+                        );
+                        fixture
+                            .app
+                            .world_mut()
+                            .write_message(vmux_ecs::service::ServiceInbound(
+                                vmux_api::protocol::ServiceMessage::AcpWorkspaceRebindResult {
+                                    request_id,
+                                    sid,
+                                    cwd,
+                                    error: None,
+                                },
+                            ));
                         rebind = true;
                     }
                     ClientMessage::AgentCommandResponse { request_id, result }
-                        if *request_id == setup =>
+                        if request_id == setup =>
                     {
                         assert!(rebind);
                         assert!(matches!(result, AgentCommandResult::Text(_)));
@@ -1102,6 +1580,221 @@ mod tests {
             "feature/test"
         );
         assert_ne!(directory, fixture.repository.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn failed_native_rebind_does_not_activate_the_tab_or_release_following_commands() {
+        let mut fixture = WorkspaceFixture::new();
+        let setup = fixture.named("feature/rebind-failure");
+        let following = fixture.following();
+        let (request_id, sid, cwd) = fixture.wait_for_rebind();
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_ecs::service::ServiceInbound(
+                vmux_api::protocol::ServiceMessage::AcpWorkspaceRebindResult {
+                    request_id,
+                    sid,
+                    cwd: cwd.clone(),
+                    error: Some("controlled native refusal".into()),
+                },
+            ));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut replied = false;
+        loop {
+            fixture.app.update();
+            assert!(
+                !fixture
+                    .ready
+                    .read(
+                        fixture
+                            .app
+                            .world()
+                            .resource::<Messages<AgentRequestReady>>()
+                    )
+                    .any(|request| request.request_id == following)
+            );
+            for request in fixture
+                .service
+                .read(fixture.app.world().resource::<Messages<ServiceRequest>>())
+            {
+                if let ClientMessage::AgentCommandResponse { request_id, result } = &request.0
+                    && *request_id == setup
+                {
+                    assert!(matches!(result, AgentCommandResult::Error(_)));
+                    replied = true;
+                }
+            }
+            if let Some(response) = fixture
+                .responses
+                .read(
+                    fixture
+                        .app
+                        .world()
+                        .resource::<Messages<AgentCommandResponse>>(),
+                )
+                .find(|response| response.request_id == following)
+            {
+                assert!(replied);
+                assert!(matches!(response.result, AgentCommandResult::Error(_)));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "failed rebind did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            fixture.app.world().get::<Cwd>(fixture.session).unwrap().0,
+            fixture.repository.path().canonicalize().unwrap()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_layout::tab::TabWorktree>(fixture.tab)
+                .is_none()
+        );
+        assert!(!Path::new(&cwd).exists());
+    }
+
+    #[test]
+    fn removing_the_tab_during_rebind_drains_native_rollback_before_checkout_cleanup() {
+        for rollback_fails in [false, true] {
+            let mut fixture = WorkspaceFixture::new();
+            let setup = fixture.named("feature/retired-owner");
+            let following = fixture.following();
+            let (request_id, sid, cwd) = fixture.wait_for_rebind();
+            fixture.app.world_mut().despawn(fixture.tab);
+            for _ in 0..20 {
+                fixture.app.update();
+                assert!(Path::new(&cwd).exists());
+            }
+            fixture
+                .app
+                .world_mut()
+                .write_message(vmux_ecs::service::ServiceInbound(
+                    vmux_api::protocol::ServiceMessage::AcpWorkspaceRebindResult {
+                        request_id,
+                        sid,
+                        cwd: cwd.clone(),
+                        error: None,
+                    },
+                ));
+            let (request_id, sid, restored) = fixture.wait_for_rebind();
+            assert_eq!(
+                PathBuf::from(&restored),
+                fixture.repository.path().canonicalize().unwrap()
+            );
+            for _ in 0..20 {
+                fixture.app.update();
+                assert!(Path::new(&cwd).exists());
+                assert!(
+                    !fixture
+                        .ready
+                        .read(
+                            fixture
+                                .app
+                                .world()
+                                .resource::<Messages<AgentRequestReady>>()
+                        )
+                        .any(|request| request.request_id == following)
+                );
+            }
+            let error = rollback_fails.then(|| "controlled rollback refusal".to_string());
+            fixture
+                .app
+                .world_mut()
+                .write_message(vmux_ecs::service::ServiceInbound(
+                    vmux_api::protocol::ServiceMessage::AcpWorkspaceRebindResult {
+                        request_id,
+                        sid,
+                        cwd: restored,
+                        error,
+                    },
+                ));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                fixture.app.update();
+                if fixture.service.read(fixture.app.world().resource::<Messages<ServiceRequest>>()).any(|request| matches!(&request.0, ClientMessage::AgentCommandResponse {request_id, result: AgentCommandResult::Error(_)} if *request_id == setup)) {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "retired rebind did not finish"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_eq!(Path::new(&cwd).exists(), rollback_fails);
+            let expected = if rollback_fails {
+                PathBuf::from(&cwd)
+            } else {
+                fixture.repository.path().canonicalize().unwrap()
+            };
+            assert_eq!(
+                fixture.app.world().get::<Cwd>(fixture.session).unwrap().0,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn failure_of_a_same_session_workspace_group_retires_its_inactive_sibling_gate() {
+        let mut fixture = WorkspaceFixture::new();
+        let original = fixture.anchor;
+        let stack = {
+            let world = fixture.app.world_mut();
+            let mut actors = world.query::<(&ProcessId, &ChildOf)>();
+            actors
+                .iter(world)
+                .find(|(id, _)| **id == original)
+                .unwrap()
+                .1
+                .parent()
+        };
+        let sibling = ProcessId::new();
+        fixture.app.world_mut().spawn((sibling, ChildOf(stack)));
+        fixture.named("invalid branch");
+        fixture.anchor = sibling;
+        let second = fixture.named("feature/queued");
+        fixture.anchor = original;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            fixture.app.update();
+            if fixture
+                .responses
+                .read(
+                    fixture
+                        .app
+                        .world()
+                        .resource::<Messages<AgentCommandResponse>>(),
+                )
+                .any(|response| {
+                    response.request_id == second
+                        && matches!(response.result, AgentCommandResult::Error(_))
+                })
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "sibling request did not fail"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let retry = fixture.named("another invalid branch");
+        loop {
+            fixture.app.update();
+            if fixture.service.read(fixture.app.world().resource::<Messages<ServiceRequest>>()).any(|request| matches!(&request.0, ClientMessage::AgentCommandResponse {request_id, result: AgentCommandResult::Error(_)} if *request_id == retry)) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "inactive gate blocked a new workspace request"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 
     #[test]

@@ -14,8 +14,9 @@ use vmux_git::worktree::CheckoutInfo;
 
 pub use super::checkout::{
     CancelCheckout, CheckoutFailed, CheckoutPlugin, CheckoutPrepared, CheckoutRecoveryComplete,
-    CheckoutTargetRevision, CommitCheckout, CreateBranchCheckout, CreateCheckout, PreparedCheckout,
-    RecoverCheckouts, RestoreCheckout, SelectBranchCheckout,
+    CheckoutTargetRevision, CommitCheckout, CreateBranchCheckout, CreateCheckout, HoldCheckout,
+    PreparedCheckout, RecoverCheckouts, ReleaseCheckout, RestoreCheckout, RetainCheckout,
+    SelectBranchCheckout,
 };
 
 impl Plugin for WorktreePlugin {
@@ -227,11 +228,12 @@ fn retire_reconcile(
         Option<&TabWorktree>,
         Option<&CheckoutTargetRevision>,
         Has<super::page_context::PendingWorkspaceSelection>,
+        Has<TabWorktreeReady>,
     )>,
     mut cancels: MessageWriter<CancelCheckout>,
     mut commands: Commands,
 ) {
-    for (tab, task, current, workspace, metadata, revision, selecting) in &pending {
+    for (tab, task, current, workspace, metadata, revision, selecting, ready) in &pending {
         if !selecting
             && current.is_some_and(|tab| tab.startup_dir == task.startup_dir)
             && workspace == Some(&task.workspace)
@@ -246,6 +248,9 @@ fn retire_reconcile(
         commands
             .entity(tab)
             .remove::<(TabWorktreeTask, ReconcileApplied)>();
+        if ready {
+            commands.entity(tab).remove::<TabWorktreePending>();
+        }
     }
 }
 
@@ -324,6 +329,7 @@ fn finish_reconcile(
     mut pending: Query<(Entity, &mut TabWorktreeTask)>,
     mut tabs: Query<&mut Tab>,
     states: Query<&vmux_ecs::OperationState>,
+    ready: Query<(), With<TabWorktreeReady>>,
     mut commands: Commands,
 ) {
     for message in prepared.read() {
@@ -381,6 +387,9 @@ fn finish_reconcile(
             commands
                 .entity(entity)
                 .remove::<(TabWorktreeTask, ReconcileApplied)>();
+            if ready.contains(entity) {
+                commands.entity(entity).remove::<TabWorktreePending>();
+            }
         }
     }
 }
@@ -1131,6 +1140,75 @@ mod tests {
                 .unwrap(),
             "vmux/feat-2"
         );
+    }
+
+    #[test]
+    fn an_interrupted_restore_with_a_ready_checkout_releases_deferred_page_open() {
+        for superseded in [false, true] {
+            let repo = init_repo();
+            let managed = tempfile::tempdir().unwrap();
+            let activation = CheckoutFixture::new(repo.path(), managed.path())
+                .create("ready")
+                .unwrap();
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, WorktreePlugin))
+                .insert_resource(ManagedWorktreeRoot(managed.path().to_path_buf()));
+            let tab = app
+                .world_mut()
+                .spawn((
+                    Tab {
+                        name: "ready".into(),
+                        startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
+                    },
+                    TabWorkspace {
+                        project_dir: repo.path().to_string_lossy().into_owned(),
+                    },
+                    activation.metadata.clone(),
+                ))
+                .id();
+            app.update();
+            let task = app.world().get::<TabWorktreeTask>(tab).unwrap();
+            let operation = task.operation;
+            let revision = task.revision;
+            app.world_mut()
+                .entity_mut(tab)
+                .insert(activation.ready.clone());
+            if superseded {
+                app.world_mut()
+                    .entity_mut(tab)
+                    .insert(CheckoutTargetRevision(revision + 1));
+            } else {
+                app.world_mut().write_message(CancelCheckout { operation });
+            }
+            let waiting = app
+                .world_mut()
+                .spawn((PageOpenWaitForWorktree { tab }, PageOpenDeferred))
+                .id();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                app.update();
+                if app
+                    .world()
+                    .get::<PageOpenWaitForWorktree>(waiting)
+                    .is_none()
+                    && app.world().get::<vmux_ecs::OperationState>(operation)
+                        == Some(&vmux_ecs::OperationState::Canceled)
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "ready checkout kept page open deferred after restore interruption"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(app.world().get::<PageOpenDeferred>(waiting).is_none());
+            assert!(app.world().get::<PageOpenError>(waiting).is_none());
+            assert_eq!(
+                std::fs::read(activation.execution_dir.join("seed.txt")).unwrap(),
+                b"seed\n"
+            );
+        }
     }
 
     #[test]

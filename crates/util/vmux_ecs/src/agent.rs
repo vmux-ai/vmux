@@ -72,10 +72,16 @@ pub struct AgentRequestGateFailed {
 }
 
 #[derive(Component)]
-struct QueuedAgentRequest {
-    input: AgentRequestInput,
-    anchor: vmux_api::ProcessId,
-}
+pub struct PendingAgentRequest(pub AgentRequestInput);
+
+#[derive(Component)]
+struct QueuedOn(vmux_api::ProcessId);
+
+#[derive(Message)]
+pub struct AgentRequestAvailable(pub Entity);
+
+#[derive(Message)]
+pub struct AgentRequestCanceled(pub AgentRequestId);
 
 #[derive(Resource, Default)]
 struct Sequence(u32);
@@ -88,6 +94,8 @@ impl Plugin for AgentRequestDispatchPlugin {
             .add_message::<AgentRequestInput>()
             .add_message::<AgentRequestReady>()
             .add_message::<AgentRequestGateFailed>()
+            .add_message::<AgentRequestAvailable>()
+            .add_message::<AgentRequestCanceled>()
             .add_message::<AgentCommandResponse>()
             .configure_sets(
                 Update,
@@ -103,7 +111,7 @@ impl Plugin for AgentRequestDispatchPlugin {
             )
             .add_systems(
                 Update,
-                (fail_queued, release_requests)
+                (receive_requests, fail_queued, release_requests)
                     .chain()
                     .in_set(AgentRequestReleaseSet),
             )
@@ -113,21 +121,38 @@ impl Plugin for AgentRequestDispatchPlugin {
 
 fn fail_queued(
     mut failures: MessageReader<AgentRequestGateFailed>,
-    queued: Query<(Entity, &QueuedAgentRequest)>,
+    queued: Query<(Entity, &PendingAgentRequest, &QueuedOn)>,
     mut responses: MessageWriter<AgentCommandResponse>,
+    mut canceled: MessageWriter<AgentRequestCanceled>,
     mut commands: Commands,
 ) {
     for failure in failures.read() {
-        for (entity, request) in &queued {
-            if request.anchor != failure.anchor {
+        for (entity, request, queued_on) in &queued {
+            if queued_on.0 != failure.anchor {
                 continue;
             }
             responses.write(
-                AgentReply::new(request.input.request_id)
+                AgentReply::new(request.0.request_id)
                     .response(AgentCommandResult::Error(failure.reason.clone())),
             );
+            canceled.write(AgentRequestCanceled(request.0.request_id));
             commands.entity(entity).try_despawn();
         }
+    }
+}
+
+fn receive_requests(
+    mut inputs: MessageReader<AgentRequestInput>,
+    mut sequence: ResMut<Sequence>,
+    mut commands: Commands,
+) {
+    for input in inputs.read() {
+        sequence.0 = sequence.0.wrapping_add(1);
+        commands.spawn((
+            Name::new("Accepted agent request"),
+            crate::Order(sequence.0),
+            PendingAgentRequest(input.clone()),
+        ));
     }
 }
 
@@ -151,13 +176,17 @@ impl RequestAnchor {
 }
 
 fn dispatch_requests(
-    mut inputs: MessageReader<AgentRequestInput>,
+    mut inputs: MessageReader<AgentRequestAvailable>,
+    pending: Query<&PendingAgentRequest>,
     mut gates: Query<&mut AgentRequestGate>,
     mut ready: MessageWriter<AgentRequestReady>,
-    mut sequence: ResMut<Sequence>,
     mut commands: Commands,
 ) {
-    for input in inputs.read() {
+    for available in inputs.read() {
+        let Ok(pending) = pending.get(available.0) else {
+            continue;
+        };
+        let input = &pending.0;
         let (sid, explicit) = match &input.origin {
             CommandOrigin::Agent { sid, anchor } => (sid.as_deref(), *anchor),
             CommandOrigin::User => (None, None),
@@ -170,15 +199,7 @@ fn dispatch_requests(
                     || sid.is_some_and(|sid| gate.sid.as_deref() == Some(sid)))
         });
         if let Some(gate) = gate {
-            sequence.0 = sequence.0.wrapping_add(1);
-            commands.spawn((
-                Name::new("Queued agent request"),
-                crate::Order(sequence.0),
-                QueuedAgentRequest {
-                    input: input.clone(),
-                    anchor: gate.anchor,
-                },
-            ));
+            commands.entity(available.0).insert(QueuedOn(gate.anchor));
         } else {
             for mut gate in &mut gates {
                 if gate.request_id == input.request_id {
@@ -186,27 +207,26 @@ fn dispatch_requests(
                 }
             }
             ready.write(AgentRequestReady(input.clone()));
+            commands.entity(available.0).try_despawn();
         }
     }
 }
 
 fn release_requests(
-    queued: Query<(Entity, &crate::Order, &QueuedAgentRequest)>,
+    pending: Query<(Entity, &crate::Order, Option<&QueuedOn>), With<PendingAgentRequest>>,
     gates: Query<&AgentRequestGate>,
-    mut inputs: MessageWriter<AgentRequestInput>,
-    mut commands: Commands,
+    mut inputs: MessageWriter<AgentRequestAvailable>,
 ) {
     let mut available = Vec::new();
-    for (entity, order, request) in &queued {
-        if gates.iter().any(|gate| gate.anchor == request.anchor) {
+    for (entity, order, queued_on) in &pending {
+        if queued_on.is_some_and(|queued| gates.iter().any(|gate| gate.anchor == queued.0)) {
             continue;
         }
-        available.push((order.0, entity, &request.input));
+        available.push((order.0, entity));
     }
-    available.sort_by_key(|(order, _, _)| *order);
-    for (_, entity, input) in available {
-        inputs.write(input.clone());
-        commands.entity(entity).try_despawn();
+    available.sort_by_key(|(order, _)| *order);
+    for (_, entity) in available {
+        inputs.write(AgentRequestAvailable(entity));
     }
 }
 
@@ -507,6 +527,29 @@ mod dispatch_tests {
             .remove::<AgentRequestGate>();
         fixture.app.update();
         assert_eq!(fixture.delivered(), [held]);
+    }
+
+    #[test]
+    fn released_requests_keep_their_order_before_fresh_ingress() {
+        let mut fixture = DispatchFixture::new();
+        let anchor = vmux_api::ProcessId::new();
+        let gate = fixture
+            .app
+            .world_mut()
+            .spawn(AgentRequestGate {
+                anchor,
+                sid: None,
+                request_id: AgentRequestId::new(),
+                active: true,
+            })
+            .id();
+        let queued = fixture.request(Some(anchor), None);
+        fixture.app.update();
+        assert!(fixture.delivered().is_empty());
+        fixture.app.world_mut().entity_mut(gate).despawn();
+        let fresh = fixture.request(Some(anchor), None);
+        fixture.app.update();
+        assert_eq!(fixture.delivered(), [queued, fresh]);
     }
 
     #[test]

@@ -44,6 +44,9 @@ impl Plugin for CheckoutPlugin {
             .add_message::<RestoreCheckout>()
             .add_message::<CommitCheckout>()
             .add_message::<CancelCheckout>()
+            .add_message::<RetainCheckout>()
+            .add_message::<HoldCheckout>()
+            .add_message::<ReleaseCheckout>()
             .add_message::<CheckoutPrepared>()
             .add_message::<CheckoutFailed>()
             .add_systems(
@@ -54,6 +57,9 @@ impl Plugin for CheckoutPlugin {
                         accept_branch,
                         accept_select,
                         accept_restore,
+                        preserve,
+                        holds,
+                        release_holds,
                         cancel,
                         retry_lock,
                         input,
@@ -169,6 +175,30 @@ pub struct CommitCheckout {
 pub struct CancelCheckout {
     pub operation: Entity,
 }
+
+#[derive(Message)]
+pub struct RetainCheckout {
+    pub operation: Entity,
+    pub reason: String,
+}
+
+#[derive(Component)]
+struct KeepCheckout;
+
+#[derive(Message)]
+pub struct HoldCheckout {
+    pub operation: Entity,
+    pub owner: Entity,
+}
+
+#[derive(Message)]
+pub struct ReleaseCheckout {
+    pub operation: Entity,
+    pub owner: Entity,
+}
+
+#[derive(Component)]
+struct CleanupHold(Entity);
 
 #[derive(Message)]
 pub struct CheckoutPrepared {
@@ -440,6 +470,65 @@ fn accept_restore(
             Restored,
             Progress(Phase::Input),
         ));
+    }
+}
+
+fn preserve(
+    mut requests: MessageReader<RetainCheckout>,
+    operations: Query<&OperationState, With<Progress>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        if !operations
+            .get(request.operation)
+            .is_ok_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
+        commands.entity(request.operation).insert((
+            KeepCheckout,
+            RetainedReason(request.reason.clone()),
+            AbortRequested,
+        ));
+    }
+}
+
+fn holds(
+    mut requested: MessageReader<HoldCheckout>,
+    operations: Query<Option<&CleanupHold>, With<Progress>>,
+    owners: Query<&OperationState>,
+    mut commands: Commands,
+) {
+    for request in requested.read() {
+        if !owners
+            .get(request.owner)
+            .is_ok_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
+        if operations
+            .get(request.operation)
+            .is_ok_and(|hold| hold.is_none_or(|hold| hold.0 == request.owner))
+        {
+            commands
+                .entity(request.operation)
+                .insert(CleanupHold(request.owner));
+        }
+    }
+}
+
+fn release_holds(
+    mut released: MessageReader<ReleaseCheckout>,
+    operations: Query<&CleanupHold, With<Progress>>,
+    mut commands: Commands,
+) {
+    for release in released.read() {
+        if operations
+            .get(release.operation)
+            .is_ok_and(|hold| hold.0 == release.owner)
+        {
+            commands.entity(release.operation).remove::<CleanupHold>();
+        }
     }
 }
 
@@ -1079,7 +1168,7 @@ fn retry_lock(operations: Query<(Entity, &Progress, &RetryDeadline)>, mut effect
 impl BaseRef {
     fn native(reference: &str) -> Self {
         let reference = reference
-            .strip_prefix("refs/remotes/origin/")
+            .strip_prefix("refs/remotes/")
             .or_else(|| reference.strip_prefix("refs/heads/"))
             .unwrap_or(reference);
         Self(reference.to_string())
@@ -3543,6 +3632,97 @@ mod tests {
     }
 
     #[test]
+    fn native_cleanup_hold_survives_target_removal_until_its_owner_releases_it() {
+        let mut fixture = CheckoutFixture::new();
+        let activation = fixture.finish_creation();
+        let owner = fixture
+            .app
+            .world_mut()
+            .spawn(Operation::bundle("native-rebind").unwrap().running())
+            .id();
+        fixture.app.world_mut().write_message(HoldCheckout {
+            operation: fixture.operation,
+            owner,
+        });
+        let target = fixture
+            .app
+            .world()
+            .get::<OperationTarget>(fixture.operation)
+            .unwrap()
+            .entity();
+        fixture.app.world_mut().despawn(target);
+        for _ in 0..30 {
+            fixture.app.update();
+            assert!(activation.execution_dir.exists());
+            assert_ne!(
+                fixture.app.world().get::<OperationState>(fixture.operation),
+                Some(&OperationState::Canceled)
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        fixture.app.world_mut().write_message(ReleaseCheckout {
+            operation: fixture.operation,
+            owner,
+        });
+        assert_eq!(fixture.complete(), OperationState::Canceled);
+        assert!(!activation.execution_dir.exists());
+    }
+
+    #[test]
+    fn a_lost_native_hold_owner_retains_the_checkout_and_its_branch() {
+        let mut fixture = CheckoutFixture::new();
+        let activation = fixture.finish_creation();
+        let owner = fixture
+            .app
+            .world_mut()
+            .spawn(Operation::bundle("native-rebind").unwrap().running())
+            .id();
+        fixture.app.world_mut().write_message(HoldCheckout {
+            operation: fixture.operation,
+            owner,
+        });
+        fixture.app.update();
+        fixture.app.world_mut().despawn(owner);
+        fixture.cancel();
+        assert_eq!(fixture.complete(), OperationState::Canceled);
+        assert_eq!(
+            std::fs::read(activation.execution_dir.join("seed.txt")).unwrap(),
+            b"seed\n"
+        );
+        assert!(
+            fixture
+                .git(
+                    fixture.repository.path(),
+                    &["rev-parse", "--verify", "refs/heads/vmux/work"]
+                )
+                .status
+                .success()
+        );
+    }
+
+    #[test]
+    fn same_frame_native_hold_and_release_do_not_block_cleanup() {
+        let mut fixture = CheckoutFixture::new();
+        let activation = fixture.finish_creation();
+        let owner = fixture
+            .app
+            .world_mut()
+            .spawn(Operation::bundle("native-rebind").unwrap().running())
+            .id();
+        fixture.app.world_mut().write_message(HoldCheckout {
+            operation: fixture.operation,
+            owner,
+        });
+        fixture.app.world_mut().write_message(ReleaseCheckout {
+            operation: fixture.operation,
+            owner,
+        });
+        fixture.cancel();
+        assert_eq!(fixture.complete(), OperationState::Canceled);
+        assert!(!activation.execution_dir.exists());
+    }
+
+    #[test]
     fn canceled_create_does_not_start_repository_mutation() {
         let mut fixture = CheckoutFixture::new();
         fixture.cancel();
@@ -4447,6 +4627,61 @@ mod tests {
             fixture.cancel();
             assert_eq!(fixture.complete(), OperationState::Canceled);
         }
+    }
+
+    #[test]
+    fn configured_remote_base_remains_resolvable_after_checkout_selection() {
+        let mut fixture = CheckoutFixture::new();
+        fixture.cancel();
+        assert_eq!(fixture.complete(), OperationState::Canceled);
+        fixture.release_creation();
+        for arguments in [
+            vec!["switch", "-c", "source"],
+            vec!["update-ref", "refs/remotes/origin/stable", "HEAD"],
+            vec![
+                "config",
+                "branch.source.vmux-base",
+                "refs/remotes/origin/stable",
+            ],
+            vec!["branch", "feature"],
+        ] {
+            assert!(
+                fixture
+                    .git(fixture.repository.path(), &arguments)
+                    .status
+                    .success()
+            );
+        }
+        fixture.select("feature");
+        let activation = fixture.finish_creation();
+        assert!(
+            !fixture
+                .git(
+                    fixture.repository.path(),
+                    &["rev-parse", "--verify", "refs/heads/stable"]
+                )
+                .status
+                .success()
+        );
+        let stored = fixture.git(
+            fixture.repository.path(),
+            &["config", "--get", "branch.feature.vmux-base"],
+        );
+        assert!(stored.status.success());
+        let stored = String::from_utf8(stored.stdout).unwrap();
+        let resolved = fixture.git(
+            fixture.repository.path(),
+            &["rev-parse", "--verify", stored.trim()],
+        );
+        let expected = fixture.git(
+            fixture.repository.path(),
+            &["rev-parse", "--verify", "refs/remotes/origin/stable"],
+        );
+        assert!(resolved.status.success());
+        assert_eq!(resolved.stdout, expected.stdout);
+        assert_eq!(activation.metadata.base_ref, stored.trim());
+        fixture.cancel();
+        assert_eq!(fixture.complete(), OperationState::Canceled);
     }
 
     #[test]
