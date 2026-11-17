@@ -26,4 +26,10 @@ Open the Project's Sessions to continue a conversation or find a prior result. K
 
 Closing a page does not necessarily stop its background conversation or process. Use the task or process controls when you want the work to end.
 
+## Continue selected Profile synchronization
+
+When Profile sync is available, select the Profiles whose names you want to synchronize. Names save locally before transfer, and reconnecting continues pending edits after a restart. A Profile waiting for conflict resolution does not prevent other selected Profiles from syncing.
+
+Turning synchronization back on refreshes the remote Profile list. Conflict resolution becomes available after the conflict is safely saved locally; a temporary storage failure keeps the pending work until a retry succeeds.
+
 Try [Find and book a flight](book-a-flight.md) or [Fix a bug and make a PR](make-a-pr.md).

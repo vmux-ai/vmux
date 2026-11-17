@@ -201,6 +201,30 @@ mod tests {
         }
 
         #[cfg(feature = "profile-sync")]
+        fn flag(&mut self, revision: u64, enabled: bool) {
+            let world = self.app.world_mut();
+            let provider = world
+                .query_filtered::<Entity, With<vmux_feature::Provider>>()
+                .single(world)
+                .unwrap();
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "environment": "development",
+                "revision": revision,
+                "issued_at": 1000,
+                "valid_until": 2000,
+                "flags": {"profile.sync": enabled}
+            }))
+            .unwrap();
+            world.write_message(vmux_feature::Receive {
+                provider,
+                generation: 0,
+                document: vmux_feature::snapshot::Document::decode(&bytes).unwrap(),
+            });
+            self.app.update();
+        }
+
+        #[cfg(feature = "profile-sync")]
         fn upload(&mut self) -> crate::sync::UploadRequest {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
             loop {
@@ -951,6 +975,239 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(queued, vec![selected.to_string()]);
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn restart_reaches_a_later_profile_without_reseeding_a_truncated_outbox() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        fixture.flag(2, false);
+        let blocked = fixture.profile("personal").0;
+        fixture.select(blocked, true).result.unwrap();
+        for index in 0..20 {
+            fixture
+                .rename(Uuid::new_v4(), blocked, &format!("Offline edit {index}"))
+                .result
+                .unwrap();
+        }
+        let later = fixture
+            .create(Uuid::new_v4(), "Later profile")
+            .result
+            .unwrap()
+            .entity_id;
+        fixture.select(later, true).result.unwrap();
+        let database = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
+        let expected: Vec<String> = database
+            .prepare("select id from profile_outbox order by sequence")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(expected.len() > 16);
+        drop(fixture);
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let first = fixture.upload();
+        assert_eq!(first.change.id, blocked);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first.entity)
+            .insert(crate::cloud::transport::Reply(Some(Ok(
+                crate::wire::Response::Conflict { current: None },
+            ))));
+        fixture.conflict(blocked);
+        let upload = fixture.upload();
+        assert_eq!(upload.change.id, later);
+        let retained: Vec<String> = database
+            .prepare("select id from profile_outbox order by sequence")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(retained, expected);
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn enabling_admission_again_restarts_remote_listing_on_the_same_connection() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        let connection = fixture.phase(Phase::Connected);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let request = loop {
+            fixture.app.update();
+            if let Some(request) = fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<crate::sync::ListRequest>>()
+                .drain()
+                .next()
+            {
+                break request;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        fixture.flag(2, false);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(request.entity)
+            .insert(crate::cloud::transport::Reply(Some(Ok(
+                crate::wire::Response::Entities {
+                    entities: Vec::new(),
+                    next: None,
+                },
+            ))));
+        fixture.app.update();
+        fixture.flag(3, true);
+        let remote = Uuid::new_v4();
+        let record = fixture.received(remote, 1, Some("Remote after resume"));
+        fixture.page(vec![record], None);
+        fixture.remote(remote, 1);
+        assert_eq!(fixture.connection(), Some(connection));
+    }
+
+    #[test]
+    fn development_approval_accepts_ipv6_loopback_and_refuses_remote_plaintext() {
+        for (host, uri, accepted) in [
+            ("::1", "http://[::1]:18791/development/devices", true),
+            (
+                "localhost",
+                "http://127.0.0.1:18791/development/devices",
+                true,
+            ),
+            ("::1", "http://[2001:db8::1]/devices", false),
+            ("accounts.example", "http://[::1]:18791/devices", false),
+            ("::1", "http://user:secret@[::1]:18791/devices", false),
+            ("accounts.example", "https://accounts.example/devices", true),
+        ] {
+            let data = tempfile::tempdir().unwrap();
+            let mut fixture = Fixture::at(data.path());
+            fixture.gateway(Uuid::from_u128(99), false);
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(fixture.root)
+                .insert(Server {
+                    host: host.into(),
+                    port: 8788,
+                });
+            fixture.connect();
+            let connection = fixture.phase(Phase::Authorizing);
+            fixture.app.world_mut().entity_mut(connection).insert((
+                Authorized,
+                Authorization {
+                    user_code: "EXPLICIT-APPROVAL".into(),
+                    verification_uri: uri.into(),
+                },
+                Grant {
+                    code: "bounded-development-grant".into(),
+                    expires: std::time::Instant::now() + std::time::Duration::from_secs(60),
+                    interval: 1,
+                },
+            ));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let actual = loop {
+                fixture.app.update();
+                if fixture
+                    .app
+                    .world()
+                    .get::<crate::ConnectionError>(fixture.root)
+                    .is_some()
+                {
+                    break false;
+                }
+                if fixture.app.world().get::<Phase>(connection) == Some(&Phase::AwaitingApproval) {
+                    break true;
+                }
+                assert!(std::time::Instant::now() < deadline, "{uri}");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            };
+            let development = matches!(vmux_profile::build_profile(), "dev" | "local");
+            let expected = accepted && (development || uri.starts_with("https://"));
+            assert_eq!(actual, expected, "{host} {uri}");
+        }
+    }
+
+    #[cfg(feature = "profile-sync")]
+    #[test]
+    fn conflict_resolution_waits_for_failed_conflict_writes_to_recover() {
+        let data = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::at(data.path());
+        fixture.transfer();
+        fixture.gateway(Uuid::from_u128(99), true);
+        fixture.connect();
+        fixture.phase(Phase::Connected);
+        let profile = fixture.profile("personal").0;
+        fixture.select(profile, true).result.unwrap();
+        let upload = fixture.upload();
+        let database = rusqlite::Connection::open(data.path().join("accounts.sqlite")).unwrap();
+        database
+            .execute_batch(
+                "create trigger reject_conflict before update of value on profile_outbox
+             when json_extract(new.value, '$.conflicted') = 1
+             begin select raise(abort, 'injected conflict write failure'); end;",
+            )
+            .unwrap();
+        let record = fixture.received(profile, 5, Some("Committed remote name"));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(upload.entity)
+            .insert(crate::cloud::transport::Reply(Some(Ok(
+                crate::wire::Response::Conflict {
+                    current: Some(record),
+                },
+            ))));
+        fixture.app.update();
+        fixture
+            .create(Uuid::new_v4(), "Independent local save")
+            .result
+            .unwrap();
+        let root = fixture.root;
+        let (_, busy, conflict) = fixture
+            .app
+            .world_mut()
+            .run_system_once(move |projection: crate::SyncProjection| {
+                projection.activity(root, profile)
+            })
+            .unwrap();
+        assert!(busy && conflict);
+        let persisted: bool = database
+            .query_row(
+                "select json_extract(value, '$.conflicted') from profile_outbox where id=?1",
+                [upload.change.operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!persisted);
+        database
+            .execute_batch("drop trigger reject_conflict;")
+            .unwrap();
+        fixture.conflict(profile);
+        let persisted: bool = database
+            .query_row(
+                "select json_extract(value, '$.conflicted') from profile_outbox where id=?1",
+                [upload.change.operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(persisted);
     }
 
     #[cfg(feature = "profile-sync")]

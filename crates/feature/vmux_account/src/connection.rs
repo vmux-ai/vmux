@@ -463,12 +463,12 @@ fn authorize(
                     .host
                     .parse::<std::net::IpAddr>()
                     .is_ok_and(|ip| ip.is_loopback());
-            let local_uri = url.host_str().is_some_and(|host| {
-                host == "localhost"
-                    || host
-                        .parse::<std::net::IpAddr>()
-                        .is_ok_and(|ip| ip.is_loopback())
-            });
+            let local_uri = match url.host() {
+                Some(url::Host::Domain(host)) => host == "localhost",
+                Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+                None => false,
+            };
             (url.scheme() == "https"
                 || url.scheme() == "http"
                     && matches!(vmux_profile::build_profile(), "dev" | "local")
