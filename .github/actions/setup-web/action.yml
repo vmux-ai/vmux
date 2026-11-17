@@ -64,3 +64,7 @@ runs:
       if: inputs.tailwind == 'true'
       shell: bash
       run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" vmux internal install-tailwindcss
+
+    - name: Let Dioxus capture workspace compiler invocations
+      shell: bash
+      run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
