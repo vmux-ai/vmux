@@ -52,7 +52,13 @@ impl Plugin for EditorPlugin {
             .add_observer(file_key)
             .add_observer(file_text_input)
             .add_observer(file_pointer)
-            .add_systems(Update, (reapply_keymap_on_change, run_submitted_ex_lines))
+            .add_systems(
+                Update,
+                (
+                    reapply_keymap_on_change,
+                    run_submitted_ex_lines.in_set(super::file_writes::FileWriteSet),
+                ),
+            )
             .add_observer(open_file_find)
             .add_observer(close_file_find)
             .add_observer(file_find_request)
