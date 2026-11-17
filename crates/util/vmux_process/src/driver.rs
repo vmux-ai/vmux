@@ -2100,10 +2100,24 @@ mod tests {
         let root = fixture.root.clone();
         let target = fixture.target.clone();
         fixture.ready(&root);
-        fixture
-            .process
-            .change_directory(&root.to_string_lossy(), &target)
-            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match fixture
+                .process
+                .change_directory(&root.to_string_lossy(), &target)
+            {
+                Ok(()) => break,
+                Err(error) => {
+                    assert_eq!(error, "terminal is not at an empty shell prompt");
+                    assert!(
+                        Instant::now() < deadline,
+                        "shell directory change was never admitted: {}",
+                        fixture.process.full_text()
+                    );
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         fixture.ready(&target);
         fixture.process.write_input(b"draft stays here");
         assert!(
