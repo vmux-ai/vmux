@@ -2,12 +2,12 @@ use compiler_inputs::CompilerInputs;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
 use syn::visit::{self, Visit};
 use syn::{
     Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemFn,
     Stmt, TraitItemFn, Type, TypePath, UseTree, Visibility,
 };
+use vmux_feature::manifest::FeatureManifest;
 
 #[path = "../src/compiler_inputs.rs"]
 mod compiler_inputs;
@@ -30,18 +30,6 @@ const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
 ];
 
-#[derive(Deserialize)]
-struct FeaturePages {
-    #[serde(default)]
-    pages: Vec<FeaturePage>,
-}
-
-#[derive(Deserialize)]
-struct FeaturePage {
-    #[serde(default)]
-    permissions: Vec<String>,
-}
-
 #[test]
 fn ui_events_are_declared_in_the_owning_feature_page_manifest() {
     let feature_dir = Workspace::current().0.join("crates").join("feature");
@@ -55,7 +43,7 @@ fn ui_events_are_declared_in_the_owning_feature_page_manifest() {
             continue;
         }
         let source = std::fs::read_to_string(&manifest_path).expect("read feature manifest");
-        let manifest: FeaturePages = ron::from_str(&source).expect("parse feature manifest");
+        let manifest = FeatureManifest::try_parse(&source).expect("parse feature manifest");
         if manifest.pages.is_empty() {
             continue;
         }

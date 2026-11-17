@@ -39,11 +39,11 @@ mod hierarchy;
 mod pane_store;
 mod topology;
 
-#[cfg(all(host, feature = "host"))]
+#[cfg(feature = "host")]
 pub(crate) struct Feature;
 
-#[cfg(all(host, feature = "host"))]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+#[cfg(feature = "host")]
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

@@ -10,7 +10,7 @@ use bevy::prelude::{Commands, Window};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
 
 use super::command::LayoutRequestSet;

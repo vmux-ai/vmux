@@ -9,8 +9,6 @@ use bevy_cef::prelude::HostWindow;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::Active;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::store::{PageRestore, StoreAppExt};
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
@@ -18,6 +16,8 @@ use vmux_ecs::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
     WorkspaceKind,
 };
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;

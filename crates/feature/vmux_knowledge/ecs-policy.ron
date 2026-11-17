@@ -105,7 +105,6 @@ legacy: [
     (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:SkillTree", fingerprint: "3a29aa80a065eafb", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:SkillsDir", fingerprint: "4bfa862a82a11912", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||struct:YamlScalar", fingerprint: "400c96b46f5ba434", issue: "VMX-253"),
-    (key: "crates/feature/vmux_knowledge/src/host.rs||impl:Plugin for KnowledgePlugin", fingerprint: "935707f46b94803a", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/host.rs||struct:ExpandedKnowledgeDirs", fingerprint: "f5bb72a9d787cd24", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/host.rs||struct:KnowledgePlugin", fingerprint: "afe33b6fbd6f2fd7", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/host/agent.rs||impl:Plugin for KnowledgeAgentPlugin", fingerprint: "f5852e81344f2e9c", issue: "VMX-253"),
@@ -118,8 +117,6 @@ legacy: [
     (key: "crates/feature/vmux_knowledge/src/host/index.rs||struct:KnowledgeIndexTask", fingerprint: "a40693e926e0e6c6", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/host/index.rs||struct:KnowledgeWatch", fingerprint: "f11df19e1553b916", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/host/index.rs||struct:KnowledgeWatcher", fingerprint: "fad925dfdaa16fc8", issue: "VMX-253"),
-    (key: "crates/feature/vmux_knowledge/src/lib.rs||impl:vmux_ecs :: manifest :: FeatureManifestSource for Feature", fingerprint: "6c7dba34d5a66ede", issue: "VMX-253"),
-    (key: "crates/feature/vmux_knowledge/src/lib.rs||struct:Feature", fingerprint: "9a8bd3d7aa1d06ac", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/tool.rs||impl:Plugin for KnowledgeToolPlugin", fingerprint: "663027d7c185d62d", issue: "VMX-253"),
     (key: "crates/feature/vmux_knowledge/src/tool.rs||struct:KnowledgeToolPlugin", fingerprint: "420174ba23add61d", issue: "VMX-253"),
 ],
@@ -129,4 +126,9 @@ shape: (
     (key: "crates/feature/vmux_knowledge/src/driver/vault.rs||enum:PropertySlot", fingerprint: "0b00ebb24877f299", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
-)
+boundaries: [
+    (key: "crates/feature/vmux_knowledge/src/lib.rs||struct:Feature", fingerprint: "5342bd32ceaf616e", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_knowledge/src/lib.rs||impl:vmux_feature :: manifest :: FeatureManifestSource for Feature", fingerprint: "fa163a34b242f281", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_knowledge/src/host.rs||impl:Plugin for KnowledgePlugin", fingerprint: "a89f4b2eb6f9c8f3", interface: "Bevy App plugin composition", input: "external: Bevy App registration and static page metadata", output: "ECS: crates/feature/vmux_knowledge/src/host/agent.rs||struct:AgentReadKnowledge", lifetime: "one root plugin installation", bounds: "stateless composition only; registered Knowledge systems own request admission, file IO and persistence", teardown: "App drop removes registrations and canonical request state", architecture: "ECS ownership boundaries"),
+], )

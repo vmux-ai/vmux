@@ -5,7 +5,6 @@ use vmux_api::address::{
     PageAddressUiState, PageAddressUiStatePatch,
 };
 
-use crate::manifest::FeatureManifest;
 use crate::page::{AddressContribution, AddressIntentRequest, HostsPage, PageManifest};
 use crate::{PageMetadata, PageOpenRequest, PageOpenTarget, UiStatePlugin, UiStateWrite};
 
@@ -176,38 +175,13 @@ impl RouteLabel<'_> {
     }
 }
 
-pub struct RouteCatalog;
-
-impl RouteCatalog {
-    pub fn options<'a>(
-        manifests: impl Iterator<Item = &'a FeatureManifest>,
+impl AddressContribution {
+    pub fn options(
+        entries: impl IntoIterator<Item = AddressOption>,
         contextual: &[AddressOption],
     ) -> Vec<AddressOption> {
-        let mut entries = Vec::new();
-        for manifest in manifests {
-            for page in &manifest.pages {
-                let Some(order) = page.bookmark else {
-                    continue;
-                };
-                let icon =
-                    serde_json::from_value(serde_json::Value::String(page.icon.clone())).ok();
-                entries.push((
-                    order,
-                    AddressOption {
-                        label: page.title.clone(),
-                        label_key: page.title_message_id.clone(),
-                        icon,
-                        intent: Some(AddressIntent::Navigate {
-                            url: page.url.clone(),
-                        }),
-                        ..Default::default()
-                    },
-                ));
-            }
-        }
-        entries.sort_by_key(|(order, _)| *order);
         let mut options = Vec::new();
-        for (_, mut option) in entries {
+        for mut option in entries {
             if let Some(AddressIntent::Navigate { url }) = &option.intent {
                 for candidate in contextual {
                     let Some(AddressIntent::Navigate { url: target }) = &candidate.intent else {
@@ -615,14 +589,24 @@ mod tests {
     }
 
     #[test]
-    fn route_catalog_preserves_declared_order_and_replaces_contextual_destinations() {
-        let manifest = FeatureManifest::parse(
-            r#"(pages: [
-            (url: "git://", title: "Git", title_message_id: "git-title", icon: "GitBranch", bookmark: Some(20)),
-            (url: "vmux://start/", title: "Start", title_message_id: "start-title", icon: "Sparkles", bookmark: Some(10)),
-            (url: "vmux://hidden/", title: "Hidden", icon: "Code"),
-        ])"#,
-        );
+    fn route_catalog_preserves_input_order_and_replaces_contextual_destinations() {
+        let entries = vec![
+            AddressOption {
+                label: "Start".into(),
+                label_key: "start-title".into(),
+                intent: Some(AddressIntent::Navigate {
+                    url: "vmux://start/".into(),
+                }),
+                ..Default::default()
+            },
+            AddressOption {
+                label: "Git".into(),
+                intent: Some(AddressIntent::Navigate {
+                    url: "git://".into(),
+                }),
+                ..Default::default()
+            },
+        ];
         let contextual = AddressOption {
             label: "Repository".into(),
             intent: Some(AddressIntent::Navigate {
@@ -630,10 +614,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let options = RouteCatalog::options(
-            std::iter::once(&manifest),
-            std::slice::from_ref(&contextual),
-        );
+        let options = AddressContribution::options(entries, std::slice::from_ref(&contextual));
         assert_eq!(
             options
                 .iter()

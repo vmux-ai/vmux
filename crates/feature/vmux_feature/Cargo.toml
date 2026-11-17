@@ -8,11 +8,17 @@ publish = false
 
 [features]
 default = ["ecs"]
-ecs = ["dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:sha2"]
+manifest = ["dep:ron", "dep:vmux_api", "dep:inventory", "dep:semver"]
+ecs = ["manifest", "dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:sha2"]
+hosting = ["ecs", "dep:url"]
+page-binding = ["ecs", "dep:vmux_page", "vmux_ecs/host"]
 http = ["ecs", "dep:reqwest", "dep:async-io", "dep:getrandom", "vmux_ecs/jobs"]
-page = ["ecs", "http", "dep:bevy", "dep:bevy_cef", "dep:vmux_api", "dep:vmux_macro", "dep:vmux_page", "dep:vmux_ui", "dep:dioxus", "dep:inventory", "dep:uuid", "dep:rkyv", "dep:chrono"]
+page = ["page-binding", "http", "dep:bevy", "dep:bevy_cef", "dep:vmux_api", "dep:vmux_macro", "dep:vmux_ui", "dep:dioxus", "dep:inventory", "dep:uuid", "dep:rkyv"]
 
 [dependencies]
+url = { workspace = true, optional = true }
+ron = { workspace = true, optional = true }
+semver = { version = "1", optional = true }
 bevy_app = { workspace = true, optional = true }
 bevy_ecs = { workspace = true, optional = true }
 serde = { workspace = true }
@@ -28,7 +34,7 @@ bevy_cef = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 inventory = { version = "0.3", optional = true }
 rkyv = { workspace = true, optional = true }
-chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 uuid = { workspace = true, optional = true }
 vmux_api = { path = "../../util/vmux_api", optional = true }
 vmux_macro = { path = "../../util/vmux_macro", optional = true }

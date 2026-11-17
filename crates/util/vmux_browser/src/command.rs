@@ -12,22 +12,20 @@ use vmux_api::command_bar::{
 use vmux_command::CommandBarDismiss;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-#[cfg(test)]
-use vmux_command::CommandManifest;
 use vmux_command::{
     ClaimedUrls, CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPages,
 };
 use vmux_command::{CommandInvocation, ReadCommandRequests, ResolvedLocale};
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
-use vmux_ecs::manifest::FeatureManifest;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(test)]
 use vmux_ecs::page::HostHistoryObserve;
 use vmux_ecs::{
     Active, PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
     page::{HostHistoryDelta, HostHistoryStep, PageReady},
 };
+use vmux_feature::manifest::FeatureManifest;
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::event::{
@@ -253,7 +251,7 @@ fn open_from_bar(
                 cwd: Some(directory.to_path_buf()),
                 target: TerminalSpawnTarget::NewStackInPane(pane),
                 metadata: Some(PageMetadata {
-                    url: vmux_terminal::TerminalPlugin::URL.to_string(),
+                    url: vmux_terminal::TerminalPlugin::url().to_string(),
                     title: locale.translate_with(
                         "command-terminal-path",
                         &[(
@@ -1209,8 +1207,9 @@ mod tests {
 
     #[test]
     fn browser_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = CommandManifest::for_feature::<crate::Feature>();
-        let mut definitions = definitions.into_vec();
+        let mut definitions =
+            CommandDefinition::from_manifest(FeatureManifest::of::<crate::Feature>())
+                .collect::<Vec<_>>();
         definitions.retain(|definition| definition.id != "browser_open_history");
         let tools = definitions
             .iter()

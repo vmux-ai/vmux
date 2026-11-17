@@ -9,6 +9,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 bevy = { workspace = true }
 moonshine-save = { workspace = true }
 raw-window-handle = "0.6"

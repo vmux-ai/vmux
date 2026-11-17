@@ -3,8 +3,8 @@ use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
@@ -85,12 +85,12 @@ fn open(
             })
             .and_then(|anchor| {
                 let url = match args.provider.as_ref().unwrap_or(&VaultProvider::Overview) {
-                    VaultProvider::Overview => crate::VaultPlugin::URL.to_string(),
+                    VaultProvider::Overview => crate::VaultPlugin::url().to_string(),
                     VaultProvider::Github => {
-                        format!("{}?provider=github", crate::VaultPlugin::URL)
+                        format!("{}?provider=github", crate::VaultPlugin::url())
                     }
                     VaultProvider::CloudFolder => {
-                        format!("{}?provider=cloud_folder", crate::VaultPlugin::URL)
+                        format!("{}?provider=cloud_folder", crate::VaultPlugin::url())
                     }
                 };
                 AgentRequest::encode(&AgentOpenBeside {

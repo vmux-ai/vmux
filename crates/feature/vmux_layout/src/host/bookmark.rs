@@ -22,10 +22,10 @@ use vmux_api::bookmark::{
     BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageManifest;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 
 use super::{
     command::LayoutRequestSet,

@@ -8,8 +8,6 @@ legacy: [
     (key: "crates/util/vmux_mcp/src/cli.rs||struct:McpStdio", fingerprint: "1728cd0aa3c6259d", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/host_quote.rs||impl:HostQuote", fingerprint: "2cce2e17e44ce11e", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/host_quote.rs||struct:HostQuote", fingerprint: "99cfa167840a3a6e", issue: "VMX-253"),
-    (key: "crates/util/vmux_mcp/src/lib.rs||impl:vmux_ecs :: manifest :: FeatureManifestSource for Feature", fingerprint: "8b1e4ef84e98893a", issue: "VMX-253"),
-    (key: "crates/util/vmux_mcp/src/lib.rs||struct:Feature", fingerprint: "46638b0ef6a78408", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||alias:McpFuture", fingerprint: "d5ab362adbef135a", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||impl:AgentBridge", fingerprint: "8fea16884bfb22bc", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||impl:McpExecution", fingerprint: "95803b84c907870e", issue: "VMX-253"),
@@ -27,4 +25,7 @@ shape: (
     (key: "crates/util/vmux_mcp/src/protocol.rs||enum:McpSet", fingerprint: "e3e005e123cce0c5", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
-)
+boundaries: [
+    (key: "crates/util/vmux_mcp/src/lib.rs||struct:Feature", fingerprint: "46638b0ef6a78408", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+    (key: "crates/util/vmux_mcp/src/lib.rs||impl:vmux_feature :: manifest :: FeatureManifestSource for Feature", fingerprint: "fa163a34b242f281", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+], )

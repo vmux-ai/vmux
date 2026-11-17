@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::{ToolCommand, ToolDispatchSet};
 
 use super::session::{AgentRequestUserChoice, AgentSetConversationTitle};

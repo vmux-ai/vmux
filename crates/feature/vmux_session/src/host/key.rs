@@ -20,7 +20,7 @@ use vmux_api::prompt_media::InlineMediaQuery;
 use vmux_command::{CommandBinding, CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiState;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 use crate::selector::SelectorMode;

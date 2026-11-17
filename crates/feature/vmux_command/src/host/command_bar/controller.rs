@@ -805,10 +805,12 @@ mod tests {
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::launcher::HostsLauncher;
     use vmux_ecs::overlay::OverlayState;
+    use vmux_feature::manifest::FeatureManifest;
 
     #[test]
     fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = crate::CommandManifest::for_feature::<crate::Feature>().into_vec();
+        let definitions = CommandDefinition::from_manifest(FeatureManifest::of::<crate::Feature>())
+            .collect::<Vec<_>>();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

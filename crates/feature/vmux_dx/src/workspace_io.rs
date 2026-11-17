@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bevy_ecs::prelude::Component;
 use serde::Deserialize;
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_feature::manifest::FeatureManifest;
 
 use crate::Result;
 use crate::temporary::Temporary;
@@ -27,7 +27,7 @@ impl MetadataFile {
     }
 
     pub fn feature(&self) -> Result<FeatureManifest> {
-        Ok(ron::from_str(&self.text()?)?)
+        Ok(FeatureManifest::try_parse(&self.text()?)?)
     }
 
     fn text(&self) -> Result<String> {

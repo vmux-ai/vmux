@@ -3,7 +3,7 @@ use std::time::Duration;
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_profile::ServicePaths;
 use vmux_transport::service::ServiceCodec;
 

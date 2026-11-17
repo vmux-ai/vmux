@@ -7,13 +7,13 @@ pub use host::{
     CommandBarOpenRequest, CommandBarPagesSnapshot, CommandBarPanelActive, CommandBarPlugin,
     CommandBarProjectRoots, CommandBarProjector, CommandBarState, CommandBarWorkDirectory,
     CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding,
-    CommandBindingRegistration, CommandDefinition, CommandDispatch, CommandInvocation,
-    CommandManifest, CommandMcp, CommandPlugin, CommandRegistry, CommandRuntimePlugin,
-    CommandShortcut, CommandToolPlugin, ContributedAgentModels, ContributedAgentModes,
-    ContributedCommand, ContributedPage, ContributedPages, DispatchCommandInvocations, KeyCombo,
-    KeyContext, Keymap, Modifiers, PendingCommandBarReveal, ReadCommandRequests, RegisteredPage,
-    ResolvedKey, ResolvedLocale, Shortcut, ShortcutDefinition, Source, When,
-    WriteCommandBarRequests, WriteCommandBarSnapshots, WriteCommandRequests,
+    CommandBindingRegistration, CommandDefinition, CommandDispatch, CommandInvocation, CommandMcp,
+    CommandPlugin, CommandRuntimePlugin, CommandShortcut, CommandToolPlugin,
+    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPage,
+    ContributedPages, DispatchCommandInvocations, KeyCombo, KeyContext, Keymap, Modifiers,
+    PendingCommandBarReveal, ReadCommandRequests, RegisteredPage, ResolvedKey, ResolvedLocale,
+    Shortcut, ShortcutDefinition, Source, When, WriteCommandBarRequests, WriteCommandBarSnapshots,
+    WriteCommandRequests,
 };
 pub use palette_surface::CommandPaletteSurface;
 #[cfg(ui)]
@@ -35,7 +35,7 @@ extern crate self as vmux_command;
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

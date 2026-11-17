@@ -3,12 +3,12 @@ use vmux_api::JsonSchema;
 use vmux_api::json::JsonValue;
 use vmux_api::protocol::AgentCommandTool;
 use vmux_ecs::JsonArguments;
-use vmux_ecs::manifest::{self, FeatureManifest};
+use vmux_feature::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
 use super::definition::{
-    AgentAccess, CommandDefinition, CommandDispatch, CommandInvocation, CommandManifest,
-    CommandMcp, CommandMessage, CommandShortcut, CommandToolbar, ShortcutDefinition,
+    AgentAccess, CommandDefinition, CommandDispatch, CommandInvocation, CommandMcp, CommandMessage,
+    CommandShortcut, CommandToolbar, ShortcutDefinition,
 };
 use super::shortcut_driver::{Binding, KeyCombo, Shortcut, Source, When};
 
@@ -27,20 +27,6 @@ impl From<manifest::Shortcut> for CommandShortcut {
             shortcut: shortcut.shortcut.into(),
             when: shortcut.when,
         }
-    }
-}
-
-impl CommandManifest {
-    pub fn for_feature<M: manifest::FeatureManifestSource>() -> Self {
-        Self(FeatureManifest::of::<M>().commands)
-    }
-
-    pub fn from_feature_ron(source: &str) -> Self {
-        Self(FeatureManifest::parse(source).commands)
-    }
-
-    pub fn into_vec(self) -> Vec<CommandDefinition> {
-        self.0.into_iter().map(CommandDefinition::from).collect()
     }
 }
 
@@ -94,6 +80,10 @@ impl From<manifest::Command> for CommandDefinition {
 }
 
 impl CommandDefinition {
+    pub fn from_manifest(manifest: &FeatureManifest) -> impl Iterator<Item = Self> + '_ {
+        manifest.commands.iter().cloned().map(Self::from)
+    }
+
     pub fn new(id: impl Into<String>, label: impl Into<String>, group: impl Into<String>) -> Self {
         Self {
             id: id.into(),

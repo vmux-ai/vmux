@@ -1523,27 +1523,27 @@ fn app_composition_metadata_reaches_only_its_declared_plugin_payloads() {
 #[test]
 fn manifest_metadata_boundaries_require_the_real_interface_and_a_stateless_marker() {
     for (fields, interface, allowed) in [
-        ("", "vmux_ecs::manifest::FeatureManifestSource", true),
+        ("", "vmux_feature::manifest::FeatureManifestSource", true),
         (
             "{ state: String }",
-            "vmux_ecs::manifest::FeatureManifestSource",
+            "vmux_feature::manifest::FeatureManifestSource",
             false,
         ),
         (
             "{ callback: fn() }",
-            "vmux_ecs::manifest::FeatureManifestSource",
+            "vmux_feature::manifest::FeatureManifestSource",
             false,
         ),
         (
             "{ unit: () }",
-            "vmux_ecs::manifest::FeatureManifestSource",
+            "vmux_feature::manifest::FeatureManifestSource",
             false,
         ),
         ("", "LocalSource", false),
     ] {
         let mut inventory = Inventory::default();
         inventory.source(
-            "crates/util/vmux_ecs/src/manifest.rs",
+            "crates/feature/vmux_feature/src/manifest.rs",
             "pub trait FeatureManifestSource { const SOURCE: &'static str; }",
         );
         let terminator = if fields.is_empty() { ";" } else { "" };
@@ -3459,6 +3459,127 @@ fn page_metadata_requires_the_actual_attribute_macro_and_a_typed_input() {
             ),
             expected,
             "{macro_attribute}; {local_macro}; {input}",
+        );
+    }
+}
+
+#[test]
+fn inventory_metadata_proves_the_constructed_type_and_rejects_spoofed_macros() {
+    for (body, local, expected) in [
+        ("inventory::collect!(Metadata);", "", true),
+        ("inventory::submit!(Metadata::of());", "", true),
+        ("inventory::submit!(Metadata {});", "", true),
+        ("inventory::submit!(Other::of::<Metadata>());", "", false),
+        ("inventory::collect!(\"Metadata\");", "", false),
+        ("inventory::collect!(Metadata);", "mod inventory {}", false),
+    ] {
+        let inventory =
+            Inventory::fixture(&format!("struct Metadata; struct Other; {local} {body}"));
+        let metadata = &inventory.entries[&inventory.key("struct:Metadata")];
+        let registration = inventory
+            .entries
+            .values()
+            .find(|entry| matches!(entry.kind, Kind::Macro))
+            .unwrap();
+        assert_eq!(
+            inventory.owner_references(registration, metadata),
+            expected,
+            "{body}; {local}"
+        );
+    }
+}
+
+#[test]
+fn command_components_require_the_actual_default_unit_binding_attribute() {
+    for (attribute, fields, actual, expected) in [
+        ("vmux_command::command", ";", true, true),
+        ("vmux_command::command(message)", ";", true, false),
+        ("vmux_command::command(binding)", ";", true, false),
+        ("vmux_command::command", "{ hidden: String }", true, false),
+        ("vmux_command::command", ";", false, false),
+    ] {
+        let mut inventory = Inventory::default();
+        let implementation = if actual {
+            "#[proc_macro_attribute] pub fn command() {}"
+        } else {
+            "pub fn command() {}"
+        };
+        inventory.source("crates/util/vmux_macro/src/lib.rs", implementation);
+        inventory.source(
+            "crates/feature/vmux_command/src/lib.rs",
+            "pub use vmux_macro::command;",
+        );
+        inventory.source("crates/feature/example/src/lib.rs", &format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; #[{attribute}] struct Binding {fields} fn consume(bindings: Query<(), With<Binding>>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, consume); }} }}"
+        ));
+        inventory.resolve_usage();
+        let binding = &inventory.entries["crates/feature/example/src/lib.rs||struct:Binding"];
+        assert_eq!(
+            inventory.canonical(binding, &Policy::default(), &mut BTreeSet::new()),
+            expected
+        );
+    }
+}
+
+#[test]
+fn page_subscriptions_prove_only_typed_inputs_of_the_actual_attribute_macro() {
+    for (field, input, actual, expected) in [
+        ("states", "crate::Metadata", true, true),
+        ("events", "crate::Metadata", true, true),
+        ("states", "\"Metadata\"", true, false),
+        ("states", "crate::Other", true, false),
+        ("states", "crate::Metadata", false, false),
+    ] {
+        let mut inventory = Inventory::default();
+        let attribute = if actual {
+            "#[proc_macro_attribute]"
+        } else {
+            ""
+        };
+        inventory.source(
+            "crates/util/vmux_macro/src/lib.rs",
+            &format!("{attribute} pub fn page() {{}}"),
+        );
+        inventory.source(
+            "crates/util/vmux_page/src/lib.rs",
+            "pub use vmux_macro::page;",
+        );
+        inventory.source("crates/feature/example/src/lib.rs", &format!(
+            "#[vmux_api::ui_state] struct Metadata {{ id: u64 }} struct Other; #[vmux_page::page({field} = [{input}])] struct Entry;"
+        ));
+        inventory.resolve_usage();
+        assert_eq!(
+            inventory.owner_references(
+                &inventory.entries["crates/feature/example/src/lib.rs||struct:Entry"],
+                &inventory.entries["crates/feature/example/src/lib.rs||struct:Metadata"],
+            ),
+            expected
+        );
+    }
+}
+
+#[test]
+fn absolute_page_attributes_bind_the_external_macro_despite_local_globs() {
+    for (prefix, expected) in [("::", true), ("", false)] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/util/vmux_macro/src/lib.rs",
+            "#[proc_macro_attribute] pub fn page() {}",
+        );
+        inventory.source(
+            "crates/util/vmux_page/src/lib.rs",
+            "pub use vmux_macro::page;",
+        );
+        inventory.source("crates/feature/example/src/lib.rs", &format!(
+            "mod local {{ pub mod vmux_page {{ pub fn page() {{}} }} }} use local::*; #[vmux_api::ui_state] struct Metadata {{ id: u64 }} #[{prefix}vmux_page::page(states = [Metadata])] struct Entry;"
+        ));
+        inventory.resolve_usage();
+        assert_eq!(
+            inventory.owner_references(
+                &inventory.entries["crates/feature/example/src/lib.rs||struct:Entry"],
+                &inventory.entries["crates/feature/example/src/lib.rs||struct:Metadata"],
+            ),
+            expected
         );
     }
 }
@@ -5653,6 +5774,7 @@ struct Declaration {
     required_components: BTreeSet<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
+    component_attributes: BTreeSet<String>,
     projection: bool,
     test: bool,
     production: bool,
@@ -5663,6 +5785,7 @@ struct Declaration {
     reference_paths: BTreeSet<String>,
     included_sources: BTreeSet<String>,
     page_inputs: BTreeSet<(String, String)>,
+    inventory_inputs: BTreeSet<(String, String)>,
     dom_mounts: BTreeSet<(String, String)>,
     rendered: BTreeSet<String>,
     renderer: bool,
@@ -6022,6 +6145,13 @@ impl Inventory {
 
     fn source(&mut self, path: &str, source: &str) {
         self.sources.insert(path.into(), source.into());
+        if path.ends_with(".rs") {
+            let namespace = self.namespace(path, &[]).0;
+            if let Some(root) = namespace.split("::").next() {
+                self.roots.insert(root.to_string());
+                self.imports.entry(root.to_string()).or_default();
+            }
+        }
         self.root_bindings.get_mut().clear();
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
@@ -6102,6 +6232,7 @@ impl Inventory {
                 required_components: BTreeSet::new(),
                 contract: false,
                 contract_paths: BTreeSet::new(),
+                component_attributes: BTreeSet::new(),
                 projection: false,
                 test: false,
                 production: true,
@@ -6112,6 +6243,7 @@ impl Inventory {
                 reference_paths: BTreeSet::new(),
                 included_sources: BTreeSet::new(),
                 page_inputs: BTreeSet::new(),
+                inventory_inputs: BTreeSet::new(),
                 dom_mounts: BTreeSet::new(),
                 rendered: BTreeSet::new(),
                 renderer: false,
@@ -6498,7 +6630,7 @@ impl Inventory {
                 )
                 .is_some_and(|interface| {
                     interface.key
-                        == "crates/util/vmux_ecs/src/manifest.rs||trait:FeatureManifestSource"
+                        == "crates/feature/vmux_feature/src/manifest.rs||trait:FeatureManifestSource"
                 })
             {
                 return true;
@@ -6587,6 +6719,13 @@ impl Inventory {
         reference: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<&Declaration> {
+        if let Some(reference) = reference.strip_prefix("::") {
+            let (root, reference) = reference.split_once("::")?;
+            if !self.roots.contains(root) && !self.imports.contains_key(root) {
+                return None;
+            }
+            return self.function_reference(root, reference, visiting);
+        }
         if visiting.len() > 128 || !visiting.insert(format!("function:{namespace}|{reference}")) {
             return None;
         }
@@ -6675,6 +6814,9 @@ impl Inventory {
             candidates.push(implementation);
         }
         for candidate in candidates {
+            if self.inventory_value(candidate, value) {
+                return true;
+            }
             for (attribute, input) in &candidate.page_inputs {
                 let Some(attribute) =
                     self.function_reference(&candidate.namespace, attribute, &mut BTreeSet::new())
@@ -6802,6 +6944,29 @@ impl Inventory {
             }
         }
         implementations
+    }
+
+    fn inventory_value(&self, adapter: &Declaration, value: &Declaration) -> bool {
+        for (interface, input) in &adapter.inventory_inputs {
+            let Some(interface) =
+                self.external_path(&adapter.namespace, interface, &mut BTreeSet::new())
+            else {
+                continue;
+            };
+            if !matches!(
+                interface.as_str(),
+                "inventory::collect" | "inventory::submit"
+            ) {
+                continue;
+            }
+            if self
+                .resolve(&adapter.namespace, input, &mut BTreeSet::new())
+                .is_some_and(|input| input.key == value.key)
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn boundary_references(
@@ -7823,6 +7988,24 @@ impl Inventory {
                 entry.contract = true;
                 entry.projection |= matches!(kind.as_str(), "ui_state" | "ui_state_patch");
             }
+        }
+        let mut emitted_components = Vec::new();
+        for entry in self.entries.values() {
+            for attribute in &entry.component_attributes {
+                let Some(attribute) =
+                    self.function_reference(&entry.namespace, attribute, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                if attribute.key == "crates/util/vmux_macro/src/lib.rs||fn:command"
+                    && attribute.reference_paths.contains("proc_macro_attribute")
+                {
+                    emitted_components.push(entry.key.clone());
+                }
+            }
+        }
+        for key in emitted_components {
+            self.entries.get_mut(&key).unwrap().ecs = true;
         }
         self.used_keys = keys.clone();
         self.registered_keys = registered.clone();
@@ -9021,6 +9204,21 @@ impl Declarations<'_> {
             ordinal += 1;
         }
         let parsed_item = syn::parse2::<Item>(tokens.to_token_stream()).ok();
+        let mut component_attributes = BTreeSet::new();
+        if matches!(&parsed_item, Some(Item::Struct(value)) if matches!(value.fields, syn::Fields::Unit) && value.generics.params.is_empty())
+        {
+            for attribute in Self::metadata(attrs, true) {
+                if matches!(attribute, syn::Meta::Path(_)) {
+                    component_attributes.insert(
+                        attribute
+                            .path()
+                            .to_token_stream()
+                            .to_string()
+                            .replace(' ', ""),
+                    );
+                }
+            }
+        }
         let declaration = Declaration {
             key: key.clone(),
             path: self.path.into(),
@@ -9078,6 +9276,7 @@ impl Declarations<'_> {
             required_components,
             contract: false,
             contract_paths,
+            component_attributes,
             projection: false,
             test,
             production: self.production && !Usage::test_only(attrs),
@@ -9088,6 +9287,7 @@ impl Declarations<'_> {
             reference_paths: references.paths,
             included_sources: references.included_sources,
             page_inputs: references.page_inputs,
+            inventory_inputs: references.inventory_inputs,
             dom_mounts: references.dom_mounts,
             rendered: references.rendered,
             renderer: matches!(kind, Kind::Function)
@@ -9407,6 +9607,7 @@ struct References {
     rendered: BTreeSet<String>,
     included_sources: BTreeSet<String>,
     page_inputs: BTreeSet<(String, String)>,
+    inventory_inputs: BTreeSet<(String, String)>,
     dom_mounts: BTreeSet<(String, String)>,
 }
 
@@ -9446,6 +9647,23 @@ impl<'ast> Visit<'ast> for References {
                     let syn::Meta::NameValue(argument) = argument else {
                         continue;
                     };
+                    if argument.path.is_ident("states") || argument.path.is_ident("events") {
+                        if let syn::Expr::Array(inputs) = argument.value {
+                            for input in inputs.elems {
+                                if let syn::Expr::Path(input) = input {
+                                    self.page_inputs.insert((
+                                        attribute
+                                            .path()
+                                            .to_token_stream()
+                                            .to_string()
+                                            .replace(' ', ""),
+                                        input.path.to_token_stream().to_string().replace(' ', ""),
+                                    ));
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     if !argument.path.is_ident("takes") {
                         continue;
                     }
@@ -9476,6 +9694,44 @@ impl<'ast> Visit<'ast> for References {
     }
 
     fn visit_macro(&mut self, value: &'ast syn::Macro) {
+        let interface = value.path.to_token_stream().to_string().replace(' ', "");
+        if value
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "collect")
+        {
+            if let Ok(input) = syn::parse2::<syn::TypePath>(value.tokens.clone()) {
+                self.inventory_inputs.insert((
+                    interface,
+                    input.path.to_token_stream().to_string().replace(' ', ""),
+                ));
+            }
+        } else if value
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "submit")
+        {
+            let input = match syn::parse2::<syn::Expr>(value.tokens.clone()) {
+                Ok(syn::Expr::Call(call)) => match *call.func {
+                    syn::Expr::Path(mut constructor) if constructor.path.segments.len() > 1 => {
+                        constructor.path.segments.pop();
+                        constructor.path.segments.pop_punct();
+                        Some(constructor.path)
+                    }
+                    _ => None,
+                },
+                Ok(syn::Expr::Struct(value)) => Some(value.path),
+                _ => None,
+            };
+            if let Some(input) = input {
+                self.inventory_inputs.insert((
+                    interface,
+                    input.to_token_stream().to_string().replace(' ', ""),
+                ));
+            }
+        }
         if value.path.is_ident("include_str")
             && let Ok(path) = syn::parse2::<syn::LitStr>(value.tokens.clone())
         {

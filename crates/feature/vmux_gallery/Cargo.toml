@@ -12,6 +12,7 @@ serde.workspace = true
 ron.workspace = true
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
+vmux_feature = { path = "../vmux_feature", features = ["page-binding"] }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_macro = { path = "../../util/vmux_macro" }
 

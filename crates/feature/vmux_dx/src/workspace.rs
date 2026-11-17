@@ -5,11 +5,10 @@ use std::path::PathBuf;
 use bevy_app::{App, AppExit, PreStartup, PreUpdate};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_ecs::cli::{
-    CliArgumentManifest, CliCommandManifest, CliInvocation, CliManifest, CliResult, CliSet,
-};
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::cli::{CliInvocation, CliResult, CliSet};
 use vmux_ecs::{Active, Order};
+use vmux_feature::cli::{CliArgumentManifest, CliCommandManifest, CliManifest};
+use vmux_feature::manifest::FeatureManifest;
 
 pub use crate::workspace_io::Executable;
 use crate::workspace_io::MetadataFile;
@@ -51,9 +50,9 @@ impl Host {
             .insert_resource(Probe)
             .add_plugins(WorkspacePlugin);
         app.world_mut()
-            .spawn(FeatureManifest::of::<crate::Feature>());
+            .spawn(FeatureManifest::of::<crate::Feature>().clone());
         app.world_mut()
-            .spawn(FeatureManifest::of::<crate::ci::Feature>());
+            .spawn(FeatureManifest::of::<crate::ci::Feature>().clone());
         app.update();
         app.world().resource::<Admission>().0
     }

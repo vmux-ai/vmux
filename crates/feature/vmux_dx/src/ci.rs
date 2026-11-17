@@ -20,8 +20,8 @@ use std::thread;
 use std::time::Duration;
 use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
 use vmux_ecs::jobs::{JobRequest, JobSet, JobWake};
-use vmux_ecs::manifest::{FeatureManifest, FeatureManifestSource, FeaturePlugin};
 use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState, Order};
+use vmux_feature::manifest::{FeatureManifest, FeatureManifestSource, FeaturePlugin};
 mod artifact;
 mod cache;
 mod checks;
@@ -103,11 +103,11 @@ impl FeatureManifestSource for Feature {
 impl Feature {
     fn recognizes(command: &str) -> bool {
         let manifest = FeatureManifest::of::<Self>();
-        let Some(cli) = manifest.cli else {
+        let Some(cli) = &manifest.cli else {
             return false;
         };
-        for root in cli.commands {
-            for operation in root.commands {
+        for root in &cli.commands {
+            for operation in &root.commands {
                 if operation.id == command {
                     return true;
                 }

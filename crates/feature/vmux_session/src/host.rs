@@ -5,12 +5,12 @@ use bevy_app::{PreStartup, Startup};
 use bevy_ecs::prelude::{Commands, Name};
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::host_spawn::HostSpawnRoute;
-#[cfg(host)]
-use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::page::PrewarmPage;
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::store::{WorkspaceRestoreValidator, WorkspaceStoreValidator};
+#[cfg(host)]
+use vmux_feature::manifest::FeaturePlugin;
 
 pub use SessionClientPlugin as SessionPlugin;
 #[cfg(host)]
@@ -88,7 +88,7 @@ impl Plugin for SessionClientPlugin {
         #[cfg(host)]
         app.add_plugins((
             FeaturePlugin::<crate::Feature>::default(),
-            Self::MANIFEST.plugin(),
+            Self::manifest().plugin(),
             catalog::CatalogPlugin,
             resume::ResumePlugin,
             session::ChatHostPlugin,

@@ -1,7 +1,9 @@
 use crate::url::{IosVersion, SimulatorRoute};
 use std::fs;
+use std::option::Option;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::string::String;
 
 #[derive(bevy::prelude::Component)]
 pub struct Axe {

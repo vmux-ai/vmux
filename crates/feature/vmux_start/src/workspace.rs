@@ -115,7 +115,7 @@ fn pin(
     mut commands: Commands,
 ) {
     for (webview, metadata) in &pages {
-        if !metadata.url.starts_with(crate::StartPlugin::URL) {
+        if !metadata.url.starts_with(crate::StartPlugin::url()) {
             continue;
         }
         if layout.tab_of(webview).is_none() {
@@ -162,7 +162,7 @@ fn release(
     mut commands: Commands,
 ) {
     for (webview, metadata, selection) in &pages {
-        if !metadata.url.starts_with(crate::StartPlugin::URL) {
+        if !metadata.url.starts_with(crate::StartPlugin::url()) {
             if let Some(selection) = selection {
                 cancels.write(CancelCheckout {
                     operation: selection.operation,
@@ -191,7 +191,7 @@ fn pick(
     let webview = trigger.event().webview;
     if !pages
         .get(webview)
-        .is_ok_and(|(page, _)| page.url.starts_with(crate::StartPlugin::URL))
+        .is_ok_and(|(page, _)| page.url.starts_with(crate::StartPlugin::url()))
     {
         return;
     }
@@ -254,7 +254,7 @@ fn apply(
     let request = trigger.event();
     if !pages
         .get(request.webview)
-        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::URL))
+        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::url()))
     {
         return;
     }
@@ -294,7 +294,7 @@ fn retire(
     mut commands: Commands,
 ) {
     for (page, selection, metadata) in &selections {
-        if metadata.is_some_and(|page| page.url.starts_with(crate::StartPlugin::URL)) {
+        if metadata.is_some_and(|page| page.url.starts_with(crate::StartPlugin::url())) {
             continue;
         }
         cancels.write(CancelCheckout {
@@ -341,7 +341,7 @@ fn finish(
             continue;
         }
         if !pages.get(page).is_ok_and(|(metadata, current)| {
-            metadata.url.starts_with(crate::StartPlugin::URL) && current.0 == revision.0
+            metadata.url.starts_with(crate::StartPlugin::url()) && current.0 == revision.0
         }) {
             continue;
         }
@@ -420,7 +420,7 @@ fn select(
     let webview = trigger.event().webview;
     if !pages
         .get(webview)
-        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::URL))
+        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::url()))
         || pending.iter().any(|picker| picker.webview == webview)
     {
         return;
@@ -532,7 +532,7 @@ mod tests {
                     HostsLauncher,
                     ChildOf(tab),
                     PageMetadata {
-                        url: crate::StartPlugin::URL.into(),
+                        url: crate::StartPlugin::url().into(),
                         ..Default::default()
                     },
                 ))
@@ -543,7 +543,7 @@ mod tests {
                     HostsLauncher,
                     ChildOf(tab),
                     PageMetadata {
-                        url: crate::StartPlugin::URL.into(),
+                        url: crate::StartPlugin::url().into(),
                         ..Default::default()
                     },
                 ))
@@ -723,7 +723,7 @@ mod tests {
             .world_mut()
             .get_mut::<PageMetadata>(composers.first)
             .unwrap()
-            .url = crate::StartPlugin::URL.into();
+            .url = crate::StartPlugin::url().into();
         composers.app.update();
         assert_eq!(composers.cwd(composers.first), other);
         assert_eq!(composers.cwd(composers.second), composers.original.path());
@@ -903,7 +903,7 @@ mod tests {
                 HostsLauncher,
                 ChildOf(pool),
                 PageMetadata {
-                    url: crate::StartPlugin::URL.into(),
+                    url: crate::StartPlugin::url().into(),
                     ..Default::default()
                 },
             ))

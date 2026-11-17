@@ -260,10 +260,10 @@ mod profile_tests {
     use super::*;
     use bevy_app::Update;
     use bevy_ecs::prelude::*;
-    use vmux_ecs::manifest::FeatureManifest;
     use vmux_ecs::{
         ActivateRequest, LastActivatedAt, Operation, OperationCompleted, OperationState,
     };
+    use vmux_feature::manifest::FeatureManifest;
 
     #[test]
     fn headless_profiles_preserve_core_lifecycles_and_select_their_cli_catalog() {

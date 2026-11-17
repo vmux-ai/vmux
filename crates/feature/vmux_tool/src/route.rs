@@ -1,4 +1,6 @@
+use crate::state::ToolsNavigateRequest;
 use vmux_api::VmuxRoute;
+use vmux_api::page_metadata::PageMetadata;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ToolRoute(String);
@@ -8,8 +10,16 @@ impl ToolRoute {
         Self(id.into())
     }
 
+    pub(crate) fn from_metadata(metadata: &PageMetadata) -> Option<Self> {
+        Self::parse(&metadata.url)
+    }
+
+    pub(crate) fn from_request(request: &ToolsNavigateRequest) -> Option<Self> {
+        Self::parse(&request.url)
+    }
+
     pub(crate) fn parse(url: &str) -> Option<Self> {
-        let root = VmuxRoute::parse(crate::ToolPlugin::URL)?;
+        let root = VmuxRoute::parse(crate::ToolPlugin::url())?;
         let route = VmuxRoute::parse(url)?.canonicalized();
         if route.host() != root.host() || route.query().is_some() || route.fragment().is_some() {
             return None;
@@ -24,7 +34,7 @@ impl ToolRoute {
     }
 
     pub(crate) fn url(&self) -> String {
-        format!("{}{}", crate::ToolPlugin::URL, self.id())
+        format!("{}{}", crate::ToolPlugin::url(), self.id())
     }
 }
 
@@ -41,7 +51,7 @@ mod tests {
     #[test]
     fn routes_are_derived_from_the_tool_page() {
         assert_eq!(
-            ToolRoute::parse(crate::ToolPlugin::URL),
+            ToolRoute::parse(crate::ToolPlugin::url()),
             Some(ToolRoute::named("acp"))
         );
         assert_eq!(

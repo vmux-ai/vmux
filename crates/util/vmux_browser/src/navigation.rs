@@ -7,10 +7,10 @@ use vmux_api::VmuxRoute;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin, ReadCommandRequests};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::Browser;
 use vmux_layout::{

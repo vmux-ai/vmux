@@ -4,7 +4,7 @@ use bevy_ecs::schedule::{ScheduleLabel, Schedules};
 use bevy_ecs::system::SystemParam;
 use semver::{Version, VersionReq};
 
-use crate::feature_metadata::Metadata;
+use crate::metadata::Metadata;
 use crate::manifest::FeatureManifest;
 
 #[derive(Default)]

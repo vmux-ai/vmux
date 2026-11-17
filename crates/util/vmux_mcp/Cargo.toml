@@ -10,6 +10,7 @@ name = "vmux_mcp"
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["ecs"] }
 base64 = "0.22"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }

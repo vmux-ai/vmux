@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 
 use super::{
     AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,

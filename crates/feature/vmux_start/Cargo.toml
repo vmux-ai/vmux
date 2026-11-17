@@ -10,6 +10,7 @@ build = "../../build_cfg.rs"
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "page-binding"] }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 dioxus = { version = "=0.7.9", default-features = false, features = [

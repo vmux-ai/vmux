@@ -15,7 +15,7 @@ use vmux_ecs::launcher::{
     RendersLauncherPanel,
 };
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 
 use crate::{CommandDispatch, CommandPaletteSurface, CommandRuntimePlugin, ResolvedLocale};
 

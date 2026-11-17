@@ -1,4 +1,5 @@
-use bevy::prelude::Commands;
+use bevy::prelude::{Added, Changed, Commands, Or, Query, With};
+use std::option::Option;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -85,13 +86,9 @@ impl Plugin for TerminalPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(
-            Self::MANIFEST
-                .plugin()
-                .route(vmux_ecs::host_spawn::HostSpawnRoute::page(
-                    "vmux://terminal/",
-                )),
-        )
+        app.add_plugins(Self::manifest().plugin().route(
+            vmux_ecs::host_spawn::HostSpawnRoute::page("vmux://terminal/"),
+        ))
         .add_message::<ServiceRequest>()
         .add_message::<super::command::TerminalCloseRequest>()
         .add_message::<super::command::TerminalNextRequest>()
@@ -162,7 +159,7 @@ fn present(
             continue;
         };
         let target_pane =
-            placement.resolve_spiral(agent_pane, TerminalPlugin::URL, false, &mut split_batch);
+            placement.resolve_spiral(agent_pane, TerminalPlugin::url(), false, &mut split_batch);
         let tab = commands
             .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
             .id();
@@ -257,7 +254,7 @@ fn open(
         return;
     }
 
-    if value.starts_with(TerminalPlugin::URL) {
+    if value.starts_with(TerminalPlugin::url()) {
         warn!("no terminal pane for {}; spawning new", value);
     }
     let cwd = if value.is_empty() || value.contains("://") {
@@ -284,7 +281,7 @@ fn open(
             cwd,
             target: TerminalSpawnTarget::NewStackInPane(pane),
             metadata: Some(PageMetadata {
-                url: TerminalPlugin::URL.to_string(),
+                url: TerminalPlugin::url().to_string(),
                 title: locale.translate("command-terminal"),
                 ..default()
             }),
@@ -293,7 +290,7 @@ fn open(
         let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
         invocations.write(
             CommandInvocation::new(caller, "open_in_new_stack")
-                .with_arguments(serde_json::json!({ "url": TerminalPlugin::URL })),
+                .with_arguments(serde_json::json!({ "url": TerminalPlugin::url() })),
         );
     }
     commands.trigger(CommandBarDismiss::new(webview, true));
@@ -336,7 +333,7 @@ impl Plugin for TerminalInputPlugin {
 fn prewarm(settings: Res<AppSettings>, mut commands: Commands) {
     vmux_process::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
     commands.spawn(vmux_ecs::page::PrewarmPage::renderer(
-        TerminalPlugin::URL,
+        TerminalPlugin::url(),
         "Terminal",
         2,
     ));
@@ -349,7 +346,7 @@ fn seed_renderer(
 ) {
     if pages
         .get(added.entity)
-        .is_ok_and(|page| page.url == TerminalPlugin::URL)
+        .is_ok_and(|page| page.url == TerminalPlugin::url())
     {
         commands.entity(added.entity).insert(Terminal);
     }
@@ -482,7 +479,7 @@ fn format_url(
     for (pid, mut meta) in &mut q {
         let next = match pid {
             Some(pid) => pid.page_url(),
-            None => TerminalPlugin::URL.to_string(),
+            None => TerminalPlugin::url().to_string(),
         };
         if meta.url != next {
             meta.url = next;
@@ -529,21 +526,59 @@ fn spawn_layout_requested_content(
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PageOpenDirectory<'w, 's> {
+    saved_launches: Query<'w, 's, &'static TerminalLaunch, With<Stack>>,
+    tabs: TabHierarchy<'w, 's>,
+    settings: Res<'w, AppSettings>,
+    active_space: FocusedSpace<'w, 's>,
+}
+
+impl PageOpenDirectory<'_, '_> {
+    fn select(
+        &self,
+        task: &PageOpenTask,
+        restoring: bool,
+        parsed: &url::Url,
+    ) -> Result<(Option<TerminalLaunch>, Option<PathBuf>), String> {
+        let space_id = self.active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
+        let saved_launch = restoring
+            .then(|| self.saved_launches.get(task.stack).ok())
+            .flatten()
+            .cloned();
+        let cwd_param = parsed
+            .query_pairs()
+            .find(|(key, _)| key == "cwd")
+            .map(|(_, value)| value.into_owned());
+        let cwd = if let Some(launch) = saved_launch.as_ref() {
+            Some(PathBuf::from(&launch.cwd))
+        } else if let Some(cwd) = cwd_param.as_deref() {
+            match vmux_space::WorkspaceCwd::try_from(cwd) {
+                Ok(cwd) => cwd.into_path(),
+                Err(message) => return Err(message),
+            }
+        } else {
+            let tab_dir = self.tabs.startup_dir(task.stack);
+            match self.settings.workspace_dir(space_id, tab_dir.as_deref()) {
+                Ok(cwd) => cwd,
+                Err(message) => return Err(message),
+            }
+        };
+        Ok((saved_launch, cwd))
+    }
+}
+
 fn handle_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     navigations: Query<&vmux_ecs::PageNavigation>,
     pid_indexes: Query<&pid::PidToEntity>,
-    tabs: TabHierarchy,
     restored_stacks: Query<(), (With<Stack>, With<PageRestore>)>,
-    saved_launches: Query<&TerminalLaunch, With<Stack>>,
     children: Query<&Children>,
-    settings: Res<AppSettings>,
-    active_space: FocusedSpace,
+    directories: PageOpenDirectory,
     time: Res<Time>,
     mut commands: Commands,
     mut renderers: vmux_layout::warm_page::RendererPool,
 ) {
-    let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for (entity, task, restoring_task) in &tasks {
         if !navigations
             .get(task.stack)
@@ -552,8 +587,8 @@ fn handle_page_open(
             continue;
         }
         let restoring = restoring_task || restored_stacks.contains(task.stack);
-        if task.url != TerminalPlugin::URL.trim_end_matches('/')
-            && !task.url.starts_with(TerminalPlugin::URL)
+        if task.url != TerminalPlugin::url().trim_end_matches('/')
+            && !task.url.starts_with(TerminalPlugin::url())
         {
             continue;
         }
@@ -588,32 +623,11 @@ fn handle_page_open(
             }
             warn!("no terminal pane for pid {pid}; spawning new");
         }
-        let saved_launch = restoring
-            .then(|| saved_launches.get(task.stack).ok())
-            .flatten()
-            .cloned();
-        let cwd_param = parsed
-            .query_pairs()
-            .find(|(key, _)| key == "cwd")
-            .map(|(_, value)| value.into_owned());
-        let cwd = if let Some(launch) = saved_launch.as_ref() {
-            Some(PathBuf::from(&launch.cwd))
-        } else if let Some(cwd) = cwd_param.as_deref() {
-            match vmux_space::WorkspaceCwd::try_from(cwd) {
-                Ok(cwd) => cwd.into_path(),
-                Err(message) => {
-                    commands.entity(entity).insert(PageOpenError { message });
-                    continue;
-                }
-            }
-        } else {
-            let tab_dir = tabs.startup_dir(task.stack);
-            match settings.workspace_dir(space_id, tab_dir.as_deref()) {
-                Ok(cwd) => cwd,
-                Err(message) => {
-                    commands.entity(entity).insert(PageOpenError { message });
-                    continue;
-                }
+        let (saved_launch, cwd) = match directories.select(task, restoring, &parsed) {
+            Ok(selected) => selected,
+            Err(message) => {
+                commands.entity(entity).insert(PageOpenError { message });
+                continue;
             }
         };
         let title = cwd
@@ -630,11 +644,11 @@ fn handle_page_open(
                 .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
         }
         let bundle = (
-            TerminalBundle::with_cwd(&settings, cwd.as_deref()),
+            TerminalBundle::with_cwd(&directories.settings, cwd.as_deref()),
             vmux_layout::hosted_page::SurfaceHandoff::new(previous, task.id, 0, time.elapsed()),
             ChildOf(task.stack),
         );
-        let terminal = match renderers.take(TerminalPlugin::URL, entity) {
+        let terminal = match renderers.take(TerminalPlugin::url(), entity) {
             Some(terminal) => {
                 commands.entity(terminal).insert(bundle);
                 terminal
@@ -648,7 +662,7 @@ fn handle_page_open(
             KeyboardOwner,
             Visibility::Hidden,
             PageMetadata {
-                url: TerminalPlugin::URL.to_string(),
+                url: TerminalPlugin::url().to_string(),
                 title,
                 bg_color: None,
                 ..default()
@@ -764,7 +778,7 @@ impl TerminalBundle {
             pending_create: PendingServiceCreate,
             metadata: PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                url: TerminalPlugin::URL.to_string(),
+                url: TerminalPlugin::url().to_string(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
@@ -808,7 +822,7 @@ fn respond_stack_spawn(
             .map(|cwd| format!("Terminal ({})", cwd.display()))
             .unwrap_or_else(|| "Terminal".to_string());
         commands.entity(stack).insert(PageMetadata {
-            url: TerminalPlugin::URL.to_string(),
+            url: TerminalPlugin::url().to_string(),
             title,
             bg_color: None,
             ..default()
@@ -864,7 +878,7 @@ impl ReattachedTerminalBundle {
             pending_attach: PendingServiceAttach,
             metadata: PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                url: TerminalPlugin::URL.to_string(),
+                url: TerminalPlugin::url().to_string(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
@@ -1913,7 +1927,7 @@ fn restart_pty(
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
-        meta.url = TerminalPlugin::URL.to_string();
+        meta.url = TerminalPlugin::url().to_string();
         meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
     }
 }
@@ -2209,7 +2223,7 @@ mod tests {
         app.add_message::<PendingProcessPresentation>()
             .add_observer(queue_presentation)
             .add_systems(Update, present);
-        app.world_mut().spawn(TerminalPlugin::MANIFEST);
+        app.world_mut().spawn(TerminalPlugin::manifest());
         let tab = app.world_mut().spawn(Tab::bundle()).id();
         let pane = app
             .world_mut()

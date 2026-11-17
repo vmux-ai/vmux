@@ -177,7 +177,7 @@ fn respond_process_stack_spawn(
             .unwrap_or(&request.command)
             .to_string();
         commands.entity(stack).insert(PageMetadata {
-            url: crate::TerminalPlugin::URL.to_string(),
+            url: crate::TerminalPlugin::url().to_string(),
             title,
             bg_color: None,
             ..default()

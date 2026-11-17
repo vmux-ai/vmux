@@ -8,7 +8,7 @@ use vmux_ui::i18n::translate;
 #[vmux_page::page(
     page = "error",
     component = Page,
-    states = ["ThemeUiState"],
+    states = [vmux_ui::theme::ThemeUiState],
     takes = vmux_api::error::ErrorPageData,
     claims = vmux_api::error::ErrorPageData
 )]
@@ -70,7 +70,7 @@ mod tests {
             .query::<&vmux_page::PageRegistration>()
             .iter(app.world())
             .copied()
-            .find(|registration| registration.page().url == ErrorPage::URL)
+            .find(|registration| registration.page().url == ErrorPage::url())
             .unwrap();
         assert!(registration.answers_for(app.world().entity(failed), "vmux://start/"));
     }

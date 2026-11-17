@@ -177,7 +177,7 @@ mod tests {
 
     struct Feature;
 
-    impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+    impl vmux_feature::manifest::FeatureManifestSource for Feature {
         const SOURCE: &'static str =
             "(commands: [(id: \"runner.check\", label: \"Check\", group: \"File\")])";
     }
@@ -187,7 +187,7 @@ mod tests {
 
     impl Frozen {
         fn check(
-            registry: Option<bevy_ecs::prelude::Res<vmux_ecs::manifest::Registry>>,
+            registry: Option<bevy_ecs::prelude::Res<vmux_feature::manifest::Registry>>,
             frozen: bevy_ecs::prelude::Res<Self>,
             mut exits: bevy_ecs::prelude::MessageWriter<AppExit>,
         ) {
@@ -204,7 +204,7 @@ mod tests {
         let (_signal_tx, signal_rx) = mpsc::channel(1);
         let frozen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut app = App::new();
-        app.add_plugins(vmux_ecs::manifest::FeaturePlugin::<Feature>::default())
+        app.add_plugins(vmux_feature::manifest::FeaturePlugin::<Feature>::default())
             .insert_resource(Frozen(frozen.clone()))
             .add_systems(bevy_app::Update, Frozen::check)
             .set_runner(

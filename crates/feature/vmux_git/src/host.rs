@@ -25,9 +25,9 @@ pub use repository_provision::{
 };
 pub use runtime::{GitRuntime, GitTask};
 pub use status::FileGit;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostedPage, PrewarmPage};
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_feature::manifest::FeaturePlugin;
 pub use watch::RepoInfoCache;
 
 mod catalog;
@@ -101,7 +101,7 @@ impl Plugin for GitPlugin {
                 repository_summary::SummaryPlugin,
             ))
             .add_plugins(
-                Self::MANIFEST
+                Self::manifest()
                     .plugin()
                     .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git"))
                     .alias(HostedPage::subtree(crate::LEGACY_GIT_PAGE_URL, "Git")),

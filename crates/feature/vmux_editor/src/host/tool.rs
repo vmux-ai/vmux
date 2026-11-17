@@ -7,7 +7,7 @@ use vmux_api::protocol::{
     ProcessId, ServiceMessage,
 };
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_tool::{AgentWorkingDirectory, ToolCommand, ToolDispatchError, ToolDispatchSet};

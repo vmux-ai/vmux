@@ -10,6 +10,7 @@ publish = false
 default = ["app"]
 preferences = ["vmux_ecs/jobs", "dep:vmux_path"]
 app = [
+    "vmux_feature/page-binding",
     "preferences",
     "dep:base64",
     "dep:bevy",
@@ -35,6 +36,7 @@ app = [
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 base64 = { version = "0.22", optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }

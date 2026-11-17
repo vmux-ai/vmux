@@ -29,7 +29,7 @@ use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ToolsUiState, vmux_api::extension::ExtensionsUiState],
     subtree
 )]
 pub struct ToolsPage;
@@ -44,7 +44,7 @@ pub fn Page() -> Element {
     let extension_state = extensions();
     let route = if state.view.route.is_empty() {
         try_consume_context::<vmux_ecs::PageMetadata>()
-            .and_then(|metadata| ToolRoute::parse(&metadata.url))
+            .and_then(|metadata| ToolRoute::from_metadata(&metadata))
             .unwrap_or_else(|| ToolRoute::named("acp"))
             .id()
             .to_string()
@@ -206,7 +206,7 @@ impl ToolRouteOption {
                 label_key: "tools-title".into(),
                 icon: Some(vmux_api::BuiltinIcon::Toolbox),
                 intent: Some(AddressIntent::Navigate {
-                    url: crate::ToolPlugin::URL.to_string(),
+                    url: crate::ToolPlugin::url().to_string(),
                 }),
                 ..Default::default()
             },

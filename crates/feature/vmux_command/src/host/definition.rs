@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::prelude::*;
 use vmux_api::JsonSchema;
 use vmux_ecs::JsonArguments;
-use vmux_ecs::manifest::{self, FeatureManifest};
+use vmux_feature::manifest::{self, FeatureId, FeatureManifest};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteCommandRequests;
@@ -43,6 +43,7 @@ impl Plugin for CommandRuntimePlugin {
                 )
                     .chain(),
             )
+            .add_systems(Startup, (bind, bind_message).in_set(BindCommands))
             .add_systems(
                 Update,
                 (validate, dispatch, bevy::ecs::schedule::ApplyDeferred)
@@ -50,10 +51,10 @@ impl Plugin for CommandRuntimePlugin {
                     .in_set(DispatchCommandInvocations),
             );
         for binding in inventory::iter::<CommandBindingRegistration> {
-            (binding.register)(app);
-        }
-        for message in inventory::iter::<CommandMessageRegistration> {
-            (message.register)(app);
+            binding
+                .declaration
+                .validate()
+                .expect("valid command declaration binding");
         }
     }
 }
@@ -69,8 +70,6 @@ pub struct CommandShortcut {
     pub shortcut: ShortcutDefinition,
     pub when: Option<String>,
 }
-
-pub struct CommandManifest(pub(super) Vec<manifest::Command>);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum AgentAccess {
@@ -120,57 +119,103 @@ pub trait CommandBinding: Bundle + Sized {
     fn for_command(id: &str) -> Option<Self>;
 }
 
+#[derive(Component, Clone, Copy)]
 pub struct CommandBindingRegistration {
-    register: fn(&mut App),
+    declaration: vmux_feature::CommandBindingRegistration,
+    attach: fn(Entity, &CommandDefinition, &mut Commands),
 }
 
 impl CommandBindingRegistration {
-    pub const fn of<T: CommandBinding>() -> Self {
+    pub const fn of<T: CommandBinding, M: manifest::FeatureManifestSource>(
+        selector: Option<&'static str>,
+    ) -> Self {
         Self {
-            register: register_binding::<T>,
+            declaration: vmux_feature::CommandBindingRegistration::of::<M>(selector),
+            attach: attach::<T>,
         }
+    }
+}
+
+fn attach<T: CommandBinding>(
+    entity: Entity,
+    definition: &CommandDefinition,
+    commands: &mut Commands,
+) {
+    if let Some(bundle) = T::for_command(&definition.id) {
+        commands.entity(entity).insert(bundle);
     }
 }
 
 inventory::collect!(CommandBindingRegistration);
 
+#[derive(Component, Clone, Copy)]
 pub struct CommandMessageRegistration {
-    register: fn(&mut App),
+    owner: fn() -> FeatureId,
+    message: fn(&CommandDefinition) -> Option<CommandMessage>,
 }
 
 impl CommandMessageRegistration {
-    pub const fn of<T>() -> Self
+    pub const fn of<T, M: manifest::FeatureManifestSource>() -> Self
     where
         T: Message + for<'a> TryFrom<&'a CommandInvocation>,
     {
         Self {
-            register: register_message::<T>,
+            owner: FeatureId::of::<M>,
+            message: Self::message::<T>,
         }
+    }
+
+    fn message<T>(definition: &CommandDefinition) -> Option<CommandMessage>
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &definition.id);
+        if T::try_from(&invocation).is_err() {
+            return None;
+        }
+        Some(CommandMessage::of::<T>())
     }
 }
 
 inventory::collect!(CommandMessageRegistration);
 
-fn register_binding<T: CommandBinding>(app: &mut App) {
-    app.add_systems(Startup, bind::<T>.in_set(BindCommands));
+fn bind(
+    definitions: Query<(Entity, &CommandDefinition, &ChildOf)>,
+    owners: Query<&FeatureId>,
+    bindings: Query<&CommandBindingRegistration>,
+    mut commands: Commands,
+) {
+    for (entity, definition, parent) in &definitions {
+        let Ok(owner) = owners.get(parent.parent()) else {
+            continue;
+        };
+        for binding in &bindings {
+            if binding.declaration.owner() == *owner {
+                (binding.attach)(entity, definition, &mut commands);
+            }
+        }
+    }
 }
 
-fn bind<T: CommandBinding>(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<T>(&mut commands);
-}
-
-fn register_message<T>(app: &mut App)
-where
-    T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-{
-    app.add_systems(Startup, bind_message::<T>.in_set(BindCommands));
-}
-
-fn bind_message<T>(registry: CommandRegistry, mut commands: Commands)
-where
-    T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-{
-    registry.message::<T>(&mut commands);
+fn bind_message(
+    definitions: Query<(Entity, &CommandDefinition, &ChildOf)>,
+    owners: Query<&FeatureId>,
+    registrations: Query<&CommandMessageRegistration>,
+    mut commands: Commands,
+) {
+    for (entity, definition, parent) in &definitions {
+        let Ok(owner) = owners.get(parent.parent()) else {
+            continue;
+        };
+        for registration in &registrations {
+            if (registration.owner)() != *owner {
+                continue;
+            }
+            if let Some(message) = (registration.message)(definition) {
+                commands.entity(entity).insert(message);
+            }
+        }
+    }
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -185,33 +230,6 @@ enum CommandStartupSet {
     Flush,
 }
 
-#[derive(SystemParam)]
-pub struct CommandRegistry<'w, 's> {
-    definitions: Query<'w, 's, (Entity, &'static CommandDefinition)>,
-}
-
-impl CommandRegistry<'_, '_> {
-    pub fn bind<B: CommandBinding>(&self, commands: &mut Commands) {
-        for (entity, definition) in &self.definitions {
-            if let Some(bundle) = B::for_command(&definition.id) {
-                commands.entity(entity).insert(bundle);
-            }
-        }
-    }
-
-    pub fn message<T>(&self, commands: &mut Commands)
-    where
-        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-    {
-        for (entity, definition) in &self.definitions {
-            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &definition.id);
-            if T::try_from(&invocation).is_ok() {
-                commands.entity(entity).insert(CommandMessage::of::<T>());
-            }
-        }
-    }
-}
-
 fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Command keymap"),
@@ -219,15 +237,16 @@ fn spawn(mut commands: Commands) {
     ));
 }
 
-fn register(manifests: Query<&FeatureManifest>, mut commands: Commands) {
-    for manifest in &manifests {
-        for definition in manifest
-            .commands
-            .iter()
-            .cloned()
-            .map(CommandDefinition::from)
-        {
-            commands.spawn(definition);
+fn register(manifests: Query<(Entity, &FeatureManifest)>, mut commands: Commands) {
+    for binding in inventory::iter::<CommandBindingRegistration> {
+        commands.spawn(*binding);
+    }
+    for message in inventory::iter::<CommandMessageRegistration> {
+        commands.spawn(*message);
+    }
+    for (owner, manifest) in &manifests {
+        for definition in CommandDefinition::from_manifest(manifest) {
+            commands.spawn((definition, ChildOf(owner)));
         }
     }
 }
@@ -297,18 +316,98 @@ fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_feature::manifest::FeatureManifestOwner;
+
+    struct Owner;
+    struct Foreign;
+
+    impl manifest::FeatureManifestSource for Owner {
+        const SOURCE: &'static str =
+            r#"(commands: [(id: "ownership.owner", label: "Owner", group: "Test")])"#;
+    }
+
+    impl manifest::FeatureManifestSource for Foreign {
+        const SOURCE: &'static str =
+            r#"(commands: [(id: "ownership.foreign", label: "Foreign", group: "Test")])"#;
+    }
+
+    #[derive(Component)]
+    struct BroadBinding;
+
+    impl CommandBinding for BroadBinding {
+        fn for_command(_id: &str) -> Option<Self> {
+            Some(Self)
+        }
+    }
+
+    #[derive(Message)]
+    struct BroadMessage;
+
+    impl TryFrom<&CommandInvocation> for BroadMessage {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Ok(Self)
+        }
+    }
+
+    inventory::submit! {
+        CommandBindingRegistration::of::<BroadBinding, Owner>(None)
+    }
+
+    inventory::submit! {
+        CommandMessageRegistration::of::<BroadMessage, Owner>()
+    }
 
     #[test]
-    fn parses_commands_from_feature_manifest() {
-        let definitions = CommandManifest::from_feature_ron(
-            r#"(
-                commands: [(id: "test", label: "Test", group: "Test")],
-                ignored: true,
-            )"#,
-        )
-        .into_vec();
-
-        assert_eq!(definitions[0].id, "test");
+    fn registered_commands_bind_only_inside_their_source_lifetime() {
+        let mut app = CommandTestApp::empty();
+        app.add_plugins((
+            manifest::FeaturePlugin::<Owner>::default(),
+            manifest::FeaturePlugin::<Foreign>::default(),
+        ))
+        .add_message::<BroadMessage>();
+        app.finish();
+        app.update();
+        let mut definitions = app.world_mut().query::<(Entity, &CommandDefinition)>();
+        let mut owner = None;
+        let mut foreign = None;
+        for (entity, definition) in definitions.iter(app.world()) {
+            match definition.id.as_str() {
+                "ownership.owner" => owner = Some(entity),
+                "ownership.foreign" => foreign = Some(entity),
+                _ => {}
+            }
+        }
+        let owner = owner.expect("owned command exists");
+        let foreign = foreign.expect("foreign command exists");
+        let owner_bound = app.world().get::<BroadBinding>(owner).is_some();
+        let foreign_bound = app.world().get::<BroadBinding>(foreign).is_some();
+        assert!(owner_bound);
+        assert!(app.world().get::<CommandMessage>(owner).is_some());
+        assert!(!foreign_bound);
+        assert!(app.world().get::<CommandMessage>(foreign).is_none());
+        app.world_mut()
+            .write_message(CommandInvocation::new(owner, "ownership.owner"));
+        app.world_mut()
+            .write_message(CommandInvocation::new(foreign, "ownership.foreign"));
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<BroadMessage>>()
+                .drain()
+                .count(),
+            1
+        );
+        let source = app
+            .world_mut()
+            .query_filtered::<Entity, With<FeatureManifestOwner<Owner>>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().despawn(source);
+        app.update();
+        assert!(app.world().get::<CommandDefinition>(owner).is_none());
+        assert!(app.world().get::<CommandDefinition>(foreign).is_some());
     }
 
     #[derive(Message)]

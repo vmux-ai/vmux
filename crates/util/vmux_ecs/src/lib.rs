@@ -82,26 +82,18 @@ pub mod browser;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod component;
-#[cfg(feature = "cli")]
-mod composition;
 #[cfg(feature = "contracts")]
 pub mod event;
 mod external_identity;
-#[cfg(feature = "cli")]
-mod feature_metadata;
 #[cfg(all(host, feature = "host"))]
 mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
-#[cfg(feature = "hosting")]
-pub mod hosting;
 mod identity;
 #[cfg(feature = "jobs")]
 pub mod jobs;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
-#[cfg(feature = "cli")]
-pub mod manifest;
 #[cfg(all(host, feature = "host"))]
 pub mod notify;
 mod operation;
@@ -125,8 +117,6 @@ pub mod profile;
 mod profile_identity;
 #[cfg(feature = "records")]
 pub mod record;
-#[cfg(feature = "cli")]
-mod registry;
 pub mod revision;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]

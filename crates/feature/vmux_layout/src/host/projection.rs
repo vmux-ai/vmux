@@ -8,9 +8,9 @@ use vmux_api::bookmark::{
 };
 use vmux_api::space::ProjectRowKind;
 use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::page::{AddressContribution, PageManifest};
 use vmux_ecs::{Description, EntityTarget, PageMetadata};
+use vmux_feature::manifest::FeatureManifest;
 use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
 use crate::cef::{Browser, LayoutCef};
@@ -1108,8 +1108,8 @@ fn project_header(
                     contribution.current = vmux_ecs::address::RouteLabel(route).option();
                 }
                 if contribution.views.is_empty() {
-                    contribution.views = vmux_ecs::address::RouteCatalog::options(
-                        manifests.iter(),
+                    contribution.views = vmux_ecs::page::AddressContribution::options(
+                        FeatureManifest::address_options(manifests.iter()),
                         &contribution.contextual,
                     );
                 }

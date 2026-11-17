@@ -21,6 +21,7 @@ host = [
 ]
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 base64 = { version = "0.22", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

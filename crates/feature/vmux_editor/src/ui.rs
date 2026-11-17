@@ -31,7 +31,7 @@ mod workspace;
 #[vmux_page::page(
     component = Page,
     document_url = "vmux://files/",
-    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, vmux_ecs::event::FileUiState, vmux_ecs::event::ProjectNavigation, vmux_api::input::KeyClaimsUiState, vmux_api::page_location::PageLocationUiState],
     dom_group = "editor",
     subtree,
     reactive_takes,
@@ -42,7 +42,7 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectUiState", "ProjectFormUiState", "SessionScopeUiState", "RepositorySummaryUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, vmux_ecs::event::FileUiState, vmux_project::contract::ProjectUiState, vmux_project::contract::ProjectFormUiState, vmux_session::state::SessionScopeUiState, vmux_git::event::RepositorySummaryUiState, vmux_git::state::GitUiState, vmux_api::input::KeyClaimsUiState, vmux_api::page_location::PageLocationUiState],
     dom_group = "editor",
     subtree,
     takes = vmux_ecs::PageMetadata
@@ -50,9 +50,9 @@ pub(crate) struct FilePage;
 pub(crate) struct ProjectsPage;
 
 #[vmux_page::page(
-    file = "../vmux_knowledge/src/feature.ron",
+    owner = vmux_knowledge::Feature,
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, vmux_ecs::event::FileUiState, vmux_ecs::event::ProjectNavigation, vmux_api::input::KeyClaimsUiState, vmux_api::page_location::PageLocationUiState],
     dom_group = "editor",
     subtree,
     reactive_takes,

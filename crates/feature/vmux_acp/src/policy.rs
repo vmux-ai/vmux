@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_ecs::manifest::{FeatureManifest, FeatureManifestOwner};
+use vmux_feature::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
+use vmux_feature::manifest::{FeatureManifestSource, FeaturePlugin};
 
 pub(crate) fn add(app: &mut App) {
     app.configure_sets(Startup, PolicyLoaded)

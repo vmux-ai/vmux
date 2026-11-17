@@ -31,7 +31,7 @@ const SETTINGS_SCROLL_ID: &str = "settings-scroll-viewport";
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "PageLocationUiState", "ThemeUiState", "SettingsUiState"]
+    states = [vmux_api::address::PageAddressUiState, vmux_api::page_location::PageLocationUiState, vmux_ui::theme::ThemeUiState, crate::state::SettingsUiState]
 )]
 pub(crate) struct SettingsPage;
 

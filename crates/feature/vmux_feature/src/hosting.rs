@@ -6,7 +6,7 @@ use vmux_api::{BinEvent, PageReady, UiEvent};
 use crate::manifest::{
     FeatureManifest, FeatureManifestOwner, FeatureManifestSource, FeaturePlugin,
 };
-use crate::{EffectiveStartupUrl, Ready};
+use vmux_ecs::{EffectiveStartupUrl, Ready};
 
 pub struct WebHostPlugin {
     contract: Contract,

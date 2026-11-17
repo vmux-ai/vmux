@@ -5,12 +5,12 @@ use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
 use vmux_command::{CommandInvocation, ResolvedLocale};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
@@ -72,7 +72,7 @@ impl Plugin for ProcessMonitorPlugin {
             .add_observer(process_kill_all)
             .add_observer(search)
             .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
-                ProcessMonitorPageManifest::MANIFEST,
+                ProcessMonitorPageManifest::manifest(),
             ));
     }
 }
@@ -241,7 +241,7 @@ fn open_services(
 ) {
     for _ in requests.read() {
         stack_requests.write(OpenRequest {
-            url: Some(ProcessMonitorPageManifest::URL.to_string()),
+            url: Some(ProcessMonitorPageManifest::url().to_string()),
             policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
         });
     }

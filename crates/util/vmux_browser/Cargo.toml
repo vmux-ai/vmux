@@ -9,6 +9,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["ecs"] }
 async-channel = "2"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }

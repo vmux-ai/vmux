@@ -1,11 +1,9 @@
 #[cfg(host)]
 pub use host::{ShortcutCaptureSet, ShortcutPlugin};
 
-#[cfg(host)]
 pub(crate) struct Feature;
 
-#[cfg(host)]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -14,11 +12,11 @@ pub struct ShortcutUrl;
 
 #[cfg(host)]
 impl ShortcutUrl {
-    pub fn canonical(url: &str) -> Option<&'static str> {
-        let url = url.trim().trim_end_matches('/');
-        (url == ShortcutPlugin::URL.trim_end_matches('/')
+    pub fn canonical(task: &vmux_ecs::PageOpenTask) -> Option<&'static str> {
+        let url = task.url.trim().trim_end_matches('/');
+        (url == ShortcutPlugin::url().trim_end_matches('/')
             || matches!(url, "vmux://cheatsheet" | "vmux://cheetsheet"))
-        .then_some(ShortcutPlugin::URL)
+        .then_some(ShortcutPlugin::url())
     }
 }
 

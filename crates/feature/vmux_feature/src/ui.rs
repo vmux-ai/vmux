@@ -13,7 +13,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::state::*;
 
-#[vmux_page::page(component=Page,states=["ThemeUiState","PageAddressUiState","FeaturesUiState"],subtree)]
+#[vmux_page::page(owner=crate::registration::Feature,component=Page,states = [vmux_ui::theme::ThemeUiState, vmux_api::address::PageAddressUiState, crate::state::FeaturesUiState],subtree)]
 pub(crate) struct FeaturesPage;
 
 #[component]

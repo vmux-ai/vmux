@@ -144,7 +144,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use vmux_api::protocol::AgentRequest;
-    use vmux_ecs::manifest::FeaturePlugin;
+    use vmux_feature::manifest::FeaturePlugin;
     use vmux_tool::{AddedTool, ToolDispatchSet, ToolQuery, ToolRegistryPlugin};
 
     #[vmux_tool::input]
@@ -153,7 +153,7 @@ mod tests {
 
     struct TestFeature;
 
-    impl vmux_ecs::manifest::FeatureManifestSource for TestFeature {
+    impl vmux_feature::manifest::FeatureManifestSource for TestFeature {
         const SOURCE: &'static str =
             r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#;
     }

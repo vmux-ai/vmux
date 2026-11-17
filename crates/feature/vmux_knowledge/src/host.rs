@@ -11,7 +11,7 @@ pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(Self::MANIFEST.plugin())
+        app.add_plugins(Self::manifest().plugin())
             .add_plugins((
                 crate::KnowledgeToolPlugin,
                 agent::KnowledgeAgentPlugin,

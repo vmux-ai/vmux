@@ -24,10 +24,10 @@ const CONTAINER_ID: &str = "term-container";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 
-#[vmux_page::page(
+#[::vmux_page::page(
     component = Page,
     subtree,
-    states = ["ThemeUiState", "TerminalUiState", "KeyClaimsUiState"],
+    states = [vmux_ui::theme::ThemeUiState, vmux_ecs::event::TerminalUiState, vmux_api::input::KeyClaimsUiState],
     claims = crate::Terminal
 )]
 pub(crate) struct TerminalPage;
@@ -858,7 +858,7 @@ mod tests {
 
     #[test]
     fn process_specific_terminal_pages_can_exchange_their_state_and_input() {
-        let permissions = TerminalPage::PAGE.page_permissions();
+        let permissions = TerminalPage::page().page_permissions();
         for permission in ["TerminalUiState", "TermResizeEvent", "KeyClaimsUiState"] {
             assert!(permissions.allows("vmux://terminal/29876", permission));
         }

@@ -78,8 +78,8 @@ impl Plugin for LayoutRuntimePlugin {
                 WorktreePlugin,
             ))
             .add_plugins((
-                Self::MANIFEST.plugin(),
-                ErrorPage::MANIFEST.plugin(),
+                Self::manifest().plugin(),
+                ErrorPage::manifest().plugin(),
                 LayoutStorePlugin,
                 PageContextPlugin,
                 crate::page_slot::PageSlotPlugin,
