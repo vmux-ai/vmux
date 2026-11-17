@@ -46,6 +46,33 @@ impl LoginShellEnvironment {
         }
     }
 
+    pub fn protect_isolated_configuration(command: &mut Command) {
+        let paths = vmux_profile::ProfilePaths::current();
+        if !paths.isolated() {
+            return;
+        }
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        Self::protect_configuration(command, Self::get(&shell));
+    }
+
+    fn protect_configuration(command: &mut Command, environment: &[(String, String)]) {
+        for (key, value) in environment {
+            if matches!(
+                key.as_str(),
+                "HOME"
+                    | "CARGO_HOME"
+                    | "XDG_CONFIG_HOME"
+                    | "XDG_CACHE_HOME"
+                    | "XDG_DATA_HOME"
+                    | "XDG_STATE_HOME"
+                    | "VIBE_HOME"
+                    | "VIBE_TEST_DISABLE_KEYRING"
+            ) {
+                command.env(key, value);
+            }
+        }
+    }
+
     pub fn apply_pty_isolation(command: &mut CommandBuilder) {
         if vmux_profile::ProfilePaths::current().isolated() {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
@@ -119,6 +146,11 @@ impl LoginShellEnvironment {
             home.join(".cargo").to_string_lossy().into_owned(),
         ));
         environment.push(("HOME".into(), home.to_string_lossy().into_owned()));
+        environment.push((
+            "VIBE_HOME".into(),
+            home.join(".vibe").to_string_lossy().into_owned(),
+        ));
+        environment.push(("VIBE_TEST_DISABLE_KEYRING".into(), "1".into()));
         environment.push((
             "XDG_CONFIG_HOME".into(),
             home.join(".config").to_string_lossy().into_owned(),
@@ -291,6 +323,40 @@ impl LoginShellEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_credentials_cannot_escape_through_explicit_agent_environment() {
+        let directory = tempfile::tempdir().unwrap();
+        let first_home = directory.path().join("profiles/first/home");
+        let second_home = directory.path().join("profiles/second/home");
+        for home in [&first_home, &second_home] {
+            let environment = LoginShellEnvironment::isolated(
+                home,
+                [
+                    ("VIBE_HOME".into(), "/personal/vibe".into()),
+                    ("VIBE_TEST_DISABLE_KEYRING".into(), "0".into()),
+                    ("PATH".into(), "/usr/bin:/bin".into()),
+                ],
+            );
+            let mut command = Command::new("/usr/bin/printenv");
+            command
+                .env_clear()
+                .envs(environment.clone())
+                .env("HOME", "/personal")
+                .env("XDG_CONFIG_HOME", "/personal/config")
+                .env("VIBE_HOME", "/personal/vibe")
+                .env("VIBE_TEST_DISABLE_KEYRING", "0")
+                .env("BROWSER", "scoped-browser-command");
+            LoginShellEnvironment::protect_configuration(&mut command, &environment);
+            let result = command.output().unwrap();
+            assert!(result.status.success());
+            let output = String::from_utf8(result.stdout).unwrap();
+            assert!(output.contains(&format!("VIBE_HOME={}\n", home.join(".vibe").display())));
+            assert!(output.contains("VIBE_TEST_DISABLE_KEYRING=1\n"));
+            assert!(output.contains("BROWSER=scoped-browser-command\n"));
+            assert!(!output.contains("/personal"));
+        }
+    }
 
     #[test]
     fn isolated_agent_environment_replaces_dotfile_paths_and_omits_unrelated_credentials() {
