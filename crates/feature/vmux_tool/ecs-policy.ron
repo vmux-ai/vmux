@@ -217,7 +217,6 @@ legacy: [
     (key: "crates/feature/vmux_tool/src/manifest.rs||impl:Eq for ToolStore", fingerprint: "2a934409f9c3eaf1", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/manifest.rs||impl:Execution", fingerprint: "7a7f56b854d213ed", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/manifest.rs||impl:PartialEq for ToolStore", fingerprint: "189df2361f9e6a10", issue: "VMX-253"),
-    (key: "crates/feature/vmux_tool/src/manifest.rs||impl:ToolStore", fingerprint: "9b6ba6fb7cb2aa15", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/manifest.rs||impl:ToolsManifest", fingerprint: "aa6b61b4da50d9bd", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/manifest.rs||static:EXECUTIONS", fingerprint: "aae33340ab84755e", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/manifest.rs||struct:Execution", fingerprint: "67a7c445e05e70a3", issue: "VMX-253"),
@@ -328,12 +327,10 @@ legacy: [
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:HomebrewSourceCard", fingerprint: "9fdf0e2e8ad91f7a", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:Page", fingerprint: "149d8ae1658f4a45", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolActions", fingerprint: "1a165ece660e0d5d", issue: "VMX-253"),
-    (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolCard", fingerprint: "cb17287bc2eaf6e8", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolDetails", fingerprint: "f567358ad9ba8230", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolManager", fingerprint: "77aa2a324b75b05e", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolMeta", fingerprint: "dab3d3fe2bb44416", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolQuickInstall", fingerprint: "1353b1303923ecc9", issue: "VMX-253"),
-    (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolRow", fingerprint: "91db0821143df27c", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolSection", fingerprint: "ac7c813504003099", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolThumbnail", fingerprint: "d797b631af470b90", issue: "VMX-253"),
     (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolsHeader", fingerprint: "f93166e47decf705", issue: "VMX-253"),
@@ -365,6 +362,9 @@ boundaries: [
     (key: "crates/feature/vmux_tool/src/catalog.rs||struct:CatalogPlugin", fingerprint: "3c174a344155b15a", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_tool/src/catalog.rs||struct:Catalog", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_tool/src/host.rs||impl:Plugin for ToolHostPlugin", fingerprint: "ac590c68f0a782d8", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_tool/src/catalog.rs||struct:Catalog", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_tool/src/command_bar.rs||struct:CommandBarPlugin", fingerprint: "5865c42bb944c915", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_tool/src/command_bar.rs||struct:McpCommandBar", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolRow", fingerprint: "91db0821143df27c", interface: "Dioxus mounted rendering and typed UI intent delivery", input: "ECS: crates/feature/vmux_tool/src/state.rs||struct:ToolItem", output: "external: mounted DOM nodes and component callbacks", lifetime: "one mounted component scope and its current host binding", bounds: "presentation and immediate DOM state only; typed intent enters the host before product state changes", teardown: "unmount releases DOM signals and callbacks; host rejects expired page bindings", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_tool/src/ui.rs||fn:ToolCard", fingerprint: "cb17287bc2eaf6e8", interface: "Dioxus mounted rendering and typed UI intent delivery", input: "ECS: crates/feature/vmux_tool/src/state.rs||struct:ToolItem", output: "external: mounted DOM nodes and component callbacks", lifetime: "one mounted component scope and its current host binding", bounds: "presentation and immediate DOM state only; typed intent enters the host before product state changes", teardown: "unmount releases DOM signals and callbacks; host rejects expired page bindings", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_tool/src/manifest.rs||impl:ToolStore", fingerprint: "45c0c1f88053ff71", interface: "canonical ToolStore filesystem lease, path and atomic manifest IO", input: "ECS: crates/feature/vmux_tool/src/manifest.rs||struct:ToolStore", output: "external: profile-scoped tool paths, serialized files and filesystem migration results", lifetime: "the canonical ToolStore component and one operation lease", bounds: "configuration paths and filesystem locking/atomic write mechanics; catalog, operation selection and commits stay in registered systems", teardown: "lease drop releases the semaphore; unused weak filesystem locks are evicted", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   debt: [
@@ -378,4 +378,5 @@ shape: (
     (key: "crates/feature/vmux_tool/src/mcp.rs||enum:McpTransport", fingerprint: "1788fae848f2e923", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
+
 )

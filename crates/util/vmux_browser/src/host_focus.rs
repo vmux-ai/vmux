@@ -100,6 +100,7 @@ fn compute_intent(
             Has<KeyboardOwner>,
             Has<WebviewWindowed>,
             Has<vmux_ecs::overlay::OverlayShownInline>,
+            Option<&HostWindow>,
         ),
         With<WindowOverlay>,
     >,
@@ -109,7 +110,10 @@ fn compute_intent(
     mut intent: Single<&mut HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
-        |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
+        |(entity, node, visibility, keyboard_target, windowed, shown_inline, host)| {
+            if host.is_some_and(|host| Some(host.0) != focused_window.entity()) {
+                return None;
+            }
             OverlayState::resolve(
                 node.display,
                 visibility.copied().unwrap_or_default(),

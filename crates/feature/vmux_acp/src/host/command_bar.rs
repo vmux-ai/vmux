@@ -27,7 +27,7 @@ pub(super) fn add(app: &mut App) {
 }
 
 #[derive(Component)]
-struct InstalledAgent;
+pub(super) struct InstalledAgent;
 
 fn sync_work_directories(
     sessions: Query<Ref<Cwd>, With<Session>>,

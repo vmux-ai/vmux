@@ -198,8 +198,8 @@ pub fn WorkspaceLayout(
 }
 
 #[component]
-pub fn ManagerSearchRow(children: Element) -> Element {
-    rsx! { PageToolbarRow { class: "relative w-full min-h-11 px-2 py-2".to_string(), {children} } }
+pub fn ManagerSearchRow(#[props(default)] compact: bool, children: Element) -> Element {
+    rsx! { PageToolbarRow { class: if compact { "relative w-full min-h-8 px-2 py-0.5".to_string() } else { "relative w-full min-h-11 px-2 py-2".to_string() }, {children} } }
 }
 
 #[component]
@@ -400,6 +400,8 @@ pub fn ManagerControls(children: Element, #[props(default)] class: String) -> El
 pub fn ManagerSearch(
     value: String,
     placeholder: String,
+    #[props(default)] disabled: bool,
+    #[props(default)] inherit_color: bool,
     #[props(default)] id: Option<String>,
     #[props(default)] autofocus: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
@@ -424,13 +426,17 @@ pub fn ManagerSearch(
         }
     });
     let class = "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 transition-colors duration-100 hover:bg-foreground/[0.025] focus-within:bg-foreground/[0.045] motion-reduce:transition-none";
-    let input_class = "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55";
+    let input_class = if inherit_color {
+        "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-inherit outline-none placeholder:text-current placeholder:opacity-60"
+    } else {
+        "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55"
+    };
     rsx! {
         div { class, "data-vmux-search-active": if draft().is_empty() { "false" } else { "true" },
             label { r#for: id.clone(), class: "flex h-full shrink-0 cursor-text items-center",
                 LineIconView {
                     icon: LineIcon::Search,
-                    class: "size-3.5 shrink-0 text-muted-foreground/70 transition-colors duration-100 group-focus-within/manager-search:text-foreground",
+                    class: if inherit_color { "size-3.5 shrink-0 opacity-70" } else { "size-3.5 shrink-0 text-muted-foreground/70 transition-colors duration-100 group-focus-within/manager-search:text-foreground" },
                 }
             }
             {prefix}
@@ -443,9 +449,11 @@ pub fn ManagerSearch(
                     placeholder,
                     value: draft(),
                     autofocus,
+                    disabled,
                     autocomplete: "off",
                     spellcheck: "false",
                     oninput: move |event: FormEvent| {
+                        if disabled { return; }
                         let query = event.value();
                         draft.set(query.clone());
                         if let Some(handler) = onsearch {
@@ -468,6 +476,7 @@ pub fn ManagerSearch(
                     },
                     onkeydown: move |event| {
                         event.stop_propagation();
+                        if disabled { return; }
                         if let Some(handler) = &onkeydown {
                             handler.call(event);
                         }
@@ -500,6 +509,11 @@ pub fn ManagerIconButton(
                 aria_label: label,
                 aria_pressed: active,
                 disabled,
+                onkeydown: move |event| {
+                    if event.key() == Key::Enter || matches!(event.key(), Key::Character(key) if key == " ") {
+                        event.stop_propagation();
+                    }
+                },
                 onclick: move |event| onclick.call(event),
                 {children}
             }
@@ -783,6 +797,8 @@ pub fn ManagerRow(
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] aria_label: Option<String>,
     #[props(default)] onselect: Option<EventHandler<NavigationGesture>>,
 ) -> Element {
     let interactive = onselect.is_some();
@@ -801,14 +817,18 @@ pub fn ManagerRow(
         div {
             class,
             role: if interactive { "button" } else { "group" },
-            tabindex: if interactive { "0" } else { "-1" },
+            tabindex: if interactive && !disabled { "0" } else { "-1" },
             aria_selected: selected,
+            aria_disabled: disabled,
+            aria_label,
             onclick: move |event| {
+                if disabled { return; }
                 if let Some(handler) = &onselect {
                     handler.call(NavigationGesture::from_mouse(&event));
                 }
             },
             onkeydown: move |event| {
+                if disabled { return; }
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
                 if !activate {
@@ -852,6 +872,8 @@ pub fn ManagerCard(
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] aria_label: Option<String>,
     onselect: EventHandler<NavigationGesture>,
 ) -> Element {
     let keyboard_select = onselect;
@@ -863,10 +885,13 @@ pub fn ManagerCard(
                 "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
             },
             role: "button",
-            tabindex: "0",
+            tabindex: if disabled { "-1" } else { "0" },
             aria_selected: selected,
-            onclick: move |event| onselect.call(NavigationGesture::from_mouse(&event)),
+            aria_disabled: disabled,
+            aria_label,
+            onclick: move |event| { if !disabled { onselect.call(NavigationGesture::from_mouse(&event)); } },
             onkeydown: move |event| {
+                if disabled { return; }
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
                 if !activate {

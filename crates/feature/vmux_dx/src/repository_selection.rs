@@ -113,10 +113,20 @@ fn request(requests: Incoming, mut commands: Commands) {
                 }
             },
         };
-        commands.entity(entity).insert(Input {
-            path,
-            branch: invocation.value_os("branch").map(OsString::from),
-        });
+        let branch = match (
+            invocation.value_os("branch"),
+            invocation.value_os("branch-option"),
+        ) {
+            (Some(positional), Some(option)) if positional != option => {
+                commands.entity(entity).insert(CliResult(Err(
+                    "Conflicting positional and option branch values".into(),
+                )));
+                continue;
+            }
+            (Some(branch), _) | (None, Some(branch)) => Some(branch.to_owned()),
+            (None, None) => None,
+        };
+        commands.entity(entity).insert(Input { path, branch });
     }
 }
 

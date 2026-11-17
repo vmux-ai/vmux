@@ -17,8 +17,10 @@ use vmux_ui::i18n::translate;
 #[component]
 pub(super) fn ChatDock(chat: Chat) -> Element {
     rsx! {
-        div { class: "relative z-20 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2",
-            div { class: "session-chat-prompt-shell relative mx-auto flex max-w-3xl flex-col gap-2",
+        super::surface::Dock {
+            if chat.setup_pending() {
+                super::setup::Controls { chat }
+            } else {
                 if !chat.in_use() {
                     if chat.media_menu_open() {
                         MediaMenu { chat }

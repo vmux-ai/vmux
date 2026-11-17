@@ -1099,6 +1099,36 @@ impl Job for CreateTemporary {
     }
 }
 
+#[derive(Component, Clone)]
+#[component(immutable)]
+#[require(crate::debug::Io)]
+pub struct CreateOnboardingDirectory;
+
+impl IoJob for CreateOnboardingDirectory {
+    type Data = TemporaryValue;
+}
+
+impl Job for CreateOnboardingDirectory {
+    type Output = Result<TemporaryValue, Failure>;
+
+    fn run(self) -> Self::Output {
+        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            return Err(Failure::message("Debug IO canceled"));
+        }
+        let directory = Temporary::create(Path::new("/tmp"), "vmux-fresh-clean")
+            .map_err(|error| Failure::message(error.to_string()))?;
+        for path in ["profiles/fresh/home", "config/projects"] {
+            fs::create_dir_all(directory.path().join(path))
+                .map_err(|error| Failure::message(error.to_string()))?;
+        }
+        Ok(TemporaryValue(Arc::new(directory)))
+    }
+
+    fn lane(&self) -> Lane {
+        Lane::Process
+    }
+}
+
 pub struct Process {
     child: Option<std::process::Child>,
     retained: Option<Retained>,

@@ -28,6 +28,10 @@ flowchart LR
 
 A page may keep a draft, caret or scroll position locally. Changes to shared work go through the owning system. Closing a page does not necessarily stop its conversation or process; reopening it can show the same ongoing work.
 
+Transcript delivery selects a page target on the canonical Session, applies queued-input updates, and publishes through ordered systems in the same frame. The temporary target is removed after delivery or deferral; the page publication capability only hydrates and emits the typed snapshot.
+
+Native breadcrumb labels and parent links resolve from registered feature manifests and page declarations using the actual routed URL. Shared DOM document URLs do not determine navigation identity. Features add contextual entries; the host corrects a contributed root that belongs to a different route. A child route in `feature.ron` needs no separate breadcrumb registration.
+
 ## Where the code lives
 
 | Directory | Responsibility |
@@ -61,6 +65,8 @@ Selected Profile sync uses durable local records and an idempotent outbox. ECS s
 Development and local products may use explicit loopback Cloud endpoints and certificate pinning. Release products retain production configuration and certificate verification. Live uses the existing encrypted host transport; enabling Live does not select Profiles for synchronization.
 
 ## Development and validation
+
+Fresh onboarding launches create a private temporary data tree through a typed IO job, override the launch profile and environment-key mode, and retain that tree only after a successful launch. Normal launches preserve the requested data and profile.
 
 Development CLI operations follow the same ownership model as product work. Systems sequence builds, signing, packaging, CI planning, evidence validation and cleanup. CI composes the development feature without the desktop runtime; Git, Cargo, filesystem and Actions adapters return bounded facts to accepted operations. Leases protect active work and shared artifacts; cancellation drains IO before returning.
 

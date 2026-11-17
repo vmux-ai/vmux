@@ -16,6 +16,9 @@ pub use native_bridge::NativeBridge;
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use navigation::OpenHistoryRequest;
+pub use popup::{
+    PopupBounds, PopupHideRequest, PopupPresented, PopupScriptRequest, PopupWebviewsPlugin,
+};
 pub use tool::BrowserToolPlugin;
 use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};
 use vmux_ecs::{
@@ -55,6 +58,7 @@ mod navigation;
 mod page;
 mod page_life;
 mod platform;
+mod popup;
 mod present;
 mod scroll;
 mod snapshot;
@@ -135,8 +139,8 @@ impl BrowserPlugin {
     }
 }
 
-impl Plugin for BrowserPlugin {
-    fn build(&self, app: &mut App) {
+impl bevy::prelude::Plugin for BrowserPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
         let startup_appearance = vmux_setting::AppearanceSettings::from_disk();
         let startup_locale = appearance::BrowserLocale::requested(&startup_appearance.locale);
         let startup_accept_language_list = startup_locale.accept_language_list();
@@ -153,8 +157,8 @@ impl Plugin for BrowserPlugin {
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
-        Self::configure_schedule(app)
-            .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+        Self::configure_schedule(app);
+        app.add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins((
