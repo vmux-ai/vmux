@@ -34,4 +34,51 @@ This tests the examples against your local source. `vmux dx test sdk --git` test
 
 `vmux_app` provides the builder for enabling features. Your application supplies its window, UI, permissions, and storage locations. The [host-path tests](https://github.com/vmux-ai/vmux/blob/main/examples/host-consumer/tests/host.rs) show how a separate product's name and namespace keep its data and service paths separate.
 
-Use the example's Cargo features and pin all Vmux dependencies to one reviewed main commit or release tag, with its required Bevy version. The SDK currently uses Git dependencies; its public APIs can still change.
+Select Cargo features to make a capability available, then enable it through `VmuxPlugin::builder()`.
+For example, `layout` makes the renderer-independent layout core available; `layout-runtime`
+adds the native product adapter. Compiling an adapter does not install it in a core-only app.
+
+| Public namespace | Cargo feature | Available behavior |
+|---|---|---|
+| `vmux_app::ecs` | `ecs`; optionally `jobs` and `contracts` | Shared components, scoped identity, operations and owned jobs. Store remains opt-in on its owning crate. |
+| `vmux_app::project` | `project` | Project registration, archive and persistence requests; optional filesystem adapter. |
+| `vmux_app::flex` | `flex` | Renderer-independent geometry; an explicit window viewport adapter. |
+| `vmux_app::layout` | `layout` | Owner-scoped pane topology and selection; native adapters require `layout-runtime`. |
+| `vmux_app::extension` | `extension-core` | Extension catalog and installation lifecycle; `extension` adds native product adapters. |
+| `vmux_app::lsp` | `lsp` | Shared server, document, request and diagnostics lifecycles; the application supplies transport. |
+| `vmux_app::host` | `host` | Compiled product identity and isolated data, credential and service paths. |
+
+The independent consumer checks the core namespaces without Editor, Profile, CEF, Winit or
+product UI. A separate Host consumer validates product namespaces. The same consumer suites
+run from local paths and immutable Git dependencies without the private cloud repository.
+
+## Pin a compatible SDK
+
+Use one reviewed main commit or release tag for every Vmux dependency. Mixing revisions can
+produce incompatible ECS types even when their names match. The supported Bevy minor is 0.19;
+a Bevy minor change or breaking public API change requires a compatibility review and the
+consumer gate. The SDK currently uses Git dependencies rather than a supported set of
+crates.io packages. Publishing is a separate release action.
+
+During 0.0.x, pin an exact revision. Floating revisions have no compatibility guarantee.
+Release notes identify breaking changes and replacement APIs; compatible aliases remain
+where practical, with no fixed deprecation window before a stable SDK version.
+
+Store schemas belong to their features. Keep reflected names stable, version persisted
+contracts, and provide a migration or explicit refusal before accepting incompatible data.
+Wire compatibility follows the protocol's versioned handshake. Unversioned LSP diagnostics
+cannot identify which document edit produced them.
+
+## Package a plugin and choose a target
+
+Native plugins are Rust crates linked at build time. A plugin owns its components, typed
+requests and feature manifest, and packages its pages and assets with the host build. The
+host supplies the renderer, IO, permissions and runner. An embedded web surface can keep
+its presentation while moving behavior into typed native plugins through the existing UI
+contracts; native permissions remain explicit.
+
+The facade provides desktop, mobile, daemon, CLI and MCP composition presets. macOS desktop
+and iOS mobile have product hosts; Linux exercises headless and shared-core paths in CI.
+This does not guarantee that every SDK capability has an adapter on every target. Windows,
+Android, web, game and spatial SDK hosts remain unverified. Dynamic Rust loading and a
+prebuilt generic product host are not supported SDK capabilities.

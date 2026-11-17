@@ -158,6 +158,7 @@ impl Consumer {
             ("vmux_layout", "", true),
             ("vmux_layout", "contracts,geometry", true),
             ("vmux_layout", "store", true),
+            ("vmux_lsp", "", true),
         ] {
             let mut command =
                 self.cargo(&["test", "--locked", "-p", package, "--no-default-features"]);
@@ -343,9 +344,13 @@ mod tests {
     }
 
     #[test]
-    fn graph_refuses_native_packages_even_with_the_complete_sdk_surface() {
-        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\n";
+    fn graph_requires_the_complete_sdk_surface_and_refuses_native_packages() {
+        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\nvmux_lsp v1\n";
         assert!(Graph::check(graph).is_ok());
+        for package in graph.lines() {
+            let incomplete = graph.replace(&format!("{package}\n"), "");
+            assert!(Graph::check(&incomplete).is_err(), "{package}");
+        }
         assert!(Graph::check(&format!("{graph}bevy_cef v1\n")).is_err());
     }
 

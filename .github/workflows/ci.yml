@@ -560,7 +560,7 @@ jobs:
           test "$PLAN" = success
           test "$PREPARE" = success
           case "$SUITE" in
-            test-rust|test-sdk-ecs|test-sdk-project|test-sdk-extension|test-sdk-flex|test-sdk-layout|test-sdk-framework|test-sdk-host|test-desktop|test-features|test-ecs) ;;
+            test-rust|test-sdk-ecs|test-sdk-project|test-sdk-extension|test-sdk-flex|test-sdk-layout|test-sdk-lsp|test-sdk-framework|test-sdk-host|test-desktop|test-features|test-ecs) ;;
             *) echo "::error::Unknown test suite: $SUITE"; exit 1 ;;
           esac
       - name: Reuse verified test result

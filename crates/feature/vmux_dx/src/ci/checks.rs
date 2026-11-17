@@ -1532,11 +1532,11 @@ mod tests {
     }
 
     #[test]
-    fn sdk_selection_requires_all_seven_feature_and_consumer_groups() {
+    fn sdk_selection_requires_every_public_feature_and_consumer_group() {
         let mut runs = Runs::new();
         runs.fixture.environment.set("VMUX_SDK_REQUIRED", "true");
         let outputs = runs.plan();
-        let mut matrix: Value = serde_json::from_str(&outputs["tests"]).unwrap();
+        let matrix: Value = serde_json::from_str(&outputs["tests"]).unwrap();
         let mut sdk = BTreeSet::new();
         for row in matrix["include"].as_array().unwrap() {
             if row["key"].as_str().unwrap().starts_with("test-sdk-") {
@@ -1556,6 +1556,7 @@ mod tests {
                     "test-sdk-extension",
                     "test-sdk-flex",
                     "test-sdk-layout",
+                    "test-sdk-lsp",
                     "test-sdk-framework",
                     "test-sdk-host"
                 ]
@@ -1571,21 +1572,25 @@ mod tests {
             .environment
             .set("VMUX_CI_RESULTS", results.to_string());
         runs.fixture.run("checks-gate", &[]).unwrap();
-        matrix["include"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|row| row["key"] != "test-sdk-host");
-        selected["tests"] = json!(matrix.to_string());
-        selected["test_count"] = json!(matrix["include"].as_array().unwrap().len().to_string());
-        results["changes"]["outputs"] = selected;
-        runs.fixture
-            .environment
-            .set("VMUX_CI_RESULTS", results.to_string());
-        assert!(
+        for missing in ["test-sdk-host", "test-sdk-lsp"] {
+            let mut incomplete = matrix.clone();
+            incomplete["include"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|row| row["key"] != missing);
+            selected["tests"] = json!(incomplete.to_string());
+            selected["test_count"] =
+                json!(incomplete["include"].as_array().unwrap().len().to_string());
+            results["changes"]["outputs"] = selected.clone();
             runs.fixture
-                .run("checks-gate", &[])
-                .unwrap_err()
-                .contains("test-sdk-host")
-        );
+                .environment
+                .set("VMUX_CI_RESULTS", results.to_string());
+            assert!(
+                runs.fixture
+                    .run("checks-gate", &[])
+                    .unwrap_err()
+                    .contains(missing)
+            );
+        }
     }
 }
