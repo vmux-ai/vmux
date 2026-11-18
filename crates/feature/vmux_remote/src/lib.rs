@@ -6,9 +6,9 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::prelude::{App, Plugin};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{Browsers, UiInput};
+use bevy_cef::prelude::{Browsers, UiEventSystems, UiInput};
 use vmux_ecs::page::PageReady;
-use vmux_ecs::{CreatedAt, Order, UiState, UiStateWrite};
+use vmux_ecs::{CreatedAt, Order, UiStateWrite};
 use vmux_layout::event::{
     RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
     RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
@@ -38,7 +38,7 @@ impl Plugin for RemotePlugin {
                     disable,
                     poll_enable,
                     poll_registration,
-                    poll_authorizations,
+                    poll_authorizations.after(UiEventSystems::Flush),
                     expire_pairing,
                     push_state_emit,
                 )
@@ -546,10 +546,24 @@ fn expire_pairing(mut visibility: Single<&mut PairingVisibility>) {
     }
 }
 
+#[derive(Component)]
+struct SubmittedRemote(RemoteUiState);
+
+type RemotePages<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, PageReady>,
+        Option<&'static SubmittedRemote>,
+    ),
+    With<LayoutCef>,
+>;
+
 fn push_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    cef_q: Query<(Entity, Ref<PageReady>, Option<&UiState<LayoutUiState>>), With<LayoutCef>>,
+    cef_q: RemotePages,
     states: Query<(
         Entity,
         &RemoteState,
@@ -580,14 +594,13 @@ fn push_state_emit(
         if !browsers.can_emit_to(&cef_e) {
             continue;
         }
-        if published
-            .and_then(UiState::current)
-            .is_some_and(|state| state.remote == payload)
-            && !page_ready.is_changed()
-        {
+        if published.is_some_and(|submitted| submitted.0 == payload) && !page_ready.is_changed() {
             continue;
         }
         commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        commands
+            .entity(cef_e)
+            .insert(SubmittedRemote(payload.clone()));
     }
 }
 
@@ -656,14 +669,19 @@ fn remove_if_exists(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_ecs::UiState;
 
     #[derive(Resource, Default)]
-    struct Published(Option<RemoteUiState>);
+    struct Published {
+        last: Option<RemoteUiState>,
+        writes: usize,
+    }
 
     impl Published {
         fn capture(trigger: On<UiStateWrite<LayoutUiState>>, mut published: ResMut<Self>) {
             if let Some(remote) = &trigger.event().update().remote {
-                published.0 = Some(remote.clone());
+                published.last = Some(remote.clone());
+                published.writes += 1;
             }
         }
     }
@@ -939,7 +957,7 @@ mod tests {
                 .and_then(UiState::current)
                 .is_none()
         );
-        assert!(fixture.app.world().resource::<Published>().0.is_none());
+        assert!(fixture.app.world().resource::<Published>().last.is_none());
         fixture.snapshot(fixture.runtime, &["phone"]);
         fixture
             .app
@@ -951,7 +969,7 @@ mod tests {
             .app
             .world()
             .resource::<Published>()
-            .0
+            .last
             .as_ref()
             .unwrap();
         assert!(published.paired);
@@ -977,7 +995,7 @@ mod tests {
             .app
             .world()
             .resource::<Published>()
-            .0
+            .last
             .as_ref()
             .unwrap();
         assert_eq!(
@@ -987,6 +1005,65 @@ mod tests {
                 .map(|device| device.id.as_str())
                 .collect::<Vec<_>>(),
             ["replacement-phone"]
+        );
+    }
+    #[test]
+    fn queued_remote_projection_is_deduplicated_and_expired_qr_supersedes_it() {
+        let mut fixture = RemoteFixture::new();
+        let page = fixture
+            .app
+            .world_mut()
+            .spawn((LayoutCef, PageReady, bevy_cef::prelude::BinIpcBlocked))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .non_send_mut::<Browsers>()
+            .set_externally_hosted(page);
+        fixture.tick();
+        fixture.tick();
+        assert_eq!(fixture.app.world().resource::<Published>().writes, 1);
+
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.runtime)
+            .insert(PairingVisibility(Some(
+                Instant::now() + Duration::from_secs(60),
+            )));
+        fixture.tick();
+        fixture.tick();
+        assert_eq!(fixture.app.world().resource::<Published>().writes, 2);
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Published>()
+                .last
+                .as_ref()
+                .unwrap()
+                .pairing_visible
+        );
+
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.runtime)
+            .insert(PairingVisibility(Some(
+                Instant::now() - Duration::from_millis(1),
+            )));
+        fixture.tick();
+        fixture.tick();
+        assert_eq!(fixture.app.world().resource::<Published>().writes, 3);
+        assert!(
+            !fixture
+                .app
+                .world()
+                .resource::<Published>()
+                .last
+                .as_ref()
+                .unwrap()
+                .pairing_visible
         );
     }
 }
