@@ -2,8 +2,9 @@ use bevy_app::{App, Plugin as BevyPlugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::system::SystemParam;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::result::Result;
 use vmux_ecs::{
     Active, BaseRevision, Cwd, EntityTarget, Operation, OperationError, OperationState, Revision,
 };
@@ -22,13 +23,22 @@ impl BevyPlugin for ApprovalPlugin {
             .add_message::<Scoped>()
             .add_message::<Loaded>()
             .add_message::<Saved>()
-            .add_systems(Reconcile, (initialize, remember, resolve).chain())
+            .add_message::<PreparedGrant>()
+            .add_systems(
+                Reconcile,
+                (initialize, remember, receive, materialize, receive_saves).chain(),
+            )
             .configure_sets(Update, (Prepare, Resolve).chain())
             .add_systems(
                 Update,
                 (initialize, remember, prepare).chain().in_set(Prepare),
             )
-            .add_systems(Update, (resolve, settle).chain().in_set(Resolve))
+            .add_systems(
+                Update,
+                (receive, materialize, receive_saves, settle)
+                    .chain()
+                    .in_set(Resolve),
+            )
             .add_systems(
                 Update,
                 counts
@@ -36,6 +46,10 @@ impl BevyPlugin for ApprovalPlugin {
                     .in_set(vmux_session::ApprovalProjectionSet),
             )
             .add_observer(remove)
+            .add_observer(load)
+            .add_observer(scope)
+            .add_observer(apply)
+            .add_observer(saved)
             .init_schedule(Reconcile);
     }
 }
@@ -148,14 +162,14 @@ pub(crate) struct Remember {
     pub(crate) tool: String,
 }
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub(crate) struct Scoped {
     pub(crate) operation: Entity,
     pub(crate) repository: Option<PathBuf>,
     pub(crate) directory: Option<PathBuf>,
 }
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub(crate) struct Loaded {
     pub(crate) file: Entity,
     pub(crate) operation: Entity,
@@ -163,7 +177,7 @@ pub(crate) struct Loaded {
     pub(crate) result: Result<Vec<(String, String, String)>, String>,
 }
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub(crate) struct Saved {
     pub(crate) file: Entity,
     pub(crate) operation: Entity,
@@ -388,336 +402,412 @@ fn prepare(
     }
 }
 
-fn resolve(world: &mut World) {
-    let mut incoming = Vec::new();
-    let loaded: Vec<_> = world.resource_mut::<Messages<Loaded>>().drain().collect();
-    for result in loaded {
-        if world
-            .get::<EntityTarget<File>>(result.operation)
-            .is_none_or(|target| target.entity() != result.file)
-        {
+#[derive(Message, Event)]
+struct PreparedGrant {
+    file: Entity,
+    actor: String,
+    directory: String,
+    transient: Option<Entity>,
+    tool: Option<String>,
+    binding: Option<(Entity, String, PathBuf)>,
+    explicit: bool,
+}
+
+fn receive(
+    mut loaded: ResMut<Messages<Loaded>>,
+    mut scoped: ResMut<Messages<Scoped>>,
+    mut commands: Commands,
+) {
+    for receipt in loaded.drain() {
+        commands.trigger(receipt);
+    }
+    for receipt in scoped.drain() {
+        commands.trigger(receipt);
+    }
+}
+
+fn materialize(mut prepared: ResMut<Messages<PreparedGrant>>, mut commands: Commands) {
+    for grant in prepared.drain() {
+        commands.trigger(grant);
+    }
+}
+
+fn receive_saves(mut saved: ResMut<Messages<Saved>>, mut commands: Commands) {
+    for receipt in saved.drain() {
+        commands.trigger(receipt);
+    }
+}
+
+fn load(
+    mut receipt: On<Loaded>,
+    mut files: Query<&mut File>,
+    targets: Query<&EntityTarget<File>>,
+    grants: Query<(Entity, &ChildOf, Has<Explicit>), With<Grant>>,
+    parents: Query<&ChildOf>,
+    mut prepared: MessageWriter<PreparedGrant>,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    if !targets
+        .get(receipt.operation)
+        .is_ok_and(|target| target.entity() == receipt.file)
+    {
+        return;
+    }
+    let Ok(mut file) = files.get_mut(receipt.file) else {
+        return;
+    };
+    if file.read != Some(receipt.operation) {
+        return;
+    }
+    file.read = None;
+    let result = std::mem::replace(&mut receipt.result, Ok(Vec::new()));
+    let records = match result {
+        Ok(records) => records,
+        Err(error) => {
+            file.loaded = false;
+            file.read_failed = true;
+            commands.entity(receipt.operation).insert((
+                OperationState::Failed,
+                OperationError::new(error.clone()).unwrap(),
+            ));
+            commands
+                .entity(receipt.file)
+                .insert(OperationError::new(error).unwrap());
+            return;
+        }
+    };
+    file.loaded = true;
+    file.read_failed = false;
+    file.fingerprint = receipt.fingerprint;
+    commands.entity(receipt.file).remove::<OperationError>();
+    commands
+        .entity(receipt.operation)
+        .insert(OperationState::Succeeded);
+    for (entity, parent, explicit) in &grants {
+        if explicit {
             continue;
         }
-        let Some(mut file) = world.get_mut::<File>(result.file) else {
+        let Ok(scope) = parents.get(parent.parent()) else {
             continue;
         };
-        if file.read != Some(result.operation) {
+        let Ok(agent) = parents.get(scope.parent()) else {
             continue;
-        }
-        file.read = None;
-        match result.result {
-            Ok(records) => {
-                file.loaded = true;
-                file.read_failed = false;
-                file.fingerprint = result.fingerprint;
-                world.entity_mut(result.file).remove::<OperationError>();
-                world
-                    .entity_mut(result.operation)
-                    .insert(OperationState::Succeeded);
-                let mut stale = Vec::new();
-                for (entity, parent, explicit) in world
-                    .query_filtered::<(Entity, &ChildOf, Has<Explicit>), With<Grant>>()
-                    .iter(world)
-                {
-                    if explicit {
-                        continue;
-                    }
-                    let Some(scope) = world.get::<ChildOf>(parent.parent()) else {
-                        continue;
-                    };
-                    let Some(agent) = world.get::<ChildOf>(scope.parent()) else {
-                        continue;
-                    };
-                    if agent.parent() == result.file {
-                        stale.push(entity);
-                    }
-                }
-                for entity in stale {
-                    world.despawn(entity);
-                }
-                for (agent, directory, tool) in records {
-                    if agent.is_empty()
-                        || agent != agent.trim().to_ascii_lowercase()
-                        || tool.is_empty()
-                        || tool != Grant::key(&tool)
-                    {
-                        continue;
-                    }
-                    incoming.push((result.file, agent, directory, None, Some(tool), None, false));
-                }
-            }
-            Err(error) => {
-                file.loaded = false;
-                file.read_failed = true;
-                world.entity_mut(result.operation).insert((
-                    OperationState::Failed,
-                    OperationError::new(error.clone()).unwrap(),
-                ));
-                world
-                    .entity_mut(result.file)
-                    .insert(OperationError::new(error).unwrap());
-            }
+        };
+        if agent.parent() == receipt.file {
+            commands.entity(entity).despawn();
         }
     }
-    let scoped: Vec<_> = world.resource_mut::<Messages<Scoped>>().drain().collect();
-    for result in scoped {
-        let Some(request) = world.get::<ScopeRequest>(result.operation).copied() else {
-            continue;
-        };
-        let owner = if request.consent {
-            request.file
-        } else {
-            request.session
-        };
-        if world
-            .get::<ChildOf>(result.operation)
-            .is_none_or(|parent| parent.parent() != owner)
+    for (actor, directory, tool) in records {
+        if actor.is_empty()
+            || actor != actor.trim().to_ascii_lowercase()
+            || tool.is_empty()
+            || tool != Grant::key(&tool)
         {
             continue;
         }
-        let Some(agent) = world.get::<AgentId>(result.operation).cloned() else {
-            continue;
-        };
-        let Some(cwd) = world.get::<Cwd>(result.operation).cloned() else {
-            continue;
-        };
-        if world.get::<File>(request.file).is_none()
-            || matches!(
-                world.get::<OperationState>(result.operation),
-                Some(OperationState::Canceled | OperationState::Failed)
-            )
+        prepared.write(PreparedGrant {
+            file: receipt.file,
+            actor,
+            directory,
+            transient: None,
+            tool: Some(tool),
+            binding: None,
+            explicit: false,
+        });
+    }
+}
+
+fn scope(
+    mut receipt: On<Scoped>,
+    requests: Query<(
+        &ScopeRequest,
+        &ChildOf,
+        &AgentId,
+        &Cwd,
+        Option<&OperationState>,
+        Option<&Name>,
+    )>,
+    files: Query<Has<Active>, With<File>>,
+    sessions: Query<(&AgentId, &Cwd, Option<&Pending>), With<Session>>,
+    mut prepared: MessageWriter<PreparedGrant>,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    let Ok((request, parent, agent, cwd, state, name)) = requests.get(receipt.operation) else {
+        return;
+    };
+    let owner = if request.consent {
+        request.file
+    } else {
+        request.session
+    };
+    if parent.parent() != owner
+        || !files.contains(request.file)
+        || matches!(
+            state,
+            Some(OperationState::Canceled | OperationState::Failed)
+        )
+    {
+        return;
+    }
+    let binding = match sessions.get(request.session) {
+        Ok((found, directory, _))
+            if found == agent && directory == cwd && files.get(request.file) == Ok(true) =>
         {
-            continue;
+            Some((request.session, agent.0.clone(), cwd.0.clone()))
         }
-        let mut binding = None;
-        if world.get::<AgentId>(request.session) == Some(&agent)
-            && world.get::<Cwd>(request.session) == Some(&cwd)
-            && world.get::<Session>(request.session).is_some()
-            && world.get::<Active>(request.file).is_some()
-        {
-            binding = Some((request.session, agent.0.clone(), cwd.0.clone()));
-        }
-        if !request.consent && binding.is_none() {
-            world
-                .entity_mut(result.operation)
-                .remove::<ScopeRequest>()
-                .insert(OperationState::Canceled);
-            continue;
-        }
-        let path = result.repository.or(result.directory);
-        let transient = if path.is_none() {
-            Some(request.session)
-        } else {
-            None
-        };
-        if transient.is_some() && world.get::<Session>(request.session).is_none() {
-            world
-                .entity_mut(result.operation)
-                .remove::<ScopeRequest>()
-                .insert((
-                    OperationState::Failed,
-                    OperationError::new("approval scope is unavailable").unwrap(),
-                ));
-            continue;
-        }
-        let key = if let Some(path) = path {
-            Scope::key(&path)
-        } else {
-            Scope::key(&cwd.0)
-        };
-        let tool = if request.consent {
-            world
-                .get::<Name>(result.operation)
-                .map(|name| name.as_str().to_string())
-        } else {
-            None
-        };
-        incoming.push((
-            request.file,
-            agent.0.trim().to_ascii_lowercase(),
-            key,
-            transient,
-            tool,
-            binding,
-            request.consent,
-        ));
-        world
-            .entity_mut(result.operation)
+        _ => None,
+    };
+    if !request.consent && binding.is_none() {
+        commands
+            .entity(receipt.operation)
             .remove::<ScopeRequest>()
-            .insert(OperationState::Succeeded);
-        if world
-            .get::<Pending>(request.session)
-            .is_some_and(|pending| pending.0 == result.operation)
-        {
-            world.entity_mut(request.session).remove::<Pending>();
-        }
+            .insert(OperationState::Canceled);
+        return;
     }
-    let mut agents = HashMap::new();
-    for (entity, parent, agent) in world
-        .query_filtered::<(Entity, &ChildOf, &AgentId), With<Agent>>()
-        .iter(world)
+    let path = receipt
+        .repository
+        .take()
+        .or_else(|| receipt.directory.take());
+    let transient = if path.is_none() {
+        Some(request.session)
+    } else {
+        None
+    };
+    if transient.is_some() && !sessions.contains(request.session) {
+        commands
+            .entity(receipt.operation)
+            .remove::<ScopeRequest>()
+            .insert((
+                OperationState::Failed,
+                OperationError::new("approval scope is unavailable").unwrap(),
+            ));
+        return;
+    }
+    let directory = match path {
+        Some(path) => Scope::key(&path),
+        None => Scope::key(&cwd.0),
+    };
+    let tool = if request.consent {
+        name.map(|name| name.as_str().to_string())
+    } else {
+        None
+    };
+    prepared.write(PreparedGrant {
+        file: request.file,
+        actor: agent.0.trim().to_ascii_lowercase(),
+        directory,
+        transient,
+        tool,
+        binding,
+        explicit: request.consent,
+    });
+    commands
+        .entity(receipt.operation)
+        .remove::<ScopeRequest>()
+        .insert(OperationState::Succeeded);
+    if sessions
+        .get(request.session)
+        .is_ok_and(|(_, _, pending)| pending.is_some_and(|pending| pending.0 == receipt.operation))
     {
-        agents.insert((parent.parent(), agent.0.clone()), entity);
+        commands.entity(request.session).remove::<Pending>();
     }
-    let mut scopes = HashMap::new();
-    for (entity, parent, scope, name) in world
-        .query::<(Entity, &ChildOf, &Scope, &Name)>()
-        .iter(world)
-    {
-        scopes.insert(
-            (parent.parent(), name.as_str().to_string(), scope.session),
-            entity,
-        );
-    }
-    let mut rules = HashMap::new();
-    for (entity, parent, name) in world
-        .query_filtered::<(Entity, &ChildOf, &Name), With<Grant>>()
-        .iter(world)
-    {
-        rules.insert((parent.parent(), name.as_str().to_string()), entity);
-    }
-    for (file, actor, directory, transient, tool, binding, explicit) in incoming {
-        let agent_key = (file, actor.clone());
-        let agent = if let Some(agent) = agents.get(&agent_key) {
-            *agent
-        } else {
-            let agent = world.spawn((Agent, AgentId(actor), ChildOf(file))).id();
-            agents.insert(agent_key, agent);
-            agent
-        };
-        let scope_key = (agent, directory.clone(), transient);
-        let scope = if let Some(scope) = scopes.get(&scope_key) {
-            *scope
-        } else {
-            let scope = world
-                .spawn((
-                    Scope { session: transient },
-                    Name::new(directory),
-                    ChildOf(agent),
-                ))
-                .id();
-            scopes.insert(scope_key, scope);
-            scope
-        };
-        if let Some((session, agent, cwd)) = binding {
-            if let Some(pending) = world.get::<Pending>(session) {
-                let operation = pending.0;
-                world.despawn(operation);
-                world.entity_mut(session).remove::<Pending>();
+}
+
+#[derive(SystemParam)]
+struct GrantCatalog<'w, 's> {
+    agents: Query<'w, 's, (Entity, &'static ChildOf, &'static AgentId), With<Agent>>,
+    scopes: Query<'w, 's, (Entity, &'static ChildOf, &'static Scope, &'static Name)>,
+    rules: Query<'w, 's, (Entity, &'static ChildOf, &'static Name), With<Grant>>,
+}
+
+impl GrantCatalog<'_, '_> {
+    fn agent(&self, file: Entity, actor: &str) -> Option<Entity> {
+        let mut found = None;
+        for (entity, parent, agent) in &self.agents {
+            if parent.parent() == file && agent.0 == actor {
+                found = Some(entity);
             }
-            world.entity_mut(session).insert(Binding {
-                scope,
-                file,
-                agent,
-                cwd,
-            });
         }
-        let Some(tool) = tool else {
-            continue;
-        };
-        if let Some(entity) = rules.get(&(scope, tool.clone())) {
-            if explicit {
-                let revision = if transient.is_none() {
-                    let mut revision = world.get_mut::<Revision>(file).unwrap();
-                    revision.0 = revision
-                        .0
-                        .checked_add(1)
-                        .expect("approval revision exhausted");
-                    revision.0
-                } else {
-                    0
-                };
-                world
-                    .entity_mut(*entity)
-                    .insert((Explicit, Revision(revision)));
+        found
+    }
+
+    fn scope(&self, agent: Entity, directory: &str, transient: Option<Entity>) -> Option<Entity> {
+        let mut found = None;
+        for (entity, parent, scope, name) in &self.scopes {
+            if parent.parent() == agent && name.as_str() == directory && scope.session == transient
+            {
+                found = Some(entity);
             }
-            continue;
         }
-        let revision = if explicit && transient.is_none() {
-            let mut revision = world.get_mut::<Revision>(file).unwrap();
-            revision.0 = revision
-                .0
-                .checked_add(1)
-                .expect("approval revision exhausted");
-            revision.0
-        } else {
-            0
-        };
-        let entity = world
+        found
+    }
+
+    fn rule(&self, scope: Entity, tool: &str) -> Option<Entity> {
+        let mut found = None;
+        for (entity, parent, name) in &self.rules {
+            if parent.parent() == scope && name.as_str() == tool {
+                found = Some(entity);
+            }
+        }
+        found
+    }
+}
+
+fn apply(
+    grant: On<PreparedGrant>,
+    catalog: GrantCatalog,
+    pending: Query<&Pending>,
+    mut revisions: Query<&mut Revision>,
+    mut commands: Commands,
+) {
+    let agent = match catalog.agent(grant.file, &grant.actor) {
+        Some(agent) => agent,
+        None => commands
+            .spawn((Agent, AgentId(grant.actor.clone()), ChildOf(grant.file)))
+            .id(),
+    };
+    let scope = match catalog.scope(agent, &grant.directory, grant.transient) {
+        Some(scope) => scope,
+        None => commands
+            .spawn((
+                Scope {
+                    session: grant.transient,
+                },
+                Name::new(grant.directory.clone()),
+                ChildOf(agent),
+            ))
+            .id(),
+    };
+    if let Some((session, actor, cwd)) = &grant.binding {
+        if let Ok(pending) = pending.get(*session) {
+            commands.entity(pending.0).try_despawn();
+            commands.entity(*session).remove::<Pending>();
+        }
+        commands.entity(*session).insert(Binding {
+            scope,
+            file: grant.file,
+            agent: actor.clone(),
+            cwd: cwd.clone(),
+        });
+    }
+    let Some(tool) = &grant.tool else {
+        return;
+    };
+    let existing = catalog.rule(scope, tool);
+    if existing.is_some() && !grant.explicit {
+        return;
+    }
+    let revision = if grant.explicit && grant.transient.is_none() {
+        let mut revision = revisions.get_mut(grant.file).unwrap();
+        revision.0 = revision
+            .0
+            .checked_add(1)
+            .expect("approval revision exhausted");
+        revision.0
+    } else {
+        0
+    };
+    let entity = match existing {
+        Some(entity) => entity,
+        None => commands
             .spawn((
                 Grant,
                 Name::new(tool.clone()),
                 Revision(revision),
                 ChildOf(scope),
             ))
-            .id();
-        if explicit {
-            world.entity_mut(entity).insert(Explicit);
-        }
-        rules.insert((scope, tool), entity);
+            .id(),
+    };
+    if grant.explicit {
+        commands
+            .entity(entity)
+            .insert((Explicit, Revision(revision)));
     }
-    let saved: Vec<_> = world.resource_mut::<Messages<Saved>>().drain().collect();
-    for result in saved {
-        if world
-            .get::<EntityTarget<File>>(result.operation)
-            .is_none_or(|target| target.entity() != result.file)
-            || world
-                .get::<BaseRevision>(result.operation)
-                .map(|captured| captured.0)
-                != Some(result.revision)
-            || world
-                .get::<Revision>(result.file)
-                .is_none_or(|current| result.revision > current.0)
-        {
-            continue;
-        }
-        let Some(mut file) = world.get_mut::<File>(result.file) else {
-            continue;
-        };
-        if file.write != Some(result.operation) {
-            continue;
-        }
-        file.write = None;
-        match result.result {
-            Ok(()) => {
-                file.fingerprint = result.fingerprint;
-                file.write_failed = false;
-                world.get_mut::<BaseRevision>(result.file).unwrap().0 = result.revision;
-                world
-                    .entity_mut(result.operation)
-                    .insert(OperationState::Succeeded);
-                let mut acknowledged = Vec::new();
-                for (entity, parent, revision) in world
-                    .query_filtered::<(Entity, &ChildOf, &Revision), (With<Grant>, With<Explicit>)>(
-                    )
-                    .iter(world)
-                {
-                    let Some(scope) = world.get::<ChildOf>(parent.parent()) else {
-                        continue;
-                    };
-                    let Some(agent) = world.get::<ChildOf>(scope.parent()) else {
-                        continue;
-                    };
-                    if agent.parent() == result.file && revision.0 <= result.revision {
-                        acknowledged.push(entity);
-                    }
-                }
-                for entity in acknowledged {
-                    world.entity_mut(entity).remove::<Explicit>();
+}
+
+#[derive(SystemParam)]
+struct Acknowledgments<'w, 's> {
+    revisions: Query<'w, 's, &'static Revision>,
+    versions: ParamSet<
+        'w,
+        's,
+        (
+            Query<'w, 's, (&'static EntityTarget<File>, &'static BaseRevision)>,
+            Query<'w, 's, &'static mut BaseRevision>,
+        ),
+    >,
+}
+
+impl Acknowledgments<'_, '_> {
+    fn accepts(&mut self, operation: Entity, file: Entity, revision: u64) -> bool {
+        self.versions
+            .p0()
+            .get(operation)
+            .is_ok_and(|(target, base)| target.entity() == file && base.0 == revision)
+            && self
+                .revisions
+                .get(file)
+                .is_ok_and(|current| revision <= current.0)
+    }
+}
+
+fn saved(
+    mut receipt: On<Saved>,
+    mut files: Query<&mut File>,
+    mut acknowledgments: Acknowledgments,
+    rules: Query<(Entity, &ChildOf, &Revision), (With<Grant>, With<Explicit>)>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    if !acknowledgments.accepts(receipt.operation, receipt.file, receipt.revision) {
+        return;
+    }
+    let Ok(mut file) = files.get_mut(receipt.file) else {
+        return;
+    };
+    if file.write != Some(receipt.operation) {
+        return;
+    }
+    file.write = None;
+    match std::mem::replace(&mut receipt.result, Ok(())) {
+        Ok(()) => {
+            file.fingerprint = receipt.fingerprint;
+            file.write_failed = false;
+            acknowledgments
+                .versions
+                .p1()
+                .get_mut(receipt.file)
+                .unwrap()
+                .0 = receipt.revision;
+            commands
+                .entity(receipt.operation)
+                .insert(OperationState::Succeeded);
+            for (entity, parent, revision) in &rules {
+                let Ok(scope) = parents.get(parent.parent()) else {
+                    continue;
+                };
+                let Ok(agent) = parents.get(scope.parent()) else {
+                    continue;
+                };
+                if agent.parent() == receipt.file && revision.0 <= receipt.revision {
+                    commands.entity(entity).remove::<Explicit>();
                 }
             }
-            Err(error) => {
-                file.loaded = false;
-                file.read_failed = true;
-                file.write_failed = true;
-                world.entity_mut(result.operation).insert((
-                    OperationState::Failed,
-                    OperationError::new(error.clone()).unwrap(),
-                ));
-                world
-                    .entity_mut(result.file)
-                    .insert(OperationError::new(error).unwrap());
-            }
+        }
+        Err(error) => {
+            file.loaded = false;
+            file.read_failed = true;
+            file.write_failed = true;
+            commands.entity(receipt.operation).insert((
+                OperationState::Failed,
+                OperationError::new(error.clone()).unwrap(),
+            ));
+            commands
+                .entity(receipt.file)
+                .insert(OperationError::new(error).unwrap());
         }
     }
 }
@@ -861,6 +951,99 @@ mod tests {
                 .iter(self.app.world())
                 .count()
         }
+    }
+
+    #[test]
+    fn consent_receipt_cannot_retire_a_later_scope_receipt_in_the_same_batch() {
+        let mut fixture = Fixture::new();
+        let session = fixture.session("claude", "/repo/project");
+        let pending = fixture.app.world().get::<Pending>(session).unwrap().0;
+        fixture.remember(session, "bash");
+        let consent = fixture
+            .app
+            .world_mut()
+            .query::<(Entity, &ScopeRequest)>()
+            .iter(fixture.app.world())
+            .find_map(|(entity, request)| {
+                (request.consent && request.session == session).then_some(entity)
+            })
+            .unwrap();
+        for (operation, directory) in [(consent, "/repo/consented"), (pending, "/repo/current")] {
+            fixture.app.world_mut().write_message(Scoped {
+                operation,
+                repository: Some(directory.into()),
+                directory: None,
+            });
+        }
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(pending),
+            Some(&OperationState::Succeeded)
+        );
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(consent),
+            Some(&OperationState::Succeeded)
+        );
+        assert!(!fixture.allows(session, "bash"));
+        let matching = fixture.session("claude", "/repo/consented/subdir");
+        fixture.resolve(matching, Some("/repo/consented"), None);
+        assert!(fixture.allows(matching, "bash"));
+    }
+
+    #[test]
+    fn save_acknowledgment_preserves_grants_created_after_its_captured_revision() {
+        let mut fixture = Fixture::new();
+        let session = fixture.session("claude", "/repo/project");
+        fixture.resolve(session, Some("/repo"), None);
+        fixture.remember(session, "bash");
+        fixture.resolve(session, Some("/repo"), None);
+        let revision = fixture.app.world().get::<Revision>(fixture.file).unwrap().0;
+        let operation = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("approval.write").unwrap().running(),
+                EntityTarget::<File>::new(fixture.file),
+                BaseRevision(revision),
+            ))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<File>(fixture.file)
+            .unwrap()
+            .write = Some(operation);
+        fixture.remember(session, "read");
+        fixture.resolve(session, Some("/repo"), None);
+        fixture.app.world_mut().write_message(Saved {
+            file: fixture.file,
+            operation,
+            revision,
+            fingerprint: Some(7),
+            result: Ok(()),
+        });
+        fixture.app.world_mut().run_schedule(Reconcile);
+        assert!(fixture.allows(session, "bash"));
+        assert!(fixture.allows(session, "read"));
+        let rules: Vec<_> = fixture
+            .app
+            .world_mut()
+            .query_filtered::<(&Name, Has<Explicit>), With<Grant>>()
+            .iter(fixture.app.world())
+            .map(|(name, explicit)| (name.as_str().to_string(), explicit))
+            .collect();
+        assert_eq!(rules.len(), 2);
+        assert!(rules.contains(&("bash".into(), false)));
+        assert!(rules.contains(&("read".into(), true)));
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<BaseRevision>(fixture.file)
+                .unwrap()
+                .0,
+            revision
+        );
     }
 
     #[test]
