@@ -1,25 +1,22 @@
 use crate::SimulatorPlugin;
 use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorUiState};
 use crate::url::SimulatorRoute;
+use attachment::{AttachmentFailed, AttachmentSet, Attempt, Phase};
 use bevy::prelude::*;
 use bevy::prelude::{Commands, Query};
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 pub use device::{Axe, SimulatorDevice};
-use hid::HidBroker;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
 use stream::StreamServer;
 pub use tool::SimulatorToolPlugin;
 use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
-use vmux_ecs::PageMetadata;
 use vmux_ecs::page::{HostedPage, PageReady};
 use vmux_ecs::service::ServiceRequest;
+use vmux_ecs::{EntityTarget, PageMetadata};
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_input::{NativeKeyClaimSet, NativeKeyInputSet};
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 
+mod attachment;
 #[cfg(target_os = "macos")]
 mod core_simulator;
 mod device;
@@ -79,6 +76,7 @@ impl Plugin for SimulatorPlugin {
         )
         .add_plugins(UiStatePlugin::<SimulatorUiState>::default())
         .add_plugins(SimulatorToolPlugin)
+        .add_plugins(attachment::AttachmentPlugin)
         .configure_sets(
             Update,
             (NativeKeyClaimSet, NativeKeyInputSet, SimulatorInputSet).chain(),
@@ -108,15 +106,7 @@ impl Plugin for SimulatorPlugin {
                 .in_set(SimulatorFocusSet),
         )
         .add_message::<ServiceRequest>()
-        .add_systems(
-            Update,
-            (
-                start_device_attachments,
-                finish_device_attachments,
-                announce,
-            )
-                .chain(),
-        )
+        .add_systems(Update, announce.after(AttachmentSet))
         .add_systems(
             Update,
             (sync_active_view, ApplyDeferred)
@@ -126,7 +116,7 @@ impl Plugin for SimulatorPlugin {
         .add_systems(
             Update,
             sync_stream_activity
-                .after(finish_device_attachments)
+                .after(AttachmentSet)
                 .after(sync_active_view),
         )
         .add_systems(Update, handle_screenshot_requests.after(sync_active_view))
@@ -367,99 +357,8 @@ struct DevicePoints(f32, f32);
 #[derive(Component)]
 struct DevicePixels(u32, u32);
 
-type SimulatorViews<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PageMetadata,
-        Option<&'static ChildOf>,
-        Option<&'static UiState<SimulatorUiState>>,
-        Option<&'static DeviceAttachment>,
-        Option<&'static AttachmentFailed>,
-    ),
-    With<PageReady>,
->;
-
-type SimulatorAttachmentCandidates<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PageMetadata,
-        Option<&'static AttachedRoute>,
-        Option<&'static SimulatorDevice>,
-        Has<DeviceAttachment>,
-        Has<AttachmentFailed>,
-    ),
-    With<PageReady>,
->;
-
 #[derive(Component)]
 struct ActiveSimulatorView;
-
-#[derive(Component, Clone, PartialEq, Eq)]
-struct AttachedRoute(SimulatorRoute);
-
-#[derive(Component)]
-struct DeviceAttachment {
-    task: Task<Result<AttachedDevice, String>>,
-    progress: Arc<AtomicU8>,
-}
-
-struct AttachmentProgress {
-    phase: Arc<AtomicU8>,
-    wake: Option<EventLoopProxy<WinitUserEvent>>,
-}
-
-impl AttachmentProgress {
-    fn set(&self, phase: AttachmentPhase) {
-        self.phase.store(phase as u8, Ordering::Relaxed);
-        if let Some(wake) = &self.wake {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-#[repr(u8)]
-enum AttachmentPhase {
-    Locating = 1,
-    Booting = 2,
-    Connecting = 3,
-    Streaming = 4,
-}
-
-impl AttachmentPhase {
-    fn status(value: u8) -> &'static str {
-        match value {
-            2 => "booting",
-            3 => "connecting",
-            4 => "streaming",
-            _ => "locating",
-        }
-    }
-}
-
-impl DeviceAttachment {
-    fn status(&self) -> &'static str {
-        AttachmentPhase::status(self.progress.load(Ordering::Relaxed))
-    }
-}
-
-#[derive(Component)]
-struct AttachmentFailed(String);
-
-struct AttachedDevice {
-    axe: Axe,
-    clipboard: input::SimulatorClipboard,
-    hid: HidBroker,
-    keyboard: input::SimulatorKeyboard,
-    device: SimulatorDevice,
-    points: Option<(f32, f32)>,
-    pixels: Option<(u32, u32)>,
-    server: StreamServer,
-}
 
 fn sync_active_view(
     focus: FocusedStack,
@@ -499,145 +398,20 @@ impl SimulatorPlugin {
     }
 }
 
-fn start_device_attachments(
-    views: SimulatorAttachmentCandidates,
-    wake: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, metadata, attached_route, device, starting, failed) in &views {
-        let Ok(route) = SimulatorRoute::try_from(metadata.url.as_str()) else {
-            continue;
-        };
-        let matches = attached_route.is_some_and(|current| current.0 == route)
-            || device.is_some_and(|device| device.matches_route(&route));
-        if matches && (starting || failed || device.is_some()) {
-            continue;
-        }
-        commands.entity(entity).remove::<(
-            DeviceAttachment,
-            AttachmentFailed,
-            Axe,
-            HidBroker,
-            input::SimulatorClipboard,
-            input::SimulatorKeyboard,
-            SimulatorDevice,
-            DevicePoints,
-            DevicePixels,
-            StreamServer,
-            UiState<SimulatorUiState>,
-            input::DeviceTouchSession,
-        )>();
-        let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
-        let attached_route = route.clone();
-        let progress = Arc::new(AtomicU8::new(AttachmentPhase::Locating as u8));
-        let attachment_progress = AttachmentProgress {
-            phase: progress.clone(),
-            wake: wake.clone(),
-        };
-        let task = IoTaskPool::get().spawn(async move {
-            let result = attach_device(&route, &attachment_progress);
-            if let Some(proxy) = wake {
-                let _ = proxy.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands.entity(entity).insert((
-            AttachedRoute(attached_route),
-            DeviceAttachment { task, progress },
-        ));
-    }
-}
-
-fn attach_device(
-    route: &SimulatorRoute,
-    progress: &AttachmentProgress,
-) -> Result<AttachedDevice, String> {
-    progress.set(AttachmentPhase::Locating);
-    let axe = Axe::locate().ok_or_else(|| {
-        format!(
-            "`{}` not found; install it with `brew install cameroncooke/axe/axe`",
-            Axe::BIN
-        )
-    })?;
-    info!(
-        "axe {} at {}",
-        axe.version().unwrap_or_default(),
-        axe.path().display()
-    );
-    progress.set(AttachmentPhase::Booting);
-    let device = SimulatorDevice::booted_or_boot(route.version(), route.device_name())?;
-    progress.set(AttachmentPhase::Connecting);
-    let points = device.point_size(&axe);
-    let pixels = device.pixel_size(&axe);
-    let hid = HidBroker::start(&axe, &device)
-        .map_err(|error| format!("could not start simulator input: {error}"))?;
-    let clipboard = input::SimulatorClipboard::start(&axe, &device)
-        .map_err(|error| format!("could not start simulator clipboard: {error}"))?;
-    let keyboard = input::SimulatorKeyboard::start(&axe, &device)
-        .map_err(|error| format!("could not start simulator keyboard: {error}"))?;
-    progress.set(AttachmentPhase::Streaming);
-    let server = StreamServer::start(&axe, device.clone(), pixels)
-        .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
-    Ok(AttachedDevice {
-        axe,
-        clipboard,
-        hid,
-        keyboard,
-        device,
-        points,
-        pixels,
-        server,
-    })
-}
-
-fn finish_device_attachments(
-    mut attachments: Query<(Entity, &mut DeviceAttachment)>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, mut attachment) in &mut attachments {
-        let Some(result) = future::block_on(future::poll_once(&mut attachment.task)) else {
-            continue;
-        };
-        commands.entity(entity).remove::<DeviceAttachment>();
-        let attached = match result {
-            Ok(attached) => attached,
-            Err(error) => {
-                error!("could not attach an iOS Simulator: {error}");
-                commands.entity(entity).insert(AttachmentFailed(error));
-                continue;
-            }
-        };
-        info!(
-            "mirroring {} on loopback port {}",
-            attached.device.name,
-            attached.server.port()
-        );
-        let mut entity_commands = commands.entity(entity);
-        if let Some((width, height)) = attached.points {
-            entity_commands.insert(DevicePoints(width, height));
-        }
-        if let Some((width, height)) = attached.pixels {
-            entity_commands.insert(DevicePixels(width, height));
-        }
-        entity_commands.insert((
-            attached.server,
-            attached.device,
-            attached.hid,
-            attached.clipboard,
-            attached.keyboard,
-            attached.axe,
-            input::DeviceTouchSession::default(),
-        ));
-        if let Some(wake) = wake.as_deref() {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-    }
-}
-
 fn announce(
-    views: SimulatorViews,
+    views: Query<
+        (
+            Entity,
+            &PageMetadata,
+            Option<&ChildOf>,
+            Option<&UiState<SimulatorUiState>>,
+            Option<&EntityTarget<Attempt>>,
+            Option<&AttachmentFailed>,
+        ),
+        With<PageReady>,
+    >,
     attachments: Query<(&StreamServer, &SimulatorDevice)>,
+    phases: Query<(&Phase, &vmux_ecs::OperationState)>,
     mut commands: Commands,
 ) {
     for (entity, meta, child_of, announced, starting, failed) in views.iter() {
@@ -663,8 +437,16 @@ fn announce(
             Err(_) => SimulatorUiState {
                 status: if failed.is_some() {
                     "errored".to_string()
-                } else if let Some(starting) = starting {
-                    starting.status().to_string()
+                } else if let Some((phase, _)) = starting
+                    .and_then(|target| phases.get(target.entity()).ok())
+                    .filter(|(_, state)| {
+                        matches!(
+                            state,
+                            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+                        )
+                    })
+                {
+                    phase.status().to_string()
                 } else {
                     "waiting".to_string()
                 },
