@@ -20,8 +20,11 @@ impl Plugin for TabsPlugin {
             .add_observer(close_item)
             .add_observer(reopen_item)
             .add_observer(capture)
+            .add_observer(retain)
+            .add_observer(transfer)
             .add_observer(restore)
-            .add_observer(restore_buffers);
+            .add_observer(restore_buffers)
+            .add_observer(resume);
     }
 }
 
@@ -53,47 +56,53 @@ impl Command for RestoreEditors {
     }
 }
 
-fn restore_buffers(request: On<RestoreEditors>, mut commands: Commands) {
+#[derive(EntityEvent)]
+struct ResumeEditors {
+    #[event_target]
+    view: Entity,
+    path: PathBuf,
+}
+
+fn restore_buffers(
+    request: On<RestoreEditors>,
+    mut archives: Query<(&mut ArchivedEditorState, Option<&mut ClosedEditors>)>,
+    mut views: Query<(&FileView, Option<&mut ExplorerState>)>,
+    mut buffers: Buffers,
+    mut commands: Commands,
+) {
     let stack = request.stack;
     let view = request.view;
-    commands.queue(move |world: &mut World| {
-        let Some(file) = world.get::<FileView>(view) else {
-            return;
-        };
-        let path = file.path.clone();
-        let Ok(mut owner) = world.get_entity_mut(stack) else {
-            return;
-        };
-        let Some(state) = owner.take::<ArchivedEditorState>() else {
-            return;
-        };
-        let closed = owner.take::<ClosedEditors>().unwrap_or_default();
-        let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
-        buffers
-            .get_mut(world)
-            .expect("parked buffer access")
-            .transfer(stack, view);
-        buffers.apply(world);
-        let settings = world.get_resource::<vmux_setting::AppSettings>();
-        let keymap = crate::host::keymap::KeymapConfig::resolve(settings).keymap();
-        buffers
-            .get_mut(world)
-            .expect("parked buffer access")
-            .resume(view, &path, keymap);
-        let mut document = world.entity_mut(view);
-        if let Some(mut explorer) = document.get_mut::<ExplorerState>() {
-            explorer.restore_editors(state.paths.iter().map(PathBuf::from).collect(), &path);
-        }
-        if let Some((_, closed_at)) = closed.0.last() {
-            document.insert(vmux_ecs::page::PageItemHistory {
+    let Ok((file, explorer)) = views.get_mut(view) else {
+        return;
+    };
+    let Ok((mut state, closed)) = archives.get_mut(stack) else {
+        return;
+    };
+    let path = file.path.clone();
+    let state = std::mem::take(&mut *state);
+    let closed = match closed {
+        Some(mut closed) => std::mem::take(&mut *closed),
+        None => ClosedEditors::default(),
+    };
+    commands
+        .entity(stack)
+        .remove::<(ArchivedEditorState, ClosedEditors)>();
+    buffers.transfer(stack, view);
+    if let Some(mut explorer) = explorer {
+        explorer.restore_editors(state.paths.iter().map(PathBuf::from).collect(), &path);
+    }
+    if let Some((_, closed_at)) = closed.0.last() {
+        commands
+            .entity(view)
+            .insert(vmux_ecs::page::PageItemHistory {
                 closed_at: *closed_at,
             });
-        }
-        document.insert((closed, OpenEditorsDirty));
-        buffers.apply(world);
-        let mut document = world.entity_mut(view);
-        if !state.preview_checkout.is_empty() {
-            document.insert(crate::host::navigation::CheckoutPreview(
+    }
+    commands.entity(view).insert((closed, OpenEditorsDirty));
+    if !state.preview_checkout.is_empty() {
+        commands
+            .entity(view)
+            .insert(crate::host::navigation::CheckoutPreview(
                 vmux_ecs::event::FileCheckoutState {
                     path: path.to_string_lossy().into_owned(),
                     repository: state.preview_repository,
@@ -101,8 +110,24 @@ fn restore_buffers(request: On<RestoreEditors>, mut commands: Commands) {
                     read_only: true,
                 },
             ));
-        }
-    });
+    }
+    commands.trigger(ResumeEditors { view, path });
+}
+
+fn resume(
+    request: On<ResumeEditors>,
+    views: Query<&FileView>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut buffers: Buffers,
+) {
+    let Ok(file) = views.get(request.view) else {
+        return;
+    };
+    if file.path != request.path {
+        return;
+    }
+    let keymap = crate::host::keymap::KeymapConfig::resolve(settings.as_deref()).keymap();
+    buffers.resume(request.view, &request.path, keymap);
 }
 
 fn close_item(
@@ -163,6 +188,23 @@ fn reopen_item(
         .remove::<vmux_ecs::page::PageItemHistory>();
 }
 
+#[derive(EntityEvent)]
+struct Captured {
+    source: Entity,
+    #[event_target]
+    archive: Entity,
+    state: ArchivedEditorState,
+    closed: ClosedEditors,
+    buffer: Option<Entity>,
+}
+
+#[derive(EntityEvent)]
+struct Transfer {
+    source: Entity,
+    #[event_target]
+    target: Entity,
+}
+
 fn capture(
     request: On<vmux_ecs::page::ArchiveCaptureRequest>,
     documents: Query<(
@@ -202,60 +244,85 @@ fn capture(
         let Ok(mut document) = world.get_entity_mut(source) else {
             return;
         };
-        if let Some(edit) = document.take::<Editor>() {
-            let diff = document
-                .take::<vmux_git::GitDiffSource>()
-                .unwrap_or_else(|| vmux_git::GitDiffSource {
-                    content: edit.core.buffer.text(),
-                    dirty: edit.core.dirty,
-                });
-            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
-            buffers
-                .get_mut(world)
-                .expect("parked buffer access")
-                .retain(source, edit, diff);
-            buffers.apply(world);
-        }
-        let closed = world
-            .entity_mut(source)
-            .take::<ClosedEditors>()
-            .unwrap_or_default();
-        let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
-        buffers
-            .get_mut(world)
-            .expect("parked buffer access")
-            .transfer(source, archive);
-        buffers.apply(world);
-        if let Ok(mut entry) = world.get_entity_mut(archive) {
-            entry.insert((state, closed));
-        }
+        let editor = document.take::<Editor>();
+        let diff = if editor.is_some() {
+            document.take::<vmux_git::GitDiffSource>()
+        } else {
+            None
+        };
+        let closed = document.take::<ClosedEditors>().unwrap_or_default();
+        let buffer = match editor {
+            Some(editor) => {
+                let mut buffer = world.spawn((editor, ChildOf(source)));
+                if let Some(diff) = diff {
+                    buffer.insert(diff);
+                }
+                Some(buffer.id())
+            }
+            None => None,
+        };
+        world.trigger(Captured {
+            source,
+            archive,
+            state,
+            closed,
+            buffer,
+        });
     });
 }
 
-fn restore(request: On<vmux_ecs::page::ArchiveRestoreRequest>, mut commands: Commands) {
+fn retain(
+    mut request: On<Captured>,
+    entities: Query<()>,
+    mut buffers: Buffers,
+    mut commands: Commands,
+) {
+    let request = request.event_mut();
+    if !entities.contains(request.archive) || !entities.contains(request.source) {
+        return;
+    }
+    if let Some(buffer) = request.buffer.take() {
+        buffers.retain(request.source, buffer);
+    }
+    commands.entity(request.archive).insert((
+        std::mem::take(&mut request.state),
+        std::mem::take(&mut request.closed),
+    ));
+    commands.trigger(Transfer {
+        source: request.source,
+        target: request.archive,
+    });
+}
+
+fn transfer(request: On<Transfer>, mut buffers: Buffers) {
+    buffers.transfer(request.source, request.target);
+}
+
+fn restore(
+    request: On<vmux_ecs::page::ArchiveRestoreRequest>,
+    mut archives: Query<(&mut ArchivedEditorState, Option<&mut ClosedEditors>)>,
+    targets: Query<()>,
+    mut buffers: Buffers,
+    mut commands: Commands,
+) {
     let archive = request.archive;
     let stack = request.stack;
-    commands.queue(move |world: &mut World| {
-        if world.get_entity(stack).is_err() {
-            return;
-        }
-        let Ok(mut entry) = world.get_entity_mut(archive) else {
-            return;
-        };
-        let Some(state) = entry.take::<ArchivedEditorState>() else {
-            return;
-        };
-        let closed = entry.take::<ClosedEditors>().unwrap_or_default();
-        let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
-        buffers
-            .get_mut(world)
-            .expect("parked buffer access")
-            .transfer(archive, stack);
-        buffers.apply(world);
-        if let Ok(mut stack) = world.get_entity_mut(stack) {
-            stack.insert((state, closed));
-        }
-    });
+    if !targets.contains(stack) {
+        return;
+    }
+    let Ok((mut state, closed)) = archives.get_mut(archive) else {
+        return;
+    };
+    let state = std::mem::take(&mut *state);
+    let closed = match closed {
+        Some(mut closed) => std::mem::take(&mut *closed),
+        None => ClosedEditors::default(),
+    };
+    commands
+        .entity(archive)
+        .remove::<(ArchivedEditorState, ClosedEditors)>();
+    buffers.transfer(archive, stack);
+    commands.entity(stack).insert((state, closed));
 }
 
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_ecs::page::PageReady>);
