@@ -9,10 +9,10 @@ use serde_json::{Value, json};
 use vmux_api::protocol::{
     AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage, JsonValue,
 };
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{ProcessAnchor, ProcessId};
+use vmux_feature::manifest::FeaturePlugin;
 
 use crate::{
     AddedTool, ToolDispatchSet, ToolQuery, ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet,

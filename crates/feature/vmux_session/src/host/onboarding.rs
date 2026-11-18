@@ -25,7 +25,9 @@ impl bevy_app::Plugin for OnboardingPlugin {
             .add_systems(Startup, load)
             .add_systems(
                 Update,
-                sync_views.after(vmux_ecs::PageOpenSet::HandleKnownPages),
+                (select_route, sync_views)
+                    .chain()
+                    .after(vmux_ecs::PageOpenSet::HandleKnownPages),
             )
             .add_observer(connect)
             .add_observer(authentication_chosen)
@@ -47,6 +49,46 @@ pub struct SetupView;
 
 #[derive(Component)]
 pub struct SetupTarget;
+
+#[derive(Component)]
+struct RouteSelection(String);
+
+fn select_route(
+    views: Query<
+        (Entity, &vmux_ecs::PageMetadata, Option<&RouteSelection>),
+        (
+            With<vmux_ecs::page::HostsPage>,
+            Without<vmux_ecs::page::PrewarmedPage>,
+        ),
+    >,
+    mut state: Query<(&mut Draft, &Catalog)>,
+    mut commands: Commands,
+) {
+    let Ok((mut draft, catalog)) = state.single_mut() else {
+        return;
+    };
+    for (view, metadata, applied) in &views {
+        let Some(requested) = vmux_api::session::AgentSetupRoute::parse(&metadata.url) else {
+            if applied.is_some() {
+                commands.entity(view).remove::<RouteSelection>();
+            }
+            continue;
+        };
+        if applied.is_some_and(|applied| applied.0 == metadata.url) {
+            continue;
+        }
+        if !catalog.0.iter().any(|agent| agent.id == requested.0) {
+            continue;
+        }
+        if !draft.setup_started && !draft.starting {
+            draft.agent_id = requested.0;
+            draft.dirty = true;
+        }
+        commands
+            .entity(view)
+            .insert(RouteSelection(metadata.url.clone()));
+    }
+}
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PageOutput<'w, 's> {
@@ -916,6 +958,90 @@ mod tests {
                 session,
             }
         }
+    }
+
+    #[test]
+    fn requested_agent_is_selected_after_catalog_delivery_without_starting_setup() {
+        let mut setup = Setup::new();
+        let requested = "agent/with?query&setup=0#fragment";
+        let url = vmux_api::session::AgentSetupRoute(requested.into()).url();
+        assert_eq!(crate::Route::parse(&url), Some(crate::Route::Setup));
+        setup
+            .app
+            .world_mut()
+            .entity_mut(setup.owner)
+            .insert((Draft::default(), Catalog::default()));
+        setup
+            .app
+            .world_mut()
+            .entity_mut(setup.view)
+            .remove::<(SetupView, super::super::SessionView)>();
+        setup
+            .app
+            .world_mut()
+            .entity_mut(setup.stack)
+            .remove::<SetupTarget>();
+        setup
+            .app
+            .world_mut()
+            .get_mut::<vmux_ecs::PageMetadata>(setup.view)
+            .unwrap()
+            .url = url;
+        setup.app.update();
+        assert!(setup.app.world().get::<SetupView>(setup.view).is_some());
+        assert!(
+            setup
+                .app
+                .world()
+                .get::<Draft>(setup.owner)
+                .unwrap()
+                .agent_id
+                .is_empty()
+        );
+        setup
+            .app
+            .world_mut()
+            .entity_mut(setup.owner)
+            .insert(Catalog(vec![AgentOption {
+                id: requested.into(),
+                ..Default::default()
+            }]));
+        setup.app.update();
+        let draft = setup.app.world().get::<Draft>(setup.owner).unwrap();
+        assert_eq!(draft.agent_id, requested);
+        assert!(!draft.setup_started);
+        assert!(!draft.starting);
+        assert!(draft.session_id.is_empty());
+    }
+
+    #[test]
+    fn requested_agent_does_not_replace_a_paused_setup_conversation() {
+        let mut setup = Setup::new();
+        setup
+            .app
+            .world_mut()
+            .get_mut::<Draft>(setup.owner)
+            .unwrap()
+            .paused = true;
+        setup
+            .app
+            .world_mut()
+            .entity_mut(setup.owner)
+            .insert(Catalog(vec![AgentOption {
+                id: "other".into(),
+                ..Default::default()
+            }]));
+        setup
+            .app
+            .world_mut()
+            .get_mut::<vmux_ecs::PageMetadata>(setup.view)
+            .unwrap()
+            .url = vmux_api::session::AgentSetupRoute("other".into()).url();
+        setup.app.update();
+        let draft = setup.app.world().get::<Draft>(setup.owner).unwrap();
+        assert_eq!(draft.agent_id, "chosen");
+        assert_eq!(draft.session_id, "setup-session");
+        assert!(draft.paused);
     }
 
     #[test]

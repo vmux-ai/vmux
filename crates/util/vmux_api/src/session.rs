@@ -463,9 +463,31 @@ pub struct SetupReadinessUiState {
     pub pending: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentSetupRoute(pub String);
 
 impl AgentSetupRoute {
+    pub fn parse(value: &str) -> Option<Self> {
+        let route = crate::VmuxRoute::parse(value)?;
+        if !route.is_host("start")
+            || route.path_segments().collect::<Vec<_>>() != ["onboarding", "agent"]
+            || route.fragment().is_some()
+        {
+            return None;
+        }
+        let mut fields = url::form_urlencoded::parse(route.query()?.as_bytes());
+        let (name, agent) = fields.next()?;
+        if name != "agent"
+            || fields.next().is_some()
+            || agent.is_empty()
+            || agent.len() > 256
+            || agent.chars().any(char::is_control)
+        {
+            return None;
+        }
+        Some(Self(agent.into_owned()))
+    }
+
     pub fn url(&self) -> String {
         let mut url = url::Url::parse("vmux://start/onboarding/agent").expect("static setup URL");
         url.query_pairs_mut().append_pair("agent", &self.0);
@@ -490,6 +512,28 @@ mod tests {
             [("agent".into(), id.into())]
         );
         assert!(url.fragment().is_none());
+        assert_eq!(
+            super::AgentSetupRoute::parse(&value),
+            Some(super::AgentSetupRoute(id.into()))
+        );
+    }
+
+    #[test]
+    fn agent_setup_routes_reject_ambiguous_or_unbounded_selection() {
+        for value in [
+            "https://start/onboarding/agent?agent=codex",
+            "vmux://sessions/inbox?agent=codex",
+            "vmux://start/onboarding/agent",
+            "vmux://start/onboarding/agent?agent=",
+            "vmux://start/onboarding/agent?agent=codex&agent=claude",
+            "vmux://start/onboarding/agent?agent=codex&other=value",
+            "vmux://start/onboarding/agent?agent=codex#other",
+            "vmux://start/onboarding/agent?agent=%00",
+        ] {
+            assert!(super::AgentSetupRoute::parse(value).is_none(), "{value}");
+        }
+        let value = super::AgentSetupRoute("a".repeat(257)).url();
+        assert!(super::AgentSetupRoute::parse(&value).is_none());
     }
 
     #[test]

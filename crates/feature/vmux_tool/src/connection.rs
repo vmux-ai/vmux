@@ -1298,7 +1298,7 @@ mod tests {
     use vmux_api::mcp::{
         McpServerOperation, McpServerPending, McpServerRequest, McpServersUiState,
     };
-    use vmux_ecs::manifest::FeatureManifest;
+    use vmux_feature::manifest::FeatureManifest;
 
     #[test]
     fn connector_links_open_in_app_and_queue_external_opening_only_on_request() {
