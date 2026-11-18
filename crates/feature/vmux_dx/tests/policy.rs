@@ -1219,6 +1219,165 @@ fn stateless_framework_bootstraps_do_not_approve_other_implementations_or_test_o
 }
 
 #[test]
+fn child_only_framework_composition_requires_actual_interfaces_and_bounded_installation() {
+    for (binding, child, body, expected) in [
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.add_plugins(Child);",
+            true,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "if !app.is_plugin_added::<Child>() { app.add_plugins(Child); }",
+            true,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "",
+            "app.add_plugins(Child);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "#[cfg(test)] impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.add_plugins(Child);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "struct FakeApp; impl Plugin for Child { fn build(&self, app: &mut FakeApp) { app.add_systems(Update, read); } }",
+            "app.add_plugins(Child);",
+            false,
+        ),
+        (
+            "use bevy_app::Plugin; struct App;",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.add_plugins(Child);",
+            false,
+        ),
+        (
+            "use bevy_app::App; trait Plugin {}",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.add_plugins(Child);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.add_plugins(Child::default());",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.add_plugins(factory());",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "loop { app.add_plugins(Child); }",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "app.world_mut(); app.add_plugins(Child);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "if false { app.add_plugins(Child); }",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "impl Plugin for Child { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+            "",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "{binding} use bevy_ecs::prelude::*; #[derive(Component)] struct State; fn read(state: Query<&State>) {{}} struct Child; {child} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ {body} }} }} impl Root {{ fn workflow(&self) {{ loop {{}} }} }}"
+        ));
+        for key in ["struct:Root", "impl:Plugin for Root"] {
+            assert_eq!(
+                inventory.canonical(
+                    &inventory.entries[&inventory.key(key)],
+                    &Policy::default(),
+                    &mut BTreeSet::new()
+                ),
+                expected,
+                "{binding}; {child}; {body}; {key}"
+            );
+        }
+        assert!(!inventory.canonical(
+            &inventory.entries[&inventory.key("impl:Root")],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+    }
+}
+
+#[test]
+fn child_only_composition_preserves_registered_endpoints_and_child_workflow_audits() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App, Plugin}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; #[derive(Component)] struct Unrelated; fn read(state: Query<&State>) {} struct Leaf; impl Plugin for Leaf { fn build(&self, app: &mut App) { app.add_systems(Update, read); app.world_mut(); } } impl Leaf { fn workflow(&self) { loop {} } } struct Child; impl Plugin for Child { fn build(&self, app: &mut App) { app.add_plugins(Leaf); } } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_plugins(Child); } }",
+    );
+    let root = &inventory.entries[&inventory.key("struct:Root")];
+    assert!(inventory.canonical(root, &Policy::default(), &mut BTreeSet::new()));
+    for (name, expected) in [("State", true), ("Unrelated", false)] {
+        assert_eq!(
+            inventory.boundary_references(
+                root,
+                &inventory.entries[&inventory.key(&format!("struct:{name}"))],
+                &mut BTreeSet::new()
+            ),
+            expected
+        );
+    }
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("impl:Leaf")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("impl:Plugin for Leaf")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn child_only_composition_refuses_cycles_without_rejecting_shared_registered_children() {
+    for (composition, expected) in [
+        (
+            "struct First; impl Plugin for First { fn build(&self, app: &mut App) { app.add_plugins(Second); } } struct Second; impl Plugin for Second { fn build(&self, app: &mut App) { app.add_plugins(First); } }",
+            false,
+        ),
+        (
+            "struct First; impl Plugin for First { fn build(&self, app: &mut App) { app.add_plugins(Leaf); } } struct Second; impl Plugin for Second { fn build(&self, app: &mut App) { app.add_plugins(Leaf); } }",
+            true,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App, Plugin}}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; fn read(state: Query<&State>) {{}} struct Leaf; impl Plugin for Leaf {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }} {composition} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_plugins((First, Second)); }} }}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("struct:Root")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected
+        );
+    }
+}
+
+#[test]
 fn generic_plugin_implementations_match_concrete_repeated_nested_and_const_patterns() {
     for (patterns, installed, expected) in [
         ("MarkerA,T", "MarkerB,State", false),
@@ -5448,6 +5607,7 @@ struct BodyShape {
     production: bool,
     composition: bool,
     bootstrap_defaults: Option<BTreeSet<String>>,
+    bootstrap_app: Option<String>,
 }
 
 impl BodyShape {
@@ -5604,6 +5764,25 @@ impl BodyShape {
         }
     }
 
+    fn app(signature: &syn::Signature) -> Option<String> {
+        if signature.ident != "build" || signature.inputs.len() != 2 {
+            return None;
+        }
+        let syn::FnArg::Typed(argument) = signature.inputs.iter().nth(1)? else {
+            return None;
+        };
+        let Type::Reference(reference) = argument.ty.as_ref() else {
+            return None;
+        };
+        let Type::Path(path) = reference.elem.as_ref() else {
+            return None;
+        };
+        if reference.mutability.is_none() || path.qself.is_some() {
+            return None;
+        }
+        Some(References::path(&path.path))
+    }
+
     fn of(
         key: String,
         name: String,
@@ -5637,6 +5816,7 @@ impl BodyShape {
             name,
             composition,
             bootstrap_defaults: (composition && !calls.unsupported).then_some(calls.defaults),
+            bootstrap_app: method.as_ref().and_then(|method| Self::app(&method.sig)),
             fingerprint: Declaration::fingerprint(&tokens.to_string()),
             lines: footprint.lines.len(),
             production: !Usage::test_only(attributes)
@@ -6878,6 +7058,17 @@ impl Inventory {
     }
 
     fn framework_bootstrap(&self, entry: &Declaration) -> bool {
+        self.framework_bootstrap_from(entry, &mut BTreeSet::new())
+    }
+
+    fn framework_bootstrap_from(
+        &self,
+        entry: &Declaration,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if !visiting.insert(entry.key.clone()) {
+            return false;
+        }
         if entry.local || entry.dynamic || entry.opaque || entry.projection {
             return false;
         }
@@ -6951,6 +7142,9 @@ impl Inventory {
                 continue;
             }
             if implementation.registered_systems.is_empty() {
+                if self.framework_children(implementation, visiting) {
+                    return true;
+                }
                 continue;
             }
             let registered = implementation
@@ -6980,6 +7174,110 @@ impl Inventory {
             }
         }
         false
+    }
+
+    fn framework_children(
+        &self,
+        implementation: &Declaration,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if implementation.plugin_children.is_empty() || !implementation.plugin_arguments.is_empty()
+        {
+            return false;
+        }
+        for body in &implementation.bodies {
+            let Some(app) = &body.bootstrap_app else {
+                return false;
+            };
+            if self
+                .framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                .as_deref()
+                != Some("App")
+            {
+                return false;
+            }
+        }
+        for path in &implementation.plugin_children {
+            let Some(child) = self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+            else {
+                return false;
+            };
+            if !matches!(child.kind, Kind::Struct)
+                || !child.production
+                || child.local
+                || child.dynamic
+            {
+                return false;
+            }
+            if !self.framework_child_interfaces(child, &mut visiting.clone()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn framework_child_interfaces(
+        &self,
+        child: &Declaration,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if !visiting.insert(child.key.clone()) || !child.production {
+            return false;
+        }
+        let mut installed = false;
+        for implementation in self.implementations(child) {
+            if !implementation.production
+                || implementation.plugin_path.as_ref().is_none_or(|path| {
+                    self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        != Some("Plugin")
+                })
+            {
+                continue;
+            }
+            if !implementation.bodies.iter().any(|body| {
+                body.production
+                    && body.bootstrap_app.as_ref().is_some_and(|app| {
+                        self.framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                            .as_deref()
+                            == Some("App")
+                    })
+            }) {
+                return false;
+            }
+            installed = true;
+            for path in &implementation.plugin_children {
+                let mut prefix = path.as_str();
+                loop {
+                    if let Some(nested) =
+                        self.resolve(&implementation.namespace, prefix, &mut BTreeSet::new())
+                    {
+                        if !self.framework_child_interfaces(nested, &mut visiting.clone()) {
+                            return false;
+                        }
+                        break;
+                    }
+                    if self
+                        .external_path(&implementation.namespace, prefix, &mut BTreeSet::new())
+                        .is_some_and(|path| {
+                            matches!(
+                                path.split("::").next(),
+                                Some(
+                                    "bevy" | "bevy_app" | "bevy_ecs" | "bevy_cef" | "bevy_cef_core"
+                                )
+                            )
+                        })
+                    {
+                        break;
+                    }
+                    let Some((parent, _)) = prefix.rsplit_once("::") else {
+                        return false;
+                    };
+                    prefix = parent;
+                }
+            }
+        }
+        installed
     }
 
     fn fixture_dom_type(
