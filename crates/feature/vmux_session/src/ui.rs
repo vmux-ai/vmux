@@ -207,8 +207,8 @@ impl FilePlacement {
 mod page_routing_tests {
     #[test]
     fn setup_and_connected_conversations_preserve_the_same_document_and_dom() {
-        let setup = super::AgentOnboardingPage::PAGE;
-        let session = super::ChatPage::PAGE;
+        let setup = super::AgentOnboardingPage::page();
+        let session = super::ChatPage::page();
         assert!(setup.preserves_dom_for(&session));
         assert!(session.preserves_dom_for(&setup));
     }
