@@ -27,12 +27,14 @@ impl Plugin for RegistryPlugin {
 pub(crate) struct Declarations(HashMap<FeatureId, Entry>);
 
 impl Declarations {
-    pub(crate) fn register<M: FeatureManifestSource>(&mut self) -> Option<FeatureManifest> {
+    pub(crate) fn register<M: FeatureManifestSource>(
+        &mut self,
+        manifest: FeatureManifest,
+    ) -> Option<FeatureManifest> {
         let id = FeatureId::of::<M>();
         if self.0.contains_key(&id) {
             return None;
         }
-        let manifest = FeatureManifest::of::<M>();
         self.0.insert(
             id,
             Entry {

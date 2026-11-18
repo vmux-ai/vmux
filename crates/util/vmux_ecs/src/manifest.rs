@@ -9,21 +9,36 @@ use serde::de::DeserializeOwned;
 use vmux_api::JsonSchema;
 
 use crate::cli::CliManifest;
+pub use crate::composition::{CompositionPlugin, Profile};
+pub use crate::feature_metadata::{Dependency, Lifecycle, Metadata};
 pub use crate::registry::Registry;
 use crate::registry::{Declarations, RegistryPlugin};
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Deserialize)]
 pub struct FeatureManifest {
+    #[serde(default)]
+    pub metadata: Option<Metadata>,
+    #[serde(default)]
     pub pages: Vec<Page>,
+    #[serde(default)]
     pub commands: Vec<Command>,
+    #[serde(default)]
     pub command_bar: Vec<CommandBarEntry>,
+    #[serde(default)]
     pub search_engines: Vec<SearchEngineManifest>,
+    #[serde(default)]
     pub tool_providers: Vec<ToolProviderManifest>,
+    #[serde(default)]
     pub tools: Vec<Tool>,
+    #[serde(default)]
     pub cli: Option<CliManifest>,
+    #[serde(default)]
     pub mcp_servers: Vec<McpServer>,
+    #[serde(default)]
     settings: Option<Box<RawValue>>,
+    #[serde(default)]
     policy: Option<Box<RawValue>>,
+    #[serde(default)]
     policies: Option<Box<RawValue>>,
 }
 
@@ -33,10 +48,13 @@ impl FeatureManifest {
     }
 
     pub fn parse(source: &str) -> Self {
-        let manifest: Self =
-            ron::from_str(source).expect("embedded feature manifest must be valid RON");
-        manifest.validate();
-        manifest
+        Self::try_parse(source).expect("embedded feature manifest must be valid")
+    }
+
+    pub fn try_parse(source: &str) -> Result<Self, String> {
+        let manifest: Self = ron::from_str(source).map_err(|error| error.to_string())?;
+        manifest.validate()?;
+        Ok(manifest)
     }
 
     pub fn policy<T: DeserializeOwned>(&self) -> Result<Option<T>, String> {
@@ -59,69 +77,21 @@ impl FeatureManifest {
             .map_err(|error| error.to_string())
     }
 
-    fn validate(&self) {
+    fn validate(&self) -> Result<(), String> {
+        if let Some(metadata) = &self.metadata {
+            metadata.validate()?;
+        }
         for command in &self.commands {
             if let Some(mcp) = &command.mcp
                 && let Some(input_schema) = &mcp.input_schema
             {
-                input_schema
-                    .validate()
-                    .expect("embedded command input schemas must be valid");
+                input_schema.validate()?;
             }
         }
         for tool in &self.tools {
-            tool.input_schema
-                .validate()
-                .expect("embedded tool input schemas must be valid");
+            tool.input_schema.validate()?;
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for FeatureManifest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Manifest {
-            #[serde(default)]
-            pages: Vec<Page>,
-            #[serde(default)]
-            commands: Vec<Command>,
-            #[serde(default)]
-            command_bar: Vec<CommandBarEntry>,
-            #[serde(default)]
-            search_engines: Vec<SearchEngineManifest>,
-            #[serde(default)]
-            tool_providers: Vec<ToolProviderManifest>,
-            #[serde(default)]
-            tools: Vec<Tool>,
-            #[serde(default)]
-            cli: Option<CliManifest>,
-            #[serde(default)]
-            mcp_servers: Vec<McpServer>,
-            #[serde(default)]
-            settings: Option<Box<RawValue>>,
-            #[serde(default)]
-            policy: Option<Box<RawValue>>,
-            #[serde(default)]
-            policies: Option<Box<RawValue>>,
-        }
-
-        let manifest = Manifest::deserialize(deserializer)?;
-        Ok(Self {
-            pages: manifest.pages,
-            commands: manifest.commands,
-            command_bar: manifest.command_bar,
-            search_engines: manifest.search_engines,
-            tool_providers: manifest.tool_providers,
-            tools: manifest.tools,
-            cli: manifest.cli,
-            mcp_servers: manifest.mcp_servers,
-            settings: manifest.settings,
-            policy: manifest.policy,
-            policies: manifest.policies,
-        })
+        Ok(())
     }
 }
 
@@ -388,11 +358,26 @@ impl FeatureId {
 #[derive(Component)]
 pub struct FeatureManifestOwner<M>(PhantomData<fn() -> M>);
 
-pub struct FeaturePlugin<M>(PhantomData<fn() -> M>);
+pub struct FeaturePlugin<M> {
+    manifest: Option<FeatureManifest>,
+    marker: PhantomData<fn() -> M>,
+}
+
+impl<M> FeaturePlugin<M> {
+    pub fn from_manifest(manifest: FeatureManifest) -> Self {
+        Self {
+            manifest: Some(manifest),
+            marker: PhantomData,
+        }
+    }
+}
 
 impl<M> Default for FeaturePlugin<M> {
     fn default() -> Self {
-        Self(PhantomData)
+        Self {
+            manifest: None,
+            marker: PhantomData,
+        }
     }
 }
 
@@ -405,13 +390,25 @@ impl<M: FeatureManifestSource> Plugin for FeaturePlugin<M> {
         if !app.is_plugin_added::<RegistryPlugin>() {
             app.add_plugins(RegistryPlugin);
         }
+        let manifest = match &self.manifest {
+            Some(manifest) => manifest.clone(),
+            None => FeatureManifest::of::<M>(),
+        };
+        manifest.validate().expect("valid feature manifest");
         let Some(manifest) = app
             .world_mut()
             .resource_mut::<Declarations>()
-            .register::<M>()
+            .register::<M>(manifest)
         else {
+            assert!(
+                self.manifest.is_none(),
+                "external feature manifest is already registered"
+            );
             return;
         };
+        if manifest.metadata.is_some() && !app.is_plugin_added::<CompositionPlugin>() {
+            app.add_plugins(CompositionPlugin::default());
+        }
         app.world_mut().spawn((
             Name::new(std::any::type_name::<M>()),
             FeatureId::of::<M>(),

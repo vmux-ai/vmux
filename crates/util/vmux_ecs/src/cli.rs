@@ -31,7 +31,7 @@ impl std::task::Wake for CliWake {
     }
 }
 
-#[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct CliManifest {
     #[serde(default)]
     pub default: Option<String>,

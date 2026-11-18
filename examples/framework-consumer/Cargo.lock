@@ -2680,6 +2680,7 @@ dependencies = [
  "moonshine-save",
  "rkyv",
  "ron",
+ "semver",
  "serde",
  "serde_json",
  "uuid",
