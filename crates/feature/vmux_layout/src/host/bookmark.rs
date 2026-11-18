@@ -21,6 +21,9 @@ use vmux_api::bookmark::{
     BookmarkTextInputRequest, BookmarkToggleRequest,
     BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
+pub use vmux_api::bookmark::{
+    BookmarkAddRequest as AddRequest, BookmarkRemoveRequest as RemoveRequest,
+};
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 use vmux_ecs::page::PageManifest;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
@@ -410,17 +413,6 @@ impl TryFrom<&CommandInvocation> for CreateFolderRequest {
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct ToggleForUrlRequest {
     pub metadata: PageMetadata,
-}
-
-#[vmux_api::agent(Eq, Message)]
-pub struct AddRequest {
-    pub metadata: PageMetadata,
-    pub folder: Option<String>,
-}
-
-#[vmux_api::agent(Eq, Message)]
-pub struct RemoveRequest {
-    pub uuid: String,
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -1125,10 +1117,7 @@ fn request_add(
     trigger: On<UiInput<BookmarkAddUiRequest>>,
     mut requests: MessageWriter<AddRequest>,
 ) {
-    requests.write(AddRequest {
-        metadata: trigger.event().payload.metadata.clone(),
-        folder: trigger.event().payload.folder.clone(),
-    });
+    requests.write(trigger.event().payload.clone());
 }
 
 fn request_pin_url(
@@ -1144,9 +1133,7 @@ fn request_remove(
     trigger: On<UiInput<BookmarkRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveRequest>,
 ) {
-    requests.write(RemoveRequest {
-        uuid: trigger.event().payload.uuid.clone(),
-    });
+    requests.write(trigger.event().payload.clone());
 }
 
 fn request_rename(
@@ -1390,6 +1377,56 @@ fn commands(
 mod tests {
     use super::*;
     use vmux_api::PageIcon;
+
+    #[test]
+    fn ui_addition_and_legacy_agent_removal_share_the_canonical_messages() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::LayoutContractPlugin, BookmarkPlugin));
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(BookmarkAddUiRequest {
+            metadata: PageMetadata {
+                url: "https://untouched.test".into(),
+                title: "Untouched".into(),
+                ..default()
+            },
+            folder: None,
+        });
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: BookmarkAddUiRequest {
+                metadata: PageMetadata {
+                    url: "https://saved.test".into(),
+                    title: "Saved".into(),
+                    ..default()
+                },
+                folder: None,
+            },
+        });
+        app.update();
+        let world = app.world_mut();
+        let mut saved = None;
+        for (uuid, metadata) in world
+            .query_filtered::<(&Uuid, &PageMetadata), With<Bookmark>>()
+            .iter(world)
+        {
+            if metadata.url == "https://saved.test" {
+                saved = Some(uuid.0.clone());
+            }
+        }
+        let legacy = vmux_api::protocol::AgentRequest {
+            id: "remove@1".into(),
+            body: format!(r#"{{"uuid":"{}"}}"#, saved.unwrap()).into_bytes(),
+        };
+        app.world_mut()
+            .write_message(legacy.decode::<BookmarkRemoveUiRequest>().unwrap().unwrap());
+        app.update();
+        let world = app.world_mut();
+        let remaining = world
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .single(world)
+            .unwrap();
+        assert_eq!(remaining.url, "https://untouched.test");
+    }
 
     #[test]
     fn command_id_dispatches_the_typed_bookmark_request() {
