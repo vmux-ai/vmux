@@ -8,7 +8,7 @@ use vmux_api::bookmark::SmartBookmarkFolder;
 use vmux_ecs::profile::SessionEnvironment;
 use vmux_ecs::store::State;
 use vmux_ecs::store::{SchemaPlugin, Types};
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, EntityTarget, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
 #[cfg(test)]
 use vmux_setting::AppSettings;
@@ -34,6 +34,8 @@ impl Plugin for BookmarkStorePlugin {
             .add_observer(publish_pins)
             .add_observer(seed_folders)
             .add_observer(finish_defaults)
+            .add_observer(begin_write)
+            .add_observer(written)
             .add_systems(
                 Startup,
                 (spawn, ApplyDeferred, load_bookmarks_on_startup)
@@ -686,45 +688,99 @@ fn autosave_bookmarks(
     }
     let mut save = SaveWorld::<BookmarkFilter>::into_file(path.0.clone());
     types.apply(&mut save);
-    commands.queue(BookmarkWrite { entity, save });
+    commands.queue(BookmarkWrite {
+        target: EntityTarget::new(entity),
+        save: Some(save),
+    });
 }
 
+#[derive(Event)]
 struct BookmarkWrite {
-    entity: Entity,
-    save: SaveWorld<BookmarkFilter>,
+    target: EntityTarget<BookmarkAutoSave>,
+    save: Option<SaveWorld<BookmarkFilter>>,
 }
 
 impl Command for BookmarkWrite {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let Some(revision) = world
-            .get_mut::<State>(self.entity)
-            .and_then(|mut state| state.begin())
-        else {
-            return;
-        };
-        let result = moonshine_save::save::SaveCommand(self.save).apply(world);
-        let Some(mut state) = world.get_mut::<State>(self.entity) else {
-            return;
-        };
-        let failed = match result {
-            Ok(()) => {
-                state.succeed(revision);
-                false
-            }
-            Err(error) => {
-                error!(%error, "bookmark write failed; retrying in 60 seconds");
-                state.retry(revision, error.to_string());
-                true
-            }
-        };
-        if failed {
-            world.entity_mut(self.entity).insert(RetryAt(
+        world.trigger(self);
+    }
+}
+
+fn begin_write(
+    mut request: On<BookmarkWrite>,
+    mut stores: Query<&mut State, With<BookmarkAutoSave>>,
+    mut commands: Commands,
+) {
+    let request = request.event_mut();
+    if request.save.is_none() {
+        return;
+    }
+    let entity = request.target.entity();
+    let Ok(mut state) = stores.get_mut(entity) else {
+        return;
+    };
+    let Some(revision) = state.begin() else {
+        return;
+    };
+    let Some(save) = request.save.take() else {
+        return;
+    };
+    commands.queue(WriteSnapshot {
+        target: request.target,
+        revision,
+        save,
+    });
+}
+
+struct WriteSnapshot {
+    target: EntityTarget<BookmarkAutoSave>,
+    revision: u64,
+    save: SaveWorld<BookmarkFilter>,
+}
+
+impl Command for WriteSnapshot {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let result = moonshine_save::save::SaveCommand(self.save)
+            .apply(world)
+            .map_err(|error| error.to_string());
+        world.trigger(Written {
+            entity: self.target.entity(),
+            revision: self.revision,
+            result,
+        });
+    }
+}
+
+#[derive(EntityEvent)]
+struct Written {
+    entity: Entity,
+    revision: u64,
+    result: Result<(), String>,
+}
+
+fn written(
+    result: On<Written>,
+    mut stores: Query<&mut State, With<BookmarkAutoSave>>,
+    mut commands: Commands,
+) {
+    let Ok(mut state) = stores.get_mut(result.entity) else {
+        return;
+    };
+    match &result.result {
+        Ok(()) => {
+            state.succeed(result.revision);
+            commands.entity(result.entity).remove::<RetryAt>();
+        }
+        Err(error) => {
+            error!(%error, "bookmark write failed; retrying in 60 seconds");
+            state.retry(result.revision, error.clone());
+            commands.entity(result.entity).insert(RetryAt(
                 std::time::Instant::now() + std::time::Duration::from_secs(60),
             ));
-        } else {
-            world.entity_mut(self.entity).remove::<RetryAt>();
         }
     }
 }
@@ -783,9 +839,7 @@ mod tests {
             bevy::asset::AssetPlugin::default(),
             vmux_ecs::PrimitivesPlugin,
         ))
-        .add_plugins(SchemaPlugin::<BookmarkStore>::default())
-        .insert_resource(OfferedBookmarkDefaults::default())
-        .add_systems(Update, autosave_bookmarks);
+        .add_plugins(BookmarkStorePlugin);
         let store = app
             .world_mut()
             .spawn((BookmarkAutoSave, BookmarkStorePath(path.clone())))
@@ -799,14 +853,14 @@ mod tests {
             },
         ));
         app.world_mut().get_mut::<State>(store).unwrap().advance();
-        app.update();
+        app.world_mut().run_schedule(PostUpdate);
         assert!(path.is_dir());
         assert!(app.world().get::<State>(store).unwrap().is_dirty());
         assert!(app.world().get::<State>(store).unwrap().error().is_some());
         std::fs::remove_dir(&path).unwrap();
         app.world_mut().get_mut::<RetryAt>(store).unwrap().0 =
             std::time::Instant::now() - std::time::Duration::from_secs(1);
-        app.update();
+        app.world_mut().run_schedule(PostUpdate);
         assert!(path.is_file());
         let state = app.world().get::<State>(store).unwrap();
         assert!(!state.is_dirty());
@@ -1250,7 +1304,9 @@ mod tests {
             .add_observer(order_vm)
             .add_observer(publish_pins)
             .add_observer(seed_folders)
-            .add_observer(finish_defaults);
+            .add_observer(finish_defaults)
+            .add_observer(begin_write)
+            .add_observer(written);
         load_app
             .world_mut()
             .commands()
