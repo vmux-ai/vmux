@@ -1238,13 +1238,35 @@ fn accept(
     }
 }
 
+#[derive(SystemParam)]
+struct Admission<'w, 's> {
+    writing: Query<'w, 's, (), With<Writing>>,
+    store: ParamSet<
+        'w,
+        's,
+        (
+            Catalog<'w, 's>,
+            Query<'w, 's, (&'static Revision, &'static mut State, Has<Repair>)>,
+        ),
+    >,
+}
+
+#[derive(SystemParam)]
+struct Provisional<'w, 's> {
+    packages: Query<'w, 's, (&'static Id, &'static ChildOf)>,
+    associations: Query<
+        'w,
+        's,
+        (Entity, &'static ProfileId, &'static ChildOf),
+        (With<Association>, Without<Installed>),
+    >,
+}
+
 fn admit(
     event: On<Accepting>,
     requests: Query<(&Request, &OperationState), (With<Operation>, With<Queued>)>,
-    writing: Query<(), With<Writing>>,
-    packages: Query<(&Id, &ChildOf)>,
-    pending: Query<(Entity, &ProfileId, &ChildOf), (With<Association>, Without<Installed>)>,
-    mut store: ParamSet<(Catalog, Query<(&Revision, &mut State, Has<Repair>)>)>,
+    provisional: Provisional,
+    mut admission: Admission,
     mut writes: MessageWriter<WriteTaskRequest>,
     mut commands: Commands,
 ) {
@@ -1254,14 +1276,15 @@ fn admit(
     };
     let owner = request.ticket.owner;
     if !matches!(status, OperationState::Pending | OperationState::Running)
-        || writing.contains(owner)
+        || admission.writing.contains(owner)
     {
         return;
     }
     if let Mutation::Remove(remove) = &request.mutation {
-        for (entity, profile, parent) in &pending {
+        for (entity, profile, parent) in &provisional.associations {
             if profile.0 == request.profile
-                && packages
+                && provisional
+                    .packages
                     .get(parent.parent())
                     .is_ok_and(|(id, parent)| id.0 == remove.id && parent.parent() == owner)
             {
@@ -1270,7 +1293,7 @@ fn admit(
         }
     }
     let snapshot = {
-        let catalog = store.p0();
+        let catalog = admission.store.p0();
         if !catalog.ready(&request.ticket) {
             Err("extension store is unavailable".into())
         } else {
@@ -1291,7 +1314,7 @@ fn admit(
             return;
         }
     };
-    let mut states = store.p1();
+    let mut states = admission.store.p1();
     let (base, mut state, repair) = states.get_mut(owner).unwrap();
     if !state.is_dirty()
         && snapshot
