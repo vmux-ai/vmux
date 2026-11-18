@@ -12,8 +12,8 @@ use vmux_ecs::event::{
 };
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    FileUiStateWrite, Operation, OperationCompleted, OperationPlugin, OperationState,
-    OperationTarget,
+    FileUiStateWrite, Operation, OperationCompleted, OperationPlugin, OperationRetained,
+    OperationState, OperationTarget, Order,
 };
 use vmux_knowledge::{
     ApplyKnowledgeRename, KnowledgeIndex, KnowledgeReady, KnowledgeRenameComplete,
@@ -39,6 +39,7 @@ impl Plugin for ExplorerEntryPlugin {
         if !app.is_plugin_added::<KnowledgeRenamePlugin>() {
             app.add_plugins(KnowledgeRenamePlugin);
         }
+        app.init_resource::<RenameSequence>();
         app.add_plugins(UiEventPlugin::<(
             ExplorerCreateFilePromptRequest,
             ExplorerCreateDirectoryPromptRequest,
@@ -54,6 +55,9 @@ impl Plugin for ExplorerEntryPlugin {
                     clear_prompt,
                     project.after(clear_prompt),
                     drain_creates,
+                    drain_roots,
+                    select_roots,
+                    start_snapshots,
                     drain_rename_sources,
                     drain_renames,
                     drain_deletes,
@@ -446,14 +450,37 @@ struct BeginRename {
 #[derive(EntityEvent)]
 struct RenameFinished {
     entity: Entity,
-    result: std::result::Result<ExplorerRenameOutcome, String>,
+    moved: Option<ExplorerRenameOutcome>,
+    result: std::result::Result<(), String>,
 }
+
+#[derive(Resource, Default)]
+struct RenameSequence(u32);
+
+#[derive(Component)]
+struct RenameRootTask(Task<RenameRootFacts>);
+
+#[derive(Component)]
+struct RenameRootFacts {
+    project: Option<PathBuf>,
+    vault: Option<PathBuf>,
+}
+
+#[derive(Component)]
+struct VaultRenameRoot(PathBuf);
+
+#[derive(Component)]
+struct VaultRenameActive;
+
+#[derive(Component)]
+struct CapturePending;
 
 fn rename(
     trigger: On<RenameEntry>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
     wake: Option<Res<EventLoopProxyWrapper>>,
+    mut sequence: ResMut<RenameSequence>,
     mut commands: Commands,
 ) {
     let view = trigger.event_target();
@@ -463,32 +490,122 @@ fn rename(
     };
     let root = tree.root.clone();
     let old = trigger.event().path.clone();
+    sequence.0 = sequence.0.wrapping_add(1);
     let entity = commands
         .spawn((
             Operation::bundle("file.rename").unwrap().running(),
             OperationTarget::new(view),
+            OperationRetained,
+            Order(sequence.0),
         ))
         .id();
     let Some(parent) = old.parent().map(Path::to_path_buf) else {
         commands.trigger(RenameFinished {
             entity,
+            moved: None,
             result: Err("Explorer root cannot be changed".to_string()),
         });
         return;
     };
-    let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
-    let knowledge = root
-        .canonicalize()
-        .ok()
-        .zip(knowledge_root.canonicalize().ok())
-        .is_some_and(|(root, knowledge_root)| root == knowledge_root);
+    let vault = vmux_knowledge::KnowledgeVault::user().into_root();
     commands.entity(entity).insert(RenamePending {
         root: root.clone(),
         old,
         parent,
         name: trigger.event().name.clone(),
     });
-    if knowledge {
+    let wake = wake.as_deref().map(|proxy| (**proxy).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let facts = RenameRootFacts {
+            project: root.canonicalize().ok(),
+            vault: vault.canonicalize().ok(),
+        };
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        facts
+    });
+    commands.entity(entity).insert(RenameRootTask(task));
+}
+
+fn drain_roots(
+    mut tasks: Query<(Entity, &mut RenameRootTask, &OperationState)>,
+    mut commands: Commands,
+) {
+    for (entity, mut task, state) in &mut tasks {
+        let Some(facts) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<RenameRootTask>();
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands
+                .entity(entity)
+                .remove::<(RenamePending, OperationRetained)>();
+            continue;
+        }
+        commands.entity(entity).insert(facts);
+    }
+}
+
+fn select_roots(facts: Query<(Entity, &RenameRootFacts, &OperationState)>, mut commands: Commands) {
+    for (entity, facts, state) in &facts {
+        commands.entity(entity).remove::<RenameRootFacts>();
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands
+                .entity(entity)
+                .remove::<(RenamePending, OperationRetained)>();
+            continue;
+        }
+        if let Some(root) = facts.project.as_ref()
+            && facts.vault.as_ref() == Some(root)
+        {
+            commands
+                .entity(entity)
+                .insert((VaultRenameRoot(root.clone()), CapturePending));
+        } else {
+            commands.trigger(BeginRename { entity });
+        }
+    }
+}
+
+type WaitingCaptures<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static VaultRenameRoot,
+        &'static Order,
+        &'static OperationState,
+    ),
+    With<CapturePending>,
+>;
+
+fn start_snapshots(
+    pending: WaitingCaptures,
+    active: Query<&VaultRenameRoot, With<VaultRenameActive>>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let mut held = std::collections::HashSet::new();
+    for root in &active {
+        held.insert(root.0.clone());
+    }
+    let mut waiting = pending.iter().collect::<Vec<_>>();
+    waiting.sort_by_key(|(_, _, order, _)| order.0);
+    for (entity, root, _, state) in waiting {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.entity(entity).remove::<(
+                RenamePending,
+                CapturePending,
+                VaultRenameRoot,
+                OperationRetained,
+            )>();
+            continue;
+        }
+        if !held.insert(root.0.clone()) {
+            continue;
+        }
+        let root = root.0.clone();
         let wake = wake.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = RawSnapshot::capture(&root).map_err(|error| error.to_string());
@@ -497,9 +614,10 @@ fn rename(
             }
             result
         });
-        commands.entity(entity).insert(KnowledgeSourceTask(task));
-    } else {
-        commands.trigger(BeginRename { entity });
+        commands
+            .entity(entity)
+            .remove::<CapturePending>()
+            .insert((VaultRenameActive, KnowledgeSourceTask(task)));
     }
 }
 
@@ -513,7 +631,12 @@ fn drain_rename_sources(
         };
         commands.entity(entity).remove::<KnowledgeSourceTask>();
         if !matches!(state, OperationState::Pending | OperationState::Running) {
-            commands.entity(entity).remove::<RenamePending>();
+            commands.entity(entity).remove::<(
+                RenamePending,
+                VaultRenameRoot,
+                VaultRenameActive,
+                OperationRetained,
+            )>();
             continue;
         }
         match result {
@@ -524,6 +647,7 @@ fn drain_rename_sources(
             Err(error) => {
                 commands.trigger(RenameFinished {
                     entity,
+                    moved: None,
                     result: Err(error),
                 });
             }
@@ -546,6 +670,12 @@ fn prepare_rename(trigger: On<KnowledgeReady>, pending: ReadyRenames, mut comman
         commands.trigger(RetireKnowledge {
             entity: trigger.entity,
         });
+        commands.entity(trigger.entity).remove::<(
+            RenamePending,
+            VaultRenameRoot,
+            VaultRenameActive,
+            OperationRetained,
+        )>();
         return;
     }
     commands.trigger(PrepareKnowledgeRename {
@@ -574,7 +704,12 @@ fn begin_rename(
         commands.trigger(RetireKnowledge {
             entity: trigger.entity,
         });
-        commands.entity(trigger.entity).remove::<RenamePending>();
+        commands.entity(trigger.entity).remove::<(
+            RenamePending,
+            VaultRenameRoot,
+            VaultRenameActive,
+            OperationRetained,
+        )>();
         return;
     }
     let root = pending.root.clone();
@@ -609,13 +744,10 @@ fn complete_rewrites(
     let Ok(outcome) = outcomes.get(trigger.entity) else {
         return;
     };
-    let result = match &trigger.result {
-        Ok(()) => Ok(outcome.clone()),
-        Err(error) => Err(error.clone()),
-    };
     commands.trigger(RenameFinished {
         entity: trigger.entity,
-        result,
+        moved: Some(outcome.clone()),
+        result: trigger.result.clone(),
     });
 }
 
@@ -728,8 +860,12 @@ fn drain_renames(
         };
         commands.entity(entity).remove::<ExplorerRenameTask>();
         if !matches!(state, OperationState::Pending | OperationState::Running) {
-            commands.trigger(RetireKnowledge { entity });
-            commands.entity(entity).remove::<RenamePending>();
+            let moved = result.ok();
+            commands.trigger(RenameFinished {
+                entity,
+                moved,
+                result: Err("Rename canceled".to_string()),
+            });
             continue;
         }
         match result {
@@ -739,8 +875,19 @@ fn drain_renames(
                 commands.entity(entity).insert(outcome);
                 commands.trigger(ApplyKnowledgeRename { entity, old, new });
             }
-            result => {
-                commands.trigger(RenameFinished { entity, result });
+            Ok(outcome) => {
+                commands.trigger(RenameFinished {
+                    entity,
+                    moved: Some(outcome),
+                    result: Ok(()),
+                });
+            }
+            Err(error) => {
+                commands.trigger(RenameFinished {
+                    entity,
+                    moved: None,
+                    result: Err(error),
+                });
             }
         }
     }
@@ -748,34 +895,34 @@ fn drain_renames(
 
 fn finish_rename(
     trigger: On<RenameFinished>,
-    operations: Query<(&OperationState, Option<&OperationTarget>)>,
+    operations: Query<Option<&OperationTarget>, With<Operation>>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
     let entity = trigger.entity;
     commands.trigger(RetireKnowledge { entity });
-    commands
-        .entity(entity)
-        .remove::<(RenamePending, ExplorerRenameOutcome)>();
-    let Ok((operation, target)) = operations.get(entity) else {
+    commands.entity(entity).remove::<(
+        RenamePending,
+        ExplorerRenameOutcome,
+        VaultRenameRoot,
+        VaultRenameActive,
+        OperationRetained,
+    )>();
+    let Ok(target) = operations.get(entity) else {
         return;
     };
-    if !matches!(operation, OperationState::Pending | OperationState::Running) {
-        return;
-    }
     commands.trigger(OperationCompleted::from_result(entity, &trigger.result));
     let Some(target) = target else { return };
     let webview = target.entity();
     let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
         return;
     };
-    let outcome = match &trigger.result {
-        Ok(outcome) => outcome.clone(),
-        Err(error) => {
+    let Some(outcome) = trigger.moved.clone() else {
+        if let Err(error) = &trigger.result {
             commands.trigger(ExplorerFeedback::new(webview, false, error.clone()));
-            return;
         }
+        return;
     };
     for open in &mut state.open_editors {
         if let Ok(suffix) = open.strip_prefix(&outcome.old_path) {
@@ -804,10 +951,8 @@ fn finish_rename(
     if let Some(path) = open_path {
         commands.trigger(FileNavigateRequest::new(webview, path, 0));
     }
-    commands.trigger(ExplorerFeedback::new(
-        webview,
-        true,
-        format!(
+    let message = match &trigger.result {
+        Ok(()) => format!(
             "Renamed to {}",
             outcome
                 .new_path
@@ -815,6 +960,12 @@ fn finish_rename(
                 .unwrap_or_default()
                 .to_string_lossy()
         ),
+        Err(error) => error.clone(),
+    };
+    commands.trigger(ExplorerFeedback::new(
+        webview,
+        trigger.result.is_ok(),
+        message,
     ));
 }
 
@@ -894,7 +1045,11 @@ fn drain_deletes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
     use std::time::{Duration, Instant};
 
     struct RenameFixture {
@@ -902,7 +1057,7 @@ mod tests {
         app: App,
         view: Entity,
         operation: Entity,
-        release: Option<mpsc::Sender<()>>,
+        release: Option<Arc<AtomicBool>>,
     }
 
     impl RenameFixture {
@@ -925,6 +1080,7 @@ mod tests {
                 .spawn((
                     Operation::bundle("file.rename").unwrap().running(),
                     OperationTarget::new(view),
+                    OperationRetained,
                     RenamePending {
                         root: root.clone(),
                         old,
@@ -934,11 +1090,14 @@ mod tests {
                 ))
                 .id();
             app.world_mut().flush();
-            let (release, resume) = mpsc::channel();
+            let release = Arc::new(AtomicBool::new(false));
+            let resume = release.clone();
             let (started, ready) = mpsc::channel();
             let task = IoTaskPool::get().spawn(async move {
                 started.send(()).unwrap();
-                resume.recv_timeout(Duration::from_secs(3)).unwrap();
+                while !resume.load(Ordering::Acquire) {
+                    future::yield_now().await;
+                }
                 RawSnapshot::capture(&root).map_err(|error| error.to_string())
             });
             ready.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -956,7 +1115,7 @@ mod tests {
 
         fn release(&mut self) {
             if let Some(release) = self.release.take() {
-                let _ = release.send(());
+                release.store(true, Ordering::Release);
             }
         }
 
@@ -1065,5 +1224,200 @@ mod tests {
                 .get::<KnowledgeIndex>(fixture.operation)
                 .is_none()
         );
+    }
+    struct QueuedRenames {
+        directory: tempfile::TempDir,
+        app: App,
+    }
+
+    impl QueuedRenames {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_non_send(Browsers::default())
+                .add_plugins(ExplorerEntryPlugin);
+            app.world_mut().flush();
+            Self { directory, app }
+        }
+
+        fn vault(&self, name: &str) -> PathBuf {
+            let root = self.directory.path().join(name);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("a.md"), "# A\n").unwrap();
+            std::fs::write(root.join("b.md"), "# B\n").unwrap();
+            std::fs::write(root.join("source.md"), "See [[a]] [[b]].\n").unwrap();
+            root.canonicalize().unwrap()
+        }
+
+        fn queue(&mut self, root: &Path, old: &str, new: &str, order: u32) -> Entity {
+            self.app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("file.rename").unwrap().running(),
+                    OperationRetained,
+                    Order(order),
+                    RenamePending {
+                        root: root.to_path_buf(),
+                        old: root.join(old),
+                        parent: root.to_path_buf(),
+                        name: new.to_string(),
+                    },
+                    VaultRenameRoot(root.to_path_buf()),
+                    CapturePending,
+                ))
+                .id()
+        }
+
+        fn finish(&mut self, operation: Entity) {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while matches!(
+                self.app.world().get::<OperationState>(operation),
+                Some(OperationState::Pending | OperationState::Running)
+            ) {
+                assert!(Instant::now() < deadline, "queued rename must finish");
+                self.app.update();
+                std::thread::yield_now();
+            }
+            assert_eq!(
+                self.app.world().get::<OperationState>(operation),
+                Some(&OperationState::Succeeded)
+            );
+        }
+    }
+
+    #[test]
+    fn same_vault_renames_capture_the_previous_operations_completed_rewrites() {
+        let mut fixture = QueuedRenames::new();
+        let root = fixture.vault("vault");
+        let first = fixture.queue(&root, "a.md", "renamed-a.md", 1);
+        let second = fixture.queue(&root, "b.md", "renamed-b.md", 2);
+        fixture.finish(second);
+        fixture.finish(first);
+        assert_eq!(
+            std::fs::read_to_string(root.join("source.md")).unwrap(),
+            "See [[renamed-a]] [[renamed-b]].\n"
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<OperationRetained>(first)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<OperationRetained>(second)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn different_vaults_progress_while_another_capture_is_pending() {
+        let mut fixture = QueuedRenames::new();
+        let first_root = fixture.vault("first");
+        let second_root = fixture.vault("second");
+        let first = fixture.queue(&first_root, "a.md", "renamed-a.md", 1);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .remove::<CapturePending>()
+            .insert(VaultRenameActive);
+        let release = Arc::new(AtomicBool::new(false));
+        let resume = release.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            while !resume.load(Ordering::Acquire) {
+                future::yield_now().await;
+            }
+            RawSnapshot::capture(&first_root).map_err(|error| error.to_string())
+        });
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .insert(KnowledgeSourceTask(task));
+        let second = fixture.queue(&second_root, "b.md", "renamed-b.md", 2);
+        fixture.finish(second);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeSourceTask>(first)
+                .is_some()
+        );
+        release.store(true, Ordering::Release);
+        fixture.finish(first);
+    }
+
+    #[test]
+    fn native_move_paths_reconcile_even_when_link_rewriting_reports_failure() {
+        let mut fixture = QueuedRenames::new();
+        let root = fixture.vault("vault");
+        let view = fixture
+            .app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::new(),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        let tree = fixture
+            .app
+            .world_mut()
+            .spawn(ExplorerTree::new(root.clone()))
+            .id();
+        let old = root.join("a.md");
+        let new = root.join("renamed-a.md");
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(view)
+            .insert(UsesExplorerTree(tree));
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<ExplorerState>(view)
+            .unwrap()
+            .open_editors
+            .push(old.clone());
+        let operation = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("file.rename").unwrap().running(),
+                OperationTarget::new(view),
+                OperationRetained,
+            ))
+            .id();
+        fixture.app.world_mut().trigger(RenameFinished {
+            entity: operation,
+            moved: Some(ExplorerRenameOutcome {
+                old_path: old,
+                new_path: new.clone(),
+                parent: root,
+                was_dir: false,
+            }),
+            result: Err("Source changed".to_string()),
+        });
+        fixture.app.world_mut().flush();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ExplorerState>(view)
+                .unwrap()
+                .open_editors,
+            [new]
+        );
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+        assert!(fixture.app.world().get::<ExplorerTreeDirty>(view).is_some());
     }
 }

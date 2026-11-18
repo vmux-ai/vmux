@@ -45,7 +45,8 @@ pub use launcher::{
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use operation::{
     Operation, OperationBundle, OperationCompleted, OperationError, OperationKind, OperationPlugin,
-    OperationState, OperationTarget, OperationTargetRevision, TargetedOperations,
+    OperationRetained, OperationState, OperationTarget, OperationTargetRevision,
+    TargetedOperations,
 };
 #[cfg(all(host, feature = "host"))]
 pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};

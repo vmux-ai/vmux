@@ -219,23 +219,22 @@ pub(crate) struct NoteLink {
 impl NoteLink {
     fn parse(text: &str) -> Vec<Self> {
         let mut links = Vec::new();
+        let mut rows = text.split_inclusive('\n');
+        let mut row = rows.next().unwrap_or_default();
+        let mut line = 0;
+        let mut end = row.len();
+        let mut preview: String = row.trim().chars().take(240).collect();
         for link in WikiLink::parse_all(text) {
-            let line = text[..link.start.min(text.len())]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count() as u32;
-            let preview = text
-                .lines()
-                .nth(line as usize)
-                .unwrap_or_default()
-                .trim()
-                .chars()
-                .take(240)
-                .collect();
+            while link.start >= end && end < text.len() {
+                row = rows.next().unwrap_or_default();
+                end += row.len();
+                line += 1;
+                preview = row.trim().chars().take(240).collect();
+            }
             links.push(Self {
                 link,
                 line,
-                preview,
+                preview: preview.clone(),
             });
         }
         links
@@ -379,12 +378,17 @@ pub(crate) struct KnowledgeResolver<'w, 's> {
             &'static ChildOf,
         ),
     >,
-    anchors: Query<'w, 's, (&'static Anchor, &'static ChildOf)>,
+    anchors: Query<'w, 's, &'static Anchor>,
+    children: Query<'w, 's, &'static Children>,
 }
 
 impl KnowledgeResolver<'_, '_> {
     fn note_entity(&self, owner: Entity, source: &Path, target: &str) -> Option<Entity> {
         let source = PathIdentity::resolve(source).into_path_buf();
+        self.note_entity_canonical(owner, &source, target)
+    }
+
+    fn note_entity_canonical(&self, owner: Entity, source: &Path, target: &str) -> Option<Entity> {
         if target.trim().is_empty() {
             return self
                 .notes
@@ -443,16 +447,23 @@ impl KnowledgeResolver<'_, '_> {
                 None => (anchor, false),
             };
             let key = KnowledgeNote::normalized(key);
-            for (value, parent) in &self.anchors {
-                if parent.parent() == entity && value.key == key && value.block == block {
+            let children = self.children.get(entity).ok();
+            for child in children.into_iter().flat_map(|children| children.iter()) {
+                let Ok(value) = self.anchors.get(child) else {
+                    continue;
+                };
+                if value.key == key && value.block == block {
                     line = Some(value.line);
                     break;
                 }
             }
             if line.is_none() && block {
                 let key = KnowledgeNote::normalized(anchor);
-                for (value, parent) in &self.anchors {
-                    if parent.parent() == entity && value.key == key && !value.block {
+                for child in children.into_iter().flat_map(|children| children.iter()) {
+                    let Ok(value) = self.anchors.get(child) else {
+                        continue;
+                    };
+                    if value.key == key && !value.block {
                         line = Some(value.line);
                         break;
                     }
@@ -504,7 +515,7 @@ fn resolve_links(
             continue;
         };
         if owner.parent() == trigger.entity {
-            match resolver.note_entity(trigger.entity, &note.path, &link.link.note) {
+            match resolver.note_entity_canonical(trigger.entity, &note.path, &link.link.note) {
                 Some(target) => {
                     commands.entity(entity).insert(LinkTarget(target));
                 }
@@ -694,6 +705,21 @@ impl KnowledgeGraph<'_, '_> {
         path: &Path,
         limit: usize,
     ) -> Vec<KnowledgeBacklink> {
+        let linked = self
+            .backlinks(owner, path)
+            .into_iter()
+            .map(|reference| reference.path)
+            .collect::<HashSet<_>>();
+        self.unlinked_mentions_excluding(owner, path, limit, &linked)
+    }
+
+    pub fn unlinked_mentions_excluding(
+        &self,
+        owner: Entity,
+        path: &Path,
+        limit: usize,
+        linked: &HashSet<PathBuf>,
+    ) -> Vec<KnowledgeBacklink> {
         let path = PathIdentity::resolve(path).into_path_buf();
         let Some(target) = self.resolver.note_entity(owner, &path, "") else {
             return Vec::new();
@@ -702,11 +728,6 @@ impl KnowledgeGraph<'_, '_> {
         let mut terms = vec![name.as_str().to_string()];
         terms.extend(target.aliases.clone());
         terms.retain(|term| term.chars().count() >= 3);
-        let linked = self
-            .backlinks(owner, &path)
-            .into_iter()
-            .map(|reference| reference.path)
-            .collect::<HashSet<_>>();
         let mut ordered = Vec::new();
         for (_, note, name, order, parent) in &self.resolver.notes {
             if parent.parent() == owner {
