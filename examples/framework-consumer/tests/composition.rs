@@ -282,7 +282,11 @@ fn external_manifest_decoding_refuses_malformed_contracts_and_keeps_legacy_sourc
     let mut app = App::new();
     app.add_plugins(FeaturePlugin::<Storage>::default());
     app.finish();
-    assert_eq!(app.world().resource::<Profile>().target(), "headless");
+    let world = app.world_mut();
+    assert_eq!(
+        world.query::<&Profile>().single(world).unwrap().target(),
+        "headless"
+    );
     assert!(FeatureManifest::try_parse("(name: \"Legacy\", commands: [])").is_ok());
 }
 
@@ -317,4 +321,30 @@ fn external_manifest_registration_cannot_replace_an_existing_feature() {
         .version
         .clone();
     assert_eq!(current, existing);
+}
+
+#[test]
+fn composition_refuses_missing_or_ambiguous_owner_contexts_before_startup() {
+    for duplicate in [false, true] {
+        let mut consumer = Consumer::new(
+            Profile::new("headless").permission("data.write"),
+            Notes::SOURCE,
+            Some(Storage::SOURCE),
+        );
+        if duplicate {
+            consumer.app.world_mut().spawn(Profile::new("web"));
+        } else {
+            let world = consumer.app.world_mut();
+            let entity = world
+                .query_filtered::<Entity, With<Profile>>()
+                .single(world)
+                .unwrap();
+            world.despawn(entity);
+        }
+        let error = consumer.finish().unwrap_err();
+        assert!(
+            error.contains("one application composition profile is required"),
+            "{error}"
+        );
+    }
 }

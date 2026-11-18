@@ -12,15 +12,10 @@ pub struct CompositionPlugin(pub Profile);
 
 impl Plugin for CompositionPlugin {
     fn build(&self, app: &mut App) {
-        self.0.validate().expect("valid composition profile");
-        assert!(
-            !app.world().contains_resource::<Profile>(),
-            "composition profile is already selected"
-        );
-        app.insert_resource(self.0.clone())
-            .init_resource::<Validation>()
-            .init_schedule(ValidationSchedule)
+        app.init_schedule(ValidationSchedule)
             .add_systems(ValidationSchedule, validate);
+        app.world_mut()
+            .spawn((Name::new("Application composition"), self.0.clone()));
     }
 
     fn finish(&self, app: &mut App) {
@@ -28,18 +23,10 @@ impl Plugin for CompositionPlugin {
         app.world_mut()
             .resource_mut::<Schedules>()
             .remove(ValidationSchedule);
-        let validation = app
-            .world_mut()
-            .remove_resource::<Validation>()
-            .expect("composition validation is installed");
-        validation
-            .0
-            .expect("composition validation must run")
-            .unwrap_or_else(|error| panic!("invalid SDK composition: {error}"));
     }
 }
 
-#[derive(Clone, Debug, Resource)]
+#[derive(Clone, Debug, Component)]
 pub struct Profile {
     target: String,
     capabilities: Vec<String>,
@@ -222,9 +209,14 @@ impl Features<'_, '_> {
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct ValidationSchedule;
 
-#[derive(Resource, Default)]
-struct Validation(Option<Result<(), String>>);
-
-fn validate(features: Features, profile: Res<Profile>, mut validation: ResMut<Validation>) {
-    validation.0 = Some(features.check(&profile));
+fn validate(features: Features, profiles: Query<&Profile>) {
+    let profile = profiles
+        .single()
+        .expect("one application composition profile is required");
+    profile
+        .validate()
+        .unwrap_or_else(|error| panic!("invalid SDK composition: {error}"));
+    features
+        .check(profile)
+        .unwrap_or_else(|error| panic!("invalid SDK composition: {error}"));
 }
