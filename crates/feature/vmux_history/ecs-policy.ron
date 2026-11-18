@@ -4,8 +4,6 @@
     (key: "crates/feature/vmux_history/src/host/prune.rs||const:RETENTION_MS", fingerprint: "7e9fb8f2fcb72690", issue: "VMX-253"),
     (key: "crates/feature/vmux_history/src/host/prune.rs||impl:Plugin for HistoryPrunePlugin", fingerprint: "f1142b41f90c9bb9", issue: "VMX-253"),
     (key: "crates/feature/vmux_history/src/host/prune.rs||struct:HistoryPrunePlugin", fingerprint: "d71cb80fe4bbaf61", issue: "VMX-253"),
-    (key: "crates/feature/vmux_history/src/host/query.rs||impl:Plugin for HistoryQueryPlugin", fingerprint: "b9c23e3c5861f921", issue: "VMX-253"),
-    (key: "crates/feature/vmux_history/src/host/query.rs||struct:HistoryQueryPlugin", fingerprint: "cb27a87f0e6425e5", issue: "VMX-253"),
     (key: "crates/feature/vmux_history/src/host/state.rs||alias:HistoryUiStateUpdates", fingerprint: "59f826ede07f2528", issue: "VMX-253"),
     (key: "crates/feature/vmux_history/src/host/state.rs||impl:Plugin for StatePlugin", fingerprint: "392408b2716d32fa", issue: "VMX-253"),
     (key: "crates/feature/vmux_history/src/host/state.rs||struct:StatePlugin", fingerprint: "65a1765431063f9c", issue: "VMX-253"),

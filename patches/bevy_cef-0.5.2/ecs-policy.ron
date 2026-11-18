@@ -135,7 +135,6 @@ legacy: [
     (key: "patches/bevy_cef-0.5.2/src/navigation.rs||fn:apply_request_navigate", fingerprint: "28b7d25a8c9df73b", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/navigation.rs||fn:apply_request_reload", fingerprint: "6e98eb4a092f931e", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/navigation.rs||fn:apply_request_reload_ignore_cache", fingerprint: "07784042f014c6ca", issue: "VMX-253"),
-    (key: "patches/bevy_cef-0.5.2/src/navigation.rs||impl:Plugin for NavigationPlugin", fingerprint: "0bf2eed99c23dacf", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/popup_state.rs||impl:Plugin for WebviewPopupPlugin", fingerprint: "74af4b282bf7e2d3", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/popup_state.rs||struct:WebviewPopupPlugin", fingerprint: "e59bbf2141a7eaa4", issue: "VMX-253"),
     (key: "patches/bevy_cef-0.5.2/src/popup_state.rs||struct:WebviewPopupReceiver", fingerprint: "e7f2eb40a5fd1cbe", issue: "VMX-253"),
