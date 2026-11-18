@@ -12,6 +12,7 @@ default = []
 host = ["dep:vmux_profile"]
 contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layout?/contracts"]
 manifest = ["ecs", "vmux_ecs/cli"]
+hosting = ["manifest", "vmux_ecs/hosting"]
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",

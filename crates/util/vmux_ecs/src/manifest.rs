@@ -11,6 +11,8 @@ use vmux_api::JsonSchema;
 use crate::cli::CliManifest;
 pub use crate::composition::{CompositionPlugin, Profile};
 pub use crate::feature_metadata::{Dependency, Lifecycle, Metadata};
+#[cfg(feature = "hosting")]
+pub use crate::hosting;
 pub use crate::registry::Registry;
 use crate::registry::{Declarations, RegistryPlugin};
 

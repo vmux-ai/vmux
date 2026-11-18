@@ -93,6 +93,8 @@ mod feature_metadata;
 mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
+#[cfg(feature = "hosting")]
+pub mod hosting;
 mod identity;
 #[cfg(feature = "jobs")]
 pub mod jobs;
