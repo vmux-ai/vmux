@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
-use bevy_ecs::system::{SystemParam, SystemState};
+use bevy_ecs::system::SystemParam;
 use serde::{Deserialize, Serialize};
 use vmux_api::extension::{ExtPinRequest, ExtToggleRequest, ExtUninstallRequest};
 pub use vmux_ecs::store::State;
@@ -47,7 +47,10 @@ impl Plugin for CorePlugin {
                     .chain()
                     .in_set(ExtensionSet::Accept),
             )
-            .add_systems(Update, step.in_set(ExtensionSet::Step));
+            .add_systems(Update, step.in_set(ExtensionSet::Step))
+            .add_observer(start)
+            .add_observer(admit)
+            .add_observer(retire);
     }
 }
 
@@ -639,122 +642,135 @@ fn reset(
     }
 }
 
-fn begin(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &InstallRequest, &OperationState), (With<Operation>, Without<InstallOwner>)>();
-    let mut requests = Vec::new();
-    for (entity, request, state) in query.iter(world) {
+#[derive(EntityEvent)]
+struct Starting {
+    entity: Entity,
+}
+
+fn begin(
+    requests: Query<
+        (Entity, &OperationState),
+        (With<Operation>, With<InstallRequest>, Without<InstallOwner>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, state) in &requests {
         if matches!(state, OperationState::Pending | OperationState::Running) {
-            requests.push((entity, request.clone()));
+            commands.trigger(Starting { entity });
         }
-    }
-    for (operation, request) in requests {
-        let root = request.ticket.owner;
-        if world
-            .get::<Root>(root)
-            .is_none_or(|root| root.0 != request.ticket.directory)
-            || world
-                .get::<Scope>(root)
-                .is_none_or(|scope| scope.0 != request.ticket)
-            || world.get::<Loaded>(root).is_none()
-            || request.id.len() != 32
-            || !request.id.bytes().all(|byte| (b'a'..=b'p').contains(&byte))
-        {
-            world.trigger(OperationCompleted {
-                entity: operation,
-                result: Err("invalid extension installation context".into()),
-            });
-            world.entity_mut(operation).remove::<InstallRequest>();
-            continue;
-        }
-        let mut packages = world.query_filtered::<(Entity, &Id, &ChildOf), With<Package>>();
-        let mut found = None;
-        for (entity, id, parent) in packages.iter(world) {
-            if parent.parent() == root && id.0 == request.id {
-                found = Some(entity);
-                break;
-            }
-        }
-        let package = match found {
-            Some(entity) => entity,
-            None => world
-                .spawn((Package, Id(request.id.clone()), ChildOf(root)))
-                .id(),
-        };
-        let mut associations =
-            world.query_filtered::<(Entity, &ProfileId, &ChildOf), With<Association>>();
-        let mut found = None;
-        for (entity, profile, parent) in associations.iter(world) {
-            if parent.parent() == package && profile.0 == request.profile {
-                found = Some(entity);
-                break;
-            }
-        }
-        let association = match found {
-            Some(entity) => entity,
-            None => world
-                .spawn((
-                    Association,
-                    ProfileId(request.profile.clone()),
-                    Grants::default(),
-                    ChildOf(package),
-                ))
-                .id(),
-        };
-        world.entity_mut(package).insert(Installing(operation));
-        world.entity_mut(association).insert(Installing(operation));
-        world.entity_mut(operation).insert(InstallOwner {
-            package,
-            association,
-        });
     }
 }
 
-fn cancel(world: &mut World) {
-    let mut query = world.query_filtered::<(
-        Entity,
-        Option<&Request>,
-        Option<&InstallRequest>,
-        Option<&InstallOwner>,
-        &OperationState,
-    ), With<Operation>>();
-    let mut stale = Vec::new();
-    for (operation, request, install, owner, state) in query.iter(world) {
+fn start(
+    event: On<Starting>,
+    requests: Query<(&InstallRequest, &OperationState), (With<Operation>, Without<InstallOwner>)>,
+    roots: Query<(&Root, &Scope, Has<Loaded>)>,
+    packages: Query<(Entity, &Id, &ChildOf), With<Package>>,
+    associations: Query<(Entity, &ProfileId, &ChildOf), With<Association>>,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok((request, state)) = requests.get(operation) else {
+        return;
+    };
+    if !matches!(state, OperationState::Pending | OperationState::Running) {
+        return;
+    }
+    let root = request.ticket.owner;
+    if !roots.get(root).is_ok_and(|(root, scope, loaded)| {
+        root.0 == request.ticket.directory && scope.0 == request.ticket && loaded
+    }) || request.id.len() != 32
+        || !request.id.bytes().all(|byte| (b'a'..=b'p').contains(&byte))
+    {
+        commands.trigger(OperationCompleted {
+            entity: operation,
+            result: Err("invalid extension installation context".into()),
+        });
+        commands.entity(operation).remove::<InstallRequest>();
+        return;
+    }
+    let mut found = None;
+    for (entity, id, parent) in &packages {
+        if parent.parent() == root && id.0 == request.id {
+            found = Some(entity);
+            break;
+        }
+    }
+    let package = match found {
+        Some(entity) => entity,
+        None => commands
+            .spawn((Package, Id(request.id.clone()), ChildOf(root)))
+            .id(),
+    };
+    let mut found = None;
+    for (entity, profile, parent) in &associations {
+        if parent.parent() == package && profile.0 == request.profile {
+            found = Some(entity);
+            break;
+        }
+    }
+    let association = match found {
+        Some(entity) => entity,
+        None => commands
+            .spawn((
+                Association,
+                ProfileId(request.profile.clone()),
+                Grants::default(),
+                ChildOf(package),
+            ))
+            .id(),
+    };
+    commands.entity(package).insert(Installing(operation));
+    commands.entity(association).insert(Installing(operation));
+    commands.entity(operation).insert(InstallOwner {
+        package,
+        association,
+    });
+}
+
+fn cancel(
+    mut operations: Query<
+        (
+            Entity,
+            Option<&Request>,
+            Option<&InstallRequest>,
+            Option<&InstallOwner>,
+            &mut OperationState,
+        ),
+        With<Operation>,
+    >,
+    roots: Query<(&Root, &Scope)>,
+    installing: Query<&Installing>,
+    mut commands: Commands,
+) {
+    for (operation, request, install, owner, mut state) in &mut operations {
         let ticket = match (request, install) {
             (Some(request), _) => &request.ticket,
             (_, Some(install)) => &install.ticket,
             _ => continue,
         };
-        let current = world
-            .get::<Root>(ticket.owner)
-            .is_some_and(|root| root.0 == ticket.directory)
-            && world
-                .get::<Scope>(ticket.owner)
-                .is_some_and(|scope| scope.0 == *ticket);
+        let current = roots
+            .get(ticket.owner)
+            .is_ok_and(|(root, scope)| root.0 == ticket.directory && scope.0 == *ticket);
         let owned = owner.is_none_or(|owner| {
-            world
-                .get::<Installing>(owner.package)
-                .is_some_and(|epoch| epoch.0 == operation)
-                && world
-                    .get::<Installing>(owner.association)
-                    .is_some_and(|epoch| epoch.0 == operation)
+            installing
+                .get(owner.package)
+                .is_ok_and(|epoch| epoch.0 == operation)
+                && installing
+                    .get(owner.association)
+                    .is_ok_and(|epoch| epoch.0 == operation)
         });
-        if !current || !owned {
-            stale.push((
-                operation,
-                owner.copied(),
-                matches!(state, OperationState::Pending | OperationState::Running),
-            ));
+        if current && owned {
+            continue;
         }
-    }
-    for (operation, owner, active) in stale {
-        if active {
-            world.entity_mut(operation).insert(OperationState::Canceled);
+        if matches!(*state, OperationState::Pending | OperationState::Running) {
+            *state = OperationState::Canceled;
         }
-        world
-            .entity_mut(operation)
+        commands
+            .entity(operation)
             .remove::<(Request, Queued, InstallRequest, InstallOwner)>();
         if let Some(owner) = owner {
-            world.entity_mut(operation).insert(ReleasedInstall(owner));
+            commands.entity(operation).insert(ReleasedInstall(*owner));
         }
     }
 }
@@ -1057,55 +1073,64 @@ fn reconcile(
     }
 }
 
-fn settle(world: &mut World) {
-    let mut query =
-        world.query_filtered::<(Entity, &OperationState, &InstallOwner), With<InstallRequest>>();
-    let mut completed = Vec::new();
-    for (operation, state, owner) in query.iter(world) {
-        if !matches!(state, OperationState::Pending | OperationState::Running) {
-            completed.push((operation, *owner));
+fn settle(
+    operations: Query<(Entity, &OperationState, &InstallOwner), With<InstallRequest>>,
+    mut commands: Commands,
+) {
+    for (operation, state, owner) in &operations {
+        if matches!(state, OperationState::Pending | OperationState::Running) {
+            continue;
         }
-    }
-    for (operation, owner) in completed {
-        world
-            .entity_mut(operation)
+        commands
+            .entity(operation)
             .remove::<(InstallRequest, InstallOwner)>();
-        world.entity_mut(operation).insert(ReleasedInstall(owner));
+        commands.entity(operation).insert(ReleasedInstall(*owner));
     }
 }
 
 #[derive(Component)]
 struct ReleasedInstall(InstallOwner);
 
-fn release(world: &mut World) {
-    let mut query = world.query::<(Entity, &ReleasedInstall)>();
-    let mut released = Vec::new();
-    for (operation, owner) in query.iter(world) {
-        released.push((operation, owner.0));
+#[derive(EntityEvent)]
+struct Releasing {
+    entity: Entity,
+}
+
+fn release(released: Query<Entity, With<ReleasedInstall>>, mut commands: Commands) {
+    for entity in &released {
+        commands.trigger(Releasing { entity });
     }
-    for (operation, owner) in released {
-        world.entity_mut(operation).remove::<ReleasedInstall>();
-        if world
-            .get::<Installing>(owner.association)
-            .is_some_and(|epoch| epoch.0 == operation)
-        {
-            world.entity_mut(owner.association).remove::<Installing>();
-            if world.get::<Installed>(owner.association).is_none() {
-                world.entity_mut(owner.association).despawn();
-            }
+}
+
+fn retire(
+    event: On<Releasing>,
+    released: Query<&ReleasedInstall>,
+    entities: Query<(Option<&Installing>, Has<Installed>, Has<Version>)>,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok(released) = released.get(operation) else {
+        return;
+    };
+    let owner = released.0;
+    commands.entity(operation).remove::<ReleasedInstall>();
+    if let Ok((Some(epoch), installed, _)) = entities.get(owner.association)
+        && epoch.0 == operation
+    {
+        commands.entity(owner.association).remove::<Installing>();
+        if !installed {
+            commands.entity(owner.association).despawn();
         }
-        if world
-            .get::<Installing>(owner.package)
-            .is_some_and(|epoch| epoch.0 == operation)
-        {
-            world.entity_mut(owner.package).remove::<Installing>();
-        }
-        if world.get::<Version>(owner.package).is_none()
-            && world.get::<Installing>(owner.package).is_none()
-            && let Ok(entity) = world.get_entity_mut(owner.package)
-        {
-            entity.despawn();
-        }
+    }
+    let Ok((epoch, _, committed)) = entities.get(owner.package) else {
+        return;
+    };
+    let owned = epoch.is_some_and(|epoch| epoch.0 == operation);
+    if owned {
+        commands.entity(owner.package).remove::<Installing>();
+    }
+    if !committed && (epoch.is_none() || owned) {
+        commands.entity(owner.package).despawn();
     }
 }
 
@@ -1192,108 +1217,118 @@ fn queue(
     }
 }
 
-fn accept(world: &mut World) {
-    let mut query =
-        world.query_filtered::<(Entity, &Request, &Queued, &OperationState), With<Operation>>();
-    let mut requests = Vec::new();
-    for (entity, request, queued, state) in query.iter(world) {
+#[derive(EntityEvent)]
+struct Accepting {
+    entity: Entity,
+}
+
+fn accept(
+    requests: Query<(Entity, &Queued, &OperationState), (With<Request>, With<Operation>)>,
+    mut commands: Commands,
+) {
+    let mut ordered = Vec::new();
+    for (entity, queued, state) in &requests {
         if matches!(state, OperationState::Pending | OperationState::Running) {
-            requests.push((queued.0, entity, request.clone()));
+            ordered.push((queued.0, entity));
         }
     }
-    requests.sort_by_key(|request| request.0);
-    let mut catalog = SystemState::<Catalog>::new(world);
-    for (_, operation, request) in requests {
-        let owner = request.ticket.owner;
-        if world.get::<Writing>(owner).is_some() {
-            continue;
+    ordered.sort_unstable_by_key(|request| request.0);
+    for (_, entity) in ordered {
+        commands.trigger(Accepting { entity });
+    }
+}
+
+fn admit(
+    event: On<Accepting>,
+    requests: Query<(&Request, &OperationState), (With<Operation>, With<Queued>)>,
+    writing: Query<(), With<Writing>>,
+    packages: Query<(&Id, &ChildOf)>,
+    pending: Query<(Entity, &ProfileId, &ChildOf), (With<Association>, Without<Installed>)>,
+    mut store: ParamSet<(Catalog, Query<(&Revision, &mut State, Has<Repair>)>)>,
+    mut writes: MessageWriter<WriteTaskRequest>,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok((request, status)) = requests.get(operation) else {
+        return;
+    };
+    let owner = request.ticket.owner;
+    if !matches!(status, OperationState::Pending | OperationState::Running)
+        || writing.contains(owner)
+    {
+        return;
+    }
+    if let Mutation::Remove(remove) = &request.mutation {
+        for (entity, profile, parent) in &pending {
+            if profile.0 == request.profile
+                && packages
+                    .get(parent.parent())
+                    .is_ok_and(|(id, parent)| id.0 == remove.id && parent.parent() == owner)
+            {
+                commands.entity(entity).despawn();
+            }
         }
-        if let Mutation::Remove(remove) = &request.mutation {
-            let mut pending = world.query_filtered::<(Entity, &ProfileId, &ChildOf), (With<Association>, Without<Installed>)>();
-            let mut removed = Vec::new();
-            for (entity, profile, parent) in pending.iter(world) {
-                if profile.0 != request.profile {
-                    continue;
-                }
-                let package = parent.parent();
-                if world.get::<Id>(package).is_some_and(|id| id.0 == remove.id)
-                    && world
-                        .get::<ChildOf>(package)
-                        .is_some_and(|parent| parent.parent() == owner)
-                {
-                    removed.push(entity);
-                }
-            }
-            for entity in removed {
-                world.entity_mut(entity).despawn();
-            }
+    }
+    let snapshot = {
+        let catalog = store.p0();
+        if !catalog.ready(&request.ticket) {
+            Err("extension store is unavailable".into())
+        } else {
+            catalog.snapshot(owner)
         }
-        let snapshot = {
-            let catalog = catalog.get(world).unwrap();
-            if !catalog.ready(&request.ticket) {
-                Err("extension store is unavailable".into())
-            } else {
-                catalog.snapshot(owner)
-            }
-        };
-        let proposed = snapshot
-            .clone()
-            .and_then(|snapshot| request.propose(snapshot));
-        let proposed = match proposed {
-            Ok(proposed) => proposed,
-            Err(error) => {
-                world.trigger(OperationCompleted {
-                    entity: operation,
-                    result: Err(error),
-                });
-                world.entity_mut(operation).remove::<(Request, Queued)>();
-                continue;
-            }
-        };
-        let dirty = world
-            .get::<State>(owner)
-            .is_some_and(|state| state.is_dirty());
-        if !dirty
-            && snapshot
-                .as_ref()
-                .is_ok_and(|snapshot| *snapshot == proposed)
-        {
-            world.trigger(OperationCompleted {
+    };
+    let proposed = match snapshot
+        .clone()
+        .and_then(|snapshot| request.propose(snapshot))
+    {
+        Ok(proposed) => proposed,
+        Err(error) => {
+            commands.trigger(OperationCompleted {
                 entity: operation,
-                result: Ok(()),
+                result: Err(error),
             });
-            world.entity_mut(operation).remove::<(Request, Queued)>();
-            continue;
+            commands.entity(operation).remove::<(Request, Queued)>();
+            return;
         }
-        let base = *world.get::<Revision>(owner).unwrap();
-        let before = world.get::<State>(owner).unwrap().clone();
-        let revision = {
-            let mut state = world.get_mut::<State>(owner).unwrap();
-            state.advance();
-            state.begin().unwrap()
-        };
-        world
-            .entity_mut(operation)
-            .insert((OperationState::Running, OperationTargetRevision(revision)));
-        if world.get::<Repair>(owner).is_some() {
-            world.entity_mut(owner).insert(Repair::Suspended);
-        }
-        world.entity_mut(owner).insert(Writing {
-            ticket: request.ticket.clone(),
-            operation,
-            base,
-            revision,
-            snapshot: proposed.clone(),
-            request: request.clone(),
-            before,
+    };
+    let mut states = store.p1();
+    let (base, mut state, repair) = states.get_mut(owner).unwrap();
+    if !state.is_dirty()
+        && snapshot
+            .as_ref()
+            .is_ok_and(|snapshot| *snapshot == proposed)
+    {
+        commands.trigger(OperationCompleted {
+            entity: operation,
+            result: Ok(()),
         });
-        world.write_message(WriteTaskRequest {
-            ticket: request.ticket,
-            operation,
-            revision,
-            snapshot: proposed,
-        });
+        commands.entity(operation).remove::<(Request, Queued)>();
+        return;
     }
+    let before = state.clone();
+    state.advance();
+    let revision = state.begin().unwrap();
+    commands
+        .entity(operation)
+        .insert((OperationState::Running, OperationTargetRevision(revision)));
+    if repair {
+        commands.entity(owner).insert(Repair::Suspended);
+    }
+    commands.entity(owner).insert(Writing {
+        ticket: request.ticket.clone(),
+        operation,
+        base: *base,
+        revision,
+        snapshot: proposed.clone(),
+        request: request.clone(),
+        before,
+    });
+    writes.write(WriteTaskRequest {
+        ticket: request.ticket.clone(),
+        operation,
+        revision,
+        snapshot: proposed,
+    });
 }
 
 #[cfg(test)]
@@ -1621,6 +1656,158 @@ mod tests {
                 .drain()
                 .next()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn queued_mutations_wait_for_commit_without_blocking_other_roots() {
+        let mut fixture = Fixture::new();
+        let index = fixture.snapshot();
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((Root("/other-extensions".into()), Seed(Ok(index))))
+            .id();
+        fixture.app.update();
+        let mut catalog = SystemState::<Catalog>::new(fixture.app.world_mut());
+        let other_ticket = catalog
+            .get(fixture.app.world())
+            .unwrap()
+            .ticket(other)
+            .unwrap()
+            .clone();
+        let mut operations = Vec::new();
+        for (ticket, mutation) in [
+            (
+                fixture.ticket.clone(),
+                Mutation::Pin(ExtPinRequest {
+                    id: PACKAGE_ID.into(),
+                    pinned: true,
+                }),
+            ),
+            (
+                fixture.ticket.clone(),
+                Mutation::Toggle(ExtToggleRequest {
+                    id: PACKAGE_ID.into(),
+                    enabled: true,
+                    approve_permissions: true,
+                }),
+            ),
+            (
+                other_ticket,
+                Mutation::Pin(ExtPinRequest {
+                    id: PACKAGE_ID.into(),
+                    pinned: true,
+                }),
+            ),
+        ] {
+            operations.push(
+                fixture
+                    .app
+                    .world_mut()
+                    .spawn(
+                        Request {
+                            ticket,
+                            profile: "personal".into(),
+                            mutation,
+                        }
+                        .bundle(),
+                    )
+                    .id(),
+            );
+        }
+        fixture.app.update();
+        let writes: Vec<_> = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<WriteTaskRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0].operation, operations[0]);
+        assert_eq!(writes[1].operation, operations[2]);
+        assert!(!fixture.snapshot().entries[0].pinned_for("personal"));
+        assert!(!fixture.snapshot().entries[0].enabled_for("personal"));
+        fixture.finish(&writes[0], Ok(()));
+        let next = fixture.write();
+        assert_eq!(next.operation, operations[1]);
+        assert!(fixture.snapshot().entries[0].pinned_for("personal"));
+        assert!(!fixture.snapshot().entries[0].enabled_for("personal"));
+        fixture.finish(&next, Ok(()));
+        let committed = fixture.snapshot();
+        assert!(committed.entries[0].pinned_for("personal"));
+        assert!(committed.entries[0].enabled_for("personal"));
+    }
+
+    #[test]
+    fn simultaneous_provisional_installs_share_one_package_and_release_old_epochs() {
+        let mut fixture = Fixture::new();
+        let id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut operations = Vec::new();
+        for profile in ["personal", "work"] {
+            operations.push(
+                fixture
+                    .app
+                    .world_mut()
+                    .spawn((
+                        Operation::bundle("extension.install").unwrap().running(),
+                        InstallRequest {
+                            ticket: fixture.ticket.clone(),
+                            profile: profile.into(),
+                            id: id.into(),
+                        },
+                    ))
+                    .id(),
+            );
+        }
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(operations[0]),
+            Some(&OperationState::Canceled)
+        );
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(operations[1]),
+            Some(&OperationState::Running)
+        );
+        let packages: Vec<_> = fixture
+            .app
+            .world_mut()
+            .query_filtered::<(Entity, &Id), With<Package>>()
+            .iter(fixture.app.world())
+            .filter_map(|(entity, found)| (found.0 == id).then_some(entity))
+            .collect();
+        assert_eq!(packages.len(), 1);
+        let package = packages[0];
+        let profiles: Vec<_> = fixture
+            .app
+            .world_mut()
+            .query_filtered::<(&ProfileId, &ChildOf), With<Association>>()
+            .iter(fixture.app.world())
+            .filter_map(|(profile, parent)| {
+                (parent.parent() == package).then_some(profile.0.clone())
+            })
+            .collect();
+        assert_eq!(profiles, ["work"]);
+        assert!(
+            fixture
+                .snapshot()
+                .entries
+                .iter()
+                .all(|entry| entry.id != id)
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(operations[1])
+            .insert(OperationState::Canceled);
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(package).is_err());
+        assert!(
+            fixture
+                .snapshot()
+                .entries
+                .iter()
+                .all(|entry| entry.id != id)
         );
     }
 
