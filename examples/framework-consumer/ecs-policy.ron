@@ -1,5 +1,4 @@
 (legacy: [
-    (key: "examples/framework-consumer/src/lib.rs||fn:rename", fingerprint: "88ff05d839bdae49", issue: "VMX-253"),
     (key: "examples/framework-consumer/src/lib.rs||impl:Plugin for DocumentStorePlugin", fingerprint: "7a667b3001a2c437", issue: "VMX-253"),
     (key: "examples/framework-consumer/src/lib.rs||impl:Plugin for DocumentsPlugin", fingerprint: "53a13adb04a01780", issue: "VMX-253"),
     (key: "examples/framework-consumer/src/lib.rs||struct:DocumentStore", fingerprint: "cd9aaefa0caf739d", issue: "VMX-253"),
