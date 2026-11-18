@@ -1305,7 +1305,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(super::McpConnectionPlugin);
         app.world_mut()
-            .spawn(FeatureManifest::of::<crate::Feature>());
+            .spawn(FeatureManifest::of::<crate::Feature>().clone());
         app.update();
         let url = "https://github.com/login/device";
         let target = app
@@ -1394,7 +1394,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(super::McpConnectionPlugin);
         app.world_mut()
-            .spawn(FeatureManifest::of::<crate::Feature>());
+            .spawn(FeatureManifest::of::<crate::Feature>().clone());
         let (send, receive) = std::sync::mpsc::channel();
         let authorization = vmux_api::mcp::McpAuthorization {
             url: "https://github.com/login/device".into(),
