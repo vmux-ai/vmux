@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::prelude::{App, Commands, Entity, MessageReader, Plugin, Query, With, World};
+use bevy::prelude::{App, Commands, Entity, MessageReader, Plugin, Query, With};
 use bevy_cef_core::prelude::{CefTransitionCore, WebviewCommittedNavigationEvent};
 use vmux_api::VmuxRoute;
 use vmux_ecs::page::PageReady;
@@ -18,7 +18,8 @@ impl Plugin for HistorySpawnPlugin {
                 (committed, requested, ready, record)
                     .chain()
                     .in_set(HistoryWriteSet),
-            );
+            )
+            .add_observer(apply);
     }
 }
 
@@ -141,63 +142,87 @@ fn ready(
     }
 }
 
-fn record(world: &mut World) {
-    let mut pending = Vec::new();
-    let mut recordings = world.query_filtered::<
+#[derive(EntityEvent)]
+struct RecordingRequested {
+    entity: Entity,
+}
+
+fn record(
+    recordings: Query<
         (Entity, &Order, &PageMetadata, &CreatedAt, &TransitionType),
         With<Recording>,
-    >();
-    for (entity, order, metadata, created, transition) in recordings.iter(world) {
-        pending.push((order.0, entity, metadata.clone(), created.0, *transition));
+    >,
+    mut commands: Commands,
+) {
+    let mut pending = Vec::new();
+    for (entity, order, ..) in &recordings {
+        pending.push((order.0, entity));
     }
-    pending.sort_by_key(|(order, ..)| *order);
-    for (_, operation, metadata, created, transition) in pending {
-        if !world
-            .get::<OperationState>(operation)
-            .is_some_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            world.despawn(operation);
-            continue;
+    pending.sort_by_key(|(order, _)| *order);
+    for (_, entity) in pending {
+        commands.trigger(RecordingRequested { entity });
+    }
+}
+
+fn apply(
+    request: On<RecordingRequested>,
+    mut recordings: Query<
+        (
+            &PageMetadata,
+            &CreatedAt,
+            &TransitionType,
+            &mut OperationState,
+        ),
+        With<Recording>,
+    >,
+    mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
+    mut commands: Commands,
+) {
+    let operation = request.entity;
+    let Ok((metadata, created, transition, mut state)) = recordings.get_mut(operation) else {
+        commands.entity(operation).try_despawn();
+        return;
+    };
+    if !matches!(*state, OperationState::Pending | OperationState::Running) {
+        commands.entity(operation).despawn();
+        return;
+    }
+    *state = OperationState::Running;
+    let mut existing = None;
+    for (entity, current, ..) in &urls {
+        if current.url == metadata.url {
+            existing = Some(entity);
+            break;
         }
-        world.entity_mut(operation).insert(OperationState::Running);
-        let mut existing = None;
-        let mut urls = world
-            .query_filtered::<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>();
-        for (entity, current, ..) in urls.iter(world) {
-            if current.url == metadata.url {
-                existing = Some(entity);
-                break;
-            }
+    }
+    let url = match existing {
+        Some(entity) => {
+            let (_, _, mut count, mut last) = urls.get_mut(entity).unwrap();
+            count.0 = count.0.saturating_add(1);
+            last.0 = created.0;
+            entity
         }
-        let url = match existing {
-            Some(entity) => {
-                let mut count = world.get_mut::<VisitCount>(entity).unwrap();
-                count.0 = count.0.saturating_add(1);
-                world.get_mut::<LastVisitedAt>(entity).unwrap().0 = created;
-                entity
-            }
-            None => world
-                .spawn((
-                    Url,
-                    moonshine_save::prelude::Save,
-                    metadata,
-                    VisitCount(1),
-                    LastVisitedAt(created),
-                    CreatedAt(created),
-                ))
-                .id(),
-        };
-        if transition != TransitionType::BackForward {
-            world.spawn((
-                Visit,
+        None => commands
+            .spawn((
+                Url,
                 moonshine_save::prelude::Save,
-                CreatedAt(created),
-                VisitedUrl(url),
-                transition,
-            ));
-        }
-        world.despawn(operation);
+                metadata.clone(),
+                VisitCount(1),
+                LastVisitedAt(created.0),
+                *created,
+            ))
+            .id(),
+    };
+    if *transition != TransitionType::BackForward {
+        commands.spawn((
+            Visit,
+            moonshine_save::prelude::Save,
+            *created,
+            VisitedUrl(url),
+            *transition,
+        ));
     }
+    commands.entity(operation).despawn();
 }
 
 #[cfg(test)]
