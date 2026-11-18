@@ -1,3 +1,4 @@
+use bevy::app::{App, Plugin};
 use bevy::{prelude::*, window::WindowResized};
 use bevy_cef::prelude::{Browsers, HostWindow, WebviewWindowed};
 use vmux_flex::prelude::LayoutSystems;
