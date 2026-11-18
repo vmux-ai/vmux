@@ -25,5 +25,4 @@
     (key: "crates/feature/vmux_start/src/branches.rs||struct:BranchesPlugin", fingerprint: "bd672e9ee7f5bb47", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_start/src/branches.rs||struct:Read", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
 
 
-    (key: "crates/feature/vmux_start/src/ui.rs||struct:StartPage", fingerprint: "36f8f2d2b6bc214a", interface: "Dioxus and Bevy CEF typed page registration", input: "ECS: crates/util/vmux_ui/src/theme.rs||struct:ThemeUiState", output: "external: mounted page metadata and typed subscription wiring", lifetime: "one static page registration", bounds: "the actual page attribute binds declared Rust UI state types; page systems retain domain and mutation authority", teardown: "page unmount drops presentation and handlers; compiled metadata remains immutable", architecture: "ECS ownership boundaries"),
 ])
