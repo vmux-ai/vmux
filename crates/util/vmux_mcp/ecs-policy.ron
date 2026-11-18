@@ -26,6 +26,4 @@ shape: (
   ],
 ),
 boundaries: [
-    (key: "crates/util/vmux_mcp/src/lib.rs||struct:Feature", fingerprint: "46638b0ef6a78408", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
-    (key: "crates/util/vmux_mcp/src/lib.rs||impl:vmux_feature :: manifest :: FeatureManifestSource for Feature", fingerprint: "fa163a34b242f281", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
 ], )
