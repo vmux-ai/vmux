@@ -122,6 +122,216 @@ mod macos {
     }
 
     impl BookmarkMenuBuilder<'_, '_> {
+        fn entry(
+            &mut self,
+            menu: Entity,
+            locale: &Locale,
+            folders: &[FolderMenuRow],
+            uuid: &str,
+            webview: Entity,
+        ) {
+            let Some((_, _, _, Some(metadata), pinned, true, _, _, parent)) =
+                self.entries.iter().find(|(_, id, ..)| id.0 == uuid)
+            else {
+                return;
+            };
+            self.commands.spawn((
+                OsMenuEntry::new(locale.translate("common-open"), true),
+                ChildOf(menu),
+                BookmarkMenuMessage(OpenRequest {
+                    url: Some(metadata.url.clone()),
+                    policy: vmux_layout::stack::OpenPolicy::FocusExact,
+                }),
+            ));
+            self.commands.spawn((
+                OsMenuEntry::new(locale.translate("common-rename"), true),
+                ChildOf(menu),
+                BookmarkMenuMessage(RenameInputRequest {
+                    webview,
+                    uuid: uuid.to_string(),
+                }),
+            ));
+            if pinned {
+                self.commands.spawn((
+                    OsMenuEntry::new(locale.translate("layout-unpin-page"), true),
+                    ChildOf(menu),
+                    BookmarkMenuMessage(UnpinRequest {
+                        uuid: uuid.to_string(),
+                    }),
+                ));
+            } else {
+                self.commands.spawn((
+                    OsMenuEntry::new(locale.translate("layout-pin"), true),
+                    ChildOf(menu),
+                    BookmarkMenuMessage(PinRequest {
+                        uuid: uuid.to_string(),
+                    }),
+                ));
+            }
+            self.commands.spawn((OsMenuSeparator, ChildOf(menu)));
+            if parent.is_some() {
+                self.commands.spawn((
+                    OsMenuEntry::new(locale.translate("layout-move-to-bookmarks"), true),
+                    ChildOf(menu),
+                    BookmarkMenuMessage(MoveRequest {
+                        uuid: uuid.to_string(),
+                        folder: None,
+                    }),
+                ));
+            }
+            for folder in BookmarkMenuBuilder::folder_choices(folders) {
+                if parent.is_some_and(|parent| parent.parent() == folder.entity) {
+                    continue;
+                }
+                self.commands.spawn((
+                    OsMenuEntry::new(
+                        locale.translate_with(
+                            "layout-move-to",
+                            &[("folder", TranslationValue::String(&folder.label))],
+                        ),
+                        true,
+                    ),
+                    ChildOf(menu),
+                    BookmarkMenuMessage(MoveRequest {
+                        uuid: uuid.to_string(),
+                        folder: Some(folder.uuid),
+                    }),
+                ));
+            }
+            self.commands.spawn((OsMenuSeparator, ChildOf(menu)));
+            self.commands.spawn((
+                OsMenuEntry::new(locale.translate("common-remove"), true),
+                ChildOf(menu),
+                BookmarkMenuMessage(RemoveRequest {
+                    uuid: uuid.to_string(),
+                }),
+            ));
+        }
+
+        fn folder(
+            &mut self,
+            menu: Entity,
+            locale: &Locale,
+            folders: &[FolderMenuRow],
+            uuid: &str,
+            active_page: Option<PageMetadata>,
+            webview: Entity,
+        ) {
+            let Some((entity, _, _, _, _, _, true, collapsed, parent)) =
+                self.entries.iter().find(|(_, id, ..)| id.0 == uuid)
+            else {
+                return;
+            };
+            self.commands.spawn((
+                OsMenuEntry::new(
+                    locale.translate(if collapsed {
+                        "common-expand"
+                    } else {
+                        "common-collapse"
+                    }),
+                    true,
+                ),
+                ChildOf(menu),
+                BookmarkMenuMessage(ToggleFolderRequest {
+                    uuid: uuid.to_string(),
+                }),
+            ));
+            let current_page_enabled = active_page.is_some();
+            let current_page = active_page.unwrap_or_default();
+            self.commands.spawn((
+                OsMenuEntry::new(
+                    locale.translate("layout-bookmark-current-page"),
+                    current_page_enabled,
+                ),
+                ChildOf(menu),
+                BookmarkMenuMessage(AddRequest {
+                    metadata: current_page,
+                    folder: Some(uuid.to_string()),
+                }),
+            ));
+            let new_folder_item = OsMenuEntry::new(locale.translate("layout-new-folder"), true);
+            let new_folder = NewFolderInputRequest {
+                webview,
+                parent: Some(uuid.to_string()),
+            };
+            if collapsed {
+                self.commands.spawn((
+                    new_folder_item,
+                    ChildOf(menu),
+                    BookmarkMenuMessage(new_folder),
+                    BookmarkMenuMessage(ToggleFolderRequest {
+                        uuid: uuid.to_string(),
+                    }),
+                ));
+            } else {
+                self.commands.spawn((
+                    new_folder_item,
+                    ChildOf(menu),
+                    BookmarkMenuMessage(new_folder),
+                ));
+            }
+            self.commands.spawn((
+                OsMenuEntry::new(locale.translate("layout-rename-folder"), true),
+                ChildOf(menu),
+                BookmarkMenuMessage(RenameInputRequest {
+                    webview,
+                    uuid: uuid.to_string(),
+                }),
+            ));
+            self.commands.spawn((OsMenuSeparator, ChildOf(menu)));
+            self.folder_moves(menu, locale, folders, uuid, entity, parent.is_some());
+        }
+
+        fn folder_moves(
+            &mut self,
+            menu: Entity,
+            locale: &Locale,
+            folders: &[FolderMenuRow],
+            uuid: &str,
+            entity: Entity,
+            nested: bool,
+        ) {
+            if nested {
+                self.commands.spawn((
+                    OsMenuEntry::new(locale.translate("layout-move-to-bookmarks"), true),
+                    ChildOf(menu),
+                    BookmarkMenuMessage(MoveFolderRequest {
+                        uuid: uuid.to_string(),
+                        parent: None,
+                    }),
+                ));
+            }
+            for folder in BookmarkMenuBuilder::folder_choices(folders) {
+                if folder.entity == entity
+                    || BookmarkMenuBuilder::is_descendant(folder.entity, entity, folders)
+                {
+                    continue;
+                }
+                self.commands.spawn((
+                    OsMenuEntry::new(
+                        locale.translate_with(
+                            "layout-move-to",
+                            &[("folder", TranslationValue::String(&folder.label))],
+                        ),
+                        true,
+                    ),
+                    ChildOf(menu),
+                    BookmarkMenuMessage(MoveFolderRequest {
+                        uuid: uuid.to_string(),
+                        parent: Some(folder.uuid),
+                    }),
+                ));
+            }
+            self.commands.spawn((OsMenuSeparator, ChildOf(menu)));
+            self.commands.spawn((
+                OsMenuEntry::new(locale.translate("layout-remove-folder"), true),
+                ChildOf(menu),
+                BookmarkMenuMessage(RemoveFolderRequest {
+                    uuid: uuid.to_string(),
+                }),
+            ));
+        }
+
         fn folders(&self) -> Vec<FolderMenuRow> {
             let mut folders = Vec::new();
             for (entity, uuid, name, _, _, _, folder, _, parent) in &self.entries {
@@ -248,25 +458,12 @@ mod macos {
                 &builder.entries,
                 &uuid,
             ),
-            BookmarkMenuTarget::Entry { uuid } => bookmark_menu(
-                menu,
-                &mut builder.commands,
-                &locale,
-                &builder.entries,
-                &folders,
-                &uuid,
-                request.webview,
-            ),
-            BookmarkMenuTarget::Folder { uuid, active_page } => folder_menu(
-                menu,
-                &mut builder.commands,
-                &locale,
-                &builder.entries,
-                &folders,
-                &uuid,
-                active_page,
-                request.webview,
-            ),
+            BookmarkMenuTarget::Entry { uuid } => {
+                builder.entry(menu, &locale, &folders, &uuid, request.webview)
+            }
+            BookmarkMenuTarget::Folder { uuid, active_page } => {
+                builder.folder(menu, &locale, &folders, &uuid, active_page, request.webview)
+            }
         }
     }
 
@@ -318,206 +515,6 @@ mod macos {
                 }),
             ));
         }
-    }
-
-    fn bookmark_menu(
-        menu: Entity,
-        commands: &mut Commands,
-        locale: &Locale,
-        entries: &BookmarkMenuEntries<'_, '_>,
-        folders: &[FolderMenuRow],
-        uuid: &str,
-        webview: Entity,
-    ) {
-        let Some((_, _, _, Some(metadata), pinned, true, _, _, parent)) =
-            entries.iter().find(|(_, id, ..)| id.0 == uuid)
-        else {
-            return;
-        };
-        commands.spawn((
-            OsMenuEntry::new(locale.translate("common-open"), true),
-            ChildOf(menu),
-            BookmarkMenuMessage(OpenRequest {
-                url: Some(metadata.url.clone()),
-                policy: vmux_layout::stack::OpenPolicy::FocusExact,
-            }),
-        ));
-        commands.spawn((
-            OsMenuEntry::new(locale.translate("common-rename"), true),
-            ChildOf(menu),
-            BookmarkMenuMessage(RenameInputRequest {
-                webview,
-                uuid: uuid.to_string(),
-            }),
-        ));
-        if pinned {
-            commands.spawn((
-                OsMenuEntry::new(locale.translate("layout-unpin-page"), true),
-                ChildOf(menu),
-                BookmarkMenuMessage(UnpinRequest {
-                    uuid: uuid.to_string(),
-                }),
-            ));
-        } else {
-            commands.spawn((
-                OsMenuEntry::new(locale.translate("layout-pin"), true),
-                ChildOf(menu),
-                BookmarkMenuMessage(PinRequest {
-                    uuid: uuid.to_string(),
-                }),
-            ));
-        }
-        commands.spawn((OsMenuSeparator, ChildOf(menu)));
-        if parent.is_some() {
-            commands.spawn((
-                OsMenuEntry::new(locale.translate("layout-move-to-bookmarks"), true),
-                ChildOf(menu),
-                BookmarkMenuMessage(MoveRequest {
-                    uuid: uuid.to_string(),
-                    folder: None,
-                }),
-            ));
-        }
-        for folder in BookmarkMenuBuilder::folder_choices(folders) {
-            if parent.is_some_and(|parent| parent.parent() == folder.entity) {
-                continue;
-            }
-            commands.spawn((
-                OsMenuEntry::new(
-                    locale.translate_with(
-                        "layout-move-to",
-                        &[("folder", TranslationValue::String(&folder.label))],
-                    ),
-                    true,
-                ),
-                ChildOf(menu),
-                BookmarkMenuMessage(MoveRequest {
-                    uuid: uuid.to_string(),
-                    folder: Some(folder.uuid),
-                }),
-            ));
-        }
-        commands.spawn((OsMenuSeparator, ChildOf(menu)));
-        commands.spawn((
-            OsMenuEntry::new(locale.translate("common-remove"), true),
-            ChildOf(menu),
-            BookmarkMenuMessage(RemoveRequest {
-                uuid: uuid.to_string(),
-            }),
-        ));
-    }
-
-    fn folder_menu(
-        menu: Entity,
-        commands: &mut Commands,
-        locale: &Locale,
-        entries: &BookmarkMenuEntries<'_, '_>,
-        folders: &[FolderMenuRow],
-        uuid: &str,
-        active_page: Option<PageMetadata>,
-        webview: Entity,
-    ) {
-        let Some((entity, _, _, _, _, _, true, collapsed, parent)) =
-            entries.iter().find(|(_, id, ..)| id.0 == uuid)
-        else {
-            return;
-        };
-        commands.spawn((
-            OsMenuEntry::new(
-                locale.translate(if collapsed {
-                    "common-expand"
-                } else {
-                    "common-collapse"
-                }),
-                true,
-            ),
-            ChildOf(menu),
-            BookmarkMenuMessage(ToggleFolderRequest {
-                uuid: uuid.to_string(),
-            }),
-        ));
-        let current_page_enabled = active_page.is_some();
-        let current_page = active_page.unwrap_or_default();
-        commands.spawn((
-            OsMenuEntry::new(
-                locale.translate("layout-bookmark-current-page"),
-                current_page_enabled,
-            ),
-            ChildOf(menu),
-            BookmarkMenuMessage(AddRequest {
-                metadata: current_page,
-                folder: Some(uuid.to_string()),
-            }),
-        ));
-        let new_folder_item = OsMenuEntry::new(locale.translate("layout-new-folder"), true);
-        let new_folder = NewFolderInputRequest {
-            webview,
-            parent: Some(uuid.to_string()),
-        };
-        if collapsed {
-            commands.spawn((
-                new_folder_item,
-                ChildOf(menu),
-                BookmarkMenuMessage(new_folder),
-                BookmarkMenuMessage(ToggleFolderRequest {
-                    uuid: uuid.to_string(),
-                }),
-            ));
-        } else {
-            commands.spawn((
-                new_folder_item,
-                ChildOf(menu),
-                BookmarkMenuMessage(new_folder),
-            ));
-        }
-        commands.spawn((
-            OsMenuEntry::new(locale.translate("layout-rename-folder"), true),
-            ChildOf(menu),
-            BookmarkMenuMessage(RenameInputRequest {
-                webview,
-                uuid: uuid.to_string(),
-            }),
-        ));
-        commands.spawn((OsMenuSeparator, ChildOf(menu)));
-        if parent.is_some() {
-            commands.spawn((
-                OsMenuEntry::new(locale.translate("layout-move-to-bookmarks"), true),
-                ChildOf(menu),
-                BookmarkMenuMessage(MoveFolderRequest {
-                    uuid: uuid.to_string(),
-                    parent: None,
-                }),
-            ));
-        }
-        for folder in BookmarkMenuBuilder::folder_choices(folders) {
-            if folder.entity == entity
-                || BookmarkMenuBuilder::is_descendant(folder.entity, entity, folders)
-            {
-                continue;
-            }
-            commands.spawn((
-                OsMenuEntry::new(
-                    locale.translate_with(
-                        "layout-move-to",
-                        &[("folder", TranslationValue::String(&folder.label))],
-                    ),
-                    true,
-                ),
-                ChildOf(menu),
-                BookmarkMenuMessage(MoveFolderRequest {
-                    uuid: uuid.to_string(),
-                    parent: Some(folder.uuid),
-                }),
-            ));
-        }
-        commands.spawn((OsMenuSeparator, ChildOf(menu)));
-        commands.spawn((
-            OsMenuEntry::new(locale.translate("layout-remove-folder"), true),
-            ChildOf(menu),
-            BookmarkMenuMessage(RemoveFolderRequest {
-                uuid: uuid.to_string(),
-            }),
-        ));
     }
 
     struct FolderChoice {

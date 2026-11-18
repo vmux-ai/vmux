@@ -47,8 +47,6 @@ impl Plugin for BookmarkStorePlugin {
     }
 }
 
-const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
-
 #[vmux_ecs::store(
     ChildOf,
     Children,
@@ -152,6 +150,7 @@ pub(super) struct OfferedBookmarkDefaults {
 }
 
 impl BookmarkSeed<'_, '_> {
+    const RETIRED_DEFAULT_BOOKMARKS: [&'static str; 2] = ["vmux://spaces/", "vmux://team/"];
     const PIN_ORDER_REVISION: u32 = 5;
     const LEGACY_PIN_ORDER_REVISION: u32 = 4;
 
@@ -314,7 +313,7 @@ fn retire_defaults(
     };
     if state.pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
         let mut retired = HashSet::new();
-        for url in RETIRED_DEFAULT_BOOKMARKS {
+        for url in BookmarkSeed::RETIRED_DEFAULT_BOOKMARKS {
             retired.insert(BookmarkSeed::key(url));
         }
         let mut offered = HashSet::new();

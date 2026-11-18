@@ -1,11 +1,6 @@
 (
 legacy: [
-    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|fn:bookmark_menu", fingerprint: "0ca1c997a144a7cf", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|fn:folder_menu", fingerprint: "ea11be3cabd1baef", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|struct:FolderChoice", fingerprint: "cedd69de811af822", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|struct:FolderMenuRow", fingerprint: "c70445a90dd92f47", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||alias:BookmarkStoreTypes", fingerprint: "85dc16e7b41d39c9", issue: "VMX-253"),
-    (key: "crates/feature/vmux_bookmark/src/store.rs||const:RETIRED_DEFAULT_BOOKMARKS", fingerprint: "f20f39e8d058c61d", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||fn:autosave_bookmarks", fingerprint: "6e9565643a481497", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||impl:Command for BookmarkWrite", fingerprint: "36e391026c6ce96e", issue: "VMX-253"),
     (key: "crates/feature/vmux_bookmark/src/store.rs||struct:BookmarkStore", fingerprint: "69e2fa996059e2cd", issue: "VMX-253"),
@@ -28,10 +23,11 @@ boundaries: [
     (key: "crates/feature/vmux_bookmark/src/lib.rs||impl:vmux_feature :: manifest :: FeatureManifestSource for Feature", fingerprint: "fa163a34b242f281", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
 ],
 values: [
+    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|struct:FolderMenuRow", owner: "crates/feature/vmux_bookmark/src/menu.rs|macos|struct:BookmarkMenuBuilder", lifetime: "read-only canonical folder projection borrowed for one native menu construction; no retained folder registry"),
+    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|struct:FolderChoice", owner: "crates/feature/vmux_bookmark/src/menu.rs|macos|struct:BookmarkMenuBuilder", lifetime: "read-only folder label/identity projection for one native menu and its typed selection messages"),
 ],
 shape: (
   debt: [
-    (key: "crates/feature/vmux_bookmark/src/menu.rs|macos|fn:folder_menu", fingerprint: "ea11be3cabd1baef", issue: "VMX-253", finding: "AU-14"),
   ],
   enums: [
     (key: "crates/feature/vmux_bookmark/src/tool.rs||enum:BookmarkPinTool", fingerprint: "4de7ed55f5b1ed42", role: Boundary, owner: "crates/feature/vmux_bookmark/src/tool.rs||enum:BookmarkPinTool", reason: "Exact external bookmark_pin JSON one_of alternatives advertised by feature.ron and decoded with serde untagged; the registered system converts them into separate PinRequest or PinUrlRequest intent."),
