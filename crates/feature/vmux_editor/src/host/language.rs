@@ -290,10 +290,9 @@ impl WikiCompletion {
     fn result(
         self,
         entity: Entity,
-        index: &vmux_knowledge::KnowledgeIndex,
+        entries: Vec<(String, String)>,
     ) -> crate::host::panel::CompletionResult {
-        let items = index
-            .completions(&self.prefix, 32)
+        let items = entries
             .into_iter()
             .map(|(title, relative)| CompletionItem {
                 label: title.clone(),
@@ -542,10 +541,10 @@ fn code_action(
 fn wiki_completion(
     trigger: On<WikiCompletionRequest>,
     views: Query<&Editor>,
-    indexes: Query<&vmux_knowledge::KnowledgeIndex>,
+    graph: vmux_knowledge::KnowledgeGraph,
     mut commands: Commands,
 ) {
-    let Ok(index) = indexes.single() else {
+    let Some((owner, index)) = graph.index() else {
         return;
     };
     let entity = trigger.event_target();
@@ -555,7 +554,8 @@ fn wiki_completion(
     let Some(completion) = WikiCompletion::for_edit(edit, index) else {
         return;
     };
-    commands.trigger(completion.result(entity, index));
+    let entries = graph.completions(owner, &completion.prefix, 32);
+    commands.trigger(completion.result(entity, entries));
 }
 
 fn request_hover(
@@ -788,7 +788,7 @@ fn request_references(
 fn request_completion(
     trigger: On<UiInput<FileCompletionRequest>>,
     views: Query<&Editor>,
-    indexes: Query<&vmux_knowledge::KnowledgeIndex>,
+    graph: vmux_knowledge::KnowledgeGraph,
     mut commands: Commands,
     manager: crate::lsp::manager::LspManager<'_, '_>,
 ) {
@@ -797,10 +797,11 @@ fn request_completion(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    if let Ok(index) = indexes.single()
+    if let Some((owner, index)) = graph.index()
         && let Some(completion) = WikiCompletion::for_edit(edit, index)
     {
-        commands.trigger(completion.result(entity, index));
+        let entries = graph.completions(owner, &completion.prefix, 32);
+        commands.trigger(completion.result(entity, entries));
         return;
     }
     let position = edit.lsp_position_at_cell(request.line, request.col);

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy_cef::prelude::UiEventPlugin;
 use vmux_ecs::event::{
     ExplorerCloseEditor, ExplorerCollapseAll, ExplorerFilesToggle, ExplorerOpenEditorsToggle,
     ExplorerOutlineToggle, ExplorerPanelSetVisible, ExplorerPanelViewSet,
