@@ -27,7 +27,6 @@ mod format;
 pub(crate) struct ChatPage;
 
 #[vmux_page::page(
-    file = "src/feature.ron",
     page = "agent-onboarding",
     component = Page,
     states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState],
