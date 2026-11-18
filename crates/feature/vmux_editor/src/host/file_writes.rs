@@ -94,8 +94,92 @@ mod tests {
     use super::super::file_lifecycle::{FileLifecyclePlugin, FileLoadTask};
     use super::super::file_watch::Observed;
     use super::super::viewport::FileViewport;
+    use super::super::workspace_edit::WorkspaceEditPlugin;
     use super::*;
     use bevy_cef::prelude::Browsers;
+
+    #[test]
+    fn lsp_edits_commit_with_the_file_watch_and_document_pipeline_installed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file.txt");
+        std::fs::write(&path, "one two three\n").unwrap();
+        let (diagnostics, inbox) = crate::lsp::LspDiagnosticsSender::channel();
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            FileLifecyclePlugin,
+            EditExecutionPlugin,
+            WorkspaceEditPlugin,
+            crate::lsp::server_request::ServerRequestPlugin,
+            vmux_lsp::LspPlugin,
+            crate::lsp::manager::ManagerPlugin::new(diagnostics, inbox),
+        ))
+        .insert_resource(vmux_setting::AppSettings::default())
+        .insert_non_send(Browsers::default())
+        .insert_non_send(ClipboardHandle(None))
+        .add_message::<crate::lsp::manager_page::PackageInstallRequest>();
+        crate::lsp::registry::add(&mut app);
+        app.update();
+
+        let sender = app
+            .world_mut()
+            .query::<&crate::lsp::server_request::ServerInputSender>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        let (outgoing, reply) = std::sync::mpsc::channel();
+        sender
+            .apply_edits
+            .send(crate::lsp::server_request::ApplyEditInput {
+                reply: crate::lsp::server_request::ReplyHandle::new(
+                    crate::lsp::wire::RequestId::Number(1000),
+                    outgoing,
+                ),
+                root: directory.path().to_path_buf(),
+                server: None,
+                transport: None,
+                params: lsp_types::ApplyWorkspaceEditParams {
+                    label: None,
+                    edit: lsp_types::WorkspaceEdit {
+                        document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                            lsp_types::TextDocumentEdit {
+                                text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                    uri: url::Url::from_file_path(&path)
+                                        .unwrap()
+                                        .as_str()
+                                        .parse()
+                                        .unwrap(),
+                                    version: None,
+                                },
+                                edits: vec![lsp_types::OneOf::Left(lsp_types::TextEdit {
+                                    range: lsp_types::Range {
+                                        start: lsp_types::Position::new(0, 0),
+                                        end: lsp_types::Position::new(0, 3),
+                                    },
+                                    new_text: "replacement".into(),
+                                })],
+                            },
+                        ])),
+                        ..Default::default()
+                    },
+                },
+            })
+            .unwrap();
+        app.update();
+        assert_eq!(reply.try_recv().unwrap()["result"]["applied"], true);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "replacement two three\n"
+        );
+        app.update();
+        let mut receipts = bevy::ecs::system::SystemState::<WriteReceipts>::new(app.world_mut());
+        assert!(
+            receipts
+                .get(app.world())
+                .unwrap()
+                .recent(&path.canonicalize().unwrap())
+        );
+    }
 
     #[cfg(unix)]
     #[test]

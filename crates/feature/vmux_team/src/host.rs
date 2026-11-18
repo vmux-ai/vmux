@@ -968,7 +968,7 @@ mod tests {
         let mut app = App::new();
         let active = app.world_mut().spawn(Space).id();
         let other = app.world_mut().spawn(Space).id();
-        TeamStackFixture::new(app.world_mut(), other).0;
+        TeamStackFixture::new(app.world_mut(), other);
         assert_eq!(lookup(&mut app, active), None);
     }
 
