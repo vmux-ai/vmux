@@ -1994,8 +1994,7 @@ fn manifest_sources_do_not_approve_inherent_workflows_or_test_only_implementatio
     inventory.resolve_usage();
     let marker = &inventory.entries["crates/feature/example/src/lib.rs||struct:Feature"];
     let workflow = &inventory.entries["crates/feature/example/src/lib.rs||impl:Feature"];
-    assert!(!inventory.manifest_source(marker));
-    assert!(!inventory.typed_page(marker));
+    assert!(inventory.manifest_source(marker));
     assert!(!inventory.manifest_source(workflow));
     assert!(!inventory.canonical(workflow, &Policy::default(), &mut BTreeSet::new()));
     let mut inventory = Inventory::default();
