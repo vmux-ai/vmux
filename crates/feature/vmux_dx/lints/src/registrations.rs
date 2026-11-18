@@ -105,6 +105,33 @@ impl Fixture {
 }
 
 #[test]
+fn compiler_resolves_observers_and_ignores_lookalike_registration_apis() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        (
+            "observers",
+            include_str!("../ui/observers.rs"),
+            &[
+                "public",
+                "crate_visible",
+                "parent_visible",
+                "world_visible",
+                "entity_visible",
+                "commands_visible",
+                "constructed",
+            ][..],
+        ),
+        (
+            "unrelated_observers",
+            include_str!("../ui/unrelated_observers.rs"),
+            &[][..],
+        ),
+    ] {
+        fixture.check(name, source, expected);
+    }
+}
+
+#[test]
 fn compiler_resolves_registered_systems_and_ignores_other_contracts() {
     let fixture = Fixture::new();
     for (name, source, expected) in [
