@@ -78,7 +78,6 @@ legacy: [
     (key: "crates/feature/vmux_setting/src/host/runtime.rs||struct:StartupDir", fingerprint: "00224096baecda8f", issue: "VMX-253"),
     (key: "crates/feature/vmux_setting/src/host/state.rs|page_open_tests|struct:CommandFixture", fingerprint: "683ae373f7e69a89", issue: "VMX-253"),
     (key: "crates/feature/vmux_setting/src/host/state.rs||alias:SettingsUiStateUpdates", fingerprint: "188cf4399fc04346", issue: "VMX-253"),
-    (key: "crates/feature/vmux_setting/src/host/state.rs||struct:OpenSettingsBinding", fingerprint: "18d19f397d4ccc8d", issue: "VMX-253"),
     (key: "crates/feature/vmux_setting/src/host/state.rs||struct:StatePlugin", fingerprint: "65a1765431063f9c", issue: "VMX-253"),
     (key: "crates/feature/vmux_setting/src/host/tool.rs||impl:Plugin for SettingToolPlugin", fingerprint: "ed05282ceaea6a48", issue: "VMX-253"),
     (key: "crates/feature/vmux_setting/src/host/tool.rs||struct:SettingToolPlugin", fingerprint: "3e4160832e8a4295", issue: "VMX-253"),
