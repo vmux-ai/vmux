@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
 use sha2::{Digest, Sha256};
 use vmux_ecs::{
     Cwd, Job, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, OperationCompleted,
@@ -20,16 +19,43 @@ pub struct FilesystemPlugin;
 
 impl Plugin for FilesystemPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(JobPlugin::<FileJob>::default())
-            .add_message::<CleanupCompleted>()
-            .add_message::<MaterializeRequest>()
-            .add_message::<MaterializeCompleted>()
-            .init_resource::<Clock>()
-            .add_systems(
-                Update,
-                finish.in_set(JobSet::Apply).before(ExtensionSet::Step),
+        app.add_plugins((
+            JobPlugin::<ReadJob>::default(),
+            JobPlugin::<WriteJob>::default(),
+            JobPlugin::<CleanupJob>::default(),
+            JobPlugin::<MaterializeJob>::default(),
+        ))
+        .add_message::<CleanupCompleted>()
+        .add_message::<MaterializeRequest>()
+        .add_message::<MaterializeCompleted>()
+        .init_resource::<Clock>()
+        .add_systems(
+            Update,
+            (
+                finish_reads,
+                finish_writes,
+                finish_cleanups,
+                finish_materializations,
             )
-            .add_systems(Update, (receive, start).chain().after(ExtensionSet::Step));
+                .in_set(JobSet::Apply)
+                .before(ExtensionSet::Step),
+        )
+        .add_systems(
+            Update,
+            (
+                receive_reads,
+                receive_cleanups,
+                receive_writes,
+                receive_materializations,
+                start,
+            )
+                .chain()
+                .after(ExtensionSet::Step),
+        )
+        .add_observer(read)
+        .add_observer(write)
+        .add_observer(cleanup)
+        .add_observer(materialize);
     }
 }
 
@@ -201,83 +227,95 @@ impl Clock {
     }
 }
 
-#[derive(Clone)]
-enum Work {
-    Read(Ticket),
-    Write(WriteTaskRequest),
-    Cleanup(CleanupRequest),
-    Materialize(MaterializeRequest),
-}
+#[derive(Component)]
+struct Queued(u64);
 
-impl Work {
-    fn ticket(&self) -> &Ticket {
-        match self {
-            Self::Read(ticket) => ticket,
-            Self::Write(request) => &request.ticket,
-            Self::Cleanup(request) => &request.ticket,
-            Self::Materialize(request) => &request.ticket,
-        }
+impl Queued {
+    fn bundle(ticket: Ticket, directory: std::path::PathBuf, order: u64) -> impl Bundle {
+        (
+            Cwd(directory),
+            Operation::bundle("extension.file").unwrap(),
+            Self(order),
+            Lease(ticket),
+        )
     }
 }
 
 #[derive(Component)]
-struct Queued {
-    order: u64,
-    work: Work,
-}
+struct Lease(Ticket);
 
 #[derive(Component)]
-struct Executing(Work);
+struct Executing;
 
-#[derive(Clone)]
-struct FileJob {
+#[derive(EntityEvent)]
+struct Starting {
+    entity: Entity,
+}
+
+#[derive(Component, Clone)]
+struct ReadJob {
     directory: std::path::PathBuf,
-    work: Work,
+    request: LoadRequest,
 }
 
-#[derive(Clone)]
-enum FileOutput {
-    Index(Index),
-    Materialized(Box<ExtEntry>),
-}
-
-impl Job for FileJob {
-    type Output = Result<FileOutput, String>;
+impl Job for ReadJob {
+    type Output = Result<Index, String>;
 
     fn run(self) -> Self::Output {
-        match self.work {
-            Work::Read(_) => FileStore::read(&self.directory).map(FileOutput::Index),
-            Work::Write(request) => {
-                FileStore::write(&self.directory, &request.snapshot)?;
-                Ok(FileOutput::Index(Index::default()))
-            }
-            Work::Cleanup(request) => {
-                FileStore::cleanup(&self.directory, &request)?;
-                Ok(FileOutput::Index(Index::default()))
-            }
-            Work::Materialize(request) => FileStore::materialize(&self.directory, &request)
-                .map(|entry| FileOutput::Materialized(Box::new(entry))),
-        }
+        FileStore::read(&self.directory)
     }
 }
 
-#[derive(SystemParam)]
-struct FileRequests<'w, 's> {
-    reads: MessageReader<'w, 's, LoadRequest>,
-    writes: MessageReader<'w, 's, WriteTaskRequest>,
-    cleanup: MessageReader<'w, 's, CleanupRequest>,
-    materialize: MessageReader<'w, 's, MaterializeRequest>,
+#[derive(Component, Clone)]
+struct WriteJob {
+    directory: std::path::PathBuf,
+    request: WriteTaskRequest,
 }
 
-fn receive(
-    mut requests: FileRequests,
+impl Job for WriteJob {
+    type Output = Result<(), String>;
+
+    fn run(self) -> Self::Output {
+        FileStore::write(&self.directory, &self.request.snapshot)
+    }
+}
+
+#[derive(Component, Clone)]
+struct CleanupJob {
+    directory: std::path::PathBuf,
+    request: CleanupRequest,
+}
+
+impl Job for CleanupJob {
+    type Output = Result<(), String>;
+
+    fn run(self) -> Self::Output {
+        FileStore::cleanup(&self.directory, &self.request)
+    }
+}
+
+#[derive(Component, Clone)]
+struct MaterializeJob {
+    directory: std::path::PathBuf,
+    request: MaterializeRequest,
+}
+
+impl Job for MaterializeJob {
+    type Output = Result<ExtEntry, String>;
+
+    fn run(self) -> Self::Output {
+        FileStore::materialize(&self.directory, &self.request)
+    }
+}
+
+fn receive_reads(
+    mut requests: MessageReader<LoadRequest>,
     roots: Query<(Entity, &Root, &Scope)>,
     mut completed: MessageWriter<LoadCompleted>,
     mut clock: ResMut<Clock>,
     mut commands: Commands,
 ) {
-    let mut work = Vec::new();
-    for request in requests.reads.read() {
+    for request in requests.read() {
         let ticket = &request.0;
         let directory = vmux_path::PathIdentity::resolve(&ticket.directory).into_path_buf();
         if roots.iter().any(|(owner, root, _)| {
@@ -290,39 +328,99 @@ fn receive(
             });
             continue;
         }
-        work.push(Work::Read(ticket.clone()));
-    }
-    for request in requests.cleanup.read() {
-        work.push(Work::Cleanup(request.clone()));
-    }
-    for request in requests.writes.read() {
-        work.push(Work::Write(request.clone()));
-    }
-    for request in requests.materialize.read() {
-        work.push(Work::Materialize(request.clone()));
-    }
-    for work in work {
-        let ticket = work.ticket();
         if !roots
             .get(ticket.owner)
             .is_ok_and(|(_, root, scope)| root.0 == ticket.directory && scope.0 == *ticket)
         {
             continue;
         }
+        commands.spawn((
+            Queued::bundle(ticket.clone(), directory.clone(), clock.next()),
+            ReadJob {
+                directory,
+                request: request.clone(),
+            },
+        ));
+    }
+}
+
+fn receive_cleanups(
+    mut requests: MessageReader<CleanupRequest>,
+    roots: Query<(&Root, &Scope)>,
+    mut clock: ResMut<Clock>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let ticket = &request.ticket;
+        if !roots
+            .get(ticket.owner)
+            .is_ok_and(|(root, scope)| root.0 == ticket.directory && scope.0 == *ticket)
+        {
+            continue;
+        }
         let directory = vmux_path::PathIdentity::resolve(&ticket.directory).into_path_buf();
         commands.spawn((
-            Cwd(directory),
-            Operation::bundle("extension.file").unwrap(),
-            Queued {
-                order: clock.next(),
-                work,
+            Queued::bundle(ticket.clone(), directory.clone(), clock.next()),
+            CleanupJob {
+                directory,
+                request: request.clone(),
+            },
+        ));
+    }
+}
+
+fn receive_writes(
+    mut requests: MessageReader<WriteTaskRequest>,
+    roots: Query<(&Root, &Scope)>,
+    mut clock: ResMut<Clock>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let ticket = &request.ticket;
+        if !roots
+            .get(ticket.owner)
+            .is_ok_and(|(root, scope)| root.0 == ticket.directory && scope.0 == *ticket)
+        {
+            continue;
+        }
+        let directory = vmux_path::PathIdentity::resolve(&ticket.directory).into_path_buf();
+        commands.spawn((
+            Queued::bundle(ticket.clone(), directory.clone(), clock.next()),
+            WriteJob {
+                directory,
+                request: request.clone(),
+            },
+        ));
+    }
+}
+
+fn receive_materializations(
+    mut requests: MessageReader<MaterializeRequest>,
+    roots: Query<(&Root, &Scope)>,
+    mut clock: ResMut<Clock>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let ticket = &request.ticket;
+        if !roots
+            .get(ticket.owner)
+            .is_ok_and(|(root, scope)| root.0 == ticket.directory && scope.0 == *ticket)
+        {
+            continue;
+        }
+        let directory = vmux_path::PathIdentity::resolve(&ticket.directory).into_path_buf();
+        commands.spawn((
+            Queued::bundle(ticket.clone(), directory.clone(), clock.next()),
+            MaterializeJob {
+                directory,
+                request: request.clone(),
             },
         ));
     }
 }
 
 fn start(
-    queued: Query<(Entity, &Cwd, &Queued)>,
+    queued: Query<(Entity, &Cwd, &Queued, &Lease, Option<&MaterializeJob>)>,
     active: Query<&Cwd, With<Executing>>,
     roots: Query<(&Root, &Scope)>,
     installs: Query<(&InstallRequest, &InstallOwner, &vmux_ecs::OperationState)>,
@@ -334,12 +432,11 @@ fn start(
         occupied.insert(directory.0.clone());
     }
     let mut pending = Vec::new();
-    for (entity, directory, queued) in &queued {
-        pending.push((queued.order, entity, directory, &queued.work));
+    for (entity, directory, queued, lease, materialize) in &queued {
+        pending.push((queued.0, entity, directory, &lease.0, materialize));
     }
     pending.sort_by_key(|pending| pending.0);
-    for (_, entity, directory, work) in pending {
-        let ticket = work.ticket();
+    for (_, entity, directory, ticket, materialize) in pending {
         if !roots
             .get(ticket.owner)
             .is_ok_and(|(root, scope)| root.0 == ticket.directory && scope.0 == *ticket)
@@ -347,12 +444,12 @@ fn start(
             commands.entity(entity).despawn();
             continue;
         }
-        if let Work::Materialize(request) = work
+        if let Some(job) = materialize
             && !installs
-                .get(request.operation)
+                .get(job.request.operation)
                 .is_ok_and(|(install, _, state)| {
-                    install.ticket == request.ticket
-                        && install.id == request.entry.id
+                    install.ticket == job.request.ticket
+                        && install.id == job.request.entry.id
                         && matches!(
                             state,
                             vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
@@ -365,28 +462,52 @@ fn start(
         if !occupied.insert(directory.0.clone()) {
             continue;
         }
-        commands.entity(entity).remove::<Queued>().insert((
-            Executing(work.clone()),
-            JobRequest(FileJob {
-                directory: directory.0.clone(),
-                work: work.clone(),
-            }),
-        ));
+        commands.entity(entity).remove::<Queued>().insert(Executing);
+        commands.trigger(Starting { entity });
         if let Some(wake) = &wake {
             wake.0.wake_by_ref();
         }
     }
 }
 
-fn finish(
-    tasks: Query<(Entity, &Executing, &JobResult<FileJob>)>,
-    mut loaded: MessageWriter<LoadCompleted>,
-    mut written: MessageWriter<WriteCompleted>,
-    mut cleaned: MessageWriter<CleanupCompleted>,
-    mut materialized: MessageWriter<MaterializeCompleted>,
+fn read(event: On<Starting>, jobs: Query<&ReadJob>, mut commands: Commands) {
+    if let Ok(job) = jobs.get(event.entity) {
+        commands
+            .entity(event.entity)
+            .insert(JobRequest(job.clone()));
+    }
+}
+
+fn write(event: On<Starting>, jobs: Query<&WriteJob>, mut commands: Commands) {
+    if let Ok(job) = jobs.get(event.entity) {
+        commands
+            .entity(event.entity)
+            .insert(JobRequest(job.clone()));
+    }
+}
+
+fn cleanup(event: On<Starting>, jobs: Query<&CleanupJob>, mut commands: Commands) {
+    if let Ok(job) = jobs.get(event.entity) {
+        commands
+            .entity(event.entity)
+            .insert(JobRequest(job.clone()));
+    }
+}
+
+fn materialize(event: On<Starting>, jobs: Query<&MaterializeJob>, mut commands: Commands) {
+    if let Ok(job) = jobs.get(event.entity) {
+        commands
+            .entity(event.entity)
+            .insert(JobRequest(job.clone()));
+    }
+}
+
+fn finish_reads(
+    tasks: Query<(Entity, &ReadJob, &JobResult<ReadJob>), With<Executing>>,
+    mut completed: MessageWriter<LoadCompleted>,
     mut commands: Commands,
 ) {
-    for (entity, executing, result) in &tasks {
+    for (entity, job, result) in &tasks {
         let result = match &result.0 {
             Ok(result) => result.clone(),
             Err(error) => Err(error.clone()),
@@ -395,47 +516,93 @@ fn finish(
             Ok(_) => Ok(()),
             Err(error) => Err(error.clone()),
         };
-        match &executing.0 {
-            Work::Read(ticket) => {
-                let result = match result {
-                    Ok(FileOutput::Index(index)) => Ok(index),
-                    Ok(_) => Err("unexpected extension read result".into()),
-                    Err(error) => Err(error),
-                };
-                loaded.write(LoadCompleted {
-                    ticket: ticket.clone(),
-                    result,
-                });
-            }
-            Work::Write(request) => {
-                written.write(WriteCompleted {
-                    ticket: request.ticket.clone(),
-                    operation: request.operation,
-                    revision: request.revision,
-                    result: completion.clone(),
-                });
-            }
-            Work::Cleanup(request) => {
-                cleaned.write(CleanupCompleted {
-                    ticket: request.ticket.clone(),
-                    id: request.id.clone(),
-                    profile: request.profile.clone(),
-                    result: completion.clone(),
-                });
-            }
-            Work::Materialize(request) => {
-                let result = match result {
-                    Ok(FileOutput::Materialized(entry)) => Ok(*entry),
-                    Ok(_) => Err("unexpected extension materialization result".into()),
-                    Err(error) => Err(error),
-                };
-                materialized.write(MaterializeCompleted {
-                    ticket: request.ticket.clone(),
-                    operation: request.operation,
-                    result,
-                });
-            }
-        }
+        completed.write(LoadCompleted {
+            ticket: job.request.0.clone(),
+            result,
+        });
+        commands.trigger(OperationCompleted {
+            entity,
+            result: completion,
+        });
+        commands.entity(entity).despawn();
+    }
+}
+
+fn finish_writes(
+    tasks: Query<(Entity, &WriteJob, &JobResult<WriteJob>), With<Executing>>,
+    mut completed: MessageWriter<WriteCompleted>,
+    mut commands: Commands,
+) {
+    for (entity, job, result) in &tasks {
+        let result = match &result.0 {
+            Ok(result) => result.clone(),
+            Err(error) => Err(error.clone()),
+        };
+        let completion = match &result {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error.clone()),
+        };
+        completed.write(WriteCompleted {
+            ticket: job.request.ticket.clone(),
+            operation: job.request.operation,
+            revision: job.request.revision,
+            result,
+        });
+        commands.trigger(OperationCompleted {
+            entity,
+            result: completion,
+        });
+        commands.entity(entity).despawn();
+    }
+}
+
+fn finish_cleanups(
+    tasks: Query<(Entity, &CleanupJob, &JobResult<CleanupJob>), With<Executing>>,
+    mut completed: MessageWriter<CleanupCompleted>,
+    mut commands: Commands,
+) {
+    for (entity, job, result) in &tasks {
+        let result = match &result.0 {
+            Ok(result) => result.clone(),
+            Err(error) => Err(error.clone()),
+        };
+        let completion = match &result {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error.clone()),
+        };
+        completed.write(CleanupCompleted {
+            ticket: job.request.ticket.clone(),
+            id: job.request.id.clone(),
+            profile: job.request.profile.clone(),
+            result,
+        });
+        commands.trigger(OperationCompleted {
+            entity,
+            result: completion,
+        });
+        commands.entity(entity).despawn();
+    }
+}
+
+fn finish_materializations(
+    tasks: Query<(Entity, &MaterializeJob, &JobResult<MaterializeJob>), With<Executing>>,
+    mut completed: MessageWriter<MaterializeCompleted>,
+    mut commands: Commands,
+) {
+    for (entity, job, result) in &tasks {
+        let result = match &result.0 {
+            Ok(result) => result.clone(),
+            Err(error) => Err(error.clone()),
+        };
+        let completion = match &result {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error.clone()),
+        };
+        completed.write(MaterializeCompleted {
+            ticket: job.request.ticket.clone(),
+            operation: job.request.operation,
+            result,
+        });
         commands.trigger(OperationCompleted {
             entity,
             result: completion,
@@ -702,6 +869,164 @@ mod tests {
                 self.app.update();
             }
         }
+    }
+
+    #[test]
+    fn read_priority_and_directory_serialization_survive_distinct_job_types() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut host = Host::new(directory.path());
+        host.load();
+        host.app
+            .world_mut()
+            .resource_mut::<Messages<LoadCompleted>>()
+            .drain()
+            .for_each(drop);
+        let mut catalog = SystemState::<Catalog>::new(host.app.world_mut());
+        let ticket = catalog
+            .get(host.app.world())
+            .unwrap()
+            .ticket(host.root)
+            .unwrap()
+            .clone();
+        let mut next = Index::default();
+        next.entries.push(ExtEntry {
+            id: ID.into(),
+            name: "Queued write".into(),
+            version: "1".into(),
+            ..Default::default()
+        });
+        let operation = host
+            .app
+            .world_mut()
+            .spawn(Operation::bundle("extension.write").unwrap())
+            .id();
+        let (blocker, release) = host.hold_file_jobs();
+        host.app.world_mut().write_message(WriteTaskRequest {
+            ticket: ticket.clone(),
+            operation,
+            revision: 1,
+            snapshot: next.clone(),
+        });
+        host.app.world_mut().write_message(LoadRequest(ticket));
+        host.app.update();
+        host.app.update();
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut reads = Vec::new();
+        let mut writes = Vec::new();
+        while reads.is_empty() || writes.is_empty() {
+            assert!(
+                Instant::now() < deadline,
+                "typed file jobs did not complete"
+            );
+            host.wake.recv_timeout(Duration::from_secs(2)).unwrap();
+            host.app.update();
+            reads.extend(
+                host.app
+                    .world_mut()
+                    .resource_mut::<Messages<LoadCompleted>>()
+                    .drain(),
+            );
+            writes.extend(
+                host.app
+                    .world_mut()
+                    .resource_mut::<Messages<WriteCompleted>>()
+                    .drain(),
+            );
+        }
+        assert_eq!(reads.len(), 1);
+        assert!(reads.pop().unwrap().result.unwrap().entries.is_empty());
+        assert_eq!(writes.len(), 1);
+        assert!(writes.pop().unwrap().result.is_ok());
+        assert_eq!(FileStore::read(directory.path()).unwrap(), next);
+        drop(blocker);
+    }
+
+    #[test]
+    fn materialization_retains_source_ownership_until_io_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut host = Host::new(directory.path());
+        host.load();
+        let staging = directory.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let temporary = Arc::new(tempfile::tempdir_in(&staging).unwrap());
+        let temporary_path = temporary.path().to_path_buf();
+        let source = temporary.path().join("unpacked");
+        std::fs::create_dir_all(&source).unwrap();
+        let manifest = r#"{"name":"Owned source","version":"1"}"#;
+        std::fs::write(source.join("manifest.json"), manifest).unwrap();
+        let entry = ExtEntry {
+            id: ID.into(),
+            name: "Owned source".into(),
+            version: "1".into(),
+            source_hash: FileStore::source_hash(&source).unwrap(),
+            ..Default::default()
+        };
+        let mut catalog = SystemState::<Catalog>::new(host.app.world_mut());
+        let ticket = catalog
+            .get(host.app.world())
+            .unwrap()
+            .ticket(host.root)
+            .unwrap()
+            .clone();
+        let operation = host
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("extension.install").unwrap().running(),
+                InstallRequest {
+                    ticket: ticket.clone(),
+                    profile: "personal".into(),
+                    id: ID.into(),
+                },
+            ))
+            .id();
+        host.app.update();
+        let (blocker, release) = host.hold_file_jobs();
+        let mut request =
+            MaterializeRequest::new(ticket, operation, Box::new(entry), source.clone());
+        request._lifetime = Some(temporary);
+        host.app.world_mut().write_message(request);
+        host.app.update();
+        host.app
+            .world_mut()
+            .resource_mut::<Messages<MaterializeRequest>>()
+            .drain()
+            .for_each(drop);
+        host.app.update();
+        assert!(temporary_path.is_dir());
+        assert_eq!(
+            std::fs::read_to_string(source.join("manifest.json")).unwrap(),
+            manifest
+        );
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let completion = loop {
+            assert!(
+                Instant::now() < deadline,
+                "owned materialization did not complete"
+            );
+            host.wake.recv_timeout(Duration::from_secs(2)).unwrap();
+            host.app.update();
+            if let Some(completion) = host
+                .app
+                .world_mut()
+                .resource_mut::<Messages<MaterializeCompleted>>()
+                .drain()
+                .next()
+            {
+                break completion;
+            }
+        };
+        assert!(completion.result.is_ok());
+        assert!(!temporary_path.exists());
+        let destination = directory
+            .path()
+            .join("packages")
+            .join(ID)
+            .join("1/source/manifest.json");
+        assert_eq!(std::fs::read_to_string(destination).unwrap(), manifest);
+        drop(blocker);
     }
 
     #[test]
