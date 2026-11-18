@@ -9,7 +9,7 @@ use vmux_ecs::UiStateWrite;
 use vmux_layout::LayoutUiStateUpdates;
 
 use crate::host::{Binding, RuntimeIds};
-use crate::{Catalog, ExtensionSet, Mutation, Request};
+use crate::{Catalog, ExtensionSet, Pin, Toggle, Uninstall};
 use vmux_ecs::{OperationError, OperationState, Revision};
 
 pub(crate) struct ExtensionCatalogPlugin;
@@ -193,12 +193,11 @@ fn toggle(
         return;
     };
     commands.spawn((
-        Request {
-            ticket: ticket.clone(),
-            profile: profile.clone().into_id(),
-            mutation: Mutation::Toggle(trigger.event().payload.clone()),
-        }
-        .bundle(),
+        Toggle::bundle(
+            ticket.clone(),
+            profile.clone().into_id(),
+            trigger.event().payload.clone(),
+        ),
         PendingCatalogOperation,
     ));
 }
@@ -217,12 +216,11 @@ fn uninstall(
         return;
     };
     commands.spawn((
-        Request {
-            ticket: ticket.clone(),
-            profile: profile.clone().into_id(),
-            mutation: Mutation::Remove(trigger.event().payload.clone()),
-        }
-        .bundle(),
+        Uninstall::bundle(
+            ticket.clone(),
+            profile.clone().into_id(),
+            trigger.event().payload.clone(),
+        ),
         PendingCatalogOperation,
     ));
 }
@@ -242,12 +240,7 @@ fn pin(
     };
     let request = trigger.event().payload.clone();
     commands.spawn((
-        Request {
-            ticket: ticket.clone(),
-            profile: profile.clone().into_id(),
-            mutation: Mutation::Pin(request.clone()),
-        }
-        .bundle(),
+        Pin::bundle(ticket.clone(), profile.clone().into_id(), request.clone()),
         PendingCatalogOperation,
         ExtensionCatalogKey(request.id),
     ));

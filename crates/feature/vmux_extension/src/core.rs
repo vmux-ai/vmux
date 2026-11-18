@@ -5,7 +5,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::system::SystemParam;
-use serde::{Deserialize, Serialize};
+use std::result::Result;
 use vmux_api::extension::{ExtPinRequest, ExtToggleRequest, ExtUninstallRequest};
 pub use vmux_ecs::store::State;
 use vmux_ecs::{
@@ -13,7 +13,7 @@ use vmux_ecs::{
     OperationTargetRevision, Revision,
 };
 
-use crate::snapshot::{EnableForProfileResult, ExtEntry, ExtensionGrants, Index};
+use crate::snapshot::{ExtEntry, ExtensionGrants, Index};
 
 pub struct CorePlugin;
 
@@ -49,7 +49,14 @@ impl Plugin for CorePlugin {
             )
             .add_systems(Update, step.in_set(ExtensionSet::Step))
             .add_observer(start)
+            .add_observer(toggle)
+            .add_observer(pin)
+            .add_observer(uninstall)
+            .add_observer(install)
+            .add_observer(grant)
+            .add_observer(save)
             .add_observer(admit)
+            .add_observer(discard)
             .add_observer(retire);
     }
 }
@@ -203,153 +210,127 @@ pub struct CleanupRequest {
     pub package: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Mutation {
-    Toggle(ExtToggleRequest),
-    Pin(ExtPinRequest),
-    Remove(ExtUninstallRequest),
-    Install(Box<ExtEntry>),
-    Grant { id: String, grants: ExtensionGrants },
-    Save,
-}
+#[derive(Component)]
+struct Pending;
 
-#[derive(Component, Clone, Debug)]
-pub struct Request {
-    pub ticket: Ticket,
-    pub profile: String,
-    pub mutation: Mutation,
-}
+impl Pending {
+    fn parts(ticket: Ticket, profile: String) -> impl Bundle {
+        (Self, Scope(ticket), ProfileId(profile))
+    }
 
-impl Request {
-    pub fn bundle(self) -> impl Bundle {
-        let kind = match self.mutation {
-            Mutation::Toggle(_) => "extension.toggle",
-            Mutation::Pin(_) => "extension.pin",
-            Mutation::Remove(_) => "extension.remove",
-            Mutation::Install(_) => "extension.install",
-            Mutation::Grant { .. } => "extension.grant",
-            Mutation::Save => "extension.save",
-        };
+    fn bundle(ticket: Ticket, profile: String, kind: &str) -> impl Bundle {
         (
             Operation::bundle(kind).unwrap(),
-            OperationTarget::new(self.ticket.owner),
-            self,
+            OperationTarget::new(ticket.owner),
+            Self::parts(ticket, profile),
+        )
+    }
+}
+
+#[derive(Component)]
+pub struct Toggle {
+    enabled: bool,
+    approve_permissions: bool,
+}
+
+impl Toggle {
+    pub fn bundle(ticket: Ticket, profile: String, request: ExtToggleRequest) -> impl Bundle {
+        (
+            Pending::bundle(ticket, profile, "extension.toggle"),
+            Self {
+                enabled: request.enabled,
+                approve_permissions: request.approve_permissions,
+            },
+            Id(request.id),
+        )
+    }
+}
+
+#[derive(Component)]
+pub struct Pin(bool);
+
+impl Pin {
+    pub fn bundle(ticket: Ticket, profile: String, request: ExtPinRequest) -> impl Bundle {
+        (
+            Pending::bundle(ticket, profile, "extension.pin"),
+            Self(request.pinned),
+            Id(request.id),
+        )
+    }
+}
+
+#[derive(Component)]
+pub struct Uninstall;
+
+impl Uninstall {
+    pub fn bundle(ticket: Ticket, profile: String, request: ExtUninstallRequest) -> impl Bundle {
+        (
+            Pending::bundle(ticket, profile, "extension.remove"),
+            Self,
+            Id(request.id),
+        )
+    }
+}
+
+#[derive(Component)]
+pub struct Grant;
+
+impl Grant {
+    pub fn bundle(
+        ticket: Ticket,
+        profile: String,
+        id: String,
+        grants: ExtensionGrants,
+    ) -> impl Bundle {
+        (
+            Pending::bundle(ticket, profile, "extension.grant"),
+            Self,
+            Id(id),
+            Grants(grants),
+        )
+    }
+}
+
+#[derive(Component)]
+pub struct Save;
+
+impl Save {
+    pub fn bundle(ticket: Ticket) -> impl Bundle {
+        (
+            Pending::bundle(ticket, String::new(), "extension.save"),
+            Self,
+        )
+    }
+}
+
+#[derive(Component)]
+pub struct Install;
+
+impl Install {
+    pub fn bundle(ticket: Ticket, profile: String, entry: ExtEntry) -> impl Bundle {
+        (
+            Operation::bundle("extension.install").unwrap(),
+            OperationTarget::new(ticket.owner),
+            Self::prepared(ticket, profile, entry),
         )
     }
 
-    fn propose(&self, mut snapshot: Index) -> Result<Index, String> {
-        match &self.mutation {
-            Mutation::Toggle(request) => {
-                match snapshot.set_enabled_for(
-                    &self.profile,
-                    &request.id,
-                    request.enabled,
-                    request.approve_permissions,
-                ) {
-                    EnableForProfileResult::Updated => {}
-                    EnableForProfileResult::NeedsApproval => {
-                        return Err("extension permissions require approval".into());
-                    }
-                    EnableForProfileResult::NotFound => {
-                        return Err("extension association not found".into());
-                    }
-                }
-            }
-            Mutation::Pin(request) => {
-                let Some(entry) = snapshot.entries.iter().find(|entry| entry.id == request.id)
-                else {
-                    return Err("extension package not found".into());
-                };
-                if !entry.installed_for(&self.profile) {
-                    return Err("extension association not found".into());
-                }
-                snapshot.set_pinned_for(&self.profile, &request.id, request.pinned);
-            }
-            Mutation::Remove(request) => {
-                if let Some(entry) = snapshot
-                    .entries
-                    .iter_mut()
-                    .find(|entry| entry.id == request.id)
-                {
-                    entry.profile_enabled.remove(&self.profile);
-                    entry.profile_pinned.remove(&self.profile);
-                    entry.approved_grants.remove(&self.profile);
-                    if entry.profile_enabled.is_empty() {
-                        snapshot.remove(&request.id);
-                    }
-                }
-            }
-            Mutation::Install(entry) => {
-                let mut next = entry.as_ref().clone();
-                if let Some(existing) = snapshot.entries.iter().find(|entry| entry.id == next.id) {
-                    next.profile_enabled.clone_from(&existing.profile_enabled);
-                    next.profile_pinned.clone_from(&existing.profile_pinned);
-                    next.approved_grants.clone_from(&existing.approved_grants);
-                } else {
-                    next.profile_enabled.clear();
-                    next.profile_pinned.clear();
-                    next.approved_grants.clear();
-                }
-                next.enabled = false;
-                next.profile_enabled
-                    .entry(self.profile.clone())
-                    .or_insert(false);
-                for (profile, grants) in &mut next.approved_grants {
-                    grants.retain_declared(
-                        &next.permissions,
-                        &next.optional_permissions,
-                        &next.host_permissions,
-                        &next.optional_host_permissions,
-                    );
-                    if !grants.covers(&next.permissions, &next.host_permissions) {
-                        next.profile_enabled.insert(profile.clone(), false);
-                    }
-                }
-                for (profile, enabled) in &mut next.profile_enabled {
-                    if !next
-                        .approved_grants
-                        .get(profile)
-                        .cloned()
-                        .unwrap_or_default()
-                        .covers(&next.permissions, &next.host_permissions)
-                    {
-                        *enabled = false;
-                    }
-                }
-                snapshot.upsert(next);
-            }
-            Mutation::Grant { id, grants } => {
-                let Some(entry) = snapshot.entries.iter_mut().find(|entry| entry.id == *id) else {
-                    return Err("extension package not found".into());
-                };
-                if !entry.installed_for(&self.profile) {
-                    return Err("extension association not found".into());
-                }
-                for permission in &grants.permissions {
-                    if !entry.permissions.contains(permission)
-                        && !entry.optional_permissions.contains(permission)
-                    {
-                        return Err("permission is not declared by the extension".into());
-                    }
-                }
-                for permission in &grants.host_permissions {
-                    if !entry.host_permissions.contains(permission)
-                        && !entry.optional_host_permissions.contains(permission)
-                    {
-                        return Err("host permission is not declared by the extension".into());
-                    }
-                }
-                entry
-                    .approved_grants
-                    .insert(self.profile.clone(), grants.clone());
-                if !grants.covers(&entry.permissions, &entry.host_permissions) {
-                    entry.profile_enabled.insert(self.profile.clone(), false);
-                }
-            }
-            Mutation::Save => {}
-        }
-        snapshot.validate()?;
-        Ok(snapshot)
+    pub(crate) fn prepared(ticket: Ticket, profile: String, entry: ExtEntry) -> impl Bundle {
+        (
+            Pending::parts(ticket, profile),
+            Self,
+            Id(entry.id),
+            Name::new(entry.name),
+            Version(entry.version),
+            Popup(entry.popup),
+            Icon(entry.icon),
+            Permissions(entry.permissions),
+            OptionalPermissions(entry.optional_permissions),
+            HostPermissions(entry.host_permissions),
+            OptionalHostPermissions(entry.optional_host_permissions),
+            SourceHash(entry.source_hash),
+            PublicKey(entry.public_key_b64),
+        )
     }
 }
 
@@ -579,7 +560,7 @@ struct Writing {
     base: Revision,
     revision: u64,
     snapshot: Index,
-    request: Request,
+    cleanup: Option<(String, String)>,
     before: State,
 }
 
@@ -732,12 +713,12 @@ fn cancel(
     mut operations: Query<
         (
             Entity,
-            Option<&Request>,
+            Option<&Scope>,
             Option<&InstallRequest>,
             Option<&InstallOwner>,
             &mut OperationState,
         ),
-        With<Operation>,
+        (With<Operation>, Or<(With<Pending>, With<InstallRequest>)>),
     >,
     roots: Query<(&Root, &Scope)>,
     installing: Query<&Installing>,
@@ -745,7 +726,7 @@ fn cancel(
 ) {
     for (operation, request, install, owner, mut state) in &mut operations {
         let ticket = match (request, install) {
-            (Some(request), _) => &request.ticket,
+            (Some(scope), _) => &scope.0,
             (_, Some(install)) => &install.ticket,
             _ => continue,
         };
@@ -768,7 +749,7 @@ fn cancel(
         }
         commands
             .entity(operation)
-            .remove::<(Request, Queued, InstallRequest, InstallOwner)>();
+            .remove::<(Pending, Queued, InstallRequest, InstallOwner)>();
         if let Some(owner) = owner {
             commands.entity(operation).insert(ReleasedInstall(*owner));
         }
@@ -865,19 +846,15 @@ fn finish(
                     .entity(ticket.owner)
                     .remove::<(WriteError, Repair)>();
                 effects.changed.write(Changed(ticket.owner));
-                if let Mutation::Remove(request) = &writing.request.mutation {
+                if let Some((id, profile)) = &writing.cleanup {
                     effects.cleanup.write(CleanupRequest {
                         ticket: ticket.clone(),
-                        id: request.id.clone(),
-                        profile: writing.request.profile.clone(),
+                        id: id.clone(),
+                        profile: profile.clone(),
                         package: !installs
                             .iter()
-                            .any(|install| install.ticket == *ticket && install.id == request.id)
-                            && !writing
-                                .snapshot
-                                .entries
-                                .iter()
-                                .any(|entry| entry.id == request.id),
+                            .any(|install| install.ticket == *ticket && install.id == *id)
+                            && !writing.snapshot.entries.iter().any(|entry| entry.id == *id),
                     });
                 }
             }
@@ -901,7 +878,7 @@ fn finish(
         ));
         commands
             .entity(completion.operation)
-            .remove::<(Request, Queued)>();
+            .remove::<(Pending, Queued)>();
         commands.entity(ticket.owner).remove::<Writing>();
     }
 }
@@ -1185,30 +1162,23 @@ fn autosave(
         ),
         (With<Loaded>, Without<Writing>),
     >,
-    requests: Query<&Request>,
+    requests: Query<&Scope, With<Pending>>,
     mut commands: Commands,
 ) {
     for (scope, state, error, repair, auto) in &roots {
         if (!auto && repair.is_none())
             || !state.is_dirty()
             || (error && !matches!(repair, Some(Repair::Required)))
-            || requests.iter().any(|request| request.ticket == scope.0)
+            || requests.iter().any(|request| request.0 == scope.0)
         {
             continue;
         }
-        commands.spawn(
-            Request {
-                ticket: scope.0.clone(),
-                profile: String::new(),
-                mutation: Mutation::Save,
-            }
-            .bundle(),
-        );
+        commands.spawn(Save::bundle(scope.0.clone()));
     }
 }
 
 fn queue(
-    requests: Query<Entity, (With<Request>, Without<Queued>)>,
+    requests: Query<Entity, (With<Pending>, Without<Queued>)>,
     mut clock: ResMut<Clock>,
     mut commands: Commands,
 ) {
@@ -1223,7 +1193,7 @@ struct Accepting {
 }
 
 fn accept(
-    requests: Query<(Entity, &Queued, &OperationState), (With<Request>, With<Operation>)>,
+    requests: Query<(Entity, &Queued, &OperationState), (With<Pending>, With<Operation>)>,
     mut commands: Commands,
 ) {
     let mut ordered = Vec::new();
@@ -1262,70 +1232,498 @@ struct Provisional<'w, 's> {
     >,
 }
 
-fn admit(
+#[derive(SystemParam)]
+struct Proposals<'w, 's> {
+    requests: Query<
+        'w,
+        's,
+        (&'static Scope, &'static ProfileId, &'static OperationState),
+        (With<Pending>, With<Queued>),
+    >,
+    writing: Query<'w, 's, (), With<Writing>>,
+    catalog: Catalog<'w, 's>,
+}
+
+impl Proposals<'_, '_> {
+    fn read(&self, operation: Entity) -> Option<(Ticket, String, Revision, Result<Index, String>)> {
+        let (scope, profile, state) = self.requests.get(operation).ok()?;
+        if !matches!(state, OperationState::Pending | OperationState::Running)
+            || self.writing.contains(scope.0.owner)
+        {
+            return None;
+        }
+        let result = if self.catalog.ready(&scope.0) {
+            self.catalog.snapshot(scope.0.owner)
+        } else {
+            Err("extension store is unavailable".into())
+        };
+        Some((
+            scope.0.clone(),
+            profile.0.clone(),
+            self.catalog.revision(scope.0.owner).unwrap_or_default(),
+            result,
+        ))
+    }
+}
+
+#[derive(EntityEvent)]
+struct Prepared {
+    entity: Entity,
+    base: Revision,
+    before: Index,
+    result: Result<Index, String>,
+}
+
+impl Prepared {
+    fn rejected(entity: Entity, base: Revision, error: String) -> Self {
+        Self {
+            entity,
+            base,
+            before: Index::default(),
+            result: Err(error),
+        }
+    }
+}
+
+fn toggle(
     event: On<Accepting>,
-    requests: Query<(&Request, &OperationState), (With<Operation>, With<Queued>)>,
+    inputs: Query<(&Toggle, &Id)>,
+    proposals: Proposals,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok((request, id)) = inputs.get(operation) else {
+        return;
+    };
+    let Some((_ticket, profile, base, snapshot)) = proposals.read(operation) else {
+        return;
+    };
+
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(Prepared::rejected(operation, base, error));
+            return;
+        }
+    };
+    let mut next = snapshot.clone();
+    let Some(entry) = next.entries.iter_mut().find(|entry| entry.id == id.0) else {
+        commands.trigger(Prepared::rejected(
+            operation,
+            base,
+            "extension association not found".into(),
+        ));
+        return;
+    };
+    if !entry.installed_for(&profile) {
+        commands.trigger(Prepared::rejected(
+            operation,
+            base,
+            "extension association not found".into(),
+        ));
+        return;
+    }
+    if request.enabled
+        && !entry
+            .grants_for(&profile)
+            .covers(&entry.permissions, &entry.host_permissions)
+    {
+        if !request.approve_permissions {
+            commands.trigger(Prepared::rejected(
+                operation,
+                base,
+                "extension permissions require approval".into(),
+            ));
+            return;
+        }
+        entry.approved_grants.insert(
+            profile.clone(),
+            ExtensionGrants {
+                permissions: entry.permissions.clone(),
+                host_permissions: entry.host_permissions.clone(),
+            },
+        );
+    }
+    entry.profile_enabled.insert(profile, request.enabled);
+    let result = next.validate().map(|_| next);
+    commands.trigger(Prepared {
+        entity: operation,
+        base,
+        before: snapshot,
+        result,
+    });
+}
+
+fn pin(
+    event: On<Accepting>,
+    inputs: Query<(&Pin, &Id)>,
+    proposals: Proposals,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok((request, id)) = inputs.get(operation) else {
+        return;
+    };
+    let Some((_ticket, profile, base, snapshot)) = proposals.read(operation) else {
+        return;
+    };
+
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(Prepared::rejected(operation, base, error));
+            return;
+        }
+    };
+    let mut next = snapshot.clone();
+    let Some(entry) = next.entries.iter_mut().find(|entry| entry.id == id.0) else {
+        commands.trigger(Prepared::rejected(
+            operation,
+            base,
+            "extension package not found".into(),
+        ));
+        return;
+    };
+    if !entry.installed_for(&profile) {
+        commands.trigger(Prepared::rejected(
+            operation,
+            base,
+            "extension association not found".into(),
+        ));
+        return;
+    }
+    if entry.pinned_for(&profile) != request.0 {
+        entry.profile_pinned.insert(profile, request.0);
+    }
+    let result = next.validate().map(|_| next);
+    commands.trigger(Prepared {
+        entity: operation,
+        base,
+        before: snapshot,
+        result,
+    });
+}
+
+fn uninstall(
+    event: On<Accepting>,
+    inputs: Query<&Id, With<Uninstall>>,
+    proposals: Proposals,
     provisional: Provisional,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok(id) = inputs.get(operation) else {
+        return;
+    };
+    let Some((ticket, profile, base, snapshot)) = proposals.read(operation) else {
+        return;
+    };
+    for (entity, found, parent) in &provisional.associations {
+        if found.0 == profile
+            && provisional
+                .packages
+                .get(parent.parent())
+                .is_ok_and(|(found, parent)| found.0 == id.0 && parent.parent() == ticket.owner)
+        {
+            commands.entity(entity).despawn();
+        }
+    }
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(Prepared::rejected(operation, base, error));
+            return;
+        }
+    };
+    let mut next = snapshot.clone();
+    if let Some(entry) = next.entries.iter_mut().find(|entry| entry.id == id.0) {
+        entry.profile_enabled.remove(&profile);
+        entry.profile_pinned.remove(&profile);
+        entry.approved_grants.remove(&profile);
+        if entry.profile_enabled.is_empty() {
+            next.entries.retain(|entry| entry.id != id.0);
+        }
+    }
+    let result = next.validate().map(|_| next);
+    commands.trigger(Prepared {
+        entity: operation,
+        base,
+        before: snapshot,
+        result,
+    });
+}
+
+fn grant(
+    event: On<Accepting>,
+    inputs: Query<(&Id, &Grants), With<Grant>>,
+    proposals: Proposals,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok((id, grants)) = inputs.get(operation) else {
+        return;
+    };
+    let Some((_ticket, profile, base, snapshot)) = proposals.read(operation) else {
+        return;
+    };
+
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(Prepared::rejected(operation, base, error));
+            return;
+        }
+    };
+    let mut next = snapshot.clone();
+    let Some(entry) = next.entries.iter_mut().find(|entry| entry.id == id.0) else {
+        commands.trigger(Prepared::rejected(
+            operation,
+            base,
+            "extension package not found".into(),
+        ));
+        return;
+    };
+    if !entry.installed_for(&profile) {
+        commands.trigger(Prepared::rejected(
+            operation,
+            base,
+            "extension association not found".into(),
+        ));
+        return;
+    }
+    for permission in &grants.0.permissions {
+        if !entry.permissions.contains(permission)
+            && !entry.optional_permissions.contains(permission)
+        {
+            commands.trigger(Prepared::rejected(
+                operation,
+                base,
+                "permission is not declared by the extension".into(),
+            ));
+            return;
+        }
+    }
+    for permission in &grants.0.host_permissions {
+        if !entry.host_permissions.contains(permission)
+            && !entry.optional_host_permissions.contains(permission)
+        {
+            commands.trigger(Prepared::rejected(
+                operation,
+                base,
+                "host permission is not declared by the extension".into(),
+            ));
+            return;
+        }
+    }
+    entry
+        .approved_grants
+        .insert(profile.clone(), grants.0.clone());
+    if !grants.0.covers(&entry.permissions, &entry.host_permissions) {
+        entry.profile_enabled.insert(profile, false);
+    }
+    let result = next.validate().map(|_| next);
+    commands.trigger(Prepared {
+        entity: operation,
+        base,
+        before: snapshot,
+        result,
+    });
+}
+
+fn save(
+    event: On<Accepting>,
+    inputs: Query<(), With<Save>>,
+    proposals: Proposals,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok(()) = inputs.get(operation) else {
+        return;
+    };
+    let Some((_ticket, _profile, base, snapshot)) = proposals.read(operation) else {
+        return;
+    };
+
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(Prepared::rejected(operation, base, error));
+            return;
+        }
+    };
+    let next = snapshot.clone();
+
+    let result = next.validate().map(|_| next);
+    commands.trigger(Prepared {
+        entity: operation,
+        base,
+        before: snapshot,
+        result,
+    });
+}
+
+fn install(
+    event: On<Accepting>,
+    inputs: Query<
+        (
+            &Id,
+            &Name,
+            &Version,
+            &Popup,
+            &Icon,
+            &Permissions,
+            &OptionalPermissions,
+            &HostPermissions,
+            &OptionalHostPermissions,
+            &SourceHash,
+            &PublicKey,
+        ),
+        With<Install>,
+    >,
+    proposals: Proposals,
+    mut commands: Commands,
+) {
+    let operation = event.entity;
+    let Ok((
+        id,
+        name,
+        version,
+        popup,
+        icon,
+        permissions,
+        optional,
+        hosts,
+        optional_hosts,
+        hash,
+        public_key,
+    )) = inputs.get(operation)
+    else {
+        return;
+    };
+    let Some((_ticket, profile, base, snapshot)) = proposals.read(operation) else {
+        return;
+    };
+
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(Prepared::rejected(operation, base, error));
+            return;
+        }
+    };
+    let mut next = snapshot.clone();
+    let mut entry = ExtEntry {
+        id: id.0.clone(),
+        name: name.as_str().into(),
+        version: version.0.clone(),
+        popup: popup.0.clone(),
+        icon: icon.0.clone(),
+        permissions: permissions.0.clone(),
+        optional_permissions: optional.0.clone(),
+        host_permissions: hosts.0.clone(),
+        optional_host_permissions: optional_hosts.0.clone(),
+        source_hash: hash.0.clone(),
+        public_key_b64: public_key.0.clone(),
+        ..Default::default()
+    };
+    if let Some(previous) = next.entries.iter().find(|previous| previous.id == id.0) {
+        entry.profile_enabled.clone_from(&previous.profile_enabled);
+        entry.profile_pinned.clone_from(&previous.profile_pinned);
+        entry.approved_grants.clone_from(&previous.approved_grants);
+    }
+    entry.profile_enabled.entry(profile).or_insert(false);
+    for (profile, grants) in &mut entry.approved_grants {
+        grants.retain_declared(
+            &entry.permissions,
+            &entry.optional_permissions,
+            &entry.host_permissions,
+            &entry.optional_host_permissions,
+        );
+        if !grants.covers(&entry.permissions, &entry.host_permissions) {
+            entry.profile_enabled.insert(profile.clone(), false);
+        }
+    }
+    for (profile, enabled) in &mut entry.profile_enabled {
+        if !entry
+            .approved_grants
+            .get(profile)
+            .cloned()
+            .unwrap_or_default()
+            .covers(&entry.permissions, &entry.host_permissions)
+        {
+            *enabled = false;
+        }
+    }
+    if let Some(previous) = next.entries.iter_mut().find(|previous| previous.id == id.0) {
+        *previous = entry;
+    } else {
+        next.entries.push(entry);
+    }
+    let result = next.validate().map(|_| next);
+    commands.trigger(Prepared {
+        entity: operation,
+        base,
+        before: snapshot,
+        result,
+    });
+}
+
+fn admit(
+    mut event: On<Prepared>,
+    requests: Query<
+        (
+            &Scope,
+            &ProfileId,
+            &OperationState,
+            Option<&Id>,
+            Has<Uninstall>,
+        ),
+        (With<Pending>, With<Queued>),
+    >,
     mut admission: Admission,
     mut writes: MessageWriter<WriteTaskRequest>,
     mut commands: Commands,
 ) {
+    let event = event.event_mut();
     let operation = event.entity;
-    let Ok((request, status)) = requests.get(operation) else {
+    let Ok((scope, profile, status, id, remove)) = requests.get(operation) else {
         return;
     };
-    let owner = request.ticket.owner;
+    let owner = scope.0.owner;
     if !matches!(status, OperationState::Pending | OperationState::Running)
         || admission.writing.contains(owner)
     {
         return;
     }
-    if let Mutation::Remove(remove) = &request.mutation {
-        for (entity, profile, parent) in &provisional.associations {
-            if profile.0 == request.profile
-                && provisional
-                    .packages
-                    .get(parent.parent())
-                    .is_ok_and(|(id, parent)| id.0 == remove.id && parent.parent() == owner)
-            {
-                commands.entity(entity).despawn();
+    let proposed =
+        match std::mem::replace(&mut event.result, Err("extension proposal consumed".into())) {
+            Ok(proposed) => proposed,
+            Err(error) => {
+                commands.trigger(OperationCompleted {
+                    entity: operation,
+                    result: Err(error),
+                });
+                commands.entity(operation).remove::<(Pending, Queued)>();
+                return;
             }
-        }
+        };
+    let catalog = admission.store.p0();
+    if !catalog.ready(&scope.0) || catalog.revision(owner) != Some(event.base) {
+        commands.trigger(OperationCompleted {
+            entity: operation,
+            result: Err("extension revision conflict".into()),
+        });
+        commands.entity(operation).remove::<(Pending, Queued)>();
+        return;
     }
-    let snapshot = {
-        let catalog = admission.store.p0();
-        if !catalog.ready(&request.ticket) {
-            Err("extension store is unavailable".into())
-        } else {
-            catalog.snapshot(owner)
-        }
-    };
-    let proposed = match snapshot
-        .clone()
-        .and_then(|snapshot| request.propose(snapshot))
-    {
-        Ok(proposed) => proposed,
-        Err(error) => {
-            commands.trigger(OperationCompleted {
-                entity: operation,
-                result: Err(error),
-            });
-            commands.entity(operation).remove::<(Request, Queued)>();
-            return;
-        }
-    };
     let mut states = admission.store.p1();
     let (base, mut state, repair) = states.get_mut(owner).unwrap();
-    if !state.is_dirty()
-        && snapshot
-            .as_ref()
-            .is_ok_and(|snapshot| *snapshot == proposed)
-    {
+    if !state.is_dirty() && event.before == proposed {
         commands.trigger(OperationCompleted {
             entity: operation,
             result: Ok(()),
         });
-        commands.entity(operation).remove::<(Request, Queued)>();
+        commands.entity(operation).remove::<(Pending, Queued)>();
         return;
     }
     let before = state.clone();
@@ -1337,21 +1735,52 @@ fn admit(
     if repair {
         commands.entity(owner).insert(Repair::Suspended);
     }
+    let cleanup = if remove {
+        id.map(|id| (id.0.clone(), profile.0.clone()))
+    } else {
+        None
+    };
     commands.entity(owner).insert(Writing {
-        ticket: request.ticket.clone(),
+        ticket: scope.0.clone(),
         operation,
         base: *base,
         revision,
         snapshot: proposed.clone(),
-        request: request.clone(),
+        cleanup,
         before,
     });
     writes.write(WriteTaskRequest {
-        ticket: request.ticket.clone(),
+        ticket: scope.0.clone(),
         operation,
         revision,
         snapshot: proposed,
     });
+}
+
+fn discard(event: On<Remove, Pending>, mut commands: Commands) {
+    commands.entity(event.entity).remove::<(
+        Scope,
+        ProfileId,
+        Toggle,
+        Pin,
+        Uninstall,
+        Install,
+        Grant,
+        Save,
+        Id,
+    )>();
+    commands.entity(event.entity).remove::<(
+        Name,
+        Version,
+        Popup,
+        Icon,
+        Permissions,
+        OptionalPermissions,
+        HostPermissions,
+        OptionalHostPermissions,
+        SourceHash,
+        PublicKey,
+    )>();
 }
 
 #[cfg(test)]
@@ -1398,19 +1827,8 @@ mod tests {
             Self { app, root, ticket }
         }
 
-        fn submit(&mut self, profile: &str, mutation: Mutation) -> Entity {
-            let entity = self
-                .app
-                .world_mut()
-                .spawn(
-                    Request {
-                        ticket: self.ticket.clone(),
-                        profile: profile.into(),
-                        mutation,
-                    }
-                    .bundle(),
-                )
-                .id();
+        fn submit<B: Bundle>(&mut self, request: B) -> Entity {
+            let entity = self.app.world_mut().spawn(request).id();
             self.app.update();
             entity
         }
@@ -1447,14 +1865,15 @@ mod tests {
     #[test]
     fn enabling_requires_approval_and_commits_only_the_selected_profile_after_io() {
         let mut fixture = Fixture::new();
-        let refused = fixture.submit(
-            "personal",
-            Mutation::Toggle(ExtToggleRequest {
+        let refused = fixture.submit(Toggle::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtToggleRequest {
                 id: PACKAGE_ID.into(),
                 enabled: true,
                 approve_permissions: false,
-            }),
-        );
+            },
+        ));
         assert_eq!(
             fixture.app.world().get::<OperationState>(refused),
             Some(&OperationState::Failed)
@@ -1468,14 +1887,15 @@ mod tests {
                 .next()
                 .is_none()
         );
-        let accepted = fixture.submit(
-            "personal",
-            Mutation::Toggle(ExtToggleRequest {
+        let accepted = fixture.submit(Toggle::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtToggleRequest {
                 id: PACKAGE_ID.into(),
                 enabled: true,
                 approve_permissions: true,
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         assert!(!fixture.snapshot().entries[0].enabled_for("personal"));
         fixture.finish(&write, Ok(()));
@@ -1497,13 +1917,14 @@ mod tests {
     #[test]
     fn failed_atomic_write_preserves_committed_state_and_a_new_request_can_retry() {
         let mut fixture = Fixture::new();
-        let operation = fixture.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let operation = fixture.submit(Pin::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtPinRequest {
                 id: PACKAGE_ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Err("disk full".into()));
         assert!(!fixture.snapshot().entries[0].pinned_for("personal"));
@@ -1520,13 +1941,14 @@ mod tests {
             fixture.app.world().get::<OperationState>(operation),
             Some(&OperationState::Failed)
         );
-        fixture.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        fixture.submit(Pin::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtPinRequest {
                 id: PACKAGE_ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         let retry = fixture.write();
         fixture.finish(&write, Ok(()));
         assert!(!fixture.snapshot().entries[0].pinned_for("personal"));
@@ -1544,12 +1966,13 @@ mod tests {
     #[test]
     fn removing_one_profile_retains_the_shared_package_and_other_associations() {
         let mut fixture = Fixture::new();
-        fixture.submit(
-            "personal",
-            Mutation::Remove(ExtUninstallRequest {
+        fixture.submit(Uninstall::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtUninstallRequest {
                 id: PACKAGE_ID.into(),
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         let snapshot = fixture.snapshot();
@@ -1564,12 +1987,13 @@ mod tests {
             .next()
             .unwrap();
         assert!(!cleanup.package);
-        fixture.submit(
-            "work",
-            Mutation::Remove(ExtUninstallRequest {
+        fixture.submit(Uninstall::bundle(
+            fixture.ticket.clone(),
+            "work".into(),
+            ExtUninstallRequest {
                 id: PACKAGE_ID.into(),
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         assert!(fixture.snapshot().entries.is_empty());
@@ -1588,20 +2012,25 @@ mod tests {
     #[test]
     fn package_update_narrows_grants_and_disables_a_profile_missing_new_permissions() {
         let mut fixture = Fixture::new();
-        fixture.submit(
-            "personal",
-            Mutation::Toggle(ExtToggleRequest {
+        fixture.submit(Toggle::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtToggleRequest {
                 id: PACKAGE_ID.into(),
                 enabled: true,
                 approve_permissions: true,
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         let mut update = fixture.snapshot().entries.remove(0);
         update.version = "2".into();
         update.permissions = vec!["tabs".into()];
-        fixture.submit("personal", Mutation::Install(Box::new(update)));
+        fixture.submit(Install::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            update,
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         let entry = &fixture.snapshot().entries[0];
@@ -1614,13 +2043,14 @@ mod tests {
     #[test]
     fn replacing_a_root_cancels_pending_work_and_refuses_late_completion() {
         let mut fixture = Fixture::new();
-        let operation = fixture.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let operation = fixture.submit(Pin::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtPinRequest {
                 id: PACKAGE_ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture
             .app
@@ -1699,46 +2129,44 @@ mod tests {
             .ticket(other)
             .unwrap()
             .clone();
-        let mut operations = Vec::new();
-        for (ticket, mutation) in [
-            (
+        let first = fixture
+            .app
+            .world_mut()
+            .spawn(Pin::bundle(
                 fixture.ticket.clone(),
-                Mutation::Pin(ExtPinRequest {
+                "personal".into(),
+                ExtPinRequest {
                     id: PACKAGE_ID.into(),
                     pinned: true,
-                }),
-            ),
-            (
+                },
+            ))
+            .id();
+        let second = fixture
+            .app
+            .world_mut()
+            .spawn(Toggle::bundle(
                 fixture.ticket.clone(),
-                Mutation::Toggle(ExtToggleRequest {
+                "personal".into(),
+                ExtToggleRequest {
                     id: PACKAGE_ID.into(),
                     enabled: true,
                     approve_permissions: true,
-                }),
-            ),
-            (
+                },
+            ))
+            .id();
+        let independent = fixture
+            .app
+            .world_mut()
+            .spawn(Pin::bundle(
                 other_ticket,
-                Mutation::Pin(ExtPinRequest {
+                "personal".into(),
+                ExtPinRequest {
                     id: PACKAGE_ID.into(),
                     pinned: true,
-                }),
-            ),
-        ] {
-            operations.push(
-                fixture
-                    .app
-                    .world_mut()
-                    .spawn(
-                        Request {
-                            ticket,
-                            profile: "personal".into(),
-                            mutation,
-                        }
-                        .bundle(),
-                    )
-                    .id(),
-            );
-        }
+                },
+            ))
+            .id();
+        let operations = [first, second, independent];
         fixture.app.update();
         let writes: Vec<_> = fixture
             .app
@@ -1899,10 +2327,11 @@ mod tests {
                 .iter()
                 .any(|entry| entry.id == id)
         );
-        fixture.submit(
-            "personal",
-            Mutation::Remove(ExtUninstallRequest { id: id.into() }),
-        );
+        fixture.submit(Uninstall::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtUninstallRequest { id: id.into() },
+        ));
         fixture.app.update();
         assert_eq!(
             fixture.app.world().get::<OperationState>(operation),
@@ -1936,13 +2365,14 @@ mod tests {
             .id();
         fixture.app.update();
         let owner = *fixture.app.world().get::<InstallOwner>(operation).unwrap();
-        fixture.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        fixture.submit(Pin::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtPinRequest {
                 id: PACKAGE_ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         assert!(fixture.app.world().get_entity(owner.association).is_ok());
@@ -1955,12 +2385,13 @@ mod tests {
     #[test]
     fn removing_the_last_committed_profile_preserves_another_profiles_pending_install() {
         let mut fixture = Fixture::new();
-        fixture.submit(
-            "personal",
-            Mutation::Remove(ExtUninstallRequest {
+        fixture.submit(Uninstall::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtUninstallRequest {
                 id: PACKAGE_ID.into(),
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         let mut replacement = fixture.snapshot().entries.remove(0);
@@ -1978,12 +2409,13 @@ mod tests {
             ))
             .id();
         fixture.app.update();
-        fixture.submit(
-            "work",
-            Mutation::Remove(ExtUninstallRequest {
+        fixture.submit(Uninstall::bundle(
+            fixture.ticket.clone(),
+            "work".into(),
+            ExtUninstallRequest {
                 id: PACKAGE_ID.into(),
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
         fixture.app.update();
@@ -2004,11 +2436,11 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(operation)
-            .insert(Request {
-                ticket: fixture.ticket.clone(),
-                profile: "new-profile".into(),
-                mutation: Mutation::Install(Box::new(replacement)),
-            });
+            .insert(Install::prepared(
+                fixture.ticket.clone(),
+                "new-profile".into(),
+                replacement,
+            ));
         fixture.app.update();
         let write = fixture.write();
         fixture.finish(&write, Ok(()));
@@ -2023,13 +2455,14 @@ mod tests {
     fn canceled_successful_io_is_compensated_with_the_canonical_snapshot() {
         let mut fixture = Fixture::new();
         let before = fixture.snapshot();
-        let operation = fixture.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let operation = fixture.submit(Pin::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtPinRequest {
                 id: PACKAGE_ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         let write = fixture.write();
         assert!(write.snapshot.entries[0].pinned_for("personal"));
         fixture
