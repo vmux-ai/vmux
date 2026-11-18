@@ -150,7 +150,7 @@ pub(super) struct OfferedBookmarkDefaults {
 }
 
 impl BookmarkSeed<'_, '_> {
-    const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
+    const RETIRED_DEFAULT_BOOKMARKS: [&'static str; 2] = ["vmux://spaces/", "vmux://team/"];
     const PIN_ORDER_REVISION: u32 = 5;
     const LEGACY_PIN_ORDER_REVISION: u32 = 4;
 
