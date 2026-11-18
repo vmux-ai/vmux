@@ -121,7 +121,6 @@ legacy: [
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||fn:wait_for_terminal_exit", fingerprint: "fc6b0627e935bc14", issue: "VMX-253"),
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpAgentInfo < \'_ >", fingerprint: "ff9ccd18f66c8e74", issue: "VMX-253"),
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpAttachment < \'_ >", fingerprint: "673ba27fbb309a11", issue: "VMX-253"),
-    (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver", fingerprint: "32e9d18443e94f7b", issue: "VMX-253"),
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpFileContents", fingerprint: "c71c2b5959ea13f3", issue: "VMX-253"),
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpFsScope", fingerprint: "037a296af7a699ac", issue: "VMX-253"),
     (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpMcpServers", fingerprint: "fb4b01a0553bc4d8", issue: "VMX-253"),
@@ -566,6 +565,7 @@ legacy: [
     (key: "crates/feature/vmux_acp/src/service_driver.rs||struct:AgentContent", fingerprint: "eb5d98d5f448d3bf", issue: "VMX-253"),
 ],
 boundaries: [
+    (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver", owner: None, fingerprint: "3bf2c81707703f20", interface: "agent_client_protocol ByteStreams and supervised ACP subprocess stdio", input: "external: ACP child process callbacks and per-process command inbox", output: "ECS: crates/util/vmux_api/src/protocol/agent.rs||enum:AgentRunStatus", lifetime: "one supervised ACP subprocess connection; projected run status remains in ECS", bounds: "60-second initialize/session startup request deadline; media reads limited to 8 MiB per file and 64 MiB total; stderr tail retains 50 lines", teardown: "Close leaves the connection loop; AgentProcess releases and terminates its child process group and pipe handles", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_acp/src/service_driver.rs|tests|fn:checked_rebind_reports_a_correlated_failure_from_the_native_runtime", fingerprint: "aba6c86427ec4f68", interface: "Headless native service protocol and rkyv framing fixture", input: "ECS: crates/feature/vmux_acp/src/service_driver.rs||struct:AcpService", output: "external: Correlated framed native rebind failure and completion ownership", lifetime: "One isolated native runtime App and protocol connection test", bounds: "One checked rebind through real service framing and production runtime systems; no app, VM or agent process launch", teardown: "Owned connection task drains its reply before the isolated App, channels and native handles drop", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_acp/src/acp.rs||struct:AcpRuntimePlugin", fingerprint: "7342407737b6676f", interface: "Bevy registration of the native ACP runtime and service protocol adapter", input: "external: Bevy App plugin composition", output: "ECS: crates/feature/vmux_acp/src/acp.rs||struct:RebindAcpSession", lifetime: "One ACP service/runtime App installation", bounds: "Registration only; typed native requests and private runtime systems own state and IO completion", teardown: "App and native runtime ownership release registered schedules, inboxes and response handles", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_acp/src/acp.rs||impl:bevy :: prelude :: Plugin for AcpRuntimePlugin", fingerprint: "6ad5a777dfdf7f9d", interface: "Bevy registration of the native ACP runtime and service protocol adapter", input: "external: Bevy App plugin composition", output: "ECS: crates/feature/vmux_acp/src/acp.rs||struct:RebindAcpSession", lifetime: "One ACP service/runtime App installation", bounds: "Registration only; typed native requests and private runtime systems own state and IO completion", teardown: "App and native runtime ownership release registered schedules, inboxes and response handles", architecture: "ECS ownership boundaries"),
@@ -674,6 +674,9 @@ values: [
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||struct:ReadResult", owner: "crates/feature/vmux_acp/src/host/external.rs||struct:ConversationLoadTask", lifetime: "bounded raw IO result of one Session-owned blocking Read task"),
 ],
 shape: (
+  bodies: [
+    (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver::run", fingerprint: "30cb95445b8d9456", boundary: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver", reason: "One supervised agent_client_protocol stdio loop translates bounded native inbox receipts into initialization, authentication, prompt, configuration, permission and cancellation RPCs; canonical Session updates return through typed ECS inboxes and process IO drains before teardown."),
+  ],
   debt: [
     (key: "crates/feature/vmux_acp/src/host/navigation.rs||fn:open", fingerprint: "86370c0058da75b0", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/external.rs||fn:activate", fingerprint: "667e52675037bdd5", issue: "VMX-253", finding: "AU-14"),
@@ -691,7 +694,6 @@ shape: (
     (key: "crates/feature/vmux_acp/src/host/approval_io.rs||fn:flush", fingerprint: "ee410e916fdc2db6", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/remote_driver.rs||impl:RemoteMediaQuery < \'_ >::entries", fingerprint: "e45cac602beb3a8e", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||impl:FileConversation::before", fingerprint: "cd2dc41d05ea77ef", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_acp/src/acp/driver.rs||impl:AcpDriver::run", fingerprint: "c229e07014c7c4e5", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/navigation.rs||fn:prepare", fingerprint: "f82b41ef2ac7ab68", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_acp/src/host/acp/registry.rs||enum:Runtime", fingerprint: "f3b32130a48a1e6d", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_acp/src/host/external/conversation.rs||impl:ChatDecoder::record", fingerprint: "40016c71a2a52a49", issue: "VMX-253", finding: "AU-14"),

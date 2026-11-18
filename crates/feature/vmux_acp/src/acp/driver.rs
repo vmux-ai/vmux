@@ -849,15 +849,16 @@ impl AcpDriver {
     ) {
         let agent_cwd = shared.cwd();
         let mut launch = Command::new(&command);
-        let mut child = match AgentProcess::spawn(
-            launch
-                .args(&args)
-                .envs(env)
-                .current_dir(agent_cwd)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped()),
-        ) {
+        vmux_process::LoginShellEnvironment::apply_isolation(launch.as_std_mut());
+        launch
+            .args(&args)
+            .envs(env)
+            .current_dir(agent_cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        vmux_process::LoginShellEnvironment::protect_isolated_configuration(launch.as_std_mut());
+        let mut child = match AgentProcess::spawn(&mut launch) {
             Ok(child) => child,
             Err(err) => {
                 shared

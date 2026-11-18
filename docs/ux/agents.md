@@ -6,6 +6,10 @@ An agent is an assistant you can give a task: research a trip, compare products,
 
 Select an available agent for a new Session. If it needs setup or sign-in, complete that first. Then describe the result you want and the details that matter.
 
+Development profiles using an isolated data directory keep app settings and provider configuration inside that directory. Codex uses its private `.codex` home, Claude Code uses private configuration and secure-storage directories, and Vibe uses `.vibe`. Explicit agent environment overrides cannot redirect those paths to personal configuration.
+
+Vibe 3.1.2 uses an owner-only plaintext `.env` in its private home when the native keyring is disabled for isolation. This provider-specific fallback also disables experimental OIDC keyring persistence. Codex's credential backend remains configurable, and Claude Code still uses its native keychain backend with configuration-derived service names; these settings do not imply that every provider avoids native keychain access.
+
 For shopping, include the budget and delivery country. For cooking, include ingredients, portions, and dietary requirements. For software, select the Project and describe how to reproduce the problem.
 
 ## Let tools support the task

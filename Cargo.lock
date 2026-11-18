@@ -11117,6 +11117,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "tempfile",
  "tokio",
  "url",
  "vmux_api",
