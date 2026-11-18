@@ -7462,9 +7462,6 @@ impl Inventory {
         if entry.local || entry.dynamic || entry.opaque {
             return false;
         }
-        if self.plugin_metadata_keys.contains(&entry.key) {
-            return true;
-        }
         if let Some(owner) = &entry.owner {
             let Some(declaration) = self.resolve(&entry.namespace, owner, &mut BTreeSet::new())
             else {
@@ -13303,7 +13300,7 @@ fn stateless_plugin_metadata_requires_the_actual_framework_trait_and_app() {
         let inventory = Inventory::fixture(source);
         let root = &inventory.entries[&inventory.key("struct:Root")];
         assert!(
-            inventory.canonical(root, &Policy::default(), &mut BTreeSet::new()),
+            inventory.plugin_metadata_keys.contains(&root.key),
             "{source}"
         );
         let implementation = inventory
@@ -13312,7 +13309,7 @@ fn stateless_plugin_metadata_requires_the_actual_framework_trait_and_app() {
             .find(|entry| matches!(entry.kind, Kind::Impl))
             .unwrap();
         assert!(
-            inventory.canonical(implementation, &Policy::default(), &mut BTreeSet::new()),
+            inventory.plugin_metadata_keys.contains(&implementation.key),
             "{source}"
         );
     }
@@ -13327,10 +13324,15 @@ fn stateless_plugin_metadata_requires_the_actual_framework_trait_and_app() {
         let inventory = Inventory::fixture(source);
         let root = &inventory.entries[&inventory.key("struct:Root")];
         assert!(
-            !inventory.canonical(root, &Policy::default(), &mut BTreeSet::new()),
+            !inventory.plugin_metadata_keys.contains(&root.key),
             "{source}"
         );
     }
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin}; struct Root; impl Plugin for Root { fn build(&self,app:&mut App) {} }",
+    );
+    let root = &inventory.entries[&inventory.key("struct:Root")];
+    assert!(!inventory.canonical(root, &Policy::default(), &mut BTreeSet::new()));
     let inventory = Inventory::fixture(
         "use bevy_app::{App,Plugin}; #[derive(Component)] struct Unused; struct Root; impl Plugin for Root { fn build(&self,app:&mut App) {} }",
     );
