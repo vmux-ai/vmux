@@ -1,6 +1,8 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use bevy_reflect::Reflect;
+use std::result::Result;
 pub use vmux_ecs::revision::{BaseRevision, Record, Revision};
 use vmux_ecs::store::SchemaPlugin;
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, UnixMillis, Uuid};
@@ -14,7 +16,8 @@ pub(crate) struct MutationPlugin;
 
 impl Plugin for MutationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(SchemaPlugin::<MutationStore>::default())
+        app.init_resource::<crate::ProviderSessionTombstones>()
+            .add_plugins(SchemaPlugin::<MutationStore>::default())
             .register_type::<Creation>()
             .add_message::<Request>()
             .add_message::<Committed>()
@@ -30,7 +33,8 @@ impl Plugin for MutationPlugin {
                 (ApplyDeferred, receive, ApplyDeferred)
                     .chain()
                     .in_set(CommitSet),
-            );
+            )
+            .add_observer(commit);
     }
 }
 
@@ -88,7 +92,7 @@ pub struct Creation {
     pub local: bool,
 }
 
-#[derive(Message, Clone, Debug)]
+#[derive(Message, Event, Clone, Debug)]
 pub struct Request {
     pub operation: String,
     pub session: SessionId,
@@ -126,204 +130,287 @@ impl Command for Request {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let result = 'commit: {
-            if self.operation.trim().is_empty() {
-                break 'commit Err(Rejection::InvalidOperation);
+        world.trigger(self);
+    }
+}
+
+#[derive(SystemParam)]
+struct Journal<'w, 's> {
+    sessions: Query<'w, 's, (Entity, &'static SessionId, Option<&'static Revision>), With<Session>>,
+    records: Query<
+        'w,
+        's,
+        (
+            &'static Uuid,
+            &'static Revision,
+            &'static Mutation,
+            &'static ChildOf,
+        ),
+        With<Record>,
+    >,
+    stages: Query<'w, 's, &'static StageId, With<StageDefinition>>,
+    ids: Query<'w, 's, &'static SessionId>,
+    imports: crate::provider::ImportLeases<'w, 's>,
+}
+
+impl Journal<'_, '_> {
+    fn session(&self, id: &SessionId) -> Result<Option<Entity>, Rejection> {
+        let mut found = None;
+        for (entity, candidate, _) in &self.sessions {
+            if candidate != id {
+                continue;
             }
-            let mut entity = None;
-            for (candidate, id) in world
-                .query_filtered::<(Entity, &SessionId), With<Session>>()
-                .iter(world)
+            if found.replace(entity).is_some() {
+                return Err(Rejection::DuplicateSession);
+            }
+        }
+        Ok(found)
+    }
+
+    fn recorded(
+        &self,
+        request: &Request,
+        entity: Option<Entity>,
+    ) -> Result<Option<Revision>, Rejection> {
+        let mut committed = None;
+        for (id, revision, mutation, owner) in &self.records {
+            if id.0 != request.operation {
+                continue;
+            }
+            if entity != Some(owner.parent())
+                || mutation != &request.mutation
+                || committed.is_some()
             {
-                if id != &self.session {
-                    continue;
-                }
-                if entity.replace(candidate).is_some() {
-                    break 'commit Err(Rejection::DuplicateSession);
-                }
+                return Err(Rejection::OperationConflict);
             }
-            let mut committed = None;
-            for (id, revision, mutation, owner) in world
-                .query_filtered::<(&Uuid, &Revision, &Mutation, &ChildOf), With<Record>>()
-                .iter(world)
-            {
-                if id.0 != self.operation {
-                    continue;
-                }
-                if entity != Some(owner.parent())
-                    || mutation != &self.mutation
-                    || committed.is_some()
-                {
-                    break 'commit Err(Rejection::OperationConflict);
-                }
-                committed = Some(*revision);
-            }
-            if let Some(revision) = committed {
-                break 'commit Ok(Committed {
-                    operation: self.operation.clone(),
-                    session: self.session.clone(),
-                    revision,
-                });
-            }
-            if let Some(operation) = self.lease {
-                let mut leases =
-                    bevy_ecs::system::SystemState::<crate::provider::ImportLeases>::new(world);
-                if world.get::<SessionId>(operation) != Some(&self.session)
-                    || !leases
-                        .get(world)
-                        .expect("import lease parameters")
-                        .active(operation)
-                {
-                    break 'commit Err(Rejection::Canceled);
-                }
-            }
-            let current = entity
-                .and_then(|entity| world.get::<Revision>(entity))
-                .copied()
-                .unwrap_or_default();
-            if let Some(expected) = self.expected
-                && expected != current
-            {
-                break 'commit Err(Rejection::Stale {
-                    expected,
-                    actual: current,
-                });
-            }
-            let Some(next) = current.next() else {
-                break 'commit Err(Rejection::RevisionExhausted);
-            };
-            let stage = match self.creation() {
-                Some(created) => Some(&created.stage),
-                None => match &self.mutation {
-                    Mutation::ChangeStage(stage) => Some(stage),
-                    _ => None,
-                },
-            };
-            if let Some(stage) = stage
-                && !world
-                    .query_filtered::<&StageId, With<StageDefinition>>()
-                    .iter(world)
-                    .any(|id| id == stage)
-            {
-                break 'commit Err(Rejection::MissingStage);
-            }
-            let entity = match (self.creation(), entity) {
-                (Some(_), Some(_)) => break 'commit Err(Rejection::SessionExists),
-                (Some(created), None) => {
-                    let mut entity = world.spawn((
-                        Session,
-                        self.session.clone(),
-                        Name::new(created.name.clone()),
-                        Description(created.description.clone()),
-                        Cwd(created.cwd.clone()),
-                        CreatedAt(created.created_at),
-                        LastActivatedAt(created.activated_at),
-                        Stage(created.stage.clone()),
-                        StageChangedAt(created.activated_at),
-                    ));
-                    if created.local {
-                        entity.insert(LocalTask);
-                    }
-                    if let Some(agent) = created.agent.clone() {
-                        entity.insert(agent);
-                    }
-                    entity.id()
-                }
-                (_, Some(entity)) => entity,
-                (_, None) => break 'commit Err(Rejection::MissingSession),
-            };
-            'change: {
-                match &self.mutation {
-                    Mutation::Create(_) => {}
-                    Mutation::Rename(name) => {
-                        world
-                            .entity_mut(entity)
-                            .insert((
-                                Name::new(name.clone()),
-                                AgentConversationTitle(name.clone()),
-                            ))
-                            .remove::<TitlePending>();
-                    }
-                    Mutation::Describe(description) => {
-                        world
-                            .entity_mut(entity)
-                            .insert(Description(description.clone()));
-                    }
-                    Mutation::Summarize { title, description } => {
-                        world
-                            .entity_mut(entity)
-                            .insert((
-                                Name::new(title.clone()),
-                                AgentConversationTitle(title.clone()),
-                                Description(description.clone()),
-                            ))
-                            .remove::<TitlePending>();
-                    }
-                    Mutation::ChangeWorkspace(cwd) => {
-                        world.entity_mut(entity).insert(Cwd(cwd.clone()));
-                    }
-                    Mutation::BindAgent { agent, cwd } => {
-                        world
-                            .entity_mut(entity)
-                            .insert((agent.clone(), Cwd(cwd.clone())));
-                    }
-                    Mutation::ChangeStage(stage) => {
-                        if world
-                            .get::<Stage>(entity)
-                            .is_some_and(|current| current.0 == *stage)
-                        {
-                            break 'change;
-                        }
-                        let previous = world
-                            .get::<StageChangedAt>(entity)
-                            .map(|at| at.0)
-                            .unwrap_or_default();
-                        world.entity_mut(entity).insert((
-                            Stage(stage.clone()),
-                            StageChangedAt(UnixMillis::now().0.max(previous.saturating_add(1))),
-                        ));
-                    }
-                    Mutation::Archive(Some(at)) => {
-                        world.entity_mut(entity).insert(ArchivedAt((*at).max(1)));
-                    }
-                    Mutation::Archive(None) => {
-                        world.entity_mut(entity).remove::<ArchivedAt>();
-                    }
-                }
-            }
-            world.entity_mut(entity).insert(next);
-            let record = Record::bundle(
-                entity,
-                Uuid(self.operation.clone()),
-                current,
-                next,
-                CreatedAt(UnixMillis::now().0),
-            )
-            .unwrap();
-            world.spawn((record, self.mutation.clone()));
-            if matches!(self.mutation, Mutation::Create(_)) {
-                world.trigger(Created {
-                    entity,
-                    id: self.session.clone(),
-                });
-            }
-            Ok(Committed {
-                operation: self.operation.clone(),
-                session: self.session.clone(),
-                revision: next,
+            committed = Some(*revision);
+        }
+        Ok(committed)
+    }
+
+    fn validate(
+        &self,
+        request: &Request,
+        entity: Option<Entity>,
+    ) -> Result<(Revision, Revision), Rejection> {
+        if let Some(operation) = request.lease
+            && (self.ids.get(operation) != Ok(&request.session) || !self.imports.active(operation))
+        {
+            return Err(Rejection::Canceled);
+        }
+        let current = entity
+            .and_then(|entity| {
+                self.sessions
+                    .get(entity)
+                    .ok()
+                    .and_then(|(_, _, revision)| revision)
             })
+            .copied()
+            .unwrap_or_default();
+        if let Some(expected) = request.expected
+            && expected != current
+        {
+            return Err(Rejection::Stale {
+                expected,
+                actual: current,
+            });
+        }
+        let next = current.next().ok_or(Rejection::RevisionExhausted)?;
+        let stage = match request.creation() {
+            Some(created) => Some(&created.stage),
+            None => match &request.mutation {
+                Mutation::ChangeStage(stage) => Some(stage),
+                _ => None,
+            },
         };
-        match result {
-            Ok(committed) => {
-                world.write_message(committed);
+        if let Some(stage) = stage
+            && !self.stages.iter().any(|id| id == stage)
+        {
+            return Err(Rejection::MissingStage);
+        }
+        Ok((current, next))
+    }
+}
+
+#[derive(SystemParam)]
+struct Replies<'w> {
+    committed: MessageWriter<'w, Committed>,
+    rejected: MessageWriter<'w, Rejected>,
+}
+
+impl Replies<'_> {
+    fn reject(&mut self, request: &Request, reason: Rejection) {
+        self.rejected.write(Rejected {
+            operation: request.operation.clone(),
+            session: request.session.clone(),
+            reason,
+        });
+    }
+
+    fn commit(&mut self, request: &Request, revision: Revision) {
+        self.committed.write(Committed {
+            operation: request.operation.clone(),
+            session: request.session.clone(),
+            revision,
+        });
+    }
+}
+
+impl Creation {
+    fn bundle(&self, id: SessionId) -> impl Bundle {
+        (
+            Session,
+            id,
+            Name::new(self.name.clone()),
+            Description(self.description.clone()),
+            Cwd(self.cwd.clone()),
+            CreatedAt(self.created_at),
+            LastActivatedAt(self.activated_at),
+            Stage(self.stage.clone()),
+            StageChangedAt(self.activated_at),
+        )
+    }
+}
+
+fn commit(
+    event: On<Request>,
+    journal: Journal,
+    stages: Query<(Option<&Stage>, Option<&StageChangedAt>)>,
+    mut replies: Replies,
+    mut commands: Commands,
+) {
+    let request = event.event();
+    if request.operation.trim().is_empty() {
+        replies.reject(request, Rejection::InvalidOperation);
+        return;
+    }
+    let entity = match journal.session(&request.session) {
+        Ok(entity) => entity,
+        Err(reason) => {
+            replies.reject(request, reason);
+            return;
+        }
+    };
+    match journal.recorded(request, entity) {
+        Ok(Some(revision)) => {
+            replies.commit(request, revision);
+            return;
+        }
+        Ok(None) => {}
+        Err(reason) => {
+            replies.reject(request, reason);
+            return;
+        }
+    }
+    let (current, next) = match journal.validate(request, entity) {
+        Ok(revisions) => revisions,
+        Err(reason) => {
+            replies.reject(request, reason);
+            return;
+        }
+    };
+    let entity = match (request.creation(), entity) {
+        (Some(_), Some(_)) => {
+            replies.reject(request, Rejection::SessionExists);
+            return;
+        }
+        (Some(created), None) => {
+            let mut entity = commands.spawn(created.bundle(request.session.clone()));
+            if created.local {
+                entity.insert(LocalTask);
             }
-            Err(reason) => {
-                world.write_message(Rejected {
-                    operation: self.operation,
-                    session: self.session,
-                    reason,
-                });
+            if let Some(agent) = created.agent.clone() {
+                entity.insert(agent);
             }
+            entity.id()
+        }
+        (_, Some(entity)) => entity,
+        (_, None) => {
+            replies.reject(request, Rejection::MissingSession);
+            return;
+        }
+    };
+    change(request, entity, &stages, &mut commands);
+    commands.entity(entity).insert(next);
+    let record = Record::bundle(
+        entity,
+        Uuid(request.operation.clone()),
+        current,
+        next,
+        CreatedAt(UnixMillis::now().0),
+    )
+    .unwrap();
+    commands.spawn((record, request.mutation.clone()));
+    if request.creation().is_some() {
+        commands.trigger(Created {
+            entity,
+            id: request.session.clone(),
+        });
+    }
+    replies.commit(request, next);
+}
+
+fn change(
+    request: &Request,
+    entity: Entity,
+    stages: &Query<(Option<&Stage>, Option<&StageChangedAt>)>,
+    commands: &mut Commands,
+) {
+    match &request.mutation {
+        Mutation::Create(_) => {}
+        Mutation::Rename(name) => {
+            commands
+                .entity(entity)
+                .insert((
+                    Name::new(name.clone()),
+                    AgentConversationTitle(name.clone()),
+                ))
+                .remove::<TitlePending>();
+        }
+        Mutation::Describe(description) => {
+            commands
+                .entity(entity)
+                .insert(Description(description.clone()));
+        }
+        Mutation::Summarize { title, description } => {
+            commands
+                .entity(entity)
+                .insert((
+                    Name::new(title.clone()),
+                    AgentConversationTitle(title.clone()),
+                    Description(description.clone()),
+                ))
+                .remove::<TitlePending>();
+        }
+        Mutation::ChangeWorkspace(cwd) => {
+            commands.entity(entity).insert(Cwd(cwd.clone()));
+        }
+        Mutation::BindAgent { agent, cwd } => {
+            commands
+                .entity(entity)
+                .insert((agent.clone(), Cwd(cwd.clone())));
+        }
+        Mutation::ChangeStage(stage) => {
+            let current = stages.get(entity).ok();
+            if current
+                .is_some_and(|(current, _)| current.is_some_and(|current| current.0 == *stage))
+            {
+                return;
+            }
+            let previous = current
+                .and_then(|(_, at)| at)
+                .map(|at| at.0)
+                .unwrap_or_default();
+            commands.entity(entity).insert((
+                Stage(stage.clone()),
+                StageChangedAt(UnixMillis::now().0.max(previous.saturating_add(1))),
+            ));
+        }
+        Mutation::Archive(Some(at)) => {
+            commands.entity(entity).insert(ArchivedAt((*at).max(1)));
+        }
+        Mutation::Archive(None) => {
+            commands.entity(entity).remove::<ArchivedAt>();
         }
     }
 }
@@ -477,6 +564,73 @@ mod tests {
         assert_eq!(cwd.0, std::path::PathBuf::from("/tmp/project"));
         assert_eq!(archived.0, 200);
         assert_eq!(*revision, Revision(4));
+    }
+
+    #[test]
+    fn expired_import_lease_refuses_new_work_but_keeps_committed_replay_idempotent() {
+        let mut app = App::new();
+        app.add_plugins(MutationPlugin);
+        let id = SessionId("leased".into());
+        let entity = app
+            .world_mut()
+            .spawn((Session, id.clone(), Name::new("Original")))
+            .id();
+        let request = Request {
+            lease: None,
+            operation: "committed-before-expiry".into(),
+            session: id.clone(),
+            expected: Some(Revision(0)),
+            mutation: Mutation::Rename("Committed".into()),
+        };
+        app.world_mut().write_message(request.clone());
+        app.update();
+        let description = app.world().get::<Description>(entity).cloned();
+        app.world_mut()
+            .resource_mut::<Messages<Committed>>()
+            .drain()
+            .for_each(drop);
+        let expired = app
+            .world_mut()
+            .spawn((id.clone(), vmux_ecs::OperationState::Canceled))
+            .id();
+        let mut replay = request;
+        replay.lease = Some(expired);
+        app.world_mut().write_message(replay);
+        app.world_mut().write_message(Request {
+            lease: Some(expired),
+            operation: "refused-after-expiry".into(),
+            session: id,
+            expected: Some(Revision(1)),
+            mutation: Mutation::Describe("Must not commit".into()),
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<Name>(entity).unwrap().as_str(),
+            "Committed"
+        );
+        assert_eq!(app.world().get::<Description>(entity), description.as_ref());
+        assert_eq!(app.world().get::<Revision>(entity), Some(&Revision(1)));
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Record>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        let committed: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<Committed>>()
+            .drain()
+            .collect();
+        let rejected: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<Rejected>>()
+            .drain()
+            .collect();
+        assert_eq!(committed.len(), 1);
+        assert_eq!(committed[0].revision, Revision(1));
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(rejected[0].reason, Rejection::Canceled);
     }
 
     #[test]

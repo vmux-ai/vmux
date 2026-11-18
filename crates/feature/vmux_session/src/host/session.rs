@@ -1456,7 +1456,7 @@ mod tests {
     #[test]
     fn agent_title_request_updates_the_session_root() {
         let mut app = App::new();
-        app.add_plugins(AgentProjectionPlugin);
+        app.add_plugins((AgentProjectionPlugin, crate::mutation::MutationPlugin));
         let anchor = ProcessId::new();
         let session = app
             .world_mut()
