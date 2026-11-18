@@ -3,12 +3,12 @@ pub(crate) use catalog::RegisteredStory;
 pub use catalog::Story;
 #[cfg(host)]
 pub use host::GalleryPlugin;
+#[cfg(ui)]
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 pub(crate) struct Feature;
 impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
-#[cfg(ui)]
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 mod catalog;
 #[cfg(host)]

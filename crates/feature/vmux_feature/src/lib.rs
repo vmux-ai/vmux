@@ -1,3 +1,8 @@
+extern crate self as vmux_feature;
+
+#[cfg(feature = "manifest")]
+pub use binding::{CommandBindingRegistration, FeaturePageBinding, PageBindingRegistration};
+
 #[cfg(feature = "ecs")]
 pub use runtime::{
     Changed, Current, Definition, Failure, FeaturePlugin, Generation, Provider, Receive,
@@ -43,7 +48,3 @@ pub mod __private {
 pub mod state;
 #[cfg(all(feature = "page", ui))]
 mod ui;
-extern crate self as vmux_feature;
-
-#[cfg(feature = "manifest")]
-pub use binding::{CommandBindingRegistration, FeaturePageBinding, PageBindingRegistration};

@@ -475,7 +475,7 @@ mod tests {
                         description: "Test",
                         input_schema: (type: Object),
                     )],
-                ignored: true,
+                name: "Tools fixture",
             )"#,
         );
 

@@ -559,10 +559,7 @@ impl PageOpenDirectory<'_, '_> {
             }
         } else {
             let tab_dir = self.tabs.startup_dir(task.stack);
-            match self.settings.workspace_dir(space_id, tab_dir.as_deref()) {
-                Ok(cwd) => cwd,
-                Err(message) => return Err(message),
-            }
+            self.settings.workspace_dir(space_id, tab_dir.as_deref())?
         };
         Ok((saved_launch, cwd))
     }

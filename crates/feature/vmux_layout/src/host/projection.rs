@@ -1108,7 +1108,7 @@ fn project_header(
                     contribution.current = vmux_ecs::address::RouteLabel(route).option();
                 }
                 if contribution.views.is_empty() {
-                    contribution.views = vmux_ecs::page::AddressContribution::options(
+                    contribution.views = AddressContribution::options(
                         FeatureManifest::address_options(manifests.iter()),
                         &contribution.contextual,
                     );
