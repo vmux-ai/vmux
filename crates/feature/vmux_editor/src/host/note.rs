@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
 use bevy::prelude::{App, Commands, Plugin};
@@ -143,7 +143,11 @@ fn render(
         .map(|(owner, _)| {
             graph.resolve_blocks(owner, &file.path, &mut note.blocks);
             let mut references = graph.backlinks(owner, &file.path);
-            references.extend(graph.unlinked_mentions(owner, &file.path, 32));
+            let linked = references
+                .iter()
+                .map(|reference| reference.path.clone())
+                .collect::<HashSet<_>>();
+            references.extend(graph.unlinked_mentions_excluding(owner, &file.path, 32, &linked));
             references
                 .into_iter()
                 .map(|reference| vmux_knowledge::KnowledgeReference {

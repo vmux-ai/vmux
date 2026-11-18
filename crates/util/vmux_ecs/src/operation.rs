@@ -186,6 +186,9 @@ impl OperationError {
 }
 
 #[derive(Component)]
+pub struct OperationRetained;
+
+#[derive(Component)]
 struct OperationExpiresAt(Instant);
 
 #[derive(Resource, Default)]
@@ -213,7 +216,7 @@ fn finish(
 }
 
 fn cleanup(
-    operations: Query<(Entity, &OperationExpiresAt), With<Operation>>,
+    operations: Query<(Entity, &OperationExpiresAt, Has<OperationRetained>), With<Operation>>,
     mut expiry: ResMut<OperationExpiry>,
     mut commands: Commands,
 ) {
@@ -222,8 +225,8 @@ fn cleanup(
         return;
     }
     let mut next = None::<Instant>;
-    for (entity, finished) in &operations {
-        if finished.0 <= now {
+    for (entity, finished, retained) in &operations {
+        if finished.0 <= now && !retained {
             commands.entity(entity).despawn();
         } else if next.is_none_or(|deadline| finished.0 < deadline) {
             next = Some(finished.0);
@@ -235,6 +238,35 @@ fn cleanup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_operation_survives_expiry_until_its_work_is_released() {
+        let mut app = App::new();
+        app.add_plugins(OperationPlugin);
+        let entity = app
+            .world_mut()
+            .spawn((Operation::bundle("test.write").unwrap(), OperationRetained))
+            .id();
+        let child = app.world_mut().spawn(ChildOf(entity)).id();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(OperationState::Canceled);
+        app.update();
+        let deadline = Instant::now() - Duration::from_secs(1);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(OperationExpiresAt(deadline));
+        app.world_mut().resource_mut::<OperationExpiry>().0 = Some(deadline);
+        app.update();
+        assert!(app.world().get_entity(entity).is_ok());
+        assert!(app.world().get_entity(child).is_ok());
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<OperationRetained>();
+        app.update();
+        assert!(app.world().get_entity(entity).is_err());
+        assert!(app.world().get_entity(child).is_err());
+    }
 
     #[test]
     fn completed_work_keeps_its_result_and_late_completion_cannot_revive_cancellation() {
