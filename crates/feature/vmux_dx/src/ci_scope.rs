@@ -432,6 +432,7 @@ impl Workspace {
             if Selection::documentation(file) {
                 continue;
             }
+            sdk |= Selection::framework(file);
             if Selection::global(file) {
                 return Ok(self.full());
             }
@@ -580,6 +581,32 @@ struct Selection {
 }
 
 impl Selection {
+    fn framework(path: &Path) -> bool {
+        if path == Path::new("crates/util/vmux_ecs/src/cli.rs")
+            || path.starts_with("crates/util/vmux_ecs/src/cli")
+        {
+            return false;
+        }
+        for directory in [
+            "crates/util/vmux_api",
+            "crates/util/vmux_app",
+            "crates/util/vmux_ecs",
+            "crates/util/vmux_flex",
+            "crates/util/vmux_lsp",
+            "crates/util/vmux_macro",
+            "crates/util/vmux_profile",
+            "crates/feature/vmux_feature",
+            "crates/feature/vmux_project",
+            "crates/feature/vmux_extension",
+            "crates/feature/vmux_layout",
+        ] {
+            if path.starts_with(directory) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn documentation(path: &Path) -> bool {
         path.starts_with("docs")
             || (!path.starts_with("crates")
@@ -949,6 +976,11 @@ mod tests {
                 ("vmux_extension", "feature"),
                 ("vmux_layout", "feature"),
                 ("vmux_flex", "util"),
+                ("vmux_api", "util"),
+                ("vmux_lsp", "util"),
+                ("vmux_macro", "util"),
+                ("vmux_profile", "util"),
+                ("vmux_feature", "feature"),
             ] {
                 repository.package(name, directory, &[], &[]);
             }
@@ -958,6 +990,7 @@ mod tests {
                 &[("store", &[]), ("records", &[])],
                 &[("portable", "../portable", "")],
             );
+            repository.write("crates/feature/vmux_extension/src/core.rs", "");
             repository.package(
                 "vmux_app",
                 "util",
@@ -1169,7 +1202,47 @@ mod tests {
             ),
             (
                 "crates/util/vmux_ecs/src/lib.rs",
-                [false, false, false, true, false, false],
+                [true, false, false, true, false, false],
+            ),
+            (
+                "crates/feature/vmux_extension/src/core.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/feature/vmux_project/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/feature/vmux_layout/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/feature/vmux_feature/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/util/vmux_flex/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/util/vmux_lsp/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/util/vmux_api/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/util/vmux_macro/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/util/vmux_profile/src/lib.rs",
+                [true, false, false, false, false, false],
+            ),
+            (
+                "crates/util/vmux_ecs/src/cli.rs",
+                [false, false, false, false, false, false],
             ),
             (
                 "crates/app/vmux_desktop/src/lib.rs",

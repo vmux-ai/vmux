@@ -4,7 +4,7 @@ use bevy_ecs::system::SystemState;
 use vmux_api::extension::ExtToggleRequest;
 use vmux_app::VmuxPlugin;
 use vmux_app::extension::snapshot::{ExtEntry, Index};
-use vmux_app::extension::{Catalog, Mutation, Request, Root, Seed, WriteCompleted, WriteTaskRequest};
+use vmux_app::extension::{Catalog, Root, Seed, Toggle, WriteCompleted, WriteTaskRequest};
 
 #[test]
 fn an_independent_extension_core_keeps_profile_grants_separate_and_commits_after_io() {
@@ -33,18 +33,15 @@ fn an_independent_extension_core_keeps_profile_grants_separate_and_commits_after
         .ticket(root)
         .unwrap()
         .clone();
-    app.world_mut().spawn(
-        Request {
-            ticket,
-            profile: "work".into(),
-            mutation: Mutation::Toggle(ExtToggleRequest {
-                id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                enabled: true,
-                approve_permissions: true,
-            }),
-        }
-        .bundle(),
-    );
+    app.world_mut().spawn(Toggle::bundle(
+        ticket,
+        "work".into(),
+        ExtToggleRequest {
+            id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            enabled: true,
+            approve_permissions: true,
+        },
+    ));
     app.update();
     let write = app
         .world_mut()

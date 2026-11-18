@@ -124,7 +124,11 @@ impl Consumer {
     fn write_operation(&mut self, owner: Entity) -> Entity {
         self.0
             .world_mut()
-            .query::<(Entity, &vmux_app::ecs::OperationKind, &vmux_app::ecs::OperationTarget)>()
+            .query::<(
+                Entity,
+                &vmux_app::ecs::OperationKind,
+                &vmux_app::ecs::OperationTarget,
+            )>()
             .iter(self.0.world())
             .find(|(_, kind, target)| kind.as_str() == "project.write" && target.entity() == owner)
             .unwrap()
@@ -145,7 +149,13 @@ fn completed_project_operations_keep_shared_retention_without_proposal_payloads(
         Some(&OperationState::Succeeded)
     );
     assert!(consumer.0.world().get::<Operation>(operation).is_some());
-    assert!(consumer.0.world().get::<vmux_app::ecs::Cwd>(operation).is_none());
+    assert!(
+        consumer
+            .0
+            .world()
+            .get::<vmux_app::ecs::Cwd>(operation)
+            .is_none()
+    );
     assert_eq!(
         consumer.snapshot("/projects").projects["shared-id"].name,
         "Saved"
