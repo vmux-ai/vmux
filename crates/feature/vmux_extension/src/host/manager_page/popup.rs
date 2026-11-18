@@ -1,4 +1,3 @@
-use bevy::ecs::system::SystemState;
 use bevy::{prelude::*, window::WindowResized};
 use bevy_cef::prelude::{
     Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewWindowed,
@@ -34,6 +33,7 @@ impl Plugin for PopupPlugin {
             .add_observer(close_request)
             .add_observer(size)
             .add_observer(dismiss)
+            .add_observer(show)
             .add_systems(
                 Update,
                 (open, close, dispose).chain().after(WindowRequestSet),
@@ -48,7 +48,7 @@ impl Plugin for PopupPlugin {
     }
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[derive(Message, Event, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OpenRequest {
     pub(crate) extension_id: String,
     pub(crate) url: String,
@@ -287,37 +287,29 @@ impl PopupHost<'_, '_> {
     }
 }
 
-fn open(world: &mut World, state: &mut SystemState<(MessageReader<OpenRequest>, PopupHost)>) {
-    let requests: Vec<_> = {
-        let Ok((mut requests, _)) = state.get_mut(world) else {
-            return;
-        };
-        requests.read().cloned().collect()
-    };
-    for request in requests {
-        {
-            let Ok((_, mut host)) = state.get_mut(world) else {
-                continue;
-            };
-            let Some(entry) = host.entry(&request.extension_id) else {
-                continue;
-            };
-            let Some(owner) = host.owner_for_window(request.host_window_id) else {
-                continue;
-            };
-            let Some(anchor) = host.anchor(owner) else {
-                continue;
-            };
-            host.show(
-                owner,
-                entry,
-                request.url.clone(),
-                anchor,
-                Some(request.window_id),
-            );
-        }
-        state.apply(world);
+fn open(mut requests: MessageReader<OpenRequest>, mut host: If<PopupHost>) {
+    for request in requests.read() {
+        host.commands.trigger(request.clone());
     }
+}
+
+fn show(request: On<OpenRequest>, mut host: If<PopupHost>) {
+    let Some(entry) = host.entry(&request.extension_id) else {
+        return;
+    };
+    let Some(owner) = host.owner_for_window(request.host_window_id) else {
+        return;
+    };
+    let Some(anchor) = host.anchor(owner) else {
+        return;
+    };
+    host.show(
+        owner,
+        entry,
+        request.url.clone(),
+        anchor,
+        Some(request.window_id),
+    );
 }
 
 fn close(mut requests: MessageReader<CloseRequest>, mut host: PopupHost) {
