@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::{SystemParam, SystemState};
+use bevy_ecs::system::SystemParam;
 use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,14 @@ impl Plugin for ConversationPlugin {
                 .after(ServiceMessageSet),
         )
         .configure_sets(PostUpdate, index.after(crate::model::CanonicalizeSet))
-        .add_message::<Ingress>()
+        .add_observer(begin_snapshot)
+        .add_observer(replay_snapshot)
+        .add_observer(finish_snapshot)
+        .add_observer(append_received)
+        .add_observer(operation_received)
+        .add_observer(begin_native)
+        .add_observer(apply_native)
+        .add_observer(finish_native)
         .add_message::<SnapshotReceived>()
         .add_message::<ConversationAppendReceived>()
         .add_message::<OperationReceived>()
@@ -67,7 +74,7 @@ impl Plugin for ConversationPlugin {
         )
         .add_systems(
             Update,
-            (collect, execute)
+            (collect, bevy_ecs::schedule::ApplyDeferred)
                 .chain()
                 .after(ServiceMessageSet)
                 .after(index)
@@ -75,12 +82,7 @@ impl Plugin for ConversationPlugin {
         )
         .add_systems(
             Update,
-            (
-                accept,
-                bevy_ecs::schedule::ApplyDeferred,
-                execute,
-                cache_transcripts,
-            )
+            (accept, bevy_ecs::schedule::ApplyDeferred, cache_transcripts)
                 .chain()
                 .in_set(crate::history::Ready),
         );
@@ -368,37 +370,128 @@ pub enum DocumentKind {
     Plan,
 }
 
-#[derive(Message, Clone, Debug)]
+#[derive(Message, Event, Clone, Debug)]
 pub struct SnapshotReceived {
     pub session: SessionId,
     pub messages: Vec<Message>,
 }
 
-#[derive(Message, Clone, Debug)]
+#[derive(Message, Event, Clone, Debug)]
 pub struct ConversationAppendReceived {
     pub session: SessionId,
     pub messages: Vec<Message>,
 }
 
-#[derive(Message, Clone, Debug)]
+#[derive(Message, Event, Clone, Debug)]
 pub struct OperationReceived(pub SerializedEvent);
 
 #[derive(Message, Clone, Debug)]
 pub struct OperationCommitted(pub SerializedEvent);
 
-#[derive(Message, Clone)]
-enum Ingress {
-    Snapshot(SnapshotReceived),
-    Append(ConversationAppendReceived),
-    Operation(SerializedEvent),
-    Native {
-        operation: Entity,
-        read: Read,
-        entries: Vec<(Option<String>, Message)>,
-        updated_at: i64,
-        file: Option<FileFacts>,
-        page: Option<Page>,
-    },
+#[derive(Event)]
+struct NativeReceived {
+    operation: Entity,
+    read: Read,
+    entries: Vec<(Option<String>, Message)>,
+    updated_at: i64,
+    file: Option<FileFacts>,
+    page: Option<Page>,
+}
+
+#[derive(Component)]
+struct Reconciliation {
+    index: EventIndex,
+}
+
+#[derive(Component)]
+struct SnapshotBatch {
+    stale: HashMap<EventId, (Entity, Option<ClientOpId>)>,
+}
+
+#[derive(EntityEvent)]
+struct SnapshotItem {
+    #[event_target]
+    operation: Entity,
+    event: Option<SerializedEvent>,
+}
+
+#[derive(EntityEvent)]
+struct SnapshotFinished {
+    #[event_target]
+    operation: Entity,
+}
+
+#[derive(Component)]
+struct NativeBatch {
+    file: Option<(Option<Entity>, FileHistory)>,
+    before: Option<crate::history::Boundary>,
+    page: Option<Page>,
+    timestamp: u64,
+    original: HashSet<Entity>,
+    page_limit: Option<usize>,
+    right_anchor: Option<Entity>,
+    incoming: Vec<Entity>,
+}
+
+impl NativeBatch {
+    fn anchor(&mut self, index: &mut EventIndex, session: Entity, read: &Read) {
+        let (Some(page), Some((_, state))) = (self.page, &self.file) else {
+            return;
+        };
+        let mut first = None;
+        for ((owner, source, alias, _), bindings) in &index.native_aliases {
+            if *owner != session || source != &read.source {
+                continue;
+            }
+            let NativeAlias::File {
+                generation,
+                offset,
+                subrecord,
+            } = alias
+            else {
+                continue;
+            };
+            let position = (*offset, *subrecord);
+            if *generation != state.generation
+                || position < (page.before.byte, page.before.message)
+                || first.is_some_and(|first| first < position)
+            {
+                continue;
+            }
+            for (entity, _, slot) in bindings {
+                if let Some(position_in_units) = index.unit_positions.get(&(*entity, *slot))
+                    && (first != Some(position)
+                        || self
+                            .page_limit
+                            .is_none_or(|limit| *position_in_units < limit))
+                {
+                    first = Some(position);
+                    self.page_limit = Some(*position_in_units);
+                    self.right_anchor = Some(*entity);
+                }
+            }
+        }
+        self.page_limit = Some(
+            self.page_limit
+                .unwrap_or_else(|| index.units.get(&session).map_or(0, Vec::len)),
+        );
+        index.native_positions.insert(session, 0);
+        index.latest_users.remove(&session);
+    }
+}
+
+#[derive(EntityEvent)]
+struct NativeItem {
+    #[event_target]
+    operation: Entity,
+    identity: Option<(NativeAlias, String)>,
+    message: Message,
+}
+
+#[derive(EntityEvent)]
+struct NativeFinished {
+    #[event_target]
+    operation: Entity,
 }
 
 #[derive(SystemParam)]
@@ -771,318 +864,330 @@ fn collect(
     mut appended: MessageReader<ConversationAppendReceived>,
     mut received: MessageReader<OperationReceived>,
     mut committed: MessageReader<OperationCommitted>,
-    mut ingress: MessageWriter<Ingress>,
+    mut commands: Commands,
 ) {
     for request in snapshots.read() {
-        ingress.write(Ingress::Snapshot(request.clone()));
+        commands.trigger(request.clone());
     }
     for request in appended.read() {
-        ingress.write(Ingress::Append(request.clone()));
+        commands.trigger(request.clone());
     }
     for request in received.read() {
-        ingress.write(Ingress::Operation(request.0.clone()));
+        commands.trigger(request.clone());
     }
     for request in committed.read() {
-        ingress.write(Ingress::Operation(request.0.clone()));
+        commands.trigger(OperationReceived(request.0.clone()));
     }
 }
 
-fn execute(world: &mut World) {
-    let requests: Vec<_> = world.resource_mut::<Messages<Ingress>>().drain().collect();
-    for request in requests {
-        let id = match &request {
-            Ingress::Snapshot(request) => request.session.clone(),
-            Ingress::Append(request) => request.session.clone(),
-            Ingress::Operation(event) => event.session_id.clone(),
-            Ingress::Native { read, .. } => read.session.clone(),
+fn begin_snapshot(request: On<SnapshotReceived>, history: SessionHistory, mut commands: Commands) {
+    let mut index = history.index(&HashSet::from([request.session.clone()]), true);
+    let Some(session) = index.session(&request.session) else {
+        return;
+    };
+    let stale = index.snapshot_events.remove(&session).unwrap_or_default();
+    let operation = commands
+        .spawn((
+            vmux_ecs::Operation::bundle("conversation.snapshot")
+                .unwrap()
+                .running(),
+            Reconciliation { index },
+            SnapshotBatch { stale },
+            ChildOf(session),
+        ))
+        .id();
+    let now = vmux_ecs::UnixMillis::now().0.max(0) as u64;
+    for event in SerializedEvent::from_messages(&request.session, now, &request.messages) {
+        commands.trigger(SnapshotItem {
+            operation,
+            event: Some(event),
+        });
+    }
+    commands.trigger(SnapshotFinished { operation });
+}
+
+fn replay_snapshot(
+    mut request: On<SnapshotItem>,
+    mut batches: Query<(&mut Reconciliation, &mut SnapshotBatch)>,
+    mut writer: EventMaterializer,
+) {
+    let Some(event) = request.event_mut().event.take() else {
+        return;
+    };
+    let Ok((mut reconciliation, mut snapshot)) = batches.get_mut(request.operation) else {
+        return;
+    };
+    for id in writer.replay(&mut reconciliation.index, event) {
+        snapshot.stale.remove(&id);
+    }
+}
+
+fn finish_snapshot(
+    request: On<SnapshotFinished>,
+    batches: Query<&SnapshotBatch>,
+    mut commands: Commands,
+) {
+    let Ok(snapshot) = batches.get(request.operation) else {
+        return;
+    };
+    for (entity, _) in snapshot.stale.values() {
+        commands.entity(*entity).try_despawn();
+    }
+    commands.entity(request.operation).despawn();
+}
+
+fn append_received(
+    request: On<ConversationAppendReceived>,
+    mut state: ParamSet<(SessionHistory, EventMaterializer)>,
+) {
+    let mut index = state
+        .p0()
+        .index(&HashSet::from([request.session.clone()]), false);
+    if index.session(&request.session).is_none() {
+        return;
+    }
+    for message in &request.messages {
+        state
+            .p1()
+            .append(&mut index, &request.session, std::slice::from_ref(message));
+    }
+}
+
+fn operation_received(
+    request: On<OperationReceived>,
+    mut state: ParamSet<(SessionHistory, EventMaterializer)>,
+) {
+    let mut index = state
+        .p0()
+        .index(&HashSet::from([request.0.session_id.clone()]), false);
+    let _ = state.p1().apply(
+        &mut index,
+        request.0.clone(),
+        MessageDelivery::Committed,
+        MaterializationSource::Operation,
+    );
+}
+
+fn begin_native(
+    request: On<NativeReceived>,
+    history: SessionHistory,
+    files: FileSources,
+    windows: Query<&crate::history::Window>,
+    mut committed: MessageWriter<Committed>,
+    mut commands: Commands,
+) {
+    let mut index = history.index(&HashSet::from([request.read.session.clone()]), true);
+    let Some(session) = index.session(&request.read.session) else {
+        return;
+    };
+    if let Some(page) = request.page
+        && !windows
+            .get(session)
+            .is_ok_and(|window| window.pending(page))
+    {
+        committed.write(Committed {
+            operation: request.operation,
+            result: Ok(false),
+        });
+        return;
+    }
+    let file = if let Some(facts) = &request.file {
+        let Some(prepared) = files.prepare(session, &request.read, facts) else {
+            commands.entity(request.operation).insert(Applied);
+            committed.write(Committed {
+                operation: request.operation,
+                result: Err("history file generation exhausted".into()),
+            });
+            return;
         };
-        let reconcile = matches!(&request, Ingress::Snapshot(_) | Ingress::Native { .. });
-        let mut history = SystemState::<SessionHistory>::new(world);
-        let mut index = match history.get(world) {
-            Ok(history) => history.index(&HashSet::from([id.clone()]), reconcile),
-            Err(_) => continue,
+        Some(prepared)
+    } else {
+        None
+    };
+    if let Some(page) = request.page
+        && file
+            .as_ref()
+            .is_none_or(|(_, state)| state.generation != page.generation)
+    {
+        committed.write(Committed {
+            operation: request.operation,
+            result: Ok(false),
+        });
+        return;
+    }
+    let mut entries = Vec::with_capacity(request.entries.len());
+    for (position, (external, message)) in request.entries.iter().enumerate() {
+        let identity = if let Some(external) = external {
+            Some((NativeAlias::External, external.clone()))
+        } else if let (Some(facts), Some((_, state))) = (&request.file, &file) {
+            let (offset, subrecord) = facts.positions[position];
+            Some((
+                NativeAlias::File {
+                    generation: state.generation,
+                    offset,
+                    subrecord,
+                },
+                "file".into(),
+            ))
+        } else {
+            None
         };
-        let Some(session) = index.session(&id) else {
-            continue;
+        entries.push((identity, message));
+    }
+    if !index.admits(session, &request.read, &entries) {
+        commands.entity(request.operation).insert(Applied);
+        committed.write(Committed {
+            operation: request.operation,
+            result: Err("history sequence exhausted".into()),
+        });
+        return;
+    }
+    let timestamp = if entries.iter().any(|(id, _)| id.is_some()) {
+        request.updated_at.max(0) as u64
+    } else {
+        vmux_ecs::UnixMillis::now().0.max(0) as u64
+    };
+    let mut batch = NativeBatch {
+        file,
+        before: request.file.as_ref().and_then(|file| file.before),
+        page: request.page,
+        timestamp,
+        original: index.events.values().copied().collect(),
+        page_limit: None,
+        right_anchor: None,
+        incoming: Vec::new(),
+    };
+    batch.anchor(&mut index, session, &request.read);
+    commands
+        .entity(request.operation)
+        .insert((Reconciliation { index }, batch));
+    for (identity, message) in entries {
+        commands.trigger(NativeItem {
+            operation: request.operation,
+            identity,
+            message: message.clone(),
+        });
+    }
+    commands.trigger(NativeFinished {
+        operation: request.operation,
+    });
+}
+
+fn apply_native(
+    request: On<NativeItem>,
+    mut batches: Query<(&ChildOf, &Read, &mut Reconciliation, &mut NativeBatch)>,
+    mut writer: EventMaterializer,
+) {
+    let Ok((parent, read, mut reconciliation, mut batch)) = batches.get_mut(request.operation)
+    else {
+        return;
+    };
+    let index = &mut reconciliation.index;
+    let bindings = writer.native(
+        index,
+        read,
+        request.identity.as_ref(),
+        &request.message,
+        batch.timestamp,
+        &mut batch.page_limit,
+    );
+    if batch.page.is_none() {
+        return;
+    }
+    let session = parent.parent();
+    for (entity, _, _) in bindings {
+        if batch.incoming.last() != Some(&entity) {
+            batch.incoming.push(entity);
+        }
+        if matches!(request.message, Message::User { .. }) {
+            index.latest_users.insert(
+                session,
+                (
+                    index.event_order[&entity],
+                    index.identities[&entity].event_id.clone(),
+                ),
+            );
+        }
+    }
+}
+
+fn finish_native(
+    request: On<NativeFinished>,
+    mut batches: Query<(&ChildOf, &Read, &Reconciliation, &mut NativeBatch)>,
+    windows: Query<&crate::history::Window>,
+    orders: Query<&Order>,
+    mut committed: MessageWriter<Committed>,
+    mut commands: Commands,
+) {
+    let Ok((parent, read, reconciliation, mut batch)) = batches.get_mut(request.operation) else {
+        return;
+    };
+    let session = parent.parent();
+    if batch.page.is_some()
+        && batch
+            .incoming
+            .iter()
+            .any(|entity| !batch.original.contains(entity))
+    {
+        let Some(changes) =
+            reconciliation
+                .index
+                .page_order(&batch.original, &batch.incoming, batch.right_anchor)
+        else {
+            commands
+                .entity(request.operation)
+                .remove::<(Reconciliation, NativeBatch)>();
+            committed.write(Committed {
+                operation: request.operation,
+                result: Err("history order exhausted".into()),
+            });
+            return;
         };
-        let mut writer = SystemState::<EventMaterializer>::new(world);
-        match request {
-            Ingress::Snapshot(request) => {
-                let mut stale = index.snapshot_events.remove(&session).unwrap_or_default();
-                let now = vmux_ecs::UnixMillis::now().0.max(0) as u64;
-                for event in SerializedEvent::from_messages(&id, now, &request.messages) {
-                    let ids = writer
-                        .get_mut(world)
-                        .expect("canonical materializer")
-                        .replay(&mut index, event);
-                    for id in ids {
-                        stale.remove(&id);
-                    }
-                    writer.apply(world);
-                }
-                for (_, (entity, _)) in stale {
-                    world.despawn(entity);
-                }
-            }
-            Ingress::Append(request) => {
-                for message in request.messages {
-                    writer
-                        .get_mut(world)
-                        .expect("canonical materializer")
-                        .append(&mut index, &id, &[message]);
-                    writer.apply(world);
-                }
-            }
-            Ingress::Operation(event) => {
-                let _ = writer
-                    .get_mut(world)
-                    .expect("canonical materializer")
-                    .apply(
-                        &mut index,
-                        event,
-                        MessageDelivery::Committed,
-                        MaterializationSource::Operation,
-                    );
-                writer.apply(world);
-            }
-            Ingress::Native {
-                operation,
-                read,
-                entries,
-                updated_at,
-                file,
-                page,
-            } => {
-                if let Some(page) = page
-                    && !world
-                        .get::<crate::history::Window>(session)
-                        .is_some_and(|window| window.pending(page))
-                {
-                    world.write_message(Committed {
-                        operation,
-                        result: Ok(false),
-                    });
-                    continue;
-                }
-                let mut file_sources = SystemState::<FileSources>::new(world);
-                let file_state = if let Some(facts) = &file {
-                    let prepared = file_sources
-                        .get(world)
-                        .expect("canonical file source")
-                        .prepare(session, &read, facts);
-                    let Some(prepared) = prepared else {
-                        world.entity_mut(operation).insert(Applied);
-                        world.write_message(Committed {
-                            operation,
-                            result: Err("history file generation exhausted".into()),
-                        });
-                        continue;
-                    };
-                    Some(prepared)
-                } else {
-                    None
-                };
-                if let Some(page) = page
-                    && file_state
-                        .as_ref()
-                        .is_none_or(|(_, state)| state.generation != page.generation)
-                {
-                    world.write_message(Committed {
-                        operation,
-                        result: Ok(false),
-                    });
-                    continue;
-                }
-                let mut identified = Vec::with_capacity(entries.len());
-                for (position, (external, message)) in entries.into_iter().enumerate() {
-                    let identity = if let Some(external) = external {
-                        Some((NativeAlias::External, external))
-                    } else if let (Some(facts), Some((_, state))) = (&file, &file_state) {
-                        let (offset, subrecord) = facts.positions[position];
-                        Some((
-                            NativeAlias::File {
-                                generation: state.generation,
-                                offset,
-                                subrecord,
-                            },
-                            "file".into(),
-                        ))
-                    } else {
-                        None
-                    };
-                    identified.push((identity, message));
-                }
-                let entries = identified;
-                let mut required = 0u64;
-                let mut added = HashSet::new();
-                for (id, message) in &entries {
-                    if let Some(id) = id {
-                        let key = (session, read.source.clone(), id.0, id.1.clone());
-                        if let Some(bindings) = index.native_aliases.get(&key) {
-                            let covered = bindings
-                                .iter()
-                                .filter_map(|(_, source, _)| *source)
-                                .max()
-                                .map_or(0, |last| last + 1);
-                            let spread = bindings.first().is_some_and(|(first, _, _)| {
-                                bindings.iter().any(|(entity, _, _)| entity != first)
-                            });
-                            if spread && MessageContent::slots(message).len() > covered {
-                                required = required.saturating_add(1);
-                            }
-                            continue;
-                        }
-                        if !added.insert(id) {
-                            continue;
-                        }
-                    }
-                    required = required.saturating_add(1);
-                }
-                if index
-                    .latest_sequences
-                    .get(&session)
-                    .copied()
-                    .unwrap_or_default()
-                    .checked_add(required)
-                    .is_none()
-                {
-                    world.entity_mut(operation).insert(Applied);
-                    world.write_message(Committed {
-                        operation,
-                        result: Err("history sequence exhausted".into()),
-                    });
-                    continue;
-                }
-                let timestamp = if entries.iter().any(|(id, _)| id.is_some()) {
-                    updated_at.max(0) as u64
-                } else {
-                    vmux_ecs::UnixMillis::now().0.max(0) as u64
-                };
-                let original: HashSet<_> = index.events.values().copied().collect();
-                let mut page_limit = None;
-                let mut right_anchor = None;
-                if let (Some(page), Some((_, state))) = (page, &file_state) {
-                    let mut first = None;
-                    for ((owner, source, alias, _), bindings) in &index.native_aliases {
-                        if *owner != session || source != &read.source {
-                            continue;
-                        }
-                        let NativeAlias::File {
-                            generation,
-                            offset,
-                            subrecord,
-                        } = alias
-                        else {
-                            continue;
-                        };
-                        let position = (*offset, *subrecord);
-                        if *generation != state.generation
-                            || position < (page.before.byte, page.before.message)
-                            || first.is_some_and(|first| first < position)
-                        {
-                            continue;
-                        }
-                        for (entity, _, slot) in bindings {
-                            if let Some(position_in_units) =
-                                index.unit_positions.get(&(*entity, *slot))
-                                && (first != Some(position)
-                                    || page_limit.is_none_or(|limit| *position_in_units < limit))
-                            {
-                                first = Some(position);
-                                page_limit = Some(*position_in_units);
-                                right_anchor = Some(*entity);
-                            }
-                        }
-                    }
-                    page_limit = Some(
-                        page_limit.unwrap_or_else(|| index.units.get(&session).map_or(0, Vec::len)),
-                    );
-                    index.native_positions.insert(session, 0);
-                    index.latest_users.remove(&session);
-                }
-                let mut incoming = Vec::new();
-                for (external, message) in entries {
-                    let bindings = writer
-                        .get_mut(world)
-                        .expect("canonical materializer")
-                        .native(
-                            &mut index,
-                            &read,
-                            external.as_ref(),
-                            &message,
-                            timestamp,
-                            &mut page_limit,
-                        );
-                    if page.is_some() {
-                        for (entity, _, _) in bindings {
-                            if incoming.last() != Some(&entity) {
-                                incoming.push(entity);
-                            }
-                            if matches!(message, Message::User { .. }) {
-                                index.latest_users.insert(
-                                    session,
-                                    (
-                                        index.event_order[&entity],
-                                        index.identities[&entity].event_id.clone(),
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                    writer.apply(world);
-                }
-                if page.is_some() && incoming.iter().any(|entity| !original.contains(entity)) {
-                    let Some(orders) = index.page_order(&original, &incoming, right_anchor) else {
-                        world.write_message(Committed {
-                            operation,
-                            result: Err("history order exhausted".into()),
-                        });
-                        continue;
-                    };
-                    for (entity, order) in orders {
-                        if world.get::<Order>(entity) != Some(&order) {
-                            world.entity_mut(entity).insert(order);
-                        }
-                    }
-                }
-                if let Some((entity, state)) = file_state {
-                    let previous = if entity.is_some() {
-                        world.get::<crate::history::Window>(session).cloned()
-                    } else {
-                        None
-                    };
-                    let before = file.as_ref().and_then(|file| file.before);
-                    world
-                        .entity_mut(session)
-                        .insert(crate::history::Window::observe(
-                            previous,
-                            state.generation,
-                            before,
-                            page,
-                        ));
-                    if let Some(entity) = entity {
-                        world.entity_mut(entity).insert(state);
-                    } else {
-                        world.spawn((state, read.source.kind, read.source.id, ChildOf(session)));
-                    }
-                }
-                if let Ok(mut operation_entity) = world.get_entity_mut(operation) {
-                    operation_entity.insert(Applied);
-                }
-                world.write_message(Committed {
-                    operation,
-                    result: Ok(true),
-                });
+        for (entity, order) in changes {
+            if orders.get(entity).ok() != Some(&order) {
+                commands.entity(entity).insert(order);
             }
         }
     }
+    if let Some((entity, state)) = batch.file.take() {
+        let previous = if entity.is_some() {
+            windows.get(session).ok().cloned()
+        } else {
+            None
+        };
+        commands
+            .entity(session)
+            .insert(crate::history::Window::observe(
+                previous,
+                state.generation,
+                batch.before,
+                batch.page,
+            ));
+        if let Some(entity) = entity {
+            commands.entity(entity).insert(state);
+        } else {
+            commands.spawn((
+                state,
+                read.source.kind.clone(),
+                read.source.id.clone(),
+                ChildOf(session),
+            ));
+        }
+    }
+    commands
+        .entity(request.operation)
+        .insert(Applied)
+        .remove::<(Reconciliation, NativeBatch)>();
+    committed.write(Committed {
+        operation: request.operation,
+        result: Ok(true),
+    });
 }
 
 fn accept(
     mut received: MessageReader<Received>,
     reads: AcceptedReads,
     versions: Versions,
-    mut ingress: MessageWriter<Ingress>,
     mut committed: MessageWriter<Committed>,
     mut commands: Commands,
 ) {
@@ -1151,7 +1256,7 @@ fn accept(
             });
             continue;
         }
-        ingress.write(Ingress::Native {
+        commands.trigger(NativeReceived {
             operation: request.operation,
             read,
             entries,
@@ -1223,30 +1328,36 @@ struct SessionHistory<'w, 's> {
 
 impl SessionHistory<'_, '_> {
     fn index(&self, requested: &HashSet<SessionId>, reconcile: bool) -> EventIndex {
-        let mut index = EventIndex {
-            sessions: HashMap::new(),
-            events: HashMap::new(),
-            operations: HashMap::new(),
-            entity_keys: HashMap::new(),
-            timestamps: HashMap::new(),
-            snapshot_events: HashMap::new(),
-            latest_sequences: HashMap::new(),
-            latest_users: HashMap::new(),
-            native_aliases: HashMap::new(),
-            native_entities: HashMap::new(),
-            native_bound: HashSet::new(),
-            identities: HashMap::new(),
-            event_order: HashMap::new(),
-            native_positions: HashMap::new(),
-            event_owners: HashMap::new(),
-            units: HashMap::new(),
-            claimed_units: HashSet::new(),
-            replay_aliases: HashMap::new(),
-            replay_positions: HashMap::new(),
-            sources: HashMap::new(),
-            origins: HashMap::new(),
-            unit_positions: HashMap::new(),
-        };
+        let mut index = EventIndex::default();
+        self.include_sessions(requested, reconcile, &mut index);
+        if !reconcile {
+            return index;
+        }
+        for slots in index.units.values_mut() {
+            slots.sort_by_key(|(entity, slot)| (index.event_order[entity], *slot));
+        }
+        for slots in index.units.values() {
+            for (position, slot) in slots.iter().enumerate() {
+                index.unit_positions.insert(*slot, position);
+            }
+        }
+        self.include_native_aliases(&mut index);
+        self.include_replay_aliases(&mut index);
+        for aliases in index.native_aliases.values_mut() {
+            aliases.sort_by_key(|(_, source, _)| *source);
+        }
+        for aliases in index.replay_aliases.values_mut() {
+            aliases.sort_by_key(|(_, source, _)| *source);
+        }
+        index
+    }
+
+    fn include_sessions(
+        &self,
+        requested: &HashSet<SessionId>,
+        reconcile: bool,
+        index: &mut EventIndex,
+    ) {
         for (session, id, children, kind, provider) in &self.sessions {
             if !requested.contains(id) || self.identities.entity(id) != Ok(Some(session)) {
                 continue;
@@ -1309,17 +1420,9 @@ impl SessionHistory<'_, '_> {
                 }
             }
         }
-        if !reconcile {
-            return index;
-        }
-        for slots in index.units.values_mut() {
-            slots.sort_by_key(|(entity, slot)| (index.event_order[entity], *slot));
-        }
-        for slots in index.units.values() {
-            for (position, slot) in slots.iter().enumerate() {
-                index.unit_positions.insert(*slot, position);
-            }
-        }
+    }
+
+    fn include_native_aliases(&self, index: &mut EventIndex) {
         for (record, parent, name, alias, kind, provider, source_slot, target_slot) in &self.aliases
         {
             let entity = parent.parent();
@@ -1342,6 +1445,9 @@ impl SessionHistory<'_, '_> {
             index.claimed_units.insert((entity, target_slot));
             index.native_bound.insert(entity);
         }
+    }
+
+    fn include_replay_aliases(&self, index: &mut EventIndex) {
         for (parent, alias, kind, provider, source_slot, target_slot) in &self.replays {
             let entity = parent.parent();
             let Some(session) = index.event_owners.get(&entity).copied() else {
@@ -1363,16 +1469,10 @@ impl SessionHistory<'_, '_> {
                     target_slot.map(|slot| slot.0),
                 ));
         }
-        for aliases in index.native_aliases.values_mut() {
-            aliases.sort_by_key(|(_, source, _)| *source);
-        }
-        for aliases in index.replay_aliases.values_mut() {
-            aliases.sort_by_key(|(_, source, _)| *source);
-        }
-        index
     }
 }
 
+#[derive(Default)]
 struct EventIndex {
     sessions: HashMap<SessionId, Entity>,
     events: HashMap<(Entity, EventId), Entity>,
@@ -1405,6 +1505,45 @@ struct EventIndex {
 }
 
 impl EventIndex {
+    fn admits(
+        &self,
+        session: Entity,
+        read: &Read,
+        entries: &[(Option<(NativeAlias, String)>, &Message)],
+    ) -> bool {
+        let mut required = 0u64;
+        let mut added = HashSet::new();
+        for (id, message) in entries {
+            if let Some(id) = id {
+                let key = (session, read.source.clone(), id.0, id.1.clone());
+                if let Some(bindings) = self.native_aliases.get(&key) {
+                    let covered = bindings
+                        .iter()
+                        .filter_map(|(_, source, _)| *source)
+                        .max()
+                        .map_or(0, |last| last + 1);
+                    let spread = bindings.first().is_some_and(|(first, _, _)| {
+                        bindings.iter().any(|(entity, _, _)| entity != first)
+                    });
+                    if spread && MessageContent::slots(message).len() > covered {
+                        required = required.saturating_add(1);
+                    }
+                    continue;
+                }
+                if !added.insert(id) {
+                    continue;
+                }
+            }
+            required = required.saturating_add(1);
+        }
+        self.latest_sequences
+            .get(&session)
+            .copied()
+            .unwrap_or_default()
+            .checked_add(required)
+            .is_some()
+    }
+
     fn page_order(
         &self,
         original: &HashSet<Entity>,
@@ -2794,6 +2933,42 @@ mod tests {
             .collect::<Vec<_>>();
         identities.sort_by_key(|identity| identity.sequence);
         assert_eq!(identities[1].reply_to, Some(identities[0].event_id.clone()));
+    }
+
+    #[test]
+    fn a_large_repeated_snapshot_finishes_in_one_update_and_replays_without_duplicates() {
+        let mut app = App::new();
+        app.add_plugins(crate::history::HistoryPlugin);
+        let id = SessionId("large-replay".into());
+        let session = app.world_mut().spawn((Session, id.clone())).id();
+        let mut messages = Vec::new();
+        for _ in 0..512 {
+            messages.push(Message::user("repeat"));
+            messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text("same answer".into())],
+            });
+        }
+        app.world_mut().write_message(SnapshotReceived {
+            session: id.clone(),
+            messages: messages.clone(),
+        });
+        app.update();
+        let initial = app
+            .world_mut()
+            .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+            .unwrap();
+        assert_eq!(initial.messages, messages);
+        app.world_mut().write_message(SnapshotReceived {
+            session: id,
+            messages: messages.clone(),
+        });
+        app.update();
+        let replayed = app
+            .world_mut()
+            .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+            .unwrap();
+        assert_eq!(replayed.messages, messages);
+        assert_eq!(replayed.event_ids, initial.event_ids);
     }
 
     #[test]
