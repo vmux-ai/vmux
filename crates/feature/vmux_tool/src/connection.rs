@@ -61,6 +61,7 @@ impl Plugin for McpConnectionPlugin {
         .add_systems(
             Update,
             (
+                retire_sources,
                 start_mcp_operation,
                 drain_mcp_operations,
                 start_mcp_snapshots,
@@ -195,13 +196,12 @@ fn cancel(
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let Ok(cancellation) = cancellations.get(target) else {
-        return;
-    };
-    cancellation.cancel();
+    if let Ok(cancellation) = cancellations.get(target) {
+        cancellation.cancel();
+    }
     commands
         .entity(target)
-        .remove::<(McpOperationTask, PendingMcpOperation, Cancellation)>();
+        .remove::<(PendingMcpOperation, Cancellation)>();
     if let Ok(mut state) = states.get_mut(target) {
         if let Some(pending) = &state.snapshot.pending {
             commands.trigger(ConnectorConnectionCompleted(McpServerResult {
@@ -355,8 +355,17 @@ fn request_mcp_server(
     });
 }
 
+fn retire_sources(tasks: Query<&McpOperationTask>, states: Query<&McpPageState>) {
+    for task in &tasks {
+        match states.get(task.target) {
+            Ok(state) if state.generation == task.generation => {}
+            _ => task.cancellation.cancel(),
+        }
+    }
+}
+
 fn start_mcp_operation(
-    pending: Query<(Entity, &PendingMcpOperation), Without<McpOperationTask>>,
+    pending: Query<(Entity, &PendingMcpOperation)>,
     catalog: McpCatalog,
     credentials: Query<&McpCredentials>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -402,15 +411,16 @@ fn start_mcp_operation(
         commands
             .entity(entity)
             .remove::<PendingMcpOperation>()
-            .insert(cancellation.clone())
-            .insert(McpOperationTask {
-                generation,
-                id,
-                operation,
-                cancellation,
-                task,
-                progress: Mutex::new(progress_receiver),
-            });
+            .insert(cancellation.clone());
+        commands.spawn(McpOperationTask {
+            target: entity,
+            generation,
+            id,
+            operation,
+            cancellation,
+            task,
+            progress: Mutex::new(progress_receiver),
+        });
     }
 }
 
@@ -423,11 +433,12 @@ fn drain_mcp_operations(
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(authorization) = task.progress.get_mut().try_recv() {
-            if let Ok(mut state) = states.get_mut(entity)
+            if let Ok(mut state) = states.get_mut(task.target)
                 && state.generation == task.generation
+                && task.cancellation.check().is_ok()
             {
                 browsers.write(vmux_ecs::browser::BrowserOpenRequest {
-                    source: entity,
+                    source: task.target,
                     url: authorization.url.clone(),
                 });
                 state.snapshot.authorization = Some(authorization);
@@ -436,18 +447,19 @@ fn drain_mcp_operations(
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        if let Ok(mut state) = states.get_mut(entity)
-            && state.generation == task.generation
-        {
-            state.snapshot.authorization = None;
+        commands.entity(entity).despawn();
+        let Ok(mut state) = states.get_mut(task.target) else {
+            continue;
+        };
+        if state.generation != task.generation || task.cancellation.check().is_err() {
+            continue;
         }
-        commands
-            .entity(entity)
-            .remove::<(McpOperationTask, Cancellation)>();
+        state.snapshot.authorization = None;
+        commands.entity(task.target).remove::<Cancellation>();
         let (success, message) = match result {
             Ok(()) => {
                 for target in &other_pages {
-                    if target != entity {
+                    if target != task.target {
                         commands.trigger(McpSnapshotRequest { target });
                     }
                 }
@@ -462,7 +474,7 @@ fn drain_mcp_operations(
             message,
         };
         commands.trigger(ConnectorConnectionCompleted(result.clone()));
-        commands.entity(entity).insert(PendingMcpSnapshot {
+        commands.entity(task.target).insert(PendingMcpSnapshot {
             generation: task.generation,
             result: Some(result),
         });
@@ -559,6 +571,7 @@ struct PendingMcpSnapshot {
 
 #[derive(Component)]
 struct McpOperationTask {
+    target: Entity,
     generation: u64,
     id: String,
     operation: McpServerOperation,
@@ -1390,21 +1403,20 @@ mod tests {
         send.send(authorization.clone()).unwrap();
         let target = app
             .world_mut()
-            .spawn((
-                McpPageState {
-                    generation: 1,
-                    ..Default::default()
-                },
-                super::McpOperationTask {
-                    generation: 1,
-                    id: "github".into(),
-                    operation: McpServerOperation::Connect,
-                    cancellation: Cancellation::default(),
-                    task: pool.spawn(std::future::pending()),
-                    progress: super::Mutex::new(receive),
-                },
-            ))
+            .spawn((McpPageState {
+                generation: 1,
+                ..Default::default()
+            },))
             .id();
+        app.world_mut().spawn(super::McpOperationTask {
+            target,
+            generation: 1,
+            id: "github".into(),
+            operation: McpServerOperation::Connect,
+            cancellation: Cancellation::default(),
+            task: pool.spawn(std::future::pending()),
+            progress: super::Mutex::new(receive),
+        });
         app.update();
         let opens = app
             .world_mut()
@@ -1511,6 +1523,152 @@ mod tests {
         }
     }
 
+    struct Attempt {
+        app: App,
+        view: Entity,
+        work: Entity,
+        release: std::sync::Arc<async_lock::Semaphore>,
+        outcomes: std::sync::Arc<super::Mutex<Vec<super::McpServerResult>>>,
+    }
+
+    impl Attempt {
+        fn new() -> Self {
+            let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+            let mut app = App::new();
+            let outcomes = std::sync::Arc::new(super::Mutex::new(Vec::new()));
+            let received = outcomes.clone();
+            app.add_plugins(super::McpConnectionPlugin).add_observer(
+                move |event: On<super::ConnectorConnectionCompleted>| {
+                    received.lock().push(event.event().0.clone());
+                },
+            );
+            let cancellation = Cancellation::default();
+            let view = app
+                .world_mut()
+                .spawn((
+                    McpPageState {
+                        generation: 1,
+                        snapshot: McpServersUiState {
+                            pending: Some(vmux_api::mcp::McpServerPending {
+                                id: "github".into(),
+                                operation: McpServerOperation::Connect,
+                            }),
+                            ..Default::default()
+                        },
+                    },
+                    cancellation.clone(),
+                ))
+                .id();
+            let release = std::sync::Arc::new(async_lock::Semaphore::new(0));
+            let completion = release.clone();
+            let (_, progress) = std::sync::mpsc::channel();
+            let work = app
+                .world_mut()
+                .spawn(super::McpOperationTask {
+                    target: view,
+                    generation: 1,
+                    id: "github".into(),
+                    operation: McpServerOperation::Connect,
+                    cancellation,
+                    task: pool.spawn(async move {
+                        let _permit = completion.acquire().await;
+                        Ok(())
+                    }),
+                    progress: super::Mutex::new(progress),
+                })
+                .id();
+            Self {
+                app,
+                view,
+                work,
+                release,
+                outcomes,
+            }
+        }
+
+        fn complete(&mut self) {
+            self.release.add_permits(1);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while self.app.world().get_entity(self.work).is_ok() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "native attempt must drain"
+                );
+                self.app.update();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
+    fn stop_keeps_native_io_owned_and_old_completion_cannot_change_a_replacement() {
+        let mut attempt = Attempt::new();
+        attempt.app.world_mut().trigger(UiInput {
+            webview: attempt.view,
+            payload: vmux_api::mcp::McpServerCancelRequest,
+        });
+        attempt.app.world_mut().flush();
+        assert!(attempt.app.world().get_entity(attempt.work).is_ok());
+        assert!(
+            attempt
+                .app
+                .world()
+                .get::<super::McpOperationTask>(attempt.work)
+                .unwrap()
+                .cancellation
+                .check()
+                .is_err()
+        );
+        assert_eq!(attempt.outcomes.lock().len(), 1);
+        let replacement = Cancellation::default();
+        attempt.app.world_mut().entity_mut(attempt.view).insert((
+            McpPageState {
+                generation: 3,
+                snapshot: McpServersUiState {
+                    pending: Some(vmux_api::mcp::McpServerPending {
+                        id: "github".into(),
+                        operation: McpServerOperation::Connect,
+                    }),
+                    ..Default::default()
+                },
+            },
+            replacement.clone(),
+        ));
+        attempt.complete();
+        assert_eq!(attempt.outcomes.lock().len(), 1);
+        assert!(replacement.check().is_ok());
+        assert!(
+            attempt
+                .app
+                .world()
+                .get::<McpPageState>(attempt.view)
+                .unwrap()
+                .snapshot
+                .pending
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn removing_the_view_retains_native_attempt_until_its_io_drains() {
+        let mut attempt = Attempt::new();
+        attempt.app.world_mut().entity_mut(attempt.view).despawn();
+        attempt.app.update();
+        assert!(attempt.app.world().get_entity(attempt.work).is_ok());
+        assert!(
+            attempt
+                .app
+                .world()
+                .get::<super::McpOperationTask>(attempt.work)
+                .unwrap()
+                .cancellation
+                .check()
+                .is_err()
+        );
+        attempt.complete();
+        assert!(attempt.outcomes.lock().is_empty());
+    }
+
     #[test]
     fn disposing_an_authentication_operation_cancels_its_polling() {
         let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
@@ -1520,6 +1678,7 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn(super::McpOperationTask {
+                target: Entity::PLACEHOLDER,
                 generation: 1,
                 id: "github".into(),
                 operation: McpServerOperation::Connect,

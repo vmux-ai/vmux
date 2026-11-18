@@ -49,10 +49,7 @@ pub use operation::{
     TargetedOperations,
 };
 #[cfg(all(host, feature = "host"))]
-pub use overlay::{
-    FixedWindowOverlay, BrowserLoadSet, BrowserOverlaySet, Overlay, OverlayShownInline, OverlayState, PopupWebview,
-    WebviewLoadCompleted, WindowOverlay,
-};
+pub use overlay::{FixedWindowOverlay, Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 #[cfg(feature = "contracts")]
 pub use page_metadata::{PageIdentity, PageMetadata};
 #[cfg(all(host, feature = "host"))]

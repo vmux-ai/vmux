@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
 use std::collections::HashMap;
-use vmux_ecs::{Order, PageMetadata, PopupWebview};
+use vmux_browser::PopupWebview;
+use vmux_ecs::{Order, PageMetadata};
 use vmux_flex::prelude::Visibility;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Loading;
@@ -241,44 +242,7 @@ fn rebuild_model(
         });
     }
     let mut windows = projected_windows;
-    for (metadata, id, host, visibility, loading) in &projection.browser_popups {
-        if *visibility == Visibility::Hidden
-            || !(metadata.url.starts_with("https://") || metadata.url.starts_with("http://"))
-        {
-            continue;
-        }
-        let Ok((_, _, window_id, _)) = projection.windows.get(host.0) else {
-            continue;
-        };
-        for tab in &mut tabs {
-            if tab.window_id == window_id.0 {
-                tab.active = false;
-                tab.highlighted = false;
-            }
-        }
-        if projection.focused_window.entity() == Some(host.0) {
-            for window in &mut windows {
-                window.focused = window.id == window_id.0;
-            }
-        }
-        let index = tabs
-            .iter()
-            .filter(|tab| tab.window_id == window_id.0)
-            .map(|tab| tab.index)
-            .max()
-            .map_or(0, |index| index.saturating_add(1));
-        tabs.push(ExtensionTabSnapshot {
-            id: id.0,
-            window_id: window_id.0,
-            index,
-            active: true,
-            highlighted: true,
-            pinned: false,
-            url: metadata.url.clone(),
-            title: metadata.title.clone(),
-            status: if loading { "loading" } else { "complete" }.into(),
-        });
-    }
+    projection.append_browser_popups(&mut windows, &mut tabs);
     let model = ExtensionModel { windows, tabs };
     for event in previous.events(&model) {
         events.write(event);
@@ -289,6 +253,51 @@ fn rebuild_model(
 }
 
 impl ProjectionData<'_, '_> {
+    fn append_browser_popups(
+        &self,
+        windows: &mut [ExtensionWindowSnapshot],
+        tabs: &mut Vec<ExtensionTabSnapshot>,
+    ) {
+        for (metadata, id, host, visibility, loading) in &self.browser_popups {
+            if *visibility == Visibility::Hidden
+                || !(metadata.url.starts_with("https://") || metadata.url.starts_with("http://"))
+            {
+                continue;
+            }
+            let Ok((_, _, window_id, _)) = self.windows.get(host.0) else {
+                continue;
+            };
+            for tab in tabs.iter_mut() {
+                if tab.window_id == window_id.0 {
+                    tab.active = false;
+                    tab.highlighted = false;
+                }
+            }
+            if self.focused_window.entity() == Some(host.0) {
+                for window in windows.iter_mut() {
+                    window.focused = window.id == window_id.0;
+                }
+            }
+            let index = tabs
+                .iter()
+                .filter(|tab| tab.window_id == window_id.0)
+                .map(|tab| tab.index)
+                .max()
+                .map_or(0, |index| index.saturating_add(1));
+            tabs.push(ExtensionTabSnapshot {
+                id: id.0,
+                window_id: window_id.0,
+                index,
+                active: true,
+                highlighted: true,
+                pinned: false,
+                url: metadata.url.clone(),
+                title: metadata.title.clone(),
+                status: if loading { "loading" } else { "complete" }.into(),
+            });
+        }
+    }
+
     fn windows(&self) -> Vec<WindowCandidate> {
         let mut windows = self
             .windows

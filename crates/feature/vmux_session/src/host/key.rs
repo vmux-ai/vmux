@@ -66,6 +66,29 @@ pub(super) struct ChatListSelection {
 pub(super) struct ChatSelectorProjection(pub ChatSelectorState);
 
 impl ChatListSelection {
+    fn choose_index(
+        &mut self,
+        list: &ActiveChatList,
+        index: Option<usize>,
+        caller: Entity,
+        commands: &mut Commands,
+    ) -> usize {
+        let Some(index) = index else {
+            return *self.current(list);
+        };
+        self.update(list, index);
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                caller,
+                &ChatListSelectionState {
+                    kind: list.kind,
+                    index: self.index as u32,
+                },
+            ),
+        );
+        self.index
+    }
+
     fn current(&mut self, list: &ActiveChatList) -> &mut usize {
         if self.list.as_ref() != Some(&list.identity) {
             self.list = Some(list.identity.clone());
@@ -132,10 +155,213 @@ impl ActiveChatList {
     }
 }
 
+impl ChatListSelection {
+    fn finish(
+        &mut self,
+        caller: Entity,
+        composer: &mut ComposerState,
+        close_menu: bool,
+        change_composer: Option<String>,
+        commands: &mut Commands,
+    ) {
+        if close_menu {
+            self.close_composer_menu();
+            commands
+                .entity(caller)
+                .insert(ActiveComposerMenu::default());
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                    caller,
+                    &ChatComposerMenuState {
+                        menu: None,
+                        index: 0,
+                    },
+                ),
+            );
+            let draft = composer.draft().to_string();
+            let effect = composer.effect(draft, true);
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
+            );
+        }
+        if let Some(draft) = change_composer {
+            let effect = composer.effect(draft, true);
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
+            );
+            commands.trigger(ComposerChanged::new(caller));
+        }
+    }
+}
+
 #[derive(Component, Clone, Copy, Default)]
 pub(super) struct ActiveComposerMenu {
     menu: Option<ChatComposerMenuKind>,
     index: usize,
+}
+
+impl ChatSnapshotProjection {
+    fn selected_approval(&self, index: usize) -> Option<ChatApproval> {
+        let approval = self.0.approval.as_ref()?;
+        let decision = match index {
+            0 => ApprovalDecision::Allow,
+            1 => ApprovalDecision::AllowAlways,
+            2 => ApprovalDecision::Deny,
+            _ => return None,
+        };
+        Some(ChatApproval {
+            call_id: approval.call_id.clone(),
+            decision,
+        })
+    }
+}
+
+impl ChatResumeProjection {
+    fn selected_resume(&self, index: usize) -> Option<ResumeSession> {
+        let session = self.0.sessions.get(index)?;
+        Some(ResumeSession {
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            cwd: session.cwd.clone(),
+            open: None,
+        })
+    }
+}
+
+impl ModelPickerProjection {
+    fn selected_model(&self, draft: &str, index: usize) -> Option<SelectModel> {
+        let SelectorMode::Models(query) = SelectorMode::from_draft(draft) else {
+            return None;
+        };
+        let models = self.filtered(query);
+        let model = models.get(index)?;
+        Some(SelectModel {
+            model_id: model.id.clone(),
+        })
+    }
+}
+
+impl SlashCommandProjection {
+    fn selected_command(&self, draft: &str, index: usize) -> Option<ChatSlashCommandRequest> {
+        let SelectorMode::Commands(query) = SelectorMode::from_draft(draft) else {
+            return None;
+        };
+        let commands = self.filtered(query);
+        let command = commands.get(index)?;
+        Some(ChatSlashCommandRequest {
+            command: command.command,
+        })
+    }
+}
+
+impl ActiveComposerMenu {
+    fn choose(
+        &self,
+        caller: Entity,
+        selected: usize,
+        lists: &ChatLists,
+        commands: &mut Commands,
+    ) -> bool {
+        let Some(kind) = self.menu else {
+            return false;
+        };
+        match kind {
+            ChatComposerMenuKind::Effort => {
+                let Ok(model) = lists.models.get(caller) else {
+                    return false;
+                };
+                let level = if selected == 0 {
+                    String::new()
+                } else {
+                    let Some(level) = model.0.effort_levels.get(selected - 1) else {
+                        return false;
+                    };
+                    level.clone()
+                };
+                commands.trigger(UiInput {
+                    webview: caller,
+                    payload: SetAgentEffort {
+                        agent_key: model.0.agent_key.clone(),
+                        level,
+                    },
+                });
+            }
+            ChatComposerMenuKind::Permission => {
+                let Ok(mode) = lists.modes.get(caller) else {
+                    return false;
+                };
+                let Some(mode) = mode.0.modes.get(selected) else {
+                    return false;
+                };
+                commands.trigger(UiInput {
+                    webview: caller,
+                    payload: SelectMode {
+                        mode_id: mode.id.clone(),
+                    },
+                });
+            }
+            ChatComposerMenuKind::Project => {
+                if !self.choose_project(caller, selected, lists, commands) {
+                    return false;
+                }
+            }
+            ChatComposerMenuKind::Branch => {
+                let Ok(branches) = lists.branches.get(caller) else {
+                    return false;
+                };
+                let Some(branch) = branches.0.branches.get(selected) else {
+                    return false;
+                };
+                commands.trigger(UiInput {
+                    webview: caller,
+                    payload: ChatGoToBranch {
+                        project: branches.0.project.clone(),
+                        branch: branch.branch.clone(),
+                        checkout: branch.checkout.clone(),
+                    },
+                });
+            }
+        }
+        true
+    }
+
+    fn choose_project(
+        &self,
+        caller: Entity,
+        selected: usize,
+        lists: &ChatLists,
+        commands: &mut Commands,
+    ) -> bool {
+        let Ok(context) = lists.contexts.get(caller) else {
+            return false;
+        };
+        let mut roots = Vec::new();
+        for project in &context.0.projects {
+            if project.depth == 0 {
+                roots.push(project);
+            }
+        }
+        if selected == roots.len() {
+            commands.trigger(UiInput {
+                webview: caller,
+                payload: ChatSelectWorkspace,
+            });
+        } else {
+            let Some(project) = roots.get(selected) else {
+                return false;
+            };
+            commands.trigger(UiInput {
+                webview: caller,
+                payload: ChatGoToBranch {
+                    project: project.path.clone(),
+                    branch: String::new(),
+                    checkout: String::new(),
+                },
+            });
+        }
+
+        true
+    }
 }
 
 #[vmux_command::command]
@@ -209,6 +435,74 @@ struct ChatLists<'w, 's> {
 }
 
 impl ChatLists<'_, '_> {
+    fn selected_media(
+        &self,
+        caller: Entity,
+        draft: &str,
+        index: usize,
+    ) -> Option<(Option<ChatAttachPaths>, String)> {
+        let media = self.media.get(caller).ok()?;
+        let entry = media.0.entries.get(index)?;
+        let query = InlineMediaQuery::parse(draft)?;
+        let reference = entry.reference();
+        let (attachment, replacement) = if entry.is_dir {
+            (None, format!("@{reference}/"))
+        } else {
+            (
+                Some(ChatAttachPaths {
+                    paths: vec![entry.path.clone()],
+                }),
+                String::new(),
+            )
+        };
+        Some((attachment, query.replace(draft, &replacement)))
+    }
+
+    fn selected_command(
+        &self,
+        caller: Entity,
+        draft: &str,
+        index: usize,
+    ) -> Option<ChatSlashCommandRequest> {
+        let projection = self.commands.get(caller).ok()?;
+        projection.selected_command(draft, index)
+    }
+
+    fn selected_model(&self, caller: Entity, draft: &str, index: usize) -> Option<SelectModel> {
+        let projection = self.models.get(caller).ok()?;
+        projection.selected_model(draft, index)
+    }
+
+    fn selected_resume(&self, caller: Entity, index: usize) -> Option<ResumeSession> {
+        let projection = self.resumes.get(caller).ok()?;
+        projection.selected_resume(index)
+    }
+
+    fn selected_approval(&self, caller: Entity, index: usize) -> Option<ChatApproval> {
+        let projection = self.snapshots.get(caller).ok()?;
+        projection.selected_approval(index)
+    }
+
+    fn selected_mcp(
+        &self,
+        caller: Entity,
+        draft: &str,
+        index: usize,
+    ) -> Option<McpServerSelectionRequest> {
+        let state = self.mcp.get(caller).ok()?.current()?;
+        if state.pending.is_some() {
+            return None;
+        }
+        let SelectorMode::Mcp(query) = SelectorMode::from_draft(draft) else {
+            return None;
+        };
+        let entries = self.mcp_entries(caller, query);
+        let server = entries.get(index)?;
+        Some(McpServerSelectionRequest {
+            id: server.id.clone(),
+        })
+    }
+
     fn selector(&self, webview: Entity, draft: &str) -> ChatSelectorState {
         let Some(active) = self.active(webview, draft) else {
             return ChatSelectorState {
@@ -560,58 +854,28 @@ fn choose_from_ui(trigger: On<UiInput<ChatListChooseRequest>>, mut commands: Com
 fn choose(
     trigger: On<ChooseList>,
     lists: ChatLists,
-    mut composers: Query<&mut ComposerState>,
-    mut selections: Query<&mut ChatListSelection>,
+    mut views: Query<(&mut ComposerState, &mut ChatListSelection)>,
     mut commands: Commands,
 ) {
     let caller = trigger.event_target();
-    let Ok(mut composer) = composers.get_mut(caller) else {
+    let Ok((mut composer, mut selection)) = views.get_mut(caller) else {
         return;
     };
     let Some(list) = lists.active(caller, composer.draft()) else {
         return;
     };
-    let Ok(mut selection) = selections.get_mut(caller) else {
-        return;
-    };
     let kind = list.kind;
-    let selected = if let Some(index) = trigger.event().index {
-        selection.update(&list, index);
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                caller,
-                &ChatListSelectionState {
-                    kind,
-                    index: selection.index as u32,
-                },
-            ),
-        );
-        selection.index
-    } else {
-        *selection.current(&list)
-    };
+    let selected = selection.choose_index(&list, trigger.event().index, caller, &mut commands);
     let mut close_menu = false;
     let mut change_composer = None;
     match kind {
         ChatListKind::Approval => {
-            let Ok(snapshot) = lists.snapshots.get(caller) else {
+            let Some(payload) = lists.selected_approval(caller, selected) else {
                 return;
-            };
-            let Some(approval) = &snapshot.0.approval else {
-                return;
-            };
-            let decision = match selected {
-                0 => ApprovalDecision::Allow,
-                1 => ApprovalDecision::AllowAlways,
-                2 => ApprovalDecision::Deny,
-                _ => return,
             };
             commands.trigger(UiInput {
                 webview: caller,
-                payload: ChatApproval {
-                    call_id: approval.call_id.clone(),
-                    decision,
-                },
+                payload,
             });
         }
         ChatListKind::Choice => {
@@ -626,223 +890,71 @@ fn choose(
             let Ok(menu) = lists.menus.get(caller) else {
                 return;
             };
-            let Some(kind) = menu.menu else {
+            close_menu = menu.choose(caller, selected, &lists, &mut commands);
+            if !close_menu {
                 return;
-            };
-            match kind {
-                ChatComposerMenuKind::Effort => {
-                    let Ok(model) = lists.models.get(caller) else {
-                        return;
-                    };
-                    let level = if selected == 0 {
-                        String::new()
-                    } else {
-                        let Some(level) = model.0.effort_levels.get(selected - 1) else {
-                            return;
-                        };
-                        level.clone()
-                    };
-                    commands.trigger(UiInput {
-                        webview: caller,
-                        payload: SetAgentEffort {
-                            agent_key: model.0.agent_key.clone(),
-                            level,
-                        },
-                    });
-                }
-                ChatComposerMenuKind::Permission => {
-                    let Ok(mode) = lists.modes.get(caller) else {
-                        return;
-                    };
-                    let Some(mode) = mode.0.modes.get(selected) else {
-                        return;
-                    };
-                    commands.trigger(UiInput {
-                        webview: caller,
-                        payload: SelectMode {
-                            mode_id: mode.id.clone(),
-                        },
-                    });
-                }
-                ChatComposerMenuKind::Project => {
-                    let Ok(context) = lists.contexts.get(caller) else {
-                        return;
-                    };
-                    let mut roots = Vec::new();
-                    for project in &context.0.projects {
-                        if project.depth == 0 {
-                            roots.push(project);
-                        }
-                    }
-                    if selected == roots.len() {
-                        commands.trigger(UiInput {
-                            webview: caller,
-                            payload: ChatSelectWorkspace,
-                        });
-                    } else {
-                        let Some(project) = roots.get(selected) else {
-                            return;
-                        };
-                        commands.trigger(UiInput {
-                            webview: caller,
-                            payload: ChatGoToBranch {
-                                project: project.path.clone(),
-                                branch: String::new(),
-                                checkout: String::new(),
-                            },
-                        });
-                    }
-                }
-                ChatComposerMenuKind::Branch => {
-                    let Ok(branches) = lists.branches.get(caller) else {
-                        return;
-                    };
-                    let Some(branch) = branches.0.branches.get(selected) else {
-                        return;
-                    };
-                    commands.trigger(UiInput {
-                        webview: caller,
-                        payload: ChatGoToBranch {
-                            project: branches.0.project.clone(),
-                            branch: branch.branch.clone(),
-                            checkout: branch.checkout.clone(),
-                        },
-                    });
-                }
             }
-            close_menu = true;
         }
         ChatListKind::Media => {
-            let Ok(media) = lists.media.get(caller) else {
+            let Some((attachment, draft)) =
+                lists.selected_media(caller, composer.draft(), selected)
+            else {
                 return;
             };
-            let Some(entry) = media.0.entries.get(selected) else {
-                return;
-            };
-            let Some(query) = InlineMediaQuery::parse(composer.draft()) else {
-                return;
-            };
-            let reference = entry.reference();
-            let replacement = if entry.is_dir {
-                format!("@{reference}/")
-            } else {
+            if let Some(payload) = attachment {
                 commands.trigger(UiInput {
                     webview: caller,
-                    payload: ChatAttachPaths {
-                        paths: vec![entry.path.clone()],
-                    },
+                    payload,
                 });
-                String::new()
-            };
-            change_composer = Some(query.replace(composer.draft(), &replacement));
+            }
+            change_composer = Some(draft);
         }
         ChatListKind::Mcp => {
-            let Ok(state) = lists.mcp.get(caller) else {
-                return;
-            };
-            let Some(state) = state.current() else {
-                return;
-            };
-            if state.pending.is_some() {
-                return;
-            }
-            let SelectorMode::Mcp(query) = SelectorMode::from_draft(composer.draft()) else {
-                return;
-            };
-            let entries = lists.mcp_entries(caller, query);
-            let Some(server) = entries.get(selected) else {
+            let Some(payload) = lists.selected_mcp(caller, composer.draft(), selected) else {
                 return;
             };
             commands.trigger(UiInput {
                 webview: caller,
-                payload: McpServerSelectionRequest {
-                    id: server.id.clone(),
-                },
+                payload,
             });
         }
         ChatListKind::Session => {
-            let Ok(sessions) = lists.resumes.get(caller) else {
-                return;
-            };
-            let Some(session) = sessions.0.sessions.get(selected) else {
+            let Some(payload) = lists.selected_resume(caller, selected) else {
                 return;
             };
             commands.trigger(UiInput {
                 webview: caller,
-                payload: ResumeSession {
-                    kind: session.kind.clone(),
-                    sid: session.sid.clone(),
-                    cwd: session.cwd.clone(),
-                    open: None,
-                },
+                payload,
             });
             change_composer = Some(String::new());
         }
         ChatListKind::Model => {
-            let Ok(models) = lists.models.get(caller) else {
-                return;
-            };
-            let SelectorMode::Models(query) = SelectorMode::from_draft(composer.draft()) else {
-                return;
-            };
-            let models = models.filtered(query);
-            let Some(model) = models.get(selected) else {
+            let Some(payload) = lists.selected_model(caller, composer.draft(), selected) else {
                 return;
             };
             commands.trigger(UiInput {
                 webview: caller,
-                payload: SelectModel {
-                    model_id: model.id.clone(),
-                },
+                payload,
             });
             change_composer = Some(String::new());
         }
         ChatListKind::Command => {
-            let Ok(command) = lists.commands.get(caller) else {
-                return;
-            };
-            let SelectorMode::Commands(query) = SelectorMode::from_draft(composer.draft()) else {
-                return;
-            };
-            let commands_list = command.filtered(query);
-            let Some(command) = commands_list.get(selected) else {
+            let Some(payload) = lists.selected_command(caller, composer.draft(), selected) else {
                 return;
             };
             commands.trigger(UiInput {
                 webview: caller,
-                payload: ChatSlashCommandRequest {
-                    command: command.command,
-                },
+                payload,
             });
         }
     }
-    if close_menu {
-        selection.close_composer_menu();
-        commands
-            .entity(caller)
-            .insert(ActiveComposerMenu::default());
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                caller,
-                &ChatComposerMenuState {
-                    menu: None,
-                    index: 0,
-                },
-            ),
-        );
-        let draft = composer.draft().to_string();
-        let effect = composer.effect(draft, true);
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
-        );
-    }
-    if let Some(draft) = change_composer {
-        let effect = composer.effect(draft, true);
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
-        );
-        commands.trigger(ComposerChanged::new(caller));
-    }
+    selection.finish(
+        caller,
+        &mut composer,
+        close_menu,
+        change_composer,
+        &mut commands,
+    );
 }
 
 fn select_list(
