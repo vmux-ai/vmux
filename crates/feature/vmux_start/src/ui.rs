@@ -17,7 +17,7 @@ pub(crate) struct StartPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_command_bar_ui();
+    let state: Signal<vmux_api::command_bar::CommandBarUiState> = use_command_bar_ui();
 
     rsx! {
         document::Title { "Any prompt. Anything, done." }

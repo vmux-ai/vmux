@@ -1,5 +1,6 @@
 use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::prelude::{Commands, Component};
 use vmux_api::page::UiStateEmit;
 use vmux_api::team::{TeamMemberRow, TeamUiState};
 
@@ -109,12 +110,12 @@ mod tests {
             self.0.world_mut().write_message(Members(members));
             self.0.update();
         }
-    }
 
-    fn member(name: &str) -> TeamMemberRow {
-        TeamMemberRow {
-            name: name.to_string(),
-            ..TeamMemberRow::default()
+        fn member(name: &str) -> TeamMemberRow {
+            TeamMemberRow {
+                name: name.to_string(),
+                ..TeamMemberRow::default()
+            }
         }
     }
 
@@ -123,7 +124,7 @@ mod tests {
         let mut started = Started::with(Vec::new());
         assert!(started.team().members.is_empty());
 
-        started.reroster(vec![member("ada"), member("grace")]);
+        started.reroster(vec![Started::member("ada"), Started::member("grace")]);
         let names: Vec<&str> = started
             .team()
             .members

@@ -310,7 +310,6 @@ legacy: [
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:ValidatedLinkedWorkspace", fingerprint: "e19b214ccb26f212", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:WorktreeStatus", fingerprint: "67d1deaaf031893d", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:BaseRef", fingerprint: "d5f2f91e200ae068", issue: "VMX-253"),
-    (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:BranchChange", fingerprint: "eb2d12318cb1e4d5", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:LinkedRepoRoot", fingerprint: "f94b2270fd8ee1af", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:ProjectRoot", fingerprint: "995e2062f4156480", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:RepoLabel", fingerprint: "ad5ae99e28b56c70", issue: "VMX-253"),
@@ -500,6 +499,7 @@ boundaries: [
     (key: "crates/feature/vmux_git/src/host.rs||impl:Plugin for GitPlugin", fingerprint: "9d44dad63eeb7b63", interface: "Bevy App plugin composition", input: "external: Bevy App registration and static page metadata", output: "ECS: crates/util/vmux_api/src/page_metadata.rs||struct:PageMetadata", lifetime: "one root plugin installation", bounds: "stateless composition only; registered feature systems and canonical entities own behavior and persistence", teardown: "App drop removes registrations and their canonical state", architecture: "ECS ownership boundaries"),
 ],
 values: [
+    (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:BranchChange", owner: "crates/feature/vmux_git/src/host/worktree.rs||struct:BranchHolder", lifetime: "immutable change-count facts belonging to one branch-holder result"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||struct:CheckoutInfo", owner: "crates/feature/vmux_layout/src/host/checkout.rs||struct:RepositoryIdentity", lifetime: "Captured native checkout root/common-directory facts of one accepted operation; current selection remains on canonical checkout entities"),
 
     (key: "crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCacheEntry", owner: "crates/feature/vmux_git/src/host/watch.rs||struct:RepoInfoCache", lifetime: "Read-only Git IO metadata or watch lease bookkeeping retained by its canonical cache/projection owner; eviction and task cancellation follow that owner"),
