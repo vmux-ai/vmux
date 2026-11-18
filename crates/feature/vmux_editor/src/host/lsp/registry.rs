@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_ecs::manifest::{FeatureManifest, FeatureManifestOwner};
+use vmux_feature::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
+use vmux_feature::manifest::{FeatureManifestSource, FeaturePlugin};
 #[cfg(test)]
 use vmux_path::Executable;
 

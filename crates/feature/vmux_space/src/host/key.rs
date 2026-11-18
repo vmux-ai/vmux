@@ -3,7 +3,7 @@ use bevy_cef::prelude::UiInput;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiStateWrite;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, SpacesUiState};

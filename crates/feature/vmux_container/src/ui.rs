@@ -30,13 +30,13 @@ use crate::event::{
     ContainerStartRequest, ContainerStopRequest, ContainerUiState,
 };
 
-#[vmux_page::page(page = "vm", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
+#[vmux_page::page(page = "vm", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::event::ContainerUiState])]
 pub(crate) struct VmPage;
 
-#[vmux_page::page(page = "docker", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
+#[vmux_page::page(page = "docker", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::event::ContainerUiState])]
 pub(crate) struct DockerPage;
 
-#[vmux_page::page(page = "containers", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
+#[vmux_page::page(page = "containers", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::event::ContainerUiState])]
 pub(crate) struct ContainerPage;
 
 #[component]
@@ -313,9 +313,9 @@ fn Header(
                 icon: Some(value.icon()),
                 intent: Some(AddressIntent::Navigate {
                     url: match value {
-                        Level::Vm => VmPage::URL,
-                        Level::Docker => DockerPage::URL,
-                        Level::Containers => ContainerPage::URL,
+                        Level::Vm => VmPage::url(),
+                        Level::Docker => DockerPage::url(),
+                        Level::Containers => ContainerPage::url(),
                     }
                     .into(),
                 }),
@@ -1020,9 +1020,9 @@ impl Level {
 
     fn open(self) -> Result<(), vmux_ui::hooks::EventListenerError> {
         let url = match self {
-            Self::Vm => VmPage::URL,
-            Self::Docker => DockerPage::URL,
-            Self::Containers => ContainerPage::URL,
+            Self::Vm => VmPage::url(),
+            Self::Docker => DockerPage::url(),
+            Self::Containers => ContainerPage::url(),
         };
         send(&OpenRequest {
             value: url.into(),

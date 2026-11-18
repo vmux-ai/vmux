@@ -11,6 +11,7 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true, features = ["multi_threaded"] }
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../vmux_feature", features = ["page-binding"] }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_vm = { path = "../../util/vmux_vm" }
 vmux_api = { path = "../../util/vmux_api" }

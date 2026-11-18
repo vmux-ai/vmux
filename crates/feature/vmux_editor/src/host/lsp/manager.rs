@@ -2620,7 +2620,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
-                vmux_ecs::manifest::FeaturePlugin::<crate::Feature>::default(),
+                vmux_feature::manifest::FeaturePlugin::<crate::Feature>::default(),
                 crate::lsp::server_request::ServerRequestPlugin,
                 vmux_lsp::LspPlugin,
                 ManagerPlugin::new(diagnostics, inbox),

@@ -286,7 +286,7 @@ fn restore_views(
 }
 
 fn restored_page_url(url: &str) -> &str {
-    if url == crate::ErrorPage::URL {
+    if url == crate::ErrorPage::url() {
         return "vmux://start/";
     }
     url
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn transient_error_page_restores_as_start() {
-        assert_eq!(restored_page_url(crate::ErrorPage::URL), "vmux://start/");
+        assert_eq!(restored_page_url(crate::ErrorPage::url()), "vmux://start/");
         assert_eq!(restored_page_url("vmux://sessions/"), "vmux://sessions/");
     }
 }

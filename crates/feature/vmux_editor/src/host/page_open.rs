@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{Children, Commands, Has, MessageWriter, Query, Res, Time, With};
 use bevy_cef::prelude::*;
+use std::option::Option;
 use vmux_ecs::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_ecs::profile::Projects;
 use vmux_ecs::store::PageRestore;
@@ -117,6 +119,110 @@ impl FileOpenContext<'_, '_> {
                 !blocked && !handoff && !transition
             })
     }
+    fn path(&self, task: &PageOpenTask, knowledge_root: &Path) -> Option<Result<PathBuf, String>> {
+        let knowledge_landing = if task.url.trim_end_matches('/')
+            == vmux_knowledge::KnowledgePlugin::url().trim_end_matches('/')
+        {
+            KnowledgeLanding::select(knowledge_root, self.visits.iter())
+        } else {
+            None
+        };
+        let restored_path = self
+            .restored
+            .get(task.stack)
+            .ok()
+            .map(|state| PathBuf::from(&state.active));
+        let file_landing = if CodeLanding::is_root(&task.url) {
+            self.code_directory(task.stack)
+                .map(|directory| CodeLanding::select(&directory))
+        } else {
+            None
+        };
+        let project = if ProjectRoute::is_page(&task.url) {
+            match self.projects.path() {
+                Ok(root) => {
+                    if matches!(self.registrations.ready(root), Ok(false)) {
+                        return None;
+                    }
+                    self.registrations.resolve(&task.url, root)
+                }
+                Err(error) => Some(Err(error)),
+            }
+        } else {
+            None
+        };
+        let target = if let Some(project) = project {
+            Some(match project {
+                Ok(path) => FilePageTarget {
+                    path: Some(path),
+                    error: String::new(),
+                },
+                Err(error) => FilePageTarget { path: None, error },
+            })
+        } else {
+            FilePageTarget::resolve(
+                &task.url,
+                self.projects.path(),
+                knowledge_root,
+                knowledge_landing.as_deref(),
+                file_landing.as_deref(),
+            )
+        };
+        let target = target?;
+        let Some(path) = target.path else {
+            return Some(Err(target.error));
+        };
+        let path = if CodeLanding::requested(&task.url) {
+            path
+        } else {
+            restored_path.unwrap_or(path)
+        };
+        Some(Ok(path))
+    }
+
+    fn presentation(
+        &self,
+        task: &PageOpenTask,
+        restoring: bool,
+        path: &Path,
+        knowledge_root: &Path,
+    ) -> (vmux_ecs::WorkspaceKind, String) {
+        let (persisted_workspace, stack_restoring) = self
+            .stack_workspaces
+            .get(task.stack)
+            .unwrap_or((None, false));
+        let workspace = if task.url.trim_end_matches('/')
+            == vmux_knowledge::KnowledgePlugin::url().trim_end_matches('/')
+        {
+            vmux_ecs::WorkspaceKind::Knowledge
+        } else if restoring || stack_restoring {
+            persisted_workspace.copied().unwrap_or_else(|| {
+                let knowledge_root = vmux_path::PathIdentity::resolve(knowledge_root);
+                let path = vmux_path::PathIdentity::resolve(path);
+                if path.as_path().starts_with(knowledge_root.as_path()) {
+                    vmux_ecs::WorkspaceKind::Knowledge
+                } else {
+                    vmux_ecs::WorkspaceKind::Editor
+                }
+            })
+        } else {
+            vmux_ecs::WorkspaceKind::Editor
+        };
+        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
+        let page_url = if CodeLanding::is_root(&clean_url)
+            || self.restored.contains(task.stack)
+            || clean_url.trim_end_matches('/')
+                == vmux_knowledge::KnowledgePlugin::url().trim_end_matches('/')
+        {
+            FileView {
+                path: path.to_path_buf(),
+            }
+            .url()
+        } else {
+            clean_url.clone()
+        };
+        (workspace, page_url)
+    }
 }
 
 fn new_file_view_bundle(
@@ -188,101 +294,21 @@ fn handle_file(
             continue;
         }
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
-        let knowledge_landing = if task.url.trim_end_matches('/')
-            == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
-        {
-            KnowledgeLanding::select(&knowledge_root, context.visits.iter())
-        } else {
-            None
+        let Some(path) = context.path(task, &knowledge_root) else {
+            continue;
         };
-        let restored_path = context
-            .restored
-            .get(task.stack)
-            .ok()
-            .map(|state| PathBuf::from(&state.active));
-        let file_landing = if CodeLanding::is_root(&task.url) {
-            context
-                .code_directory(task.stack)
-                .map(|directory| CodeLanding::select(&directory))
-        } else {
-            None
-        };
-        let project = if ProjectRoute::is_page(&task.url) {
-            match context.projects.path() {
-                Ok(root) => {
-                    if matches!(context.registrations.ready(root), Ok(false)) {
-                        continue;
-                    }
-                    context.registrations.resolve(&task.url, root)
-                }
-                Err(error) => Some(Err(error)),
+        let path = match path {
+            Ok(path) => path,
+            Err(message) => {
+                context
+                    .commands
+                    .entity(entity)
+                    .insert(PageOpenError { message });
+                continue;
             }
-        } else {
-            None
         };
-        let target = if let Some(project) = project {
-            Some(match project {
-                Ok(path) => FilePageTarget {
-                    path: Some(path),
-                    error: String::new(),
-                },
-                Err(error) => FilePageTarget { path: None, error },
-            })
-        } else {
-            FilePageTarget::resolve(
-                &task.url,
-                context.projects.path(),
-                &knowledge_root,
-                knowledge_landing.as_deref(),
-                file_landing.as_deref(),
-            )
-        };
-        let Some(target) = target else {
-            continue;
-        };
-        let Some(path) = target.path else {
-            context.commands.entity(entity).insert(PageOpenError {
-                message: target.error,
-            });
-            continue;
-        };
-        let path = if CodeLanding::requested(&task.url) {
-            path
-        } else {
-            restored_path.unwrap_or(path)
-        };
-        let (persisted_workspace, stack_restoring) = context
-            .stack_workspaces
-            .get(task.stack)
-            .unwrap_or((None, false));
-        let workspace = if task.url.trim_end_matches('/')
-            == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
-        {
-            vmux_ecs::WorkspaceKind::Knowledge
-        } else if restoring || stack_restoring {
-            persisted_workspace.copied().unwrap_or_else(|| {
-                let knowledge_root = vmux_path::PathIdentity::resolve(&knowledge_root);
-                let path = vmux_path::PathIdentity::resolve(&path);
-                if path.as_path().starts_with(knowledge_root.as_path()) {
-                    vmux_ecs::WorkspaceKind::Knowledge
-                } else {
-                    vmux_ecs::WorkspaceKind::Editor
-                }
-            })
-        } else {
-            vmux_ecs::WorkspaceKind::Editor
-        };
+        let (workspace, page_url) = context.presentation(task, restoring, &path, &knowledge_root);
         context.commands.entity(task.stack).insert(workspace);
-        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
-        let page_url = if CodeLanding::is_root(&clean_url)
-            || context.restored.contains(task.stack)
-            || clean_url.trim_end_matches('/')
-                == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
-        {
-            FileView { path: path.clone() }.url()
-        } else {
-            clean_url.clone()
-        };
         if !path.is_dir() {
             let title = FileView { path: path.clone() }.page_title();
             context
@@ -293,70 +319,15 @@ fn handle_file(
                 });
         }
         let pending = PendingGoto::from_url(&task.url);
-        let view = match context.reusable_view(task.stack) {
-            Some(view) => {
-                if let Ok((file_view, mut metadata, current_workspace, _, _, _)) =
-                    context.views.get_mut(view)
-                {
-                    if current_workspace.copied() != Some(workspace) {
-                        context.commands.entity(view).insert(workspace);
-                    }
-                    if file_view.path != path {
-                        let request = FileNavigateRequest::new(view, path, 0);
-                        let request = if page_url.starts_with("vmux://") {
-                            request.with_page_url(page_url.clone())
-                        } else {
-                            request
-                        };
-                        context.commands.trigger(request);
-                    } else if page_url.starts_with("vmux://") {
-                        metadata.title.clone_from(&page_url);
-                        metadata.url = page_url.clone();
-                        metadata.icon = vmux_api::PageIcon::None;
-                    }
-                }
-                view
-            }
-            None => {
-                let previous = context
-                    .children
-                    .get(task.stack)
-                    .map(|children| children.iter().collect::<Vec<_>>())
-                    .unwrap_or_default();
-                for surface in &previous {
-                    context
-                        .commands
-                        .entity(*surface)
-                        .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
-                }
-                let renderer = if workspace == vmux_ecs::WorkspaceKind::Editor {
-                    renderers.take("file://", entity)
-                } else {
-                    None
-                };
-                let bundle = (
-                    new_file_view_bundle(&page_url, path, workspace),
-                    ChildOf(task.stack),
-                );
-                let view = match renderer {
-                    Some(view) => {
-                        context.commands.entity(view).insert(bundle);
-                        view
-                    }
-                    None => context.commands.spawn(bundle).id(),
-                };
-                context.commands.entity(view).insert((
-                    vmux_layout::hosted_page::SurfaceHandoff::new(
-                        previous,
-                        task.id,
-                        0,
-                        context.time.elapsed(),
-                    ),
-                    Visibility::Hidden,
-                ));
-                view
-            }
-        };
+        let view = prepare_view(
+            &mut context,
+            &mut renderers,
+            entity,
+            task,
+            path,
+            workspace,
+            &page_url,
+        );
         let restored_stack = task.stack;
         context.commands.queue(super::explorer::RestoreEditors {
             stack: restored_stack,
@@ -366,6 +337,81 @@ fn handle_file(
             context.commands.entity(view).insert(pending);
         }
         context.commands.entity(entity).insert(PageOpenHandled);
+    }
+}
+
+fn prepare_view(
+    context: &mut FileOpenContext,
+    renderers: &mut vmux_layout::warm_page::RendererPool,
+    entity: Entity,
+    task: &PageOpenTask,
+    path: PathBuf,
+    workspace: vmux_ecs::WorkspaceKind,
+    page_url: &str,
+) -> Entity {
+    match context.reusable_view(task.stack) {
+        Some(view) => {
+            if let Ok((file_view, mut metadata, current_workspace, _, _, _)) =
+                context.views.get_mut(view)
+            {
+                if current_workspace.copied() != Some(workspace) {
+                    context.commands.entity(view).insert(workspace);
+                }
+                if file_view.path != path {
+                    let request = FileNavigateRequest::new(view, path, 0);
+                    let request = if page_url.starts_with("vmux://") {
+                        request.with_page_url(page_url.to_string())
+                    } else {
+                        request
+                    };
+                    context.commands.trigger(request);
+                } else if page_url.starts_with("vmux://") {
+                    metadata.title = page_url.to_string();
+                    metadata.url = page_url.to_string();
+                    metadata.icon = vmux_api::PageIcon::None;
+                }
+            }
+            view
+        }
+        None => {
+            let previous = context
+                .children
+                .get(task.stack)
+                .map(|children| children.iter().collect::<Vec<_>>())
+                .unwrap_or_default();
+            for surface in &previous {
+                context
+                    .commands
+                    .entity(*surface)
+                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+            }
+            let renderer = if workspace == vmux_ecs::WorkspaceKind::Editor {
+                renderers.take("file://", entity)
+            } else {
+                None
+            };
+            let bundle = (
+                new_file_view_bundle(page_url, path, workspace),
+                ChildOf(task.stack),
+            );
+            let view = match renderer {
+                Some(view) => {
+                    context.commands.entity(view).insert(bundle);
+                    view
+                }
+                None => context.commands.spawn(bundle).id(),
+            };
+            context.commands.entity(view).insert((
+                vmux_layout::hosted_page::SurfaceHandoff::new(
+                    previous,
+                    task.id,
+                    0,
+                    context.time.elapsed(),
+                ),
+                Visibility::Hidden,
+            ));
+            view
+        }
     }
 }
 
@@ -395,7 +441,8 @@ impl FilePageTarget {
                 Err(error) => Self { path: None, error },
             });
         }
-        if url.trim_end_matches('/') == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/') {
+        if url.trim_end_matches('/') == vmux_knowledge::KnowledgePlugin::url().trim_end_matches('/')
+        {
             return Some(Self {
                 path: Some(knowledge_landing.unwrap_or(knowledge_root).to_path_buf()),
                 error: String::new(),
@@ -973,7 +1020,7 @@ mod tests {
 
     #[test]
     fn knowledge_page_opens_its_landing_note() {
-        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
+        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::url());
         let page = stack.page();
         let root = vmux_knowledge::KnowledgeVault::user().into_root();
         let expected = KnowledgeLanding::select(&root, std::iter::empty()).unwrap_or(root);
@@ -990,7 +1037,7 @@ mod tests {
 
     #[test]
     fn opening_the_same_knowledge_file_as_code_updates_its_workspace_context() {
-        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
+        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::url());
         let page = stack.page();
         let file_url = stack.url(page);
 
@@ -1091,7 +1138,7 @@ mod tests {
 
     #[test]
     fn selecting_a_note_updates_the_file_url() {
-        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
+        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::url());
         let page = stack.page();
 
         stack.select(page, Path::new("/tmp/note.md"));

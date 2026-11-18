@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiState;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_layout::{
     hosted_page::HostedUiPlugin,
     stack::{OpenPolicy, OpenRequest},
@@ -33,7 +33,7 @@ impl Plugin for StatePlugin {
             .add_observer(issue_open_settings)
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
-                HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
+                HostedUiPlugin::<Settings>::new(super::SettingsPlugin::manifest()),
                 UiEventPlugin::<(
                     SettingsRequest,
                     SettingsEditRequest,
@@ -75,7 +75,7 @@ fn issue_open_settings(
 ) {
     if registered.contains(trigger.event().command()) {
         requests.write(OpenRequest {
-            url: Some(crate::SettingsPlugin::URL.to_string()),
+            url: Some(crate::SettingsPlugin::url().to_string()),
             policy: OpenPolicy::FocusReusable,
         });
     }
@@ -253,7 +253,7 @@ mod page_open_tests {
                 .world_mut()
                 .query_filtered::<(Entity, &PageMetadata), With<Stack>>();
             for (entity, metadata) in query.iter(self.app.world()) {
-                if metadata.url.split('#').next() == Some(crate::SettingsPlugin::URL) {
+                if metadata.url.split('#').next() == Some(crate::SettingsPlugin::url()) {
                     pages.push((entity, metadata.url.clone()));
                 }
             }
@@ -305,7 +305,7 @@ mod page_open_tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(HostedPagePlugin)
             .add_plugins(HostedUiPlugin::<Settings>::new(
-                super::super::SettingsPlugin::MANIFEST,
+                super::super::SettingsPlugin::manifest(),
             ));
         let navigation = PageOpenId::new();
         let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
@@ -314,7 +314,7 @@ mod page_open_tests {
             .spawn(PageOpenTask {
                 id: navigation,
                 stack,
-                url: crate::SettingsPlugin::URL.to_string(),
+                url: crate::SettingsPlugin::url().to_string(),
                 request_id: None,
             })
             .id();
@@ -340,7 +340,7 @@ mod page_open_tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(HostedPagePlugin)
             .add_plugins(HostedUiPlugin::<Settings>::new(
-                super::super::SettingsPlugin::MANIFEST,
+                super::super::SettingsPlugin::manifest(),
             ));
         let navigation = PageOpenId::new();
         let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
@@ -348,7 +348,7 @@ mod page_open_tests {
             app.world_mut().spawn(PageOpenTask {
                 id: navigation,
                 stack,
-                url: crate::SettingsPlugin::URL.to_string(),
+                url: crate::SettingsPlugin::url().to_string(),
                 request_id: None,
             });
         }

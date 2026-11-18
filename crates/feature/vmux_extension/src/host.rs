@@ -8,7 +8,7 @@ use vmux_api::protocol::AgentRequest;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet};
 
 mod access;

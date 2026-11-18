@@ -21,7 +21,7 @@ use vmux_ui::platform::Platform;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "HistoryUiState"]
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::HistoryUiState]
 )]
 pub(crate) struct HistoryPage;
 

@@ -6,9 +6,9 @@ use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentQueryResult, AgentRequest,
     AgentRequestId, ClientMessage,
 };
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_layout::bookmark::{
     AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
 };

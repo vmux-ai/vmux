@@ -69,10 +69,13 @@ impl TryFrom<&CommandInvocation> for CopyModeRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_feature::manifest::FeatureManifest;
 
     #[test]
     fn terminal_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = vmux_command::CommandManifest::for_feature::<crate::Feature>().into_vec();
+        let definitions =
+            vmux_command::CommandDefinition::from_manifest(FeatureManifest::of::<crate::Feature>())
+                .collect::<Vec<_>>();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)

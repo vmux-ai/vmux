@@ -45,7 +45,7 @@ impl Plugin for TeamPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TeamPage::plugin());
         app.add_plugins((
-            HostedUiPlugin::<Team>::new(Self::MANIFEST),
+            HostedUiPlugin::<Team>::new(Self::manifest()),
             ProjectionPlugin,
             IntentPlugin,
             crate::TeamToolPlugin,
@@ -400,7 +400,7 @@ fn open_team_stack_in_space(
     hierarchy: &SpaceHierarchy,
 ) -> Option<Entity> {
     stacks.iter().find_map(|(stack, meta)| {
-        (meta.url == TeamPlugin::URL && hierarchy.get(stack) == Some(space)).then_some(stack)
+        (meta.url == TeamPlugin::url() && hierarchy.get(stack) == Some(space)).then_some(stack)
     })
 }
 
@@ -425,7 +425,7 @@ fn open_request(
     }
 
     stack_requests.write(OpenRequest {
-        url: Some(TeamPlugin::URL.to_string()),
+        url: Some(TeamPlugin::url().to_string()),
         policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     });
 }
@@ -782,17 +782,23 @@ mod tests {
     use vmux_ecs::PageNavigation;
     use vmux_ecs::page_open::{PageOpenId, PageOpenTask};
 
-    fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
-        world
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    url: TeamPlugin::URL.to_string(),
-                    ..default()
-                },
-                ChildOf(space),
-            ))
-            .id()
+    struct TeamStackFixture(Entity);
+
+    impl TeamStackFixture {
+        fn new(world: &mut World, space: Entity) -> Self {
+            Self(
+                world
+                    .spawn((
+                        Stack::default(),
+                        PageMetadata {
+                            url: TeamPlugin::url().to_string(),
+                            ..default()
+                        },
+                        ChildOf(space),
+                    ))
+                    .id(),
+            )
+        }
     }
 
     fn lookup(app: &mut App, space: Entity) -> Option<Entity> {
@@ -953,7 +959,7 @@ mod tests {
     fn finds_open_team_stack_in_active_space() {
         let mut app = App::new();
         let space = app.world_mut().spawn(Space).id();
-        let stack = spawn_team_stack(app.world_mut(), space);
+        let stack = TeamStackFixture::new(app.world_mut(), space).0;
         assert_eq!(lookup(&mut app, space), Some(stack));
     }
 
@@ -962,7 +968,7 @@ mod tests {
         let mut app = App::new();
         let active = app.world_mut().spawn(Space).id();
         let other = app.world_mut().spawn(Space).id();
-        spawn_team_stack(app.world_mut(), other);
+        TeamStackFixture::new(app.world_mut(), other);
         assert_eq!(lookup(&mut app, active), None);
     }
 
@@ -996,7 +1002,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_layout::hosted_page::HostedPagePlugin)
-            .add_plugins(HostedUiPlugin::<Team>::new(TeamPlugin::MANIFEST));
+            .add_plugins(HostedUiPlugin::<Team>::new(TeamPlugin::manifest()));
 
         let navigation = PageOpenId::new();
         let stack = app
@@ -1006,7 +1012,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: navigation,
             stack,
-            url: TeamPlugin::URL.to_string(),
+            url: TeamPlugin::url().to_string(),
             request_id: None,
         });
         app.update();
@@ -1059,7 +1065,7 @@ mod tests {
     fn user_click_reuses_open_team_stack() {
         let mut app = command_app();
         let space = app.world_mut().spawn((Space, CurrentSpace)).id();
-        let team = spawn_team_stack(app.world_mut(), space);
+        let team = TeamStackFixture::new(app.world_mut(), space).0;
 
         app.world_mut().trigger(UiInput::<TeamOpenRequest> {
             webview: Entity::PLACEHOLDER,

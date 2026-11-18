@@ -19,11 +19,11 @@ pub use provider::*;
 #[cfg(host)]
 pub use query::*;
 pub use registry::*;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{
     AsyncTask, Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
     TaskPlugin, TaskResult, TaskSet, TaskToken,
 };
+use vmux_feature::manifest::FeaturePlugin;
 pub use vmux_macro::input;
 
 #[doc(hidden)]
@@ -37,7 +37,7 @@ pub const EXTENSIONS_URL: &str = "vmux://tools/extensions";
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -80,11 +80,11 @@ impl Plugin for ToolPlugin {
 
         #[cfg(all(host, ui))]
         app.add_plugins(
-            Self::MANIFEST
+            Self::manifest()
                 .plugin()
                 .hosted(vmux_ecs::page::HostedPage::subtree(
-                    Self::URL,
-                    ui::ToolsPage::PAGE.title,
+                    Self::url(),
+                    ui::ToolsPage::page().title,
                 )),
         );
 

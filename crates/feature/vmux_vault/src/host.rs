@@ -34,11 +34,11 @@ impl Plugin for VaultPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::VaultPage::plugin()).add_plugins(
-            Self::MANIFEST
+            Self::manifest()
                 .plugin()
                 .hosted(vmux_ecs::page::HostedPage::page(
-                    Self::URL,
-                    crate::ui::VaultPage::PAGE.title,
+                    Self::url(),
+                    crate::ui::VaultPage::page().title,
                 )),
         );
 

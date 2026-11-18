@@ -1,11 +1,12 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{ChildOf, Commands, Entity, On, Query, With};
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{CommandBarResultItem, OpenRequest};
 use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, McpServersUiState};
 use vmux_ecs::UiStateWrite;
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
+use vmux_feature::manifest::FeatureManifest;
 use vmux_ui::i18n::translate;
 
 use crate::connection::McpSnapshotRequest;
@@ -41,7 +42,7 @@ fn routes(
     if event.picker.is_some() {
         return;
     }
-    let Some(filter) = RouteQuery::parse(&event.query) else {
+    let Some(filter) = RouteContribution::parse(&event.query) else {
         return;
     };
     let mut categories = std::collections::BTreeMap::new();
@@ -66,11 +67,11 @@ fn routes(
         .entry("extensions".to_string())
         .or_insert((translate("extensions-title"), 100));
     for (route, (label, rank)) in categories {
-        if !filter.matches(&route, &label) {
+        if !RouteContribution::matches(&filter, &route, &label) {
             continue;
         }
-        let url = format!("{}{route}", crate::ToolPlugin::URL);
-        if filter.0.is_empty()
+        let url = format!("{}{route}", crate::ToolPlugin::url());
+        if filter.is_empty()
             && pages
                 .iter()
                 .any(|page| page.command_bar && page.url() == url)
@@ -125,7 +126,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(CommandBarPlugin).add_observer(capture);
             app.world_mut()
-                .spawn(FeatureManifest::of::<crate::Feature>());
+                .spawn(FeatureManifest::of::<crate::Feature>().clone());
             app.world_mut().spawn(FeatureManifest::parse(r#"(
                 tool_providers: [
                     (id: "agent", title: "Agents", route_title: "Agents", route: "acp", rank: 0),
@@ -227,7 +228,7 @@ mod tests {
     #[test]
     fn registered_default_page_is_not_duplicated_and_other_contributions_are_preserved() {
         let mut palette = Palette::create();
-        palette.app.world_mut().spawn(crate::ToolPlugin::MANIFEST);
+        palette.app.world_mut().spawn(crate::ToolPlugin::manifest());
         let other = palette
             .app
             .world_mut()
@@ -259,36 +260,34 @@ fn open_route(
     });
 }
 
-struct RouteQuery(String);
-
-impl RouteQuery {
-    fn parse(query: &str) -> Option<Self> {
+impl RouteContribution {
+    fn parse(query: &str) -> Option<String> {
         let query = query.trim();
-        let root = crate::ToolPlugin::URL.trim_end_matches('/');
+        let root = crate::ToolPlugin::url().trim_end_matches('/');
         let lower = query.to_lowercase();
         if let Some(rest) = lower.strip_prefix(root) {
             if !rest.is_empty() && !rest.starts_with('/') {
                 return None;
             }
-            return Some(Self(rest.trim_matches('/').to_string()));
+            return Some(rest.trim_matches('/').to_string());
         }
         if lower.contains("://") || lower.starts_with('/') || lower.is_empty() {
             return None;
         }
         let tools = translate("tools-title").to_lowercase();
         if lower == "tools" || lower == tools {
-            return Some(Self(String::new()));
+            return Some(String::new());
         }
         if let Some(rest) = lower.strip_prefix("tools ") {
-            return Some(Self(rest.trim().to_string()));
+            return Some(rest.trim().to_string());
         }
-        Some(Self(lower))
+        Some(lower)
     }
 
-    fn matches(&self, route: &str, label: &str) -> bool {
-        self.0.is_empty()
-            || route.to_ascii_lowercase().contains(&self.0)
-            || label.to_lowercase().contains(&self.0)
+    fn matches(filter: &str, route: &str, label: &str) -> bool {
+        filter.is_empty()
+            || route.to_ascii_lowercase().contains(filter)
+            || label.to_lowercase().contains(filter)
     }
 }
 

@@ -11,14 +11,15 @@ use crate::state::{
     ToolsSnapshot, ToolsUiState, ToolsView,
 };
 use bevy::prelude::*;
+use bevy::prelude::{Commands, On, Query};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::manifest::{FeatureId, FeatureManifest};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
     AsyncTask, OperationState, PageMetadata, PageOpenRequest, PageOpenTarget, TaskPlugin,
     TaskResult, TaskSet, TaskWaker, UiState, UiStatePlugin, UiStateWrite,
 };
+use vmux_feature::manifest::{FeatureId, FeatureManifest};
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,
@@ -155,7 +156,7 @@ fn page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if !page.url.starts_with(crate::ToolPlugin::URL) {
+    if !page.url.starts_with(crate::ToolPlugin::url()) {
         return;
     }
     if let Ok(mut subscriber) = subscribers.get_mut(webview) {
@@ -207,7 +208,7 @@ fn navigate_request(
     mut subscribers: Query<&mut ToolSubscriber>,
     mut pages: Query<&mut PageMetadata>,
 ) {
-    let Some(route) = crate::route::ToolRoute::parse(&trigger.event().payload.url) else {
+    let Some(route) = crate::route::ToolRoute::from_request(&trigger.event().payload) else {
         return;
     };
     let webview = trigger.event().webview;

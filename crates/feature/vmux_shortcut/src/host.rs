@@ -11,9 +11,9 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::{CommandDefinition, ResolvedLocale};
 use vmux_command::{KeyCombo, KeyContext, Keymap, Shortcut};
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
 use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::stack::FocusedStack;
@@ -31,7 +31,7 @@ impl Plugin for ShortcutPlugin {
         app.add_plugins((
             crate::claim::ClaimPlugin,
             crate::input::InputPlugin,
-            HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
+            HostedUiPlugin::<Shortcuts>::new(Self::manifest()),
             UiEventPlugin::<(
                 ShortcutProbePressRequest,
                 ShortcutProbeClearRequest,
@@ -521,7 +521,7 @@ fn publish_state(views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>, mut com
 
 fn normalize_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpenTask>>) {
     for mut task in &mut tasks {
-        if let Some(canonical) = ShortcutUrl::canonical(&task.url) {
+        if let Some(canonical) = ShortcutUrl::canonical(&task) {
             task.url = canonical.to_string();
         }
     }
@@ -671,23 +671,23 @@ mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
     use vmux_api::input::KeyModifiers;
-    use vmux_command::CommandManifest;
     use vmux_command::{Binding, Modifiers, Source, When};
     use vmux_ecs::{PageMetadata, PageNavigation, PageOpenId, PageOpenTask};
+    use vmux_feature::manifest::FeatureManifest;
     use vmux_layout::hosted_page::HostedPagePlugin;
 
     struct LayoutCommandFixture;
 
     impl LayoutCommandFixture {
         fn definitions(panes: bool, tabs: bool) -> Vec<CommandDefinition> {
-            CommandManifest::from_feature_ron(include_str!("../../vmux_layout/src/feature.ron"))
-                .into_vec()
-                .into_iter()
-                .filter(|definition| {
-                    panes && matches!(definition.id.as_str(), "close_pane" | "rotate_forward")
-                        || tabs && definition.id == "open_in_new_tab"
-                })
-                .collect()
+            CommandDefinition::from_manifest(&FeatureManifest::parse(include_str!(
+                "../../vmux_layout/src/feature.ron"
+            )))
+            .filter(|definition| {
+                panes && matches!(definition.id.as_str(), "close_pane" | "rotate_forward")
+                    || tabs && definition.id == "open_in_new_tab"
+            })
+            .collect()
         }
     }
 
@@ -930,7 +930,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: navigation,
             stack,
-            url: ShortcutPlugin::URL.to_string(),
+            url: ShortcutPlugin::url().to_string(),
             request_id: None,
         });
 
@@ -965,7 +965,7 @@ mod tests {
         app.update();
 
         let metadata = app.world().get::<PageMetadata>(stack).unwrap();
-        assert_eq!(metadata.url, ShortcutPlugin::URL);
+        assert_eq!(metadata.url, ShortcutPlugin::url());
     }
 
     #[test]

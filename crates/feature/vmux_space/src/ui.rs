@@ -19,7 +19,7 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SpacesUiState", "KeyClaimsUiState"]
+    states = [vmux_ui::theme::ThemeUiState, vmux_api::space::SpacesUiState, vmux_api::input::KeyClaimsUiState]
 )]
 pub(crate) struct SpacesPage;
 

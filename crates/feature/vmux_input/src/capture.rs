@@ -4,8 +4,8 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentImage, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage,
 };
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::{
     AddedTool, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };

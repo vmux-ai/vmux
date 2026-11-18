@@ -5,8 +5,8 @@ use vmux_api::protocol::{
     AgentListCommands, AgentNotify, AgentQueryResult, AgentRequest, ClientMessage, JsonValue,
 };
 use vmux_ecs::JsonArguments;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
     UnclaimedToolInvocation,

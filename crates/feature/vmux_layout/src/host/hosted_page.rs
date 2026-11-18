@@ -863,7 +863,7 @@ fn spawn_error(
         .insert(PageNavigation::new(navigation));
     commands
         .spawn((
-            Browser::hosted_page(crate::ErrorPage::URL, &title),
+            Browser::hosted_page(crate::ErrorPage::url(), &title),
             vmux_api::error::ErrorPageData {
                 title_message_id: vmux_api::error::FAILED_TO_LOAD.to_string(),
                 message: String::new(),

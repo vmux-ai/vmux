@@ -13,8 +13,8 @@ use vmux_command::{
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
 use vmux_ecs::PageMetadata;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{KeyboardOwner, PagePresented};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_ui::i18n::Locale;
 
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
@@ -31,9 +31,9 @@ impl Plugin for StartPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(
-            Self::MANIFEST
+            Self::manifest()
                 .plugin()
-                .hosted(vmux_ecs::page::HostedPage::page(Self::URL, "Start")),
+                .hosted(vmux_ecs::page::HostedPage::page(Self::url(), "Start")),
         )
         .add_message::<InlineTransitionRequested>()
         .add_systems(Startup, prewarm)
@@ -60,7 +60,7 @@ impl Plugin for StartPlugin {
 fn prewarm(mut commands: Commands) {
     commands.spawn(vmux_ecs::page::PrewarmPage::host(
         "start",
-        StartPlugin::URL,
+        StartPlugin::url(),
         "Start",
         2,
     ));
@@ -327,7 +327,7 @@ fn sync_pages(
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
     for (e, meta, synced, keyboard_target, last_git) in &starts {
-        if !meta.url.starts_with(StartPlugin::URL) {
+        if !meta.url.starts_with(StartPlugin::url()) {
             continue;
         }
         let tab = prompt_context.tab(e);
@@ -392,7 +392,7 @@ fn focus_ready(
 ) {
     if starts
         .get(event.webview)
-        .is_ok_and(|metadata| metadata.url.starts_with(StartPlugin::URL))
+        .is_ok_and(|metadata| metadata.url.starts_with(StartPlugin::url()))
     {
         commands.trigger(CommandBarFocusRequested {
             webview: event.webview,
@@ -413,7 +413,7 @@ fn focus_presented(
     mut commands: Commands,
 ) {
     for (webview, metadata) in &starts {
-        if metadata.url.starts_with(StartPlugin::URL) {
+        if metadata.url.starts_with(StartPlugin::url()) {
             commands.trigger(CommandBarFocusRequested { webview });
         }
     }
@@ -450,11 +450,11 @@ fn mark_launcher(
     mut commands: Commands,
 ) {
     for (entity, meta, launcher, synced, transitioning) in starts.iter() {
-        if meta.url.starts_with(StartPlugin::URL) && !launcher {
+        if meta.url.starts_with(StartPlugin::url()) && !launcher {
             commands
                 .entity(entity)
                 .try_insert((HostsLauncher, vmux_command::CommandBarState::default()));
-        } else if !meta.url.starts_with(StartPlugin::URL) && synced && !transitioning {
+        } else if !meta.url.starts_with(StartPlugin::url()) && synced && !transitioning {
             commands.entity(entity).remove::<(
                 HostsLauncher,
                 vmux_command::CommandBarState,
@@ -537,7 +537,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
-        assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+        assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::url()));
     }
 
     #[test]
@@ -565,7 +565,7 @@ mod tests {
         app.world_mut().run_schedule(Update);
         assert!(app.world().get::<HostsLauncher>(page).is_none());
         assert!(app.world().get::<StartWorkSynced>(page).is_none());
-        app.world_mut().get_mut::<PageMetadata>(page).unwrap().url = StartPlugin::URL.into();
+        app.world_mut().get_mut::<PageMetadata>(page).unwrap().url = StartPlugin::url().into();
         app.world_mut().run_schedule(Update);
         assert!(app.world().get::<HostsLauncher>(page).is_some());
     }
@@ -580,12 +580,12 @@ mod tests {
 
         assert!(UiEventPermissions::allows_page(
             permissions.iter(app.world()),
-            StartPlugin::URL,
+            StartPlugin::url(),
             KeyContextRequest::PERMISSION,
         ));
         assert!(UiEventPermissions::allows_page(
             permissions.iter(app.world()),
-            StartPlugin::URL,
+            StartPlugin::url(),
             KeyClaimsUiState::PERMISSION,
         ));
     }
@@ -619,7 +619,7 @@ mod tests {
             .init_resource::<EmittedIds>()
             .add_observer(capture_state);
         let metadata = PageMetadata {
-            url: StartPlugin::URL.to_string(),
+            url: StartPlugin::url().to_string(),
             ..Default::default()
         };
         let selected = app
@@ -646,7 +646,7 @@ mod tests {
     fn selected_start_requests_prompt_focus_after_its_document_is_ready() {
         let mut app = start_focus_app();
         let metadata = PageMetadata {
-            url: StartPlugin::URL.to_string(),
+            url: StartPlugin::url().to_string(),
             ..Default::default()
         };
         let selected = app

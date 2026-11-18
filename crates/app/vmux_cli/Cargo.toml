@@ -16,6 +16,7 @@ name = "vmux"
 path = "src/main.rs"
 
 [dependencies]
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["ecs"] }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 clap = { version = "4", features = ["string"] }

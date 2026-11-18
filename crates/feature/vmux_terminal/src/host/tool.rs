@@ -6,8 +6,8 @@ use vmux_api::protocol::{
     AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript, AgentRequest,
     AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{HostShell, ProcessAnchor};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_transport::service::ServiceConnection;
 

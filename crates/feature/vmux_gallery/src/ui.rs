@@ -19,7 +19,7 @@ pub(crate) mod previews;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "GalleryUiState"],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::GalleryUiState],
     subtree
 )]
 pub(crate) struct GalleryPage;

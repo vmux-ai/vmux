@@ -12,7 +12,7 @@ default = []
 host = ["dep:vmux_profile"]
 contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layout?/contracts"]
 manifest = ["ecs", "vmux_ecs/cli"]
-hosting = ["manifest", "vmux_ecs/hosting"]
+hosting = ["manifest", "vmux_feature/hosting"]
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",
@@ -85,9 +85,9 @@ tool = ["layout-runtime", "dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
 container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
-ecs = ["dep:vmux_ecs"]
-release-flags = ["ecs", "dep:bevy_ecs", "dep:vmux_feature", "dep:vmux_profile"]
-feature-flags = ["release-flags", "runtime", "jobs", "host", "dep:bevy_ecs", "dep:tracing", "dep:vmux_feature", "vmux_feature/page"]
+ecs = ["dep:vmux_ecs", "vmux_feature/ecs"]
+release-flags = ["ecs", "dep:bevy_ecs", "vmux_feature/http", "dep:vmux_profile"]
+feature-flags = ["release-flags", "runtime", "jobs", "host", "dep:bevy_ecs", "dep:tracing", "vmux_feature/manifest", "vmux_feature/page"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
 account-local = ["account", "vmux_account/local"]
 account-cloud = ["account-local", "vmux_account/cloud", "vmux_account/profile-sync", "release-flags", "vmux_team?/profile-sync"]
@@ -134,7 +134,7 @@ vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
 vmux_container = { path = "../../feature/vmux_container", optional = true }
-vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["http"], optional = true }
+vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["manifest"] }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_account = { path = "../../feature/vmux_account", optional = true }

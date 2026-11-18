@@ -4,11 +4,9 @@ pub use vmux_api::history as event;
 #[cfg(host)]
 pub use vmux_ecs::{CreatedAt, LastActivatedAt, UnixMillis, Visit};
 
-#[cfg(host)]
 pub(crate) struct Feature;
 
-#[cfg(host)]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

@@ -13,6 +13,7 @@ runtime-cli = []
 ci-syntax = ["dep:proc-macro2", "dep:syn"]
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 proc-macro2 = { version = "1", features = ["span-locations"], optional = true }
 syn = { version = "2", features = ["full", "visit"], optional = true }
 plist = "1"

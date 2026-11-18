@@ -13,6 +13,7 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "page-binding"] }
 uuid.workspace = true
 regex.workspace = true
 web-time.workspace = true

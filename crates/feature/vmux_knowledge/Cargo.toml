@@ -10,6 +10,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "page-binding"] }
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }

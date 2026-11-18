@@ -380,7 +380,7 @@ fn page_ready(
     };
     if !metadata
         .url
-        .starts_with(crate::registration::FeaturePagePlugin::URL)
+        .starts_with(crate::registration::FeaturePagePlugin::url())
         || contexts.contains(page)
     {
         return;

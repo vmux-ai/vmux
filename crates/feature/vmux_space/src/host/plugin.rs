@@ -2,8 +2,6 @@ use bevy::prelude::{Commands, MessageWriter, On, Query, Res, With};
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 use std::option::Option;
-#[cfg(test)]
-use vmux_command::CommandManifest;
 use vmux_command::{
     CommandBarDismiss, CommandBarOpenRequest, ResolvedLocale, WriteCommandBarRequests,
 };
@@ -15,6 +13,8 @@ use vmux_ecs::{
 };
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 use vmux_ecs::{UiStateWrite, store::WorkspaceRestore};
+#[cfg(test)]
+use vmux_feature::manifest::FeatureManifest;
 use vmux_history::LastActivatedAt;
 use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::projection::SpacesProjection;
@@ -108,7 +108,7 @@ impl Plugin for SpacePlugin {
         .add_message::<SpacesPageSpawnRequest>()
         .add_systems(Update, respond_spaces_spawn.in_set(ReadCommandRequests))
         .add_plugins((
-            HostedUiPlugin::<Spaces>::new(Self::MANIFEST),
+            HostedUiPlugin::<Spaces>::new(Self::manifest()),
             super::key::SpaceKeyPlugin,
             super::project::SpaceProjectPlugin,
             super::snapshot_updater::SnapshotPlugin,
@@ -252,9 +252,9 @@ fn contribute(
         return;
     }
     let query = request.query.trim();
-    let page = query == SpacePlugin::URL
-        || query == SpacePlugin::URL.trim_end_matches('/')
-        || query.starts_with(SpacePlugin::URL);
+    let page = query == SpacePlugin::url()
+        || query == SpacePlugin::url().trim_end_matches('/')
+        || query.starts_with(SpacePlugin::url());
     if !picker
         && !page
         && (query.is_empty()
@@ -320,7 +320,7 @@ fn contribute(
                 row: vmux_api::command_bar::CommandBarResultItem {
                     key: "space:manage".to_string(),
                     title: translate("command-manage-spaces"),
-                    url: SpacePlugin::URL.to_string(),
+                    url: SpacePlugin::url().to_string(),
                     ..Default::default()
                 },
                 rank: i32::MAX,
@@ -356,7 +356,7 @@ fn activate_contribution(
         commands.trigger(UiInput {
             webview: event.webview,
             payload: CommandBarOpenUrlRequest {
-                value: SpacePlugin::URL.to_string(),
+                value: SpacePlugin::url().to_string(),
                 open: event.open,
             },
         });
@@ -921,7 +921,8 @@ fn open_page(
         return;
     };
     if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
-        metadata.url == SpacePlugin::MANIFEST.url && space_window.window_of(*stack) == Some(window)
+        metadata.url == SpacePlugin::manifest().url
+            && space_window.window_of(*stack) == Some(window)
     }) {
         if trigger.event().payload.create {
             commands.entity(existing).insert(OpenSpaceForm);
@@ -942,7 +943,7 @@ fn open_page(
     let stack = stack.id();
     spawn_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
-        url: SpacePlugin::MANIFEST.url.to_string(),
+        url: SpacePlugin::manifest().url.to_string(),
         request_id: None,
     });
 }
@@ -1127,7 +1128,7 @@ fn create(
         name: None,
         startup_dir,
         content: TabLayoutSpawnContent::Url {
-            url: SpacePlugin::MANIFEST.url.to_string(),
+            url: SpacePlugin::manifest().url.to_string(),
             pending_prompt: None,
         },
         clear_pending_stack: true,
@@ -1217,7 +1218,7 @@ fn respond_spaces_spawn(
     for req in reader.read() {
         page_open.write(PageOpenRequest {
             target: PageOpenTarget::Stack(req.target_stack),
-            url: SpacePlugin::MANIFEST.url.to_string(),
+            url: SpacePlugin::manifest().url.to_string(),
             request_id: None,
         });
     }
@@ -1234,7 +1235,9 @@ mod tests {
 
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
+        let definitions =
+            vmux_command::CommandDefinition::from_manifest(FeatureManifest::of::<crate::Feature>())
+                .collect::<Vec<_>>();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)

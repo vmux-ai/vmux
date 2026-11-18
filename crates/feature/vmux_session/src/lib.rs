@@ -61,11 +61,11 @@ impl Plugin for SessionDomainPlugin {
     }
 }
 
-#[cfg(all(host, feature = "app"))]
+#[cfg(host)]
 pub(crate) struct Feature;
 
-#[cfg(all(host, feature = "app"))]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+#[cfg(host)]
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

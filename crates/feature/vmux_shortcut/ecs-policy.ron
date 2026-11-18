@@ -10,10 +10,8 @@ legacy: [
     (key: "crates/feature/vmux_shortcut/src/claim.rs||struct:ClaimPlugin", fingerprint: "06f4b67c0a629911", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs|tests|fn:probe_catalog", fingerprint: "f3a3682cd5fecbfe", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs|tests|fn:stroke", fingerprint: "e0f14abc8bda7955", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/host.rs|tests|impl:LayoutCommandFixture", fingerprint: "4021d79bb327b6a1", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs|tests|struct:LayoutCommandFixture", fingerprint: "9284a8a801d1f1e1", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs||impl:From < & Shortcut > for ShortcutBinding", fingerprint: "9a33b8c51abd6569", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/host.rs||impl:Plugin for ShortcutPlugin", fingerprint: "c19c4f37db62e7c6", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs||impl:ShortcutCatalog", fingerprint: "dd7177d215126410", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs||impl:ShortcutProbe", fingerprint: "de231cd9ae853343", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/host.rs||impl:ShortcutStroke", fingerprint: "2b368a7a573c73cd", issue: "VMX-253"),
@@ -28,28 +26,37 @@ legacy: [
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:release", fingerprint: "b87ad3cceada56f5", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:split_settings_with_leader", fingerprint: "b6c84e82789cc9b7", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:tab_settings_with_leader", fingerprint: "111317191252c934", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/input.rs|tests|impl:ShortcutFixture", fingerprint: "b48bc0b7c30c3bdf", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|struct:ShortcutFixture", fingerprint: "60543112693f4bf2", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||alias:ShortcutUiStateUpdates", fingerprint: "128e8ef9bdb4e8f5", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutBinding", fingerprint: "1d98091106bd6d29", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutCatalog", fingerprint: "bfe10e6591e599bd", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutStroke", fingerprint: "42646775a33caa7c", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutUrl", fingerprint: "fbd5980cdb434913", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:vmux_ecs :: manifest :: FeatureManifestSource for Feature", fingerprint: "6c7dba34d5a66ede", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/lib.rs||struct:Feature", fingerprint: "9a8bd3d7aa1d06ac", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/lib.rs||struct:ShortcutUrl", fingerprint: "85fa10326df9104f", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||fn:Page", fingerprint: "f3ff4fadb82144f4", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||fn:ShortcutEntryView", fingerprint: "05786b4f1f2ce4b8", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||fn:ShortcutSequence", fingerprint: "f4f6b606f8b699fe", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||fn:probe_presentation", fingerprint: "160baf3b5d47604d", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||fn:shortcut_key_class", fingerprint: "00075ca2445b5f73", issue: "VMX-253"),
     (key: "crates/feature/vmux_shortcut/src/ui.rs||impl:ShortcutStroke", fingerprint: "6d2e19d4a1ad7e94", issue: "VMX-253"),
-    (key: "crates/feature/vmux_shortcut/src/ui.rs||struct:ShortcutPage", fingerprint: "53630a675443821f", issue: "VMX-253"),
 ],
 boundaries: [
     (key: "crates/feature/vmux_shortcut/src/input.rs||struct:InputPlugin", fingerprint: "e50f82c52475e045", interface: "Bevy fallback keyboard/keymap prefix owner registration", input: "ECS: crates/feature/vmux_shortcut/src/input.rs||struct:PendingPrefix", output: "external: installed shortcut synchronization, dispatch and prefix retirement", lifetime: "one shortcut plugin installation", bounds: "registration and synchronization ordering only; Keymap-owned components retain pending chord state", teardown: "Keymap removal retires pending prefix before reattachment", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_shortcut/src/input.rs||impl:Plugin for InputPlugin", fingerprint: "2691290c0ed9b162", interface: "Bevy fallback keyboard/keymap prefix owner registration", input: "ECS: crates/feature/vmux_shortcut/src/input.rs||struct:PendingPrefix", output: "external: installed shortcut synchronization, dispatch and prefix retirement", lifetime: "one shortcut plugin installation", bounds: "registration and synchronization ordering only; Keymap-owned components retain pending chord state", teardown: "Keymap removal retires pending prefix before reattachment", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_shortcut/src/input.rs|tests|fn:test_settings_with_leader", fingerprint: "4628e272c0bfdfc2", interface: "Rust test harness configuration adapter", input: "ECS: crates/feature/vmux_setting/src/host/runtime.rs||struct:AppSettings", output: "external: Controlled test App, DOM, configuration or protocol observations", lifetime: "One isolated fixture invocation", bounds: "One generated settings value for an isolated production-plugin fixture", teardown: "App, DOM listeners, captured results, temporary files and native handles drop with the fixture", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/lib.rs||struct:Feature", fingerprint: "46638b0ef6a78408", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:vmux_feature :: manifest :: FeatureManifestSource for Feature", fingerprint: "fa163a34b242f281", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/ui.rs||struct:ShortcutPage", fingerprint: "5be588409973a8d9", interface: "Dioxus and Bevy CEF typed page registration", input: "ECS: crates/util/vmux_ui/src/theme.rs||struct:ThemeUiState", output: "external: mounted page metadata and typed subscription wiring", lifetime: "one static page registration", bounds: "the actual page attribute binds declared Rust UI state types; page systems retain domain and mutation authority", teardown: "page unmount drops presentation and handlers; compiled metadata remains immutable", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/host.rs||impl:Plugin for ShortcutPlugin", fingerprint: "f95f253fda33393f", interface: "Bevy App plugin composition", input: "external: Bevy App registration and static page metadata", output: "ECS: crates/util/vmux_api/src/page_metadata.rs||struct:PageMetadata", lifetime: "one root plugin installation", bounds: "stateless composition only; registered feature systems and canonical entities own behavior and persistence", teardown: "App drop removes registrations and their canonical state", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/lib.rs||struct:ShortcutUrl", fingerprint: "85fa10326df9104f", interface: "Legacy shortcuts URL codec", input: "ECS: crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenTask", output: "external: immutable URL or DOM representation", lifetime: "one accepted page-open task", bounds: "one shortcuts URL and its two historical aliases; the page-open system owns mutation and completion", teardown: "temporary values drop with the input or mounted projection", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/lib.rs||impl:ShortcutUrl", fingerprint: "86714c350042f9c3", interface: "Legacy shortcuts URL codec", input: "ECS: crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenTask", output: "external: immutable URL or DOM representation", lifetime: "one accepted page-open task", bounds: "one shortcuts URL and its two historical aliases; the page-open system owns mutation and completion", teardown: "temporary values drop with the input or mounted projection", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/host.rs|tests|impl:LayoutCommandFixture", fingerprint: "019b5ee5efc0372f", interface: "Headless Bevy production-plugin and embedded RON fixture", input: "external: fixed embedded declarations, typed fixture input and isolated Bevy App", output: "ECS: crates/feature/vmux_feature/src/manifest.rs||struct:FeatureManifest", lifetime: "one isolated behavioral regression", bounds: "one production schedule or declaration conversion; no persistent fixture registry or production IO", teardown: "App drop releases canonical fixture entities and owned work", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_shortcut/src/input.rs|tests|impl:ShortcutFixture", fingerprint: "9809d009803a9d5e", interface: "Headless Bevy production-plugin and embedded RON fixture", input: "external: fixed embedded declarations, typed fixture input and isolated Bevy App", output: "ECS: crates/feature/vmux_feature/src/manifest.rs||struct:FeatureManifest", lifetime: "one isolated behavioral regression", bounds: "one production schedule or declaration conversion; no persistent fixture registry or production IO", teardown: "App drop releases canonical fixture entities and owned work", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   debt: [

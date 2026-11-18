@@ -2,6 +2,7 @@ use crate::SimulatorPlugin;
 use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorUiState};
 use crate::url::SimulatorRoute;
 use bevy::prelude::*;
+use bevy::prelude::{Commands, Query};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 pub use device::{Axe, SimulatorDevice};
@@ -72,9 +73,9 @@ impl Plugin for SimulatorPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SimulatorPage::plugin());
         app.add_plugins(
-            Self::MANIFEST
+            Self::manifest()
                 .plugin()
-                .hosted(HostedPage::subtree(Self::URL, Self::MANIFEST.title)),
+                .hosted(HostedPage::subtree(Self::url(), Self::manifest().title)),
         )
         .add_plugins(UiStatePlugin::<SimulatorUiState>::default())
         .add_plugins(SimulatorToolPlugin)
@@ -640,7 +641,7 @@ fn announce(
     mut commands: Commands,
 ) {
     for (entity, meta, child_of, announced, starting, failed) in views.iter() {
-        if !meta.url.starts_with(SimulatorPlugin::URL) {
+        if !meta.url.starts_with(SimulatorPlugin::url()) {
             continue;
         }
         let payload = match attachments.get(entity) {

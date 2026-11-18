@@ -17,7 +17,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, vmux_api::input::KeyClaimsUiState],
     subtree,
     preserve_title,
     no_favicon,

@@ -14,6 +14,7 @@ profile-sync = ["vmux_account/profile-sync"]
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "page-binding"] }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 rkyv = { workspace = true }

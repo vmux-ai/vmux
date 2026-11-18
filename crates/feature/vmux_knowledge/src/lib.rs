@@ -10,11 +10,9 @@ pub use host::KnowledgePlugin;
 pub use tool::KnowledgeToolPlugin;
 pub use vmux_api::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
 
-#[cfg(host)]
-pub(crate) struct Feature;
+pub struct Feature;
 
-#[cfg(host)]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

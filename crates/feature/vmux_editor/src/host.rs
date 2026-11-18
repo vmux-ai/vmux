@@ -52,14 +52,14 @@ impl Plugin for EditorPlugin {
             vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default(),
         ))
         .add_plugins((
-            Self::MANIFEST
+            Self::manifest()
                 .plugin()
                 .route(vmux_ecs::host_spawn::HostSpawnRoute::scheme("file")),
-            ProjectsPage::MANIFEST
+            ProjectsPage::manifest()
                 .plugin()
                 .hosted(vmux_ecs::page::HostedPage::subtree(
-                    ProjectsPage::URL,
-                    ProjectsPage::MANIFEST.title,
+                    ProjectsPage::url(),
+                    ProjectsPage::manifest().title,
                 )),
         ));
     }

@@ -262,7 +262,7 @@ fn page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if !page.url.starts_with(VaultPlugin::URL) {
+    if !page.url.starts_with(VaultPlugin::url()) {
         return;
     }
     let requested = VaultWorkflow::for_url(&page.url);

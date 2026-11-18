@@ -7,8 +7,8 @@ use vmux_api::protocol::{
 };
 use vmux_command::AgentInvokeCommand;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
     ToolQueryRouteSet,

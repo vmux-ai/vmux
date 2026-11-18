@@ -14,6 +14,7 @@ debug = []
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 inventory = "0.3"
 rkyv = { workspace = true }
 serde = { workspace = true }

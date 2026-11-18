@@ -15,9 +15,8 @@ use bevy_ecs::system::SystemParam;
 #[cfg(feature = "development")]
 use vmux_ecs::cli::{CliInvocation, CliResult};
 #[cfg(feature = "development")]
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
-#[cfg(feature = "development")]
 use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState};
+use vmux_feature::manifest::{FeatureManifestSource, FeaturePlugin};
 
 use environment::Environment;
 #[cfg(feature = "development")]

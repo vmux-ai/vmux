@@ -41,7 +41,7 @@ pub(super) struct FilePageTarget {
 impl AgentFileLayout<'_, '_> {
     fn is_file(&self, url: &str) -> bool {
         self.placements
-            .same_group(url, vmux_editor::EditorPlugin::URL)
+            .same_group(url, vmux_editor::EditorPlugin::url())
     }
 
     pub(super) fn reuses(&self, request_url: &str, existing_url: &str) -> bool {

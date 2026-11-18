@@ -243,7 +243,8 @@ fn dispatch(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandInvocation, CommandManifest, CommandPlugin};
+    use vmux_command::{CommandInvocation, CommandPlugin};
+    use vmux_feature::manifest::FeatureManifest;
     use vmux_layout::pane::PaneCommandPlugin;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -270,9 +271,7 @@ mod tests {
                 include_str!("../../vmux_layout/src/feature.ron"),
                 include_str!("../../vmux_space/src/feature.ron"),
             ] {
-                for definition in CommandManifest::from_feature_ron(source).into_vec() {
-                    app.world_mut().spawn(definition);
-                }
+                app.world_mut().spawn(FeatureManifest::parse(source));
             }
             if let Some(settings) = settings {
                 app.insert_resource(settings);

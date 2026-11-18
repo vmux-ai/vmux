@@ -11,7 +11,7 @@ default = []
 contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api", "dep:vmux_project", "vmux_ecs/contracts"]
 geometry = ["dep:vmux_flex", "dep:bevy_transform"]
 store = ["vmux_ecs/store", "dep:moonshine-save"]
-host = [
+host = ["vmux_feature/page",
     "contracts", "geometry", "store", "vmux_ecs/host",
     "dep:vmux_page", "dep:vmux_path", "dep:vmux_ui", "dep:vmux_session", "dep:vmux_git",
     "dep:bevy", "dep:bevy_asset", "dep:bevy_cef", "dep:bevy_cef_core", "dep:libc",
@@ -23,6 +23,7 @@ host = [
 debug = ["host"]
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 bevy_app.workspace = true
 bevy_ecs.workspace = true
 bevy_reflect.workspace = true

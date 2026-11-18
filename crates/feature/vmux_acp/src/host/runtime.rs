@@ -4,10 +4,10 @@ use vmux_api::protocol::{AcpSessionConfig, ClientMessage, SharedMessage};
 use vmux_ecs::Cwd;
 #[cfg(test)]
 use vmux_ecs::ProcessId;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_git::worktree::ValidatedLinkedWorkspace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::TabWorktreeReady;

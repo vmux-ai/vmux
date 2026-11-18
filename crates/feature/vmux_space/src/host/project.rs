@@ -660,7 +660,7 @@ fn publish_git_projects(
     let mut projection = None;
     for (entity, page, current) in &views {
         if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
-            && page.url != vmux_git::GitPlugin::MANIFEST.url
+            && page.url != vmux_git::GitPlugin::manifest().url
         {
             continue;
         }

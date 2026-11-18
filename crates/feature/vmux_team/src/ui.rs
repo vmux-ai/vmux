@@ -21,7 +21,7 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "TeamUiState"]
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, vmux_api::team::TeamUiState]
 )]
 pub(crate) struct TeamPage;
 

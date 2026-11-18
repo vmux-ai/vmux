@@ -16,7 +16,7 @@ use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ShortcutUiState"]
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::ShortcutUiState]
 )]
 pub(crate) struct ShortcutPage;
 

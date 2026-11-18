@@ -6,10 +6,10 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostedPage, PageReady};
 use vmux_ecs::wake::Wake;
 use vmux_ecs::{KeyboardOwner, PageMetadata, Revision, UiStatePlugin, UiStateWrite};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
@@ -28,15 +28,15 @@ impl Plugin for ContainerPlugin {
         app.init_resource::<Source>()
             .add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_plugins((
-                Self::MANIFEST
+                Self::manifest()
                     .plugin()
-                    .hosted(HostedPage::page(Self::URL, "VM")),
-                crate::Docker::MANIFEST
+                    .hosted(HostedPage::page(Self::url(), "VM")),
+                crate::Docker::manifest()
                     .plugin()
-                    .hosted(HostedPage::page(crate::Docker::URL, "Docker")),
-                crate::Containers::MANIFEST
+                    .hosted(HostedPage::page(crate::Docker::url(), "Docker")),
+                crate::Containers::manifest()
                     .plugin()
-                    .hosted(HostedPage::subtree(crate::Containers::URL, "Containers")),
+                    .hosted(HostedPage::subtree(crate::Containers::url(), "Containers")),
             ))
             .add_plugins(UiStatePlugin::<ContainerUiState>::default())
             .add_plugins(UiEventPlugin::<(
@@ -227,15 +227,15 @@ fn page_ready(
     let Ok((page, revision)) = pages.get(entity) else {
         return;
     };
-    if !vmux_api::RoutePattern::new(ContainerPlugin::URL, false).matches(&page.url)
-        && !vmux_api::RoutePattern::new(crate::Docker::URL, false).matches(&page.url)
-        && !vmux_api::RoutePattern::new(crate::Containers::URL, true).matches(&page.url)
+    if !vmux_api::RoutePattern::new(ContainerPlugin::url(), false).matches(&page.url)
+        && !vmux_api::RoutePattern::new(crate::Docker::url(), false).matches(&page.url)
+        && !vmux_api::RoutePattern::new(crate::Containers::url(), true).matches(&page.url)
     {
         return;
     }
     commands.entity(entity).insert((
         PageView,
-        vmux_ecs::address::AddressScope::subtree(ContainerPlugin::URL),
+        vmux_ecs::address::AddressScope::subtree(ContainerPlugin::url()),
     ));
     if revision.is_none() {
         commands
@@ -723,7 +723,7 @@ mod tests {
             .spawn((
                 PageView,
                 PageMetadata {
-                    url: crate::Containers::URL.into(),
+                    url: crate::Containers::url().into(),
                     ..Default::default()
                 },
                 Revision::default(),
@@ -739,7 +739,7 @@ mod tests {
         browsers.set_externally_hosted(page);
         app.world_mut().insert_non_send(browsers);
         app.world_mut().spawn(UiEventPermissions {
-            url: crate::Containers::URL,
+            url: crate::Containers::url(),
             owns_subtree: true,
             permissions: &[ContainerUiState::PERMISSION],
         });
@@ -965,7 +965,7 @@ mod tests {
             .spawn((
                 PageView,
                 PageMetadata {
-                    url: crate::Containers::URL.into(),
+                    url: crate::Containers::url().into(),
                     ..Default::default()
                 },
                 Revision::default(),
@@ -979,7 +979,7 @@ mod tests {
         browsers.set_externally_hosted(page);
         app.world_mut().insert_non_send(browsers);
         app.world_mut().spawn(UiEventPermissions {
-            url: crate::Containers::URL,
+            url: crate::Containers::url(),
             owns_subtree: true,
             permissions: &[ContainerUiState::PERMISSION],
         });

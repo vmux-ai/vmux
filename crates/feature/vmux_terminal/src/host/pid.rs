@@ -21,7 +21,7 @@ pub struct Pid(pub u32);
 
 impl Pid {
     pub fn page_url(&self) -> String {
-        format!("{}{}", crate::TerminalPlugin::URL, self.0)
+        format!("{}{}", crate::TerminalPlugin::url(), self.0)
     }
 }
 

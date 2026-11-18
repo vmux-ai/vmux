@@ -36,7 +36,7 @@ pub use window_drag::{WindowDragRegion, WindowDragRegions};
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

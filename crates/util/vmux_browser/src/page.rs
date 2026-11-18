@@ -1,9 +1,11 @@
+use bevy::prelude::{Children, Commands, Entity, Query, Res, Time, With};
 use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::{RequestReload, WebviewRendererTerminatedReceiver};
+use std::option::Option;
 use vmux_api::{
     VmuxRoute,
     error::{ErrorPageData, FAILED_TO_LOAD, NOT_FOUND},
@@ -598,7 +600,7 @@ fn attach_error_pages(
         commands.entity(attachment.stack).insert(metadata.clone());
         let browser = commands
             .spawn((
-                Browser::hosted_page(vmux_layout::ErrorPage::URL, &title),
+                Browser::hosted_page(vmux_layout::ErrorPage::url(), &title),
                 attachment.failure.clone(),
                 ChildOf(attachment.stack),
             ))

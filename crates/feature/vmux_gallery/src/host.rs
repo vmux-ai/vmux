@@ -3,8 +3,8 @@ use bevy::prelude::{
     Plugin, Query, Update,
 };
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
 use vmux_ecs::{PageMetadata, UiState, UiStatePlugin, UiStateWrite};
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_layout::hosted_page::HostedUiPlugin;
 
 use crate::{
@@ -30,8 +30,8 @@ pub struct GalleryPlugin;
 impl Plugin for GalleryPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeaturePlugin::<Self>::default(),
-            HostedUiPlugin::<Preview>::new(Self::MANIFEST),
+            FeaturePlugin::<crate::Feature>::default(),
+            HostedUiPlugin::<Preview>::new(Self::manifest()),
             UiEventPlugin::<(
                 GalleryDisabledRequest,
                 GalleryTextRequest,
@@ -67,10 +67,6 @@ impl Plugin for GalleryPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::GalleryPage::plugin());
     }
-}
-
-impl FeatureManifestSource for GalleryPlugin {
-    const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 struct PreviewPlugin;
@@ -248,7 +244,7 @@ impl Preview {
                 label_key: "gallery-title".into(),
                 icon: Some(vmux_api::BuiltinIcon::Layers),
                 intent: Some(AddressIntent::Navigate {
-                    url: GalleryPlugin::URL.into(),
+                    url: GalleryPlugin::url().into(),
                 }),
                 ..Default::default()
             },

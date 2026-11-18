@@ -653,20 +653,17 @@ struct Configuration {
 #[cfg(host)]
 impl Configuration {
     fn load() -> Self {
-        let file: FeatureFile = ron::from_str(include_str!("feature.ron"))
-            .expect("embedded Session configuration must be valid RON");
-        file.session.validate();
+        let session: SessionConfiguration =
+            vmux_feature::manifest::FeatureManifest::of::<crate::Feature>()
+                .session()
+                .expect("embedded Session configuration must be valid RON")
+                .expect("Session feature declares its configuration");
+        session.validate();
         Self {
-            default_stage: StageId(file.session.default_stage),
-            stages: file.session.stages,
+            default_stage: StageId(session.default_stage),
+            stages: session.stages,
         }
     }
-}
-
-#[cfg(host)]
-#[derive(Deserialize)]
-struct FeatureFile {
-    session: SessionConfiguration,
 }
 
 #[cfg(host)]

@@ -93,7 +93,7 @@ impl SimulatorRoute {
     }
 
     fn parse_url(url: &str) -> Option<Self> {
-        let root = VmuxRoute::parse(crate::SimulatorPlugin::URL)?;
+        let root = VmuxRoute::parse(crate::SimulatorPlugin::url())?;
         let route = VmuxRoute::parse(url)?;
         if route.host() != root.host() {
             return None;
@@ -131,7 +131,7 @@ impl SimulatorRoute {
     pub fn url(version: &IosVersion, device_name: Option<&str>) -> String {
         format!(
             "{}{}",
-            crate::SimulatorPlugin::URL.trim_end_matches('/'),
+            crate::SimulatorPlugin::url().trim_end_matches('/'),
             Self::path(version, device_name)
         )
     }

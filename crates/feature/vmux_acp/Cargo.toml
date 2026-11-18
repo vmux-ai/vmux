@@ -75,6 +75,7 @@ app = [
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 bevy_ecs = { workspace = true, optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true, default-features = false, features = ["contracts"] }
 vmux_session = { path = "../vmux_session", default-features = false, optional = true }

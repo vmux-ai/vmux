@@ -13,6 +13,7 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "page-binding"] }
 dioxus = { workspace = true }
 serde = { workspace = true }
 rkyv = { workspace = true }

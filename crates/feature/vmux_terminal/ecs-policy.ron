@@ -82,7 +82,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:apply_viewport_updates", fingerprint: "37f4d8037eb191ed", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:copy_mode_key_exits", fingerprint: "e20e9eb5a0e93d89", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:copy_mode_key_uses_count", fingerprint: "16616efab7486973", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:format_url", fingerprint: "781169ef5574a04f", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:input_char", fingerprint: "d32d7abdffc11338", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:input_digit", fingerprint: "6c5a44297f210091", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:key_char_eq", fingerprint: "a324f8cccccdbfe0", issue: "VMX-253"),
@@ -97,8 +96,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:CopyModeKeyInput < \'a >", fingerprint: "a7c0adf40b01d99a", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:Plugin for TerminalInputPlugin", fingerprint: "266d4f0f7e611be2", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:Plugin for TerminalServicePlugin", fingerprint: "90957c1d1f87995d", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:ReattachedTerminalBundle", fingerprint: "368c412a8d9b9340", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:TerminalBundle", fingerprint: "ff2d22a0ac02b278", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:TerminalInput", fingerprint: "a2db58f38e0ecaa1", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:TerminalInput#2", fingerprint: "2a3cbd6a9f535f46", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:TerminalShortcutState", fingerprint: "38b419755ac9c9d4", issue: "VMX-253"),
@@ -129,7 +126,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||fn:spawn", fingerprint: "74e0cd87de9480f5", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:From < LocalProcess > for LocalVmuxProcess", fingerprint: "c41ba34be9b40b9f", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:LocalVmuxProcess", fingerprint: "baf1fa7fb3dd69fe", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:Plugin for ProcessMonitorPlugin", fingerprint: "f09a79c05004d636", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:ProcessMemory", fingerprint: "d9286997dafb73e9", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:ProcessUptime", fingerprint: "500f32dc1ba8fbee", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:Sparkline", fingerprint: "b584dff7086adaea", issue: "VMX-253"),
@@ -192,8 +188,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/host/tool.rs||struct:ProcessTarget", fingerprint: "abdd60de54f4d9c1", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/tool.rs||struct:Run", fingerprint: "62f882b5def700f1", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/tool.rs||struct:TerminalToolPlugin", fingerprint: "9de2ea6768cb73ff", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/lib.rs||impl:vmux_ecs :: manifest :: FeatureManifestSource for Feature", fingerprint: "6c7dba34d5a66ede", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/lib.rs||struct:Feature", fingerprint: "9a8bd3d7aa1d06ac", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/render_model.rs||impl:TermSpanPresentation", fingerprint: "3e7dc54838b5dc74", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/render_model.rs||struct:SpanBackgroundOverlay", fingerprint: "509f416156a51d22", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/render_model.rs||struct:TermSpanPresentation", fingerprint: "5aa6106434ad8fac", issue: "VMX-253"),
@@ -201,7 +195,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/ui/monitor.rs||fn:ProcessTable", fingerprint: "da8c90461999f7b7", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/monitor.rs||fn:ServiceDashboard", fingerprint: "8c185fede086f3f4", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/monitor.rs||fn:UsageChart", fingerprint: "01ae58008021afc9", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/ui/monitor.rs||struct:ProcessMonitorPage", fingerprint: "499cf62ed3359d65", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/state.rs||impl:TerminalState", fingerprint: "1857c06a62265611", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/state.rs||struct:TerminalRowState", fingerprint: "0da59f98e396c498", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/state.rs||struct:TerminalState", fingerprint: "62c02c6163656f0d", issue: "VMX-253"),
@@ -219,7 +212,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||fn:span_char_offset_for_col", fingerprint: "290ee4d14be82100", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||fn:span_contains_col", fingerprint: "85cfb3837e49b547", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||fn:trigger_button_id", fingerprint: "b4539ead7637b97d", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/ui/surface.rs||struct:TerminalPage", fingerprint: "63e3cff243a98b2f", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/ui/surface.rs||struct:Viewport", fingerprint: "3d3477d4878bc9a9", issue: "VMX-253"),
 ],
 boundaries: [
@@ -240,10 +232,22 @@ boundaries: [
     (key: "crates/feature/vmux_terminal/src/host/directory.rs|tests|impl:TerminalFixture", fingerprint: "bf961fbb96eb9d8b", interface: "Headless Bevy production-plugin fixture", input: "external: isolated typed test input and Bevy App", output: "ECS: crates/feature/vmux_terminal/src/host/directory.rs||struct:Entries", lifetime: "one isolated regression invocation", bounds: "one App; fixture state stays in canonical entities and registered production schedules", teardown: "App drop releases fixture entities, schedules and native handles", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/host/directory.rs||struct:DirectoryPlugin", fingerprint: "97dca9dbae73901a", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_terminal/src/host/directory.rs||struct:Entries", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/host/snapshot.rs||impl:bevy :: app :: Plugin for SnapshotPlugin", fingerprint: "50008ebdd79a729e", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_command/src/host/snapshot.rs||struct:CommandBarWorkDirectory", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
-    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:Plugin for TerminalPlugin", fingerprint: "2ae7361f75f35b2a", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_terminal/src/host/agent.rs||struct:ProcessStackSpawnRequest", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:Plugin for TerminalPlugin", fingerprint: "d709a93bbf4d59d1", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_terminal/src/host/agent.rs||struct:ProcessStackSpawnRequest", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:Plugin for TerminalUpdatePlugin", fingerprint: "79e298629d6ec189", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_terminal/src/host/directory.rs||struct:Entries", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/host/snapshot.rs||struct:SnapshotPlugin", fingerprint: "7db7b539c918ed15", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_command/src/host/snapshot.rs||struct:CommandBarWorkDirectory", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_terminal/src/host/directory.rs||impl:bevy :: app :: Plugin for DirectoryPlugin", fingerprint: "8b069f608acc42d9", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/feature/vmux_terminal/src/host/directory.rs||struct:Entries", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_terminal/src/lib.rs||struct:Feature", fingerprint: "46638b0ef6a78408", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_terminal/src/lib.rs||impl:vmux_feature :: manifest :: FeatureManifestSource for Feature", fingerprint: "fa163a34b242f281", interface: "Embedded feature.ron registration through FeatureManifestSource", input: "pre-world: immutable embedded feature manifest source", output: "pre-world: stateless typed manifest registration", lifetime: "one compiled feature declaration and its cached registration", bounds: "one embedded source per stateless Rust owner type; no runtime decision state", teardown: "App owns registration and canonical entities; immutable source has process lifetime", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_terminal/src/ui/monitor.rs||struct:ProcessMonitorPage", fingerprint: "98755e068572fe9c", interface: "Dioxus and Bevy CEF typed page registration", input: "ECS: crates/util/vmux_ui/src/theme.rs||struct:ThemeUiState", output: "external: mounted page metadata and typed subscription wiring", lifetime: "one static page registration", bounds: "the actual page attribute binds declared Rust UI state types; page systems retain domain and mutation authority", teardown: "page unmount drops presentation and handlers; compiled metadata remains immutable", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_terminal/src/ui/surface.rs||struct:TerminalPage", fingerprint: "d395cfe00269b3d4", interface: "Dioxus and Bevy CEF typed page registration", input: "ECS: crates/util/vmux_ui/src/theme.rs||struct:ThemeUiState", output: "external: mounted page metadata and typed subscription wiring", lifetime: "one static page registration", bounds: "the actual page attribute binds declared Rust UI state types; page systems retain domain and mutation authority", teardown: "page unmount drops presentation and handlers; compiled metadata remains immutable", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_terminal/src/host/process_monitor.rs||impl:Plugin for ProcessMonitorPlugin", fingerprint: "a146278971a4b003", interface: "Bevy App plugin composition", input: "external: Bevy App registration and static page metadata", output: "ECS: crates/feature/vmux_feature/src/manifest.rs||struct:FeatureManifest", lifetime: "one root plugin installation", bounds: "stateless composition only; registered feature systems and canonical entities own behavior and persistence", teardown: "App drop removes registrations and their canonical state", architecture: "ECS ownership boundaries"),
+
+    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:TerminalBundle", fingerprint: "5ec925dcd1f45db9", interface: "Bevy Bundle construction and insertion ABI", input: "external: one caller-selected launch or attachment and its configuration", output: "ECS: crates/util/vmux_ecs/src/terminal.rs||struct:Terminal", lifetime: "one entity construction or attachment", bounds: "constructs one concrete Bundle; the caller and service systems own admission, queueing, IO and runtime lifetime", teardown: "Bundle fields become canonical entity components when inserted", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||impl:ReattachedTerminalBundle", fingerprint: "8e1808eea80b9a11", interface: "Bevy Bundle construction and insertion ABI", input: "external: one caller-selected launch or attachment and its configuration", output: "ECS: crates/util/vmux_ecs/src/terminal.rs||struct:Terminal", lifetime: "one entity construction or attachment", bounds: "constructs one concrete Bundle; the caller and service systems own admission, queueing, IO and runtime lifetime", teardown: "Bundle fields become canonical entity components when inserted", architecture: "ECS ownership boundaries"),
 ],
 values: [
     (key: "crates/feature/vmux_terminal/src/host/agent_run.rs||struct:RunTerminalCandidate", owner: "crates/feature/vmux_terminal/src/host/agent_run.rs||struct:RunTerminals", lifetime: "Read-only terminal placement candidate derived from the canonical process, launch and pane queries during one accepted run batch"),
@@ -266,7 +270,6 @@ shape: (
     (key: "crates/feature/vmux_terminal/src/host/mouse.rs||impl:TerminalMouseState::apply", fingerprint: "b8c363b735621181", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_terminal/src/host/agent.rs||enum:AgentShellMode", fingerprint: "0f304bf3bf480e44", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_terminal/src/host/agent_run.rs||enum:PlacementMode", fingerprint: "d4970af0e0b059ee", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_terminal/src/host/plugin.rs||fn:handle_page_open", fingerprint: "bf479d11a6c6a031", issue: "VMX-253", finding: "AU-14"),
   ],
 ),
 )

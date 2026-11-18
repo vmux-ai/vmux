@@ -10,7 +10,7 @@ use vmux_ecs::event::{
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::manifest::FeaturePlugin;
 
 use crate::host::editing::FileFindOpenRequest;
 use crate::host::editor::{Editor, FileView};

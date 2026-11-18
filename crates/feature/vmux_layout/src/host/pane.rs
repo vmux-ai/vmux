@@ -34,9 +34,9 @@ pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
-#[cfg(test)]
 use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 #[cfg(test)]
 use vmux_flex::prelude::*;
 use vmux_flex::{Display, Node, Visibility};

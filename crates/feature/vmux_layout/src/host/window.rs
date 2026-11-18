@@ -14,13 +14,13 @@ use bevy::{
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageEmbedSet;
 use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{
     Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
 };
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 

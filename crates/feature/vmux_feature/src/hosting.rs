@@ -2,11 +2,11 @@ use bevy_app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 use vmux_api::{BinEvent, PageReady, UiEvent};
+use vmux_ecs::{EffectiveStartupUrl, Ready};
 
 use crate::manifest::{
     FeatureManifest, FeatureManifestOwner, FeatureManifestSource, FeaturePlugin,
 };
-use crate::{EffectiveStartupUrl, Ready};
 
 pub struct WebHostPlugin {
     contract: Contract,
@@ -151,6 +151,9 @@ impl Header {
             .as_ref()
             .ok_or("package needs feature metadata")?;
         if !metadata.provides.is_empty()
+            || manifest.root
+            || !manifest.flags.is_empty()
+            || !manifest.auth_providers.is_empty()
             || !manifest.commands.is_empty()
             || !manifest.tools.is_empty()
             || manifest.cli.is_some()

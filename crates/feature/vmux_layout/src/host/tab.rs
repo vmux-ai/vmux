@@ -10,15 +10,15 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-#[cfg(test)]
-use vmux_command::CommandManifest;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 use vmux_ecs::Order;
 use vmux_ecs::launcher::LauncherDismissRequest;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::store::StoreAppExt;
 pub use vmux_ecs::workspace::TabCommandSet;
+#[cfg(test)]
+use vmux_feature::manifest::FeatureManifest;
+#[cfg(test)]
+use vmux_feature::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -696,7 +696,8 @@ mod tests {
 
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
+        let definitions = CommandDefinition::from_manifest(FeatureManifest::of::<crate::Feature>())
+            .collect::<Vec<_>>();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
