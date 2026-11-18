@@ -19,8 +19,8 @@ use crate::filesystem::{MaterializeCompleted, MaterializeRequest};
 use crate::host::Binding;
 use crate::webstore::ChromeWebStore;
 use crate::{
-    Catalog, ExtensionSet, InstallOwner, InstallRequest, Mutation, Request,
-    catalog::ExtensionCatalog, download, driver, store,
+    Catalog, ExtensionSet, Install, InstallOwner, InstallRequest, catalog::ExtensionCatalog,
+    download, driver, store,
 };
 
 const DEFAULT_PRODVERSION: &str = "120.0.0.0";
@@ -181,17 +181,24 @@ impl Job for DownloadJob {
 }
 
 #[derive(Clone)]
-struct UnpackJob(DownloadedInstall);
+struct UnpackJob {
+    downloaded: DownloadedInstall,
+    request: InstallRequest,
+}
 
 impl Job for UnpackJob {
     type Output = Result<InstallOutput, String>;
 
     fn run(self) -> Self::Output {
-        let bytes = std::fs::read(&self.0.crx_path).map_err(|error| error.to_string())?;
+        if self.request.id != self.downloaded.id || self.request.profile != self.downloaded.profile
+        {
+            return Err("downloaded extension context changed".into());
+        }
+        let bytes = std::fs::read(&self.downloaded.crx_path).map_err(|error| error.to_string())?;
         PackageInstaller {
-            id: self.0.id,
-            profile: self.0.profile,
-            staging: self.0.staging,
+            id: self.request.id,
+            profile: self.request.profile,
+            staging: self.downloaded.staging,
         }
         .unpack(bytes)
     }
@@ -399,6 +406,7 @@ fn unpack(
     operations: Query<(
         Entity,
         &ExtensionInstallRequest,
+        &InstallRequest,
         &DownloadProgressChannel,
         Option<&JobResult<DownloadJob>>,
         &OperationState,
@@ -407,7 +415,7 @@ fn unpack(
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
-    for (entity, request, progress, result, state) in &operations {
+    for (entity, request, install, progress, result, state) in &operations {
         if !matches!(state, OperationState::Pending | OperationState::Running) {
             continue;
         }
@@ -437,9 +445,10 @@ fn unpack(
         )>();
         match &result.0 {
             Ok(Ok(downloaded)) => {
-                commands
-                    .entity(entity)
-                    .insert(JobRequest(UnpackJob(downloaded.clone())));
+                commands.entity(entity).insert(JobRequest(UnpackJob {
+                    downloaded: downloaded.clone(),
+                    request: install.clone(),
+                }));
                 catalog.update_progress(ExtInstallProgress {
                     key: request.source.clone(),
                     phase: ExtInstallPhase::Unpacking,
@@ -510,11 +519,13 @@ fn materialize(
             .remove::<Materializing>();
         match &completion.result {
             Ok(entry) => {
-                commands.entity(completion.operation).insert(Request {
-                    ticket: install.ticket.clone(),
-                    profile: install.profile.clone(),
-                    mutation: Mutation::Install(Box::new(entry.clone())),
-                });
+                commands
+                    .entity(completion.operation)
+                    .insert(Install::prepared(
+                        install.ticket.clone(),
+                        install.profile.clone(),
+                        entry.clone(),
+                    ));
                 if let Some(wake) = &wake {
                     wake.0.wake_by_ref()
                 }
@@ -671,6 +682,54 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(installed.join("background.js")).unwrap(),
             "previous"
+        );
+    }
+
+    #[test]
+    fn unpack_refuses_download_from_a_replaced_install_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = FixtureCrx::new(r#"{"name":"Example","version":"1","manifest_version":3}"#);
+        let crx_path = directory.path().join("download.crx");
+        std::fs::write(&crx_path, &fixture.bytes).unwrap();
+        let staged = directory.path().join("staging/request");
+        std::fs::create_dir_all(&staged).unwrap();
+        let mut app = App::new();
+        app.add_plugins(crate::CorePlugin);
+        let root = app
+            .world_mut()
+            .spawn((
+                crate::Root(directory.path().to_path_buf()),
+                crate::Seed(Ok(store::Index::default())),
+            ))
+            .id();
+        app.update();
+        let ticket = app
+            .world()
+            .get::<crate::core::Scope>(root)
+            .unwrap()
+            .0
+            .clone();
+        let job = UnpackJob {
+            downloaded: DownloadedInstall {
+                id: fixture.id.clone(),
+                profile: "previous-profile".into(),
+                staging: Staging::new(staged.clone()),
+                crx_path: crx_path.clone(),
+            },
+            request: InstallRequest {
+                ticket,
+                profile: "current-profile".into(),
+                id: fixture.id,
+            },
+        };
+        assert!(job.run().is_err());
+        assert!(!staged.join("unpacked").exists());
+        assert_eq!(std::fs::read(crx_path).unwrap(), fixture.bytes);
+        assert!(
+            crate::filesystem::FileStore::read(directory.path())
+                .unwrap()
+                .entries
+                .is_empty()
         );
     }
 

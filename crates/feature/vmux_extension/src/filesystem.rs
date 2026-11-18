@@ -618,7 +618,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::{Catalog, CorePlugin, Loaded, Mutation, Request};
+    use crate::{Catalog, CorePlugin, Install, Loaded, Pin, Uninstall};
     use bevy_ecs::system::SystemState;
     use vmux_api::extension::{ExtPinRequest, ExtUninstallRequest};
     use vmux_ecs::OperationState;
@@ -657,22 +657,12 @@ mod tests {
             Self { app, root }
         }
 
-        fn submit(&mut self, mutation: Mutation) -> WriteTaskRequest {
-            let mut catalog = SystemState::<Catalog>::new(self.app.world_mut());
-            let ticket = catalog
-                .get(self.app.world())
-                .unwrap()
-                .ticket(self.root)
-                .unwrap()
-                .clone();
-            self.app.world_mut().spawn(
-                Request {
-                    ticket,
-                    profile: "personal".into(),
-                    mutation,
-                }
-                .bundle(),
-            );
+        fn ticket(&self) -> Ticket {
+            self.app.world().get::<Scope>(self.root).unwrap().0.clone()
+        }
+
+        fn submit<B: Bundle>(&mut self, request: B) -> WriteTaskRequest {
+            self.app.world_mut().spawn(request);
             self.app.update();
             self.write()
         }
@@ -734,26 +724,12 @@ mod tests {
             }
         }
 
-        fn submit(&mut self, profile: &str, mutation: Mutation) -> Entity {
-            let mut state = SystemState::<Catalog>::new(self.app.world_mut());
-            let ticket = state
-                .get(self.app.world())
-                .unwrap()
-                .ticket(self.root)
-                .unwrap()
-                .clone();
-            let operation = self
-                .app
-                .world_mut()
-                .spawn(
-                    Request {
-                        ticket,
-                        profile: profile.into(),
-                        mutation,
-                    }
-                    .bundle(),
-                )
-                .id();
+        fn ticket(&self) -> Ticket {
+            self.app.world().get::<Scope>(self.root).unwrap().0.clone()
+        }
+
+        fn submit<B: Bundle>(&mut self, request: B) -> Entity {
+            let operation = self.app.world_mut().spawn(request).id();
             self.app.update();
             operation
         }
@@ -1059,11 +1035,11 @@ mod tests {
         host.app
             .world_mut()
             .entity_mut(staged.operation)
-            .insert(Request {
-                ticket: staged.ticket,
-                profile: "personal".into(),
-                mutation: Mutation::Install(Box::new(entry.clone())),
-            });
+            .insert(Install::prepared(
+                staged.ticket,
+                "personal".into(),
+                entry.clone(),
+            ));
         host.app.update();
         assert_eq!(
             host.complete(staged.operation),
@@ -1111,13 +1087,14 @@ mod tests {
         FileStore::write(directory.path(), &original).unwrap();
         let mut host = Host::new(directory.path());
         host.load();
-        let operation = host.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let operation = host.submit(Pin::bundle(
+            host.ticket(),
+            "personal".into(),
+            ExtPinRequest {
                 id: ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         host.app
             .world_mut()
             .entity_mut(host.root)
@@ -1185,13 +1162,14 @@ mod tests {
             let mut host = Host::new(directory.path());
             host.load();
             let (blocker, release) = host.hold_file_jobs();
-            host.submit(
-                "personal",
-                Mutation::Pin(ExtPinRequest {
+            host.submit(Pin::bundle(
+                host.ticket(),
+                "personal".into(),
+                ExtPinRequest {
                     id: ID.into(),
                     pinned: true,
-                }),
-            );
+                },
+            ));
             if alias {
                 let path = directory.path().join("alias");
                 std::os::unix::fs::symlink(directory.path(), &path).unwrap();
@@ -1242,10 +1220,14 @@ mod tests {
         );
         original.entries.push(entry);
         let mut host = ManualStore::new(directory.path(), original.clone());
-        let old = host.submit(Mutation::Pin(ExtPinRequest {
-            id: ID.into(),
-            pinned: true,
-        }));
+        let old = host.submit(Pin::bundle(
+            host.ticket(),
+            "personal".into(),
+            ExtPinRequest {
+                id: ID.into(),
+                pinned: true,
+            },
+        ));
         FileStore::write(directory.path(), &old.snapshot).unwrap();
         host.reseed(original.clone());
         let repair = host.write();
@@ -1310,13 +1292,14 @@ mod tests {
                 .grants_for("personal")
                 .covers(&["tabs".into()], &[])
         );
-        let operation = host.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let operation = host.submit(Pin::bundle(
+            host.ticket(),
+            "personal".into(),
+            ExtPinRequest {
                 id: ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         assert_eq!(host.complete(operation), OperationState::Succeeded);
         let snapshot = FileStore::read(directory.path()).unwrap();
         assert!(snapshot.entries[0].pinned_for("personal"));
@@ -1338,10 +1321,11 @@ mod tests {
         }
         let mut host = Host::new(directory.path());
         host.load();
-        let operation = host.submit(
-            "personal",
-            Mutation::Remove(ExtUninstallRequest { id: ID.into() }),
-        );
+        let operation = host.submit(Uninstall::bundle(
+            host.ticket(),
+            "personal".into(),
+            ExtUninstallRequest { id: ID.into() },
+        ));
         assert_eq!(host.complete(operation), OperationState::Succeeded);
         let deadline = Instant::now() + Duration::from_secs(5);
         while personal.exists() {
@@ -1371,13 +1355,14 @@ mod tests {
         host.load();
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
-        let operation = host.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let operation = host.submit(Pin::bundle(
+            host.ticket(),
+            "personal".into(),
+            ExtPinRequest {
                 id: ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         assert_eq!(host.complete(operation), OperationState::Failed);
         let mut state = SystemState::<Catalog>::new(host.app.world_mut());
         assert!(
@@ -1391,13 +1376,14 @@ mod tests {
         );
         std::fs::remove_dir(&path).unwrap();
         std::fs::write(&path, source).unwrap();
-        let retry = host.submit(
-            "personal",
-            Mutation::Pin(ExtPinRequest {
+        let retry = host.submit(Pin::bundle(
+            host.ticket(),
+            "personal".into(),
+            ExtPinRequest {
                 id: ID.into(),
                 pinned: true,
-            }),
-        );
+            },
+        ));
         assert_eq!(host.complete(retry), OperationState::Succeeded);
         assert!(FileStore::read(directory.path()).unwrap().entries[0].pinned_for("personal"));
     }

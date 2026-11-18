@@ -117,7 +117,8 @@ mod tests {
     use super::*;
     use crate::snapshot::{ExtEntry, ExtensionGrants, Index};
     use crate::{
-        CorePlugin, Mutation, Request, Root, Seed, Ticket, WriteCompleted, WriteTaskRequest,
+        CorePlugin, Grant, Install, Root, Seed, Ticket, Toggle, Uninstall, WriteCompleted,
+        WriteTaskRequest,
     };
     use bevy::ecs::system::SystemState;
     use vmux_api::extension::{ExtToggleRequest, ExtUninstallRequest};
@@ -207,15 +208,8 @@ mod tests {
                 .authorization(ID)
         }
 
-        fn apply(&mut self, mutation: Mutation) {
-            self.app.world_mut().spawn(
-                Request {
-                    ticket: self.ticket.clone(),
-                    profile: "personal".into(),
-                    mutation,
-                }
-                .bundle(),
-            );
+        fn apply<B: Bundle>(&mut self, request: B) {
+            self.app.world_mut().spawn(request);
             self.app.update();
             let write = self
                 .app
@@ -244,13 +238,15 @@ mod tests {
                 .permissions
                 .contains("history")
         );
-        fixture.apply(Mutation::Grant {
-            id: ID.into(),
-            grants: ExtensionGrants {
+        fixture.apply(Grant::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ID.into(),
+            ExtensionGrants {
                 permissions: vec!["storage".into()],
                 host_permissions: Vec::new(),
             },
-        });
+        ));
         assert!(
             fixture
                 .authorization()
@@ -265,7 +261,11 @@ mod tests {
                 .permissions
                 .contains("history")
         );
-        fixture.apply(Mutation::Remove(ExtUninstallRequest { id: ID.into() }));
+        fixture.apply(Uninstall::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtUninstallRequest { id: ID.into() },
+        ));
         assert!(fixture.authorization().is_none());
         let mut state = SystemState::<Catalog>::new(fixture.app.world_mut());
         assert!(
@@ -284,12 +284,20 @@ mod tests {
             .unwrap()
             .entries
             .remove(0);
-        fixture.apply(Mutation::Install(Box::new(entry)));
-        fixture.apply(Mutation::Toggle(ExtToggleRequest {
-            id: ID.into(),
-            enabled: true,
-            approve_permissions: true,
-        }));
+        fixture.apply(Install::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            entry,
+        ));
+        fixture.apply(Toggle::bundle(
+            fixture.ticket.clone(),
+            "personal".into(),
+            ExtToggleRequest {
+                id: ID.into(),
+                enabled: true,
+                approve_permissions: true,
+            },
+        ));
         assert!(fixture.authorization().is_none());
     }
 

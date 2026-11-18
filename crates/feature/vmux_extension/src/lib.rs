@@ -11,11 +11,11 @@ pub use core::CorePlugin as ExtensionPlugin;
 
 pub use core::{
     Association, AutoSave, Catalog, Changed, CleanupCompleted, CleanupRequest, CorePlugin, Enabled,
-    Evidence, ExtensionSchedule, ExtensionSet, Grants, HostPermissions, Icon, Id, InstallOwner,
-    InstallRequest, Installed, LoadCompleted, LoadRequest, Loaded, Mutation,
-    OptionalHostPermissions, OptionalPermissions, Package, Permissions, Pinned, Popup,
-    PreparedEvidence, ProfileId, PublicKey, Request, Root, Seed, SourceHash, State, Ticket,
-    Version, WriteCompleted, WriteError, WriteTaskRequest,
+    Evidence, ExtensionSchedule, ExtensionSet, Grant, Grants, HostPermissions, Icon, Id, Install,
+    InstallOwner, InstallRequest, Installed, LoadCompleted, LoadRequest, Loaded,
+    OptionalHostPermissions, OptionalPermissions, Package, Permissions, Pin, Pinned, Popup,
+    PreparedEvidence, ProfileId, PublicKey, Root, Save, Seed, SourceHash, State, Ticket, Toggle,
+    Uninstall, Version, WriteCompleted, WriteError, WriteTaskRequest,
 };
 
 #[cfg(all(host, feature = "host"))]
