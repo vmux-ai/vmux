@@ -745,7 +745,7 @@ mod tests {
     #[test]
     fn typed_declarations_refuse_incompatible_defaults_and_unsafe_offline_lifetimes() {
         let valid = r#"(key: "remote.live", type: Boolean, class: Release,
-            default: Boolean(true), lifecycle: Temporary, owner: "vmux", 
+            default: Boolean(true), lifecycle: Temporary, owner: "vmux",
             expiry: Some("2027-01-01T00:00:00Z"), offline: RetainOff)"#;
         FeatureManifest::try_parse(&format!("(flags: [{valid}])")).unwrap();
         for invalid in [
