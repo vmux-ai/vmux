@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen, RecordVisitRequest};
 
 use super::media::FileMedia;
+use super::parked_edits::Buffers;
 use crate::edit::Selection;
-use crate::host::editor::{
-    Editor, FileDocumentRevision, FileNavigateRequest, FileView, ParkedEdit, ParkedEdits,
-};
+use crate::host::editor::{Editor, FileDocumentRevision, FileNavigateRequest, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir};
 use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
@@ -358,32 +358,33 @@ fn apply_file(
         {
             return;
         }
-        let mut edits = document.take::<ParkedEdits>().unwrap_or_default();
         if document.contains::<Editor>() && document.contains::<vmux_git::GitDiffSource>() {
             let edit = document.take::<Editor>().unwrap();
             let diff = document.take::<vmux_git::GitDiffSource>().unwrap();
-            let actual_previous = edit.core.buffer.path.clone();
-            let modified = ParkedEdits::modified_at(&actual_previous);
-            edits.insert(
-                actual_previous,
-                ParkedEdit {
-                    edit,
-                    diff,
-                    modified,
-                },
-            );
+            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
+            buffers
+                .get_mut(world)
+                .expect("parked buffer access")
+                .retain(entity, edit, diff);
+            buffers.apply(world);
         }
-        let forced = document
+        let forced = world
+            .entity(entity)
             .get::<super::file_lifecycle::ForcedEncoding>()
             .is_some_and(|encoding| encoding.path == requested);
         let resumed = if forced {
-            None
+            false
         } else {
-            edits.resume(&requested)
+            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
+            let resumed = buffers
+                .get_mut(world)
+                .expect("parked buffer access")
+                .resume(entity, &requested, resumed_keymap);
+            buffers.apply(world);
+            resumed
         };
-        document.insert(edits);
-        if let Some(resumed) = resumed {
-            document.insert((resumed.edit, resumed.diff, resumed_keymap));
+        let mut document = world.entity_mut(entity);
+        if resumed {
             if super::markdown::ParsedNote::supports(&requested) {
                 document.insert(super::explorer::OutlineDirty);
             }

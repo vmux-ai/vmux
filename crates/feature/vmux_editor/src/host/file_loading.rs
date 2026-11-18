@@ -9,7 +9,7 @@ use vmux_ecs::{
 };
 
 use super::edit::{EditCore, highlight_cache::HighlightCache};
-use super::editor::{Editor, FileView, ParkedEdits};
+use super::editor::{Editor, FileView};
 use super::explorer::OutlineDirty;
 use super::file_lifecycle::{
     EditorFileLoadedSet, FileBuffer, FileChangesSet, FileDir, ForcedEncoding, LoadFailure,
@@ -21,6 +21,7 @@ use super::keymap::KeymapConfig;
 use super::markdown::ParsedNote;
 use super::media::FileMedia;
 use super::note::NoteSent;
+use super::parked_edits::Buffers;
 
 pub(super) struct FileLoadingPlugin;
 
@@ -148,41 +149,29 @@ impl Loads<'_, '_> {
     }
 }
 
-type UnloadedViews<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static FileView,
-        Option<&'static mut ParkedEdits>,
-        Option<&'static ForcedEncoding>,
-    ),
-    (
-        Without<FileBuffer>,
-        Without<FileDir>,
-        Without<FileMedia>,
-        Without<Editor>,
-        Without<FileLoadTask>,
-    ),
->;
-
+#[allow(clippy::type_complexity)]
 fn accept(
-    mut files: UnloadedViews,
+    files: Query<
+        (Entity, &FileView, Option<&ForcedEncoding>),
+        (
+            Without<FileBuffer>,
+            Without<FileDir>,
+            Without<FileMedia>,
+            Without<Editor>,
+            Without<FileLoadTask>,
+        ),
+    >,
     settings: Option<Res<vmux_setting::AppSettings>>,
+    mut buffers: Buffers,
     mut commands: Commands,
 ) {
     let keymap = KeymapConfig::resolve(settings.as_deref());
-    for (entity, file, mut parked, forced) in &mut files {
+    for (entity, file, forced) in &files {
         let encoding = forced.and_then(|encoding| encoding.for_path(&file.path));
-        if encoding.is_none()
-            && let Some(parked) = parked.as_mut()
-            && let Some(resumed) = parked.resume(&file.path)
-        {
-            commands
-                .entity(entity)
-                .insert((resumed.edit, keymap.keymap(), resumed.diff))
-                .remove::<MissingFileView>();
-            if ParsedNote::supports(&file.path) {
+        let path = &file.path;
+        if encoding.is_none() && buffers.resume(entity, path, keymap.keymap()) {
+            commands.entity(entity).remove::<MissingFileView>();
+            if ParsedNote::supports(path) {
                 commands
                     .entity(entity)
                     .remove::<NoteSent>()
@@ -195,7 +184,7 @@ fn accept(
                 Operation::bundle("editor.file.load").unwrap().running(),
                 Name::new("Load editor file"),
                 Load,
-                Source(file.path.clone()),
+                Source(path.clone()),
                 OperationTarget::new(entity),
             ))
             .id();
@@ -206,9 +195,7 @@ fn accept(
             Operation::bundle("editor.file.inspect").unwrap(),
             Name::new("Inspect editor file"),
             ChildOf(operation),
-            JobRequest(Inspect {
-                path: file.path.clone(),
-            }),
+            JobRequest(Inspect { path: path.clone() }),
         ));
         commands.entity(entity).insert(FileLoadTask { operation });
     }

@@ -41,7 +41,10 @@ impl Plugin for FoldPlugin {
                     .chain()
                     .in_set(FoldSet::Restore),
             )
-            .add_systems(Update, mutate.in_set(FoldSet::Mutate))
+            .add_systems(
+                Update,
+                (mutate, ApplyDeferred).chain().in_set(FoldSet::Mutate),
+            )
             .add_systems(Update, (finish, save).chain().in_set(FoldSet::Save));
     }
 }
@@ -334,69 +337,100 @@ fn restore(
     }
 }
 
-fn mutate(world: &mut World) {
-    let requests: Vec<_> = world
-        .resource_mut::<Messages<UpdateRequest>>()
-        .drain()
-        .collect();
-    for request in requests {
-        let ticket = &request.ticket;
-        let Some(root) = world.get::<Root>(ticket.owner) else {
+#[allow(clippy::type_complexity)]
+fn mutate(
+    mut requests: MessageReader<UpdateRequest>,
+    mut roots: Query<(&Root, &Scope, Option<&mut State>), With<Loaded>>,
+    mut records: Query<
+        (
+            Entity,
+            &FileId,
+            &ChildOf,
+            &mut Collapsed,
+            Option<&mut Revision>,
+        ),
+        With<Record>,
+    >,
+    mut commands: Commands,
+) {
+    let mut pending: Vec<_> = requests.read().collect();
+    pending.sort_by(|left, right| {
+        left.ticket
+            .owner
+            .cmp(&right.ticket.owner)
+            .then_with(|| left.file.0.cmp(&right.file.0))
+    });
+    for group in pending
+        .chunk_by(|left, right| left.ticket.owner == right.ticket.owner && left.file == right.file)
+    {
+        let ticket = &group[0].ticket;
+        let Ok((root, scope, mut state)) = roots.get_mut(ticket.owner) else {
             continue;
         };
-        if root.0 != ticket.path
-            || world
-                .get::<Scope>(ticket.owner)
-                .is_none_or(|scope| scope.0 != *ticket)
-            || world.get::<Loaded>(ticket.owner).is_none()
-        {
+        if root.0 != scope.0.path {
             continue;
         }
-        let mut records =
-            world.query_filtered::<(Entity, &FileId, &Collapsed, &ChildOf), With<Record>>();
         let mut found = None;
         let mut duplicate = false;
-        for (entity, id, collapsed, parent) in records.iter(world) {
-            if parent.parent() != ticket.owner || *id != request.file {
+        for (entity, id, parent, _, _) in records.iter() {
+            if parent.parent() != ticket.owner || *id != group[0].file {
                 continue;
             }
             if found.is_some() {
                 duplicate = true;
                 break;
             }
-            found = Some((entity, collapsed.clone()));
+            found = Some(entity);
         }
         if duplicate {
             continue;
         }
-        let mut collapsed = found
-            .as_ref()
-            .map(|(_, collapsed)| collapsed.clone())
-            .unwrap_or_default();
-        let previous = collapsed.clone();
-        collapsed.apply(&request.mutation);
-        if collapsed == previous {
+        let (mut collapsed, mut revision) = match found {
+            Some(entity) => {
+                let (_, _, _, collapsed, revision) = records.get(entity).unwrap();
+                (collapsed.clone(), revision.copied().unwrap_or_default())
+            }
+            None => (Collapsed::default(), Revision::default()),
+        };
+        let mut changed = false;
+        for request in group {
+            if request.ticket != scope.0 {
+                continue;
+            }
+            let previous = collapsed.clone();
+            collapsed.apply(&request.mutation);
+            if collapsed == previous {
+                continue;
+            }
+            revision = revision.saturating_next();
+            changed = true;
+            if let Some(state) = state.as_mut() {
+                state.advance();
+            }
+        }
+        if !changed {
             continue;
         }
         match found {
-            Some((entity, _)) => {
-                let revision = world.get::<Revision>(entity).copied().unwrap_or_default();
-                world
-                    .entity_mut(entity)
-                    .insert((collapsed, revision.saturating_next()));
+            Some(entity) => {
+                let (_, _, _, mut current, current_revision) = records.get_mut(entity).unwrap();
+                *current = collapsed;
+                match current_revision {
+                    Some(mut current) => *current = revision,
+                    None => {
+                        commands.entity(entity).insert(revision);
+                    }
+                }
             }
             None => {
-                world.spawn((
+                commands.spawn((
                     Record,
-                    request.file,
+                    group[0].file.clone(),
                     collapsed,
-                    Revision(1),
+                    revision,
                     ChildOf(ticket.owner),
                 ));
             }
-        }
-        if let Some(mut state) = world.get_mut::<State>(ticket.owner) {
-            state.advance();
         }
     }
 }
@@ -652,6 +686,102 @@ mod tests {
                 .unwrap()
                 .loaded(),
             Some(second.revision)
+        );
+    }
+
+    #[test]
+    fn same_frame_fold_deltas_keep_fifo_order_and_noop_updates_do_not_save() {
+        let mut fixture = Fixture::new();
+        for (collapse, expand) in [
+            (&[2][..], &[][..]),
+            (&[7][..], &[2][..]),
+            (&[2][..], &[7][..]),
+        ] {
+            fixture.app.world_mut().write_message(UpdateRequest {
+                ticket: fixture.ticket.clone(),
+                file: FileId("/files/shared.rs".into()),
+                mutation: Mutation {
+                    collapse: collapse.iter().copied().collect(),
+                    expand: expand.iter().copied().collect(),
+                },
+            });
+        }
+        fixture.app.update();
+        let save = fixture.take_save();
+        assert_eq!(save.snapshot.files["/files/shared.rs"], [2]);
+        assert_eq!(save.snapshot.files.len(), 1);
+        fixture.finish(&save, Ok(()));
+        fixture.app.world_mut().write_message(UpdateRequest {
+            ticket: fixture.ticket.clone(),
+            file: FileId("/files/shared.rs".into()),
+            mutation: Mutation {
+                collapse: [2].into(),
+                expand: [99].into(),
+            },
+        });
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<SaveRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<State>(fixture.root)
+                .unwrap()
+                .is_dirty()
+        );
+    }
+
+    #[test]
+    fn duplicate_file_identity_refuses_mutation_without_losing_existing_folds() {
+        let mut fixture = Fixture::new();
+        let save = fixture.change(&[2]);
+        fixture.finish(&save, Ok(()));
+        fixture.app.world_mut().spawn((
+            Record,
+            FileId("/files/shared.rs".into()),
+            Collapsed([99].into()),
+            ChildOf(fixture.root),
+        ));
+        fixture.app.world_mut().write_message(UpdateRequest {
+            ticket: fixture.ticket.clone(),
+            file: FileId("/files/shared.rs".into()),
+            mutation: Mutation {
+                collapse: [7].into(),
+                expand: [2, 99].into(),
+            },
+        });
+        fixture.app.update();
+        let mut records = fixture.app.world_mut().query::<&Collapsed>();
+        let mut lines: Vec<_> = records
+            .iter(fixture.app.world())
+            .map(|lines| lines.0.clone())
+            .collect();
+        lines.sort();
+        assert_eq!(lines, [BTreeSet::from([2]), BTreeSet::from([99])]);
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<State>(fixture.root)
+                .unwrap()
+                .is_dirty()
+        );
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<SaveRequest>>()
+                .drain()
+                .next()
+                .is_none()
         );
     }
 

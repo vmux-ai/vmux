@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - Cargo.lock
+      - tool-versions.env
       - '**/Cargo.toml'
       - crates/build_*.rs
       - crates/feature/vmux_dx/lints/**
@@ -13,6 +14,7 @@ on:
       - crates/feature/vmux_dx/src/ci/**
       - crates/feature/vmux_dx/src/ci_io/**
       - .github/actions/setup-ci/**
+      - .github/actions/setup-compiler-cache/**
       - .github/actions/cache-sources/**
       - .github/actions/save-sources/**
       - .github/actions/cache-ecs-lints/**
@@ -21,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: ecs-compiler-cache-${{ github.ref }}
@@ -31,6 +34,11 @@ env:
   VMUX_CI_PREBUILT_DX: "0"
   VMUX_CI_FAST_RUST: "1"
   VMUX_CI_VALIDATION: "1"
+  VMUX_CI_GCS_ENABLED: "1"
+  CI_CACHE_BUCKET: ${{ vars.CI_CACHE_BUCKET }}
+  CI_CACHE_WIF_PROVIDER: ${{ vars.CI_CACHE_WIF_PROVIDER }}
+  CI_CACHE_READER_ACCOUNT: ${{ vars.CI_CACHE_READER_ACCOUNT }}
+  CI_CACHE_WRITER_ACCOUNT: ${{ vars.CI_CACHE_WRITER_ACCOUNT }}
 
 jobs:
   compiler-cache:
@@ -65,3 +73,7 @@ jobs:
         uses: ./.github/actions/save-workspace
         with:
           cache-key: compiler-warm
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: compiler-warm

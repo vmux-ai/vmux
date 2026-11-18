@@ -473,6 +473,7 @@ fn admit(
     mut completions: MessageReader<Completion>,
     steps: Admissions,
     pending: Query<(), With<Admitting>>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for completion in completions.read() {
@@ -491,6 +492,14 @@ fn admit(
             commands.entity(completion.context).insert(CliResult(Err(
                 "Development admission ownership changed".into(),
             )));
+        } else if states
+            .get(completion.context)
+            .is_ok_and(|state| *state == OperationState::Canceled)
+        {
+            let code = (128 + signals::Signals::pending().unwrap_or(15)) as u8;
+            commands
+                .entity(completion.context)
+                .insert(CliResult(Ok(code)));
         } else {
             match &completion.result {
                 Ok(_) => {
@@ -3208,14 +3217,53 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
     }
 
     #[test]
+    fn canceled_admission_reports_cancellation_when_its_storage_receipt_arrives() {
+        let mut fixture = Fixture::new();
+        let context = fixture
+            .app
+            .world_mut()
+            .spawn((Admitting, OperationState::Canceled))
+            .id();
+        let guard = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Step,
+                Admission,
+                Started {
+                    context,
+                    attempt: 1,
+                },
+                Attempt(1),
+                Cwd(fixture.directory.path().to_owned()),
+                Running,
+                OperationState::Running,
+                ChildOf(context),
+            ))
+            .id();
+        fixture.app.world_mut().write_message(Completion {
+            entity: guard,
+            context,
+            attempt: 1,
+            result: Ok(Outcome::Done),
+        });
+        fixture.app.update();
+        assert!(matches!(
+            fixture.app.world().get::<CliResult>(context),
+            Some(CliResult(Ok(143)))
+        ));
+    }
+
+    #[test]
     fn detached_or_changed_admission_reports_to_its_original_unaccepted_command() {
-        for detach in [true, false] {
+        for (detach, state) in [
+            (true, OperationState::Running),
+            (false, OperationState::Running),
+            (true, OperationState::Canceled),
+            (false, OperationState::Canceled),
+        ] {
             let mut fixture = Fixture::new();
-            let context = fixture
-                .app
-                .world_mut()
-                .spawn((Admitting, OperationState::Running))
-                .id();
+            let context = fixture.app.world_mut().spawn((Admitting, state)).id();
             let guard = fixture
                 .app
                 .world_mut()

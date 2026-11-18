@@ -9,6 +9,14 @@ use crate::sync::{Checkpoint, CheckpointChange, ExpectedScope, Origin, Pending};
 
 pub(crate) struct Store;
 
+#[derive(bevy_ecs::prelude::Component)]
+pub(crate) struct Loaded {
+    pub pending: Vec<(u32, Pending)>,
+    pub checkpoints: Vec<Checkpoint>,
+    pub next: Option<u32>,
+    pub through: u32,
+}
+
 impl Store {
     pub(crate) fn path(data: &Path) -> PathBuf {
         data.join("accounts.sqlite")
@@ -65,19 +73,63 @@ impl Store {
     pub(crate) fn load(
         data: &Path,
         origin: &Origin,
-    ) -> Result<(Vec<Pending>, Vec<Checkpoint>), String> {
-        let connection = Self::connect(data)?;
-        let mut outbox = connection.prepare(
-            "select value from profile_outbox where server=?1 and account_id=?2 order by sequence limit 16",
+        after: u32,
+        through: Option<u32>,
+    ) -> Result<Loaded, String> {
+        let mut connection = Self::connect(data)?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let through = match through {
+            Some(value) => value,
+            None => transaction
+                .query_row(
+                    "select coalesce(max(sequence), 0) from profile_outbox where server=?1 and account_id=?2",
+                    params![origin.server, origin.account.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?,
+        };
+        let mut outbox = transaction.prepare(
+            "select sequence, value from profile_outbox where server=?1 and account_id=?2 and sequence>?3 and sequence<=?4 order by sequence limit 17",
         ).map_err(|error| error.to_string())?;
         let mut rows = outbox
-            .query(params![origin.server, origin.account.to_string()])
+            .query(params![
+                origin.server,
+                origin.account.to_string(),
+                after,
+                through
+            ])
             .map_err(|error| error.to_string())?;
         let mut pending = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
-            let value: String = row.get(0).map_err(|error| error.to_string())?;
-            pending.push(serde_json::from_str(&value).map_err(|error| error.to_string())?);
+            let sequence = row.get(0).map_err(|error| error.to_string())?;
+            let value: String = row.get(1).map_err(|error| error.to_string())?;
+            pending.push((
+                sequence,
+                serde_json::from_str(&value).map_err(|error| error.to_string())?,
+            ));
         }
+        let next = if pending.len() > 16 {
+            pending.pop();
+            pending.last().map(|entry| entry.0)
+        } else {
+            None
+        };
+        let checkpoints = if next.is_none() {
+            Self::checkpoints(&transaction, origin)?
+        } else {
+            Vec::new()
+        };
+        Ok(Loaded {
+            pending,
+            checkpoints,
+            next,
+            through,
+        })
+    }
+
+    fn checkpoints(connection: &Connection, origin: &Origin) -> Result<Vec<Checkpoint>, String> {
         let mut state = connection.prepare(
             "select profile_id, remote_revision, local_revision, deleted from profile_checkpoint where server=?1 and account_id=?2 limit 4096",
         ).map_err(|error| error.to_string())?;
@@ -94,7 +146,7 @@ impl Store {
                 deleted: row.get(3).map_err(|error| error.to_string())?,
             });
         }
-        Ok((pending, checkpoints))
+        Ok(checkpoints)
     }
 
     pub(crate) fn seal(
@@ -419,10 +471,11 @@ mod tests {
         Store::acknowledge(fixture.directory.path(), &fixture.origin, &receipt).unwrap();
         assert!(Store::seal(fixture.directory.path(), &fixture.origin, later, 0).is_err());
         let sent = Store::seal(fixture.directory.path(), &fixture.origin, later, 1).unwrap();
-        let (pending, checkpoints) =
-            Store::load(fixture.directory.path(), &fixture.origin).unwrap();
+        let loaded = Store::load(fixture.directory.path(), &fixture.origin, 0, None).unwrap();
+        let pending = loaded.pending;
+        let checkpoints = loaded.checkpoints;
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].operation_id, later);
+        assert_eq!(pending[0].1.operation_id, later);
         assert_eq!(sent.name.as_deref(), Some("Later edit during send"));
         assert_eq!(checkpoints[0].local_revision, 3);
     }
@@ -455,12 +508,55 @@ mod tests {
             revision: 1,
         };
         Store::acknowledge(fixture.directory.path(), &fixture.origin, &receipt).unwrap();
-        let (pending, checkpoints) =
-            Store::load(fixture.directory.path(), &fixture.origin).unwrap();
+        let loaded = Store::load(fixture.directory.path(), &fixture.origin, 0, None).unwrap();
+        let pending = loaded.pending;
+        let checkpoints = loaded.checkpoints;
         assert!(pending.is_empty());
         assert_eq!(checkpoints.len(), 1);
         assert!(checkpoints[0].deleted);
         assert_eq!(checkpoints[0].remote_revision, 2);
         assert_eq!(checkpoints[0].local_revision, 4);
+    }
+
+    #[test]
+    fn bounded_inventory_reaches_later_profiles_and_keeps_its_captured_boundary() {
+        let fixture = Fixture::new();
+        let blocked = Uuid::new_v4();
+        let mut expected = Vec::new();
+        for revision in 1..=20 {
+            expected.push(fixture.enqueue(blocked, revision, "Blocked profile"));
+        }
+        Store::conflicted(fixture.directory.path(), &fixture.origin, expected[0], None).unwrap();
+        for _ in 0..13 {
+            expected.push(fixture.enqueue(Uuid::new_v4(), 1, "Unrelated profile"));
+        }
+        let first = Store::load(fixture.directory.path(), &fixture.origin, 0, None).unwrap();
+        assert!(first.pending[0].1.conflicted);
+        assert!(first.pending.len() <= 16);
+        let appended = fixture.enqueue(Uuid::new_v4(), 1, "Appended during inventory");
+        let through = first.through;
+        let mut next = first.next;
+        let mut received: Vec<_> = first
+            .pending
+            .iter()
+            .map(|(_, entry)| entry.operation_id)
+            .collect();
+        while let Some(after) = next {
+            let page = Store::load(
+                fixture.directory.path(),
+                &fixture.origin,
+                after,
+                Some(through),
+            )
+            .unwrap();
+            assert!(page.pending.len() <= 16);
+            received.extend(page.pending.iter().map(|(_, entry)| entry.operation_id));
+            next = page.next;
+        }
+        assert_eq!(received, expected);
+        assert!(!received.contains(&appended));
+        let later = Store::load(fixture.directory.path(), &fixture.origin, through, None).unwrap();
+        assert_eq!(later.pending.len(), 1);
+        assert_eq!(later.pending[0].1.operation_id, appended);
     }
 }

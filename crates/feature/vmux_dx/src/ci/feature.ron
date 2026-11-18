@@ -13,6 +13,7 @@
             (id: "dx.ci.cache-restore", name: "cache-restore"),
             (id: "dx.ci.cache-checkpoint", name: "cache-checkpoint"),
             (id: "dx.ci.cache-validate", name: "cache-validate"),
+            (id: "dx.ci.cache-prune", name: "cache-prune", arguments: [(id: "forward", index: Some(1), trailing: true)]),
             (id: "dx.ci.cache-stage", name: "cache-stage", arguments: [(id: "forward", index: Some(1), trailing: true)]),
             (id: "dx.ci.cache-unstage", name: "cache-unstage", arguments: [(id: "forward", index: Some(1), trailing: true)]),
             (id: "dx.ci.cli-key", name: "cli-key"),

@@ -1,8 +1,9 @@
 use crate::browser_process::client_handler::ProcessMessageHandler;
 use crate::prelude::{IntoString, PROCESS_MESSAGE_HISTORY_SWIPE};
 use async_channel::Sender;
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, Message};
 use cef::{Browser, Frame, ImplFrame, ImplListValue, ListValue};
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistorySwipeDirection {
@@ -20,7 +21,9 @@ impl HistorySwipeDirection {
     }
 }
 
+#[derive(Message)]
 pub struct HistorySwipeRaw {
+    pub at: Instant,
     pub webview: Entity,
     pub page_url: String,
     pub token: String,
@@ -50,6 +53,7 @@ impl ProcessMessageHandler for HistorySwipeHandler {
     }
 
     fn handle_message(&self, _browser: &mut Browser, frame: &mut Frame, args: Option<ListValue>) {
+        let at = Instant::now();
         if frame.is_main() == 0 {
             return;
         }
@@ -64,6 +68,7 @@ impl ProcessMessageHandler for HistorySwipeHandler {
             return;
         }
         let _ = self.sender.try_send(HistorySwipeRaw {
+            at,
             webview: self.webview,
             page_url: frame.url().into_string(),
             token,

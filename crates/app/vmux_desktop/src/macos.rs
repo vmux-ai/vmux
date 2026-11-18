@@ -107,6 +107,7 @@ fn install_activation_monitor(
     mut handles: NonSendMut<NativeInputHandles>,
     pointers: Res<vmux_input::PointerInbox>,
     windows: NonSend<crate::window_input::WindowInputInbox>,
+    wheel: Res<vmux_input::WheelInbox>,
 ) {
     let Some(proxy) = proxy else {
         return;
@@ -114,9 +115,11 @@ fn install_activation_monitor(
     let proxy = (**proxy).clone();
     let pointers = pointers.clone();
     let windows = windows.clone();
+    let wheel = wheel.clone();
     let block = block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
         pointers.cancel();
         windows.deactivate();
+        HistoryScroll::cancel(None, &wheel);
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
     let token = unsafe {
@@ -366,159 +369,26 @@ fn install_input_wake_monitor(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     cef_wake_policy: Res<MessageLoopWakePolicy>,
     pointer_inbox: Res<vmux_input::PointerInbox>,
+    wheel_inbox: Res<vmux_input::WheelInbox>,
     window_inputs: NonSend<crate::window_input::WindowInputInbox>,
     mut handles: NonSendMut<NativeInputHandles>,
 ) {
     let Some(proxy) = proxy else {
         return;
     };
-    let cef_wake_policy = cef_wake_policy.clone();
     let proxy = (**proxy).clone();
     let wake = wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
-    let local_pointer = pointer_inbox.clone();
-    let local_window_inputs = window_inputs.clone();
-    let local_wake = wake.clone();
-    let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-        let ev = unsafe { event.as_ref() };
-        let event_type = ev.r#type();
-        let native_window = objc2::MainThreadMarker::new().and_then(|mtm| ev.window(mtm));
-        let direct_source = native_window.as_ref().and_then(|window| {
-            local_pointer.source((&**window as *const objc2_app_kit::NSWindow) as isize)
-        });
-        let mut source = direct_source;
-        let mut parent = native_window;
-        for _ in 0..8 {
-            if source.is_some() {
-                break;
-            }
-            let Some(window) = parent else {
-                break;
-            };
-            parent = window.parentWindow();
-            source = parent.as_ref().and_then(|window| {
-                local_pointer.source((&**window as *const objc2_app_kit::NSWindow) as isize)
-            });
-        }
-        let Some(source) = source else {
-            local_wake(MOUSE_DRAG_WAKE_INTERVAL);
-            return event.as_ptr();
-        };
-        let scroll = event_type == NSEventType::ScrollWheel;
-        let native_webview = WindowInput(ev).targets_webview();
-        if !scroll || !native_webview {
-            cef_wake_policy.begin_interaction();
-        };
-        let location = crate::window_input::WindowInputInbox::physical_position(ev);
-        let capture_window_gesture = direct_source.is_some()
-            && local_window_inputs.suppress(source, ev, location.map(|(x, y)| Vec2::new(x, y)));
-        let token = if direct_source.is_some() {
-            local_window_inputs.queue(source, ev)
-        } else {
-            0
-        };
-        let motion = matches!(
-            event_type,
-            NSEventType::MouseMoved
-                | NSEventType::LeftMouseDragged
-                | NSEventType::RightMouseDragged
-                | NSEventType::OtherMouseDragged
-        );
-        let button_event = matches!(
-            event_type,
-            NSEventType::LeftMouseDown
-                | NSEventType::LeftMouseUp
-                | NSEventType::RightMouseDown
-                | NSEventType::RightMouseUp
-                | NSEventType::OtherMouseDown
-                | NSEventType::OtherMouseUp
-        );
-        if scroll {
-            HistoryScroll::record(ev);
-        } else if matches!(
-            event_type,
-            NSEventType::Magnify
-                | NSEventType::Rotate
-                | NSEventType::KeyDown
-                | NSEventType::FlagsChanged
-        ) {
-            HistoryScroll::cancel();
-        }
-        let pointer_position_changed =
-            motion || button_event || event_type == NSEventType::FlagsChanged;
-        let previous = local_pointer.position(source);
-        let position = location.map(|(x, y)| Vec2::new(x, y));
-        let page_changed = match (previous, position) {
-            (Some(previous), Some(position)) => {
-                vmux_browser::NativeBridge::windowed_page_changed(previous, position)
-            }
-            _ => false,
-        };
-        let scale = objc2::MainThreadMarker::new()
-            .and_then(|marker| ev.window(marker))
-            .map_or(1.0, |window| window.backingScaleFactor() as f32);
-        let near_edge = position.is_some_and(|position| {
-            vmux_browser::NativeBridge::windowed_page_edge_contains(
-                position,
-                vmux_layout::pane::ResizeGrip::minimum_width(scale) * 0.5,
-            )
-        });
-        let over_grip =
-            position.is_some_and(|position| local_window_inputs.grip_inside(source, position));
-        let sampled_over_windowed_page = location
-            .is_some_and(|(x, y)| vmux_browser::NativeBridge::windowed_page_contains_point(x, y));
-        let buttons = mouse_buttons();
-        if pointer_position_changed {
-            let mut input = match location {
-                Some((x, y)) => {
-                    vmux_input::PointerInput::sample(source, Vec2::new(x, y), buttons, motion)
-                }
-                None => vmux_input::PointerInput::buttons(source, buttons),
-            };
-            input.native_token = token;
-            let flags = ev.modifierFlags();
-            input.modifiers = Some(KeyModifiers {
-                shift: flags.contains(NSEventModifierFlags::Shift),
-                ctrl: flags.contains(NSEventModifierFlags::Control),
-                alt: flags.contains(NSEventModifierFlags::Option),
-                super_key: flags.contains(NSEventModifierFlags::Command),
-            });
-            local_pointer.send(input);
-        }
-        if motion {
-            let interval = if event_type == NSEventType::MouseMoved {
-                MOUSE_MOVE_WAKE_INTERVAL
-            } else {
-                MOUSE_DRAG_WAKE_INTERVAL
-            };
-            if WindowPointerPolicy::motion_should_wake(
-                event_type != NSEventType::MouseMoved,
-                sampled_over_windowed_page,
-                local_window_inputs.was_windowed(source),
-                event_window_is_key(ev),
-                page_changed,
-            ) || near_edge
-                || over_grip
-            {
-                local_wake(interval);
-            }
-        } else if scroll {
-            if WindowPointerPolicy::scroll_should_wake(
-                local_window_inputs.layout_inside(source),
-                sampled_over_windowed_page,
-                native_webview,
-            ) {
-                local_wake(MOUSE_DRAG_WAKE_INTERVAL);
-            }
-        } else {
-            local_wake(MOUSE_DRAG_WAKE_INTERVAL);
-        }
-        if capture_window_gesture {
-            return std::ptr::null_mut();
-        }
-        event.as_ptr()
-    });
+    let local = InputMonitor {
+        pointer: pointer_inbox.clone(),
+        wheel: wheel_inbox.clone(),
+        windows: window_inputs.clone(),
+        cef_wake_policy: cef_wake_policy.clone(),
+        wake: wake.clone(),
+    };
+    let local_block =
+        block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent { local.local(event) });
     let global_pointer = pointer_inbox.clone();
     let global_window_inputs = window_inputs.clone();
     let global_wake = wake.clone();
@@ -568,9 +438,183 @@ fn install_input_wake_monitor(
     }
 }
 
+struct InputMonitor {
+    pointer: vmux_input::PointerInbox,
+    wheel: vmux_input::WheelInbox,
+    windows: crate::window_input::WindowInputInbox,
+    cef_wake_policy: MessageLoopWakePolicy,
+    wake: WakeThrottle,
+}
+
+impl InputMonitor {
+    fn local(&self, event: NonNull<NSEvent>) -> *mut NSEvent {
+        let input = WindowInput(unsafe { event.as_ref() });
+        let Some((source, direct)) = input.origin(&self.pointer) else {
+            (self.wake)(MOUSE_DRAG_WAKE_INTERVAL);
+            return event.as_ptr();
+        };
+        let event_type = input.0.r#type();
+        let scroll = event_type == NSEventType::ScrollWheel;
+        let native_webview = input.targets_webview();
+        if !scroll || !native_webview {
+            self.cef_wake_policy.begin_interaction();
+        }
+        let location = crate::window_input::WindowInputInbox::physical_position(input.0);
+        let position = location.map(|(x, y)| Vec2::new(x, y));
+        let capture = direct && self.windows.suppress(source, input.0, position);
+        let token = if direct {
+            self.windows.queue(source, input.0)
+        } else {
+            0
+        };
+        if scroll {
+            HistoryScroll::record(input.0, source, &self.wheel);
+        } else if matches!(
+            event_type,
+            NSEventType::Magnify
+                | NSEventType::Rotate
+                | NSEventType::KeyDown
+                | NSEventType::FlagsChanged
+        ) {
+            HistoryScroll::cancel(Some(source), &self.wheel);
+        }
+        let previous = self.pointer.position(source);
+        let motion = self.pointer(&input, source, position, token);
+        self.wake(&input, source, previous, position, native_webview, motion);
+        if capture {
+            return std::ptr::null_mut();
+        }
+        event.as_ptr()
+    }
+
+    fn pointer(
+        &self,
+        input: &WindowInput<'_>,
+        source: Entity,
+        position: Option<Vec2>,
+        token: u64,
+    ) -> bool {
+        let event_type = input.0.r#type();
+        let motion = matches!(
+            event_type,
+            NSEventType::MouseMoved
+                | NSEventType::LeftMouseDragged
+                | NSEventType::RightMouseDragged
+                | NSEventType::OtherMouseDragged
+        );
+        let button_event = matches!(
+            event_type,
+            NSEventType::LeftMouseDown
+                | NSEventType::LeftMouseUp
+                | NSEventType::RightMouseDown
+                | NSEventType::RightMouseUp
+                | NSEventType::OtherMouseDown
+                | NSEventType::OtherMouseUp
+        );
+        let buttons = mouse_buttons();
+        if motion || button_event || event_type == NSEventType::FlagsChanged {
+            let mut sample = match position {
+                Some(position) => {
+                    vmux_input::PointerInput::sample(source, position, buttons, motion)
+                }
+                None => vmux_input::PointerInput::buttons(source, buttons),
+            };
+            sample.native_token = token;
+            let flags = input.0.modifierFlags();
+            sample.modifiers = Some(KeyModifiers {
+                shift: flags.contains(NSEventModifierFlags::Shift),
+                ctrl: flags.contains(NSEventModifierFlags::Control),
+                alt: flags.contains(NSEventModifierFlags::Option),
+                super_key: flags.contains(NSEventModifierFlags::Command),
+            });
+            self.pointer.send(sample);
+        }
+        motion
+    }
+
+    fn wake(
+        &self,
+        input: &WindowInput<'_>,
+        source: Entity,
+        previous: Option<Vec2>,
+        position: Option<Vec2>,
+        native_webview: bool,
+        motion: bool,
+    ) {
+        let event_type = input.0.r#type();
+        let page_changed = match (previous, position) {
+            (Some(previous), Some(position)) => {
+                vmux_browser::NativeBridge::windowed_page_changed(previous, position)
+            }
+            _ => false,
+        };
+        let scale = objc2::MainThreadMarker::new()
+            .and_then(|marker| input.0.window(marker))
+            .map_or(1.0, |window| window.backingScaleFactor() as f32);
+        let near_edge = position.is_some_and(|position| {
+            vmux_browser::NativeBridge::windowed_page_edge_contains(
+                position,
+                vmux_layout::pane::ResizeGrip::minimum_width(scale) * 0.5,
+            )
+        });
+        let over_grip = position.is_some_and(|position| self.windows.grip_inside(source, position));
+        let sampled = position.is_some_and(|position| {
+            vmux_browser::NativeBridge::windowed_page_contains_point(position.x, position.y)
+        });
+        if motion {
+            let interval = if event_type == NSEventType::MouseMoved {
+                MOUSE_MOVE_WAKE_INTERVAL
+            } else {
+                MOUSE_DRAG_WAKE_INTERVAL
+            };
+            if WindowPointerPolicy::motion_should_wake(
+                event_type != NSEventType::MouseMoved,
+                sampled,
+                self.windows.was_windowed(source),
+                event_window_is_key(input.0),
+                page_changed,
+            ) || near_edge
+                || over_grip
+            {
+                (self.wake)(interval);
+            }
+        } else if event_type == NSEventType::ScrollWheel {
+            if WindowPointerPolicy::scroll_should_wake(
+                self.windows.layout_inside(source),
+                sampled,
+                native_webview,
+            ) {
+                (self.wake)(MOUSE_DRAG_WAKE_INTERVAL);
+            }
+        } else {
+            (self.wake)(MOUSE_DRAG_WAKE_INTERVAL);
+        }
+    }
+}
+
 struct WindowInput<'a>(&'a NSEvent);
 
 impl WindowInput<'_> {
+    fn origin(&self, pointer: &vmux_input::PointerInbox) -> Option<(Entity, bool)> {
+        let native_window = objc2::MainThreadMarker::new().and_then(|mtm| self.0.window(mtm));
+        let direct = native_window.as_ref().and_then(|window| {
+            pointer.source((&**window as *const objc2_app_kit::NSWindow) as isize)
+        });
+        let mut source = direct;
+        let mut parent = native_window;
+        for _ in 0..8 {
+            if source.is_some() {
+                break;
+            }
+            let window = parent?;
+            parent = window.parentWindow();
+            source = parent.as_ref().and_then(|window| {
+                pointer.source((&**window as *const objc2_app_kit::NSWindow) as isize)
+            });
+        }
+        source.map(|source| (source, direct.is_some()))
+    }
+
     fn targets_webview(&self) -> bool {
         let Some(marker) = objc2::MainThreadMarker::new() else {
             return false;
@@ -657,50 +701,54 @@ fn install_live_resize_monitor(
 struct HistoryScroll;
 
 impl HistoryScroll {
-    fn record(event: &NSEvent) {
+    fn record(event: &NSEvent, window: Entity, inbox: &vmux_input::WheelInbox) {
         let source = event.CGEvent();
-        let modifiers = NSEventModifierFlags::Control
-            | NSEventModifierFlags::Command
-            | NSEventModifierFlags::Option
-            | NSEventModifierFlags::Shift;
-        if source.is_none()
-            || !event.hasPreciseScrollingDeltas()
-            || event.modifierFlags().intersects(modifiers)
-        {
-            Self::cancel();
-            return;
-        }
-        let Some((window, position)) = Self::position(event) else {
-            Self::cancel();
+        let flags = event.modifierFlags();
+        let Some(position) = Self::position(event) else {
+            Self::cancel(Some(window), inbox);
             return;
         };
         let phase = if event.momentumPhase() != NSEventPhase::None {
-            vmux_browser::NativeHistoryPhase::Momentum
+            vmux_input::WheelPhase::Momentum
         } else if event.phase().intersects(NSEventPhase::Cancelled) {
-            vmux_browser::NativeHistoryPhase::Cancel
+            vmux_input::WheelPhase::Cancel
         } else if event.phase().intersects(NSEventPhase::Ended) {
-            vmux_browser::NativeHistoryPhase::End
+            vmux_input::WheelPhase::End
         } else if event
             .phase()
             .intersects(NSEventPhase::Began | NSEventPhase::MayBegin)
         {
-            vmux_browser::NativeHistoryPhase::Begin
+            vmux_input::WheelPhase::Begin
         } else if event
             .phase()
             .intersects(NSEventPhase::Changed | NSEventPhase::Stationary)
         {
-            vmux_browser::NativeHistoryPhase::Changed
+            vmux_input::WheelPhase::Changed
         } else {
-            vmux_browser::NativeHistoryPhase::Unsupported
+            vmux_input::WheelPhase::Unsupported
         };
         let delta = Vec2::new(
             -event.scrollingDeltaX() as f32,
             -event.scrollingDeltaY() as f32,
         );
-        vmux_browser::NativeBridge::record_history_wheel(window, position, delta, phase);
+        inbox.record(vmux_input::NativeWheelInput {
+            window: Some(window),
+            position,
+            delta,
+            phase,
+            at: Instant::now(),
+            has_native_event: source.is_some(),
+            precise: event.hasPreciseScrollingDeltas(),
+            modifiers: KeyModifiers {
+                shift: flags.contains(NSEventModifierFlags::Shift),
+                ctrl: flags.contains(NSEventModifierFlags::Control),
+                alt: flags.contains(NSEventModifierFlags::Option),
+                super_key: flags.contains(NSEventModifierFlags::Command),
+            },
+        });
     }
 
-    fn position(event: &NSEvent) -> Option<(isize, Vec2)> {
+    fn position(event: &NSEvent) -> Option<Vec2> {
         let mtm = objc2::MainThreadMarker::new()?;
         let mut window = event.window(mtm)?;
         let screen = window.convertPointToScreen(event.locationInWindow());
@@ -722,16 +770,20 @@ impl HistoryScroll {
         if !position.is_finite() || !scale.is_finite() || scale <= 0.0 {
             return None;
         }
-        Some((window.windowNumber(), position))
+        Some(position)
     }
 
-    fn cancel() {
-        vmux_browser::NativeBridge::record_history_wheel(
-            0,
-            Vec2::ZERO,
-            Vec2::ZERO,
-            vmux_browser::NativeHistoryPhase::Cancel,
-        );
+    fn cancel(window: Option<Entity>, inbox: &vmux_input::WheelInbox) {
+        inbox.record(vmux_input::NativeWheelInput {
+            window,
+            position: Vec2::ZERO,
+            delta: Vec2::ZERO,
+            phase: vmux_input::WheelPhase::Cancel,
+            at: Instant::now(),
+            has_native_event: false,
+            precise: false,
+            modifiers: KeyModifiers::default(),
+        });
     }
 }
 

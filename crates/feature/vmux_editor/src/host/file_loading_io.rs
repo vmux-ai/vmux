@@ -1,5 +1,5 @@
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vmux_ecs::Job;
 use vmux_ecs::event::FileDirEntry;
@@ -7,6 +7,12 @@ use vmux_ecs::event::FileDirEntry;
 #[derive(Clone)]
 pub(super) struct Inspect {
     pub path: PathBuf,
+}
+
+impl Inspect {
+    pub(super) fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
+        std::fs::metadata(path).ok()?.modified().ok()
+    }
 }
 
 impl Job for Inspect {

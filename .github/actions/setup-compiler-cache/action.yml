@@ -1,0 +1,55 @@
+name: Setup compiler cache
+description: Install pinned sccache and select GitHub or optional keyless GCS storage
+runs:
+  using: composite
+  steps:
+    - name: Configure compiler cache
+      id: backend
+      shell: bash
+      env:
+        CACHE_ENABLED: ${{ env.VMUX_CI_GCS_ENABLED }}
+        CACHE_BUCKET: ${{ env.CI_CACHE_BUCKET }}
+        CACHE_PROVIDER: ${{ env.CI_CACHE_WIF_PROVIDER }}
+        CACHE_READER: ${{ env.CI_CACHE_READER_ACCOUNT }}
+        CACHE_WRITER: ${{ env.CI_CACHE_WRITER_ACCOUNT }}
+        CACHE_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        SCCACHE_GHA_RW_MODE: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'READ_WRITE' || 'READ_ONLY' }}
+        SCCACHE_GCS_RW_MODE: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'READ_WRITE' || 'READ_ONLY' }}
+      run: |
+        gcs=false
+        gha=true
+        version=vmux-compiler-v1
+        bucket=""
+        if [ "$CACHE_ENABLED" = '1' ] && [ "$CACHE_FORK" != 'true' ] &&
+           [ -n "$CACHE_BUCKET" ] && [ -n "$CACHE_PROVIDER" ] &&
+           [ -n "$CACHE_READER" ] && [ -n "$CACHE_WRITER" ]; then
+          gcs=true
+          gha=false
+          version=""
+          bucket="$CACHE_BUCKET"
+        fi
+        echo "gcs=$gcs" >> "$GITHUB_OUTPUT"
+        {
+          echo 'RUSTC_WRAPPER=sccache'
+          echo 'CARGO_INCREMENTAL=0'
+          echo 'SCCACHE_IDLE_TIMEOUT=0'
+          echo "SCCACHE_GHA_VERSION=$version"
+          echo "SCCACHE_GHA_ENABLED=$gha"
+          echo "SCCACHE_GHA_RW_MODE=$SCCACHE_GHA_RW_MODE"
+          echo "SCCACHE_GCS_BUCKET=$bucket"
+          echo "SCCACHE_GCS_RW_MODE=$SCCACHE_GCS_RW_MODE"
+          echo 'SCCACHE_GCS_KEY_PREFIX=vmux-client/v1/'
+        } >> "$GITHUB_ENV"
+    - uses: google-github-actions/auth@v3
+      if: steps.backend.outputs.gcs == 'true'
+      with:
+        workload_identity_provider: ${{ env.CI_CACHE_WIF_PROVIDER }}
+        service_account: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && env.CI_CACHE_WRITER_ACCOUNT || env.CI_CACHE_READER_ACCOUNT }}
+    - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+      with:
+        version: v${{ env.SCCACHE_VERSION }}
+    - name: Start compiler cache
+      shell: bash
+      run: |
+        sccache --start-server
+        echo 'VMUX_CI_COMPILER_CACHE_READY=1' >> "$GITHUB_ENV"
