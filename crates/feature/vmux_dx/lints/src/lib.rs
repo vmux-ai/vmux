@@ -36,27 +36,22 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
         if !package.starts_with("vmux_") {
             return;
         }
-        let (method, systems) = match expression.kind {
+        let (method, arguments, qualified) = match expression.kind {
             ExprKind::MethodCall(_, _, arguments, _) => {
                 let Some(method) = cx.typeck_results().type_dependent_def_id(expression.hir_id)
                 else {
                     return;
                 };
-                (method, arguments.get(1))
+                (method, arguments, false)
             }
             ExprKind::Call(function, arguments) => {
                 let TyKind::FnDef(method, _) = cx.typeck_results().expr_ty(function).kind() else {
                     return;
                 };
-                (*method, arguments.get(2))
+                (*method, arguments, true)
             }
             _ => return,
         };
-        if cx.tcx.crate_name(method.krate).as_str() != "bevy_app"
-            || cx.tcx.item_name(method).as_str() != "add_systems"
-        {
-            return;
-        }
         let Some(implementation) = cx.tcx.impl_of_assoc(method) else {
             return;
         };
@@ -69,10 +64,30 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
         else {
             return;
         };
-        if !matches!(cx.tcx.item_name(owner.did()).as_str(), "App" | "SubApp") {
-            return;
-        }
-        if let Some(systems) = systems {
+        let package = cx.tcx.crate_name(method.krate);
+        let owner = cx.tcx.item_name(owner.did());
+        let name = cx.tcx.item_name(method);
+        let index = match (package.as_str(), owner.as_str(), name.as_str()) {
+            ("bevy_app", "App" | "SubApp", "add_systems") => {
+                if qualified {
+                    2
+                } else {
+                    1
+                }
+            }
+            ("bevy_app", "App" | "SubApp", "add_observer")
+            | ("bevy_ecs", "World" | "Commands", "add_observer")
+            | ("bevy_ecs", "EntityCommands" | "EntityWorldMut", "observe") => {
+                if qualified {
+                    1
+                } else {
+                    0
+                }
+            }
+            ("bevy_ecs", "Observer", "new") if qualified => 0,
+            _ => return,
+        };
+        if let Some(systems) = arguments.get(index) {
             self.configuration(cx, systems);
         }
     }
