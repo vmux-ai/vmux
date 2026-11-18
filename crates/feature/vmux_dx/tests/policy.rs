@@ -1685,7 +1685,76 @@ fn manifest_metadata_boundaries_require_the_real_interface_and_a_stateless_marke
         inventory.resolve_usage();
         let marker = &inventory.entries["crates/feature/example/src/lib.rs||struct:Feature"];
         assert_eq!(inventory.manifest_source(marker), allowed);
+        assert_eq!(
+            inventory.canonical(marker, &Policy::default(), &mut BTreeSet::new()),
+            allowed
+        );
+        let implementation = inventory
+            .entries
+            .values()
+            .find(|entry| matches!(entry.kind, Kind::Impl))
+            .unwrap();
+        assert_eq!(inventory.manifest_source(implementation), allowed);
     }
+}
+
+#[test]
+fn manifest_sources_do_not_approve_inherent_workflows_or_test_only_implementations() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/vmux_feature/src/manifest.rs",
+        "pub trait FeatureManifestSource { const SOURCE: &'static str; }",
+    );
+    inventory.source("crates/feature/example/src/lib.rs", "struct Feature; impl vmux_feature::manifest::FeatureManifestSource for Feature { const SOURCE: &'static str = \"manifest\"; } impl Feature { fn workflow(&self) { loop {} } }");
+    inventory.resolve_usage();
+    let marker = &inventory.entries["crates/feature/example/src/lib.rs||struct:Feature"];
+    let workflow = &inventory.entries["crates/feature/example/src/lib.rs||impl:Feature"];
+    assert!(inventory.manifest_source(marker));
+    assert!(!inventory.manifest_source(workflow));
+    assert!(!inventory.canonical(workflow, &Policy::default(), &mut BTreeSet::new()));
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/vmux_feature/src/manifest.rs",
+        "pub trait FeatureManifestSource { const SOURCE: &'static str; }",
+    );
+    inventory.source("crates/feature/example/src/lib.rs", "struct Feature; #[cfg(test)] impl vmux_feature::manifest::FeatureManifestSource for Feature { const SOURCE: &'static str = \"manifest\"; }");
+    inventory.resolve_usage();
+    let marker = &inventory.entries["crates/feature/example/src/lib.rs||struct:Feature"];
+    assert!(!inventory.manifest_source(marker));
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/vmux_feature/src/manifest.rs",
+        "pub trait FeatureManifestSource { const SOURCE: &'static str; }",
+    );
+    inventory.source("crates/feature/example/src/lib.rs", "#[cfg(test)] mod tests { struct Feature; impl vmux_feature::manifest::FeatureManifestSource for Feature { const SOURCE: &'static str = \"fixture manifest\"; } }");
+    inventory.resolve_usage();
+    let marker = &inventory.entries["crates/feature/example/src/lib.rs|tests|struct:Feature"];
+    assert!(inventory.manifest_source(marker));
+}
+
+#[test]
+fn manifest_sources_keep_bounded_multiline_declarations_as_immutable_metadata() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/vmux_feature/src/manifest.rs",
+        "pub trait FeatureManifestSource { const SOURCE: &'static str; }",
+    );
+    let keywords = (0..40)
+        .map(|index| format!("\"keyword{index}\""))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let manifest = format!(
+        "(pages: [(name: \"main\", url: \"vmux://example/\", title: \"Example\", keywords: [{keywords}])])"
+    );
+    inventory.source("crates/feature/example/src/lib.rs", &format!("struct Feature; impl vmux_feature::manifest::FeatureManifestSource for Feature {{ const SOURCE: &'static str = {manifest:?}; }}"));
+    inventory.resolve_usage();
+    let key = inventory.key("impl:vmux_feature :: manifest :: FeatureManifestSource for Feature");
+    assert!(inventory.manifest_source(&inventory.entries[&key]));
+    assert!(inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
 }
 
 #[test]
@@ -5159,7 +5228,7 @@ impl EnumPurpose {
                 (!(shape.component || shape.signal || inventory.enum_job(entry))
                     || shape.fixed_format)
                     && (inventory.entries.get(&self.owner).is_some_and(|owner| {
-                        inventory.framework_bootstrap(owner)
+                        inventory.automatic_boundary(owner)
                             && inventory.owner_references(owner, entry)
                     }) || policy.boundaries.iter().any(|boundary| {
                         boundary.key == self.owner
@@ -5778,7 +5847,7 @@ impl Boundary {
                         current = &value.owner;
                         continue;
                     }
-                    if !inventory.framework_bootstrap(parent)
+                    if !inventory.automatic_boundary(parent)
                         && (!parent.ecs
                             || !inventory.used(parent)
                             || !inventory.canonical(parent, policy, &mut BTreeSet::new()))
@@ -5821,7 +5890,7 @@ impl Boundary {
                 if !(entry.contract
                     || entry.ecs && inventory.used(entry)
                     || owned_value
-                    || inventory.framework_bootstrap(entry))
+                    || inventory.automatic_boundary(entry))
                 {
                     return false;
                 }
@@ -5903,7 +5972,7 @@ impl Boundary {
             && let Some(entry) = inventory.entries.get(key)
         {
             for parent in inventory.entries.values() {
-                if inventory.framework_bootstrap(parent)
+                if inventory.automatic_boundary(parent)
                     && inventory.owner_references(adapter, parent)
                     && inventory.boundary_references(parent, entry, &mut BTreeSet::new())
                 {
@@ -6512,7 +6581,7 @@ impl Inventory {
         if !visiting.insert(entry.key.clone()) {
             return false;
         }
-        if self.framework_bootstrap(entry) {
+        if self.automatic_boundary(entry) {
             return true;
         }
         if policy.boundaries.iter().any(|boundary| {
@@ -6662,6 +6731,10 @@ impl Inventory {
             }
         }
         false
+    }
+
+    fn automatic_boundary(&self, entry: &Declaration) -> bool {
+        self.framework_bootstrap(entry) || self.manifest_source(entry)
     }
 
     fn framework_bootstrap(&self, entry: &Declaration) -> bool {
@@ -6936,6 +7009,13 @@ impl Inventory {
     }
 
     fn manifest_source(&self, adapter: &Declaration) -> bool {
+        if !matches!(adapter.kind, Kind::Struct | Kind::Impl)
+            || adapter.local
+            || adapter.dynamic
+            || adapter.projection
+        {
+            return false;
+        }
         let source = match &adapter.owner {
             Some(path) => self.resolve(&adapter.namespace, path, &mut BTreeSet::new()),
             None => Some(adapter),
@@ -6946,14 +7026,11 @@ impl Inventory {
         if !matches!(source.kind, Kind::Struct) || source.has_fields {
             return false;
         }
-        for implementation in self.entries.values() {
-            let Some(owner) = &implementation.owner else {
+        for implementation in self.implementations(source) {
+            if implementation.production != source.production || !implementation.bodies.is_empty() {
                 continue;
-            };
-            if self
-                .resolve(&implementation.namespace, owner, &mut BTreeSet::new())
-                .is_none_or(|owner| owner.key != source.key)
-            {
+            }
+            if matches!(adapter.kind, Kind::Impl) && implementation.key != adapter.key {
                 continue;
             }
             let Some((interface, _)) = implementation.name.split_once(" for ") else {
