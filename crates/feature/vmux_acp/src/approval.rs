@@ -617,6 +617,7 @@ fn scope(
 
 #[derive(SystemParam)]
 struct GrantCatalog<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
     agents: Query<'w, 's, (Entity, &'static ChildOf, &'static AgentId), With<Agent>>,
     scopes: Query<'w, 's, (Entity, &'static ChildOf, &'static Scope, &'static Name)>,
     rules: Query<'w, 's, (Entity, &'static ChildOf, &'static Name), With<Grant>>,
@@ -624,8 +625,12 @@ struct GrantCatalog<'w, 's> {
 
 impl GrantCatalog<'_, '_> {
     fn agent(&self, file: Entity, actor: &str) -> Option<Entity> {
+        let children = self.children.get(file).ok()?;
         let mut found = None;
-        for (entity, parent, agent) in &self.agents {
+        for child in children.iter() {
+            let Ok((entity, parent, agent)) = self.agents.get(child) else {
+                continue;
+            };
             if parent.parent() == file && agent.0 == actor {
                 found = Some(entity);
             }
@@ -634,8 +639,12 @@ impl GrantCatalog<'_, '_> {
     }
 
     fn scope(&self, agent: Entity, directory: &str, transient: Option<Entity>) -> Option<Entity> {
+        let children = self.children.get(agent).ok()?;
         let mut found = None;
-        for (entity, parent, scope, name) in &self.scopes {
+        for child in children.iter() {
+            let Ok((entity, parent, scope, name)) = self.scopes.get(child) else {
+                continue;
+            };
             if parent.parent() == agent && name.as_str() == directory && scope.session == transient
             {
                 found = Some(entity);
@@ -645,8 +654,12 @@ impl GrantCatalog<'_, '_> {
     }
 
     fn rule(&self, scope: Entity, tool: &str) -> Option<Entity> {
+        let children = self.children.get(scope).ok()?;
         let mut found = None;
-        for (entity, parent, name) in &self.rules {
+        for child in children.iter() {
+            let Ok((entity, parent, name)) = self.rules.get(child) else {
+                continue;
+            };
             if parent.parent() == scope && name.as_str() == tool {
                 found = Some(entity);
             }
@@ -658,10 +671,26 @@ impl GrantCatalog<'_, '_> {
 fn apply(
     grant: On<PreparedGrant>,
     catalog: GrantCatalog,
-    pending: Query<&Pending>,
-    mut revisions: Query<&mut Revision>,
+    sessions: Query<Option<&Pending>, With<Session>>,
+    mut revisions: Query<&mut Revision, With<File>>,
     mut commands: Commands,
 ) {
+    if !revisions.contains(grant.file) {
+        return;
+    }
+    let bind = grant
+        .binding
+        .as_ref()
+        .is_some_and(|(session, _, _)| sessions.contains(*session));
+    if grant.binding.is_some() && !bind && (!grant.explicit || grant.transient.is_some()) {
+        return;
+    }
+    if grant
+        .transient
+        .is_some_and(|session| !sessions.contains(session))
+    {
+        return;
+    }
     let agent = match catalog.agent(grant.file, &grant.actor) {
         Some(agent) => agent,
         None => commands
@@ -680,8 +709,8 @@ fn apply(
             ))
             .id(),
     };
-    if let Some((session, actor, cwd)) = &grant.binding {
-        if let Ok(pending) = pending.get(*session) {
+    if bind && let Some((session, actor, cwd)) = &grant.binding {
+        if let Ok(Some(pending)) = sessions.get(*session) {
             commands.entity(pending.0).try_despawn();
             commands.entity(*session).remove::<Pending>();
         }
@@ -950,6 +979,40 @@ mod tests {
                 .query_filtered::<Entity, With<Grant>>()
                 .iter(self.app.world())
                 .count()
+        }
+    }
+
+    #[test]
+    fn requester_removal_between_receipt_validation_and_materialization_keeps_only_durable_grants()
+    {
+        for repository in [Some("/repo"), None] {
+            let mut fixture = Fixture::new();
+            let session = fixture.session("claude", "/repo/project");
+            fixture.remember(session, "bash");
+            fixture.app.add_systems(
+                Update,
+                (move |mut commands: Commands| {
+                    commands.entity(session).try_despawn();
+                })
+                .after(receive)
+                .before(materialize),
+            );
+            fixture.resolve(session, repository, None);
+            assert!(fixture.app.world().get_entity(session).is_err());
+            assert_eq!(fixture.count(), usize::from(repository.is_some()));
+            let scopes: Vec<_> = fixture
+                .app
+                .world_mut()
+                .query::<&Scope>()
+                .iter(fixture.app.world())
+                .map(|scope| scope.session)
+                .collect();
+            assert!(scopes.iter().all(Option::is_none));
+            if repository.is_some() {
+                let survivor = fixture.session("claude", "/repo/other");
+                fixture.resolve(survivor, repository, None);
+                assert!(fixture.allows(survivor, "bash"));
+            }
         }
     }
 
