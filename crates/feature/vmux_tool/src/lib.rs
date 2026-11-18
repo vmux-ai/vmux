@@ -6,6 +6,7 @@ use crate::state::{
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::Commands;
 #[cfg(host)]
 pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
@@ -19,6 +20,7 @@ pub use provider::*;
 #[cfg(host)]
 pub use query::*;
 pub use registry::*;
+use std::result::Result;
 use vmux_ecs::{
     AsyncTask, Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
     TaskPlugin, TaskResult, TaskSet, TaskToken,
@@ -169,6 +171,18 @@ impl Plugin for ToolRuntimePlugin {
         .add_observer(accept::<ToolApplyRequest>)
         .add_observer(accept::<ToolImportRequest>)
         .add_observer(completed)
+        .add_observer(store::<mcp::ForgottenMcpServer>)
+        .add_observer(store::<dotfiles::DiscoveredDotfilePackages>)
+        .add_observer(store::<dotfiles::DotfilePlan>)
+        .add_observer(store::<dotfiles::ImportedDotfiles>)
+        .add_observer(store::<dotfiles::ImportedAvailableDotfiles>)
+        .add_observer(store::<dotfiles::LinkedDotfilePackage>)
+        .add_observer(store::<dotfiles::DisabledDotfilePackage>)
+        .add_observer(store::<dotfiles::UnlinkedDotfilePackage>)
+        .add_observer(store::<dotfiles::AppliedEnabledDotfiles>)
+        .add_observer(store::<dotfiles::AdoptedDotfile>)
+        .add_observer(store::<homebrew::ImportedBrewfile>)
+        .add_observer(store::<npm::ImportedNpmManifest>)
         .add_message::<ToolInventoryChanged>()
         .configure_sets(
             Update,
@@ -361,44 +375,65 @@ fn finish_operation<T: Component>(
             Ok(result) => result,
             Err(error) => Err(error.to_string()),
         };
-        commands.queue(completion.guard(entity, StoreCompletion { entity, result }));
+        commands.queue(completion.guard(
+            entity,
+            StoreCompletion {
+                entity,
+                result: Some(result),
+            },
+        ));
     }
 }
 
+#[derive(Event)]
 struct StoreCompletion<T: Component> {
     entity: Entity,
-    result: Result<T, String>,
+    result: Option<Result<T, String>>,
 }
 
 impl<T: Component> Command for StoreCompletion<T> {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        if world
-            .get::<OperationState>(self.entity)
-            .is_some_and(|state| {
-                !matches!(state, OperationState::Pending | OperationState::Running)
-            })
-        {
-            return;
+        world.trigger(self);
+    }
+}
+
+fn store<T: Component>(
+    mut receipt: On<StoreCompletion<T>>,
+    operations: Query<(
+        Option<&OperationState>,
+        Option<&vmux_ecs::EntityTarget<ToolStore>>,
+    )>,
+    stores: Query<(), With<ToolStore>>,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    let Ok((state, target)) = operations.get(receipt.entity) else {
+        return;
+    };
+    if state
+        .is_some_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+    {
+        return;
+    }
+    if target.is_some_and(|target| !stores.contains(target.entity())) {
+        commands
+            .entity(receipt.entity)
+            .insert(OperationState::Canceled);
+        return;
+    }
+    let Some(result) = receipt.result.take() else {
+        return;
+    };
+    match result {
+        Ok(output) => {
+            commands.entity(receipt.entity).insert(output);
         }
-        if let Some(target) = world.get::<ToolStoreTarget>(self.entity)
-            && world.get::<ToolStore>(target.entity()).is_none()
-        {
-            world
-                .entity_mut(self.entity)
-                .insert(OperationState::Canceled);
-            return;
-        }
-        match self.result {
-            Ok(output) => {
-                world.entity_mut(self.entity).insert(output);
-            }
-            Err(error) => {
-                world
-                    .entity_mut(self.entity)
-                    .insert((ToolOperationFinished, ToolOperationFailed(error)));
-            }
+        Err(error) => {
+            commands
+                .entity(receipt.entity)
+                .insert((ToolOperationFinished, ToolOperationFailed(error)));
         }
     }
 }
