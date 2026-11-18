@@ -53,7 +53,8 @@ impl Plugin for ResizePlugin {
                     .before(vmux_input::PointerSet::Route),
             )
             .add_systems(Last, publish_masks.in_set(vmux_input::PointerSet::Publish))
-            .add_systems(PostUpdate, sync_split_gaps);
+            .add_systems(PostUpdate, sync_split_gaps)
+            .add_observer(resize);
     }
 }
 
@@ -361,304 +362,344 @@ fn initialize_pointer(
     }
 }
 
-type Params<'w, 's> = (
-    Query<'w, 's, (Entity, &'static Window, &'static vmux_input::PointerState)>,
-    PointerCursors<'w, 's>,
-    crate::window::FocusedWindow<'w, 's>,
-    super::OverlayInput<'w, 's>,
-    crate::window::WindowHierarchy<'w, 's>,
-    ActiveTabParam<'w, 's>,
-    crate::Hierarchy<'w, 's>,
-    Query<'w, 's, (Entity, &'static PaneSplit, &'static Children), With<Pane>>,
-    Query<'w, 's, (Entity, &'static PaneDrag)>,
-    Query<'w, 's, &'static ComputedNode>,
-    Query<'w, 's, &'static mut Node, Without<vmux_ecs::WindowOverlay>>,
-    Query<'w, 's, &'static mut PaneSize>,
-    Query<'w, 's, &'static mut vmux_input::PointerCapture, With<Window>>,
-    Query<'w, 's, &'static mut PointerCursor, With<Window>>,
-    Commands<'w, 's>,
-);
+#[derive(SystemParam)]
+struct ResizeScene<'w, 's> {
+    windows: Query<'w, 's, (Entity, &'static Window, &'static vmux_input::PointerState)>,
+    focused: crate::window::FocusedWindow<'w, 's>,
+    overlays: super::OverlayInput<'w, 's>,
+    windows_for: crate::window::WindowHierarchy<'w, 's>,
+    active: ActiveTabParam<'w, 's>,
+    panes: crate::Hierarchy<'w, 's>,
+    splits: Query<'w, 's, (Entity, &'static PaneSplit, &'static Children), With<Pane>>,
+    layouts: Query<'w, 's, &'static ComputedNode>,
+}
 
-fn from_pointer(world: &mut World) {
-    let messages = world.resource::<Messages<vmux_input::PointerUpdated>>();
+#[derive(SystemParam)]
+struct ResizeControl<'w, 's> {
+    feedback: PointerCursors<'w, 's>,
+    drags: Query<'w, 's, (Entity, &'static PaneDrag)>,
+    captures: Query<'w, 's, &'static mut vmux_input::PointerCapture, With<Window>>,
+    cursors: Query<'w, 's, &'static mut PointerCursor, With<Window>>,
+    commands: Commands<'w, 's>,
+}
+
+#[derive(SystemParam)]
+struct ResizeSizes<'w, 's> {
+    nodes: Query<'w, 's, &'static mut Node, Without<vmux_ecs::WindowOverlay>>,
+    panes: Query<'w, 's, &'static mut PaneSize>,
+}
+
+#[derive(Event)]
+struct PointerResize(Option<vmux_input::PointerUpdated>);
+
+fn from_pointer(messages: Res<Messages<vmux_input::PointerUpdated>>, mut commands: Commands) {
     let mut cursor = messages.get_cursor();
-    let mut events: Vec<_> = cursor.read(messages).copied().map(Some).collect();
-    events.push(None);
-    for input in events {
-        let mut state = bevy::ecs::system::SystemState::<Params>::new(world);
-        {
-            let (
-                windows,
-                mut feedback,
-                focused_window,
-                overlays,
-                hierarchy,
-                active_tab,
-                panes,
-                splits,
-                active_drags,
-                layouts,
-                mut nodes,
-                mut pane_sizes,
-                mut captures,
-                mut cursors,
-                mut commands,
-            ) = state.get_mut(world).expect("pointer resize parameters");
-            'event: {
-                let event = match input {
-                    Some(event) => {
-                        let Ok(mut cursor) = cursors.get_mut(event.window) else {
-                            break 'event;
-                        };
-                        if event.sequence <= cursor.0 {
-                            break 'event;
-                        }
-                        cursor.0 = event.sequence;
-                        if focused_window.entity() != Some(event.window) {
-                            break 'event;
-                        }
-                        if captures.get(event.window).is_ok_and(|capture| {
-                            capture
-                                .owner()
-                                .is_some_and(|owner| active_drags.get(owner).is_err())
-                        }) {
-                            break 'event;
-                        }
-                        event
-                    }
-                    None => {
-                        let Some(window) = focused_window.entity() else {
-                            for (split, _) in &active_drags {
-                                commands.entity(split).remove::<PaneDrag>();
-                                if let Some(window) = hierarchy.get(split)
-                                    && let Ok(mut capture) = captures.get_mut(window)
-                                    && capture.owner() == Some(split)
-                                {
-                                    capture.release(MouseButton::Left);
-                                }
-                            }
-                            for (window, _, _) in &windows {
-                                feedback.release(window);
-                            }
-                            break 'event;
-                        };
-                        let Ok((_, _, pointer)) = windows.get(window) else {
-                            break 'event;
-                        };
-                        vmux_input::PointerUpdated {
-                            native_token: 0,
-                            capture_owner: None,
-                            window,
-                            position_px: pointer.position_px,
-                            buttons: pointer.buttons,
-                            previous_buttons: pointer.buttons,
-                            sequence: pointer.sequence,
-                            motion: false,
-                            cancelled: pointer.cancelled,
-                            modifiers: pointer.modifiers,
-                            press_sequence: pointer.press_sequence,
-                            press_position_px: pointer.press_position_px,
-                            press_modifiers: pointer.press_modifiers,
-                        }
-                    }
-                };
-                let pressed = event.buttons.left && !event.cancelled;
-                let just_pressed = input.is_some() && pressed && !event.previous_buttons.left;
-                let current_window = focused_window.entity();
-                let blocked = current_window.is_some_and(|window| overlays.owns(window));
-                let tab = active_tab.get();
-                for (entity, window, _) in &windows {
-                    if Some(entity) != current_window || !window.focused || tab.is_none() || blocked
-                    {
-                        feedback.release(entity);
-                    }
-                }
-                for (split, drag) in &active_drags {
-                    if input.is_some()
-                        && hierarchy.get(split) == Some(event.window)
-                        && let Ok(mut capture) = captures.get_mut(event.window)
-                    {
-                        capture.consume(event.native_token);
-                        capture.suppress(event.sequence);
-                    }
-                    let current = !blocked
-                        && tab.is_some_and(|tab| panes.contains(tab, split))
-                        && hierarchy.get(split) == current_window
-                        && splits.get(split).is_ok_and(|(_, split, children)| {
-                            drag.matches(
-                                split,
-                                children.iter().filter(|child| {
-                                    panes.is_leaf(*child) || splits.contains(*child)
-                                }),
-                            )
-                        });
-                    if !pressed || !current {
-                        commands.entity(split).remove::<PaneDrag>();
-                        if let Some(window) = hierarchy.get(split)
-                            && let Ok(mut capture) = captures.get_mut(window)
-                            && capture.owner() == Some(split)
-                        {
-                            capture.release(MouseButton::Left);
-                        }
-                    }
-                }
-                let (Some(window_entity), Some(tab)) = (current_window, tab) else {
-                    break 'event;
-                };
-                let Ok((_, window, _)) = windows.get(window_entity) else {
-                    break 'event;
-                };
-                if !window.focused || blocked {
-                    for (split, _) in &active_drags {
-                        commands.entity(split).remove::<PaneDrag>();
-                    }
-                    break 'event;
-                }
-                let Some(cursor) = event.position_px else {
-                    feedback.release(window_entity);
-                    break 'event;
-                };
-                let hit_position = if just_pressed {
-                    event.press_position_px.unwrap_or(cursor)
-                } else {
-                    cursor
-                };
-                if pressed {
-                    for (split_entity, drag) in &active_drags {
-                        if hierarchy.get(split_entity) != Some(window_entity)
-                            || !panes.contains(tab, split_entity)
-                        {
-                            continue;
-                        }
-                        let Ok((_, split, children)) = splits.get(split_entity) else {
-                            continue;
-                        };
-                        if !drag.matches(
-                            split,
-                            children
-                                .iter()
-                                .filter(|child| panes.is_leaf(*child) || splits.contains(*child)),
-                        ) {
-                            continue;
-                        }
-                        let (Ok(previous), Ok(next)) =
-                            (layouts.get(drag.previous), layouts.get(drag.next))
-                        else {
-                            commands.entity(split_entity).remove::<PaneDrag>();
-                            continue;
-                        };
-                        if previous.is_empty() || next.is_empty() {
-                            commands.entity(split_entity).remove::<PaneDrag>();
-                            if let Ok(mut capture) = captures.get_mut(window_entity)
-                                && capture.owner() == Some(split_entity)
-                            {
-                                capture.release(MouseButton::Left);
-                            }
-                            feedback.release(window_entity);
-                            continue;
-                        }
-                        let grip = ResizeGrip::between(split.direction, *previous, *next);
-                        feedback.publish(window_entity, grip, SystemCursorIcon::Grabbing.into());
-                        let position = match split.direction {
-                            PaneSplitDirection::Row => cursor.x,
-                            PaneSplitDirection::Column => cursor.y,
-                        };
-                        let parent_size = layouts
-                            .get(split_entity)
-                            .map_or(Vec2::ONE, |layout| layout.size);
-                        let parent_length = match split.direction {
-                            PaneSplitDirection::Row => parent_size.x,
-                            PaneSplitDirection::Column => parent_size.y,
-                        }
-                        .max(1.0);
-                        let delta = (position - drag.start_position) / parent_length
-                            * (drag.previous_grow + drag.next_grow);
-                        let (previous_grow, next_grow) =
-                            resized_pair(drag.previous_grow, drag.next_grow, delta, parent_length);
-                        if let Ok(mut node) = nodes.get_mut(drag.previous) {
-                            node.flex_grow = previous_grow;
-                        }
-                        if let Ok(mut node) = nodes.get_mut(drag.next) {
-                            node.flex_grow = next_grow;
-                        }
-                        if let Ok(mut size) = pane_sizes.get_mut(drag.previous) {
-                            size.flex_grow = previous_grow;
-                        }
-                        if let Ok(mut size) = pane_sizes.get_mut(drag.next) {
-                            size.flex_grow = next_grow;
-                        }
-                        break 'event;
-                    }
-                }
-                if pressed && !just_pressed {
-                    feedback.release(window_entity);
-                    break 'event;
-                }
-                for (split_entity, split, children) in &splits {
-                    if hierarchy.get(split_entity) != Some(window_entity)
-                        || !panes.contains(tab, split_entity)
-                    {
-                        continue;
-                    }
-                    let mut siblings = Vec::new();
-                    for child in children.iter() {
-                        if panes.is_leaf(child) || splits.contains(child) {
-                            siblings.push(child);
-                        }
-                    }
-                    for pair in siblings.windows(2) {
-                        let (previous_entity, next_entity) = (pair[0], pair[1]);
-                        let (Ok(previous), Ok(next)) =
-                            (layouts.get(previous_entity), layouts.get(next_entity))
-                        else {
-                            continue;
-                        };
-                        if previous.is_empty() || next.is_empty() {
-                            continue;
-                        }
-                        let grip = ResizeGrip::between(split.direction, *previous, *next);
-                        if !grip.contains(hit_position) {
-                            continue;
-                        }
-                        let icon = if just_pressed {
-                            SystemCursorIcon::Grabbing
-                        } else {
-                            match split.direction {
-                                PaneSplitDirection::Row => SystemCursorIcon::ColResize,
-                                PaneSplitDirection::Column => SystemCursorIcon::RowResize,
-                            }
-                        };
-                        feedback.publish(window_entity, grip, icon.into());
-                        if just_pressed {
-                            if let Ok(mut capture) = captures.get_mut(window_entity) {
-                                capture.claim(split_entity, MouseButton::Left);
-                                capture.consume(event.native_token);
-                                capture.suppress(event.sequence);
-                            }
-                            commands.entity(split_entity).insert(PaneDrag {
-                                previous: previous_entity,
-                                next: next_entity,
-                                direction: split.direction,
-                                start_position: match split.direction {
-                                    PaneSplitDirection::Row => hit_position.x,
-                                    PaneSplitDirection::Column => hit_position.y,
-                                },
-                                previous_grow: nodes
-                                    .get(previous_entity)
-                                    .map_or(1.0, |node| node.flex_grow),
-                                next_grow: nodes
-                                    .get(next_entity)
-                                    .map_or(1.0, |node| node.flex_grow),
-                            });
-                        }
-                        break 'event;
-                    }
-                }
-                feedback.release(window_entity);
+    for event in cursor.read(&messages) {
+        commands.trigger(PointerResize(Some(*event)));
+    }
+    commands.trigger(PointerResize(None));
+}
+
+fn resize(
+    input: On<PointerResize>,
+    scene: ResizeScene,
+    mut control: ResizeControl,
+    mut sizes: ResizeSizes,
+) {
+    let explicit = input.0.is_some();
+    let Some(event) = sample(input.0, &scene, &mut control) else {
+        return;
+    };
+    release(&event, explicit, &scene, &mut control);
+    let pressed = event.buttons.left && !event.cancelled;
+    let just_pressed = explicit && pressed && !event.previous_buttons.left;
+    let (Some(window), Some(tab)) = (scene.focused.entity(), scene.active.get()) else {
+        return;
+    };
+    let Ok((_, native, _)) = scene.windows.get(window) else {
+        return;
+    };
+    if !native.focused || scene.overlays.owns(window) {
+        for (split, _) in &control.drags {
+            control.commands.entity(split).remove::<PaneDrag>();
+        }
+        return;
+    }
+    let Some(cursor) = event.position_px else {
+        control.feedback.release(window);
+        return;
+    };
+    let hit = if just_pressed {
+        event.press_position_px.unwrap_or(cursor)
+    } else {
+        cursor
+    };
+    if pressed && dragging(window, tab, cursor, &scene, &mut control, &mut sizes) {
+        return;
+    }
+    if pressed && !just_pressed {
+        control.feedback.release(window);
+        return;
+    }
+    if preview(&event, tab, hit, just_pressed, &scene, &mut control, &sizes) {
+        return;
+    }
+    control.feedback.release(window);
+}
+
+fn sample(
+    input: Option<vmux_input::PointerUpdated>,
+    scene: &ResizeScene,
+    control: &mut ResizeControl,
+) -> Option<vmux_input::PointerUpdated> {
+    if let Some(event) = input {
+        let Ok(mut cursor) = control.cursors.get_mut(event.window) else {
+            return None;
+        };
+        if event.sequence <= cursor.0 {
+            return None;
+        }
+        cursor.0 = event.sequence;
+        if scene.focused.entity() != Some(event.window) {
+            return None;
+        }
+        if control.captures.get(event.window).is_ok_and(|capture| {
+            capture
+                .owner()
+                .is_some_and(|owner| control.drags.get(owner).is_err())
+        }) {
+            return None;
+        }
+        return Some(event);
+    }
+    let Some(window) = scene.focused.entity() else {
+        for (split, _) in &control.drags {
+            control.commands.entity(split).remove::<PaneDrag>();
+            if let Some(window) = scene.windows_for.get(split)
+                && let Ok(mut capture) = control.captures.get_mut(window)
+                && capture.owner() == Some(split)
+            {
+                capture.release(MouseButton::Left);
             }
         }
-        state.apply(world);
+        for (window, _, _) in &scene.windows {
+            control.feedback.release(window);
+        }
+        return None;
+    };
+    let (_, _, pointer) = scene.windows.get(window).ok()?;
+    Some(vmux_input::PointerUpdated {
+        native_token: 0,
+        capture_owner: None,
+        window,
+        position_px: pointer.position_px,
+        buttons: pointer.buttons,
+        previous_buttons: pointer.buttons,
+        sequence: pointer.sequence,
+        motion: false,
+        cancelled: pointer.cancelled,
+        modifiers: pointer.modifiers,
+        press_sequence: pointer.press_sequence,
+        press_position_px: pointer.press_position_px,
+        press_modifiers: pointer.press_modifiers,
+    })
+}
+
+fn release(
+    event: &vmux_input::PointerUpdated,
+    explicit: bool,
+    scene: &ResizeScene,
+    control: &mut ResizeControl,
+) {
+    let window = scene.focused.entity();
+    let blocked = window.is_some_and(|window| scene.overlays.owns(window));
+    let tab = scene.active.get();
+    for (entity, native, _) in &scene.windows {
+        if Some(entity) != window || !native.focused || tab.is_none() || blocked {
+            control.feedback.release(entity);
+        }
     }
+    for (split, drag) in &control.drags {
+        if explicit
+            && scene.windows_for.get(split) == Some(event.window)
+            && let Ok(mut capture) = control.captures.get_mut(event.window)
+        {
+            capture.consume(event.native_token);
+            capture.suppress(event.sequence);
+        }
+        let current = !blocked
+            && tab.is_some_and(|tab| scene.panes.contains(tab, split))
+            && scene.windows_for.get(split) == window
+            && scene.splits.get(split).is_ok_and(|(_, split, children)| {
+                drag.matches(
+                    split,
+                    children.iter().filter(|child| {
+                        scene.panes.is_leaf(*child) || scene.splits.contains(*child)
+                    }),
+                )
+            });
+        if !event.buttons.left || event.cancelled || !current {
+            control.commands.entity(split).remove::<PaneDrag>();
+            if let Some(window) = scene.windows_for.get(split)
+                && let Ok(mut capture) = control.captures.get_mut(window)
+                && capture.owner() == Some(split)
+            {
+                capture.release(MouseButton::Left);
+            }
+        }
+    }
+}
+
+fn dragging(
+    window: Entity,
+    tab: Entity,
+    cursor: Vec2,
+    scene: &ResizeScene,
+    control: &mut ResizeControl,
+    sizes: &mut ResizeSizes,
+) -> bool {
+    for (entity, drag) in &control.drags {
+        if scene.windows_for.get(entity) != Some(window) || !scene.panes.contains(tab, entity) {
+            continue;
+        }
+        let Ok((_, split, children)) = scene.splits.get(entity) else {
+            continue;
+        };
+        if !drag.matches(
+            split,
+            children
+                .iter()
+                .filter(|child| scene.panes.is_leaf(*child) || scene.splits.contains(*child)),
+        ) {
+            continue;
+        }
+        let (Ok(previous), Ok(next)) = (
+            scene.layouts.get(drag.previous),
+            scene.layouts.get(drag.next),
+        ) else {
+            control.commands.entity(entity).remove::<PaneDrag>();
+            continue;
+        };
+        if previous.is_empty() || next.is_empty() {
+            control.commands.entity(entity).remove::<PaneDrag>();
+            if let Ok(mut capture) = control.captures.get_mut(window)
+                && capture.owner() == Some(entity)
+            {
+                capture.release(MouseButton::Left);
+            }
+            control.feedback.release(window);
+            continue;
+        }
+        let grip = ResizeGrip::between(split.direction, *previous, *next);
+        control
+            .feedback
+            .publish(window, grip, SystemCursorIcon::Grabbing.into());
+        let position = match split.direction {
+            PaneSplitDirection::Row => cursor.x,
+            PaneSplitDirection::Column => cursor.y,
+        };
+        let parent_size = scene
+            .layouts
+            .get(entity)
+            .map_or(Vec2::ONE, |layout| layout.size);
+        let parent_length = match split.direction {
+            PaneSplitDirection::Row => parent_size.x,
+            PaneSplitDirection::Column => parent_size.y,
+        }
+        .max(1.0);
+        let delta = (position - drag.start_position) / parent_length
+            * (drag.previous_grow + drag.next_grow);
+        let (previous_grow, next_grow) =
+            resized_pair(drag.previous_grow, drag.next_grow, delta, parent_length);
+        if let Ok(mut node) = sizes.nodes.get_mut(drag.previous) {
+            node.flex_grow = previous_grow;
+        }
+        if let Ok(mut node) = sizes.nodes.get_mut(drag.next) {
+            node.flex_grow = next_grow;
+        }
+        if let Ok(mut size) = sizes.panes.get_mut(drag.previous) {
+            size.flex_grow = previous_grow;
+        }
+        if let Ok(mut size) = sizes.panes.get_mut(drag.next) {
+            size.flex_grow = next_grow;
+        }
+        return true;
+    }
+    false
+}
+
+fn preview(
+    event: &vmux_input::PointerUpdated,
+    tab: Entity,
+    hit: Vec2,
+    pressed: bool,
+    scene: &ResizeScene,
+    control: &mut ResizeControl,
+    sizes: &ResizeSizes,
+) -> bool {
+    let window = event.window;
+    for (entity, split, children) in &scene.splits {
+        if scene.windows_for.get(entity) != Some(window) || !scene.panes.contains(tab, entity) {
+            continue;
+        }
+        let mut siblings = Vec::new();
+        for child in children.iter() {
+            if scene.panes.is_leaf(child) || scene.splits.contains(child) {
+                siblings.push(child);
+            }
+        }
+        for pair in siblings.windows(2) {
+            let (previous_entity, next_entity) = (pair[0], pair[1]);
+            let (Ok(previous), Ok(next)) = (
+                scene.layouts.get(previous_entity),
+                scene.layouts.get(next_entity),
+            ) else {
+                continue;
+            };
+            if previous.is_empty() || next.is_empty() {
+                continue;
+            }
+            let grip = ResizeGrip::between(split.direction, *previous, *next);
+            if !grip.contains(hit) {
+                continue;
+            }
+            let icon = if pressed {
+                SystemCursorIcon::Grabbing
+            } else {
+                match split.direction {
+                    PaneSplitDirection::Row => SystemCursorIcon::ColResize,
+                    PaneSplitDirection::Column => SystemCursorIcon::RowResize,
+                }
+            };
+            control.feedback.publish(window, grip, icon.into());
+            if pressed {
+                if let Ok(mut capture) = control.captures.get_mut(window) {
+                    capture.claim(entity, MouseButton::Left);
+                    capture.consume(event.native_token);
+                    capture.suppress(event.sequence);
+                }
+                control.commands.entity(entity).insert(PaneDrag {
+                    previous: previous_entity,
+                    next: next_entity,
+                    direction: split.direction,
+                    start_position: match split.direction {
+                        PaneSplitDirection::Row => hit.x,
+                        PaneSplitDirection::Column => hit.y,
+                    },
+                    previous_grow: sizes
+                        .nodes
+                        .get(previous_entity)
+                        .map_or(1.0, |node| node.flex_grow),
+                    next_grow: sizes
+                        .nodes
+                        .get(next_entity)
+                        .map_or(1.0, |node| node.flex_grow),
+                });
+            }
+            return true;
+        }
+    }
+    false
 }
 
 fn publish_masks(
