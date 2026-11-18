@@ -29,7 +29,7 @@ pub(crate) struct ChatPage;
 #[vmux_page::page(
     page = "agent-onboarding",
     component = Page,
-    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState, vmux_api::mcp::McpServersUiState],
     document_url = "vmux://start/",
     dom_group = "agent-conversation",
     preserve_title,

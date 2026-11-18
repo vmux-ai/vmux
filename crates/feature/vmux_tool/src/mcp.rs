@@ -53,8 +53,8 @@ impl McpProvider {
             .map(|error| format!("MCP Servers: {error}"))
             .collect();
         let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
-        let catalog = vmux_ecs::manifest::FeatureManifest::parse(
-            <crate::Feature as vmux_ecs::manifest::FeatureManifestSource>::SOURCE,
+        let catalog = vmux_feature::manifest::FeatureManifest::parse(
+            <crate::Feature as vmux_feature::manifest::FeatureManifestSource>::SOURCE,
         );
         for name in manifest.mcp.servers.keys() {
             if Self::legacy_definition(name, manifest, &catalog.mcp_servers).is_some() {
@@ -125,7 +125,7 @@ impl McpProvider {
     fn legacy_definition<'a>(
         name: &str,
         manifest: &'a ToolsManifest,
-        catalog: &[vmux_ecs::manifest::McpServer],
+        catalog: &[vmux_feature::manifest::McpServer],
     ) -> Option<&'a McpServerManifest> {
         let definition = manifest.mcp.servers.get(name)?;
         for server in catalog {
