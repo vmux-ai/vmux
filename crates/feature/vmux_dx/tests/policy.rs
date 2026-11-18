@@ -9350,6 +9350,9 @@ impl Inventory {
         self.plugin_metadata_keys = plugin_metadata;
         if !registrars.is_empty() {
             for (path, source) in &self.sources {
+                if !path.ends_with(".rs") {
+                    continue;
+                }
                 let previous = self.usage.get(path).expect("source usage");
                 let mut usage = Usage {
                     testing: path.contains("/tests/"),
@@ -10596,6 +10599,9 @@ impl Inventory {
             entry.reference_paths.extend(qualified);
         }
         for (path, source) in &self.sources {
+            if !path.ends_with(".rs") {
+                continue;
+            }
             let file = syn::parse_file(source).expect("already parsed ownership source");
             let mut usage = Usage {
                 resolved_tests: test_symbols.clone(),
@@ -12707,6 +12713,9 @@ impl AppComposition {
             metadata: BTreeSet::new(),
         };
         for (path, source) in &inventory.sources {
+            if !path.ends_with(".rs") {
+                continue;
+            }
             declarations.namespace = inventory.namespace(path, &[]).0;
             let source = syn::parse_file(source).expect("ownership source");
             declarations.visit_file(&source);
