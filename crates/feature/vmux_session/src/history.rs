@@ -2066,13 +2066,14 @@ mod tests {
                     blocks: vec![c.clone(), d.clone()],
                 },
             ]);
-            let before: Vec<_> = fixture
+            let mut before: Vec<_> = fixture
                 .app
                 .world_mut()
                 .query::<&EventIdentity>()
                 .iter(fixture.app.world())
                 .cloned()
                 .collect();
+            before.sort_by(|left, right| left.event_id.as_str().cmp(right.event_id.as_str()));
             let operation = fixture.operation(false);
             assert_eq!(
                 fixture.receive(
@@ -2152,13 +2153,14 @@ mod tests {
                     ]
                 );
             }
-            let after: Vec<_> = fixture
+            let mut after: Vec<_> = fixture
                 .app
                 .world_mut()
                 .query::<&EventIdentity>()
                 .iter(fixture.app.world())
                 .cloned()
                 .collect();
+            after.sort_by(|left, right| left.event_id.as_str().cmp(right.event_id.as_str()));
             assert_eq!(after, before);
         }
     }
