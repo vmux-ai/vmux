@@ -1549,7 +1549,7 @@ mod tests {
                     McpPageState {
                         generation: 1,
                         snapshot: McpServersUiState {
-                            pending: Some(vmux_api::mcp::McpServerPending {
+                            pending: Some(McpServerPending {
                                 id: "github".into(),
                                 operation: McpServerOperation::Connect,
                             }),
@@ -1625,7 +1625,7 @@ mod tests {
             McpPageState {
                 generation: 3,
                 snapshot: McpServersUiState {
-                    pending: Some(vmux_api::mcp::McpServerPending {
+                    pending: Some(McpServerPending {
                         id: "github".into(),
                         operation: McpServerOperation::Connect,
                     }),
