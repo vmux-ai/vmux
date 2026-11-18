@@ -100,7 +100,7 @@ impl Plugin for SessionClientPlugin {
             catalog::CatalogPlugin,
             resume::ResumePlugin,
             session::ChatHostPlugin,
-            connectors::Plugin,
+            connectors::SessionConnectorsPlugin,
             command_bar::CommandBarPlugin,
             transcript::TranscriptPlugin,
             onboarding::OnboardingPlugin,

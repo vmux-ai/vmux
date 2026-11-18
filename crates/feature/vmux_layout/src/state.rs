@@ -53,7 +53,7 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 9)]
+#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 8)]
 pub struct LayoutUiState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,

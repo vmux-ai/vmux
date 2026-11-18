@@ -155,6 +155,21 @@ struct ToolSelection {
 }
 
 impl ToolSelection {
+    fn entry(
+        &self,
+        snapshot: &crate::state::ToolsSnapshot,
+        view: &crate::state::ToolsView,
+    ) -> Option<(ToolItem, ToolProviderMetadata)> {
+        for category in &view.categories {
+            let Some(item) = category.items.iter().find(|item| self.matches(item)) else {
+                continue;
+            };
+            let provider = snapshot.provider(&category.provider)?;
+            return Some((item.clone(), provider.clone()));
+        }
+        None
+    }
+
     fn of(item: &ToolItem) -> Self {
         Self {
             provider: item.provider.clone(),
@@ -428,11 +443,9 @@ fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) 
 #[component]
 fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Element {
     let mut selected = use_signal(|| None::<ToolSelection>);
-    let current = state;
-    let pending = current.pending.into_iter().collect::<BTreeSet<_>>();
-    let notice = current.notice;
-    let snapshot = &current.snapshot;
-    let view = &current.view;
+    let pending = state.pending.into_iter().collect::<BTreeSet<_>>();
+    let snapshot = &state.snapshot;
+    let view = &state.view;
     let active_route = view.route.clone();
     use_effect(use_reactive!(|active_route| {
         let _ = active_route;
@@ -457,13 +470,9 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
             }
         }
     }
-    let selected_tool = selection.as_ref().and_then(|selection| {
-        view.categories.iter().find_map(|category| {
-            let item = category.items.iter().find(|item| selection.matches(item))?;
-            let provider = snapshot.provider(&category.provider)?;
-            Some((item.clone(), provider.clone()))
-        })
-    });
+    let selected_tool = selection
+        .as_ref()
+        .and_then(|selection| selection.entry(snapshot, view));
     rsx! {
         div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
             ManagerList {
@@ -472,9 +481,7 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
                             root: snapshot.root.clone(),
                         }
                     }
-                    if let Some(result) = notice {
-                        {
-                            rsx! {
+                    if let Some(result) = state.notice {
                         div {
                             class: if result.success {
                                 "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
@@ -485,8 +492,6 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
                                 {operation_result_message(&result)}
                             } else {
                                 "{result.message}"
-                            }
-                        }
                             }
                         }
                     }

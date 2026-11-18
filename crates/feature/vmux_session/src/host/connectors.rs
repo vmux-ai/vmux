@@ -11,11 +11,12 @@ use vmux_tool::{ConnectorAccess, ConnectorConnectionCompleted};
 
 use super::session::{SessionView, SessionViews};
 
-pub(super) struct Plugin;
+pub(super) struct SessionConnectorsPlugin;
 
-impl bevy::app::Plugin for Plugin {
+impl bevy::app::Plugin for SessionConnectorsPlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<Connectors>()
+        app.register_required_components::<crate::Session, Connectors>()
+            .register_stored::<Connectors>()
             .add_plugins(UiEventPlugin::<(McpServerSelectionRequest,)>::default())
             .add_message::<PageOpenRequest>()
             .add_observer(select)
@@ -271,7 +272,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             vmux_ecs::UiStatePlugin::<McpServersUiState>::default(),
-            Plugin,
+            SessionConnectorsPlugin,
         ))
         .add_observer(record);
         let first = Conversation::create(&mut app);
@@ -309,7 +310,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             vmux_ecs::UiStatePlugin::<McpServersUiState>::default(),
-            Plugin,
+            SessionConnectorsPlugin,
         ));
         let chat = Conversation::create(&mut app);
         chat.publish(&mut app, McpServerStatus::Available, None);
@@ -332,7 +333,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             vmux_ecs::UiStatePlugin::<McpServersUiState>::default(),
-            Plugin,
+            SessionConnectorsPlugin,
         ));
         let chat = Conversation::create(&mut app);
         let other = Conversation::create(&mut app);
