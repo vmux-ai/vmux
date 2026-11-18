@@ -1,5 +1,7 @@
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use serde::Deserialize;
+use std::result::Result;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentImage, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage,
@@ -151,11 +153,20 @@ fn screenshot(
     requests: Query<(Entity, &ScreenshotTool), AddedTool<ScreenshotTool>>,
 ) {
     for (entity, args) in &requests {
+        let pane = match &args.pane {
+            Some(value) => {
+                let value = value.trim();
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                }
+            }
+            None => None,
+        };
         commands
             .entity(entity)
-            .insert(ToolQuery(AgentRequest::encode(&AgentScreenshot {
-                pane: OptionalText::trim(args.pane.clone()),
-            })));
+            .insert(ToolQuery(AgentRequest::encode(&AgentScreenshot { pane })));
     }
 }
 
@@ -164,12 +175,23 @@ fn record_start(
     requests: Query<(Entity, &RecordStartTool), AddedTool<RecordStartTool>>,
 ) {
     for (entity, args) in &requests {
+        let pane = match &args.pane {
+            Some(value) => {
+                let value = value.trim();
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                }
+            }
+            None => None,
+        };
         commands
             .entity(entity)
             .insert(ToolQuery(AgentRequest::encode(&AgentRecordStart {
                 gif: args.gif,
                 max_secs: args.max_secs.unwrap_or(600),
-                pane: OptionalText::trim(args.pane.clone()),
+                pane,
             })));
     }
 }
@@ -179,11 +201,33 @@ fn record_stop(
     requests: Query<(Entity, &RecordStopTool), AddedTool<RecordStopTool>>,
 ) {
     for (entity, args) in &requests {
+        let dir = match &args.dir {
+            Some(value) => {
+                let value = value.trim();
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                }
+            }
+            None => None,
+        };
+        let name = match &args.name {
+            Some(value) => {
+                let value = value.trim();
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                }
+            }
+            None => None,
+        };
         commands
             .entity(entity)
             .insert(ToolQuery(AgentRequest::encode(&AgentRecordStop {
-                dir: OptionalText::trim(args.dir.clone()),
-                name: OptionalText::trim(args.name.clone()),
+                dir,
+                name,
             })));
     }
 }
@@ -312,17 +356,6 @@ fn forward_record_stop_responses(
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
             AgentQueryResult::text(AgentRequestId(response.request_id), result),
         )));
-    }
-}
-
-struct OptionalText;
-
-impl OptionalText {
-    fn trim(value: Option<String>) -> Option<String> {
-        value.and_then(|value| {
-            let value = value.trim();
-            (!value.is_empty()).then(|| value.to_string())
-        })
     }
 }
 
