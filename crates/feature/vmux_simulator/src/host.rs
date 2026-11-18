@@ -398,6 +398,7 @@ impl SimulatorPlugin {
     }
 }
 
+#[expect(clippy::type_complexity)]
 fn announce(
     views: Query<
         (

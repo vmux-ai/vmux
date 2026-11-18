@@ -69,18 +69,24 @@ impl Plugin for AttachmentPlugin {
     }
 }
 
+type Attaching = (With<Attempt>, Without<Busy>, Without<Failure>);
+
+type PointRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Phase,
+        &'static OperationState,
+        &'static Axe,
+        &'static SimulatorDevice,
+        Option<&'static Points>,
+    ),
+    Attaching,
+>;
+
 fn read_points(
-    requests: Query<
-        (
-            Entity,
-            &Phase,
-            &OperationState,
-            &Axe,
-            &SimulatorDevice,
-            Option<&'static Points>,
-        ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: PointRequests,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -102,18 +108,22 @@ fn read_points(
     }
 }
 
+type PixelRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Phase,
+        &'static OperationState,
+        &'static Axe,
+        &'static SimulatorDevice,
+        Option<&'static Pixels>,
+    ),
+    Attaching,
+>;
+
 fn read_pixels(
-    requests: Query<
-        (
-            Entity,
-            &Phase,
-            &OperationState,
-            &Axe,
-            &SimulatorDevice,
-            Option<&'static Pixels>,
-        ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: PixelRequests,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -135,18 +145,22 @@ fn read_pixels(
     }
 }
 
+type HidRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Phase,
+        &'static OperationState,
+        &'static Axe,
+        &'static SimulatorDevice,
+        Option<&'static HidBroker>,
+    ),
+    Attaching,
+>;
+
 fn connect_hid(
-    requests: Query<
-        (
-            Entity,
-            &Phase,
-            &OperationState,
-            &Axe,
-            &SimulatorDevice,
-            Option<&'static HidBroker>,
-        ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: HidRequests,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -174,18 +188,22 @@ fn connect_hid(
     }
 }
 
+type ClipboardRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Phase,
+        &'static OperationState,
+        &'static Axe,
+        &'static SimulatorDevice,
+        Option<&'static SimulatorClipboard>,
+    ),
+    Attaching,
+>;
+
 fn connect_clipboard(
-    requests: Query<
-        (
-            Entity,
-            &Phase,
-            &OperationState,
-            &Axe,
-            &SimulatorDevice,
-            Option<&'static SimulatorClipboard>,
-        ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: ClipboardRequests,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -213,18 +231,22 @@ fn connect_clipboard(
     }
 }
 
+type KeyboardRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Phase,
+        &'static OperationState,
+        &'static Axe,
+        &'static SimulatorDevice,
+        Option<&'static SimulatorKeyboard>,
+    ),
+    Attaching,
+>;
+
 fn connect_keyboard(
-    requests: Query<
-        (
-            Entity,
-            &Phase,
-            &OperationState,
-            &Axe,
-            &SimulatorDevice,
-            Option<&'static SimulatorKeyboard>,
-        ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: KeyboardRequests,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -252,19 +274,23 @@ fn connect_keyboard(
     }
 }
 
+type StreamRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Phase,
+        &'static OperationState,
+        &'static Axe,
+        &'static SimulatorDevice,
+        &'static Pixels,
+        Option<&'static StreamServer>,
+    ),
+    Attaching,
+>;
+
 fn start_stream(
-    requests: Query<
-        (
-            Entity,
-            &Phase,
-            &OperationState,
-            &Axe,
-            &SimulatorDevice,
-            &Pixels,
-            Option<&StreamServer>,
-        ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: StreamRequests,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -311,7 +337,7 @@ type Finished<'w, 's> = Query<
         &'static SimulatorKeyboard,
         &'static StreamServer,
     ),
-    (With<Attempt>, Without<Busy>, Without<Failure>),
+    Attaching,
 >;
 
 fn finish(
@@ -388,16 +414,20 @@ fn finish(
     }
 }
 
+type RetiringRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static OperationState,
+        Option<&'static OperationTarget>,
+        Option<&'static Failure>,
+    ),
+    (With<Attempt>, Without<Busy>),
+>;
+
 fn retire(
-    operations: Query<
-        (
-            Entity,
-            &OperationState,
-            Option<&OperationTarget>,
-            Option<&Failure>,
-        ),
-        (With<Attempt>, Without<Busy>),
-    >,
+    operations: RetiringRequests,
     views: Query<&EntityTarget<Attempt>>,
     children: Query<(Entity, &ChildOf), With<Reported>>,
     mut commands: Commands,
@@ -709,7 +739,7 @@ type LocateRequests<'w, 's> = Query<
         &'static mut Candidates,
         Option<&'static Probe>,
     ),
-    (With<Attempt>, Without<Busy>, Without<Failure>),
+    Attaching,
 >;
 
 fn probe(
@@ -784,7 +814,7 @@ type SelectionRequests<'w, 's> = Query<
         Option<&'static Booted>,
         Option<&'static Available>,
     ),
-    (With<Attempt>, Without<Busy>, Without<Failure>),
+    Attaching,
 >;
 
 #[derive(Component)]
@@ -979,10 +1009,7 @@ fn select(
 }
 
 fn boot(
-    requests: Query<
-        (Entity, &Phase, &OperationState, &SimulatorDevice, &Boot),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
-    >,
+    requests: Query<(Entity, &Phase, &OperationState, &SimulatorDevice, &Boot), Attaching>,
     paths: Res<NativePaths>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -1026,7 +1053,7 @@ fn wait_boot(
             &Boot,
             &BootReady,
         ),
-        (With<Attempt>, Without<Busy>, Without<Failure>),
+        Attaching,
     >,
     mut commands: Commands,
 ) {

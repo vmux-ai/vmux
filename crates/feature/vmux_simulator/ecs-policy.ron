@@ -109,7 +109,7 @@ boundaries: [
 
 
 
-    (key: "crates/feature/vmux_simulator/src/host.rs||fn:announce", fingerprint: "c88dbb7126d334ec", interface: "Bevy CEF native simulator presentation projection", input: "external: bounded framework registration or presentation conversion", output: "ECS: crates/feature/vmux_simulator/src/host/device.rs||struct:SimulatorDevice", lifetime: "one static registration or scoped projection", bounds: "projects current canonical device, stream and attachment facts; updates presentation URL and emits typed UI state only; no lifecycle admission, queue or IO", teardown: "App or mounted projection releases canonical state; static metadata remains immutable", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_simulator/src/host.rs||fn:announce", fingerprint: "788ccdcc886d5045", interface: "Bevy CEF native simulator presentation projection", input: "external: bounded framework registration or presentation conversion", output: "ECS: crates/feature/vmux_simulator/src/host/device.rs||struct:SimulatorDevice", lifetime: "one static registration or scoped projection", bounds: "projects current canonical device, stream and attachment facts; updates presentation URL and emits typed UI state only; no lifecycle admission, queue or IO", teardown: "App or mounted projection releases canonical state; static metadata remains immutable", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   debt: [
