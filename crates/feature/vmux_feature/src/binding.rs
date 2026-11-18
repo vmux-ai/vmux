@@ -64,7 +64,7 @@ impl<M: FeatureManifestSource> FeaturePageBinding<M> {
 
 pub struct PageBindingRegistration {
     owner: fn() -> FeatureId,
-    validate: fn(Option<&'static str>, &[&str]) -> Result<(), String>,
+    validate: fn(&FeatureManifest, &Self) -> Result<(), String>,
     selector: Option<&'static str>,
     states: &'static [&'static str],
 }
@@ -83,17 +83,24 @@ impl PageBindingRegistration {
     }
 
     fn validate<M: FeatureManifestSource>(
-        selector: Option<&'static str>,
-        states: &[&str],
+        manifest: &FeatureManifest,
+        registration: &Self,
     ) -> Result<(), String> {
-        FeaturePageBinding::<M>::new(selector).validate(states)
+        if manifest.pages != FeatureManifest::of::<M>().pages {
+            return Err("accepted page declarations differ from cached Rust bindings".into());
+        }
+        FeaturePageBinding::<M>::new(registration.selector).validate(registration.states)
     }
 
-    pub fn validate_owner(&self, owner: FeatureId) -> Result<(), String> {
+    pub fn validate_owner(
+        &self,
+        owner: FeatureId,
+        manifest: &FeatureManifest,
+    ) -> Result<(), String> {
         if (self.owner)() != owner {
             return Ok(());
         }
-        (self.validate)(self.selector, self.states)
+        (self.validate)(manifest, self)
     }
 }
 
@@ -141,9 +148,16 @@ impl CommandBindingRegistration {
         Ok(())
     }
 
-    pub fn validate_owner(&self, owner: FeatureId) -> Result<(), String> {
+    pub fn validate_owner(
+        &self,
+        owner: FeatureId,
+        manifest: &FeatureManifest,
+    ) -> Result<(), String> {
         if (self.owner)() != owner {
             return Ok(());
+        }
+        if manifest.commands != self.declaration().commands {
+            return Err("accepted command declarations differ from cached Rust bindings".into());
         }
         self.validate()
     }

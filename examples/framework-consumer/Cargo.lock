@@ -2971,7 +2971,6 @@ dependencies = [
  "moonshine-save",
  "rkyv",
  "ron",
- "semver",
  "serde",
  "serde_json",
  "url",
@@ -2999,6 +2998,7 @@ dependencies = [
 name = "vmux_feature"
 version = "0.0.35"
 dependencies = [
+ "semver",
  "bevy_app",
  "bevy_ecs",
  "chrono",

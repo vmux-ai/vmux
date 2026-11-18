@@ -221,7 +221,7 @@ pub struct AuthProvider {
     pub permissions: Vec<String>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Page {
     #[serde(default)]
@@ -332,7 +332,7 @@ impl Page {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PagePlacement {
     pub group: String,
@@ -358,7 +358,7 @@ impl PagePlacement {
     }
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize, PartialEq, Eq)]
 pub enum PageReuse {
     #[default]
     Exact,
@@ -367,7 +367,7 @@ pub enum PageReuse {
     Fragmentless,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PageSplitPreference {
     pub anchor_group: String,
@@ -389,7 +389,7 @@ impl PageSplitPreference {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 pub enum PageSplitAxis {
     Row,
     Column,
@@ -407,7 +407,7 @@ pub struct Shortcut {
     pub when: Option<String>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CommandMcp {
     pub description: String,
@@ -417,7 +417,7 @@ pub struct CommandMcp {
     pub allow_agent: bool,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Command {
     pub id: String,
@@ -447,7 +447,7 @@ impl Command {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CommandToolbar {
     pub icon: vmux_api::BuiltinIcon,

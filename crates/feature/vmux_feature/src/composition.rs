@@ -4,8 +4,8 @@ use bevy_ecs::schedule::{ScheduleLabel, Schedules};
 use bevy_ecs::system::SystemParam;
 use semver::{Version, VersionReq};
 
-use crate::metadata::Metadata;
 use crate::manifest::FeatureManifest;
+use crate::metadata::Metadata;
 
 #[derive(Default)]
 pub struct CompositionPlugin(pub Profile);

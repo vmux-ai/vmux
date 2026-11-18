@@ -1677,6 +1677,7 @@ dependencies = [
 name = "vmux_feature"
 version = "0.0.35"
 dependencies = [
+ "semver",
  "chrono",
  "inventory",
  "ron",

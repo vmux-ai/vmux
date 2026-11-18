@@ -68,12 +68,12 @@ impl Registry {
         for entry in ordered {
             claims.include(&entry.owner, &entry.manifest)?;
         }
-        for owner in entries.keys() {
+        for (owner, entry) in &entries {
             for binding in inventory::iter::<crate::PageBindingRegistration> {
-                binding.validate_owner(*owner)?;
+                binding.validate_owner(*owner, &entry.manifest)?;
             }
             for binding in inventory::iter::<crate::CommandBindingRegistration> {
-                binding.validate_owner(*owner)?;
+                binding.validate_owner(*owner, &entry.manifest)?;
             }
         }
         Ok(Self(entries))
@@ -154,7 +154,6 @@ mod tests {
     struct Conflict;
     struct MissingBinding;
     struct UnpermittedPage;
-
     impl FeatureManifestSource for Feature {
         const SOURCE: &'static str = r#"(
             commands: [(id: "example.open", aliases: ["open"], label: "Open", group: "File")],
@@ -262,5 +261,56 @@ mod tests {
             }
         }
         assert!(count >= 20);
+    }
+
+    struct ExternalBindings;
+
+    impl FeatureManifestSource for ExternalBindings {
+        const SOURCE: &'static str = r#"(
+            pages: [(url: "vmux://bound/", title: "Bound", permissions: ["Allowed"])],
+            commands: [(id: "bound.open", label: "Open", group: "File")],
+        )"#;
+    }
+
+    inventory::submit! {
+        crate::PageBindingRegistration::of::<ExternalBindings>(None, &["Allowed"])
+    }
+
+    inventory::submit! {
+        crate::CommandBindingRegistration::of::<ExternalBindings>(Some("bound.open"))
+    }
+
+    #[test]
+    fn external_registration_preserves_cached_bindings_and_refuses_changed_permissions_or_routes() {
+        for source in [
+            ExternalBindings::SOURCE.replace("Allowed", "Denied"),
+            ExternalBindings::SOURCE.replace("vmux://bound/", "vmux://other/"),
+            ExternalBindings::SOURCE.replace("bound.open", "bound.other"),
+        ] {
+            let mut app = App::new();
+            app.add_plugins(FeaturePlugin::<ExternalBindings>::from_manifest(
+                FeatureManifest::try_parse(&source).unwrap(),
+            ));
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.finish())).is_err()
+            );
+        }
+        let source = ExternalBindings::SOURCE.replacen(
+            '(',
+            "(metadata: Some((id: \"bound\", version: \"1.0.0\")),",
+            1,
+        );
+        let mut app = App::new();
+        app.add_plugins(FeaturePlugin::<ExternalBindings>::from_manifest(
+            FeatureManifest::try_parse(&source).unwrap(),
+        ));
+        app.finish();
+        app.cleanup();
+        assert!(
+            app.world()
+                .resource::<Registry>()
+                .manifest::<ExternalBindings>()
+                .is_some()
+        );
     }
 }
