@@ -63,7 +63,6 @@ type Sources<'w, 's> = Query<
 #[derive(SystemParam)]
 struct RouteLabels<'w, 's> {
     pages: Query<'w, 's, &'static PageManifest>,
-    features: Query<'w, 's, &'static FeatureManifest>,
 }
 
 impl RouteLabels<'_, '_> {
@@ -81,28 +80,6 @@ impl RouteLabels<'_, '_> {
                 specificity = rank;
             }
         }
-        for feature in &self.features {
-            for page in &feature.pages {
-                let pattern = vmux_api::RoutePattern::new(&page.url, page.owns_subtree);
-                if !pattern.matches(url) {
-                    continue;
-                }
-                let rank = pattern.specificity(url);
-                if selected.is_some() && rank <= specificity {
-                    continue;
-                }
-                selected = Some(AddressOption {
-                    label: page.title.clone(),
-                    label_key: page.title_message_id.clone(),
-                    icon: serde_json::from_value(serde_json::Value::String(page.icon.clone())).ok(),
-                    intent: Some(AddressIntent::Navigate {
-                        url: page.url.clone(),
-                    }),
-                    ..Default::default()
-                });
-                specificity = rank;
-            }
-        }
         selected
     }
 
@@ -115,15 +92,6 @@ impl RouteLabels<'_, '_> {
                 && vmux_api::RoutePattern::new(page.route, page.owns_subtree).matches(url)
             {
                 return true;
-            }
-        }
-        for feature in &self.features {
-            for page in &feature.pages {
-                if page.url == *base
-                    && vmux_api::RoutePattern::new(&page.url, page.owns_subtree).matches(url)
-                {
-                    return true;
-                }
             }
         }
         base == url
@@ -480,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn feature_manifest_routes_supply_setup_breadcrumbs_without_manual_registration() {
+    fn registered_routes_supply_setup_breadcrumbs_and_reject_stale_page_labels() {
         let mut trail = Trail::new();
         let url = "vmux://start/onboarding/agent";
         trail
@@ -489,10 +457,17 @@ mod tests {
             .get_mut::<PageMetadata>(trail.page)
             .unwrap()
             .url = url.into();
-        trail.app.world_mut().spawn(FeatureManifest::parse(r#"(pages: [
-            (url: "vmux://start/", title: "Start", title_message_id: "start-title"),
-            (url: "vmux://start/onboarding/agent", title: "Setup Agent", title_message_id: "onboarding-setup"),
-        ])"#));
+        trail.declare("vmux://start/", "Start", false);
+        trail.declare("vmux://start/onboarding/agent", "Setup Agent", false);
+        let world = trail.app.world_mut();
+        let mut pages = world.query::<&mut PageManifest>();
+        for mut page in pages.iter_mut(world) {
+            page.title_message_id = Some(if page.url == url {
+                "onboarding-setup"
+            } else {
+                "start-title"
+            });
+        }
         trail.app.update();
         let address = trail.address();
         assert_eq!(address.url, url);
