@@ -1,4 +1,4 @@
-use crate::{KnowledgeIndex, KnowledgeVault};
+use crate::{KnowledgeGraph, KnowledgeVault};
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_ecs::agent::{
@@ -55,18 +55,18 @@ impl AgentPaneQuery<'_, '_> {
 fn search(
     mut requests: MessageReader<AgentRequestMessage<AgentSearchKnowledge>>,
     agents: AgentPaneQuery,
-    indexes: Query<&KnowledgeIndex>,
+    graph: KnowledgeGraph,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
-    let index = indexes.single().ok();
+    let index = graph.index();
     for request in requests.read() {
         let command = &request.payload;
         let result = if agents.find(command.anchor).is_none() {
             AgentCommandResult::Error("agent pane not found".to_string())
         } else {
             match index {
-                Some(index) if index.loaded() => {
-                    let matches = index.search(&command.query, usize::from(command.limit));
+                Some((owner, index)) if index.loaded() => {
+                    let matches = graph.search(owner, &command.query, usize::from(command.limit));
                     if matches.is_empty() {
                         AgentCommandResult::Text(format!(
                             "No Knowledge matches for: {}",
@@ -108,52 +108,54 @@ fn search(
 fn read(
     mut requests: MessageReader<AgentRequestMessage<AgentReadKnowledge>>,
     agents: AgentPaneQuery,
-    indexes: Query<&KnowledgeIndex>,
+    graph: KnowledgeGraph,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
-    let index = indexes.single().ok();
+    let index = graph.index();
     for request in requests.read() {
         let command = &request.payload;
         let result = if agents.find(command.anchor).is_none() {
             AgentCommandResult::Error("agent pane not found".to_string())
         } else {
             match index {
-                Some(index) if index.loaded() => match index.note_by_query(&command.path) {
-                    Some((note_path, title, text)) => {
-                        let lines = text.lines().collect::<Vec<_>>();
-                        let start = command.line.saturating_sub(1) as usize;
-                        if start >= lines.len() && !lines.is_empty() {
-                            AgentCommandResult::Error(format!(
-                                "Knowledge line {} exceeds note length {}",
-                                command.line,
-                                lines.len()
-                            ))
-                        } else {
-                            let end = start
-                                .saturating_add(command.limit as usize)
-                                .min(lines.len());
-                            let source = note_path
-                                .strip_prefix(index.root())
-                                .unwrap_or(&note_path)
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            let mut body = Vec::new();
-                            for (offset, value) in lines[start..end].iter().enumerate() {
-                                body.push(format!("{} | {}", start + offset + 1, value));
+                Some((owner, index)) if index.loaded() => {
+                    match graph.note_by_query(owner, &command.path) {
+                        Some((note_path, title, text)) => {
+                            let lines = text.lines().collect::<Vec<_>>();
+                            let start = command.line.saturating_sub(1) as usize;
+                            if start >= lines.len() && !lines.is_empty() {
+                                AgentCommandResult::Error(format!(
+                                    "Knowledge line {} exceeds note length {}",
+                                    command.line,
+                                    lines.len()
+                                ))
+                            } else {
+                                let end = start
+                                    .saturating_add(command.limit as usize)
+                                    .min(lines.len());
+                                let source = note_path
+                                    .strip_prefix(index.root())
+                                    .unwrap_or(&note_path)
+                                    .to_string_lossy()
+                                    .replace('\\', "/");
+                                let mut body = Vec::new();
+                                for (offset, value) in lines[start..end].iter().enumerate() {
+                                    body.push(format!("{} | {}", start + offset + 1, value));
+                                }
+                                AgentCommandResult::Text(format!(
+                                    "Source: {source}\nTitle: {title}\nLines {}-{}\n\n{}",
+                                    start + 1,
+                                    end,
+                                    body.join("\n")
+                                ))
                             }
-                            AgentCommandResult::Text(format!(
-                                "Source: {source}\nTitle: {title}\nLines {}-{}\n\n{}",
-                                start + 1,
-                                end,
-                                body.join("\n")
-                            ))
                         }
+                        None => AgentCommandResult::Error(format!(
+                            "Knowledge note not found: {}",
+                            command.path.trim()
+                        )),
                     }
-                    None => AgentCommandResult::Error(format!(
-                        "Knowledge note not found: {}",
-                        command.path.trim()
-                    )),
-                },
+                }
                 Some(_) => AgentCommandResult::Error(
                     "Knowledge index is still loading; retry shortly.".to_string(),
                 ),

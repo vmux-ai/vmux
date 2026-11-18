@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     FileNoteEditDismissRequest, FileNoteEditRequest, FileNoteEvent,
     FileNotePropertiesToggleRequest, FilePropertyDraftRequest, FilePropertyDraftState,
@@ -105,7 +106,7 @@ impl RenderRequest {
 fn render(
     request: On<RenderRequest>,
     mode: Single<&SharedFileViewMode>,
-    indexes: Query<&vmux_knowledge::KnowledgeIndex>,
+    graph: vmux_knowledge::KnowledgeGraph,
     notes: ReadyNotes,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -113,7 +114,7 @@ fn render(
     if mode.0 != FileViewMode::Note {
         return;
     }
-    let index = indexes.single().ok();
+    let index = graph.index();
     let entity = request.entity;
     let Ok((_, file, edit, reveal, editing, presentation)) = notes.get(entity) else {
         return;
@@ -138,11 +139,11 @@ fn render(
         commands.entity(entity).insert(presentation.clone());
     }
     let references = index
-        .filter(|index| index.loaded() && file.path.starts_with(index.root()))
-        .map(|index| {
-            index.resolve_blocks(&file.path, &mut note.blocks);
-            let mut references = index.backlinks(&file.path);
-            references.extend(index.unlinked_mentions(&file.path, 32));
+        .filter(|(_, index)| index.loaded() && file.path.starts_with(index.root()))
+        .map(|(owner, _)| {
+            graph.resolve_blocks(owner, &file.path, &mut note.blocks);
+            let mut references = graph.backlinks(owner, &file.path);
+            references.extend(graph.unlinked_mentions(owner, &file.path, 32));
             references
                 .into_iter()
                 .map(|reference| vmux_knowledge::KnowledgeReference {
@@ -257,7 +258,7 @@ fn clear_editing(files: Query<Entity, Changed<FileView>>, mut commands: Commands
 }
 
 fn mark_notes_on_knowledge_change(
-    indexes: Query<Ref<vmux_knowledge::KnowledgeIndex>>,
+    indexes: Query<Ref<vmux_knowledge::KnowledgeIndex>, With<vmux_knowledge::LiveKnowledge>>,
     files: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {

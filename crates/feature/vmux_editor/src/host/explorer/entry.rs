@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     ExplorerCreateDirectoryPromptRequest, ExplorerCreateFilePromptRequest,
     ExplorerDeletePromptRequest, ExplorerPromptDismissRequest, ExplorerPromptDraftRequest,
@@ -12,6 +14,11 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::{
     FileUiStateWrite, Operation, OperationCompleted, OperationPlugin, OperationState,
     OperationTarget,
+};
+use vmux_knowledge::{
+    ApplyKnowledgeRename, KnowledgeIndex, KnowledgeReady, KnowledgeRenameComplete,
+    KnowledgeRenamePlugin, KnowledgeRenamePrepared, MaterializeKnowledge, PrepareKnowledgeRename,
+    RawSnapshot, RetireKnowledge,
 };
 
 use super::fs::ExplorerFs;
@@ -29,6 +36,9 @@ impl Plugin for ExplorerEntryPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
+        if !app.is_plugin_added::<KnowledgeRenamePlugin>() {
+            app.add_plugins(KnowledgeRenamePlugin);
+        }
         app.add_plugins(UiEventPlugin::<(
             ExplorerCreateFilePromptRequest,
             ExplorerCreateDirectoryPromptRequest,
@@ -44,6 +54,7 @@ impl Plugin for ExplorerEntryPlugin {
                     clear_prompt,
                     project.after(clear_prompt),
                     drain_creates,
+                    drain_rename_sources,
                     drain_renames,
                     drain_deletes,
                 ),
@@ -57,6 +68,11 @@ impl Plugin for ExplorerEntryPlugin {
             .add_observer(dismiss_prompt)
             .add_observer(create)
             .add_observer(rename)
+            .add_observer(prepare_rename)
+            .add_observer(begin_prepared)
+            .add_observer(begin_rename)
+            .add_observer(complete_rewrites)
+            .add_observer(finish_rename)
             .add_observer(delete);
     }
 }
@@ -355,6 +371,7 @@ struct ExplorerCreateOutcome {
     is_dir: bool,
 }
 
+#[derive(Component, Clone)]
 struct ExplorerRenameOutcome {
     old_path: PathBuf,
     new_path: PathBuf,
@@ -369,13 +386,13 @@ struct ExplorerDeleteOutcome {
 }
 
 #[derive(Component)]
-struct ExplorerCreateTask(Task<Result<ExplorerCreateOutcome, String>>);
+struct ExplorerCreateTask(Task<std::result::Result<ExplorerCreateOutcome, String>>);
 
 #[derive(Component)]
-struct ExplorerRenameTask(Task<Result<ExplorerRenameOutcome, String>>);
+struct ExplorerRenameTask(Task<std::result::Result<ExplorerRenameOutcome, String>>);
 
 #[derive(Component)]
-struct ExplorerDeleteTask(Task<Result<ExplorerDeleteOutcome, String>>);
+struct ExplorerDeleteTask(Task<std::result::Result<ExplorerDeleteOutcome, String>>);
 
 fn create(
     trigger: On<CreateEntry>,
@@ -410,46 +427,168 @@ fn create(
     ));
 }
 
+#[derive(Component)]
+struct RenamePending {
+    root: PathBuf,
+    old: PathBuf,
+    parent: PathBuf,
+    name: String,
+}
+
+#[derive(Component)]
+struct KnowledgeSourceTask(Task<std::result::Result<RawSnapshot, String>>);
+
+#[derive(EntityEvent)]
+struct BeginRename {
+    entity: Entity,
+}
+
+#[derive(EntityEvent)]
+struct RenameFinished {
+    entity: Entity,
+    result: std::result::Result<ExplorerRenameOutcome, String>,
+}
+
 fn rename(
     trigger: On<RenameEntry>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event_target();
-    let Ok(tree_of) = views.get(entity) else {
-        return;
-    };
+    let view = trigger.event_target();
+    let Ok(tree_of) = views.get(view) else { return };
     let Ok(tree) = trees.get(tree_of.0) else {
         return;
     };
     let root = tree.root.clone();
-    let old_path = trigger.event().path.clone();
-    let name = trigger.event().name.clone();
-    let task = IoTaskPool::get().spawn(async move {
-        let parent = old_path
-            .parent()
-            .ok_or_else(|| "Explorer root cannot be changed".to_string())?
-            .to_path_buf();
-        let next_path = old_path.with_file_name(&name);
-        let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
-        let rename_plan = (root
-            .canonicalize()
-            .ok()
-            .zip(knowledge_root.canonicalize().ok())
-            .is_some_and(|(root, knowledge_root)| root == knowledge_root))
-        .then(|| {
-            vmux_knowledge::KnowledgeIndex::build(&root)
-                .map(|index| {
-                    vmux_knowledge::KnowledgeRenamePlan::build(&index, &old_path, &next_path)
-                })
-                .map_err(|error| error.to_string())
-        })
-        .transpose()?;
-        let (new_path, was_dir) = ExplorerFs::new(&root)?.rename(&old_path, &name)?;
-        if let Some(plan) = rename_plan {
-            plan.apply().map_err(|error| error.to_string())?;
+    let old = trigger.event().path.clone();
+    let entity = commands
+        .spawn((
+            Operation::bundle("file.rename").unwrap().running(),
+            OperationTarget::new(view),
+        ))
+        .id();
+    let Some(parent) = old.parent().map(Path::to_path_buf) else {
+        commands.trigger(RenameFinished {
+            entity,
+            result: Err("Explorer root cannot be changed".to_string()),
+        });
+        return;
+    };
+    let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
+    let knowledge = root
+        .canonicalize()
+        .ok()
+        .zip(knowledge_root.canonicalize().ok())
+        .is_some_and(|(root, knowledge_root)| root == knowledge_root);
+    commands.entity(entity).insert(RenamePending {
+        root: root.clone(),
+        old,
+        parent,
+        name: trigger.event().name.clone(),
+    });
+    if knowledge {
+        let wake = wake.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = RawSnapshot::capture(&root).map_err(|error| error.to_string());
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(entity).insert(KnowledgeSourceTask(task));
+    } else {
+        commands.trigger(BeginRename { entity });
+    }
+}
+
+fn drain_rename_sources(
+    mut sources: Query<(Entity, &mut KnowledgeSourceTask, &OperationState)>,
+    mut commands: Commands,
+) {
+    for (entity, mut source, state) in &mut sources {
+        let Some(result) = future::block_on(future::poll_once(&mut source.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<KnowledgeSourceTask>();
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.entity(entity).remove::<RenamePending>();
+            continue;
         }
+        match result {
+            Ok(snapshot) => {
+                commands.entity(entity).insert(KnowledgeIndex::default());
+                commands.trigger(MaterializeKnowledge { entity, snapshot });
+            }
+            Err(error) => {
+                commands.trigger(RenameFinished {
+                    entity,
+                    result: Err(error),
+                });
+            }
+        }
+    }
+}
+
+type ReadyRenames<'w, 's> = Query<
+    'w,
+    's,
+    (&'static RenamePending, &'static OperationState),
+    (Without<ExplorerRenameTask>, Without<ExplorerRenameOutcome>),
+>;
+
+fn prepare_rename(trigger: On<KnowledgeReady>, pending: ReadyRenames, mut commands: Commands) {
+    let Ok((pending, state)) = pending.get(trigger.entity) else {
+        return;
+    };
+    if !matches!(state, OperationState::Pending | OperationState::Running) {
+        commands.trigger(RetireKnowledge {
+            entity: trigger.entity,
+        });
+        return;
+    }
+    commands.trigger(PrepareKnowledgeRename {
+        entity: trigger.entity,
+        old: pending.old.clone(),
+        new: pending.old.with_file_name(&pending.name),
+    });
+}
+
+fn begin_prepared(trigger: On<KnowledgeRenamePrepared>, mut commands: Commands) {
+    commands.trigger(BeginRename {
+        entity: trigger.entity,
+    });
+}
+
+fn begin_rename(
+    trigger: On<BeginRename>,
+    pending: ReadyRenames,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((pending, state)) = pending.get(trigger.entity) else {
+        return;
+    };
+    if !matches!(state, OperationState::Pending | OperationState::Running) {
+        commands.trigger(RetireKnowledge {
+            entity: trigger.entity,
+        });
+        commands.entity(trigger.entity).remove::<RenamePending>();
+        return;
+    }
+    let root = pending.root.clone();
+    let old_path = pending.old.clone();
+    let parent = pending.parent.clone();
+    let name = pending.name.clone();
+    let wake = wake.as_deref().map(|proxy| (**proxy).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let result =
+            ExplorerFs::new(&root).and_then(|filesystem| filesystem.rename(&old_path, &name));
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        let (new_path, was_dir) = result?;
         Ok(ExplorerRenameOutcome {
             old_path,
             new_path,
@@ -457,12 +596,27 @@ fn rename(
             was_dir,
         })
     });
-    commands.spawn((
-        Operation::bundle("file.rename").unwrap().running(),
-        OperationTarget::new(entity),
-        ChildOf(entity),
-        ExplorerRenameTask(task),
-    ));
+    commands
+        .entity(trigger.entity)
+        .insert(ExplorerRenameTask(task));
+}
+
+fn complete_rewrites(
+    trigger: On<KnowledgeRenameComplete>,
+    outcomes: Query<&ExplorerRenameOutcome>,
+    mut commands: Commands,
+) {
+    let Ok(outcome) = outcomes.get(trigger.entity) else {
+        return;
+    };
+    let result = match &trigger.result {
+        Ok(()) => Ok(outcome.clone()),
+        Err(error) => Err(error.clone()),
+    };
+    commands.trigger(RenameFinished {
+        entity: trigger.entity,
+        result,
+    });
 }
 
 fn delete(
@@ -563,74 +717,105 @@ fn drain_renames(
     mut tasks: Query<(
         Entity,
         &mut ExplorerRenameTask,
-        &OperationTarget,
         &OperationState,
+        Option<&KnowledgeIndex>,
     )>,
+    mut commands: Commands,
+) {
+    for (entity, mut task, state, knowledge) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<ExplorerRenameTask>();
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.trigger(RetireKnowledge { entity });
+            commands.entity(entity).remove::<RenamePending>();
+            continue;
+        }
+        match result {
+            Ok(outcome) if knowledge.is_some() => {
+                let old = outcome.old_path.clone();
+                let new = outcome.new_path.clone();
+                commands.entity(entity).insert(outcome);
+                commands.trigger(ApplyKnowledgeRename { entity, old, new });
+            }
+            result => {
+                commands.trigger(RenameFinished { entity, result });
+            }
+        }
+    }
+}
+
+fn finish_rename(
+    trigger: On<RenameFinished>,
+    operations: Query<(&OperationState, Option<&OperationTarget>)>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
-    for (task_entity, mut pending, target, state) in &mut tasks {
-        if !matches!(state, OperationState::Pending | OperationState::Running) {
-            commands.entity(task_entity).remove::<ExplorerRenameTask>();
-            continue;
-        }
-        let Some(result) = future::block_on(future::poll_once(&mut pending.0)) else {
-            continue;
-        };
-        let webview = target.entity();
-        commands.trigger(OperationCompleted::from_result(task_entity, &result));
-        commands.entity(task_entity).remove::<ExplorerRenameTask>();
-        let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
-            continue;
-        };
-        let outcome = match result {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                commands.trigger(ExplorerFeedback::new(webview, false, error));
-                continue;
-            }
-        };
-        for open in &mut state.open_editors {
-            if let Ok(suffix) = open.strip_prefix(&outcome.old_path) {
-                *open = outcome.new_path.join(suffix);
-            }
-        }
-        let open_path = match file_view.path.strip_prefix(&outcome.old_path) {
-            Ok(suffix) => Some(outcome.new_path.join(suffix)),
-            Err(_) => None,
-        };
-        if let Ok(mut tree) = trees.get_mut(tree_of.0) {
-            if outcome.was_dir {
-                tree.evict_subtree(&outcome.old_path);
-            }
-            if tree.begin_dir_load(&outcome.parent, true) {
-                commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                    tree_of.0,
-                    outcome.parent,
-                ));
-            }
-            commands.trigger(ExplorerTreeChanged(tree_of.0));
-        }
-        commands
-            .entity(webview)
-            .insert((ExplorerTreeDirty, OpenEditorsDirty));
-        if let Some(path) = open_path {
-            commands.trigger(FileNavigateRequest::new(webview, path, 0));
-        }
-        commands.trigger(ExplorerFeedback::new(
-            webview,
-            true,
-            format!(
-                "Renamed to {}",
-                outcome
-                    .new_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-            ),
-        ));
+    let entity = trigger.entity;
+    commands.trigger(RetireKnowledge { entity });
+    commands
+        .entity(entity)
+        .remove::<(RenamePending, ExplorerRenameOutcome)>();
+    let Ok((operation, target)) = operations.get(entity) else {
+        return;
+    };
+    if !matches!(operation, OperationState::Pending | OperationState::Running) {
+        return;
     }
+    commands.trigger(OperationCompleted::from_result(entity, &trigger.result));
+    let Some(target) = target else { return };
+    let webview = target.entity();
+    let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
+        return;
+    };
+    let outcome = match &trigger.result {
+        Ok(outcome) => outcome.clone(),
+        Err(error) => {
+            commands.trigger(ExplorerFeedback::new(webview, false, error.clone()));
+            return;
+        }
+    };
+    for open in &mut state.open_editors {
+        if let Ok(suffix) = open.strip_prefix(&outcome.old_path) {
+            *open = outcome.new_path.join(suffix);
+        }
+    }
+    let open_path = match file_view.path.strip_prefix(&outcome.old_path) {
+        Ok(suffix) => Some(outcome.new_path.join(suffix)),
+        Err(_) => None,
+    };
+    if let Ok(mut tree) = trees.get_mut(tree_of.0) {
+        if outcome.was_dir {
+            tree.evict_subtree(&outcome.old_path);
+        }
+        if tree.begin_dir_load(&outcome.parent, true) {
+            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
+                tree_of.0,
+                outcome.parent,
+            ));
+        }
+        commands.trigger(ExplorerTreeChanged(tree_of.0));
+    }
+    commands
+        .entity(webview)
+        .insert((ExplorerTreeDirty, OpenEditorsDirty));
+    if let Some(path) = open_path {
+        commands.trigger(FileNavigateRequest::new(webview, path, 0));
+    }
+    commands.trigger(ExplorerFeedback::new(
+        webview,
+        true,
+        format!(
+            "Renamed to {}",
+            outcome
+                .new_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        ),
+    ));
 }
 
 fn drain_deletes(
@@ -703,5 +888,182 @@ fn drain_deletes(
                     .to_string_lossy()
             ),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    struct RenameFixture {
+        directory: tempfile::TempDir,
+        app: App,
+        view: Entity,
+        operation: Entity,
+        release: Option<mpsc::Sender<()>>,
+    }
+
+    impl RenameFixture {
+        fn new(destination_exists: bool) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().canonicalize().unwrap();
+            let old = root.join("alpha.md");
+            std::fs::write(&old, "# Alpha\n").unwrap();
+            std::fs::write(root.join("source.md"), "See [[Alpha|the note]].\n").unwrap();
+            if destination_exists {
+                std::fs::write(root.join("renamed.md"), "# Existing\n").unwrap();
+            }
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_non_send(Browsers::default())
+                .add_plugins(ExplorerEntryPlugin);
+            let view = app.world_mut().spawn_empty().id();
+            let operation = app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("file.rename").unwrap().running(),
+                    OperationTarget::new(view),
+                    RenamePending {
+                        root: root.clone(),
+                        old,
+                        parent: root.clone(),
+                        name: "renamed.md".to_string(),
+                    },
+                ))
+                .id();
+            app.world_mut().flush();
+            let (release, resume) = mpsc::channel();
+            let (started, ready) = mpsc::channel();
+            let task = IoTaskPool::get().spawn(async move {
+                started.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(3)).unwrap();
+                RawSnapshot::capture(&root).map_err(|error| error.to_string())
+            });
+            ready.recv_timeout(Duration::from_secs(2)).unwrap();
+            app.world_mut()
+                .entity_mut(operation)
+                .insert(KnowledgeSourceTask(task));
+            Self {
+                directory,
+                app,
+                view,
+                operation,
+                release: Some(release),
+            }
+        }
+
+        fn release(&mut self) {
+            if let Some(release) = self.release.take() {
+                let _ = release.send(());
+            }
+        }
+
+        fn finish(&mut self) -> OperationState {
+            self.release();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                self.app.update();
+                let state = self
+                    .app
+                    .world()
+                    .get::<OperationState>(self.operation)
+                    .unwrap()
+                    .clone();
+                if !matches!(state, OperationState::Pending | OperationState::Running) {
+                    return state;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "accepted rename must drain and finish"
+                );
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    impl Drop for RenameFixture {
+        fn drop(&mut self) {
+            self.release();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline
+                && (self
+                    .app
+                    .world()
+                    .get::<KnowledgeSourceTask>(self.operation)
+                    .is_some()
+                    || self
+                        .app
+                        .world()
+                        .get::<ExplorerRenameTask>(self.operation)
+                        .is_some()
+                    || self
+                        .app
+                        .world()
+                        .get::<KnowledgeIndex>(self.operation)
+                        .is_some())
+            {
+                self.app.update();
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_knowledge_rename_keeps_its_io_after_the_view_is_removed() {
+        let mut fixture = RenameFixture::new(false);
+        fixture.app.world_mut().despawn(fixture.view);
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeSourceTask>(fixture.operation)
+                .is_some()
+        );
+        assert_eq!(fixture.finish(), OperationState::Succeeded);
+        assert!(!fixture.directory.path().join("alpha.md").exists());
+        assert!(fixture.directory.path().join("renamed.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(fixture.directory.path().join("source.md")).unwrap(),
+            "See [[renamed|the note]].\n"
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeIndex>(fixture.operation)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ExplorerRenameTask>(fixture.operation)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn failed_filesystem_rename_does_not_start_planned_knowledge_rewrites() {
+        let mut fixture = RenameFixture::new(true);
+        assert_eq!(fixture.finish(), OperationState::Failed);
+        assert!(fixture.directory.path().join("alpha.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(fixture.directory.path().join("renamed.md")).unwrap(),
+            "# Existing\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.directory.path().join("source.md")).unwrap(),
+            "See [[Alpha|the note]].\n"
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeIndex>(fixture.operation)
+                .is_none()
+        );
     }
 }
