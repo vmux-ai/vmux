@@ -42,6 +42,8 @@ pub struct CliCommandManifest {
 pub struct CliArgumentManifest {
     pub id: String,
     #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
     pub long: Option<String>,
     #[serde(default)]
     pub short: Option<char>,
