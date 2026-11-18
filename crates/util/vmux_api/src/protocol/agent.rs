@@ -14,7 +14,7 @@ impl AgentRequest {
     {
         let body = serde_json::to_vec(payload).map_err(|error| error.to_string())?;
         Ok(Self {
-            id: T::id().to_string(),
+            id: T::AGENT_ID.to_string(),
             body,
         })
     }
@@ -23,12 +23,64 @@ impl AgentRequest {
     where
         T: crate::AgentRequestContract + serde::de::DeserializeOwned,
     {
-        if self.id != T::id() {
+        if self.id != T::AGENT_ID {
             return Ok(None);
         }
         serde_json::from_slice(&self.body)
             .map(Some)
             .map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+    use crate::bookmark::{BookmarkAddRequest, BookmarkRemoveRequest};
+
+    #[test]
+    fn bookmark_ui_payloads_keep_the_existing_agent_envelopes() {
+        let legacy = AgentRequest {
+            id: "remove@1".into(),
+            body: br#"{"uuid":"saved-page"}"#.to_vec(),
+        };
+        let request = legacy.decode::<BookmarkRemoveRequest>().unwrap().unwrap();
+        assert_eq!(request.uuid, "saved-page");
+        let encoded = AgentRequest::encode(&request).unwrap();
+        assert_eq!(encoded, legacy);
+        assert!(legacy.decode::<BookmarkAddRequest>().unwrap().is_none());
+        let add_envelope = AgentRequest {
+            id: "add@1".into(),
+            body: br#"{"metadata":{"title":"Saved","url":"https://saved.test","icon":"None","bg_color":null},"folder":null}"#.to_vec(),
+        };
+        let add = add_envelope
+            .decode::<BookmarkAddRequest>()
+            .unwrap()
+            .unwrap();
+        assert_eq!(AgentRequest::encode(&add).unwrap(), add_envelope);
+        assert!(
+            add_envelope
+                .decode::<BookmarkRemoveRequest>()
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn existing_agent_contracts_keep_their_selector_and_payload() {
+        let request = AgentSelectModel {
+            sid: "session".into(),
+            model_id: "model".into(),
+        };
+        let encoded = AgentRequest::encode(&request).unwrap();
+        assert_eq!(encoded.id, "agent_select_model@1");
+        assert_eq!(
+            encoded.body,
+            br#"{"sid":"session","model_id":"model"}"#.to_vec()
+        );
+        assert_eq!(
+            encoded.decode::<AgentSelectModel>().unwrap().unwrap(),
+            request
+        );
     }
 }
 

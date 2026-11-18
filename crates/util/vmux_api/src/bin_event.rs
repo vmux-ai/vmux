@@ -13,7 +13,9 @@ pub trait HostEvent: BinEvent {}
 
 pub trait UiEvent: BinEvent {}
 
-pub trait AgentRequestContract: BinEvent {}
+pub trait AgentRequestContract: BinEvent {
+    const AGENT_ID: &'static str = Self::ID;
+}
 
 #[vmux_api::ui_event(Copy, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]

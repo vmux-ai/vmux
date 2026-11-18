@@ -88,9 +88,14 @@ pub struct BookmarkOpenRequest {
 }
 
 #[vmux_api::ui_event(Eq)]
+#[cfg_attr(bevy_linked, derive(bevy_ecs::prelude::Message))]
 pub struct BookmarkAddRequest {
     pub metadata: PageMetadata,
     pub folder: Option<String>,
+}
+
+impl crate::AgentRequestContract for BookmarkAddRequest {
+    const AGENT_ID: &'static str = "add@1";
 }
 
 #[vmux_api::ui_event(Eq)]
@@ -99,8 +104,13 @@ pub struct BookmarkPinUrlRequest {
 }
 
 #[vmux_api::ui_event(Eq)]
+#[cfg_attr(bevy_linked, derive(bevy_ecs::prelude::Message))]
 pub struct BookmarkRemoveRequest {
     pub uuid: String,
+}
+
+impl crate::AgentRequestContract for BookmarkRemoveRequest {
+    const AGENT_ID: &'static str = "remove@1";
 }
 
 #[vmux_api::ui_event(Eq)]
