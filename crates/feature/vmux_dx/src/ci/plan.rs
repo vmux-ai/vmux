@@ -575,7 +575,7 @@ fn fetched(mut plans: Plans, mut io: Io, results: Results) {
     }
 }
 fn ancestry(mut plans: Plans, mut io: Io, results: Results) {
-    for (entity, context, settings, plan, mut phase, mut sequence) in &mut plans {
+    for (entity, context, settings, mut plan, mut phase, mut sequence) in &mut plans {
         if *phase != Phase::Ancestry {
             continue;
         }
@@ -608,6 +608,9 @@ fn ancestry(mut plans: Plans, mut io: Io, results: Results) {
         {
             io.fail(entity, "PR checkout base is outside target branch ancestry");
             continue;
+        }
+        if !second.0.status.success() {
+            plan.base = plan.tip.clone();
         }
         plan.probe(entity, context, settings, &mut sequence, &mut io);
         *phase = Phase::Merge;
@@ -1181,8 +1184,29 @@ mod tests {
                 assert!(result.unwrap_err().contains("ancestry"));
             } else {
                 let outputs = Fixture::outputs(&result.unwrap());
-                assert_eq!(outputs["base"], virtual_base);
+                assert_eq!(outputs["base"], base);
                 assert_eq!(outputs["tree"], tree);
+                fixture.git(&[
+                    "clone",
+                    "--no-local",
+                    "--single-branch",
+                    "--branch",
+                    "base",
+                    fixture.root().to_str().unwrap(),
+                    "fresh",
+                ]);
+                fixture.git(&["-C", "fresh", "fetch", "origin", &head]);
+                let history = fixture.git(&["-C", "fresh", "rev-list", "--all", "FETCH_HEAD"]);
+                assert!(!history.lines().any(|commit| commit == virtual_base));
+                let computed = fixture.git(&[
+                    "-C",
+                    "fresh",
+                    "merge-tree",
+                    "--write-tree",
+                    &outputs["base"],
+                    &outputs["head"],
+                ]);
+                assert_eq!(computed.lines().next(), Some(tree.as_str()));
             }
         }
     }
