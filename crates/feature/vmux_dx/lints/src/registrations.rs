@@ -118,6 +118,7 @@ fn compiler_resolves_observers_and_ignores_lookalike_registration_apis() {
                 "world_visible",
                 "entity_visible",
                 "commands_visible",
+                "deferred_visible",
                 "constructed",
             ][..],
         ),

@@ -25,6 +25,12 @@ impl EntityCommands {
 
 struct Observer;
 
+struct Commands;
+
+impl Commands {
+    fn add_observer(&mut self, _: fn(On<Pulse>)) {}
+}
+
 impl Observer {
     fn new(_: fn(On<Pulse>)) -> Self {
         Self
@@ -35,5 +41,6 @@ fn main() {
     App.add_observer(public);
     World.add_observer(public);
     EntityCommands.observe(public);
+    Commands.add_observer(public);
     let _ = Observer::new(public);
 }

@@ -76,7 +76,7 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
                 }
             }
             ("bevy_app", "App" | "SubApp", "add_observer")
-            | ("bevy_ecs", "World", "add_observer")
+            | ("bevy_ecs", "World" | "Commands", "add_observer")
             | ("bevy_ecs", "EntityCommands" | "EntityWorldMut", "observe") => {
                 if qualified {
                     1

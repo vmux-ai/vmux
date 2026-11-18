@@ -18,6 +18,7 @@ mod handlers {
     pub fn world_visible(_: On<Pulse>) {}
     pub fn entity_visible(_: On<Pulse>) {}
     pub fn commands_visible(_: On<Pulse>) {}
+    pub fn deferred_visible(_: On<Pulse>) {}
     pub fn constructed(_: On<Pulse>) {}
     fn private(_: On<Pulse>) {}
 
@@ -33,6 +34,9 @@ fn main() {
     App::add_observer(&mut app, handlers::crate_visible);
     app.main_mut().add_observer(handlers::parent_visible);
     World::add_observer(app.world_mut(), handlers::world_visible);
+    app.world_mut()
+        .commands()
+        .add_observer(handlers::deferred_visible);
     app.world_mut()
         .spawn_empty()
         .observe(handlers::entity_visible);
