@@ -1041,8 +1041,11 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
-        app.add_message::<crate::host::event::AcpWorkspaceChanged>()
-            .add_systems(Update, workspace);
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            vmux_session::SessionDomainPlugin,
+            RuntimePlugin,
+        ));
         let tab = app
             .world_mut()
             .spawn((
