@@ -1606,6 +1606,13 @@ fn component_hooks_require_a_used_component_and_real_hook_metadata() {
             "state: Query<&State>",
             true,
         ),
+        (
+            "Component",
+            "component(on_discard = hook)",
+            "state: Query<&State>",
+            true,
+        ),
+        ("Component", "component(on_discard = hook)", "", false),
         ("Component", "component(on_add = hook)", "", false),
         (
             "Resource",
@@ -9084,7 +9091,12 @@ impl Declarations<'_> {
                         if !value.path.get_ident().is_some_and(|name| {
                             matches!(
                                 name.to_string().as_str(),
-                                "on_add" | "on_insert" | "on_replace" | "on_remove" | "on_despawn"
+                                "on_add"
+                                    | "on_insert"
+                                    | "on_discard"
+                                    | "on_replace"
+                                    | "on_remove"
+                                    | "on_despawn"
                             )
                         }) {
                             continue;

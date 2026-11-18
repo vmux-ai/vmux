@@ -400,7 +400,12 @@ impl<'ast> Visit<'ast> for RegisteredSystems {
                 if item.path.get_ident().is_some_and(|name| {
                     matches!(
                         name.to_string().as_str(),
-                        "on_add" | "on_insert" | "on_replace" | "on_remove" | "on_despawn"
+                        "on_add"
+                            | "on_insert"
+                            | "on_discard"
+                            | "on_replace"
+                            | "on_remove"
+                            | "on_despawn"
                     )
                 }) {
                     collect_paths(&item.value, &mut self.0);
@@ -432,7 +437,7 @@ impl<'ast> Visit<'ast> for RegisteredSystems {
 fn component_lifecycle_hooks_are_registered_framework_entries() {
     let source = syn::parse_file(
         r#"
-        #[component(on_insert = bind::<T>, on_remove = cleanup)]
+        #[component(on_insert = bind::<T>, on_discard = retain, on_remove = cleanup)]
         struct Pending<T>(T);
         #[unrelated(on_insert = ignored)]
         struct Other;
@@ -443,7 +448,11 @@ fn component_lifecycle_hooks_are_registered_framework_entries() {
     registered.visit_file(&source);
     assert_eq!(
         registered.0,
-        BTreeSet::from(["bind".to_string(), "cleanup".to_string()])
+        BTreeSet::from([
+            "bind".to_string(),
+            "cleanup".to_string(),
+            "retain".to_string()
+        ])
     );
 }
 
