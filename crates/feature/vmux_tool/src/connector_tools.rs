@@ -1,3 +1,4 @@
+use bevy::app::{App, Plugin};
 use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 
@@ -38,11 +39,11 @@ pub struct ConnectorToolPlugin;
 impl Plugin for ConnectorToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .add_tool_query::<AgentConnectorTools>()
-            .add_tool_query::<AgentConnectorCall>()
             .add_systems(Update, (tools, call).in_set(ToolDispatchSet))
             .add_systems(Update, (list, invoke).after(ToolQueryRouteSet))
             .add_systems(Update, finish);
+        app.add_tool_query::<AgentConnectorTools>()
+            .add_tool_query::<AgentConnectorCall>();
     }
 }
 
