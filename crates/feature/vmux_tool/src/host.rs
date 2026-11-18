@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::result::Result;
 use std::task::Waker;
 
 use crate::catalog::{Catalog, Inventory, Received};
@@ -16,8 +17,8 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    AsyncTask, OperationState, PageMetadata, PageOpenRequest, PageOpenTarget, TaskPlugin,
-    TaskResult, TaskSet, TaskWaker, UiState, UiStatePlugin, UiStateWrite,
+    AsyncTask, EntityTarget, OperationState, PageMetadata, PageOpenRequest, PageOpenTarget,
+    TaskPlugin, TaskResult, TaskSet, TaskWaker, UiState, UiStatePlugin, UiStateWrite,
 };
 use vmux_feature::manifest::{FeatureId, FeatureManifest};
 
@@ -77,6 +78,7 @@ impl Plugin for ToolHostPlugin {
         .add_observer(open_request)
         .add_observer(filter_request)
         .add_observer(navigate_request)
+        .add_observer(complete)
         .add_systems(Startup, spawn_registry)
         .add_systems(
             Update,
@@ -833,44 +835,62 @@ fn finish_external_operations(
             Ok(result) => result,
             Err(error) => Err(error.to_string()),
         };
-        commands.queue(completion.guard(entity, ProviderCompletion { entity, result }));
+        commands.queue(completion.guard(
+            entity,
+            ProviderCompletion {
+                entity,
+                result: Some(result),
+            },
+        ));
     }
 }
 
+#[derive(Event)]
 struct ProviderCompletion {
     entity: Entity,
-    result: Result<String, String>,
+    result: Option<Result<String, String>>,
 }
 
 impl Command for ProviderCompletion {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        if !world
-            .get::<OperationState>(self.entity)
-            .is_some_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            return;
+        world.trigger(self);
+    }
+}
+
+fn complete(
+    mut receipt: On<ProviderCompletion>,
+    operations: Query<(&OperationState, Option<&EntityTarget<ToolStore>>)>,
+    stores: Query<(), With<ToolStore>>,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    let Ok((state, target)) = operations.get(receipt.entity) else {
+        return;
+    };
+    if !matches!(state, OperationState::Pending | OperationState::Running) {
+        return;
+    }
+    if target.is_some_and(|target| !stores.contains(target.entity())) {
+        commands
+            .entity(receipt.entity)
+            .insert(OperationState::Canceled);
+        return;
+    }
+    let Some(result) = receipt.result.take() else {
+        return;
+    };
+    match result {
+        Ok(message) => {
+            commands
+                .entity(receipt.entity)
+                .insert((ToolOperationFinished, ToolOperationSucceeded(message)));
         }
-        if let Some(target) = world.get::<ToolStoreTarget>(self.entity)
-            && world.get::<ToolStore>(target.entity()).is_none()
-        {
-            world
-                .entity_mut(self.entity)
-                .insert(OperationState::Canceled);
-            return;
-        }
-        match self.result {
-            Ok(message) => {
-                world
-                    .entity_mut(self.entity)
-                    .insert((ToolOperationFinished, ToolOperationSucceeded(message)));
-            }
-            Err(error) => {
-                world
-                    .entity_mut(self.entity)
-                    .insert((ToolOperationFinished, ToolOperationFailed(error)));
-            }
+        Err(error) => {
+            commands
+                .entity(receipt.entity)
+                .insert((ToolOperationFinished, ToolOperationFailed(error)));
         }
     }
 }
@@ -1038,6 +1058,73 @@ fn emit_tools_state(
 mod tests {
     use super::*;
     use crate::state::{ToolOperationKind, ToolProvider};
+
+    #[test]
+    fn queued_provider_completion_refuses_cancellation_and_retired_stores() {
+        for interruption in ["none", "cancel", "store"] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new();
+            app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin));
+            let store = app
+                .world_mut()
+                .spawn(ToolStore::new(directory.path(), directory.path()))
+                .id();
+            let operation = app
+                .world_mut()
+                .spawn((
+                    vmux_ecs::Operation::bundle("tools.test.provider")
+                        .unwrap()
+                        .running(),
+                    ToolStoreTarget::new(store),
+                ))
+                .id();
+            app.world_mut().commands().queue(ProviderCompletion {
+                entity: operation,
+                result: Some(Ok("completed".into())),
+            });
+            match interruption {
+                "none" => {}
+                "cancel" => {
+                    app.world_mut()
+                        .entity_mut(operation)
+                        .insert(OperationState::Canceled);
+                }
+                "store" => {
+                    app.world_mut().despawn(store);
+                }
+                _ => unreachable!(),
+            }
+            app.world_mut().flush();
+            if interruption == "none" {
+                assert_eq!(
+                    app.world()
+                        .get::<ToolOperationSucceeded>(operation)
+                        .map(|result| result.0.as_str()),
+                    Some("completed")
+                );
+                assert!(
+                    app.world()
+                        .get::<ToolOperationFinished>(operation)
+                        .is_some()
+                );
+            } else {
+                assert_eq!(
+                    app.world().get::<OperationState>(operation),
+                    Some(&OperationState::Canceled)
+                );
+                assert!(
+                    app.world()
+                        .get::<ToolOperationSucceeded>(operation)
+                        .is_none()
+                );
+                assert!(
+                    app.world()
+                        .get::<ToolOperationFinished>(operation)
+                        .is_none()
+                );
+            }
+        }
+    }
 
     #[test]
     fn native_tool_task_stages_form_a_valid_production_schedule() {
