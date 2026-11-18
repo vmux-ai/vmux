@@ -27,6 +27,8 @@ impl Plugin for NavigationPlugin {
             .add_observer(preview_checkout)
             .add_observer(knowledge_link_open)
             .add_observer(apply_file)
+            .add_observer(retain)
+            .add_observer(resume)
             .add_systems(Update, (refresh_checkout, apply_goto, apply_pending_goto));
     }
 }
@@ -300,6 +302,23 @@ impl FileVisitRecorder<'_> {
     }
 }
 
+#[derive(EntityEvent)]
+struct Navigated {
+    #[event_target]
+    entity: Entity,
+    path: PathBuf,
+    keymap: Entity,
+    previous: Option<Entity>,
+}
+
+#[derive(EntityEvent)]
+struct Resume {
+    #[event_target]
+    entity: Entity,
+    path: PathBuf,
+    keymap: Entity,
+}
+
 fn apply_file(
     trigger: On<FileNavigateRequest>,
     mut views: Query<(
@@ -358,39 +377,53 @@ fn apply_file(
         {
             return;
         }
-        if document.contains::<Editor>() && document.contains::<vmux_git::GitDiffSource>() {
-            let edit = document.take::<Editor>().unwrap();
-            let diff = document.take::<vmux_git::GitDiffSource>().unwrap();
-            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
-            buffers
-                .get_mut(world)
-                .expect("parked buffer access")
-                .retain(entity, edit, diff);
-            buffers.apply(world);
-        }
-        let forced = world
-            .entity(entity)
-            .get::<super::file_lifecycle::ForcedEncoding>()
-            .is_some_and(|encoding| encoding.path == requested);
-        let resumed = if forced {
-            false
-        } else {
-            let mut buffers = bevy::ecs::system::SystemState::<Buffers>::new(world);
-            let resumed = buffers
-                .get_mut(world)
-                .expect("parked buffer access")
-                .resume(entity, &requested, resumed_keymap);
-            buffers.apply(world);
-            resumed
-        };
-        let mut document = world.entity_mut(entity);
-        if resumed {
-            if super::markdown::ParsedNote::supports(&requested) {
-                document.insert(super::explorer::OutlineDirty);
-            }
-            world.trigger(super::status::DocumentRenderRequest::new(entity));
-        }
+        let previous = document.take::<(Editor, vmux_git::GitDiffSource)>();
+        let previous = previous.map(|(edit, diff)| world.spawn((edit, diff, ChildOf(entity))).id());
+        let keymap = world.spawn((resumed_keymap, ChildOf(entity))).id();
+        world.trigger(Navigated {
+            entity,
+            path: requested,
+            keymap,
+            previous,
+        });
     });
+}
+
+fn retain(mut request: On<Navigated>, mut buffers: Buffers, mut commands: Commands) {
+    let request = request.event_mut();
+    if let Some(buffer) = request.previous.take() {
+        buffers.retain(request.entity, buffer);
+    }
+    commands.trigger(Resume {
+        entity: request.entity,
+        path: std::mem::take(&mut request.path),
+        keymap: request.keymap,
+    });
+}
+
+fn resume(
+    request: On<Resume>,
+    views: Query<(&FileView, Option<&super::file_lifecycle::ForcedEncoding>)>,
+    mut buffers: Buffers,
+    mut commands: Commands,
+) {
+    let available = match views.get(request.entity) {
+        Ok((view, forced)) => {
+            view.path == request.path && forced.is_none_or(|forced| forced.path != request.path)
+        }
+        Err(_) => false,
+    };
+    let resumed = available && buffers.resume_saved(request.entity, &request.path, request.keymap);
+    commands.entity(request.keymap).despawn();
+    if !resumed {
+        return;
+    }
+    if super::markdown::ParsedNote::supports(&request.path) {
+        commands
+            .entity(request.entity)
+            .insert(super::explorer::OutlineDirty);
+    }
+    commands.trigger(super::status::DocumentRenderRequest::new(request.entity));
 }
 
 fn knowledge_link_open(

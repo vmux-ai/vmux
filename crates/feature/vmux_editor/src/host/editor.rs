@@ -672,6 +672,17 @@ mod tests {
         session.type_into_buffer("EDIT");
         session.navigate_to("lib.rs");
         session.navigate_to("main.rs");
+        let missing = session.app.world_mut().spawn_empty().id();
+        session.app.world_mut().despawn(missing);
+        session
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveCaptureRequest {
+                archive: missing,
+                source: session.entity,
+            });
+        session.app.world_mut().flush();
+        assert_eq!(session.text(), "EDIToriginal\n");
         let archive = session.app.world_mut().spawn_empty().id();
         session
             .app
@@ -682,6 +693,14 @@ mod tests {
             });
         session.app.world_mut().flush();
         session.app.world_mut().entity_mut(session.entity).despawn();
+        session
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveRestoreRequest {
+                stack: missing,
+                archive,
+            });
+        session.app.world_mut().flush();
         let stack = session.app.world_mut().spawn_empty().id();
         session
             .app
@@ -707,6 +726,14 @@ mod tests {
                 crate::host::explorer::ExplorerState::default(),
             ))
             .id();
+        session
+            .app
+            .world_mut()
+            .trigger(crate::host::explorer::RestoreEditors {
+                stack,
+                view: missing,
+            });
+        session.app.world_mut().flush();
         session
             .app
             .world_mut()
