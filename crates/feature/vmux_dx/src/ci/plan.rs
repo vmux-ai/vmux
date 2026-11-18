@@ -11,6 +11,7 @@ struct Results<'w, 's> {
     event_slot_bytes: super::Reads<'w, 's, Bytes, EventSlot>,
     ancestor_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, AncestorSlot>,
     descendant_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, DescendantSlot>,
+    base_tip_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, BaseTipSlot>,
     print_slot_written: super::Reads<'w, 's, Written, PrintSlot>,
     checkout_print_slot_written: super::Reads<'w, 's, Written, CheckoutPrintSlot>,
     parent_slot_captured: super::Reads<'w, 's, crate::ci_io::process::Captured, ParentSlot>,
@@ -286,6 +287,8 @@ struct AncestorSlot;
 #[derive(Component)]
 struct DescendantSlot;
 #[derive(Component)]
+struct BaseTipSlot;
+#[derive(Component)]
 struct MergeSlot;
 #[derive(Component)]
 struct TreeSlot;
@@ -555,11 +558,24 @@ fn fetched(mut plans: Plans, mut io: Io, results: Results) {
             ),
             DescendantSlot,
         );
+        io.request(
+            entity,
+            &mut sequence,
+            context.git(
+                &settings.0,
+                &[
+                    "rev-parse",
+                    &format!("{}^{{tree}}", plan.base),
+                    &format!("{}^{{tree}}", plan.tip),
+                ],
+            ),
+            BaseTipSlot,
+        );
         *phase = Phase::Ancestry;
     }
 }
 fn ancestry(mut plans: Plans, mut io: Io, results: Results) {
-    for (entity, context, settings, plan, mut phase, mut sequence) in &mut plans {
+    for (entity, context, settings, mut plan, mut phase, mut sequence) in &mut plans {
         if *phase != Phase::Ancestry {
             continue;
         }
@@ -569,9 +585,32 @@ fn ancestry(mut plans: Plans, mut io: Io, results: Results) {
         let Some(second) = results.descendant_slot_captured.get(entity) else {
             continue;
         };
-        if !first.0.status.success() || !second.0.status.success() {
+        let Some(trees) = results
+            .base_tip_slot_captured
+            .get(entity)
+            .map(crate::ci_io::process::Captured::text)
+        else {
+            continue;
+        };
+        let trees = match trees {
+            Ok(trees) => trees,
+            Err(error) => {
+                io.fail(entity, error);
+                continue;
+            }
+        };
+        let trees = trees.lines().collect::<Vec<_>>();
+        let equivalent = trees.len() == 2
+            && trees.iter().all(|tree| Plan::sha(tree).is_ok())
+            && trees[0] == trees[1];
+        if !first.0.status.success()
+            || (!second.0.status.success() && (second.0.status.code() != Some(1) || !equivalent))
+        {
             io.fail(entity, "PR checkout base is outside target branch ancestry");
             continue;
+        }
+        if !second.0.status.success() {
+            plan.base = plan.tip.clone();
         }
         plan.probe(entity, context, settings, &mut sequence, &mut io);
         *phase = Phase::Merge;
@@ -1105,6 +1144,71 @@ mod tests {
             "#!/bin/sh\necho '{{\"commit\":{{\"sha\":\"{head}\"}}}}'\n"
         ));
         assert!(fixture.run("plan", &[]).unwrap_err().contains("ancestry"));
+    }
+    #[test]
+    fn stacked_merge_parents_require_the_actual_target_tree() {
+        for foreign_changes in [false, true] {
+            let mut fixture = Fixture::new();
+            let main = fixture.git(&["rev-parse", "HEAD"]);
+            fixture.git(&["checkout", "-qb", "base"]);
+            fixture.write("base.txt", "parent feature");
+            let base = fixture.commit();
+            fixture.git(&["checkout", "-qb", "feature"]);
+            fixture.write("feature.txt", "dependent feature");
+            let head = fixture.commit();
+            fixture.git(&["checkout", "--detach", &main]);
+            fixture.git(&["merge", "--no-ff", "-m", "Virtual parent", &base]);
+            if foreign_changes {
+                fixture.write("foreign.txt", "outside the target branch");
+                fixture.commit();
+            }
+            let virtual_base = fixture.git(&["rev-parse", "HEAD"]);
+            fixture.git(&["merge", "--no-ff", "-m", "Dependent merge", &head]);
+            let checkout = fixture.git(&["rev-parse", "HEAD"]);
+            let tree = fixture.git(&["rev-parse", "HEAD^{tree}"]);
+            fixture.git(&["remote", "add", "origin", fixture.root().to_str().unwrap()]);
+            fixture.json(
+                "event.json",
+                &json!({"pull_request": {"head": {"sha": head}, "base": {"sha": base, "ref": "base"}}}),
+            );
+            fixture.environment.set(
+                "GITHUB_EVENT_PATH",
+                fixture.root().join("event.json").as_os_str(),
+            );
+            fixture.environment.set("GITHUB_SHA", &checkout);
+            fixture.mock_gh(&format!(
+                "#!/bin/sh\necho '{{\"commit\":{{\"sha\":\"{base}\"}}}}'\n"
+            ));
+            let result = fixture.run("plan", &[]);
+            if foreign_changes {
+                assert!(result.unwrap_err().contains("ancestry"));
+            } else {
+                let outputs = Fixture::outputs(&result.unwrap());
+                assert_eq!(outputs["base"], base);
+                assert_eq!(outputs["tree"], tree);
+                fixture.git(&[
+                    "clone",
+                    "--no-local",
+                    "--single-branch",
+                    "--branch",
+                    "base",
+                    fixture.root().to_str().unwrap(),
+                    "fresh",
+                ]);
+                fixture.git(&["-C", "fresh", "fetch", "origin", &head]);
+                let history = fixture.git(&["-C", "fresh", "rev-list", "--all", "FETCH_HEAD"]);
+                assert!(!history.lines().any(|commit| commit == virtual_base));
+                let computed = fixture.git(&[
+                    "-C",
+                    "fresh",
+                    "merge-tree",
+                    "--write-tree",
+                    &outputs["base"],
+                    &outputs["head"],
+                ]);
+                assert_eq!(computed.lines().next(), Some(tree.as_str()));
+            }
+        }
     }
     #[test]
     fn workflow_names_only_skip_when_regular_blobs_and_execution_match() {

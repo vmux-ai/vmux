@@ -59,6 +59,11 @@ impl Plugin for WorkspaceStorePlugin {
             )
             .add_observer(mark_restore_pending)
             .add_observer(prune_restored)
+            .add_observer(restore_children)
+            .add_observer(resolve_ready)
+            .add_observer(begin_load)
+            .add_observer(decoded_snapshot)
+            .add_observer(materialized)
             .add_observer(mark_dirty)
             .add_systems(
                 Update,
@@ -262,6 +267,7 @@ fn prune_restored(
     }
 }
 
+#[derive(Event)]
 struct RestoredChildren {
     parents: std::collections::HashMap<Entity, Vec<Entity>>,
     store: PathBuf,
@@ -271,44 +277,66 @@ impl Command for RestoredChildren {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let backup = self
-            .store
-            .with_extension("ron.before-empty-session-children");
-        if self.store.is_file()
-            && !backup.exists()
-            && let Err(error) = std::fs::copy(&self.store, &backup)
-        {
-            warn!("Unable to back up workspace before restoring session children: {error}");
-            return;
-        }
-        let mut removed = 0;
-        for (parent, children) in self.parents {
-            let discarded = children
-                .iter()
-                .copied()
-                .collect::<std::collections::HashSet<_>>();
-            let Some(current) = world.get::<Children>(parent) else {
-                continue;
-            };
-            let mut retained = Vec::new();
-            for child in current.iter() {
-                if !discarded.contains(&child) {
-                    retained.push(child);
-                }
+        world.trigger(self);
+    }
+}
+
+fn restore_children(
+    request: On<RestoredChildren>,
+    current: Query<&Children>,
+    entities: Query<()>,
+    mut commands: Commands,
+) {
+    let backup = request
+        .store
+        .with_extension("ron.before-empty-session-children");
+    if request.store.is_file()
+        && !backup.exists()
+        && let Err(error) = std::fs::copy(&request.store, &backup)
+    {
+        warn!("Unable to back up workspace before restoring session children: {error}");
+        return;
+    }
+    let mut removed = 0;
+    for (parent, children) in &request.parents {
+        let discarded = children
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        let Ok(current) = current.get(*parent) else {
+            continue;
+        };
+        let mut retained = Vec::new();
+        for child in current.iter() {
+            if !discarded.contains(&child) {
+                retained.push(child);
             }
-            world
-                .entity_mut(parent)
-                .replace_related::<ChildOf>(&retained);
-            for child in children {
-                if world.despawn(child) {
-                    removed += 1;
-                }
+        }
+        commands
+            .entity(*parent)
+            .replace_related::<ChildOf>(&retained);
+        for child in children {
+            if entities.contains(*child) {
+                commands.entity(*child).try_despawn();
+                removed += 1;
             }
         }
-        if removed > 0 {
-            info!("Removed {removed} empty restored session children");
-            world.trigger(StoreDirty);
-        }
+    }
+    if removed > 0 {
+        info!("Removed {removed} empty restored session children");
+        commands.trigger(StoreDirty);
+    }
+}
+
+#[derive(EntityEvent)]
+struct RestoreReady {
+    #[event_target]
+    store: Entity,
+}
+
+fn resolve_ready(request: On<RestoreReady>, mut stores: Query<&mut State, With<AutoSave>>) {
+    if let Ok(mut state) = stores.get_mut(request.store) {
+        state.resolve();
     }
 }
 
@@ -319,12 +347,7 @@ fn mark_restore_pending(
     mut commands: Commands,
 ) {
     commands.entity(*store).insert(RestorePending);
-    let entity = *store;
-    commands.queue(move |world: &mut World| {
-        if let Some(mut state) = world.get_mut::<State>(entity) {
-            state.resolve();
-        }
-    });
+    commands.trigger(RestoreReady { store: *store });
     restore_requests.write(LayoutRestoreRequest);
 }
 
@@ -1268,7 +1291,7 @@ fn load_on_startup(
             None => LoadWorld::default_from_file(path.clone()),
         };
         commands.queue(WorkspaceLoad {
-            load,
+            load: Some(load),
             store: *owner,
             path: path.clone(),
         });
@@ -1277,8 +1300,9 @@ fn load_on_startup(
     }
 }
 
+#[derive(Event)]
 struct WorkspaceLoad {
-    load: LoadWorld,
+    load: Option<LoadWorld>,
     store: Entity,
     path: PathBuf,
 }
@@ -1286,54 +1310,128 @@ struct WorkspaceLoad {
 impl Command for WorkspaceLoad {
     type Out = ();
 
+    fn apply(self, world: &mut World) {
+        world.trigger(self);
+    }
+}
+
+fn begin_load(
+    mut request: On<WorkspaceLoad>,
+    mut stores: Query<&mut State, With<AutoSave>>,
+    mut commands: Commands,
+) {
+    let request = request.event_mut();
+    let Some(load) = request.load.take() else {
+        return;
+    };
+    let Ok(mut state) = stores.get_mut(request.store) else {
+        return;
+    };
+    state.materialize();
+    commands.queue(DecodeSnapshot {
+        target: EntityTarget::new(request.store),
+        path: request.path.clone(),
+        load,
+    });
+}
+
+struct DecodeSnapshot {
+    target: EntityTarget<AutoSave>,
+    path: PathBuf,
+    load: LoadWorld,
+}
+
+impl Command for DecodeSnapshot {
+    type Out = ();
+
     fn apply(mut self, world: &mut World) {
-        if let Some(mut state) = world.get_mut::<State>(self.store) {
-            state.materialize();
-        }
         let snapshot = {
             let registry = world.resource::<AppTypeRegistry>().read();
             let mut assets = world.resource::<AssetServer>().clone();
             self.snapshot(&registry, &mut assets)
         };
-        let snapshot = match snapshot {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                WorkspaceRestoreFailed {
-                    store: self.store,
-                    path: self.path,
-                    error,
-                }
-                .apply(world);
-                return;
-            }
-        };
-        let mut rejected = None;
-        {
-            let mut validators = world.query::<&WorkspaceRestoreValidator>();
-            for validator in validators.iter(world) {
-                if let Err(error) = (validator.validate)(&snapshot) {
-                    rejected = Some(format!("{}: {error}", validator.name));
-                    break;
-                }
-            }
-        }
-        if let Some(error) = rejected {
-            WorkspaceRestoreFailed {
-                store: self.store,
-                path: self.path,
+        world.trigger(DecodedSnapshot {
+            target: self.target,
+            path: self.path,
+            load: Some(self.load),
+            snapshot: Some(snapshot),
+        });
+    }
+}
+
+#[derive(Event)]
+struct DecodedSnapshot {
+    target: EntityTarget<AutoSave>,
+    path: PathBuf,
+    load: Option<LoadWorld>,
+    snapshot: Option<Result<bevy_world_serialization::DynamicWorld, String>>,
+}
+
+fn decoded_snapshot(
+    mut request: On<DecodedSnapshot>,
+    validators: Query<&WorkspaceRestoreValidator>,
+    stores: Query<(), With<AutoSave>>,
+    mut commands: Commands,
+) {
+    let request = request.event_mut();
+    if !stores.contains(request.target.entity()) {
+        return;
+    }
+    let Some(result) = request.snapshot.take() else {
+        return;
+    };
+    let snapshot = match result {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            commands.trigger(WorkspaceRestoreFailed {
+                store: request.target.entity(),
+                path: request.path.clone(),
                 error,
-            }
-            .apply(world);
+            });
             return;
         }
+    };
+    for validator in &validators {
+        if let Err(error) = (validator.validate)(&snapshot) {
+            commands.trigger(WorkspaceRestoreFailed {
+                store: request.target.entity(),
+                path: request.path.clone(),
+                error: format!("{}: {error}", validator.name),
+            });
+            return;
+        }
+    }
+    let Some(mut load) = request.load.take() else {
+        return;
+    };
+    load.input = LoadInput::World(snapshot);
+    commands.queue(MaterializeSnapshot {
+        target: request.target,
+        path: request.path.clone(),
+        load,
+    });
+}
+
+struct MaterializeSnapshot {
+    target: EntityTarget<AutoSave>,
+    path: PathBuf,
+    load: LoadWorld,
+}
+
+impl Command for MaterializeSnapshot {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
         let mut baseline = std::collections::HashSet::new();
         for archetype in world.archetypes().iter() {
             for entity in archetype.entities() {
                 baseline.insert(entity.id());
             }
         }
-        self.load.input = LoadInput::World(snapshot);
-        if let Err(error) = LoadCommand(self.load).apply(world) {
+        let result = LoadCommand(self.load)
+            .apply(world)
+            .map_err(|error| error.to_string());
+        if result.is_err() {
             let mut resources = Vec::new();
             for (_, entity) in world.resource_entities().iter() {
                 if !baseline.contains(&entity) {
@@ -1355,17 +1453,33 @@ impl Command for WorkspaceLoad {
             for entity in discarded {
                 world.despawn(entity);
             }
-            WorkspaceRestoreFailed {
-                store: self.store,
-                path: self.path,
-                error: error.to_string(),
-            }
-            .apply(world);
         }
+        world.trigger(Materialized {
+            target: self.target,
+            path: self.path,
+            result,
+        });
     }
 }
 
-impl WorkspaceLoad {
+#[derive(Event)]
+struct Materialized {
+    target: EntityTarget<AutoSave>,
+    path: PathBuf,
+    result: Result<(), String>,
+}
+
+fn materialized(request: On<Materialized>, mut commands: Commands) {
+    if let Err(error) = &request.result {
+        commands.trigger(WorkspaceRestoreFailed {
+            store: request.target.entity(),
+            path: request.path.clone(),
+            error: error.clone(),
+        });
+    }
+}
+
+impl DecodeSnapshot {
     fn snapshot(
         &mut self,
         registry: &bevy::reflect::TypeRegistry,
@@ -1697,7 +1811,7 @@ mod tests {
                 .write_schema_version()
                 .unwrap();
             self.app.world_mut().commands().queue(WorkspaceLoad {
-                load: LoadWorld::default_from_file(self.path.clone()),
+                load: Some(LoadWorld::default_from_file(self.path.clone())),
                 store: self.store,
                 path: self.path.clone(),
             });
