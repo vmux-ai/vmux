@@ -114,18 +114,19 @@ fn add(
     requests: Query<(Entity, &BookmarkAddTool), AddedTool<BookmarkAddTool>>,
 ) {
     for (entity, args) in &requests {
-        let command =
-            RequiredText::get(args.url.clone(), "bookmark_add.url is required").and_then(|url| {
-                AgentRequest::encode(&AddRequest {
-                    metadata: PageMetadata {
-                        url,
-                        title: args.title.clone().unwrap_or_default(),
-                        icon: PageIcon::favicon(args.favicon_url.clone().unwrap_or_default()),
-                        bg_color: None,
-                    },
-                    folder: args.folder.clone(),
-                })
-            });
+        let command = if args.url.trim().is_empty() {
+            Err("bookmark_add.url is required".to_string())
+        } else {
+            AgentRequest::encode(&AddRequest {
+                metadata: PageMetadata {
+                    url: args.url.clone(),
+                    title: args.title.clone().unwrap_or_default(),
+                    icon: PageIcon::favicon(args.favicon_url.clone().unwrap_or_default()),
+                    bg_color: None,
+                },
+                folder: args.folder.clone(),
+            })
+        };
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -135,8 +136,13 @@ fn remove(
     requests: Query<(Entity, &BookmarkRemoveTool), AddedTool<BookmarkRemoveTool>>,
 ) {
     for (entity, args) in &requests {
-        let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
-            .and_then(|uuid| AgentRequest::encode(&RemoveRequest { uuid }));
+        let command = if args.uuid.trim().is_empty() {
+            Err("bookmark_remove.uuid is required".to_string())
+        } else {
+            AgentRequest::encode(&RemoveRequest {
+                uuid: args.uuid.clone(),
+            })
+        };
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -148,23 +154,28 @@ fn pin(
     for (entity, args) in &requests {
         let command = match args {
             BookmarkPinTool::Existing(args) => {
-                RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
-                    .and_then(|uuid| AgentRequest::encode(&PinRequest { uuid }))
+                if args.uuid.trim().is_empty() {
+                    Err("bookmark_pin.uuid is required".to_string())
+                } else {
+                    AgentRequest::encode(&PinRequest {
+                        uuid: args.uuid.clone(),
+                    })
+                }
             }
-            BookmarkPinTool::Page(args) => RequiredText::get(
-                args.url.clone(),
-                "bookmark_pin.url is required",
-            )
-            .and_then(|url| {
-                AgentRequest::encode(&PinUrlRequest {
-                    metadata: PageMetadata {
-                        url,
-                        title: args.title.clone().unwrap_or_default(),
-                        icon: PageIcon::favicon(args.favicon_url.clone().unwrap_or_default()),
-                        bg_color: None,
-                    },
-                })
-            }),
+            BookmarkPinTool::Page(args) => {
+                if args.url.trim().is_empty() {
+                    Err("bookmark_pin.url is required".to_string())
+                } else {
+                    AgentRequest::encode(&PinUrlRequest {
+                        metadata: PageMetadata {
+                            url: args.url.clone(),
+                            title: args.title.clone().unwrap_or_default(),
+                            icon: PageIcon::favicon(args.favicon_url.clone().unwrap_or_default()),
+                            bg_color: None,
+                        },
+                    })
+                }
+            }
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -175,8 +186,13 @@ fn unpin(
     requests: Query<(Entity, &BookmarkUnpinTool), AddedTool<BookmarkUnpinTool>>,
 ) {
     for (entity, args) in &requests {
-        let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
-            .and_then(|uuid| AgentRequest::encode(&UnpinRequest { uuid }));
+        let command = if args.uuid.trim().is_empty() {
+            Err("bookmark_unpin.uuid is required".to_string())
+        } else {
+            AgentRequest::encode(&UnpinRequest {
+                uuid: args.uuid.clone(),
+            })
+        };
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -186,9 +202,11 @@ fn create_folder(
     requests: Query<(Entity, &BookmarkFolderCreateTool), AddedTool<BookmarkFolderCreateTool>>,
 ) {
     for (entity, args) in &requests {
-        let command =
-            RequiredText::get(args.name.clone(), "bookmark_folder_create.name is required")
-                .and_then(|name| AgentRequest::encode(&CreateFolderRequest::root(name)));
+        let command = if args.name.trim().is_empty() {
+            Err("bookmark_folder_create.name is required".to_string())
+        } else {
+            AgentRequest::encode(&CreateFolderRequest::root(args.name.clone()))
+        };
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -307,15 +325,5 @@ fn answer_queries(
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
             AgentQueryResult::text(request.request_id, result),
         )));
-    }
-}
-
-struct RequiredText;
-
-impl RequiredText {
-    fn get(value: String, error: &str) -> Result<String, String> {
-        (!value.trim().is_empty())
-            .then_some(value)
-            .ok_or_else(|| error.to_string())
     }
 }
