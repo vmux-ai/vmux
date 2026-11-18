@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use bevy_app::{App, Plugin as BevyPlugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::{SystemParam, SystemState};
+use bevy_ecs::system::SystemParam;
 use moonshine_save::prelude::Save;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_ecs::{
@@ -33,6 +33,10 @@ impl BevyPlugin for ProviderPlugin {
             .add_message::<crate::mutation::Rejected>()
             .init_resource::<ProviderSessionTombstones>()
             .add_observer(finish_import)
+            .add_observer(import)
+            .add_observer(read)
+            .add_observer(archive)
+            .add_observer(written)
             .add_systems(Update, reject_imports.after(crate::mutation::CommitSet))
             .add_systems(
                 Update,
@@ -125,13 +129,13 @@ pub struct ArchiveWrite {
     pub archived: bool,
 }
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub struct ArchivesReceived {
     pub operation: Entity,
     pub result: Result<Option<HashMap<String, ArchiveState>>, String>,
 }
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub struct ArchiveWritten {
     pub operation: Entity,
     pub state: ArchiveState,
@@ -258,7 +262,7 @@ impl ImportLeases<'_, '_> {
 #[derive(Component)]
 pub struct Opened;
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub struct ImportRequested {
     pub entry: Entity,
     pub agent: AgentId,
@@ -276,7 +280,7 @@ pub struct Imported {
     pub operation: Entity,
 }
 
-#[derive(Message)]
+#[derive(Message, Event)]
 pub struct Received {
     pub operation: Entity,
     pub supported: bool,
@@ -640,228 +644,416 @@ impl Entries<'_, '_> {
     }
 }
 
-fn receive_imports(world: &mut World) {
-    let requests: Vec<_> = world
-        .resource_mut::<Messages<ImportRequested>>()
-        .drain()
-        .collect();
-    for request in requests {
-        let mut leases = SystemState::<ImportLeases>::new(world);
-        if !leases
-            .get(world)
-            .expect("import lease parameters")
-            .destination(request.destination, false)
-        {
-            continue;
-        }
-        let Some(source) = world.get::<ChildOf>(request.entry).map(ChildOf::parent) else {
-            continue;
-        };
-        if world.get::<Entry>(request.entry).is_none() || world.get::<Source>(source).is_none() {
-            continue;
-        }
-        let Some(agent) = world.get::<AgentId>(request.entry) else {
-            continue;
-        };
-        let family = AgentFamily::of(&agent.0);
-        if world.get::<Origin>(source) == Some(&Origin::Native) {
-            let mut sources =
-                world.query_filtered::<(&AgentId, &Origin, &Capability), With<Source>>();
-            if sources.iter(world).any(|(agent, origin, capability)| {
-                *origin == Origin::Acp
-                    && AgentFamily::of(&agent.0) == family
-                    && *capability != Capability::Unsupported
-            }) {
-                continue;
-            }
-        }
-        if AgentFamily::of(&request.agent.0) != family {
-            continue;
-        }
-        let Some(kind) = world.get::<ProviderKind>(request.entry).cloned() else {
-            continue;
-        };
-        let Some(id) = world.get::<ProviderSessionId>(request.entry).cloned() else {
-            continue;
-        };
-        if world
-            .resource::<ProviderSessionTombstones>()
-            .contains_family(&family, &id.0)
-        {
-            continue;
-        }
-        let Some(generation) = world.get::<Generation>(source).copied() else {
-            continue;
-        };
-        let mut imports = world.query_filtered::<(Entity, &ProviderSessionId, &AgentId, &OperationState), With<Import>>();
-        let mut existing = None;
-        for (entity, found, agent, state) in imports.iter(world) {
-            if found == &id
-                && AgentFamily::of(&agent.0) == family
-                && matches!(state, OperationState::Pending | OperationState::Running)
+#[derive(SystemParam)]
+struct Sources<'w, 's> {
+    details: Query<
+        'w,
+        's,
+        (
+            Option<&'static Generation>,
+            Option<&'static Origin>,
+            Option<&'static AgentId>,
+            Option<&'static ArchiveWrittenAt>,
+        ),
+        With<Source>,
+    >,
+    reads: Query<'w, 's, &'static EntityTarget<Read>>,
+    archives: Query<'w, 's, &'static EntityTarget<ArchiveRead>>,
+    native: Query<'w, 's, (&'static AgentId, &'static Origin, &'static Capability), With<Source>>,
+}
+
+impl Sources<'_, '_> {
+    fn current(&self, source: Entity, operation: Entity, generation: u64) -> bool {
+        self.details.get(source).is_ok_and(|(found, _, _, _)| {
+            found.is_some_and(|found| found.0 == generation)
+                && self
+                    .reads
+                    .get(source)
+                    .is_ok_and(|target| target.entity() == operation)
+        })
+    }
+
+    fn current_archive(&self, source: Entity, operation: Entity, generation: u64) -> bool {
+        self.details.get(source).is_ok_and(|(found, _, _, _)| {
+            found.is_some_and(|found| found.0 == generation)
+                && self
+                    .archives
+                    .get(source)
+                    .is_ok_and(|target| target.entity() == operation)
+        })
+    }
+
+    fn fallback(&self, family: &AgentFamily) -> bool {
+        for (agent, origin, capability) in &self.native {
+            if *origin == Origin::Acp
+                && AgentFamily::of(&agent.0) == *family
+                && *capability != Capability::Unsupported
             {
-                existing = Some(entity);
-                break;
+                return false;
             }
         }
-        if let Some(operation) = existing {
-            let changed = world.get::<Destination>(operation) != Some(&request.destination);
-            world.entity_mut(operation).insert((
-                Import {
-                    generation: generation.0,
-                },
-                ChildOf(source),
-                EntityTarget::<Entry>::new(request.entry),
-                kind,
-                id,
-                request.destination,
-            ));
-            if request.destination.opens_in_place() {
-                if changed || world.get::<Opened>(operation).is_none() {
-                    world.entity_mut(operation).insert(Opened);
-                    world.trigger(Opening { entity: operation });
-                }
-            } else {
-                world.entity_mut(operation).remove::<Opened>();
-            }
-            continue;
-        }
-        let operation = world
-            .spawn((
-                Import {
-                    generation: generation.0,
-                },
-                ChildOf(source),
-                EntityTarget::<Entry>::new(request.entry),
-                kind,
-                id,
-                request.agent.clone(),
-                request.destination,
-                vmux_ecs::Operation::bundle("provider import")
-                    .expect("import operation kind")
-                    .running(),
-            ))
-            .id();
-        let Some(cwd) = world.get::<Cwd>(request.entry).cloned() else {
-            world.entity_mut(operation).insert(OperationState::Failed);
-            continue;
-        };
-        let cwd = match cwd.0.canonicalize() {
-            Ok(cwd) if cwd.is_dir() => cwd,
-            _ => {
-                world.entity_mut(operation).insert((
-                    OperationState::Failed,
-                    OperationError::new("provider working directory is unavailable")
-                        .expect("bounded import error"),
-                ));
-                continue;
-            }
-        };
-        let id = world
-            .get::<ProviderSessionId>(request.entry)
-            .expect("provider entry identity");
-        let name = world.get::<Name>(request.entry).map_or_else(
-            || id.0.clone(),
-            |name| {
-                if name.as_str().trim().is_empty() {
-                    id.0.clone()
-                } else {
-                    name.as_str().to_string()
-                }
-            },
-        );
-        let description = world
-            .get::<Description>(request.entry)
-            .map_or_else(String::new, |description| description.0.clone());
-        let created_at = world.get::<CreatedAt>(request.entry).map_or(0, |at| at.0);
-        let updated_at = world
-            .get::<SourceUpdatedAt>(request.entry)
-            .map_or(0, |at| at.0);
-        let create = CreateRequest::imported(
-            name,
-            description,
-            cwd,
-            request.agent,
-            created_at,
-            updated_at,
-        )
-        .leased(operation);
-        world.entity_mut(operation).insert(create.id().clone());
-        if request.destination.opens_in_place() {
-            world.entity_mut(operation).insert(Opened);
-            world.trigger(Opening { entity: operation });
-        }
-        world.write_message(create);
+        true
     }
 }
 
-fn maintain_imports(world: &mut World) {
-    let mut imports = world.query_filtered::<Entity, With<Import>>();
-    let operations: Vec<_> = imports.iter(world).collect();
-    let mut leases = SystemState::<ImportLeases>::new(world);
-    let mut canceled = Vec::new();
-    {
-        let leases = leases.get(world).expect("import lease parameters");
-        for operation in operations {
-            if world.get::<OperationState>(operation).is_some_and(|state| {
-                matches!(state, OperationState::Pending | OperationState::Running)
-            }) && !leases.active(operation)
-            {
-                canceled.push(operation);
+#[derive(SystemParam)]
+struct EntryWrites<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
+    keys: Query<
+        'w,
+        's,
+        (
+            Option<&'static ProviderKind>,
+            Option<&'static ProviderSessionId>,
+        ),
+        With<Entry>,
+    >,
+    identities: Query<'w, 's, (Entity, &'static AgentId, &'static ProviderSessionId), With<Entry>>,
+    metadata: Query<
+        'w,
+        's,
+        (
+            Option<&'static Cwd>,
+            Option<&'static CreatedAt>,
+            Option<&'static SourceUpdatedAt>,
+            Option<&'static ArchiveObservedAt>,
+        ),
+        With<Entry>,
+    >,
+    commands: Commands<'w, 's>,
+}
+
+impl EntryWrites<'_, '_> {
+    fn current(&self, source: Entity) -> HashMap<(String, String), Entity> {
+        let mut current = HashMap::new();
+        if let Ok(children) = self.children.get(source) {
+            for child in children.iter() {
+                if let Ok((Some(kind), Some(id))) = self.keys.get(child) {
+                    current.insert((kind.0.clone(), id.0.clone()), child);
+                }
+            }
+        }
+        current
+    }
+
+    fn set(
+        &mut self,
+        existing: Option<Entity>,
+        source: Entity,
+        agent: &AgentId,
+        entry: &ProviderSession,
+        native: bool,
+        archives_current: bool,
+    ) {
+        let entity = match existing {
+            Some(entity) => entity,
+            None => self.commands.spawn((Entry, ChildOf(source))).id(),
+        };
+        let (cwd, created_at, updated_at, _) = self
+            .metadata
+            .get(entity)
+            .unwrap_or((None, None, None, None));
+        let cwd = if native && entry.cwd.is_empty() {
+            cwd.cloned().unwrap_or_default()
+        } else {
+            Cwd(PathBuf::from(&entry.cwd))
+        };
+        let created_at = if native && entry.created_at == 0 {
+            created_at.copied().unwrap_or_default()
+        } else {
+            CreatedAt(entry.created_at)
+        };
+        let updated_at = if native {
+            updated_at.map_or(entry.updated_at, |old| old.0.max(entry.updated_at))
+        } else {
+            entry.updated_at
+        };
+        self.commands.entity(entity).insert((
+            ProviderKind(entry.kind.clone()),
+            ProviderSessionId(entry.sid.clone()),
+            agent.clone(),
+            Name::new(entry.name.clone()),
+            Description(entry.description.clone()),
+            cwd,
+            created_at,
+            SourceUpdatedAt(updated_at),
+            ConversationTitle(entry.conversation_title.clone()),
+            LastPrompt(entry.last_prompt.clone()),
+        ));
+        if archives_current && let Some(archive) = entry.archive {
+            self.observe(entity, archive);
+        }
+        self.commands.entity(entity).remove::<Save>();
+    }
+
+    fn observe(&mut self, entity: Entity, state: ArchiveState) {
+        if self
+            .metadata
+            .get(entity)
+            .is_ok_and(|(_, _, _, old)| old.is_some_and(|old| old.0 > state.updated_at()))
+        {
+            return;
+        }
+        self.commands
+            .entity(entity)
+            .insert(ArchiveObservedAt(state.updated_at()));
+        match state {
+            ArchiveState::Active(_) => {
+                self.commands.entity(entity).remove::<ArchivedAt>();
+            }
+            ArchiveState::Archived(at) => {
+                self.commands.entity(entity).insert(ArchivedAt(at));
             }
         }
     }
-    for operation in canceled {
-        world.entity_mut(operation).insert(OperationState::Canceled);
+
+    fn matching(&self, family: &AgentFamily, id: Option<&ProviderSessionId>) -> Vec<Entity> {
+        let mut targets = Vec::new();
+        for (entity, agent, found) in &self.identities {
+            if AgentFamily::of(&agent.0) == *family && id.is_none_or(|id| found == id) {
+                targets.push(entity);
+            }
+        }
+        targets
+    }
+}
+
+#[derive(SystemParam)]
+struct ImportCatalog<'w, 's> {
+    entries: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static AgentId,
+            &'static ProviderKind,
+            &'static ProviderSessionId,
+            Option<&'static Cwd>,
+            Option<&'static Name>,
+            Option<&'static Description>,
+            Option<&'static CreatedAt>,
+            Option<&'static SourceUpdatedAt>,
+        ),
+        With<Entry>,
+    >,
+    operations: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ProviderSessionId,
+            &'static AgentId,
+            &'static OperationState,
+            Option<&'static Destination>,
+            Has<Opened>,
+        ),
+        With<Import>,
+    >,
+    sources: Sources<'w, 's>,
+    tombstones: Res<'w, ProviderSessionTombstones>,
+}
+
+impl ImportCatalog<'_, '_> {
+    fn eligible(
+        &self,
+        entry: Entity,
+        agent: &AgentId,
+    ) -> Option<(Entity, u64, AgentFamily, ProviderKind, ProviderSessionId)> {
+        let (parent, found, kind, id, _, _, _, _, _) = self.entries.get(entry).ok()?;
+        let source = parent.parent();
+        let (generation, origin, _, _) = self.sources.details.get(source).ok()?;
+        let family = AgentFamily::of(&found.0);
+        if origin == Some(&Origin::Native) && !self.sources.fallback(&family)
+            || AgentFamily::of(&agent.0) != family
+            || self.tombstones.contains_family(&family, &id.0)
+        {
+            return None;
+        }
+        Some((source, generation?.0, family, kind.clone(), id.clone()))
+    }
+
+    fn existing(
+        &self,
+        family: &AgentFamily,
+        id: &ProviderSessionId,
+    ) -> Option<(Entity, Option<Destination>, bool)> {
+        for (entity, found, agent, state, destination, opened) in &self.operations {
+            if found == id
+                && AgentFamily::of(&agent.0) == *family
+                && matches!(state, OperationState::Pending | OperationState::Running)
+            {
+                return Some((entity, destination.copied(), opened));
+            }
+        }
+        None
+    }
+
+    fn create(
+        &self,
+        entry: Entity,
+        agent: AgentId,
+        operation: Entity,
+    ) -> Result<Option<CreateRequest>, String> {
+        let (_, _, _, id, cwd, name, description, created_at, updated_at) =
+            self.entries.get(entry).map_err(|error| error.to_string())?;
+        let Some(cwd) = cwd else {
+            return Ok(None);
+        };
+        let cwd = match cwd.0.canonicalize() {
+            Ok(cwd) if cwd.is_dir() => cwd,
+            _ => return Err("provider working directory is unavailable".into()),
+        };
+        let name = match name {
+            Some(name) if !name.as_str().trim().is_empty() => name.as_str().to_string(),
+            _ => id.0.clone(),
+        };
+        Ok(Some(
+            CreateRequest::imported(
+                name,
+                description.map_or_else(String::new, |description| description.0.clone()),
+                cwd,
+                agent,
+                created_at.map_or(0, |at| at.0),
+                updated_at.map_or(0, |at| at.0),
+            )
+            .leased(operation),
+        ))
+    }
+}
+
+fn receive_imports(mut requests: ResMut<Messages<ImportRequested>>, mut commands: Commands) {
+    for request in requests.drain() {
+        commands.trigger(request);
+    }
+}
+
+fn import(
+    request: On<ImportRequested>,
+    leases: ImportLeases,
+    catalog: ImportCatalog,
+    mut creates: MessageWriter<CreateRequest>,
+    mut commands: Commands,
+) {
+    if !leases.destination(request.destination, false) {
+        return;
+    }
+    let Some((source, generation, family, kind, id)) =
+        catalog.eligible(request.entry, &request.agent)
+    else {
+        return;
+    };
+    let bundle = (
+        Import { generation },
+        ChildOf(source),
+        EntityTarget::<Entry>::new(request.entry),
+        kind,
+        id,
+        request.destination,
+    );
+    if let Some((operation, destination, opened)) = catalog.existing(&family, &bundle.4) {
+        let changed = destination != Some(request.destination);
+        commands.entity(operation).insert(bundle);
+        if request.destination.opens_in_place() {
+            if changed || !opened {
+                commands.entity(operation).insert(Opened);
+                commands.trigger(Opening { entity: operation });
+            }
+        } else {
+            commands.entity(operation).remove::<Opened>();
+        }
+        return;
+    }
+    let operation = commands
+        .spawn((
+            bundle,
+            request.agent.clone(),
+            vmux_ecs::Operation::bundle("provider import")
+                .expect("import operation kind")
+                .running(),
+        ))
+        .id();
+    let create = match catalog.create(request.entry, request.agent.clone(), operation) {
+        Ok(Some(create)) => create,
+        Ok(None) => {
+            commands.entity(operation).insert(OperationState::Failed);
+            return;
+        }
+        Err(error) => {
+            commands.entity(operation).insert((
+                OperationState::Failed,
+                OperationError::new(error).expect("bounded import error"),
+            ));
+            return;
+        }
+    };
+    commands.entity(operation).insert(create.id().clone());
+    if request.destination.opens_in_place() {
+        commands.entity(operation).insert(Opened);
+        commands.trigger(Opening { entity: operation });
+    }
+    creates.write(create);
+}
+
+fn maintain_imports(
+    imports: Query<(Entity, &OperationState), With<Import>>,
+    leases: ImportLeases,
+    mut commands: Commands,
+) {
+    for (operation, state) in &imports {
+        if matches!(state, OperationState::Pending | OperationState::Running)
+            && !leases.active(operation)
+        {
+            commands.entity(operation).insert(OperationState::Canceled);
+        }
     }
 }
 
 fn finish_import(
     event: On<Created>,
-    imports: Query<(Entity, &SessionId, &vmux_ecs::Uuid), With<Import>>,
+    imports: Query<(Entity, &SessionId, &vmux_ecs::Uuid, &EntityTarget<Entry>), With<Import>>,
+    sessions: Query<(&SessionId, Option<&Children>), With<Session>>,
+    records: Query<&vmux_ecs::Uuid, With<vmux_ecs::revision::Record>>,
+    entries: Query<
+        (
+            &ProviderKind,
+            &ProviderSessionId,
+            Option<&ConversationTitle>,
+            Option<&Name>,
+        ),
+        With<Entry>,
+    >,
     leases: ImportLeases,
-    world: &World,
     mut commands: Commands,
 ) {
-    if world.get::<Session>(event.entity).is_none()
-        || world.get::<SessionId>(event.entity) != Some(&event.id)
-    {
+    let Ok((session, children)) = sessions.get(event.entity) else {
+        return;
+    };
+    if session != &event.id {
         return;
     }
-    for (operation, id, uuid) in &imports {
+    for (operation, id, uuid, target) in &imports {
         if id != &event.id || !leases.active(operation) {
             continue;
         }
-        let committed = world.get::<Children>(event.entity).is_some_and(|children| {
-            children.iter().any(|record| {
-                world.get::<vmux_ecs::revision::Record>(record).is_some()
-                    && world.get::<vmux_ecs::Uuid>(record) == Some(uuid)
-            })
-        });
-        if !committed {
+        if !children.is_some_and(|children| {
+            children
+                .iter()
+                .any(|record| records.get(record).is_ok_and(|found| found == uuid))
+        }) {
             continue;
         }
-        let target = world
-            .get::<EntityTarget<Entry>>(operation)
-            .expect("active import target")
-            .entity();
-        let kind = world
-            .get::<ProviderKind>(target)
-            .expect("active provider kind")
-            .clone();
-        let sid = world
-            .get::<ProviderSessionId>(target)
-            .expect("active provider identity")
-            .clone();
-        let title = match world.get::<ConversationTitle>(target) {
-            Some(title) if !title.0.trim().is_empty() => title.0.clone(),
-            _ => world
-                .get::<Name>(target)
-                .map_or_else(String::new, |name| name.as_str().to_string()),
+        let Ok((kind, sid, title, name)) = entries.get(target.entity()) else {
+            continue;
         };
-        commands
-            .entity(event.entity)
-            .insert((kind, sid, AgentConversationTitle(title)));
+        let title = match title {
+            Some(title) if !title.0.trim().is_empty() => title.0.clone(),
+            _ => name.map_or_else(String::new, |name| name.as_str().to_string()),
+        };
+        commands.entity(event.entity).insert((
+            kind.clone(),
+            sid.clone(),
+            AgentConversationTitle(title),
+        ));
         commands.entity(operation).insert(OperationState::Succeeded);
         commands.trigger(Imported {
             entity: event.entity,
@@ -892,348 +1084,241 @@ fn reject_imports(
     }
 }
 
-fn receive(world: &mut World) {
-    let received: Vec<_> = world.resource_mut::<Messages<Received>>().drain().collect();
-    for received in received {
-        let Some(read) = world.get::<Read>(received.operation).copied() else {
-            continue;
-        };
-        let Some(source) = world
-            .get::<ChildOf>(received.operation)
-            .map(ChildOf::parent)
-        else {
-            continue;
-        };
-        if world
-            .get::<OperationState>(received.operation)
-            .is_none_or(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        if world.get::<Source>(source).is_none()
-            || world
-                .get::<Generation>(source)
-                .is_none_or(|generation| generation.0 != read.generation)
-            || world
-                .get::<EntityTarget<Read>>(source)
-                .is_none_or(|target| target.entity() != received.operation)
-        {
-            world
-                .entity_mut(received.operation)
-                .insert(OperationState::Canceled);
-            if world.get::<Source>(source).is_some()
-                && world
-                    .get::<EntityTarget<Read>>(source)
-                    .is_some_and(|target| target.entity() == received.operation)
-            {
-                world
-                    .entity_mut(source)
-                    .insert(Capability::Failed)
-                    .remove::<EntityTarget<Read>>();
-            }
-            continue;
-        }
-        let entries = match received.result {
-            Ok(entries) => entries,
-            Err(error) => {
-                if let Ok(error) = OperationError::new(error) {
-                    world.entity_mut(received.operation).insert(error.clone());
-                    world.entity_mut(source).insert(error);
-                }
-                world
-                    .entity_mut(source)
-                    .insert(Capability::Failed)
-                    .remove::<EntityTarget<Read>>();
-                world
-                    .entity_mut(received.operation)
-                    .insert(OperationState::Failed);
-                continue;
-            }
-        };
-        let native = world.get::<Origin>(source) == Some(&Origin::Native);
-        let Some(agent) = world.get::<AgentId>(source).cloned() else {
-            continue;
-        };
-        let archives_current = match (
-            world.get::<Started>(received.operation),
-            world.get::<ArchiveWrittenAt>(source),
-        ) {
-            (Some(read), Some(written)) => read.0 >= written.0,
-            _ => true,
-        };
-        let mut current = HashMap::new();
-        if let Some(children) = world.get::<Children>(source) {
-            for child in children.iter() {
-                if world.get::<Entry>(child).is_none() {
-                    continue;
-                }
-                if let (Some(kind), Some(id)) = (
-                    world.get::<ProviderKind>(child),
-                    world.get::<ProviderSessionId>(child),
-                ) {
-                    current.insert((kind.0.clone(), id.0.clone()), child);
-                }
-            }
-        }
-        let mut incoming = HashMap::<(String, String), usize>::new();
-        if received.supported {
-            for (position, entry) in entries.iter().enumerate() {
-                if entry.sid.trim().is_empty() || entry.kind.trim().is_empty() {
-                    continue;
-                }
-                let key = (entry.kind.clone(), entry.sid.clone());
-                if incoming
-                    .get(&key)
-                    .is_some_and(|previous| entries[*previous].updated_at > entry.updated_at)
-                {
-                    continue;
-                }
-                incoming.insert(key, position);
-            }
-        }
-        for (key, position) in incoming {
-            let entry = &entries[position];
-            let entity = match current.remove(&key) {
-                Some(entity) => entity,
-                None => world.spawn((Entry, ChildOf(source))).id(),
-            };
-            let cwd = if native && entry.cwd.is_empty() {
-                world.get::<Cwd>(entity).cloned().unwrap_or_default()
-            } else {
-                Cwd(PathBuf::from(&entry.cwd))
-            };
-            let created_at = if native && entry.created_at == 0 {
-                world.get::<CreatedAt>(entity).copied().unwrap_or_default()
-            } else {
-                CreatedAt(entry.created_at)
-            };
-            let updated_at = if native {
-                world
-                    .get::<SourceUpdatedAt>(entity)
-                    .map_or(entry.updated_at, |old| old.0.max(entry.updated_at))
-            } else {
-                entry.updated_at
-            };
-            world.entity_mut(entity).insert((
-                ProviderKind(entry.kind.clone()),
-                ProviderSessionId(entry.sid.clone()),
-                agent.clone(),
-                Name::new(entry.name.clone()),
-                Description(entry.description.clone()),
-                cwd,
-                created_at,
-                SourceUpdatedAt(updated_at),
-                ConversationTitle(entry.conversation_title.clone()),
-                LastPrompt(entry.last_prompt.clone()),
-            ));
-            if archives_current && let Some(archive) = entry.archive {
-                let observed = match archive {
-                    ArchiveState::Active(at) | ArchiveState::Archived(at) => at,
-                };
-                if world
-                    .get::<ArchiveObservedAt>(entity)
-                    .is_none_or(|old| old.0 <= observed)
-                {
-                    world.entity_mut(entity).insert(ArchiveObservedAt(observed));
-                    match archive {
-                        ArchiveState::Active(_) => {
-                            world.entity_mut(entity).remove::<ArchivedAt>();
-                        }
-                        ArchiveState::Archived(at) => {
-                            world.entity_mut(entity).insert(ArchivedAt(at));
-                        }
-                    }
-                }
-            }
-            world.entity_mut(entity).remove::<Save>();
-        }
-        for (_, entity) in current {
-            world.despawn(entity);
-        }
-        world
-            .entity_mut(source)
-            .insert(if received.supported {
-                Capability::Supported
-            } else {
-                Capability::Unsupported
-            })
-            .remove::<EntityTarget<Read>>()
-            .remove::<OperationError>();
-        world
-            .entity_mut(received.operation)
-            .insert(OperationState::Succeeded)
-            .remove::<OperationError>();
+fn receive(mut received: ResMut<Messages<Received>>, mut commands: Commands) {
+    for received in received.drain() {
+        commands.trigger(received);
     }
 }
 
-fn receive_archives(world: &mut World) {
-    let received: Vec<_> = world
-        .resource_mut::<Messages<ArchivesReceived>>()
-        .drain()
-        .collect();
-    for received in received {
-        let Some(read) = world.get::<ArchiveRead>(received.operation).copied() else {
-            continue;
-        };
-        let Some(source) = world
-            .get::<ChildOf>(received.operation)
-            .map(ChildOf::parent)
-        else {
-            continue;
-        };
-        if world.get::<OperationState>(received.operation) != Some(&OperationState::Running) {
-            continue;
-        }
-        if world.get::<Source>(source).is_none()
-            || world
-                .get::<Generation>(source)
-                .is_none_or(|generation| generation.0 != read.generation)
-            || world
-                .get::<EntityTarget<ArchiveRead>>(source)
-                .is_none_or(|target| target.entity() != received.operation)
+fn read(
+    mut receipt: On<Received>,
+    mut operations: Query<(&Read, &ChildOf, &mut OperationState, Option<&Started>)>,
+    sources: Sources,
+    mut entries: EntryWrites,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    let Ok((read, parent, mut state, started)) = operations.get_mut(receipt.operation) else {
+        return;
+    };
+    if !matches!(*state, OperationState::Pending | OperationState::Running) {
+        return;
+    }
+    let source = parent.parent();
+    if !sources.current(source, receipt.operation, read.generation) {
+        *state = OperationState::Canceled;
+        if sources.details.contains(source)
+            && sources
+                .reads
+                .get(source)
+                .is_ok_and(|target| target.entity() == receipt.operation)
         {
-            world
-                .entity_mut(received.operation)
-                .insert(OperationState::Canceled);
-            if world
-                .get::<EntityTarget<ArchiveRead>>(source)
-                .is_some_and(|target| target.entity() == received.operation)
-            {
-                world
-                    .entity_mut(source)
-                    .remove::<EntityTarget<ArchiveRead>>();
-            }
-            continue;
+            commands
+                .entity(source)
+                .insert(Capability::Failed)
+                .remove::<EntityTarget<Read>>();
         }
-        let archives = match received.result {
-            Ok(archives) => archives,
-            Err(error) => {
-                if let Ok(error) = OperationError::new(error) {
-                    world.entity_mut(received.operation).insert(error);
-                }
-                world
-                    .entity_mut(received.operation)
-                    .insert(OperationState::Failed);
-                world
-                    .entity_mut(source)
-                    .remove::<EntityTarget<ArchiveRead>>();
+        return;
+    }
+    let incoming = match std::mem::replace(&mut receipt.result, Ok(Vec::new())) {
+        Ok(entries) => entries,
+        Err(error) => {
+            if let Ok(error) = OperationError::new(error) {
+                commands.entity(receipt.operation).insert(error.clone());
+                commands.entity(source).insert(error);
+            }
+            commands
+                .entity(source)
+                .insert(Capability::Failed)
+                .remove::<EntityTarget<Read>>();
+            *state = OperationState::Failed;
+            return;
+        }
+    };
+    let (_, origin, agent, written) = sources.details.get(source).expect("current source");
+    let Some(agent) = agent else {
+        return;
+    };
+    let native = origin == Some(&Origin::Native);
+    let archives_current = match (started, written) {
+        (Some(read), Some(written)) => read.0 >= written.0,
+        _ => true,
+    };
+    let mut current = entries.current(source);
+    let mut selected = HashMap::<(String, String), usize>::new();
+    if receipt.supported {
+        for (position, entry) in incoming.iter().enumerate() {
+            if entry.sid.trim().is_empty() || entry.kind.trim().is_empty() {
                 continue;
             }
-        };
-        let current = match (
-            world.get::<Started>(received.operation),
-            world.get::<ArchiveWrittenAt>(source),
-        ) {
-            (Some(read), Some(written)) => read.0 >= written.0,
-            _ => true,
-        };
-        if current && let Some(archives) = archives {
-            let family = world
-                .get::<AgentId>(source)
-                .map(|agent| AgentFamily::of(&agent.0));
-            let mut entries =
-                world.query_filtered::<(Entity, &AgentId, &ProviderSessionId), With<Entry>>();
-            let mut observations = Vec::new();
-            for (entity, agent, id) in entries.iter(world) {
-                if family.as_ref() == Some(&AgentFamily::of(&agent.0))
-                    && let Some(state) = archives.get(&id.0)
-                {
-                    observations.push((entity, *state));
-                }
+            let key = (entry.kind.clone(), entry.sid.clone());
+            if selected
+                .get(&key)
+                .is_some_and(|previous| incoming[*previous].updated_at > entry.updated_at)
+            {
+                continue;
             }
-            for (entity, state) in observations {
-                if world
-                    .get::<ArchiveObservedAt>(entity)
-                    .is_some_and(|old| old.0 > state.updated_at())
-                {
-                    continue;
-                }
-                world
-                    .entity_mut(entity)
-                    .insert(ArchiveObservedAt(state.updated_at()));
-                match state {
-                    ArchiveState::Active(_) => {
-                        world.entity_mut(entity).remove::<ArchivedAt>();
-                    }
-                    ArchiveState::Archived(at) => {
-                        world.entity_mut(entity).insert(ArchivedAt(at));
-                    }
-                }
-            }
+            selected.insert(key, position);
         }
-        world
-            .entity_mut(source)
-            .remove::<EntityTarget<ArchiveRead>>();
-        world
-            .entity_mut(received.operation)
-            .insert(OperationState::Succeeded);
+    }
+    for (key, position) in selected {
+        entries.set(
+            current.remove(&key),
+            source,
+            agent,
+            &incoming[position],
+            native,
+            archives_current,
+        );
+    }
+    for (_, entity) in current {
+        entries.commands.entity(entity).despawn();
+    }
+    commands
+        .entity(source)
+        .insert(if receipt.supported {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        })
+        .remove::<EntityTarget<Read>>()
+        .remove::<OperationError>();
+    *state = OperationState::Succeeded;
+    commands
+        .entity(receipt.operation)
+        .remove::<OperationError>();
+}
+
+fn receive_archives(mut received: ResMut<Messages<ArchivesReceived>>, mut commands: Commands) {
+    for received in received.drain() {
+        commands.trigger(received);
     }
 }
 
-fn receive_writes(world: &mut World) {
-    let received: Vec<_> = world
-        .resource_mut::<Messages<ArchiveWritten>>()
-        .drain()
-        .collect();
-    for received in received {
-        if world.get::<ArchiveWrite>(received.operation).is_none()
-            || world.get::<OperationState>(received.operation) != Some(&OperationState::Running)
-        {
-            continue;
-        }
-        let Some(source) = world
-            .get::<ChildOf>(received.operation)
-            .map(ChildOf::parent)
-        else {
-            continue;
-        };
-        if world.get::<Source>(source).is_none() {
-            continue;
-        }
-        let Some(kind) = world.get::<ProviderKind>(received.operation) else {
-            continue;
-        };
-        let family = AgentFamily::of(kind.0.strip_prefix("acp:").unwrap_or(&kind.0));
-        if world.get::<Origin>(source) != Some(&Origin::Native)
-            || world
-                .get::<AgentId>(source)
-                .is_none_or(|agent| AgentFamily::of(&agent.0) != family)
-        {
-            continue;
-        }
-        let Some(id) = world.get::<ProviderSessionId>(received.operation).cloned() else {
-            continue;
-        };
-        let completed_at = Instant::now();
-        world
-            .entity_mut(source)
-            .insert(ArchiveWrittenAt(completed_at));
-        let mut entries =
-            world.query_filtered::<(Entity, &AgentId, &ProviderSessionId), With<Entry>>();
-        let mut targets = Vec::new();
-        for (entity, agent, found) in entries.iter(world) {
-            if found == &id && AgentFamily::of(&agent.0) == family {
-                targets.push(entity);
-            }
-        }
-        for entity in targets {
-            world.entity_mut(entity).insert((
-                ArchiveWrittenAt(completed_at),
-                ArchiveObservedAt(received.state.updated_at()),
-            ));
-            match received.state {
-                ArchiveState::Active(_) => {
-                    world.entity_mut(entity).remove::<ArchivedAt>();
-                }
-                ArchiveState::Archived(at) => {
-                    world.entity_mut(entity).insert(ArchivedAt(at));
-                }
-            }
-        }
-        world
-            .entity_mut(received.operation)
-            .insert(OperationState::Succeeded);
+fn archive(
+    mut receipt: On<ArchivesReceived>,
+    mut operations: Query<(
+        &ArchiveRead,
+        &ChildOf,
+        &mut OperationState,
+        Option<&Started>,
+    )>,
+    sources: Sources,
+    mut entries: EntryWrites,
+    mut commands: Commands,
+) {
+    let receipt = receipt.event_mut();
+    let Ok((read, parent, mut state, started)) = operations.get_mut(receipt.operation) else {
+        return;
+    };
+    if *state != OperationState::Running {
+        return;
     }
+    let source = parent.parent();
+    if !sources.current_archive(source, receipt.operation, read.generation) {
+        *state = OperationState::Canceled;
+        if sources
+            .archives
+            .get(source)
+            .is_ok_and(|target| target.entity() == receipt.operation)
+        {
+            commands
+                .entity(source)
+                .remove::<EntityTarget<ArchiveRead>>();
+        }
+        return;
+    }
+    let archives = match std::mem::replace(&mut receipt.result, Ok(None)) {
+        Ok(archives) => archives,
+        Err(error) => {
+            if let Ok(error) = OperationError::new(error) {
+                commands.entity(receipt.operation).insert(error);
+            }
+            *state = OperationState::Failed;
+            commands
+                .entity(source)
+                .remove::<EntityTarget<ArchiveRead>>();
+            return;
+        }
+    };
+    let (_, _, agent, written) = sources.details.get(source).expect("current archive source");
+    let current = match (started, written) {
+        (Some(read), Some(written)) => read.0 >= written.0,
+        _ => true,
+    };
+    if current && let (Some(archives), Some(agent)) = (archives, agent) {
+        let family = AgentFamily::of(&agent.0);
+        let mut observations = Vec::new();
+        for (entity, found, id) in &entries.identities {
+            if AgentFamily::of(&found.0) == family
+                && let Some(state) = archives.get(&id.0)
+            {
+                observations.push((entity, *state));
+            }
+        }
+        for (entity, state) in observations {
+            entries.observe(entity, state);
+        }
+    }
+    commands
+        .entity(source)
+        .remove::<EntityTarget<ArchiveRead>>();
+    *state = OperationState::Succeeded;
+}
+
+fn receive_writes(mut received: ResMut<Messages<ArchiveWritten>>, mut commands: Commands) {
+    for received in received.drain() {
+        commands.trigger(received);
+    }
+}
+
+fn written(
+    receipt: On<ArchiveWritten>,
+    mut operations: Query<(
+        &ArchiveWrite,
+        &ChildOf,
+        &mut OperationState,
+        Option<&ProviderKind>,
+        Option<&ProviderSessionId>,
+    )>,
+    sources: Sources,
+    mut entries: EntryWrites,
+    mut commands: Commands,
+) {
+    let Ok((_, parent, mut state, Some(kind), Some(id))) = operations.get_mut(receipt.operation)
+    else {
+        return;
+    };
+    if *state != OperationState::Running {
+        return;
+    }
+    let source = parent.parent();
+    let family = AgentFamily::of(kind.0.strip_prefix("acp:").unwrap_or(&kind.0));
+    let Ok((_, origin, Some(agent), _)) = sources.details.get(source) else {
+        return;
+    };
+    if origin != Some(&Origin::Native) || AgentFamily::of(&agent.0) != family {
+        return;
+    }
+    let completed_at = Instant::now();
+    commands
+        .entity(source)
+        .insert(ArchiveWrittenAt(completed_at));
+    for entity in entries.matching(&family, Some(id)) {
+        entries.commands.entity(entity).insert((
+            ArchiveWrittenAt(completed_at),
+            ArchiveObservedAt(receipt.state.updated_at()),
+        ));
+        match receipt.state {
+            ArchiveState::Active(_) => {
+                entries.commands.entity(entity).remove::<ArchivedAt>();
+            }
+            ArchiveState::Archived(at) => {
+                entries.commands.entity(entity).insert(ArchivedAt(at));
+            }
+        }
+    }
+    *state = OperationState::Succeeded;
 }
 
 #[cfg(test)]
@@ -1300,6 +1385,143 @@ mod tests {
                 .map(|name| name.as_str().to_string())
                 .collect()
         }
+    }
+
+    #[test]
+    fn queued_catalog_receipts_adopt_each_read_once() {
+        let mut fixture = Fixture::new();
+        let operation = fixture.read(1);
+        for name in ["accepted", "duplicate"] {
+            fixture.app.world_mut().write_message(Received {
+                operation,
+                supported: true,
+                result: Ok(vec![ProviderSession {
+                    kind: "native:test".into(),
+                    sid: "id".into(),
+                    name: name.into(),
+                    ..Default::default()
+                }]),
+            });
+        }
+        fixture.app.update();
+        assert_eq!(fixture.names(), ["accepted"]);
+    }
+
+    #[test]
+    fn queued_imports_share_one_operation_and_keep_the_last_destination() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut fixture = Fixture::new();
+        fixture.app.add_plugins(crate::DomainPlugin);
+        let read = fixture.read(1);
+        fixture.receive(
+            read,
+            Ok(vec![ProviderSession {
+                kind: "native:test".into(),
+                sid: "id".into(),
+                name: "Imported".into(),
+                cwd: cwd.path().to_string_lossy().into_owned(),
+                ..Default::default()
+            }]),
+        );
+        let entry = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Entry>>()
+            .single(fixture.app.world())
+            .unwrap();
+        let mut last = None;
+        for _ in 0..2 {
+            let stack = fixture.app.world_mut().spawn_empty().id();
+            let origin = fixture.app.world_mut().spawn(ChildOf(stack)).id();
+            let destination = Destination {
+                origin,
+                stack,
+                pane: None,
+                space: None,
+                window: None,
+                open: OpenTarget::InNewStack,
+            };
+            fixture.app.world_mut().write_message(ImportRequested {
+                entry,
+                agent: AgentId("test".into()),
+                destination,
+            });
+            last = Some(destination);
+        }
+        fixture.app.update();
+        let operations = fixture
+            .app
+            .world_mut()
+            .query_filtered::<&Destination, With<Import>>()
+            .iter(fixture.app.world())
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(operations, [last.unwrap()]);
+        let sessions = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Session>>()
+            .iter(fixture.app.world())
+            .count();
+        assert_eq!(sessions, 1);
+    }
+
+    #[test]
+    fn queued_archive_receipts_keep_the_newest_observation_across_sources() {
+        let mut fixture = Fixture::new();
+        let read = fixture.read(1);
+        fixture.receive(
+            read,
+            Ok(vec![ProviderSession {
+                kind: "native:test".into(),
+                sid: "id".into(),
+                name: "Imported".into(),
+                ..Default::default()
+            }]),
+        );
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Source,
+                Origin::Acp,
+                AgentId("test".into()),
+                Generation(1),
+                Capability::Supported,
+            ))
+            .id();
+        for (source, state) in [
+            (fixture.source, ArchiveState::Active(200)),
+            (other, ArchiveState::Archived(100)),
+        ] {
+            let operation = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    ArchiveRead { generation: 1 },
+                    OperationState::Running,
+                    ChildOf(source),
+                ))
+                .id();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(source)
+                .insert(EntityTarget::<ArchiveRead>::new(operation));
+            fixture.app.world_mut().write_message(ArchivesReceived {
+                operation,
+                result: Ok(Some(HashMap::from([("id".into(), state)]))),
+            });
+        }
+        fixture.app.update();
+        let archives = fixture
+            .app
+            .world_mut()
+            .query_filtered::<(&ArchiveObservedAt, Option<&ArchivedAt>), With<Entry>>()
+            .iter(fixture.app.world())
+            .map(|(at, archived)| (at.0, archived.map(|at| at.0)))
+            .collect::<Vec<_>>();
+        assert_eq!(archives, [(200, None)]);
     }
 
     #[test]
