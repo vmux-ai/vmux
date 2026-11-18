@@ -209,7 +209,7 @@ mod page_routing_tests {
     fn setup_and_connected_conversations_preserve_the_same_document_and_dom() {
         let setup = super::AgentOnboardingPage::page();
         let session = super::ChatPage::page();
-        assert!(setup.preserves_dom_for(&session));
-        assert!(session.preserves_dom_for(&setup));
+        assert!(setup.preserves_dom_for(session));
+        assert!(session.preserves_dom_for(setup));
     }
 }
