@@ -10801,7 +10801,6 @@ dependencies = [
 name = "vmux_feature"
 version = "0.0.35"
 dependencies = [
- "semver",
  "async-io",
  "bevy",
  "bevy_app",
@@ -10815,10 +10814,12 @@ dependencies = [
  "reqwest",
  "rkyv",
  "ron 0.12.1",
+ "semver",
  "serde",
  "serde_json",
  "serde_with",
  "sha2",
+ "url",
  "uuid",
  "vmux_api",
  "vmux_ecs",

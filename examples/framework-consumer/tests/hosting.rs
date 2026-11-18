@@ -109,6 +109,9 @@ fn packages_refuse_incompatible_hosts_privileged_urls_and_native_payloads() {
         (WEB.replace("\"PageReady\"", "\"DeleteSecretRequest\""), "host does not provide page event"),
         (WEB.replace("version: \"1.0.0\", targets:", "version: \"1.0.0\", provides: [\"native.count\"], targets:"), "linked feature plugins"),
         (WEB.replace("pages: [", "commands: [(id: \"native.delete\", label: \"Delete\", group: \"Native\")], pages: ["), "linked feature plugins"),
+        (WEB.replace("pages: [", "root: true, pages: ["), "linked feature plugins"),
+        (WEB.replace("pages: [", "flags: [(key: \"remote.live\", type: Boolean, class: Release, default: Boolean(true), owner: \"example\")], pages: ["), "linked feature plugins"),
+        (WEB.replace("pages: [", "auth_providers: [(id: \"external\", label: \"External\")], pages: ["), "linked feature plugins"),
     ] {
         let mut consumer = Consumer::new(&source, Contract::new("1111111111111111111111111111111111111111"), false);
         let error = consumer.finish().unwrap_err();

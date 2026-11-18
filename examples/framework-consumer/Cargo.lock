@@ -2973,7 +2973,6 @@ dependencies = [
  "ron",
  "serde",
  "serde_json",
- "url",
  "uuid",
  "vmux_api",
  "vmux_macro",
@@ -2998,16 +2997,17 @@ dependencies = [
 name = "vmux_feature"
 version = "0.0.35"
 dependencies = [
- "semver",
  "bevy_app",
  "bevy_ecs",
  "chrono",
  "inventory",
  "ron",
+ "semver",
  "serde",
  "serde_json",
  "serde_with",
  "sha2",
+ "url",
  "vmux_api",
  "vmux_ecs",
 ]
