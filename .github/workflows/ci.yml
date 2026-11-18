@@ -560,7 +560,7 @@ jobs:
           test "$PLAN" = success
           test "$PREPARE" = success
           case "$SUITE" in
-            test-rust|test-sdk-ecs|test-sdk-project|test-sdk-extension|test-sdk-flex|test-sdk-layout|test-sdk-lsp|test-sdk-framework|test-sdk-host|test-desktop|test-features|test-ecs) ;;
+            test-rust|test-framework|test-desktop|test-features|test-ecs) ;;
             *) echo "::error::Unknown test suite: $SUITE"; exit 1 ;;
           esac
       - name: Reuse verified test result
@@ -608,14 +608,14 @@ jobs:
       - name: Records
         if: matrix.reuse == '' && matrix.key == 'test-rust' && needs.changes.outputs.records == 'true'
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records
-      - name: SDK
-        if: matrix.reuse == '' && startsWith(matrix.key, 'test-sdk-')
+      - name: Framework
+        if: matrix.reuse == '' && matrix.key == 'test-framework'
         run: vmux-ci sdk-test ${{ matrix.key }}
-      - name: Git SDK
-        if: matrix.reuse == '' && matrix.key == 'test-sdk-framework' && github.event_name != 'pull_request'
+      - name: Git framework consumer
+        if: matrix.reuse == '' && matrix.key == 'test-framework' && github.event_name != 'pull_request'
         run: vmux dx test sdk --git
-      - name: Git host SDK
-        if: matrix.reuse == '' && matrix.key == 'test-sdk-host' && github.event_name != 'pull_request'
+      - name: Git host consumer
+        if: matrix.reuse == '' && matrix.key == 'test-framework' && github.event_name != 'pull_request'
         run: vmux dx test sdk --host --git
       - name: Desktop
         if: matrix.reuse == '' && matrix.key == 'test-desktop'

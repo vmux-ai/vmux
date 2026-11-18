@@ -289,16 +289,15 @@ impl Checks {
                 "website-release".into(),
             ),
         ];
-        for (key, name) in super::sdk::Sdk::PROFILES {
-            profiles.push(Profile::new(
-                settings,
-                &inputs,
-                key,
-                name,
-                "VMUX_SDK_REQUIRED",
-                key.to_string(),
-            ));
-        }
+        let (key, name) = super::sdk::Sdk::PROFILE;
+        profiles.push(Profile::new(
+            settings,
+            &inputs,
+            key,
+            name,
+            "VMUX_SDK_REQUIRED",
+            key.to_string(),
+        ));
         for profile in &profiles {
             if profile.paths.len() > 4096
                 || profile.scope.len() > 65536
@@ -337,9 +336,7 @@ impl Profile {
         }
         let matrix = match key {
             "test-rust" => Some(("test", "test", "true")),
-            key if key.starts_with("test-sdk-") => {
-                Some((key.strip_prefix("test-").unwrap(), "sdk-path", "true"))
-            }
+            "test-framework" => Some(("framework", "sdk-path", "true")),
             "test-desktop" => Some(("desktop", "test", "true")),
             "test-features" => Some(("headless", "headless", "true")),
             "test-ecs" => Some(("ecs", "lint", "false")),
@@ -363,7 +360,7 @@ impl Profile {
         inputs: &BTreeMap<String, Vec<String>>,
         key: &str,
     ) -> Vec<String> {
-        let key = if key.starts_with("test-sdk-") {
+        let key = if key == "test-framework" {
             "test-sdk"
         } else {
             key
@@ -908,18 +905,16 @@ impl Record {
         };
         number.parse::<u64>().is_ok_and(|value| value > 0)
             && Checks::sha(base)
-            && (matches!(
+            && matches!(
                 key,
                 "lint"
                     | "test-rust"
-                    | "test-sdk"
+                    | "test-framework"
                     | "test-desktop"
                     | "test-features"
                     | "test-ecs"
                     | "website"
-            ) || super::sdk::Sdk::PROFILES
-                .iter()
-                .any(|(suite, _)| *suite == key))
+            )
             && digest.len() == 64
             && digest
                 .bytes()
@@ -1109,7 +1104,7 @@ impl Verification {
         let matrix: Matrix =
             serde_json::from_str(outputs["tests"].as_str().ok_or("Missing CI matrix")?)
                 .map_err(|error| error.to_string())?;
-        if matrix.include.len() > 4 + super::sdk::Sdk::PROFILES.len()
+        if matrix.include.len() > 5
             || outputs["test_count"].as_str() != Some(&matrix.include.len().to_string())
         {
             return Err("Invalid CI test matrix count".into());
@@ -1125,14 +1120,9 @@ impl Verification {
             ("test-desktop", code && desktop),
             ("test-features", code && (headless || legacy)),
             ("test-ecs", code),
+            (super::sdk::Sdk::PROFILE.0, code && sdk),
         ] {
             if selected.contains(key) != required {
-                return Err(format!("CI matrix differs from required scope: {key}"));
-            }
-            selected.remove(key);
-        }
-        for (key, _) in super::sdk::Sdk::PROFILES {
-            if selected.contains(key) != (code && sdk) {
                 return Err(format!("CI matrix differs from required scope: {key}"));
             }
             selected.remove(key);
@@ -1532,14 +1522,14 @@ mod tests {
     }
 
     #[test]
-    fn sdk_selection_requires_every_public_feature_and_consumer_group() {
+    fn framework_selection_requires_one_complete_validation_job() {
         let mut runs = Runs::new();
         runs.fixture.environment.set("VMUX_SDK_REQUIRED", "true");
         let outputs = runs.plan();
         let matrix: Value = serde_json::from_str(&outputs["tests"]).unwrap();
         let mut sdk = BTreeSet::new();
         for row in matrix["include"].as_array().unwrap() {
-            if row["key"].as_str().unwrap().starts_with("test-sdk-") {
+            if row["key"] == "test-framework" {
                 sdk.insert(row["key"].as_str().unwrap().to_owned());
                 runs.fixture
                     .environment
@@ -1547,22 +1537,7 @@ mod tests {
                 runs.fixture.run("checks-record", &[]).unwrap();
             }
         }
-        assert_eq!(
-            sdk,
-            BTreeSet::from(
-                [
-                    "test-sdk-ecs",
-                    "test-sdk-project",
-                    "test-sdk-extension",
-                    "test-sdk-flex",
-                    "test-sdk-layout",
-                    "test-sdk-lsp",
-                    "test-sdk-framework",
-                    "test-sdk-host"
-                ]
-                .map(str::to_string)
-            )
-        );
+        assert_eq!(sdk, BTreeSet::from(["test-framework".to_string()]));
         let mut selected = json!({"code": "true", "rust": "true", "contracts": "true", "desktop": "false", "headless": "false", "legacy_desktop": "false", "website": "false", "macos": "false", "ios": "false", "macos_tooling": "false", "compiler_lints": "true", "reuse_lint": "", "reuse_website": "", "tests": matrix.to_string(), "test_count": matrix["include"].as_array().unwrap().len().to_string()});
         let mut results = json!({"plan": {"result": "success"}, "changes": {"result": "success", "outputs": selected}, "lint": {"result": "success"}, "lint-rust": {"result": "success"}, "lint-ecs": {"result": "success"}, "tests": {"result": "success"}, "website": {"result": "skipped"}, "dx-macos": {"result": "skipped"}, "build-mac": {"result": "skipped"}, "ios-build": {"result": "skipped"}});
         runs.fixture
@@ -1572,12 +1547,29 @@ mod tests {
             .environment
             .set("VMUX_CI_RESULTS", results.to_string());
         runs.fixture.run("checks-gate", &[]).unwrap();
-        for missing in ["test-sdk-host", "test-sdk-lsp"] {
+        for invalid in ["", "test-sdk-host", "test-sdk-lsp", "test-framework"] {
             let mut incomplete = matrix.clone();
             incomplete["include"]
                 .as_array_mut()
                 .unwrap()
-                .retain(|row| row["key"] != missing);
+                .retain(|row| row["key"] != "test-framework");
+            if !invalid.is_empty() {
+                let mut row = matrix["include"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["key"] == "test-framework")
+                    .unwrap()
+                    .clone();
+                row["key"] = json!(invalid);
+                incomplete["include"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(row.clone());
+                if invalid == "test-framework" {
+                    incomplete["include"].as_array_mut().unwrap().push(row);
+                }
+            }
             selected["tests"] = json!(incomplete.to_string());
             selected["test_count"] =
                 json!(incomplete["include"].as_array().unwrap().len().to_string());
@@ -1585,12 +1577,7 @@ mod tests {
             runs.fixture
                 .environment
                 .set("VMUX_CI_RESULTS", results.to_string());
-            assert!(
-                runs.fixture
-                    .run("checks-gate", &[])
-                    .unwrap_err()
-                    .contains(missing)
-            );
+            assert!(runs.fixture.run("checks-gate", &[]).is_err());
         }
     }
 }

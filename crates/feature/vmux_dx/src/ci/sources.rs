@@ -638,8 +638,10 @@ impl Inputs {
             return Err("No workspace packages to cache".into());
         }
         for (partition, consumer) in [
-            ("sdk-framework", "framework-consumer"),
-            ("sdk-host", "host-consumer"),
+            ("framework", "framework-consumer"),
+            ("framework", "host-consumer"),
+            ("framework", "framework-git-consumer"),
+            ("framework", "host-git-consumer"),
         ] {
             if self.partition == partition {
                 paths.insert(format!("{target}/{consumer}/**"));
