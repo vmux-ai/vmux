@@ -193,10 +193,10 @@ impl Journal<'_, '_> {
         request: &Request,
         entity: Option<Entity>,
     ) -> Result<(Revision, Revision), Rejection> {
-        if let Some(operation) = request.lease {
-            if self.ids.get(operation) != Ok(&request.session) || !self.imports.active(operation) {
-                return Err(Rejection::Canceled);
-            }
+        if let Some(operation) = request.lease
+            && (self.ids.get(operation) != Ok(&request.session) || !self.imports.active(operation))
+        {
+            return Err(Rejection::Canceled);
         }
         let current = entity
             .and_then(|entity| {
