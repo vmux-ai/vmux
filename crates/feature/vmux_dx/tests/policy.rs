@@ -1108,6 +1108,117 @@ fn reviewed_app_extensions_reference_only_their_actual_framework_composition() {
 }
 
 #[test]
+fn stateless_framework_bootstraps_require_real_interfaces_and_registration() {
+    for (binding, fields, body, expected) in [
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "app.add_systems(Update, read);",
+            true,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "if !app.is_plugin_added::<OtherPlugin>() { app.add_systems(Update, read); }",
+            true,
+        ),
+        (
+            "use bevy_app::{App, Plugin}; use bevy_cef::prelude::UiEventPlugin;",
+            ";",
+            "app.add_plugins(UiEventPlugin::default()).add_systems(Update, read);",
+            true,
+        ),
+        (
+            "use bevy_app::{App, Plugin}; struct UiEventPlugin;",
+            ";",
+            "app.add_plugins(UiEventPlugin::default()).add_systems(Update, read);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "app.insert_resource(State).add_systems(Update, read);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "{ state: State }",
+            "app.add_systems(Update, read);",
+            false,
+        ),
+        (
+            "trait Plugin {} struct App;",
+            ";",
+            "app.add_systems(Update, read);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "app.world_mut().insert_resource(State);",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "loop { app.add_systems(Update, read); }",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "app.add_systems(Update, || read());",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "app.add_plugins(hidden_workflow()).add_systems(Update, read);",
+            false,
+        ),
+        ("use bevy_app::{App, Plugin};", ";", "", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "{binding} use bevy_ecs::prelude::*; #[derive(Component)] struct State; fn read(state: Query<&State>) {{}} struct OtherPlugin; struct RootPlugin {fields} impl Plugin for RootPlugin {{ fn build(&self, app: &mut App) {{ {body} }} }}"
+        ));
+        for key in ["struct:RootPlugin", "impl:Plugin for RootPlugin"] {
+            let key = inventory.key(key);
+            assert_eq!(
+                inventory.canonical(
+                    &inventory.entries[&key],
+                    &Policy::default(),
+                    &mut BTreeSet::new()
+                ),
+                expected,
+                "{binding} {fields} {body} {key}"
+            );
+        }
+    }
+}
+
+#[test]
+fn stateless_framework_bootstraps_do_not_approve_other_implementations_or_test_only_builds() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App, Plugin}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; fn read(state: Query<&State>) {} struct RootPlugin; impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } } impl RootPlugin { fn workflow(&self) { loop {} } }",
+    );
+    let key = inventory.key("impl:RootPlugin");
+    assert!(!inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App, Plugin}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; fn read(state: Query<&State>) {} struct RootPlugin; #[cfg(test)] impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    let key = inventory.key("struct:RootPlugin");
+    assert!(!inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
 fn generic_plugin_implementations_match_concrete_repeated_nested_and_const_patterns() {
     for (patterns, installed, expected) in [
         ("MarkerA,T", "MarkerB,State", false),
@@ -1170,6 +1281,29 @@ fn generic_jobs_keep_shared_lifecycle_component_boundaries() {
             "{parameter}"
         );
         assert!(!inventory.used(&inventory.entries[&inventory.key("struct:Job")]));
+    }
+}
+
+#[test]
+fn stateless_framework_bootstraps_keep_fixture_and_enum_edges_without_manual_records() {
+    for (installed, expected) in [("RootPlugin", true), ("OtherPlugin", false)] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App, Plugin}}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; #[derive(SystemSet)] enum Flow {{ Read }} fn read(state: Query<&State>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read.in_set(Flow::Read)); }} }} struct OtherPlugin; #[cfg(test)] mod tests {{ use super::*; struct Fixture; impl Fixture {{ fn new() {{ let mut app = App::new(); app.add_plugins({installed}); }} }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "struct:Fixture");
+        boundary.interface = "headless production-plugin fixture".into();
+        boundary.input = "external: one isolated App".into();
+        boundary.output = format!("ECS: {}", inventory.key("struct:State"));
+        assert_eq!(boundary.references(&inventory), expected);
+        let key = inventory.key("enum:Flow");
+        let purpose = EnumPurpose {
+            key: key.clone(),
+            fingerprint: inventory.entries[&key].fingerprint.clone(),
+            role: EnumRole::Boundary,
+            owner: inventory.key("struct:RootPlugin"),
+            reason: "real registered Bevy schedule ordering".into(),
+        };
+        assert!(purpose.valid(&inventory.entries[&key], &inventory, &Policy::default()));
     }
 }
 
@@ -5024,7 +5158,10 @@ impl EnumPurpose {
             EnumRole::Boundary => {
                 (!(shape.component || shape.signal || inventory.enum_job(entry))
                     || shape.fixed_format)
-                    && policy.boundaries.iter().any(|boundary| {
+                    && (inventory.entries.get(&self.owner).is_some_and(|owner| {
+                        inventory.framework_bootstrap(owner)
+                            && inventory.owner_references(owner, entry)
+                    }) || policy.boundaries.iter().any(|boundary| {
                         boundary.key == self.owner
                             && boundary.valid()
                             && inventory.matches(&boundary.key, &boundary.fingerprint)
@@ -5032,7 +5169,7 @@ impl EnumPurpose {
                             && inventory.entries.get(&boundary.key).is_some_and(|owner| {
                                 owner.key == entry.key || inventory.owner_references(owner, entry)
                             })
-                    })
+                    }))
             }
             EnumRole::Phase | EnumRole::Scalar | EnumRole::Projection => {
                 if shape.signal || self.role != EnumRole::Projection && shape.payloads > 0 {
@@ -5158,6 +5295,7 @@ struct BodyShape {
     lines: usize,
     production: bool,
     composition: bool,
+    bootstrap_defaults: Option<BTreeSet<String>>,
 }
 
 impl BodyShape {
@@ -5337,10 +5475,16 @@ impl BodyShape {
                 Some(pattern.ident.to_string())
             })
         });
+        let composition = argument.is_some_and(|argument| Self::registration(block, &argument));
+        let mut calls = Footprint::default();
+        if composition {
+            calls.visit_block(block);
+        }
         Self {
             key,
             name,
-            composition: argument.is_some_and(|argument| Self::registration(block, &argument)),
+            composition,
+            bootstrap_defaults: (composition && !calls.unsupported).then_some(calls.defaults),
             fingerprint: Declaration::fingerprint(&tokens.to_string()),
             lines: footprint.lines.len(),
             production: !Usage::test_only(attributes)
@@ -5353,6 +5497,8 @@ impl BodyShape {
 
 #[derive(Default)]
 struct Footprint {
+    defaults: BTreeSet<String>,
+    unsupported: bool,
     lines: BTreeSet<usize>,
     test_spans: Vec<((usize, usize), (usize, usize))>,
     closure: bool,
@@ -5399,6 +5545,53 @@ impl Footprint {
 }
 
 impl<'ast> Visit<'ast> for Footprint {
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(path) = call.func.as_ref()
+            && path.qself.is_none()
+            && path.path.segments.len() > 1
+            && path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "default")
+            && call.args.is_empty()
+        {
+            let parts = path
+                .path
+                .segments
+                .iter()
+                .take(path.path.segments.len() - 1)
+                .map(|segment| segment.ident.to_string())
+                .collect::<Vec<_>>();
+            self.defaults.insert(parts.join("::"));
+        } else {
+            self.unsupported = true;
+        }
+        visit::visit_expr_call(self, call);
+    }
+
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if !matches!(
+            call.method.to_string().as_str(),
+            "add_plugins"
+                | "add_systems"
+                | "add_observer"
+                | "add_message"
+                | "add_event"
+                | "register_type"
+                | "configure_sets"
+                | "register_required_components"
+                | "is_plugin_added"
+                | "chain"
+                | "after"
+                | "before"
+                | "in_set"
+                | "run_if"
+        ) {
+            self.unsupported = true;
+        }
+        visit::visit_expr_method_call(self, call);
+    }
     fn visit_expr_closure(&mut self, value: &'ast syn::ExprClosure) {
         self.closure = true;
         visit::visit_expr_closure(self, value);
@@ -5585,9 +5778,10 @@ impl Boundary {
                         current = &value.owner;
                         continue;
                     }
-                    if !parent.ecs
-                        || !inventory.used(parent)
-                        || !inventory.canonical(parent, policy, &mut BTreeSet::new())
+                    if !inventory.framework_bootstrap(parent)
+                        && (!parent.ecs
+                            || !inventory.used(parent)
+                            || !inventory.canonical(parent, policy, &mut BTreeSet::new()))
                     {
                         return false;
                     }
@@ -5624,7 +5818,11 @@ impl Boundary {
                                 && inventory.canonical(owner, policy, &mut BTreeSet::new())
                         })
                 });
-                if !(entry.contract || entry.ecs && inventory.used(entry) || owned_value) {
+                if !(entry.contract
+                    || entry.ecs && inventory.used(entry)
+                    || owned_value
+                    || inventory.framework_bootstrap(entry))
+                {
                     return false;
                 }
                 if canonical_owner.as_deref() != Some(entry.key.as_str())
@@ -5700,6 +5898,18 @@ impl Boundary {
     ) -> bool {
         if adapter.production {
             return false;
+        }
+        if let Some(key) = endpoint.strip_prefix("ECS: ")
+            && let Some(entry) = inventory.entries.get(key)
+        {
+            for parent in inventory.entries.values() {
+                if inventory.framework_bootstrap(parent)
+                    && inventory.owner_references(adapter, parent)
+                    && inventory.boundary_references(parent, entry, &mut BTreeSet::new())
+                {
+                    return true;
+                }
+            }
         }
         for boundary in &policy.boundaries {
             if boundary.key == self.key
@@ -6302,6 +6512,9 @@ impl Inventory {
         if !visiting.insert(entry.key.clone()) {
             return false;
         }
+        if self.framework_bootstrap(entry) {
+            return true;
+        }
         if policy.boundaries.iter().any(|boundary| {
             boundary.key == entry.key
                 && boundary.fingerprint == entry.fingerprint
@@ -6445,6 +6658,111 @@ impl Inventory {
                 self.resolve(&component.namespace, path, &mut BTreeSet::new())
                     .is_some_and(|child| child.production && child.renderer)
             }) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn framework_bootstrap(&self, entry: &Declaration) -> bool {
+        if entry.local || entry.dynamic || entry.opaque || entry.projection {
+            return false;
+        }
+        let owner =
+            match entry.kind {
+                Kind::Struct => entry,
+                Kind::Impl => {
+                    let Some(owner) = entry.owner.as_ref().and_then(|owner| {
+                        self.resolve(&entry.namespace, owner, &mut BTreeSet::new())
+                    }) else {
+                        return false;
+                    };
+                    owner
+                }
+                _ => return false,
+            };
+        if !matches!(owner.kind, Kind::Struct)
+            || owner.has_fields
+            || !owner.production
+            || owner.local
+            || owner.dynamic
+            || owner.opaque
+            || owner.projection
+        {
+            return false;
+        }
+        for implementation in self.implementations(owner) {
+            if matches!(entry.kind, Kind::Impl) && implementation.key != entry.key {
+                continue;
+            }
+            let interface = implementation.plugin_path.as_ref().and_then(|path| {
+                self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+            });
+            if !implementation.plugin
+                || !implementation.production
+                || interface.as_deref() != Some("Plugin")
+            {
+                continue;
+            }
+            if implementation.bodies.is_empty()
+                || implementation.bodies.iter().any(|body| {
+                    !body.production
+                        || body.bootstrap_defaults.as_ref().is_none_or(|defaults| {
+                            defaults.iter().any(|path| {
+                                let root = self
+                                    .resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                                    .map(|declaration| declaration.namespace.clone())
+                                    .or_else(|| {
+                                        self.external_path(
+                                            &implementation.namespace,
+                                            path,
+                                            &mut BTreeSet::new(),
+                                        )
+                                    });
+                                !root.is_some_and(|root| {
+                                    matches!(
+                                        root.split("::").next(),
+                                        Some(
+                                            "bevy"
+                                                | "bevy_app"
+                                                | "bevy_ecs"
+                                                | "bevy_cef"
+                                                | "bevy_cef_core"
+                                        )
+                                    )
+                                })
+                            })
+                        })
+                })
+            {
+                continue;
+            }
+            if implementation.registered_systems.is_empty() {
+                continue;
+            }
+            let registered = implementation
+                .registered_systems
+                .iter()
+                .all(|(app, callback)| {
+                    if self
+                        .framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                        .as_deref()
+                        != Some("App")
+                    {
+                        return false;
+                    }
+                    self.function_reference(
+                        &implementation.namespace,
+                        callback,
+                        &mut BTreeSet::new(),
+                    )
+                    .is_some_and(|function| {
+                        function.production
+                            && function.private
+                            && self.registered_keys.contains(&function.key)
+                    })
+                });
+            if registered {
                 return true;
             }
         }
