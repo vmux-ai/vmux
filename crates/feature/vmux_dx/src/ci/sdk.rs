@@ -24,27 +24,36 @@ impl bevy_app::Plugin for CiSdkPlugin {
 pub(super) struct Sdk {
     suite: String,
     commands: Vec<Capture>,
+    graphs: Vec<(usize, bool)>,
     next: usize,
 }
 
 impl Sdk {
-    pub(super) const PROFILES: &'static [(&'static str, &'static str)] = &[
-        ("test-sdk-ecs", "Test SDK ECS"),
-        ("test-sdk-project", "Test SDK Project"),
-        ("test-sdk-extension", "Test SDK Extension"),
-        ("test-sdk-flex", "Test SDK Flex"),
-        ("test-sdk-layout", "Test SDK Layout"),
-        ("test-sdk-lsp", "Test SDK LSP"),
-        ("test-sdk-framework", "Test SDK Framework"),
-        ("test-sdk-host", "Test SDK Host"),
+    pub(super) const PROFILE: (&'static str, &'static str) = ("test-framework", "Test Framework");
+
+    const SUITES: &'static [&'static str] = &[
+        "test-framework",
+        "test-sdk-ecs",
+        "test-sdk-project",
+        "test-sdk-extension",
+        "test-sdk-flex",
+        "test-sdk-layout",
+        "test-sdk-lsp",
+        "test-sdk-framework",
+        "test-sdk-host",
     ];
 
     fn validate(&self, tree: &str) -> crate::Result<()> {
-        match self.suite.as_str() {
-            "test-sdk-framework" => Graph::check(tree),
-            "test-sdk-host" => Graph::host(tree),
-            _ => Ok(()),
+        for (position, host) in &self.graphs {
+            if *position != self.next {
+                continue;
+            }
+            if *host {
+                return Graph::host(tree);
+            }
+            return Graph::check(tree);
         }
+        Ok(())
     }
 }
 
@@ -74,13 +83,14 @@ fn start(requests: StartRequests<'_, '_>, mut io: Io) {
             io.fail(entity, "SDK suite must be UTF-8");
             continue;
         };
-        if !Sdk::PROFILES.iter().any(|(key, _)| *key == suite) {
+        if !Sdk::SUITES.contains(&suite) {
             io.fail(entity, "Unknown SDK suite");
             continue;
         }
         io.commands.entity(entity).insert(Sdk {
             suite: suite.into(),
             commands: Vec::new(),
+            graphs: Vec::new(),
             next: 0,
         });
     }
@@ -88,127 +98,139 @@ fn start(requests: StartRequests<'_, '_>, mut io: Io) {
 
 fn configure_core(mut requests: ConfigureRequests<'_, '_>, mut io: Io) {
     for (entity, context, settings, mut sdk) in &mut requests {
-        let variants: &[(&str, &str, bool)] = match sdk.suite.as_str() {
-            "test-sdk-ecs" => &[
-                ("vmux_ecs", "", true),
-                ("vmux_ecs", "contracts", true),
-                ("vmux_ecs", "store", true),
-                ("vmux_ecs", "jobs", true),
-            ],
-            "test-sdk-project" => &[("vmux_project", "contracts,filesystem", true)],
-            "test-sdk-extension" => &[("vmux_extension", "filesystem", true)],
-            "test-sdk-flex" => &[("vmux_flex", "", false), ("vmux_flex", "window", true)],
-            "test-sdk-layout" => &[
-                ("vmux_layout", "", true),
-                ("vmux_layout", "contracts,geometry", true),
-                ("vmux_layout", "store", true),
-            ],
-            "test-sdk-lsp" => &[("vmux_lsp", "", true)],
-            _ => continue,
-        };
+        if matches!(sdk.suite.as_str(), "test-sdk-framework" | "test-sdk-host") {
+            continue;
+        }
         let cargo = settings
             .0
             .get("CARGO_BIN")
             .and_then(|value| value.to_str())
             .unwrap_or("cargo");
-        for (package, features, lib) in variants {
+        for (suite, package, features, lib) in [
+            ("test-sdk-ecs", "vmux_ecs", "", true),
+            ("test-sdk-ecs", "vmux_ecs", "contracts", true),
+            ("test-sdk-ecs", "vmux_ecs", "store", true),
+            ("test-sdk-ecs", "vmux_ecs", "jobs", true),
+            (
+                "test-sdk-project",
+                "vmux_project",
+                "contracts,filesystem",
+                true,
+            ),
+            ("test-sdk-extension", "vmux_extension", "filesystem", true),
+            ("test-sdk-flex", "vmux_flex", "", false),
+            ("test-sdk-flex", "vmux_flex", "window", true),
+            ("test-sdk-layout", "vmux_layout", "", true),
+            ("test-sdk-layout", "vmux_layout", "contracts,geometry", true),
+            ("test-sdk-layout", "vmux_layout", "store", true),
+            ("test-sdk-lsp", "vmux_lsp", "", true),
+        ] {
+            if sdk.suite != "test-framework" && sdk.suite != suite {
+                continue;
+            }
             let mut arguments = vec!["test", "--locked", "-p", package, "--no-default-features"];
             if !features.is_empty() {
                 arguments.extend(["--features", features]);
             }
-            if *lib {
+            if lib {
                 arguments.push("--lib");
             }
             sdk.commands
                 .push(context.process(&settings.0, cargo, &arguments));
         }
-        io.commands.entity(entity).insert(Configured);
+        if sdk.suite != "test-framework" {
+            io.commands.entity(entity).insert(Configured);
+        }
     }
 }
 
 fn configure_consumer(mut requests: ConfigureRequests<'_, '_>, mut io: Io) {
     for (entity, context, settings, mut sdk) in &mut requests {
-        let name = match sdk.suite.as_str() {
-            "test-sdk-host" => "host-consumer",
-            "test-sdk-framework" => "framework-consumer",
-            _ => continue,
-        };
-        let host = sdk.suite == "test-sdk-host";
-        let manifest = format!("examples/{name}/Cargo.toml");
-        let target = match settings.0.get("CARGO_TARGET_DIR") {
-            Some(value) => std::path::PathBuf::from(value),
-            None => context.root.join("target"),
-        };
-        let target = target.join(name);
-        let Some(target) = target.to_str() else {
-            io.fail(entity, "SDK target must be UTF-8");
-            continue;
-        };
-        let cargo = settings
-            .0
-            .get("CARGO_BIN")
-            .and_then(|value| value.to_str())
-            .unwrap_or("cargo");
-        let variants: &[(&str, &str)] = if host {
-            &[
-                ("Vmux", "ai.vmux"),
-                ("Atlas", "org.example.atlas"),
-                ("Atlas", "net.example.atlas"),
-            ]
-        } else {
-            &[("", "")]
-        };
-        for (name, namespace) in variants {
-            let mut environment = settings.0.clone();
-            if host {
-                for key in settings.0.names() {
-                    let Some(key) = key.to_str() else {
-                        continue;
-                    };
-                    if key.starts_with("VMUX_HOST_") {
+        for (suite, name, host) in [
+            ("test-sdk-framework", "framework-consumer", false),
+            ("test-sdk-host", "host-consumer", true),
+        ] {
+            if sdk.suite != "test-framework" && sdk.suite != suite {
+                continue;
+            }
+            let manifest = format!("examples/{name}/Cargo.toml");
+            let target = match settings.0.get("CARGO_TARGET_DIR") {
+                Some(value) => std::path::PathBuf::from(value),
+                None => context.root.join("target"),
+            };
+            let target = target.join(name);
+            let Some(target) = target.to_str() else {
+                io.fail(entity, "SDK target must be UTF-8");
+                break;
+            };
+            let cargo = settings
+                .0
+                .get("CARGO_BIN")
+                .and_then(|value| value.to_str())
+                .unwrap_or("cargo");
+            let variants: &[(&str, &str)] = if host {
+                &[
+                    ("Vmux", "ai.vmux"),
+                    ("Atlas", "org.example.atlas"),
+                    ("Atlas", "net.example.atlas"),
+                ]
+            } else {
+                &[("", "")]
+            };
+            for (name, namespace) in variants {
+                let mut environment = settings.0.clone();
+                if host {
+                    for key in settings.0.names() {
+                        let Some(key) = key.to_str() else {
+                            continue;
+                        };
+                        if key.starts_with("VMUX_HOST_") {
+                            environment.remove(key);
+                        }
+                    }
+                    for key in ["VMUX_DATA_DIR", "VMUX_TEST"] {
                         environment.remove(key);
                     }
+                    for (key, value) in [
+                        ("VMUX_BUILD_PROFILE", "dev"),
+                        ("VMUX_PROFILE", "host-probe"),
+                        ("VMUX_HOST_NAME", name),
+                        ("VMUX_HOST_NAMESPACE", namespace),
+                        ("EXPECTED_NAMESPACE", namespace),
+                    ] {
+                        environment.set(key, value);
+                    }
                 }
-                for key in ["VMUX_DATA_DIR", "VMUX_TEST"] {
-                    environment.remove(key);
-                }
-                for (key, value) in [
-                    ("VMUX_BUILD_PROFILE", "dev"),
-                    ("VMUX_PROFILE", "host-probe"),
-                    ("VMUX_HOST_NAME", name),
-                    ("VMUX_HOST_NAMESPACE", namespace),
-                    ("EXPECTED_NAMESPACE", namespace),
-                ] {
-                    environment.set(key, value);
-                }
+                sdk.commands.push(context.process(
+                    &environment,
+                    cargo,
+                    &[
+                        "test",
+                        "--locked",
+                        "--manifest-path",
+                        &manifest,
+                        "--target-dir",
+                        target,
+                    ],
+                ));
             }
             sdk.commands.push(context.process(
-                &environment,
+                &settings.0,
                 cargo,
                 &[
-                    "test",
+                    "tree",
                     "--locked",
+                    "--prefix",
+                    "none",
+                    "--format",
+                    "{p}",
                     "--manifest-path",
                     &manifest,
-                    "--target-dir",
-                    target,
                 ],
             ));
+            let position = sdk.commands.len();
+            sdk.graphs.push((position, host));
         }
-        sdk.commands.push(context.process(
-            &settings.0,
-            cargo,
-            &[
-                "tree",
-                "--locked",
-                "--prefix",
-                "none",
-                "--format",
-                "{p}",
-                "--manifest-path",
-                &manifest,
-            ],
-        ));
         io.commands.entity(entity).insert(Configured);
     }
 }
@@ -233,12 +255,9 @@ fn advance(
                     continue;
                 }
             };
-            if sdk.next == sdk.commands.len() {
-                let result = sdk.validate(text);
-                if let Err(error) = result {
-                    io.fail(entity, error.to_string());
-                    continue;
-                }
+            if let Err(error) = sdk.validate(text) {
+                io.fail(entity, error.to_string());
+                continue;
             }
             let mut output = captured.0.stdout.clone();
             output.extend(&captured.0.stderr);
@@ -302,7 +321,7 @@ mod tests {
         fn new(tree: &str, failure: &str) -> Self {
             let mut fixture = Fixture::new();
             fixture.write("sdk-tree", tree);
-            fixture.write("bin/cargo", format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> cargo-calls\nprintf '%s|%s|%s|%s\\n' \"${{VMUX_HOST_NAME-}}\" \"${{VMUX_HOST_NAMESPACE-}}\" \"${{VMUX_DATA_DIR-unset}}\" \"${{VMUX_TEST-unset}}\" >> environments\n{failure}\nif [ \"$1\" = tree ]; then cat sdk-tree; fi\n"));
+            fixture.write("bin/cargo", format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> cargo-calls\nprintf '%s|%s|%s|%s\\n' \"${{VMUX_HOST_NAME-}}\" \"${{VMUX_HOST_NAMESPACE-}}\" \"${{VMUX_DATA_DIR-unset}}\" \"${{VMUX_TEST-unset}}\" >> environments\n{failure}\nif [ \"$1\" = tree ]; then case \"$*\" in *examples/host-consumer/Cargo.toml*) if [ -f sdk-host-tree ]; then cat sdk-host-tree; else cat sdk-tree; fi ;; *) cat sdk-tree ;; esac; fi\n"));
             std::fs::set_permissions(
                 fixture.root().join("bin/cargo"),
                 std::fs::Permissions::from_mode(0o755),
@@ -326,20 +345,21 @@ mod tests {
     }
 
     #[test]
-    fn sdk_groups_preserve_every_minimal_feature_test_and_stop_after_a_failed_command() {
-        let fixture = SdkFixture::new("", "");
-        for suite in [
-            "test-sdk-ecs",
-            "test-sdk-project",
-            "test-sdk-extension",
-            "test-sdk-flex",
-            "test-sdk-layout",
-            "test-sdk-lsp",
-        ] {
-            fixture.fixture.run("sdk-test", &[suite]).unwrap();
-        }
+    fn framework_preserves_minimal_features_consumers_and_stops_after_a_failed_command() {
+        let framework = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\nvmux_lsp v1\n";
+        let fixture = SdkFixture::new(framework, "");
+        fixture.fixture.write(
+            "sdk-host-tree",
+            "vmux_app v1\nvmux_profile v1\nbevy_app v1\nbevy_ecs v1\n",
+        );
+        fixture
+            .fixture
+            .run("sdk-test", &["test-framework"])
+            .unwrap();
+        let calls = fixture.calls();
+        assert_eq!(calls.len(), 18);
         assert_eq!(
-            fixture.calls(),
+            calls[..12],
             [
                 "test --locked -p vmux_ecs --no-default-features --lib",
                 "test --locked -p vmux_ecs --no-default-features --features contracts --lib",
@@ -355,19 +375,66 @@ mod tests {
                 "test --locked -p vmux_lsp --no-default-features --lib",
             ]
         );
+        let consumers: Vec<_> = calls[12..]
+            .iter()
+            .map(|call| {
+                call.split_whitespace()
+                    .take_while(|argument| *argument != "--target-dir")
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(
+            consumers,
+            [
+                "test --locked --manifest-path examples/framework-consumer/Cargo.toml",
+                "tree --locked --prefix none --format {p} --manifest-path examples/framework-consumer/Cargo.toml",
+                "test --locked --manifest-path examples/host-consumer/Cargo.toml",
+                "test --locked --manifest-path examples/host-consumer/Cargo.toml",
+                "test --locked --manifest-path examples/host-consumer/Cargo.toml",
+                "tree --locked --prefix none --format {p} --manifest-path examples/host-consumer/Cargo.toml",
+            ]
+        );
         let failed = SdkFixture::new(
             "",
             "case \"$*\" in *'--features contracts'*) echo 'assertion details'; echo 'compiler failed' >&2; exit 42 ;; esac",
         );
         let error = failed
             .fixture
-            .run("sdk-test", &["test-sdk-ecs"])
+            .run("sdk-test", &["test-framework"])
             .unwrap_err();
         assert!(error.contains("compiler failed"));
         assert!(error.contains("assertion details"));
         assert_eq!(failed.calls().len(), 2);
         assert!(failed.fixture.run("sdk-test", &["unknown"]).is_err());
         assert_eq!(failed.calls().len(), 2);
+    }
+
+    #[test]
+    fn framework_checks_each_consumer_graph_before_accepting_later_work() {
+        let framework = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\nvmux_lsp v1\n";
+        for (tree, host, count) in [
+            (
+                format!("{framework}bevy_cef v1\n"),
+                "vmux_app v1\nvmux_profile v1\n",
+                14,
+            ),
+            (
+                framework.into(),
+                "vmux_app v1\nvmux_profile v1\nvmux_ecs v1\n",
+                18,
+            ),
+        ] {
+            let fixture = SdkFixture::new(&tree, "");
+            fixture.fixture.write("sdk-host-tree", host);
+            assert!(
+                fixture
+                    .fixture
+                    .run("sdk-test", &["test-framework"])
+                    .is_err()
+            );
+            assert_eq!(fixture.calls().len(), count);
+        }
     }
 
     #[test]

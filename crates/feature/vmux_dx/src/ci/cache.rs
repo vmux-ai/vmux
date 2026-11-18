@@ -483,7 +483,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.cli();
         for (key, value) in [
-            ("VMUX_CACHE_PARTITION", "sdk-framework"),
+            ("VMUX_CACHE_PARTITION", "framework"),
             ("VMUX_CACHE_TARGET", "target"),
             ("VMUX_CACHE_SAVE", "true"),
         ] {
@@ -494,32 +494,48 @@ mod tests {
             .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
         let output = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
         fixture.write(&output["snapshot"], "snapshot");
-        fixture.write(
-            "target/framework-consumer/debug/deps/libdependency.rlib",
-            "consumer dependency",
-        );
-        fixture.write(
-            "target/framework-consumer/debug/incremental/cache.bin",
-            "incremental",
-        );
-        fixture.run("cache-stage", &["sdk-framework"]).unwrap();
+        for consumer in [
+            "framework-consumer",
+            "host-consumer",
+            "framework-git-consumer",
+            "host-git-consumer",
+        ] {
+            fixture.write(
+                &format!("target/{consumer}/debug/deps/libdependency.rlib"),
+                "consumer dependency",
+            );
+            fixture.write(
+                &format!("target/{consumer}/debug/incremental/cache.bin"),
+                "incremental",
+            );
+        }
+        fixture.run("cache-stage", &["framework"]).unwrap();
         let staging = fixture.root().join(&output["paths"]);
-        assert_eq!(
-            std::fs::read(staging.join("target/framework-consumer/debug/deps/libdependency.rlib"))
+        for consumer in [
+            "framework-consumer",
+            "host-consumer",
+            "framework-git-consumer",
+            "host-git-consumer",
+        ] {
+            assert_eq!(
+                std::fs::read(
+                    staging.join(format!("target/{consumer}/debug/deps/libdependency.rlib"))
+                )
                 .unwrap(),
-            b"consumer dependency"
-        );
-        assert!(
-            !staging
-                .join("target/framework-consumer/debug/incremental/cache.bin")
-                .exists()
-        );
+                b"consumer dependency"
+            );
+            assert!(
+                !staging
+                    .join(format!("target/{consumer}/debug/incremental/cache.bin"))
+                    .exists()
+            );
+        }
         std::fs::remove_dir_all(&staging).unwrap();
         let outside = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(outside.path(), &staging).unwrap();
         assert!(
             fixture
-                .run("cache-unstage", &["sdk-framework"])
+                .run("cache-unstage", &["framework"])
                 .unwrap_err()
                 .contains("symbolic links")
         );
