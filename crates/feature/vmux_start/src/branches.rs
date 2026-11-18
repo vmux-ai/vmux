@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarUiState, StartBranchesRequest, StartProjectBranches};
 use vmux_api::space::ProjectBranch;
+use vmux_git::worktree::BranchHolder;
 use vmux_git::{GitRuntime, GitTask};
 
 pub(crate) struct BranchesPlugin;
@@ -29,7 +31,7 @@ struct Requested {
 struct Read {
     subscribers: Vec<Entity>,
     project: String,
-    task: GitTask<Vec<ProjectBranch>>,
+    task: GitTask<Vec<BranchHolder>>,
 }
 
 impl Read {
@@ -118,13 +120,25 @@ fn finish(
             continue;
         };
         commands.entity(entity).despawn();
-        let branches = match result {
-            Ok(branches) => branches,
+        let holders = match result {
+            Ok(holders) => holders,
             Err(_) => {
                 warn!("Start branch lookup failed for {}", read.project);
                 Vec::new()
             }
         };
+        let mut branches = Vec::with_capacity(holders.len());
+        for holder in holders {
+            let checkout = holder.checkout_path();
+            let label = holder.checkout_label();
+            branches.push(ProjectBranch {
+                branch: holder.branch,
+                checkout,
+                label,
+                insertions: holder.change.insertions,
+                deletions: holder.change.deletions,
+            });
+        }
         for webview in &read.subscribers {
             if !browsers.can_emit_to(webview) {
                 continue;
@@ -145,27 +159,11 @@ struct Catalog<'a> {
 }
 
 impl Catalog<'_> {
-    fn read(&self) -> Vec<ProjectBranch> {
-        let mut branches = Vec::new();
+    fn read(&self) -> Vec<BranchHolder> {
         let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(self.root) else {
-            return branches;
+            return Vec::new();
         };
-        let Ok(holders) = checkout.branch_holders() else {
-            return branches;
-        };
-        branches.reserve(holders.len());
-        for holder in holders {
-            let checkout = holder.checkout_path();
-            let label = holder.checkout_label();
-            branches.push(ProjectBranch {
-                branch: holder.branch,
-                checkout,
-                label,
-                insertions: holder.change.insertions,
-                deletions: holder.change.deletions,
-            });
-        }
-        branches
+        checkout.branch_holders().unwrap_or_default()
     }
 }
 

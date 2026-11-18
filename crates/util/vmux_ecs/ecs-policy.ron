@@ -133,8 +133,6 @@ legacy: [
     (key: "crates/util/vmux_ecs/src/page_open.rs||impl:Default for PageOpenId", fingerprint: "feecf0615d2d6ea9", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/page_open.rs||impl:PageNavigation", fingerprint: "5f436bab0666814c", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/page_open.rs||impl:PageOpenId", fingerprint: "980032c4b6c7e762", issue: "VMX-253"),
-    (key: "crates/util/vmux_ecs/src/page_open.rs||struct:PageNavigation", fingerprint: "7521ca076eb53ef0", issue: "VMX-253"),
-    (key: "crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenId", fingerprint: "d402a2f1b741bc9a", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenTask", fingerprint: "270615f4e16f18f2", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/primitives.rs||impl:Plugin for PrimitivesPlugin", fingerprint: "4f8d6bde384c28a8", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/primitives.rs||struct:PrimitivesPlugin", fingerprint: "d39ff2bd03e2e937", issue: "VMX-253"),
@@ -318,6 +316,7 @@ boundaries: [
     (key: "crates/util/vmux_ecs/src/record.rs|tests|impl:RecordPlugin", fingerprint: "e7cc644f11050ef2", interface: "Headless Bevy production-plugin fixture", input: "external: isolated typed test input and Bevy App", output: "ECS: crates/util/vmux_ecs/src/component.rs||struct:Uuid", lifetime: "one isolated regression invocation", bounds: "one App; fixture state stays in canonical entities and registered production schedules", teardown: "App drop releases fixture entities, schedules and native handles", architecture: "ECS ownership boundaries"),
 ],
 values: [
+    (key: "crates/util/vmux_ecs/src/page_open.rs||struct:PageOpenId", owner: "crates/util/vmux_ecs/src/page_open.rs||struct:PageNavigation", lifetime: "immutable attempt identity of a live page navigation component"),
     (key: "crates/util/vmux_ecs/src/agent.rs||enum:CommandOrigin", owner: "crates/util/vmux_ecs/src/agent.rs||struct:AgentRequestInput", lifetime: "Origin/session/anchor values captured by one incoming or deferred agent request; not a dispatcher or registry"),
 
     (key: "crates/util/vmux_ecs/src/blocking.rs||struct:BlockingTask", owner: "crates/util/vmux_ecs/src/blocking.rs||struct:BlockingRuntime", lifetime: "one bounded IO task completion/cancellation handle created through the canonical blocking runtime"),

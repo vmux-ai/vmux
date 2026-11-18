@@ -3,6 +3,9 @@
 #[cfg(host)]
 pub use host::StartPlugin;
 
+#[cfg(host)]
+use bevy::prelude::{Component, Entity};
+
 pub(crate) struct Feature;
 
 impl vmux_feature::manifest::FeatureManifestSource for Feature {
@@ -26,12 +29,12 @@ mod workspace;
 pub mod roster;
 
 #[cfg(host)]
-#[derive(bevy::prelude::Component, Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct StartInlineTransition {
-    pub webview: bevy::prelude::Entity,
+    pub webview: Entity,
     pub navigation: Option<vmux_ecs::PageOpenId>,
 }
 
 #[cfg(host)]
-#[derive(bevy::prelude::Component)]
+#[derive(Component)]
 pub struct StartInlineTransitionView;

@@ -2,6 +2,7 @@ use std::path::Path;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
@@ -491,6 +492,7 @@ fn begin_inline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::Resource;
     use vmux_api::command_bar::CommandBarUiState;
     #[cfg(ui)]
     use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};

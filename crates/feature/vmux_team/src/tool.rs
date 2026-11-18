@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_feature::manifest::FeaturePlugin;
