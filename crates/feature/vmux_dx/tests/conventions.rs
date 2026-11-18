@@ -2,6 +2,7 @@ use compiler_inputs::CompilerInputs;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use syn::parse::Parser;
 use syn::visit::{self, Visit};
 use syn::{
     Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemFn,
@@ -386,32 +387,83 @@ impl<'ast> Visit<'ast> for FunctionNames {
 #[derive(Default)]
 struct RegisteredSystems(BTreeSet<String>);
 
-impl<'ast> Visit<'ast> for RegisteredSystems {
-    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
-        if attribute.path().is_ident("component")
-            && let Ok(metadata) = attribute.parse_args_with(
-                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-            )
-        {
-            for item in metadata {
-                let syn::Meta::NameValue(item) = item else {
-                    continue;
-                };
-                if item.path.get_ident().is_some_and(|name| {
-                    matches!(
-                        name.to_string().as_str(),
-                        "on_add"
-                            | "on_insert"
-                            | "on_discard"
-                            | "on_replace"
-                            | "on_remove"
-                            | "on_despawn"
-                    )
-                }) {
-                    collect_paths(&item.value, &mut self.0);
-                }
+impl RegisteredSystems {
+    fn component_metadata(&mut self, metadata: &syn::Meta) {
+        let syn::Meta::List(list) = metadata else {
+            return;
+        };
+        let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+        let Ok(items) = parser.parse2(list.tokens.clone()) else {
+            return;
+        };
+        if list.path.is_ident("cfg_attr") {
+            let Some(condition) = items.first() else {
+                return;
+            };
+            if Self::configuration(condition) == Some(false) {
+                return;
+            }
+            for nested in items.iter().skip(1) {
+                self.component_metadata(nested);
+            }
+            return;
+        }
+        if !list.path.is_ident("component") {
+            return;
+        }
+        for item in items {
+            let syn::Meta::NameValue(item) = item else {
+                continue;
+            };
+            if item.path.get_ident().is_some_and(|name| {
+                matches!(
+                    name.to_string().as_str(),
+                    "on_add"
+                        | "on_insert"
+                        | "on_discard"
+                        | "on_replace"
+                        | "on_remove"
+                        | "on_despawn"
+                )
+            }) {
+                collect_paths(&item.value, &mut self.0);
             }
         }
+    }
+
+    fn configuration(metadata: &syn::Meta) -> Option<bool> {
+        if metadata.path().is_ident("test") {
+            return Some(false);
+        }
+        let syn::Meta::List(list) = metadata else {
+            return None;
+        };
+        let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+        let Ok(arguments) = parser.parse2(list.tokens.clone()) else {
+            return None;
+        };
+        if list.path.is_ident("not") && arguments.len() == 1 {
+            return Self::configuration(arguments.first().unwrap()).map(|value| !value);
+        }
+        let all = list.path.is_ident("all");
+        if !all && !list.path.is_ident("any") {
+            return None;
+        }
+        let mut unknown = false;
+        for argument in arguments {
+            match Self::configuration(&argument) {
+                Some(value) if value != all => return Some(!all),
+                Some(_) => {}
+                None => unknown = true,
+            }
+        }
+        if unknown { None } else { Some(all) }
+    }
+}
+
+impl<'ast> Visit<'ast> for RegisteredSystems {
+    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+        self.component_metadata(&attribute.meta);
         visit::visit_attribute(self, attribute);
     }
 
@@ -441,6 +493,14 @@ fn component_lifecycle_hooks_are_registered_framework_entries() {
         struct Pending<T>(T);
         #[unrelated(on_insert = ignored)]
         struct Other;
+        #[cfg_attr(not(test), component(on_discard = production()))]
+        struct Active;
+        #[cfg_attr(test, component(on_discard = test_only))]
+        struct TestOnly;
+        #[cfg_attr(all(not(test), feature = "native"), component(on_remove = optional))]
+        struct Optional;
+        #[cfg_attr(all(test, feature = "native"), component(on_remove = disabled))]
+        struct Disabled;
     "#,
     )
     .unwrap();
@@ -451,7 +511,9 @@ fn component_lifecycle_hooks_are_registered_framework_entries() {
         BTreeSet::from([
             "bind".to_string(),
             "cleanup".to_string(),
-            "retain".to_string()
+            "retain".to_string(),
+            "production".to_string(),
+            "optional".to_string(),
         ])
     );
 }

@@ -90,6 +90,12 @@ impl Plugin for WorkspacePersistencePlugin {
             .add_systems(Update, drain_orphans.after(drain_writes))
             .add_systems(
                 Last,
+                flush_attached
+                    .after(flush_on_exit)
+                    .before(vmux_ecs::service::ShutdownSet),
+            )
+            .add_systems(
+                Last,
                 flush_orphans
                     .after(flush_on_exit)
                     .before(vmux_ecs::service::ShutdownSet),
@@ -823,6 +829,26 @@ fn flush_orphans(
             result,
         });
         commands.entity(entity).despawn();
+    }
+}
+
+fn flush_attached(
+    mut exits: MessageReader<AppExit>,
+    mut pending: Query<(Entity, &mut PendingWrite), With<AutoSave>>,
+    mut commands: Commands,
+) {
+    if exits.read().next().is_none() {
+        return;
+    }
+    for (entity, mut write) in &mut pending {
+        let result = write.finish();
+        commands.trigger(WriteCompleted {
+            target: EntityTarget::new(entity),
+            revision: write.revision,
+            path: write.path.clone(),
+            result,
+        });
+        commands.entity(entity).remove::<PendingWrite>();
     }
 }
 
@@ -2070,6 +2096,46 @@ mod tests {
                 .saving()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn exit_drains_an_attached_writer_after_the_last_space_is_removed() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
+        let mut fixture = WorkspaceSaveFixture::new("exit-without-space");
+        let (sender, result) = mpsc::channel();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.store)
+            .insert(PendingWrite {
+                revision: 1,
+                path: fixture.path.clone(),
+                result: Some(Mutex::new(result)),
+            });
+        let spaces: Vec<_> = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Space>>()
+            .iter(fixture.app.world())
+            .collect();
+        for entity in spaces {
+            fixture.app.world_mut().despawn(entity);
+        }
+        let path = fixture.path.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::fs::write(path, "accepted snapshot").unwrap();
+            sender.send(Ok(())).unwrap();
+        });
+        fixture.app.world_mut().write_message(AppExit::Success);
+        fixture.app.update();
+        assert_eq!(
+            std::fs::read_to_string(&fixture.path).unwrap(),
+            "accepted snapshot"
+        );
+        writer.join().unwrap();
     }
 
     #[test]
