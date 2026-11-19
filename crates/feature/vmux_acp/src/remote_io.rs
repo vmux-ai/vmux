@@ -36,58 +36,60 @@ pub(super) struct Joined(pub Result<(), String>);
 pub(super) struct Output<T: Send + Sync + 'static>(oneshot::Receiver<T>);
 
 impl<T: Send + Sync + 'static> Output<T> {
-    pub(super) fn spawn_blocking(
-        commands: &mut Commands,
+    pub(super) fn new_blocking(
         loan: &Loan,
         target: Option<Entity>,
         accepted: Accepted,
         operation: impl FnOnce() -> T + Send + 'static,
-    ) -> Entity {
+    ) -> (
+        (Name, Self, AbortTask, Accepted, Loan, CompletionWake),
+        Option<OperationTarget>,
+    ) {
         let (sender, receiver) = oneshot::channel();
         let task = loan.executor.spawn_blocking(move || {
             let result = operation();
             let _ = sender.send(result);
         });
         let notify = Waker::from(Arc::new(Notify(loan.wake.0.clone())));
-        let mut entity = commands.spawn((
-            Name::new("Remote blocking IO"),
-            Self(receiver),
-            AbortTask(task),
-            accepted,
-            loan.clone(),
-            CompletionWake(notify),
-        ));
-        if let Some(target) = target {
-            entity.insert(OperationTarget::new(target));
-        }
-        entity.id()
+        (
+            (
+                Name::new("Remote blocking IO"),
+                Self(receiver),
+                AbortTask(task),
+                accepted,
+                loan.clone(),
+                CompletionWake(notify),
+            ),
+            target.map(OperationTarget::new),
+        )
     }
 
-    pub(super) fn spawn(
-        commands: &mut Commands,
+    pub(super) fn new(
         loan: &Loan,
         target: Option<Entity>,
         accepted: Accepted,
         future: impl Future<Output = T> + Send + 'static,
-    ) -> Entity {
+    ) -> (
+        (Name, Self, AbortTask, Accepted, Loan, CompletionWake),
+        Option<OperationTarget>,
+    ) {
         let (sender, receiver) = oneshot::channel();
         let task = loan.executor.spawn(async move {
             let result = future.await;
             let _ = sender.send(result);
         });
         let notify = Waker::from(Arc::new(Notify(loan.wake.0.clone())));
-        let mut entity = commands.spawn((
-            Name::new("Remote native IO"),
-            Self(receiver),
-            AbortTask(task),
-            accepted,
-            loan.clone(),
-            CompletionWake(notify),
-        ));
-        if let Some(target) = target {
-            entity.insert(OperationTarget::new(target));
-        }
-        entity.id()
+        (
+            (
+                Name::new("Remote native IO"),
+                Self(receiver),
+                AbortTask(task),
+                accepted,
+                loan.clone(),
+                CompletionWake(notify),
+            ),
+            target.map(OperationTarget::new),
+        )
     }
 
     pub(super) fn take(&mut self, joined: &Joined) -> Result<T, String> {
@@ -99,7 +101,7 @@ impl<T: Send + Sync + 'static> Output<T> {
 }
 
 #[derive(Component)]
-struct CompletionWake(Waker);
+pub(super) struct CompletionWake(Waker);
 
 struct Notify(mpsc::UnboundedSender<()>);
 

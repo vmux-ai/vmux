@@ -268,9 +268,16 @@ fn submit_simple(
             uuid: uuid.clone(),
         };
         if sessions {
-            let native = Output::spawn(&mut commands, loan, Some(entity), accepted, async move {
-                sessions_api.remote_sessions().await
-            });
+            let native = {
+                let (pending, target) = Output::new(loan, Some(entity), accepted, async move {
+                    sessions_api.remote_sessions().await
+                });
+                let native = commands.spawn(pending).id();
+                if let Some(target) = target {
+                    commands.entity(native).insert(target);
+                }
+                native
+            };
             commands.entity(native).insert(SessionsIo);
             commands.entity(entity).insert(Waiting(native));
         } else if attach || media.is_some_and(|media| matches!(media.phase, MediaPhase::Lookup)) {
@@ -278,9 +285,16 @@ fn submit_simple(
                 continue;
             };
             let sid = sid.0.clone();
-            let native = Output::spawn(&mut commands, loan, Some(entity), accepted, async move {
-                sessions_api.remote_session(sid).await
-            });
+            let native = {
+                let (pending, target) = Output::new(loan, Some(entity), accepted, async move {
+                    sessions_api.remote_session(sid).await
+                });
+                let native = commands.spawn(pending).id();
+                if let Some(target) = target {
+                    commands.entity(native).insert(target);
+                }
+                native
+            };
             commands.entity(native).insert(LookupIo);
             commands.entity(entity).insert(Waiting(native));
         } else if cancel {
@@ -288,9 +302,16 @@ fn submit_simple(
                 continue;
             };
             let sid = sid.0.clone();
-            let native = Output::spawn(&mut commands, loan, Some(entity), accepted, async move {
-                sessions_api.input(sid, AcpInput::Cancel).await
-            });
+            let native = {
+                let (pending, target) = Output::new(loan, Some(entity), accepted, async move {
+                    sessions_api.input(sid, AcpInput::Cancel).await
+                });
+                let native = commands.spawn(pending).id();
+                if let Some(target) = target {
+                    commands.entity(native).insert(target);
+                }
+                native
+            };
             commands.entity(native).insert(InputIo);
             commands.entity(entity).insert(Waiting(native));
         } else if let Some(approve) = approve {
@@ -300,11 +321,18 @@ fn submit_simple(
             let sid = sid.0.clone();
             let call_id = approve.call_id.clone();
             let decision = approve.decision;
-            let native = Output::spawn(&mut commands, loan, Some(entity), accepted, async move {
-                sessions_api
-                    .input(sid, AcpInput::Approve { call_id, decision })
-                    .await
-            });
+            let native = {
+                let (pending, target) = Output::new(loan, Some(entity), accepted, async move {
+                    sessions_api
+                        .input(sid, AcpInput::Approve { call_id, decision })
+                        .await
+                });
+                let native = commands.spawn(pending).id();
+                if let Some(target) = target {
+                    commands.entity(native).insert(target);
+                }
+                native
+            };
             commands.entity(native).insert(InputIo);
             commands.entity(entity).insert(Waiting(native));
         }
@@ -445,16 +473,22 @@ fn submit_home(
         {
             continue;
         }
-        let native = Output::spawn_blocking(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            Home::read,
-        );
+        let native = {
+            let (pending, target) = Output::new_blocking(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                Home::read,
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(HomeIo);
         commands.entity(entity).insert(Waiting(native));
     }
@@ -529,16 +563,22 @@ fn submit_prompt_file(
             continue;
         }
         let path = prompt.paths[prompt.attachments.len()].clone();
-        let native = Output::spawn_blocking(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            move || FileFacts::read(path),
-        );
+        let native = {
+            let (pending, target) = Output::new_blocking(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                move || FileFacts::read(path),
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(PromptFileIo);
         commands.entity(entity).insert(Waiting(native));
     }
@@ -628,16 +668,22 @@ fn submit_prompt(
             attachments: prompt.attachments.clone(),
             preferred_mode: prompt.preferred_mode.clone(),
         };
-        let native = Output::spawn(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            async move { sessions.input(sid, input).await },
-        );
+        let native = {
+            let (pending, target) = Output::new(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                async move { sessions.input(sid, input).await },
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(InputIo);
         commands.entity(entity).insert(Waiting(native));
     }
@@ -663,16 +709,22 @@ fn submit_media_file(
             MediaPhase::Directory => media.directory.clone().unwrap(),
             _ => continue,
         };
-        let native = Output::spawn_blocking(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            move || FileFacts::read(path),
-        );
+        let native = {
+            let (pending, target) = Output::new_blocking(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                move || FileFacts::read(path),
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(MediaFileIo);
         commands.entity(entity).insert(Waiting(native));
     }
@@ -754,16 +806,22 @@ fn submit_directory(
             continue;
         }
         let directory = media.directory.clone().unwrap();
-        let native = Output::spawn_blocking(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            move || Directory::open(directory),
-        );
+        let native = {
+            let (pending, target) = Output::new_blocking(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                move || Directory::open(directory),
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(DirectoryIo);
         commands.entity(entity).insert(Waiting(native));
     }
@@ -832,16 +890,22 @@ fn submit_batch(
             continue;
         }
         let directory = directory.0.clone();
-        let native = Output::spawn_blocking(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            move || directory.batch(256),
-        );
+        let native = {
+            let (pending, target) = Output::new_blocking(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                move || directory.batch(256),
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(BatchIo);
         commands.entity(entity).insert(Waiting(native));
     }
@@ -969,22 +1033,28 @@ fn submit_preview(
                 continue;
             }
             let path = PathBuf::from(&entry.path);
-            let native = Output::spawn_blocking(
-                &mut commands,
-                loan,
-                Some(entity),
-                Accepted {
-                    owner: owner.entity(),
-                    uuid: uuid.clone(),
-                },
-                move || {
-                    Thumbnail::read(
-                        path,
-                        Media::MEDIA_THUMBNAIL_SOURCE_LIMIT,
-                        Media::MEDIA_THUMBNAIL_MAX_EDGE,
-                    )
-                },
-            );
+            let native = {
+                let (pending, target) = Output::new_blocking(
+                    loan,
+                    Some(entity),
+                    Accepted {
+                        owner: owner.entity(),
+                        uuid: uuid.clone(),
+                    },
+                    move || {
+                        Thumbnail::read(
+                            path,
+                            Media::MEDIA_THUMBNAIL_SOURCE_LIMIT,
+                            Media::MEDIA_THUMBNAIL_MAX_EDGE,
+                        )
+                    },
+                );
+                let native = commands.spawn(pending).id();
+                if let Some(target) = target {
+                    commands.entity(native).insert(target);
+                }
+                native
+            };
             commands.entity(native).insert(PreviewIo(index));
             commands.entity(entity).insert(Waiting(native));
             pending = true;
@@ -1071,16 +1141,22 @@ fn submit_details(
                 paths.push((index, PathBuf::from(&entry.path)));
             }
         }
-        let native = Output::spawn_blocking(
-            &mut commands,
-            loan,
-            Some(entity),
-            Accepted {
-                owner: owner.entity(),
-                uuid: uuid.clone(),
-            },
-            move || FileFacts::batch(paths),
-        );
+        let native = {
+            let (pending, target) = Output::new_blocking(
+                loan,
+                Some(entity),
+                Accepted {
+                    owner: owner.entity(),
+                    uuid: uuid.clone(),
+                },
+                move || FileFacts::batch(paths),
+            );
+            let native = commands.spawn(pending).id();
+            if let Some(target) = target {
+                commands.entity(native).insert(target);
+            }
+            native
+        };
         commands.entity(native).insert(DetailsIo);
         commands.entity(entity).insert(Waiting(native));
     }
