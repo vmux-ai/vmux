@@ -83,7 +83,7 @@ runs:
         if [ "${VMUX_CI_FAST_RUST:-}" = "1" ]; then
           cli_flags="-C opt-level=1 -C codegen-units=16"
         fi
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS="$cli_flags" cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .build-tools/cargo
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_DEV_DEBUG=0 RUSTFLAGS="$cli_flags" cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .build-tools/cargo
         mkdir -p .build-tools/bin
         install -m 0755 .build-tools/cargo/debug/vmux .build-tools/bin/vmux
         echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"

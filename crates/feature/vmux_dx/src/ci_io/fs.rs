@@ -69,8 +69,19 @@ impl Job for ReadFile {
             .open(path)
             .map_err(|error| error.to_string())?;
         let metadata = file.metadata().map_err(|error| error.to_string())?;
-        if !metadata.is_file() || metadata.len() > self.limit {
-            return Err("CI input is not a bounded regular file".into());
+        if !metadata.is_file() {
+            return Err(format!(
+                "CI input {:?} is not a regular file",
+                self.location.relative
+            ));
+        }
+        if metadata.len() > self.limit {
+            return Err(format!(
+                "CI input {:?} exceeds its bound: {} bytes > {} bytes",
+                self.location.relative,
+                metadata.len(),
+                self.limit
+            ));
         }
         let mut bytes = Vec::new();
         Read::by_ref(&mut file)
