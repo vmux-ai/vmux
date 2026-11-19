@@ -1778,6 +1778,8 @@ fn job_result_consumers_audit_the_payload_without_approving_the_indexed_input() 
         ("Query<&JobResult<Input>>", "Bytes", true),
         ("Query<&JobResult<Input>>", "Result<Bytes,String>", true),
         ("Query<&JobResult<Input>>", "OutputAlias", true),
+        ("Query<&JobResult<Input>>", "Callback", false),
+        ("Query<&JobResult<Input>>", "Self", false),
         ("Query<&JobResult<Input>>", "()", true),
         ("Query<&JobResult<Input>>", "Unowned", false),
         ("Query<(&JobResult<Input>,&Input)>", "Bytes", false),
@@ -1790,7 +1792,7 @@ fn job_result_consumers_audit_the_payload_without_approving_the_indexed_input() 
     ] {
         let mut inventory = Inventory::default();
         inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job { type Output; } #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>); #[derive(Component)] pub struct JobRequest<J:Job>(pub J);");
-        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::system::SystemParam; use vmux_ecs::jobs::{{Job,JobResult,JobRequest}}; struct Input; struct Unowned; #[derive(Component)] struct Bytes(Vec<u8>); #[derive(Component)] struct OtherResult<T>(T); type OutputAlias=Result<Bytes,String>; type Args<T>=Query<&'static JobResult<T>>; type Mixed<T>=Query<(&'static JobResult<T>,&'static T)>; #[derive(SystemParam)] struct Params<'w,'s,T:Job>{{ values:Query<'w,'s,&'static JobResult<T>> }} impl Job for Input{{ type Output={output}; }} fn receive(input:{parameter}){{}} struct RootPlugin; impl Plugin for RootPlugin{{ fn build(&self,app:&mut App){{app.add_systems(Update,receive);}} }}"));
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::system::SystemParam; use vmux_ecs::jobs::{{Job,JobResult,JobRequest}}; struct Input; struct Unowned; #[derive(Component)] struct Bytes(Vec<u8>); #[derive(Component)] struct OtherResult<T>(T); type OutputAlias=Result<Bytes,String>; type Callback=fn(); type Args<T>=Query<&'static JobResult<T>>; type Mixed<T>=Query<(&'static JobResult<T>,&'static T)>; #[derive(SystemParam)] struct Params<'w,'s,T:Job>{{ values:Query<'w,'s,&'static JobResult<T>> }} impl Job for Input{{ type Output={output}; }} fn receive(input:{parameter}){{}} struct RootPlugin; impl Plugin for RootPlugin{{ fn build(&self,app:&mut App){{app.add_systems(Update,receive);}} }}"));
         inventory.resolve_usage();
         let policy = Policy::default();
         assert_eq!(
@@ -1825,6 +1827,7 @@ fn indexed_result_evidence_requires_an_output_projection_and_preserves_concrete_
             false,
         ),
         ("J", "Query<&JobResult<Input>>", false),
+        ("Result<J::Output,J>", "Query<&JobResult<Input>>", false),
         (
             "std::marker::PhantomData<J>",
             "Query<&JobResult<Input>>",
@@ -1915,6 +1918,69 @@ fn indexed_result_inference_does_not_bind_unresolved_parameters_to_shadow_types(
                 &mut BTreeSet::new(),
             ),
             "{definition}"
+        );
+    }
+}
+
+#[test]
+fn canonical_job_inputs_cannot_hide_unowned_output_values() {
+    for (output, legacy, expected) in [
+        ("Unowned", false, false),
+        ("Unowned", true, true),
+        ("Self", false, true),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job{type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{{Job,JobResult}}; #[derive(Component)] struct Input; struct Unowned; impl Job for Input{{type Output={output};}} fn own(input:Query<&Input>){{}} fn receive(input:Query<&JobResult<Input>>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,(own,receive));}}}}"));
+        inventory.resolve_usage();
+        let mut policy = Policy::default();
+        if legacy {
+            let key = inventory.key("struct:Unowned");
+            policy.legacy.push(Legacy {
+                key: key.clone(),
+                fingerprint: inventory.entries[&key].fingerprint.clone(),
+                issue: "VMX-253".into(),
+            });
+        }
+        assert!(inventory.canonical(
+            &inventory.entries[&inventory.key("struct:Input")],
+            &policy,
+            &mut BTreeSet::new()
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &policy,
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{output}: legacy={legacy}"
+        );
+    }
+}
+
+#[test]
+fn unit_job_outputs_do_not_turn_presence_filters_into_payload_reads() {
+    for parameter in [
+        "Query<Entity,With<JobResult<Input>>>",
+        "Query<Has<JobResult<Input>>>",
+        "ParamSet<(Query<&JobResult<Other>>,Query<Entity,With<JobResult<Input>>>)>",
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job{type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{{Job,JobResult}}; struct Input; struct Other; impl Job for Input{{type Output=();}} impl Job for Other{{type Output=();}} fn receive(input:{parameter}){{}} fn payload(input:Query<&JobResult<Other>>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,(receive,payload));}}}}"));
+        inventory.resolve_usage();
+        assert!(
+            inventory
+                .used(&inventory.entries["crates/util/vmux_ecs/src/jobs.rs||struct:JobResult"])
+        );
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "{parameter}"
         );
     }
 }
@@ -7684,19 +7750,19 @@ impl Inventory {
             {
                 return false;
             }
-            if field.ecs
-                && self.used(field)
-                && (policy.legacy.iter().any(|legacy| {
-                    legacy.key == field.key && legacy.fingerprint == field.fingerprint
-                }) || policy
+            if policy
+                .legacy
+                .iter()
+                .any(|legacy| legacy.key == field.key && legacy.fingerprint == field.fingerprint)
+                || policy
                     .upstream
                     .iter()
-                    .any(|upstream| upstream.entries.get(&field.key) == Some(&field.fingerprint)))
+                    .any(|upstream| upstream.entries.get(&field.key) == Some(&field.fingerprint))
             {
                 continue;
             }
             if !self.canonical(field, policy, &mut visiting.clone()) {
-                parameters.valid = false;
+                return false;
             }
         }
         for reference in &entry.field_paths {
@@ -7778,6 +7844,23 @@ impl Inventory {
         let Some(syn::GenericArgument::Type(Type::Path(output))) = arguments.args.first() else {
             return false;
         };
+        let Some(syn::GenericArgument::Type(Type::Path(error))) = arguments.args.last() else {
+            return false;
+        };
+        let error_path = References::path(&error.path);
+        let native_error = error.qself.is_none()
+            && match self
+                .external_path(&entry.namespace, &error_path, &mut BTreeSet::new())
+                .as_deref()
+            {
+                Some("std::string::String" | "alloc::string::String") => true,
+                None => error_path == "String" && !self.local_binding(&entry.namespace, "String"),
+                _ => false,
+            };
+        if !native_error {
+            return false;
+        }
+
         output.qself.is_none()
             && output.path.segments.len() == 2
             && output.path.segments[0].ident == entry.generic_parameters[0]
@@ -10266,7 +10349,8 @@ impl Inventory {
             }
             matched = Some((implementation, bindings));
         }
-        let (implementation, bindings) = matched?;
+        let (implementation, mut bindings) = matched?;
+        bindings.insert("Self".into(), syn::GenericArgument::Type(concrete));
         let output = implementation.associated_types.get("Output")?;
         let output = Bindings::apply(self, &implementation.namespace, &bindings, output);
         Some((implementation, output))
@@ -11871,6 +11955,8 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 struct References<'a> {
     parameter_inventory: Option<&'a Inventory>,
     parameter_namespace: &'a str,
+    parameter_inside: bool,
+    parameter_read: bool,
     parameter_unbound: BTreeSet<String>,
     indexed: BTreeSet<String>,
     retained: BTreeSet<String>,
@@ -11901,6 +11987,19 @@ struct References<'a> {
 }
 
 impl<'ast> Visit<'ast> for References<'_> {
+    fn visit_type(&mut self, value: &'ast Type) {
+        if self.parameter_inventory.is_some()
+            && let Type::Reference(reference) = value
+        {
+            let previous = self.parameter_read;
+            self.parameter_read = self.parameter_inside;
+            self.visit_type(&reference.elem);
+            self.parameter_read = previous;
+            return;
+        }
+        visit::visit_type(self, value);
+    }
+
     fn visit_expr_call(&mut self, expression: &'ast syn::ExprCall) {
         if let syn::Expr::Path(function) = expression.func.as_ref()
             && let Some(last) = function.path.segments.last()
@@ -12278,7 +12377,14 @@ impl References<'_> {
             return;
         }
         let Some(owner) = inventory.resolve(namespace, &name, &mut BTreeSet::new()) else {
+            if self.parameter_handle(value) {
+                return;
+            }
+            let previous = (self.parameter_inside, self.parameter_read);
+            self.parameter_inside = false;
+            self.parameter_read = false;
             visit::visit_type_path(self, value);
+            (self.parameter_inside, self.parameter_read) = previous;
             return;
         };
         if self.inside {
@@ -12289,7 +12395,8 @@ impl References<'_> {
         if !self.payload || !matches!(owner.kind, Kind::Alias) {
             self.retained.insert(owner.key.clone());
         }
-        if inventory.indexed_result(owner)
+        if self.parameter_read
+            && inventory.indexed_result(owner)
             && value.qself.is_none()
             && let Some(segment) = value.path.segments.last()
             && let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments
@@ -12305,6 +12412,8 @@ impl References<'_> {
             let mut payload = References {
                 parameter_inventory: Some(inventory),
                 parameter_namespace: &implementation.namespace,
+                parameter_inside: true,
+                parameter_read: true,
                 parameter_unbound: implementation.generic_bindings.clone(),
                 visiting: self.visiting.clone(),
                 payload: true,
@@ -12354,6 +12463,8 @@ impl References<'_> {
                 let mut nested = References {
                     parameter_inventory: Some(inventory),
                     parameter_namespace: &owner.namespace,
+                    parameter_inside: self.parameter_inside,
+                    parameter_read: self.parameter_read,
                     parameter_unbound: self.parameter_unbound.clone(),
                     visiting: self.visiting.clone(),
                     payload: self.payload,
@@ -12364,6 +12475,8 @@ impl References<'_> {
                     nested.visit_type(field);
                 }
                 self.valid &= nested.valid;
+                self.dynamic |= nested.dynamic;
+                self.local |= nested.local;
                 self.indexed.extend(nested.indexed);
                 self.retained.extend(nested.retained);
                 self.outputs.extend(nested.outputs);
@@ -12374,6 +12487,47 @@ impl References<'_> {
             self.visiting.remove(&owner.key);
         }
         visit::visit_type_path(self, value);
+    }
+
+    fn parameter_handle(&mut self, value: &syn::TypePath) -> bool {
+        let inventory = self.parameter_inventory.unwrap();
+        let name = Self::path(&value.path);
+        let Some(handle) =
+            inventory.framework_handle(self.parameter_namespace, &name, &mut BTreeSet::new())
+        else {
+            return false;
+        };
+        let previous = (self.parameter_inside, self.parameter_read);
+        match handle.as_str() {
+            "Query" | "Single" => {
+                self.parameter_inside = true;
+                self.parameter_read = false;
+            }
+            "ParamSet" => {
+                self.parameter_inside = false;
+                self.parameter_read = false;
+            }
+            "Res" | "ResMut" | "NonSend" | "NonSendMut" => {
+                self.parameter_inside = true;
+                self.parameter_read = true;
+            }
+            "Option" | "Ref" | "Mut" => {}
+            _ => return false,
+        }
+        if let Some(segment) = value.path.segments.last()
+            && let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments
+        {
+            for argument in &arguments.args {
+                if let syn::GenericArgument::Type(value) = argument {
+                    self.visit_type(value);
+                    if matches!(handle.as_str(), "Query" | "Single") {
+                        break;
+                    }
+                }
+            }
+        }
+        (self.parameter_inside, self.parameter_read) = previous;
+        true
     }
 
     fn unresolved_projection(&self, value: &syn::TypePath) -> bool {
