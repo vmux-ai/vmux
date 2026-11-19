@@ -1150,6 +1150,7 @@ fn finish(requests: FinishRequests<'_, '_>, mut commands: Commands) {
 mod tests {
     use super::*;
     use bevy::tasks::{TaskPoolBuilder, futures_lite::future};
+    use std::io::{Read, Write};
     use vmux_ecs::profile::mcp_credentials::McpCredentialAccess;
     use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
 
@@ -1351,7 +1352,6 @@ mod tests {
 
     #[test]
     fn callback_denial_after_an_empty_poll_retires_authentication_without_exchange() {
-        use std::io::{Read, Write};
         IoTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(2).build());
         let listener = CallbackListener::bind().unwrap();
         let address = listener

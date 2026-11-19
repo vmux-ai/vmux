@@ -37,7 +37,7 @@ impl Plugin for RemovePlugin {
                     read_credential,
                     prepare,
                     write_manifest,
-                    remove_credential,
+                    delete,
                     rollback,
                     finish,
                 )
@@ -449,7 +449,7 @@ type RemoveCredentialRequests<'w, 's> = Query<
     (With<Active>, Without<Busy>),
 >;
 
-fn remove_credential(requests: RemoveCredentialRequests<'_, '_>, mut commands: Commands) {
+fn delete(requests: RemoveCredentialRequests<'_, '_>, mut commands: Commands) {
     for (entity, phase, source, credentials, done, error) in &requests {
         if !matches!(phase.0, Phase::RemoveCredential) {
             continue;

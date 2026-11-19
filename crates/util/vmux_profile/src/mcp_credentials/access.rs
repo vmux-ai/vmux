@@ -126,10 +126,10 @@ mod tests {
         let _test = TEST_ACCESS.lock().unwrap();
         let access = McpCredentialAccess::default();
         let revision = access.stable_revision().unwrap();
-        let (started_tx, started_rx) = std::sync::mpsc::channel();
-        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
         let writer_access = access.clone();
-        let writer = std::thread::spawn(move || {
+        let writer = thread::spawn(move || {
             writer_access
                 .write(|| {
                     started_tx.send(()).unwrap();
@@ -149,7 +149,7 @@ mod tests {
     fn owned_transaction_retains_exclusion_and_invalidates_prior_revisions_until_release() {
         let access = McpCredentialAccess::default();
         let before = access.stable_revision().unwrap();
-        let transaction = std::thread::scope(|threads| {
+        let transaction = thread::scope(|threads| {
             threads
                 .spawn(|| {
                     let mut future = std::pin::pin!(access.transaction());
