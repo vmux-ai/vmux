@@ -4,16 +4,16 @@ use bevy::prelude::Bundle;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::ServiceMessage;
-use vmux_api::session::{Message, RemoteSession};
+use vmux_api::session::RemoteSession;
 use vmux_ecs::ProcessId;
 use vmux_process::ProcessRuntime;
 
 use super::driver::{AcpInput, AcpMcpServers};
 use super::{
     AcpSessionAgentInfo, AcpSessionConfigRequest, AcpSessionInbox, AcpSessionInputRequest,
-    AcpSessionMessages, AcpSessionReceivers, AcpSessionRuntime, AcpSessionStatusRequest,
-    AcpSessionWake, AcpSessions, CloseAcpSession, FindAcpSession, ListAcpSessions,
-    RebindAcpSession, SnapshotAcpSession, SpawnAcpSession, SubscribeAcpSession,
+    AcpSessionReceivers, AcpSessionRuntime, AcpSessionStatusRequest, AcpSessionWake, AcpSessions,
+    CloseAcpSession, FindAcpSession, ListAcpSessions, RebindAcpSession, SnapshotAcpSession,
+    SpawnAcpSession, SubscribeAcpSession,
 };
 
 impl AcpSessions {
@@ -25,7 +25,6 @@ impl AcpSessions {
         let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
         let (config_states, config_state_inbox) = mpsc::unbounded_channel();
         let (statuses, status_inbox) = mpsc::unbounded_channel();
-        let (messages, message_inbox) = mpsc::unbounded_channel();
         let (lists, list_inbox) = mpsc::unbounded_channel();
         let (lookups, lookup_inbox) = mpsc::unbounded_channel();
         let (rebinds, rebind_inbox) = mpsc::unbounded_channel();
@@ -39,7 +38,6 @@ impl AcpSessions {
                 agent_infos,
                 config_states,
                 statuses,
-                messages,
                 lists,
                 lookups,
                 rebinds,
@@ -57,7 +55,6 @@ impl AcpSessions {
                     agent_infos: agent_info_inbox,
                     config_states: config_state_inbox,
                     statuses: status_inbox,
-                    messages: message_inbox,
                     lists: list_inbox,
                     lookups: lookup_inbox,
                     rebinds: rebind_inbox,
@@ -174,18 +171,6 @@ impl AcpSessions {
         let (response, receiver) = oneshot::channel();
         self.statuses
             .send(AcpSessionStatusRequest {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
-        let (response, receiver) = oneshot::channel();
-        self.messages
-            .send(AcpSessionMessages {
                 sid,
                 response: Some(response),
             })

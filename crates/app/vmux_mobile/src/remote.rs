@@ -1,7 +1,9 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_api::protocol::{SharedMessage, SharedResponse};
+use vmux_api::protocol::{
+    AgentListModels, AgentNewChat, AgentSelectModel, AgentSetEffort, SharedMessage, SharedResponse,
+};
 use vmux_api::session::{
     ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteAgent,
     RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
@@ -98,23 +100,29 @@ impl Api {
 
     pub(crate) async fn models(&self, sid: &str) -> Result<RemoteModelState, ApiError> {
         self.broker_json(SharedMessage::AgentListModels {
-            sid: sid.to_string(),
+            request: AgentListModels {
+                sid: sid.to_string(),
+            },
         })
         .await
     }
 
     pub(crate) async fn select_model(&self, sid: &str, model_id: &str) -> Result<(), ApiError> {
         self.apply(SharedMessage::AgentSelectModel {
-            sid: sid.to_string(),
-            model_id: model_id.to_string(),
+            request: AgentSelectModel {
+                sid: sid.to_string(),
+                model_id: model_id.to_string(),
+            },
         })
         .await
     }
 
     pub(crate) async fn set_effort(&self, sid: &str, level: &str) -> Result<(), ApiError> {
         self.apply(SharedMessage::AgentSetEffort {
-            sid: sid.to_string(),
-            level: level.to_string(),
+            request: AgentSetEffort {
+                sid: sid.to_string(),
+                level: level.to_string(),
+            },
         })
         .await
     }
@@ -148,9 +156,11 @@ impl Api {
 
     pub(crate) async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
         let request = SharedMessage::AgentNewChat {
-            client_op_id: request.client_op_id.clone(),
-            prompt: request.text.clone(),
-            agent_url: request.agent_url.clone(),
+            request: AgentNewChat {
+                client_op_id: request.client_op_id.clone(),
+                prompt: request.text.clone(),
+                agent_url: request.agent_url.clone(),
+            },
         };
         self.applied(self.quic.request(request).await)
     }

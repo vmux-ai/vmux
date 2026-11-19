@@ -42,7 +42,7 @@ Domain state, host behavior and UI projection compose separately, so headless co
 
 The web host package is a versioned declaration envelope pinned to the host's immutable SDK revision. It uses the same canonical feature manifest and startup URL, while a registered observer checks its presentation-only boundary against the host's typed event contract. Native capabilities and operations come from linked plugins; a package cannot supply executable handlers or permission grants. Startup publishes the accepted feature entity once for the selected renderer adapter. Product identity, signing and release policy remain host-owned.
 
-The desktop hosts pages and native integration. Background services retain processes and conversations beyond a page's lifetime. Mobile connects to supported host capabilities. Ordinary websites do not receive unrestricted host access.
+The desktop hosts pages and native integration. Background services retain processes and conversations beyond a page's lifetime. Remote intent enters typed service operations before validation, broker dispatch or filesystem selection; transport adapters submit individual IO requests and return their facts. The same canonical request payload can cross network and agent envelopes while their wire selectors remain stable. Mobile connects to supported host capabilities. Ordinary websites do not receive unrestricted host access.
 
 ### ECS ownership boundaries
 
