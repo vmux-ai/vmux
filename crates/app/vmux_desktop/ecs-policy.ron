@@ -130,7 +130,6 @@ legacy: [
     (key: "crates/app/vmux_desktop/src/runtime.rs||const:MIN_FOREGROUND_CEF_WAKE_INTERVAL#2", fingerprint: "c076f01635daaa05", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/runtime.rs||const:UNFOCUSED_FRAME_INTERVAL", fingerprint: "1004917c6f8434bb", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/runtime.rs||fn:hide_all_windows", fingerprint: "47cf236c640fe083", issue: "VMX-253"),
-    (key: "crates/app/vmux_desktop/src/runtime.rs||fn:request_quit", fingerprint: "375ea33921b768d4", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/runtime.rs||impl:WakePolicy", fingerprint: "df89170bd4523d1f", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/runtime.rs||struct:WakePolicy", fingerprint: "a453b313d9ee446e", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/screenshot.rs|capture|fn:capture", fingerprint: "44b6e8358ac6e5b2", issue: "VMX-253"),

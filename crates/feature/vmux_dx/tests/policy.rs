@@ -1108,6 +1108,61 @@ fn reviewed_app_extensions_reference_only_their_actual_framework_composition() {
 }
 
 #[test]
+fn component_aliases_require_used_canonical_components_and_preserve_field_ownership() {
+    for (declaration, registered, expected) in [
+        ("#[derive(Component)] struct Owner;", true, true),
+        ("#[derive(Component)] struct Owner;", false, false),
+        ("struct Owner;", true, false),
+        (
+            "struct Business { entries: Vec<String> } #[derive(Component)] struct Owner { business: Business }",
+            true,
+            false,
+        ),
+    ] {
+        let registration = if registered {
+            "app.add_systems(Update, read);"
+        } else {
+            ""
+        };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; {declaration} type Alias = Owner; fn read(input: Query<&Alias>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self, app: &mut App) {{ {registration} }} }}"
+        ));
+        let key = inventory.key("alias:Alias");
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{declaration}; registered={registered}"
+        );
+    }
+}
+
+#[test]
+fn component_aliases_do_not_approve_wrappers_shadowed_names_or_cycles() {
+    for declaration in [
+        "struct Wrapper<T>(T); #[derive(Component)] struct Owner; type Alias = Wrapper<Owner>;",
+        "mod native { #[derive(Component)] pub struct Owner; } mod shadow { pub struct Owner; } use shadow::Owner; type Alias = Owner;",
+        "type Alias = Other; type Other = Alias;",
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; {declaration} fn read(input: Query<&Alias>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let key = inventory.key("alias:Alias");
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "{declaration}"
+        );
+    }
+}
+
+#[test]
 fn stateless_framework_bootstraps_require_real_interfaces_and_registration() {
     for (binding, fields, body, expected) in [
         (
@@ -6962,23 +7017,24 @@ impl Inventory {
             Kind::Struct | Kind::Enum => entry.ecs && self.used(entry),
             Kind::Alias => {
                 self.used(entry)
-                    && entry.fields.iter().any(|field| {
-                        matches!(
-                            field.as_str(),
-                            "Query"
-                                | "ParamSet"
-                                | "With"
-                                | "Without"
-                                | "Changed"
-                                | "Added"
-                                | "Or"
-                                | "Res"
-                                | "ResMut"
-                                | "Single"
-                                | "MessageReader"
-                                | "MessageWriter"
-                        )
-                    })
+                    && (self.component_alias(entry, policy, &mut visiting.clone())
+                        || entry.fields.iter().any(|field| {
+                            matches!(
+                                field.as_str(),
+                                "Query"
+                                    | "ParamSet"
+                                    | "With"
+                                    | "Without"
+                                    | "Changed"
+                                    | "Added"
+                                    | "Or"
+                                    | "Res"
+                                    | "ResMut"
+                                    | "Single"
+                                    | "MessageReader"
+                                    | "MessageWriter"
+                            )
+                        }))
             }
             _ => false,
         };
@@ -7031,6 +7087,21 @@ impl Inventory {
             }
         }
         true
+    }
+
+    fn component_alias(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        let Some(owner) = self.nominal(entry) else {
+            return false;
+        };
+        owner.key != entry.key
+            && owner.ecs
+            && self.used(owner)
+            && self.canonical(owner, policy, visiting)
     }
 
     fn fixture_dom_mount(&self, adapter: &Declaration) -> bool {
