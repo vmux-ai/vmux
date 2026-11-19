@@ -68,6 +68,8 @@ desktop = [
 mobile = ["session", "dep:vmux_start", "dep:vmux_team"]
 service-daemon = ["daemon"]
 daemon = [
+    "dep:vmux_remote",
+    "release-flags",
     "dep:vmux_session",
     "host",
     "ecs",
@@ -86,7 +88,7 @@ capture = ["tool", "dep:vmux_input"]
 container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs", "vmux_feature/ecs"]
-release-flags = ["ecs", "dep:bevy_ecs", "vmux_feature/http", "dep:vmux_profile"]
+release-flags = ["ecs", "dep:bevy_ecs", "vmux_feature/http", "dep:vmux_profile", "dep:uuid", "dep:vmux_api"]
 feature-flags = ["release-flags", "runtime", "jobs", "host", "dep:bevy_ecs", "dep:tracing", "vmux_feature/manifest", "vmux_feature/page"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
 account-local = ["account", "vmux_account/local"]
@@ -128,11 +130,13 @@ shortcut = ["runtime", "dep:vmux_shortcut"]
 team = ["runtime", "profile-account", "dep:vmux_team"]
 space = ["layout-runtime", "dep:vmux_space"]
 service = ["runtime", "dep:vmux_service"]
-remote = ["layout-runtime", "service", "dep:vmux_remote"]
+remote = ["layout-runtime", "service", "dep:vmux_remote", "vmux_remote/host"]
 start = ["runtime", "dep:vmux_start"]
 vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
+vmux_api = { path = "../vmux_api", features = ["bevy"], optional = true }
+uuid = { workspace = true, optional = true }
 vmux_container = { path = "../../feature/vmux_container", optional = true }
 vmux_feature = { path = "../../feature/vmux_feature", default-features = false, features = ["manifest"] }
 bevy_app = { workspace = true }
@@ -155,7 +159,7 @@ vmux_layout = { path = "../../feature/vmux_layout", optional = true }
 vmux_lsp = { path = "../vmux_lsp", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
-vmux_remote = { path = "../../feature/vmux_remote", optional = true }
+vmux_remote = { path = "../../feature/vmux_remote", optional = true, default-features = false }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
 vmux_session = { path = "../../feature/vmux_session", default-features = false, optional = true }
 vmux_setting = { path = "../../feature/vmux_setting", optional = true }

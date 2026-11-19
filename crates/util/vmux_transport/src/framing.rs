@@ -34,6 +34,19 @@ impl LengthPrefixed {
         Ok(Some(body))
     }
 
+    pub async fn read_into<R>(self, reader: &mut R, body: &mut Vec<u8>) -> std::io::Result<bool>
+    where
+        R: AsyncReadExt + Unpin,
+    {
+        let mut length = [0u8; 4];
+        if !Self::fill_or_end(reader, &mut length).await? {
+            return Ok(false);
+        }
+        body.resize(self.length_of(length)?, 0);
+        reader.read_exact(body).await?;
+        Ok(true)
+    }
+
     async fn fill_or_end<R>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<bool>
     where
         R: AsyncReadExt + Unpin,

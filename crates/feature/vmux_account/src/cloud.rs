@@ -15,6 +15,7 @@ impl bevy_app::Plugin for AccountCloudPlugin {
         app.add_plugins((
             crate::availability::AvailabilityPlugin,
             transport::TransportPlugin,
+            crate::control::ControlBrokerPlugin,
         ));
         #[cfg(target_os = "macos")]
         app.add_plugins(credentials::CredentialsPlugin);

@@ -22,6 +22,55 @@ use crate::{Connection, Failure, Server, Set};
 
 pub(crate) struct TransportPlugin;
 
+#[derive(Component, Default)]
+pub(crate) struct NativePeer;
+
+#[derive(Component, Clone, PartialEq, Eq)]
+#[component(immutable)]
+pub struct LocalCertificate {
+    authority: String,
+    fingerprint: String,
+}
+
+impl LocalCertificate {
+    pub fn new(server: &Server, fingerprint: String) -> Result<Self, String> {
+        let local = server.host == "localhost"
+            || server
+                .host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|host| host.is_loopback());
+        if !local
+            || !(matches!(vmux_profile::build_profile(), "dev" | "local")
+                || vmux_profile::SessionEnvironment::is_test())
+            || fingerprint.len() != 64
+            || !fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(
+                "local Account trust requires an explicit development/test loopback certificate"
+                    .into(),
+            );
+        }
+        Ok(Self {
+            authority: server.authority(),
+            fingerprint,
+        })
+    }
+
+    pub(crate) fn trust(&self, server: &Server) -> Result<Trust, String> {
+        if self.authority != server.authority() {
+            return Err("local Account certificate scope changed".into());
+        }
+        Ok(Trust::Desktop {
+            fingerprint: self.fingerprint.clone(),
+        })
+    }
+}
+
+#[derive(Message)]
+pub(crate) struct CloseRequest {
+    pub entity: Entity,
+}
+
 impl bevy_app::Plugin for TransportPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
@@ -29,9 +78,10 @@ impl bevy_app::Plugin for TransportPlugin {
             JobPlugin::<RoundTrip>::default(),
             JobPlugin::<Delay>::default(),
         ))
+        .add_message::<CloseRequest>()
         .add_systems(
             Update,
-            (open, send, list, upload, delay).in_set(Set::Dispatch),
+            (close, open, send, list, upload, delay).in_set(Set::Dispatch),
         )
         .add_systems(
             Update,
@@ -48,10 +98,28 @@ impl bevy_app::Plugin for TransportPlugin {
 
 #[derive(Component)]
 struct Transport {
-    runtime: Arc<tokio::runtime::Runtime>,
+    runtime: Arc<NativeRuntime>,
     endpoint: quinn::Endpoint,
     connection: quinn::Connection,
     watch: tokio::task::JoinHandle<()>,
+}
+
+struct NativeRuntime(Option<tokio::runtime::Runtime>);
+
+impl std::ops::Deref for NativeRuntime {
+    type Target = tokio::runtime::Runtime;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().expect("owned Account runtime")
+    }
+}
+
+impl Drop for NativeRuntime {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.0.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl Drop for Transport {
@@ -64,30 +132,33 @@ impl Drop for Transport {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Component)]
+#[component(immutable)]
 struct Open {
     server: Server,
     wake: Option<Waker>,
     trust: Trust,
+    local_only: bool,
 }
 
 impl Job for Open {
     type Output = Result<Transport, String>;
 
     fn run(self) -> Self::Output {
-        let runtime = Arc::new(
+        let runtime = Arc::new(NativeRuntime(Some(
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
                 .enable_all()
                 .build()
                 .map_err(|error| error.to_string())?,
-        );
+        )));
         let opened = runtime.block_on(async {
             let canceled = Cancellation::wait();
             tokio::select! {
                 _ = canceled => Err("account connection canceled".to_string()),
                 result = tokio::time::timeout(Duration::from_secs(10), async {
                     let address = vmux_transport::quic::endpoint::resolve_preferring_ipv4(&self.server.host, self.server.port).await?;
+                    if self.local_only && !address.ip().is_loopback() { return Err("local Account trust requires a loopback address".into()); }
                     let endpoint = self.trust.endpoint(address)?;
                     let connection = endpoint.connect(address, &self.server.host).map_err(|error| error.to_string())?.await.map_err(|error| error.to_string())?;
                     Ok::<_, String>((endpoint, connection))
@@ -111,9 +182,10 @@ impl Job for Open {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Component)]
+#[component(immutable)]
 struct RoundTrip {
-    runtime: Arc<tokio::runtime::Runtime>,
+    runtime: Arc<NativeRuntime>,
     connection: quinn::Connection,
     request: Request,
 }
@@ -156,7 +228,8 @@ impl Cancellation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Component)]
+#[component(immutable)]
 struct Delay(u64);
 
 impl Job for Delay {
@@ -178,21 +251,49 @@ impl Job for Delay {
     }
 }
 
+fn close(
+    mut requests: MessageReader<CloseRequest>,
+    peers: Query<(), With<NativePeer>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        if peers.contains(request.entity) {
+            commands.entity(request.entity).remove::<Transport>();
+        }
+    }
+}
+
 fn open(
     mut requests: MessageReader<OpenRequest>,
-    active: Query<(), With<Connection>>,
+    active: Query<Option<&LocalCertificate>, With<NativePeer>>,
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
-        if !active.contains(request.entity) {
+        let Ok(certificate) = active.get(request.entity) else {
             continue;
-        }
-        commands.entity(request.entity).insert(JobRequest(Open {
-            trust: Trust::Relay,
+        };
+        let trust = match certificate {
+            Some(certificate) => match certificate.trust(&request.server) {
+                Ok(trust) => trust,
+                Err(error) => {
+                    commands
+                        .entity(request.entity)
+                        .insert(Rejected(Failure::storage(error)));
+                    continue;
+                }
+            },
+            None => Trust::Relay,
+        };
+        let operation = Open {
+            trust,
+            local_only: certificate.is_some(),
             server: request.server.clone(),
             wake: wake.as_ref().map(|wake| wake.0.clone()),
-        }));
+        };
+        commands
+            .entity(request.entity)
+            .insert((operation.clone(), JobRequest(operation)));
         if let Some(wake) = &wake {
             wake.0.wake_by_ref();
         }
@@ -201,7 +302,7 @@ fn open(
 
 fn send(
     mut requests: MessageReader<SendRequest>,
-    peers: Query<&Transport, With<Connection>>,
+    peers: Query<&Transport, With<NativePeer>>,
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
@@ -209,13 +310,14 @@ fn send(
         let Ok(peer) = peers.get(request.entity) else {
             continue;
         };
+        let operation = RoundTrip {
+            runtime: peer.runtime.clone(),
+            connection: peer.connection.clone(),
+            request: request.request.clone(),
+        };
         commands
             .entity(request.entity)
-            .insert(JobRequest(RoundTrip {
-                runtime: peer.runtime.clone(),
-                connection: peer.connection.clone(),
-                request: request.request.clone(),
-            }));
+            .insert((operation.clone(), JobRequest(operation)));
         if let Some(wake) = &wake {
             wake.0.wake_by_ref();
         }
@@ -235,15 +337,16 @@ fn list(
             }
             continue;
         };
+        let operation = RoundTrip {
+            runtime: peer.runtime.clone(),
+            connection: peer.connection.clone(),
+            request: Request::Profiles {
+                after: request.after,
+            },
+        };
         commands
             .entity(request.entity)
-            .insert(JobRequest(RoundTrip {
-                runtime: peer.runtime.clone(),
-                connection: peer.connection.clone(),
-                request: Request::Profiles {
-                    after: request.after,
-                },
-            }));
+            .insert((operation.clone(), JobRequest(operation)));
         if let Some(wake) = &wake {
             wake.0.wake_by_ref();
         }
@@ -280,13 +383,14 @@ fn upload(
                 }
                 continue;
             };
+            let operation = RoundTrip {
+                runtime: peer.runtime.clone(),
+                connection: peer.connection.clone(),
+                request: Request::ChangeProfile(request.change.clone()),
+            };
             commands
                 .entity(request.entity)
-                .insert(JobRequest(RoundTrip {
-                    runtime: peer.runtime.clone(),
-                    connection: peer.connection.clone(),
-                    request: Request::ChangeProfile(request.change.clone()),
-                }));
+                .insert((operation.clone(), JobRequest(operation)));
             if let Some(wake) = &wake {
                 wake.0.wake_by_ref();
             }
@@ -296,15 +400,16 @@ fn upload(
 
 fn delay(
     mut requests: MessageReader<PollRequest>,
-    active: Query<(), With<Connection>>,
+    active: Query<(), With<NativePeer>>,
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
         if active.contains(request.entity) {
+            let operation = Delay(request.seconds);
             commands
                 .entity(request.entity)
-                .insert(JobRequest(Delay(request.seconds)));
+                .insert((operation.clone(), JobRequest(operation)));
             if let Some(wake) = &wake {
                 wake.0.wake_by_ref();
             }
@@ -331,7 +436,8 @@ fn receive_open(mut results: Results<Open>, mut commands: Commands) {
         commands
             .entity(entity)
             .remove::<JobResult<Open>>()
-            .remove::<JobRequest<Open>>();
+            .remove::<JobRequest<Open>>()
+            .remove::<Open>();
     }
 }
 
@@ -352,7 +458,8 @@ fn receive(mut results: Results<RoundTrip>, mut commands: Commands) {
             .entity(entity)
             .insert(Reply(Some(response)))
             .remove::<JobResult<RoundTrip>>()
-            .remove::<JobRequest<RoundTrip>>();
+            .remove::<JobRequest<RoundTrip>>()
+            .remove::<RoundTrip>();
     }
 }
 
@@ -436,6 +543,11 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
             | Response::ProfileRefused => {
                 target.insert(Rejected(Failure::invalid_store()));
             }
+            Response::ControlAccess { .. }
+            | Response::ControlRefused
+            | Response::ControlUnavailable => {
+                target.insert(Rejected(Failure::invalid_store()));
+            }
             Response::Busy | Response::Failed | Response::Malformed => {
                 target.insert(Rejected(Failure::storage("account request refused".into())));
             }
@@ -463,11 +575,12 @@ fn receive_delay(mut results: Results<Delay>, mut commands: Commands) {
         commands
             .entity(entity)
             .remove::<JobResult<Delay>>()
-            .remove::<JobRequest<Delay>>();
+            .remove::<JobRequest<Delay>>()
+            .remove::<Delay>();
     }
 }
 
-fn closed(peers: Query<(Entity, &Transport), With<Connection>>, mut commands: Commands) {
+fn closed(peers: Query<(Entity, &Transport), With<NativePeer>>, mut commands: Commands) {
     for (entity, peer) in &peers {
         if peer.connection.close_reason().is_some() {
             commands.entity(entity).insert(Rejected(Failure::storage(

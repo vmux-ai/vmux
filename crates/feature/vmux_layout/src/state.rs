@@ -1,8 +1,7 @@
 use crate::event::{
     ActiveSession, ActiveSessionState, BookmarkUiState, HeaderState, LayoutGeometry,
-    LayoutOverlayDismissEffect, PaneTreeState, ReloadEffect, RemoteUiState, SideSheetState,
-    StackNavigationState, TabBoundaryState, TabListState, TabStripState, UpdateCleared,
-    UpdateProgress, UpdateReady,
+    LayoutOverlayDismissEffect, PaneTreeState, ReloadEffect, SideSheetState, StackNavigationState,
+    TabBoundaryState, TabListState, TabStripState, UpdateCleared, UpdateProgress, UpdateReady,
 };
 use vmux_api::bookmark::{BookmarkEditState, BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsUiState};
@@ -21,7 +20,7 @@ pub struct LayoutUiStatePatch {
     pub spaces: Option<SpacesListEvent>,
     pub space_form: Option<SpaceFormState>,
     pub projects: Option<TabBoundaryState>,
-    pub remote: Option<RemoteUiState>,
+    pub remote: Option<vmux_api::remote::UiRemote>,
     pub extensions: Option<ExtensionsUiState>,
     pub extension_popup: Option<ExtensionPopupEvent>,
     pub extension_popup_size: Option<ExtensionPopupSizeEvent>,
@@ -51,7 +50,7 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 7)]
+#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 9)]
 pub struct LayoutUiState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
@@ -61,7 +60,7 @@ pub struct LayoutUiState {
     pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
     pub header: HeaderState,
-    pub remote: RemoteUiState,
+    pub remote: vmux_api::remote::UiRemote,
     pub extensions: ExtensionsUiState,
     pub extension_popup: ExtensionPopupEvent,
     pub extension_popup_size: ExtensionPopupSizeEvent,

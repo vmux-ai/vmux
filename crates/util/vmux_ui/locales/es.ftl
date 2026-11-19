@@ -1,3 +1,33 @@
+features-configuration = Configuración
+features-configuration-help = Edita el valor tipado, la variante, las reglas ordenadas y la generación. El porcentaje usa 0–10000.
+features-configuration-stage = Preparar configuración
+features-configuration-invalid = La configuración no es válida o no coincide con el tipo declarado.
+features-typed-unavailable = Este endpoint solo admite indicadores booleanos.
+features-authorization-unavailable = La autorización para administrar indicadores no está disponible.
+
+features-assignments = Asignaciones guardadas
+features-assignment-retire = Retirar asignaciones
+features-assignment-active = Generación activa
+features-assignment-unavailable = No se pueden retirar asignaciones en este contexto.
+
+features-effective = Valor efectivo
+features-reason = Motivo
+features-variant = Variante
+features-owner = Responsable
+features-expiry = Fecha límite de eliminación
+features-lifecycle = Ciclo de vida
+features-context = Contexto de segmentación
+features-snapshot = Revisión de instantánea / vencimiento
+features-retained = Revisión de desactivación conservada
+features-override = Valor forzado de desarrollo
+features-override-apply = Aplicar valor forzado
+features-override-clear = Borrar valor forzado
+features-override-unavailable = Los valores forzados no están disponibles en este contexto.
+features-override-invalid = Introduce JSON válido que coincida con el tipo declarado.
+features-class = Clase
+features-type = Tipo de valor
+features-age = Antigüedad de la instantánea (segundos)
+
 
 features-all = Todos los indicadores
 features-boolean = Booleano

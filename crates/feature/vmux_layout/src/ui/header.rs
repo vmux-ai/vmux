@@ -285,7 +285,7 @@ fn HeaderContent() -> Element {
                     }
                     TeamFacepile { user, profiles }
                     ExtensionBar { extensions }
-                    if matches!(env!("VMUX_BUILD_PROFILE"), "dev" | "local") { RemoteControl { remote } }
+                    if matches!(env!("VMUX_BUILD_PROFILE"), "dev" | "local") && remote.available { RemoteControl { remote } }
                 }
             }
         }

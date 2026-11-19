@@ -22,9 +22,26 @@ impl RemoteState {
         RegisteredDevice::release_stale();
         let mut backoff = Backoff::new();
         loop {
+            if !*liveness.borrow() {
+                return;
+            }
             let ended = Registration::hold(&self, &liveness).await;
             ended.report();
-            tokio::time::sleep(backoff.after(&ended)).await;
+            if !*liveness.borrow() {
+                return;
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(backoff.after(&ended)) => {},
+                _ = Self::stopped(liveness.clone()) => return,
+            }
+        }
+    }
+
+    async fn stopped(mut liveness: watch::Receiver<bool>) {
+        while *liveness.borrow() {
+            if liveness.changed().await.is_err() {
+                return;
+            }
         }
     }
 }
@@ -43,7 +60,11 @@ impl Registration {
                 return SessionEnd::Unregistered(format!("desktop identity: {error}"));
             }
         };
-        match Self::open(&state.relay_token).await {
+        let opened = tokio::select! {
+            result = Self::open(&state.relay_token) => result,
+            _ = RemoteState::stopped(liveness.clone()) => return SessionEnd::Unregistered("remote admission closed".into()),
+        };
+        match opened {
             Ok(registration) => registration.serve(state, &identity, liveness).await,
             Err(reason) => SessionEnd::Unregistered(reason),
         }
@@ -99,6 +120,7 @@ impl Registration {
             Err(error) => return self.ended(error),
         };
 
+        let _registration = state.sessions.registration();
         inner
             .accept(state.clone(), liveness.clone(), self.control.clone())
             .await;

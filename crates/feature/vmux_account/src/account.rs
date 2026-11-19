@@ -6,6 +6,8 @@ pub struct AccountPlugin;
 
 impl bevy_app::Plugin for AccountPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "cloud")]
+        app.add_plugins(vmux_feature::manifest::FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_ecs::record::RecordPlugin>() {
             app.add_plugins(vmux_ecs::record::RecordPlugin);
         }
@@ -188,14 +190,24 @@ mod tests {
             let provider = self
                 .app
                 .world_mut()
-                .spawn(vmux_feature::Provider::bundle("development"))
+                .spawn((
+                    vmux_feature::Provider::bundle("development"),
+                    vmux_feature::ReleaseProvider,
+                ))
                 .id();
+            self.app.world_mut().spawn((
+                Name::new("Installation flags"),
+                vmux_feature::InstallationScope,
+                vmux_feature::flag::Context::installation("device-a"),
+            ));
             self.app.world_mut().write_message(vmux_feature::Tick(1000));
             let document = vmux_feature::snapshot::Document::decode(br#"{"schema_version":1,"environment":"development","revision":1,"issued_at":1000,"valid_until":2000,"flags":{"profile.sync":true}}"#).unwrap();
             self.app.world_mut().write_message(vmux_feature::Receive {
+                receipt: None,
                 provider,
                 generation: 0,
                 document,
+                source: vmux_feature::flag::Source::Cloud,
             });
             self.app.update();
         }
@@ -217,9 +229,11 @@ mod tests {
             }))
             .unwrap();
             world.write_message(vmux_feature::Receive {
+                receipt: None,
                 provider,
                 generation: 0,
                 document: vmux_feature::snapshot::Document::decode(&bytes).unwrap(),
+                source: vmux_feature::flag::Source::Cloud,
             });
             self.app.update();
         }
@@ -736,6 +750,10 @@ mod tests {
                 #[cfg(feature = "cloud")]
                 Request::Profiles { .. } | Request::ChangeProfile(_) => {
                     panic!("Profile synchronization needs the dedicated gateway fixture")
+                }
+                #[cfg(feature = "cloud")]
+                Request::ControlAccess { .. } => {
+                    panic!("Control access needs the real issuer fixture")
                 }
             }
         }
@@ -1679,8 +1697,16 @@ mod tests {
         let provider = fixture
             .app
             .world_mut()
-            .spawn(vmux_feature::Provider::bundle("production"))
+            .spawn((
+                vmux_feature::Provider::bundle("production"),
+                vmux_feature::ReleaseProvider,
+            ))
             .id();
+        fixture.app.world_mut().spawn((
+            Name::new("Installation flags"),
+            vmux_feature::InstallationScope,
+            vmux_feature::flag::Context::installation("device-a"),
+        ));
         fixture
             .app
             .world_mut()
@@ -1689,6 +1715,7 @@ mod tests {
             .app
             .world_mut()
             .write_message(vmux_feature::Receive {
+                receipt: None,
                 provider,
                 generation: 0,
                 document: vmux_feature::snapshot::Document {
@@ -1697,8 +1724,12 @@ mod tests {
                     revision: 1,
                     issued_at: 1000,
                     valid_until: 1100,
-                    flags: std::collections::BTreeMap::from([("account.cloud".into(), true)]),
+                    flags: std::collections::BTreeMap::from([(
+                        "account.cloud".into(),
+                        vmux_feature::flag::Configuration::boolean(true),
+                    )]),
                 },
+                source: vmux_feature::flag::Source::Cloud,
             });
         fixture.app.update();
         fixture.connect();
@@ -1718,6 +1749,7 @@ mod tests {
             .app
             .world_mut()
             .write_message(vmux_feature::Receive {
+                receipt: None,
                 provider,
                 generation: 0,
                 document: vmux_feature::snapshot::Document {
@@ -1726,8 +1758,12 @@ mod tests {
                     revision: 2,
                     issued_at: 1000,
                     valid_until: 1100,
-                    flags: std::collections::BTreeMap::from([("account.cloud".into(), false)]),
+                    flags: std::collections::BTreeMap::from([(
+                        "account.cloud".into(),
+                        vmux_feature::flag::Configuration::boolean(false),
+                    )]),
                 },
+                source: vmux_feature::flag::Source::Cloud,
             });
         fixture.result(rename).result.unwrap();
         assert!(fixture.connection().is_none());

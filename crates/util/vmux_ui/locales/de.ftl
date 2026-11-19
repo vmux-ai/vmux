@@ -1,3 +1,33 @@
+features-configuration = Konfiguration
+features-configuration-help = Bearbeiten Sie Wert, Variante, geordnete Regeln und Generation. Der Rollout-Anteil verwendet 0–10000.
+features-configuration-stage = Konfiguration vormerken
+features-configuration-invalid = Die Konfiguration ist ungültig oder passt nicht zum deklarierten Typ.
+features-typed-unavailable = Dieser Endpunkt unterstützt nur boolesche Flags.
+features-authorization-unavailable = Die Berechtigung zur Flag-Verwaltung ist nicht verfügbar.
+
+features-assignments = Gespeicherte Zuweisungen
+features-assignment-retire = Zuweisungen entfernen
+features-assignment-active = Aktive Generation
+features-assignment-unavailable = Zuweisungen können in diesem Kontext nicht entfernt werden.
+
+features-effective = Wirksamer Wert
+features-reason = Grund
+features-variant = Variante
+features-owner = Verantwortlich
+features-expiry = Entfernungsfrist
+features-lifecycle = Lebenszyklus
+features-context = Zielkontext
+features-snapshot = Snapshot-Revision / gültig bis
+features-retained = Gespeicherte Deaktivierungsrevision
+features-override = Entwicklungsüberschreibung
+features-override-apply = Überschreibung anwenden
+features-override-clear = Überschreibung entfernen
+features-override-unavailable = Überschreibungen sind in diesem Kontext nicht verfügbar.
+features-override-invalid = Geben Sie gültiges JSON für den deklarierten Flag-Typ ein.
+features-class = Klasse
+features-type = Werttyp
+features-age = Snapshot-Alter (Sekunden)
+
 
 features-all = Alle Flags
 features-boolean = Boolesch

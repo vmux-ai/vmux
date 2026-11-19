@@ -1,3 +1,33 @@
+features-configuration = Конфігурація
+features-configuration-help = Змініть значення, варіант, упорядковані правила й покоління. Частка розгортання задається в межах 0–10000.
+features-configuration-stage = Підготувати конфігурацію
+features-configuration-invalid = Конфігурація хибна або не відповідає оголошеному типу.
+features-typed-unavailable = Цей endpoint підтримує лише логічні прапорці.
+features-authorization-unavailable = Авторизація керування прапорцями недоступна.
+
+features-assignments = Збережені призначення
+features-assignment-retire = Завершити призначення
+features-assignment-active = Активне покоління
+features-assignment-unavailable = У цьому контексті не можна завершити призначення.
+
+features-effective = Чинне значення
+features-reason = Причина
+features-variant = Варіант
+features-owner = Відповідальний
+features-expiry = Термін видалення
+features-lifecycle = Життєвий цикл
+features-context = Контекст призначення
+features-snapshot = Ревізія знімка / термін дії
+features-retained = Збережена ревізія вимкнення
+features-override = Перевизначення для розробки
+features-override-apply = Застосувати перевизначення
+features-override-clear = Видалити перевизначення
+features-override-unavailable = Перевизначення недоступні в цьому контексті.
+features-override-invalid = Введіть коректний JSON, що відповідає оголошеному типу прапорця.
+features-class = Клас
+features-type = Тип значення
+features-age = Вік знімка (секунди)
+
 
 features-all = Усі прапорці
 features-boolean = Логічне значення

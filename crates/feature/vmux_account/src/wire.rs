@@ -27,6 +27,10 @@ pub(crate) enum Request {
     },
     Account,
     #[cfg(feature = "cloud")]
+    ControlAccess {
+        environment: String,
+    },
+    #[cfg(feature = "cloud")]
     Profiles {
         after: Option<Uuid>,
     },
@@ -70,6 +74,16 @@ pub(crate) enum Response {
     Account {
         id: Uuid,
     },
+    ControlAccess {
+        token: vmux_api::control::ControlToken,
+        account_id: Uuid,
+        device_id: Uuid,
+        workspace_id: Uuid,
+        environment: String,
+        expires_at: u64,
+    },
+    ControlRefused,
+    ControlUnavailable,
     Entities {
         entities: Vec<Record>,
         next: Option<Uuid>,
@@ -109,6 +123,12 @@ impl Request {
                 Self::Challenge { .. } => matches!(response, Response::Challenge { .. }),
                 Self::Authenticate { .. } => matches!(response, Response::Authenticated),
                 Self::Account => matches!(response, Response::Account { .. }),
+                Self::ControlAccess { .. } => matches!(
+                    response,
+                    Response::ControlAccess { .. }
+                        | Response::ControlRefused
+                        | Response::ControlUnavailable
+                ),
                 Self::Profiles { .. } => matches!(response, Response::Entities { .. }),
                 Self::ChangeProfile(_) => matches!(
                     response,

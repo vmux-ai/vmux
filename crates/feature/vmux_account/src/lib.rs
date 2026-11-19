@@ -17,6 +17,14 @@ pub use profile::{Failure, FailureKind};
 #[cfg(feature = "cloud")]
 pub use availability::AccountCloudFlag;
 
+#[cfg(feature = "cloud")]
+pub struct Feature;
+
+#[cfg(feature = "cloud")]
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("../feature.ron");
+}
+
 #[cfg(feature = "profile-sync")]
 pub use sync::{CheckpointChange, ExpectedScope, Origin as SyncOrigin, Pending as ProfileOutbox};
 #[cfg(feature = "profile-sync")]
@@ -39,6 +47,8 @@ pub mod local;
 
 #[cfg(feature = "cloud")]
 pub mod cloud;
+#[cfg(feature = "cloud")]
+pub mod control;
 
 #[cfg(feature = "cloud")]
 mod sync;

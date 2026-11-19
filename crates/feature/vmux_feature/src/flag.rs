@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+pub use assignment::Assignment;
+pub use context::{Attribute, Context, ContextFailure, Subject, SubjectKind};
+pub use decision::{CastError, Decision, Details, Reason, Retention, Snapshot, Source};
+pub use targeting::{Condition, Configuration, Operator, Rollout, Rule};
+
+mod assignment;
+mod context;
+mod decision;
+mod targeting;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Boolean(bool),
@@ -10,6 +20,46 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn as_boolean(&self) -> Option<bool> {
+        match self {
+            Self::Boolean(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn encode(&self) -> String {
+        let value = match self {
+            Self::Boolean(value) => serde_json::Value::Bool(*value),
+            Self::String(value) => serde_json::Value::String(value.clone()),
+            Self::Integer(value) => serde_json::Value::Number((*value).into()),
+            Self::Float(value) => serde_json::json!(value),
+            Self::Json(value) => value.clone(),
+        };
+        value.to_string()
+    }
+
+    pub fn decode(value_type: ValueType, text: &str) -> Result<Self, String> {
+        if text.len() > 16384 {
+            return Err("flag value exceeds 16 KiB".into());
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(text).map_err(|error| error.to_string())?;
+        let result = match (value_type, value) {
+            (ValueType::Boolean, serde_json::Value::Bool(value)) => Self::Boolean(value),
+            (ValueType::String, serde_json::Value::String(value)) => Self::String(value),
+            (ValueType::Integer, serde_json::Value::Number(value)) if value.is_i64() => {
+                Self::Integer(value.as_i64().unwrap())
+            }
+            (ValueType::Float, serde_json::Value::Number(value)) if value.is_f64() => {
+                Self::Float(value.as_f64().unwrap())
+            }
+            (ValueType::Json, value) => Self::Json(value),
+            _ => return Err("flag value does not match its declared type".into()),
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
     pub fn value_type(&self) -> ValueType {
         match self {
             Self::Boolean(_) => ValueType::Boolean,
@@ -59,6 +109,7 @@ pub enum Lifecycle {
     #[default]
     Persistent,
     Temporary,
+    Retired,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -98,7 +149,7 @@ impl Declaration {
                 self.key
             ));
         }
-        if self.lifecycle == Lifecycle::Temporary
+        if matches!(self.lifecycle, Lifecycle::Temporary | Lifecycle::Retired)
             && (self.owner.trim().is_empty() || self.expiry.is_none())
         {
             return Err(format!(

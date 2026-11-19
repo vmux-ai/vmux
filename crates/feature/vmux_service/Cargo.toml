@@ -14,12 +14,12 @@ name = "vmux_service"
 path = "src/lib.rs"
 
 [dependencies]
-vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "http"] }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_transport = { path = "../../util/vmux_transport" }
-vmux_api = { path = "../../util/vmux_api" }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 base64 = "0.22"
@@ -27,6 +27,7 @@ bevy = { workspace = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 libc = "0.2"
+async-io = "2"
 socket2 = "0.6"
 tokio = { workspace = true, features = ["process", "io-util"] }
 quinn = { workspace = true }

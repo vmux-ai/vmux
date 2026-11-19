@@ -9,14 +9,14 @@ use vmux_ui::i18n::translate;
 
 use crate::event::{
     LayoutOverlayEvent, RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest,
-    RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
+    RemotePhase, RemoteRequest, RemoteRevokeRequest,
 };
 
 use qrcode::QrCode;
 use qrcode::render::svg;
 
 #[component]
-pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
+pub(crate) fn RemoteControl(remote: vmux_api::remote::UiRemote) -> Element {
     let mut open = use_signal(|| false);
     Dismissal::use_listener(open(), EventHandler::new(move |()| open.set(false)));
     use_effect(move || {
@@ -36,7 +36,7 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
     rsx! {
         div { class: "relative ml-1 shrink-0",
             div {
-                class: if remote.enabled {
+                class: if remote.requested {
                     "group flex h-7 items-center overflow-hidden rounded-full border border-success/25 bg-success/10 text-success transition-colors hover:bg-success/20"
                 } else {
                     "group flex h-7 items-center overflow-hidden rounded-full border border-foreground/10 bg-foreground/[0.04] text-muted-foreground transition-colors hover:bg-foreground/[0.09]"
@@ -46,21 +46,21 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
                     class: "flex h-full items-center gap-1.5 pl-2 pr-1.5 text-[10px] font-semibold",
                     aria_label: translate("live-title"),
                     onclick: move |_| open.set(!open()),
-                    span { class: if remote.enabled { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-muted-foreground/50" } }
+                    span { class: if remote.requested { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-muted-foreground/50" } }
                     {translate("live-title")}
                 }
                 button {
                     r#type: "button",
                     class: "relative mx-1 h-4 w-7 shrink-0 rounded-full bg-foreground/15",
                     aria_label: translate("live-toggle"),
-                    aria_pressed: remote.enabled,
+                    aria_pressed: remote.requested,
                     onclick: move |_| {
                         let _ = send(&RemoteRequest {
-                            enabled: !remote.enabled,
+                            enabled: !remote.requested,
                         });
                     },
                     span {
-                        class: if remote.enabled {
+                        class: if remote.requested {
                             "absolute left-3.5 top-0.5 size-3 rounded-full bg-white shadow-sm transition-all"
                         } else {
                             "absolute left-0.5 top-0.5 size-3 rounded-full bg-foreground/70 shadow-sm transition-all"
@@ -91,14 +91,15 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
 }
 
 #[component]
-fn RemotePanel(remote: RemoteUiState) -> Element {
+fn RemotePanel(remote: vmux_api::remote::UiRemote) -> Element {
     let mut copied = use_signal(|| false);
     let active = remote.phase == RemotePhase::Enabled;
-    let transitioning = remote.phase == RemotePhase::Starting;
+    let transitioning = matches!(remote.phase, RemotePhase::Starting | RemotePhase::Stopping);
     let status = match remote.phase {
         RemotePhase::Disabled | RemotePhase::Enabled => None,
-        RemotePhase::Starting if remote.enabled => Some(translate("live-starting")),
+        RemotePhase::Starting if remote.requested => Some(translate("live-starting")),
         RemotePhase::Starting => Some(translate("live-stopping")),
+        RemotePhase::Stopping => Some(translate("live-stopping")),
         RemotePhase::Error => Some(translate("live-attention")),
     };
     let qr = if active && remote.pairing_visible && !remote.pairing_deep_link.is_empty() {
@@ -110,7 +111,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
         div { class: "p-3",
             div { class: "flex items-center gap-2",
                 div {
-                    class: if remote.enabled {
+                    class: if remote.requested {
                         "flex size-7 shrink-0 items-center justify-center rounded-md bg-success/15 text-success"
                     } else {
                         "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/5 text-muted-foreground"
@@ -136,20 +137,20 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                 }
                 button {
                     r#type: "button",
-                    class: if remote.enabled {
+                    class: if remote.requested {
                         "relative h-5 w-9 shrink-0 rounded-full bg-success transition-colors"
                     } else {
                         "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
                     },
                     aria_label: translate("live-toggle"),
-                    aria_pressed: remote.enabled,
+                    aria_pressed: remote.requested,
                     onclick: move |_| {
                         let _ = send(&RemoteRequest {
-                            enabled: !remote.enabled,
+                            enabled: !remote.requested,
                         });
                     },
                     span {
-                        class: if remote.enabled {
+                        class: if remote.requested {
                             "absolute left-[18px] top-0.5 size-4 rounded-full bg-white shadow-sm transition-all"
                         } else {
                             "absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-all"
@@ -165,7 +166,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                         class: "mt-1.5 text-[10px] font-semibold text-foreground hover:opacity-70",
                         onclick: move |_| {
                             let _ = send(&RemoteRequest {
-                                enabled: remote.enabled,
+                                enabled: remote.requested,
                             });
                         },
                         {translate("common-retry")}

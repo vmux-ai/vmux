@@ -59,7 +59,7 @@ pub(crate) enum Flow {
     Progress,
 }
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, PartialEq, Eq)]
 #[component(immutable)]
 pub struct Server {
     pub host: String,
@@ -97,6 +97,7 @@ pub struct CancelConnectRequest {
 
 #[derive(Component)]
 #[require(Phase)]
+#[cfg_attr(feature = "cloud", require(crate::cloud::transport::NativePeer))]
 pub struct Connection;
 
 #[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
@@ -173,13 +174,13 @@ pub(crate) struct DeviceKey {
 }
 
 impl DeviceKey {
-    fn public_key(&self) -> Result<String, String> {
+    pub(crate) fn public_key(&self) -> Result<String, String> {
         let key = ring::signature::Ed25519KeyPair::from_seed_unchecked(self.seed.as_ref())
             .map_err(|_| "invalid device key")?;
         Ok(Hex::encode(key.public_key().as_ref()))
     }
 
-    fn sign(&self, nonce: &str) -> Result<String, String> {
+    pub(crate) fn sign(&self, nonce: &str) -> Result<String, String> {
         let nonce = Hex::decode(nonce)?;
         if nonce.len() != 32 {
             return Err("invalid account challenge".into());

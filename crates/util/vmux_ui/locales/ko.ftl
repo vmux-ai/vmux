@@ -1,3 +1,33 @@
+features-configuration = 구성
+features-configuration-help = 유형별 값, 변형, 순서가 있는 규칙 및 실험 세대를 편집합니다. 배포 비율은 0–10000입니다.
+features-configuration-stage = 구성 반영
+features-configuration-invalid = 구성이 올바르지 않거나 선언된 값 유형과 일치하지 않습니다.
+features-typed-unavailable = 이 endpoint는 boolean 플래그만 지원합니다.
+features-authorization-unavailable = 플래그 관리 권한을 사용할 수 없습니다.
+
+features-assignments = 저장된 할당
+features-assignment-retire = 할당 종료
+features-assignment-active = 활성 세대
+features-assignment-unavailable = 이 컨텍스트에서는 할당을 종료할 수 없습니다.
+
+features-effective = 유효 값
+features-reason = 평가 이유
+features-variant = 변형
+features-owner = 담당자
+features-expiry = 제거 기한
+features-lifecycle = 수명 주기
+features-context = 대상 컨텍스트
+features-snapshot = 스냅샷 리비전 / 만료
+features-retained = 보존된 비활성화 리비전
+features-override = 개발용 재정의
+features-override-apply = 재정의 적용
+features-override-clear = 재정의 해제
+features-override-unavailable = 이 컨텍스트에서는 재정의를 사용할 수 없습니다.
+features-override-invalid = 선언된 플래그 유형에 맞는 올바른 JSON을 입력하세요.
+features-class = 분류
+features-type = 값 유형
+features-age = 스냅샷 경과 시간(초)
+
 
 features-all = 모든 플래그
 features-boolean = 불리언
