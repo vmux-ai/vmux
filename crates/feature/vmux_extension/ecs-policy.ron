@@ -213,12 +213,8 @@ legacy: [
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||const:POPUP_SIZE_CHANNEL", fingerprint: "fc9023079bb9d8ae", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:dismiss", fingerprint: "749451a97fdf4f0a", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:inject_sizing", fingerprint: "7eb942b8e8944ede", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:present", fingerprint: "5e74482094e5575e", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:size", fingerprint: "8b519ea4cc08a19d", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||impl:PopupHost < \'_ , \'_ >", fingerprint: "5f50fe4a97cc4f5a", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||struct:DismissRequest", fingerprint: "9abdcd9324d9f22e", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||struct:ExtensionPopupSizeRequest", fingerprint: "b7c6f3b02d1bf757", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||struct:PopupHost", fingerprint: "f9bc894c8a5f74a4", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/web_store.rs||const:ADD_CHANNEL", fingerprint: "5df4407b978e0992", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/web_store.rs||const:INJECTOR_JS", fingerprint: "60c63350851e7e15", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/manager_page/web_store.rs||const:MANAGE_CHANNEL", fingerprint: "fbcbe6870bce1492", issue: "VMX-253"),
@@ -246,7 +242,6 @@ legacy: [
     (key: "crates/feature/vmux_extension/src/host/project.rs||alias:PageData", fingerprint: "01e0898cbaf49529", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/project.rs||impl:ExtensionModel", fingerprint: "0ae9bca85c33c6c8", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/project.rs||impl:PageCandidate", fingerprint: "ed16460657945da7", issue: "VMX-253"),
-    (key: "crates/feature/vmux_extension/src/host/project.rs||impl:Plugin for ExtensionProjectPlugin", fingerprint: "9d1fa776a6f186c2", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/project.rs||impl:ProjectedTab", fingerprint: "352df68002e7ee67", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/project.rs||impl:ProjectionData < \'_ , \'_ >", fingerprint: "df62e87453f99281", issue: "VMX-253"),
     (key: "crates/feature/vmux_extension/src/host/project.rs||struct:ExtensionProjectPlugin", fingerprint: "596a73c1794879bd", issue: "VMX-253"),
@@ -394,6 +389,9 @@ legacy: [
     (key: "crates/feature/vmux_extension/tests/fixtures/extension_conformance/echo.js||script", fingerprint: "ceea20ece846e979", issue: "VMX-253"),
 ],
 boundaries: [
+    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||fn:size", fingerprint: "10469602993452b2", interface: "extension popup DOM sizing to layout UI projection", input: "ECS: crates/feature/vmux_extension/src/host/model.rs||struct:ExtensionPopup", output: "external: bounded popup preferred-size presentation", lifetime: "one current extension popup sizing notification", bounds: "validated channel and finite document dimensions only; popup lifecycle stays in registered systems", teardown: "popup closure drops sizing notifications and projected values", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_extension/src/host/project.rs||impl:Plugin for ExtensionProjectPlugin", fingerprint: "9d1fa776a6f186c2", interface: "Bevy App installation of canonical state and private systems", input: "ECS: crates/feature/vmux_extension/src/host/model.rs||struct:ExtensionModel", output: "external: registered Bevy resources, systems, observers and schedule metadata", lifetime: "one owning plugin installation", bounds: "framework registration only; registered systems and canonical entities own decisions and transitions", teardown: "App drop releases schedules and state", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_extension/src/host/project.rs||struct:ExtensionProjectionSet", fingerprint: "684d07677721ae70", interface: "Bevy SystemSet scheduling identity for registered owning systems", input: "external: Bevy schedule registration", output: "ECS: crates/feature/vmux_extension/src/host/model.rs||struct:ExtensionModel", lifetime: "one owning App schedule installation", bounds: "immutable scheduler metadata only; registered systems retain canonical state and transition authority", teardown: "App schedule drop releases registration identities", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_extension/src/host/project.rs||impl:Plugin for ExtensionProjectPlugin")),
     (key: "crates/feature/vmux_extension/src/install.rs||struct:DownloadJob", fingerprint: "2681c349f1a7bcbf", interface: "Native Chrome Web Store CRX HTTP download and byte-progress interface", input: "ECS: crates/feature/vmux_extension/src/install.rs||struct:ResolvedInstall", output: "external: one downloaded archive and bounded byte-progress notifications", lifetime: "one admitted download worker under its operation staging lease", bounds: "one requested HTTP response streamed to the selected archive path; no retry or catalog mutation", teardown: "response, file and progress channel release after IO drain; staging ownership continues through unpack and materialization", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_extension/src/install.rs||impl:Job for DownloadJob", fingerprint: "8669ebaeae4f3148", interface: "Native Chrome Web Store CRX HTTP download and byte-progress interface", input: "ECS: crates/feature/vmux_extension/src/install.rs||struct:ResolvedInstall", output: "external: one downloaded archive and bounded byte-progress notifications", lifetime: "one admitted download worker under its operation staging lease", bounds: "one requested HTTP response streamed to the selected archive path; no retry or catalog mutation", teardown: "response, file and progress channel release after IO drain; staging ownership continues through unpack and materialization", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_extension/src/install.rs||struct:UnpackJob", fingerprint: "3b763a8fd72abbdb", interface: "Native verified CRX archive read and staged unpack", input: "ECS: crates/feature/vmux_extension/src/core.rs||struct:InstallRequest", output: "external: verified immutable package files and decoded Chrome manifest metadata", lifetime: "one requested archive unpack under the canonical operation staging lease", bounds: "one bounded archive read, cryptographic verification and native extraction; no catalog mutation, operation selection or retry", teardown: "archive bytes drop after worker completion; the staging lease moves to materialization and owns scheduled cleanup until completion", architecture: "ECS ownership boundaries"),
@@ -428,6 +426,12 @@ values: [
     (key: "crates/feature/vmux_extension/src/core.rs||struct:Evidence", owner: "crates/feature/vmux_extension/src/core.rs||struct:PreparedEvidence", lifetime: "one prepared evidence component on a canonical extension root; removed by the registered evidence system after reconciliation"),
 ],
 shape: (
+bodies: [
+],
+
+enums: [
+],
+
   debt: [
     (key: "crates/feature/vmux_extension/src/host/model.rs||enum:ExtensionModelEvent", fingerprint: "5f19c5fe5eed0af2", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/host/runtime.rs||enum:PrepareRuntimeError", fingerprint: "5b8514e759a5f514", issue: "VMX-253", finding: "AU-13"),
@@ -439,7 +443,6 @@ shape: (
     (key: "crates/feature/vmux_extension/src/snapshot.rs||enum:EnableForProfileResult", fingerprint: "61e48ffe1f1a4638", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/match_pattern.rs||enum:Scheme", fingerprint: "5577e15c8ae6e333", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/host/bridge_page.rs||enum:ExtensionBridgeRole", fingerprint: "593a20dde9d6eb67", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_extension/src/host/manager_page/popup.rs||impl:PopupHost < \'_ , \'_ >::show", fingerprint: "0b247e0d2bc0ca52", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_extension/src/bin/vmux-extension-conformance.rs||enum:ConformanceCommand", fingerprint: "b2ba6f9ee0915662", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/protocol.rs||enum:BridgeServerMessage", fingerprint: "3b0e6c450696cca7", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_extension/src/protocol.rs||enum:ExtensionContextKind", fingerprint: "ad50559ea95aba80", issue: "VMX-253", finding: "AU-13"),

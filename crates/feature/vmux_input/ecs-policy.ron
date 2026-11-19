@@ -4,6 +4,7 @@ legacy: [
     (key: "crates/feature/vmux_input/src/capture.rs|tests|struct:CaptureFixture", fingerprint: "86160ce80628fdb2", issue: "VMX-253"),
 ],
 boundaries: [
+    (key: "crates/feature/vmux_input/src/keyboard.rs||struct:KeyboardInitializeSet", owner: Some("crates/feature/vmux_input/src/keyboard.rs||impl:Plugin for KeyboardPlugin"), fingerprint: "9c0e83c687e4dd1b", interface: "Bevy PreUpdate SystemSet label for keyboard stream initialization", input: "ECS: crates/feature/vmux_input/src/keyboard.rs||struct:KeyboardPress", output: "external: registered Bevy schedule ordering before native input delivery", lifetime: "one KeyboardPlugin installation", bounds: "stateless schedule label; canonical stream entities own all keyboard state and routing decisions", teardown: "the owning App drops its schedule registrations", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_input/src/capture.rs||struct:CapturePlugin", fingerprint: "9c39831ed9892b65", interface: "Bevy capture tool/feature schema and typed request registration", input: "external: selected Bevy App installation", output: "ECS: crates/feature/vmux_input/src/capture.rs||struct:ScreenshotRequest", lifetime: "one capture plugin installation", bounds: "static tool schemas, messages and private system scheduling only; systems own normalization, routing and result interpretation", teardown: "registrations end with App; accepted native capture remains owned through concrete request/response delivery", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_input/src/capture.rs||impl:Plugin for CapturePlugin", fingerprint: "ff0a04a19a1c301f", interface: "Bevy capture tool/feature schema and typed request registration", input: "external: selected Bevy App installation", output: "ECS: crates/feature/vmux_input/src/capture.rs||struct:ScreenshotRequest", lifetime: "one capture plugin installation", bounds: "static tool schemas, messages and private system scheduling only; systems own normalization, routing and result interpretation", teardown: "registrations end with App; accepted native capture remains owned through concrete request/response delivery", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_input/src/wheel.rs||struct:WheelPlugin", fingerprint: "e833cf9753d253a0", interface: "Bevy App plugin and private schedule registration for raw native wheel ingress", input: "external: Bevy App composition", output: "ECS: crates/feature/vmux_input/src/wheel.rs||struct:NativeWheelInput", lifetime: "one App plugin installation", bounds: "registration only; canonical entities and registered systems retain decisions and state", teardown: "registered schedules and observations retire with their App", architecture: "ECS ownership boundaries"),
@@ -54,6 +55,9 @@ values: [
     (key: "crates/feature/vmux_input/src/keyboard.rs||struct:NativePrefix", owner: "crates/feature/vmux_input/src/keyboard.rs||struct:NativeChord", lifetime: "one accepted prefix of a live canonical keyboard stream"),
 ],
 shape: (
+bodies: [
+],
+
   enums: [
     (key: "crates/feature/vmux_input/src/wheel.rs||enum:WheelPhase", fingerprint: "44f16684b42c26ed", role: Scalar, owner: "crates/feature/vmux_input/src/wheel.rs||struct:NativeWheelInput", reason: "AppKit phase/momentumPhase discriminator on one native input sample; registered systems interpret it and it never multiplexes independent domain commands"),
   ],

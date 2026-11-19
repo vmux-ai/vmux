@@ -10361,6 +10361,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_macro",
+ "zeroize",
 ]
 
 [[package]]
@@ -10467,6 +10468,7 @@ dependencies = [
  "vmux_page",
  "vmux_path",
  "vmux_project",
+ "vmux_session",
  "vmux_setting",
  "vmux_space",
  "vmux_start",
@@ -10493,10 +10495,12 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "vmux_api",
  "vmux_app",
  "vmux_dx",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10752,6 +10756,7 @@ dependencies = [
  "vmux_mcp",
  "vmux_page",
  "vmux_path",
+ "vmux_process",
  "vmux_project",
  "vmux_session",
  "vmux_setting",
@@ -11135,6 +11140,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "tempfile",
  "tokio",
  "url",
  "vmux_api",
@@ -11408,7 +11414,9 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
+ "dioxus-html",
  "dioxus-primitives",
+ "dioxus-ssr",
  "moonshine-save",
  "rfd 0.15.4",
  "rkyv",

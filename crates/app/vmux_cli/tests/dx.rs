@@ -744,6 +744,24 @@ fn positional_branches_refuse_a_missing_worktree_before_building_or_launching() 
             .failure()
             .stderr(predicate::str::contains("Branch has no worktree"));
     }
+    for command in ["build", "run"] {
+        for option in ["-b", "--branch"] {
+            fixture
+                .command()
+                .args([command, option, "missing-dx-fixture-branch"])
+                .assert()
+                .failure()
+                .stderr(predicate::str::contains("Branch has no worktree"));
+        }
+        fixture
+            .command()
+            .args([command, "one-branch", "-b", "another-branch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Conflicting positional and option branch values",
+            ));
+    }
     assert!(!fixture.root.join("open.log").exists());
 }
 
@@ -1495,6 +1513,75 @@ exec sleep 60
 
 #[test]
 #[cfg(all(target_os = "macos", not(feature = "runtime")))]
+fn onboarding_launch_isolates_each_attempt_and_preserves_normal_launch_settings() {
+    let fixture = Fixture::new();
+    fixture.command().args(["build"]).assert().success();
+    fixture.script(
+        "open",
+        "#!/bin/sh\nprintf '%s\\0' \"$@\" > \"$TEST_OPEN_LOG\"\n",
+    );
+    let persistent = fixture.directory.path().join("persistent");
+    std::fs::create_dir_all(&persistent).unwrap();
+    std::fs::write(persistent.join("existing"), "keep").unwrap();
+    let mut created = Vec::new();
+    for command in ["run", "desktop"] {
+        fixture
+            .command()
+            .args([command, "main"])
+            .env("VMUX_ONBOARDING_FRESH", "1")
+            .env("VMUX_PROFILE", "work")
+            .env("VMUX_DATA_DIR", &persistent)
+            .env("VMUX_TEST_ENV_KEYS", "1")
+            .assert()
+            .success();
+        let output = std::fs::read(fixture.root.join("open.log")).unwrap();
+        let arguments: Vec<_> = output
+            .split(|byte| *byte == 0)
+            .filter(|value| !value.is_empty())
+            .map(|value| std::str::from_utf8(value).unwrap())
+            .collect();
+        assert!(arguments.contains(&"VMUX_PROFILE=fresh"));
+        assert!(arguments.contains(&"VMUX_TEST_ENV_KEYS=0"));
+        let data = arguments
+            .iter()
+            .find_map(|value| value.strip_prefix("VMUX_DATA_DIR="))
+            .unwrap();
+        let data = std::path::PathBuf::from(data);
+        assert!(data.join("profiles/fresh/home").is_dir());
+        assert!(data.join("config/projects").is_dir());
+        assert!(!data.join("existing").exists());
+        assert!(!created.contains(&data));
+        created.push(data);
+    }
+    fixture
+        .command()
+        .args(["desktop", "main"])
+        .env_remove("VMUX_ONBOARDING_FRESH")
+        .env("VMUX_PROFILE", "work")
+        .env("VMUX_DATA_DIR", &persistent)
+        .env("VMUX_TEST_ENV_KEYS", "1")
+        .assert()
+        .success();
+    let output = std::fs::read(fixture.root.join("open.log")).unwrap();
+    let arguments: Vec<_> = output
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .map(|value| std::str::from_utf8(value).unwrap())
+        .collect();
+    assert!(arguments.contains(&"VMUX_PROFILE=work"));
+    assert!(arguments.contains(&"VMUX_TEST_ENV_KEYS=1"));
+    assert!(arguments.contains(&format!("VMUX_DATA_DIR={}", persistent.display()).as_str()));
+    assert_eq!(
+        std::fs::read_to_string(persistent.join("existing")).unwrap(),
+        "keep"
+    );
+    for directory in created {
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "macos", not(feature = "runtime")))]
 fn debug_fifo_inputs_are_refused_before_launching() {
     for name in [".vmux-dev-ready", "vmux"] {
         let fixture = Fixture::new();
@@ -1805,6 +1892,7 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
             .env("VMUX_PROFILE", "work")
             .env_remove("VMUX_TEST")
             .env("VMUX_DATA_DIR", &data)
+            .env("VMUX_TEST_ENV_KEYS", "1")
             .env("VMUX_REMOTE_RELAY_URL", "https://localhost:8787")
             .assert()
             .success();
@@ -1821,6 +1909,8 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
                 "VMUX_PROFILE=work".into(),
                 "--env".into(),
                 format!("VMUX_DATA_DIR={}", data.display()),
+                "--env".into(),
+                "VMUX_TEST_ENV_KEYS=1".into(),
                 "--env".into(),
                 "VMUX_REMOTE_RELAY_URL=https://localhost:8787".into(),
                 release
