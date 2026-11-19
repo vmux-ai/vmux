@@ -1,5 +1,6 @@
 use super::auth::{Credentials, Source};
 use super::{McpCatalogServer, McpCompletion, PendingMcpOperation};
+use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
 use crate::{ToolStore, ToolsManifest};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task};
@@ -20,11 +21,8 @@ impl Plugin for RemovePlugin {
                 (
                     poll::<StoreLease>,
                     poll::<CredentialLease>,
-                    poll::<Manifest>,
                     poll::<Credential>,
-                    poll::<ManifestWritten>,
                     poll::<CredentialRemoved>,
-                    poll::<ManifestRestored>,
                     poll::<CredentialRestored>,
                 ),
             )
@@ -74,10 +72,6 @@ struct Failed<T: Component>(String, std::marker::PhantomData<fn() -> T>);
 #[derive(Component)]
 struct Failure(String);
 #[derive(Component)]
-struct StoreLease {
-    _lease: crate::manifest::Lease,
-}
-#[derive(Component)]
 struct CredentialLease {
     _lease: McpCredentialTransaction,
 }
@@ -86,11 +80,7 @@ struct Manifest(Option<ToolsManifest>);
 #[derive(Component)]
 struct Credential(Option<McpOauthCredentials>);
 #[derive(Component)]
-struct ManifestWritten;
-#[derive(Component)]
 struct CredentialRemoved;
-#[derive(Component)]
-struct ManifestRestored;
 #[derive(Component)]
 struct CredentialRestored;
 
@@ -269,42 +259,41 @@ fn credential_lock(requests: CredentialLockRequests<'_, '_>, mut commands: Comma
     }
 }
 
-type ReadManifestRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static ToolStore,
-        Option<&'static Manifest>,
-        Option<&'static Failed<Manifest>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
-fn read_manifest(requests: ReadManifestRequests<'_, '_>, mut commands: Commands) {
-    for (entity, phase, store, done, error) in &requests {
+fn read_manifest(
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            Option<&ReadResult>,
+            Option<&ReadRequest>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, phase, result, pending) in &requests {
         if !matches!(phase.0, Phase::Manifest) {
             continue;
         }
-        if let Some(error) = error {
+        if let Some(result) = result {
+            commands.entity(entity).remove::<ReadResult>();
+            match &result.0 {
+                Ok(manifest) => {
+                    commands.entity(entity).insert((
+                        Manifest(Some(manifest.clone())),
+                        PhaseState(Phase::Credential),
+                    ));
+                }
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert((Failure(error.clone()), PhaseState(Phase::Complete)));
+                }
+            }
+        } else if pending.is_none() {
             commands
                 .entity(entity)
-                .insert((Failure(error.0.clone()), PhaseState(Phase::Complete)));
-        } else if done.is_some() {
-            commands
-                .entity(entity)
-                .insert(PhaseState(Phase::Credential));
-        } else {
-            let store = store.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(
-                    IoTaskPool::get().spawn(async move {
-                        store.load().map(|manifest| Manifest(Some(manifest)))
-                    }),
-                ),
-            ));
+                .insert(ReadRequest { retain_lease: true });
         }
     }
 }
@@ -392,45 +381,45 @@ fn prepare(
     }
 }
 
-type WriteManifestRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static Source,
-        &'static ToolStore,
-        &'static Manifest,
-        Option<&'static ManifestWritten>,
-        Option<&'static Failed<ManifestWritten>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
-fn write_manifest(requests: WriteManifestRequests<'_, '_>, mut commands: Commands) {
-    for (entity, phase, source, store, manifest, done, error) in &requests {
+fn write_manifest(
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            &Source,
+            &Manifest,
+            Option<&WriteResult>,
+            Option<&WriteRequest>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, phase, source, original, result, pending) in &requests {
         if !matches!(phase.0, Phase::WriteManifest) {
             continue;
         }
-        if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((Failure(error.0.clone()), PhaseState(Phase::RestoreManifest)));
-        } else if done.is_some() {
-            commands
-                .entity(entity)
-                .insert(PhaseState(Phase::RemoveCredential));
-        } else {
-            let mut planned = manifest.0.as_ref().unwrap().clone();
-            planned.mcp.servers.remove(&source.id);
-            let store = store.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(
-                    IoTaskPool::get()
-                        .spawn(async move { store.save(&planned).map(|_| ManifestWritten) }),
-                ),
-            ));
+        if let Some(result) = result {
+            commands.entity(entity).remove::<WriteResult>();
+            match &result.0 {
+                Ok(()) => {
+                    commands
+                        .entity(entity)
+                        .insert(PhaseState(Phase::RemoveCredential));
+                }
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert((Failure(error.clone()), PhaseState(Phase::RestoreManifest)));
+                }
+            }
+        } else if pending.is_none() {
+            let mut manifest = original.0.as_ref().unwrap().clone();
+            manifest.mcp.servers.remove(&source.id);
+            commands.entity(entity).insert(WriteRequest {
+                manifest,
+                retain_lease: true,
+            });
         }
     }
 }
@@ -474,27 +463,22 @@ fn delete(requests: RemoveCredentialRequests<'_, '_>, mut commands: Commands) {
     }
 }
 
-type RollbackRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static Source,
-        &'static ToolStore,
-        &'static Credentials,
-        &'static Manifest,
-        &'static Credential,
-        Option<&'static ManifestRestored>,
-        Option<&'static Failed<ManifestRestored>>,
-        Option<&'static CredentialRestored>,
-        Option<&'static Failed<CredentialRestored>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
 fn rollback(
-    requests: RollbackRequests<'_, '_>,
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            &Source,
+            &Credentials,
+            &Manifest,
+            &Credential,
+            Option<&WriteResult>,
+            Option<&WriteRequest>,
+            Option<&CredentialRestored>,
+            Option<&Failed<CredentialRestored>>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
     mut failures: Query<&mut Failure>,
     mut commands: Commands,
 ) {
@@ -502,39 +486,34 @@ fn rollback(
         entity,
         phase,
         source,
-        store,
         credentials,
         original,
-        credential,
-        manifest_done,
-        manifest_error,
+        old,
+        manifest,
+        pending,
         credential_done,
         credential_error,
     ) in &requests
     {
         if matches!(phase.0, Phase::RestoreManifest) {
-            if manifest_done.is_some() || manifest_error.is_some() {
-                if let Some(error) = manifest_error
+            if let Some(result) = manifest {
+                commands.entity(entity).remove::<WriteResult>();
+                if let Err(error) = &result.0
                     && let Ok(mut failure) = failures.get_mut(entity)
                 {
                     failure
                         .0
-                        .push_str(&format!("; manifest rollback failed: {}", error.0));
+                        .push_str(&format!("; manifest rollback failed: {error}"));
                 }
                 commands
                     .entity(entity)
                     .insert(PhaseState(Phase::RestoreCredential));
-                continue;
+            } else if pending.is_none() {
+                commands.entity(entity).insert(WriteRequest {
+                    manifest: original.0.as_ref().unwrap().clone(),
+                    retain_lease: true,
+                });
             }
-            let store = store.clone();
-            let original = original.0.as_ref().unwrap().clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(
-                    IoTaskPool::get()
-                        .spawn(async move { store.save(&original).map(|_| ManifestRestored) }),
-                ),
-            ));
         } else if matches!(phase.0, Phase::RestoreCredential) {
             if credential_done.is_some() || credential_error.is_some() {
                 if let Some(error) = credential_error
@@ -549,12 +528,12 @@ fn rollback(
             }
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
-            let original = credential.0.clone();
+            let old = old.0.clone();
             commands.entity(entity).insert((
                 Busy,
                 IoTask(IoTaskPool::get().spawn(async move {
-                    let result = match original {
-                        Some(original) => storage.store(&id, &original),
+                    let result = match old {
+                        Some(old) => storage.store(&id, &old),
                         None => storage.remove(&id),
                     };
                     result.map(|_| CredentialRestored)

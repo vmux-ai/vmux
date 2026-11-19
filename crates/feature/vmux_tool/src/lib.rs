@@ -68,6 +68,7 @@ mod registry;
 #[cfg(ui)]
 mod route;
 pub mod state;
+mod storage;
 #[cfg(ui)]
 mod ui;
 
@@ -110,6 +111,9 @@ pub struct ToolRuntimePlugin;
 
 impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<storage::StoragePlugin>() {
+            app.add_plugins(storage::StoragePlugin);
+        }
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
@@ -1034,28 +1038,69 @@ command = "vmux"
     #[test]
     fn package_imports_merge_without_removing_existing_desired_state() {
         let temp = tempfile::tempdir().unwrap();
-        let manifest_path = temp.path().join("tools.toml");
+        let store = ToolStore::new(temp.path(), temp.path());
+        let manifest_path = store.manifest_path();
         let brewfile = temp.path().join("Brewfile");
         let package_json = temp.path().join("package.json");
         let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "existing", true);
         manifest.write_to(&manifest_path).unwrap();
-        std::fs::write(&brewfile, "brew \"ripgrep\"\ncask \"ghostty\"\n").unwrap();
+        std::fs::write(&brewfile, "tap \"homebrew/cask-fonts\"\n# retained\nbrew \"ripgrep\", link: false\ncask \"ghostty\"\n").unwrap();
         std::fs::write(&package_json, r#"{"devDependencies":{"eslint":"1"}}"#).unwrap();
 
-        let store = ToolStore::new(temp.path(), temp.path());
+        let mut app = App::new();
+        app.add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            ToolRuntimePlugin,
+            homebrew::HomebrewToolPlugin,
+            npm::NpmToolPlugin,
+        ));
+        let source = app.world_mut().spawn(store.clone()).id();
+        let brew = app
+            .world_mut()
+            .spawn((
+                homebrew::ImportBrewfile::new(brewfile),
+                ToolStoreOperation,
+                ToolStoreTarget::new(source),
+            ))
+            .id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while app.world().get::<ToolOperationFinished>(brew).is_none() {
+            app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Brewfile import did not drain"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(app.world().get::<ToolOperationFailed>(brew).is_none());
         assert_eq!(
-            store.import_brewfile_to(&brewfile, &manifest_path).unwrap(),
-            (1, 1)
+            std::fs::read_to_string(store.brewfile_path()).unwrap(),
+            "tap \"homebrew/cask-fonts\"\n# retained\nbrew \"ripgrep\", link: false\ncask \"ghostty\"\n"
         );
-        assert_eq!(
-            store
-                .import_npm_manifest_to(&package_json, &manifest_path)
-                .unwrap(),
-            1
-        );
+
+        let npm = app
+            .world_mut()
+            .spawn((
+                npm::ImportNpmManifest::new(package_json),
+                ToolStoreOperation,
+                ToolStoreTarget::new(source),
+            ))
+            .id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while app.world().get::<ToolOperationFinished>(npm).is_none() {
+            app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "NPM import did not drain"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(app.world().get::<ToolOperationFailed>(npm).is_none());
         let loaded = ToolsManifest::read(&manifest_path).unwrap();
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
+        assert_eq!(loaded.packages["homebrew-formula"], ["ripgrep"]);
+        assert_eq!(loaded.packages["homebrew-cask"], ["ghostty"]);
     }
 
     #[cfg(unix)]
