@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use crate::storage::{ReadRequest, ReadResult, StoreLease};
 use crate::{McpServerManifest, McpTransport, ToolStore, ToolsManifest};
 use bevy::app::{App, Plugin};
 use bevy::ecs::system::SystemParam;
@@ -33,6 +34,9 @@ impl Plugin for McpConnectionPlugin {
         if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
             app.add_plugins(vmux_ecs::wake::WakePlugin);
         }
+        if !app.is_plugin_added::<crate::storage::StoragePlugin>() {
+            app.add_plugins(crate::storage::StoragePlugin);
+        }
         app.add_plugins((auth::AuthPlugin, remove::RemovePlugin))
             .init_resource::<McpObservationVersion>()
             .add_plugins((
@@ -50,6 +54,7 @@ impl Plugin for McpConnectionPlugin {
                     publish_mcp_authorization,
                     retire_mcp_operations,
                     start_mcp_snapshots,
+                    read_credentials,
                     drain_mcp_snapshots,
                     publish_mcp_connections,
                 )
@@ -255,11 +260,9 @@ fn retire_mcp_operations(
 
 fn start_mcp_snapshots(
     requests: Query<(Entity, &PendingMcpSnapshot), Without<McpSnapshotTask>>,
-    catalog: McpCatalog,
     credentials: Query<(Entity, &McpCredentials)>,
     mut version: ResMut<McpObservationVersion>,
     mut states: Query<&mut McpPageState>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let Ok((owner, credentials)) = credentials.single() else {
@@ -293,26 +296,47 @@ fn start_mcp_snapshots(
         let sequence = version.next;
         let generation = request.generation;
         let result = request.result.clone();
-        let mut ids = Vec::new();
-        for (_, server) in &catalog.servers {
-            ids.push(server.id.clone());
-        }
         let credentials = (*credentials).clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         commands.entity(target).remove::<PendingMcpSnapshot>();
         commands.spawn((
             Operation::bundle("mcp.snapshot").unwrap().running(),
             OperationTarget::new(target),
             OperationRetained,
-            McpSnapshotTask {
+            SnapshotContext {
                 generation,
                 sequence,
                 owner,
                 result,
+            },
+            auth::Credentials(credentials),
+            ToolStore::current(),
+            ReadRequest { retain_lease: true },
+        ));
+    }
+}
+
+fn read_credentials(
+    requests: Query<
+        (Entity, &ReadResult, &auth::Credentials),
+        (With<SnapshotContext>, Without<McpSnapshotTask>),
+    >,
+    catalog: McpCatalog,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, result, credentials) in &requests {
+        let manifest = result.0.clone();
+        let credentials = credentials.0.clone();
+        let mut ids = Vec::new();
+        for (_, server) in &catalog.servers {
+            ids.push(server.id.clone());
+        }
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        commands
+            .entity(entity)
+            .remove::<ReadResult>()
+            .insert(McpSnapshotTask {
                 task: IoTaskPool::get().spawn(async move {
-                    let store = ToolStore::current();
-                    let _lease = store.lease_async().await;
-                    let manifest = store.load();
                     let mut records = Vec::new();
                     for id in ids {
                         records.push((id.clone(), credentials.storage.load(&id)));
@@ -322,13 +346,17 @@ fn start_mcp_snapshots(
                     }
                     (manifest, records)
                 }),
-            },
-        ));
+            });
     }
 }
 
 fn drain_mcp_snapshots(
-    mut tasks: Query<(Entity, &mut McpSnapshotTask, Option<&OperationTarget>)>,
+    mut tasks: Query<(
+        Entity,
+        &SnapshotContext,
+        &mut McpSnapshotTask,
+        Option<&OperationTarget>,
+    )>,
     mut states: Query<&mut McpPageState>,
     catalog: Query<(Entity, &Name, &McpCatalogServer)>,
     extras: Query<Entity, With<McpConfiguredServer>>,
@@ -336,39 +364,44 @@ fn drain_mcp_snapshots(
     mut version: ResMut<McpObservationVersion>,
     mut commands: Commands,
 ) {
-    for (entity, mut task, target) in &mut tasks {
+    for (entity, context, mut task, target) in &mut tasks {
         let page = target.map(|target| target.entity());
         let Some((manifest, credentials_observed)) =
             future::block_on(future::poll_once(&mut task.task))
         else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<(McpSnapshotTask, OperationRetained)>();
+        commands.entity(entity).remove::<(
+            McpSnapshotTask,
+            SnapshotContext,
+            OperationRetained,
+            StoreLease,
+            ToolStore,
+            auth::Credentials,
+        )>();
         commands.trigger(OperationCompleted {
             entity,
             result: manifest.as_ref().map(|_| ()).map_err(Clone::clone),
         });
         let current = credentials.single().ok();
-        if current != Some(task.owner) || task.sequence < version.current {
+        if current != Some(context.owner) || context.sequence < version.current {
             if let Some(page) = page
                 && let Ok(mut state) = states.get_mut(page)
-                && state.generation == task.generation
+                && state.generation == context.generation
             {
                 state.loading = false;
                 state.pending = false;
-                state.loaded = current == Some(task.owner) && version.valid;
-                if let Some(result) = &task.result {
+                state.loaded = current == Some(context.owner) && version.valid;
+                if let Some(result) = &context.result {
                     commands.entity(page).insert(result.clone());
                 }
             }
             continue;
         }
-        version.current = task.sequence;
-        version.owner = Some(task.owner);
+        version.current = context.sequence;
+        version.owner = Some(context.owner);
         for mut state in &mut states {
-            if state.owner == Some(task.owner) {
+            if state.owner == Some(context.owner) {
                 state.set_changed();
             }
         }
@@ -381,7 +414,7 @@ fn drain_mcp_snapshots(
                 version.valid = false;
                 if let Some(page) = page
                     && let Ok(mut state) = states.get_mut(page)
-                    && state.generation == task.generation
+                    && state.generation == context.generation
                 {
                     state.loading = false;
                     state.pending = false;
@@ -402,18 +435,18 @@ fn drain_mcp_snapshots(
             &mut commands,
         );
         for mut state in &mut states {
-            if state.owner == Some(task.owner) {
+            if state.owner == Some(context.owner) {
                 state.set_changed();
             }
         }
         if let Some(page) = page
             && let Ok(mut state) = states.get_mut(page)
-            && state.generation == task.generation
+            && state.generation == context.generation
         {
             state.loading = false;
             state.pending = false;
             state.loaded = true;
-            if let Some(result) = &task.result {
+            if let Some(result) = &context.result {
                 commands.entity(page).insert(result.clone());
             }
         }
@@ -486,7 +519,7 @@ fn publish_mcp_connections(
     >,
     projection: McpServerProjection,
     operations: Query<(Option<&PendingMcpOperation>, Option<&auth::Source>)>,
-    snapshots: Query<(&McpSnapshotTask, &OperationTarget)>,
+    snapshots: Query<(&SnapshotContext, &OperationTarget)>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -663,11 +696,15 @@ type SnapshotRecords = (
 
 #[derive(Component)]
 struct McpSnapshotTask {
+    task: Task<SnapshotRecords>,
+}
+
+#[derive(Component)]
+struct SnapshotContext {
     generation: u64,
     sequence: u64,
     owner: Entity,
     result: Option<McpCompletion>,
-    task: Task<SnapshotRecords>,
 }
 
 #[derive(Component, Clone)]
@@ -954,11 +991,13 @@ mod tests {
                 Operation::bundle("mcp.snapshot").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(page),
-                super::McpSnapshotTask {
+                super::SnapshotContext {
                     generation: 1,
                     sequence: 1,
                     owner: old_owner,
                     result: None,
+                },
+                super::McpSnapshotTask {
                     task: IoTaskPool::get()
                         .spawn(async move { (Ok(crate::ToolsManifest::default()), Vec::new()) }),
                 },

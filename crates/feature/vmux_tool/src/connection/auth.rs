@@ -3,6 +3,7 @@ use super::transport::{
     ProtectedResource, TokenResponse,
 };
 use super::{McpAuthorizationUrl, McpCatalogServer, McpCompletion, PendingMcpOperation};
+use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
 use crate::{ToolStore, ToolsManifest};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task};
@@ -23,7 +24,6 @@ impl Plugin for AuthPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    poll::<Inspected>,
                     poll::<CallbackListener>,
                     poll::<Http>,
                     poll::<ProtectedResource>,
@@ -33,12 +33,9 @@ impl Plugin for AuthPlugin {
                     poll::<TokenResponse>,
                     poll::<StoreLease>,
                     poll::<CredentialLease>,
-                    poll::<OriginalManifest>,
                     poll::<OriginalCredential>,
                     poll::<CredentialWritten>,
-                    poll::<ManifestWritten>,
                     poll::<CredentialRestored>,
-                    poll::<ManifestRestored>,
                 ),
             )
             .add_systems(
@@ -219,59 +216,53 @@ fn begin(
     }
 }
 
-#[derive(Component)]
-struct Inspected(ToolsManifest);
-
-type InspectRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static ToolStore,
-        &'static McpCatalogServer,
-        &'static Source,
-        Option<&'static Inspected>,
-        Option<&'static Failed<Inspected>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
-fn inspect(requests: InspectRequests<'_, '_>, mut commands: Commands) {
-    for (entity, phase, store, server, _source, result, error) in &requests {
+fn inspect(
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            &McpCatalogServer,
+            Option<&ReadResult>,
+            Option<&ReadRequest>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, phase, server, result, pending) in &requests {
         if !matches!(phase.0, Phase::Inspect) {
             continue;
         }
-        if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
-            continue;
-        }
         if let Some(result) = result {
-            let configured = result.0.mcp.servers.get(&server.id);
-            if configured.is_some_and(|configured| !server.owns(configured)) {
-                commands.entity(entity).insert((
-                    PrimaryFailure(format!(
+            let error = match &result.0 {
+                Err(error) => Some(error.clone()),
+                Ok(manifest)
+                    if manifest
+                        .mcp
+                        .servers
+                        .get(&server.id)
+                        .is_some_and(|configured| !server.owns(configured)) =>
+                {
+                    Some(format!(
                         "MCP server ID is already managed by tools.toml: {}",
                         server.id
-                    )),
-                    PhaseState(Phase::Complete),
-                ));
-                continue;
+                    ))
+                }
+                Ok(_) => None,
+            };
+            commands.entity(entity).remove::<ReadResult>();
+            if let Some(error) = error {
+                commands
+                    .entity(entity)
+                    .insert((PrimaryFailure(error), PhaseState(Phase::Complete)));
+            } else {
+                commands.entity(entity).insert(PhaseState(Phase::Bind));
             }
-            commands
-                .entity(entity)
-                .remove::<Inspected>()
-                .insert(PhaseState(Phase::Bind));
-            continue;
+        } else if pending.is_none() {
+            commands.entity(entity).insert(ReadRequest {
+                retain_lease: false,
+            });
         }
-        let store = store.clone();
-        let task = IoTaskPool::get().spawn(async move {
-            let _lease = store.lease_async().await;
-            store.load().map(Inspected)
-        });
-        commands.entity(entity).insert((Busy, IoTask(task)));
     }
 }
 
@@ -676,10 +667,6 @@ fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
 }
 
 #[derive(Component)]
-struct StoreLease {
-    _lease: crate::manifest::Lease,
-}
-#[derive(Component)]
 struct CredentialLease {
     _lease: McpCredentialTransaction,
 }
@@ -690,11 +677,7 @@ struct OriginalCredential(Option<McpOauthCredentials>);
 #[derive(Component)]
 struct CredentialWritten;
 #[derive(Component)]
-struct ManifestWritten;
-#[derive(Component)]
 struct CredentialRestored;
-#[derive(Component)]
-struct ManifestRestored;
 
 #[derive(Component, Clone)]
 struct ProposedCredential(McpOauthCredentials);
@@ -776,40 +759,41 @@ fn credential_lock(requests: CredentialLockRequests<'_, '_>, mut commands: Comma
     }
 }
 
-type OriginalManifestRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static ToolStore,
-        Option<&'static OriginalManifest>,
-        Option<&'static Failed<OriginalManifest>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
-fn original_manifest(requests: OriginalManifestRequests<'_, '_>, mut commands: Commands) {
-    for (entity, phase, store, result, error) in &requests {
+fn original_manifest(
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            Option<&ReadResult>,
+            Option<&ReadRequest>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, phase, result, pending) in &requests {
         if !matches!(phase.0, Phase::OriginalManifest) {
             continue;
         }
-        if let Some(error) = error {
+        if let Some(result) = result {
+            commands.entity(entity).remove::<ReadResult>();
+            match &result.0 {
+                Ok(manifest) => {
+                    commands.entity(entity).insert((
+                        OriginalManifest(Some(manifest.clone())),
+                        PhaseState(Phase::OriginalCredential),
+                    ));
+                }
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert((PrimaryFailure(error.clone()), PhaseState(Phase::Complete)));
+                }
+            }
+        } else if pending.is_none() {
             commands
                 .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
-        } else if result.is_some() {
-            commands
-                .entity(entity)
-                .insert(PhaseState(Phase::OriginalCredential));
-        } else {
-            let store = store.clone();
-            let task = IoTaskPool::get().spawn(async move {
-                store
-                    .load()
-                    .map(|manifest| OriginalManifest(Some(manifest)))
-            });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+                .insert(ReadRequest { retain_lease: true });
         }
     }
 }
@@ -961,69 +945,68 @@ fn credential_write(requests: CredentialWriteRequests<'_, '_>, mut commands: Com
     }
 }
 
-type ManifestWriteRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static Source,
-        &'static McpCatalogServer,
-        &'static ToolStore,
-        &'static OriginalManifest,
-        Option<&'static ManifestWritten>,
-        Option<&'static Failed<ManifestWritten>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
-fn manifest_write(requests: ManifestWriteRequests<'_, '_>, mut commands: Commands) {
-    for (entity, phase, source, server, store, original, result, error) in &requests {
+fn manifest_write(
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            &Source,
+            &McpCatalogServer,
+            &OriginalManifest,
+            Option<&WriteResult>,
+            Option<&WriteRequest>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, phase, source, server, original, result, pending) in &requests {
         if !matches!(phase.0, Phase::ManifestWrite) {
             continue;
         }
-        if let Some(error) = error {
-            commands.entity(entity).insert((
-                PrimaryFailure(error.0.clone()),
-                PhaseState(Phase::ManifestRollback),
-            ));
-        } else if result.is_some() {
-            commands.entity(entity).insert(PhaseState(Phase::Complete));
-        } else {
-            let mut planned = original.0.as_ref().unwrap().clone();
-            planned
+        if let Some(result) = result {
+            commands.entity(entity).remove::<WriteResult>();
+            match &result.0 {
+                Ok(()) => {
+                    commands.entity(entity).insert(PhaseState(Phase::Complete));
+                }
+                Err(error) => {
+                    commands.entity(entity).insert((
+                        PrimaryFailure(error.clone()),
+                        PhaseState(Phase::ManifestRollback),
+                    ));
+                }
+            }
+        } else if pending.is_none() {
+            let mut manifest = original.0.as_ref().unwrap().clone();
+            manifest
                 .mcp
                 .servers
                 .insert(source.id.clone(), server.manifest());
-            let store = store.clone();
-            let task = IoTaskPool::get()
-                .spawn(async move { store.save(&planned).map(|_| ManifestWritten) });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands.entity(entity).insert(WriteRequest {
+                manifest,
+                retain_lease: true,
+            });
         }
     }
 }
 
-type RollbackRequests<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static PhaseState,
-        &'static Source,
-        &'static ToolStore,
-        &'static Credentials,
-        &'static OriginalManifest,
-        &'static OriginalCredential,
-        Option<&'static ManifestRestored>,
-        Option<&'static Failed<ManifestRestored>>,
-        Option<&'static CredentialRestored>,
-        Option<&'static Failed<CredentialRestored>>,
-    ),
-    (With<Active>, Without<Busy>),
->;
-
 fn rollback(
-    requests: RollbackRequests<'_, '_>,
+    requests: Query<
+        (
+            Entity,
+            &PhaseState,
+            &Source,
+            &Credentials,
+            &OriginalManifest,
+            &OriginalCredential,
+            Option<&WriteResult>,
+            Option<&WriteRequest>,
+            Option<&CredentialRestored>,
+            Option<&Failed<CredentialRestored>>,
+        ),
+        (With<Active>, Without<Busy>),
+    >,
     mut failures: Query<&mut PrimaryFailure>,
     mut commands: Commands,
 ) {
@@ -1031,35 +1014,34 @@ fn rollback(
         entity,
         phase,
         source,
-        store,
         credentials,
         original,
         old,
-        manifest_done,
-        manifest_error,
+        manifest,
+        pending,
         credential_done,
         credential_error,
     ) in &requests
     {
         if matches!(phase.0, Phase::ManifestRollback) {
-            if manifest_done.is_some() || manifest_error.is_some() {
-                if let Some(error) = manifest_error
+            if let Some(result) = manifest {
+                commands.entity(entity).remove::<WriteResult>();
+                if let Err(error) = &result.0
                     && let Ok(mut failure) = failures.get_mut(entity)
                 {
                     failure
                         .0
-                        .push_str(&format!("; manifest rollback failed: {}", error.0));
+                        .push_str(&format!("; manifest rollback failed: {error}"));
                 }
                 commands
                     .entity(entity)
                     .insert(PhaseState(Phase::CredentialRollback));
-                continue;
+            } else if pending.is_none() {
+                commands.entity(entity).insert(WriteRequest {
+                    manifest: original.0.as_ref().unwrap().clone(),
+                    retain_lease: true,
+                });
             }
-            let store = store.clone();
-            let original = original.0.as_ref().unwrap().clone();
-            let task = IoTaskPool::get()
-                .spawn(async move { store.save(&original).map(|_| ManifestRestored) });
-            commands.entity(entity).insert((Busy, IoTask(task)));
         } else if matches!(phase.0, Phase::CredentialRollback) {
             if credential_done.is_some() || credential_error.is_some() {
                 if let Some(error) = credential_error
@@ -1337,7 +1319,7 @@ mod tests {
                     expires_in: None,
                     scope: None,
                 },
-                (CredentialWritten, ManifestWritten),
+                (CredentialWritten, WriteResult(Ok(()))),
             ))
             .id();
         app.update();

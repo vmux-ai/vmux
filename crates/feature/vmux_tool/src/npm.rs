@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::state::{
     ToolImportRequest, ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
-use bevy_tasks::IoTaskPool;
 
 use vmux_ecs::OperationState;
 
@@ -14,9 +13,9 @@ use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
-    ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget, ToolScanner,
-    ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
+    ToolOperationRequest, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperator,
+    ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation,
+    ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct NpmToolPlugin;
@@ -25,7 +24,13 @@ impl Plugin for NpmToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(Update, import.in_set(ToolTaskSet::Start))
+            .add_systems(
+                Update,
+                (import, read, commit, save)
+                    .chain()
+                    .in_set(ToolTaskSet::Start),
+            )
+            .add_systems(Update, drain.after(ToolTaskSet::Apply))
             .add_systems(Update, finish.after(ToolTaskSet::Apply));
     }
 }
@@ -234,7 +239,7 @@ impl ImportNpmManifest {
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ImportedNpmManifest {
-    packages: usize,
+    pub(super) packages: usize,
 }
 
 impl ImportedNpmManifest {
@@ -244,72 +249,200 @@ impl ImportedNpmManifest {
     }
 }
 
+#[derive(Component)]
+struct NpmPlan {
+    packages: usize,
+}
+
+#[derive(Component)]
+struct Importing;
+
 fn import(
     operations: Query<
-        (Entity, &ImportNpmManifest, &ToolStoreTarget),
         (
-            Without<ToolOperationTask<ImportedNpmManifest>>,
-            Without<ImportedNpmManifest>,
-            Without<ToolOperationFailed>,
-            Without<ToolOperationFinished>,
+            Entity,
+            &ImportNpmManifest,
+            &vmux_ecs::EntityTarget<ToolStore>,
+            Option<&OperationState>,
         ),
+        (Without<Importing>, Without<ToolOperationFinished>),
     >,
     stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
-    for (entity, operation, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
+    for (entity, _, target, state) in &operations {
+        if state.is_some_and(|state| {
+            !matches!(state, OperationState::Pending | OperationState::Running)
+        }) {
             continue;
         }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
+        let Ok(store) = stores.get(target.entity()) else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
+                ToolOperationFailed("tool store entity is unavailable".into()),
             ));
             continue;
         };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let path = operation.path.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    let packages = store.import_npm_manifest(&path)?;
-                    Ok(ImportedNpmManifest { packages })
-                },
-            )));
+        commands.entity(entity).insert((
+            Importing,
+            store.clone(),
+            vmux_ecs::OperationRetained,
+            crate::storage::ReadRequest { retain_lease: true },
+        ));
     }
 }
 
-impl ToolStore {
-    pub fn import_npm_manifest(&self, path: &Path) -> Result<usize, String> {
-        self.migrate_legacy_storage()?;
-        let path = self.expand_user_path(path)?;
-        self.import_npm_manifest_to(&path, &self.manifest_path())
+fn read(
+    operations: Query<
+        (
+            Entity,
+            &ImportNpmManifest,
+            &ToolStore,
+            &crate::storage::ReadResult,
+        ),
+        (With<Importing>, Without<ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, input, store, result) in &operations {
+        commands
+            .entity(entity)
+            .remove::<crate::storage::ReadResult>();
+        let manifest = match &result.0 {
+            Ok(manifest) => manifest.clone(),
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error.clone())));
+                continue;
+            }
+        };
+        let path = match store.expand_user_path(&input.path) {
+            Ok(path) => path,
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error)));
+                continue;
+            }
+        };
+        commands
+            .entity(entity)
+            .insert((manifest, crate::storage::FileReadRequest(path)));
     }
+}
 
-    pub fn import_npm_manifest_to(
-        &self,
-        path: &Path,
-        manifest_path: &Path,
-    ) -> Result<usize, String> {
-        let path = self.expand_user_path(path)?;
-        let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let document = NpmManifest::parse(&source)?;
+fn commit(
+    mut operations: Query<
+        (
+            Entity,
+            &ImportNpmManifest,
+            &crate::storage::FileReadResult,
+            &mut ToolsManifest,
+        ),
+        (With<Importing>, Without<ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, input, source, mut manifest) in &mut operations {
+        commands
+            .entity(entity)
+            .remove::<crate::storage::FileReadResult>();
+        let source = match &source.0 {
+            Ok(source) => source,
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error.clone())));
+                continue;
+            }
+        };
+        let document = match NpmManifest::parse(source) {
+            Ok(document) => document,
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error)));
+                continue;
+            }
+        };
         if document.packages.is_empty() {
-            return Err(format!("no dependencies found in {}", path.display()));
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed(format!("no dependencies found in {}", input.path.display())),
+            ));
+            continue;
         }
-        let mut manifest = ToolsManifest::read(manifest_path)?;
-        let imported = manifest.add_packages("npm", &document.packages);
-        manifest.write_to(manifest_path)?;
-        Ok(imported)
+        let packages = manifest.add_packages("npm", &document.packages);
+        commands.entity(entity).insert((
+            NpmPlan { packages },
+            crate::storage::WriteRequest {
+                manifest: manifest.clone(),
+                retain_lease: true,
+            },
+        ));
+    }
+}
+
+fn save(
+    operations: Query<
+        (Entity, &NpmPlan, &crate::storage::WriteResult),
+        (With<Importing>, Without<ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, plan, result) in &operations {
+        commands
+            .entity(entity)
+            .remove::<crate::storage::WriteResult>();
+        match &result.0 {
+            Ok(()) => {
+                commands.entity(entity).insert(ImportedNpmManifest {
+                    packages: plan.packages,
+                });
+            }
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error.clone())));
+            }
+        }
+        commands.entity(entity).remove::<(
+            Importing,
+            NpmPlan,
+            ToolStore,
+            ToolsManifest,
+            crate::storage::StoreLease,
+            vmux_ecs::OperationRetained,
+        )>();
+    }
+}
+
+fn drain(
+    operations: Query<
+        Entity,
+        (
+            With<Importing>,
+            With<ToolOperationFinished>,
+            Without<crate::storage::ReadRequest>,
+            Without<crate::storage::WriteRequest>,
+            Without<crate::storage::FileReadRequest>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for entity in &operations {
+        commands.entity(entity).remove::<(
+            Importing,
+            NpmPlan,
+            ToolStore,
+            ToolsManifest,
+            crate::storage::StoreLease,
+            vmux_ecs::OperationRetained,
+            crate::storage::ReadResult,
+            crate::storage::WriteResult,
+            crate::storage::FileReadResult,
+        )>();
     }
 }
 
