@@ -2240,6 +2240,8 @@ mod tests {
 
     use super::*;
     use crate::flag::{Configuration, Decision};
+    #[cfg(feature = "http")]
+    use crate::http::{Credential, CredentialSource, Endpoint, HttpPlugin, RequireAuthorization};
     use crate::manifest::{FeatureManifestOwner, FeatureManifestSource};
     use crate::snapshot::Document;
     use crate::{Current, Tick};
@@ -2454,9 +2456,6 @@ mod tests {
 
         #[cfg(feature = "http")]
         fn authenticate(&mut self, revision: u64) -> crate::http::tests::Server {
-            use crate::http::{
-                Credential, CredentialSource, Endpoint, HttpPlugin, RequireAuthorization,
-            };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -3068,7 +3067,7 @@ mod tests {
         let decision = fixture
             .app
             .world()
-            .get::<crate::flag::Decision<crate::flag::Value>>(evaluation)
+            .get::<Decision<crate::flag::Value>>(evaluation)
             .unwrap();
         assert_eq!(decision.value, crate::flag::Value::Boolean(false));
         assert_eq!(decision.details.source, Source::Default);

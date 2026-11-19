@@ -1,7 +1,7 @@
 use std::path::Path;
 
 #[derive(Clone, Debug)]
-pub struct CodeRequirement(String);
+pub struct CodeRequirement(#[cfg(target_os = "macos")] String);
 
 impl CodeRequirement {
     pub fn for_binary(path: &Path) -> std::io::Result<Self> {

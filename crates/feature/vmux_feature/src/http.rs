@@ -170,20 +170,6 @@ struct EvaluationContext {
     context: crate::flag::Context,
 }
 
-impl Pending {
-    fn has_current_contexts(&self, contexts: &Query<&crate::flag::Context>) -> bool {
-        for captured in &self.contexts {
-            if !contexts
-                .get(captured.scope)
-                .is_ok_and(|context| *context == captured.context)
-            {
-                return false;
-            }
-        }
-        true
-    }
-}
-
 #[derive(Component)]
 pub(crate) struct Authentication {
     pub(crate) source: Entity,
@@ -566,6 +552,21 @@ struct ReceiptContext<'w, 's> {
     contexts: Query<'w, 's, &'static crate::flag::Context>,
 }
 
+impl ReceiptContext<'_, '_> {
+    fn has_current_contexts(&self, pending: &Pending) -> bool {
+        for captured in &pending.contexts {
+            if !self
+                .contexts
+                .get(captured.scope)
+                .is_ok_and(|context| *context == captured.context)
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 fn receive(
     mut results: FetchResults,
     mut providers: ReceivingProviders,
@@ -584,7 +585,7 @@ fn receive(
             || generation.0 != pending.generation
             || state.pending != Some(entity)
             || state.credential != pending.credential
-            || !pending.has_current_contexts(&authority.contexts)
+            || !authority.has_current_contexts(pending)
             || pending.credential.is_some_and(|(source, revision)| {
                 !authority
                     .credentials
