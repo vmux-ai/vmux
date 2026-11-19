@@ -897,9 +897,13 @@ fn finish_scans(
     )>,
     providers: Query<&ToolProviderId>,
     mut scans: Query<(&OperationState, &mut ScanManifest, &mut ScanSnapshot)>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
     for (entity, parent, target, provider, observation) in &observations {
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
         let Ok((state, mut manifest, mut snapshot)) = scans.get_mut(parent.parent()) else {
             commands.entity(entity).despawn();
             continue;
@@ -1592,6 +1596,94 @@ mod tests {
                 .snapshot(self.registry)
                 .unwrap()
         }
+    }
+
+    struct ScanWake {
+        output: std::sync::mpsc::SyncSender<()>,
+        source: vmux_ecs::JobWake,
+    }
+
+    impl std::task::Wake for ScanWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.source.0.wake_by_ref();
+            let _ = self.output.try_send(());
+        }
+
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.source.0.wake_by_ref();
+            let _ = self.output.try_send(());
+        }
+    }
+
+    #[test]
+    fn completed_provider_observation_wakes_the_next_inventory_step() {
+        IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(directory.path(), directory.path());
+        std::fs::create_dir_all(store.root()).unwrap();
+        std::fs::write(store.manifest_path(), "version = 1\n").unwrap();
+        std::fs::write(store.root().join("hold"), "").unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(32);
+        let mut app = App::new();
+        app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin));
+        let source = app
+            .world()
+            .get_resource::<vmux_ecs::JobWake>()
+            .cloned()
+            .unwrap_or_else(|| vmux_ecs::JobWake(std::task::Waker::noop().clone()));
+        app.insert_resource(vmux_ecs::JobWake(std::task::Waker::from(
+            std::sync::Arc::new(ScanWake {
+                output: sender,
+                source,
+            }),
+        )));
+        let registry = app
+            .world_mut()
+            .spawn((
+                ToolRegistry::default(),
+                Catalog::default(),
+                store.clone(),
+                ToolsManifest::default(),
+                OperationRequestSequence::default(),
+            ))
+            .id();
+        for provider in ["alpha", "beta"] {
+            app.world_mut().spawn((
+                ToolProviderId(ToolProvider::new(provider)),
+                ToolScanner::new(InventoryFixture::observe),
+            ));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let task = loop {
+            app.update();
+            if let Some(entity) = app
+                .world_mut()
+                .query_filtered::<Entity, With<ScanTask>>()
+                .iter(app.world())
+                .next()
+            {
+                break entity;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        std::fs::remove_file(store.root().join("hold")).unwrap();
+        while !app.world().get::<ScanTask>(task).unwrap().0.is_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        while receiver.try_recv().is_ok() {}
+        app.update();
+        assert!(
+            receiver.try_recv().is_ok(),
+            "completed observation must wake its continuation"
+        );
+        while !app.world().get::<Catalog>(registry).unwrap().loaded {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(!app.world().get::<ToolStore>(registry).unwrap().is_busy());
     }
 
     #[test]
