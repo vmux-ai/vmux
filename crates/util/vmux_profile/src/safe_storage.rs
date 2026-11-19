@@ -267,6 +267,18 @@ impl SafeStorage {
     }
 
     #[cfg(target_os = "macos")]
+    pub(crate) fn open_account_silent(
+        context: &SafeStorageContext,
+        scope: &str,
+        ciphertext: &[u8],
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, SafeStorageError> {
+        let Some(cipher) = Self::cipher_silent(context)? else {
+            return Ok(None);
+        };
+        cipher.open_account(scope, ciphertext).map(Some)
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn wrap_vault_key(
         context: &SafeStorageContext,
         vault_id: &str,

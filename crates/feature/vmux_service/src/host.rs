@@ -14,6 +14,10 @@ pub mod bundle;
 pub mod cleanup;
 pub mod cli;
 mod client;
+mod control;
+pub mod control_delivery;
+mod control_delivery_io;
+mod control_driver;
 mod handoff;
 mod launch_agent;
 #[cfg(target_os = "macos")]
@@ -28,3 +32,4 @@ pub mod sm_app_service;
 pub mod supervisor;
 
 mod daemon;
+mod peer;

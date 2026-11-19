@@ -1,0 +1,6 @@
+(
+    flags: [
+        (key: "account.cloud", type: Boolean, class: Release, default: Boolean(false), owner: "vmux", expiry: Some("2027-06-01T00:00:00Z"), lifecycle: Temporary),
+        (key: "profile.sync", type: Boolean, class: Release, default: Boolean(false), owner: "vmux", expiry: Some("2027-06-01T00:00:00Z"), lifecycle: Temporary),
+    ],
+)

@@ -10,7 +10,7 @@ use vmux_ecs::record::{Deleted, Record};
 use vmux_ecs::{
     Job, JobOwner, JobPlugin, JobRequest, JobResult, JobWake, Operation, Revision, Uuid as Id,
 };
-use vmux_feature::{Current, Definition, Provider};
+use vmux_feature::{Current, Definition};
 
 use crate::cloud::transport::Reply;
 use crate::mutations::{
@@ -89,7 +89,8 @@ impl bevy_app::Plugin for ProfileSyncPlugin {
                     .chain(),
             )
                 .chain()
-                .after(Set::Publish),
+                .after(Set::Publish)
+                .after(vmux_feature::Set::Publish),
         );
     }
 }
@@ -649,7 +650,12 @@ fn reset(
 }
 
 fn define(
-    providers: Query<Entity, With<Provider>>,
+    providers: Query<Entity, With<vmux_feature::ReleaseProvider>>,
+    scopes: Query<Entity, With<vmux_feature::InstallationScope>>,
+    sources: Query<
+        (Entity, &vmux_feature::manifest::FeatureManifest),
+        With<vmux_feature::manifest::FeatureManifestOwner<crate::Feature>>,
+    >,
     flags: Query<(), With<ProfileSyncFlag>>,
     mut commands: Commands,
 ) {
@@ -659,9 +665,18 @@ fn define(
     let Ok(provider) = providers.single() else {
         return;
     };
+    let Ok(scope) = scopes.single() else {
+        return;
+    };
+    let Ok((source, manifest)) = sources.single() else {
+        return;
+    };
+    let (index, declaration) = manifest
+        .flag("profile.sync")
+        .expect("Profile sync declaration");
     commands.spawn((
         ProfileSyncFlag,
-        Definition::bundle(provider, "profile.sync", false),
+        Definition::bundle(provider, source, index, scope, declaration),
     ));
 }
 

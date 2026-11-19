@@ -1,3 +1,33 @@
+features-configuration = الإعداد
+features-configuration-help = عدّل القيمة والنوع والمتغير والقواعد المرتبة وجيل التجربة. نسبة النشر تستخدم 0–10000.
+features-configuration-stage = تحضير الإعداد
+features-configuration-invalid = الإعداد غير صالح أو لا يطابق النوع المعلن.
+features-typed-unavailable = هذا endpoint يدعم العلامات المنطقية فقط.
+features-authorization-unavailable = تفويض إدارة العلامات غير متاح.
+
+features-assignments = التعيينات المحفوظة
+features-assignment-retire = إنهاء التعيينات
+features-assignment-active = الجيل النشط
+features-assignment-unavailable = لا يمكن إنهاء التعيينات في هذا السياق.
+
+features-effective = القيمة الفعلية
+features-reason = السبب
+features-variant = المتغير
+features-owner = المسؤول
+features-expiry = موعد الإزالة
+features-lifecycle = دورة الحياة
+features-context = سياق الاستهداف
+features-snapshot = مراجعة اللقطة / الصلاحية
+features-retained = مراجعة التعطيل المحفوظة
+features-override = تجاوز التطوير
+features-override-apply = تطبيق التجاوز
+features-override-clear = مسح التجاوز
+features-override-unavailable = التجاوزات غير متاحة في هذا السياق.
+features-override-invalid = أدخل JSON صالحًا يطابق نوع العلامة المعلن.
+features-class = الفئة
+features-type = نوع القيمة
+features-age = عمر اللقطة (بالثواني)
+
 
 features-all = كل العلامات
 features-boolean = قيمة منطقية

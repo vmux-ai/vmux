@@ -182,29 +182,32 @@ impl Drop for Lifetime {
 
 impl Plugin for ServicePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .init_resource::<Lifetime>()
-            .add_message::<ServiceRequest>()
-            .add_message::<ServiceInbound>()
-            .add_systems(
-                Startup,
-                (start, ApplyDeferred, register, launch_detached).chain(),
+        app.add_plugins((
+            FeaturePlugin::<crate::Feature>::default(),
+            super::control_delivery::ControlDeliveryPlugin,
+        ))
+        .init_resource::<Lifetime>()
+        .add_message::<ServiceRequest>()
+        .add_message::<ServiceInbound>()
+        .add_systems(
+            Startup,
+            (start, ApplyDeferred, register, launch_detached).chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                receive_messages.in_set(ServiceMessageIngressSet),
+                reconnect_disconnected,
+                finish_connection,
+                start_connection,
             )
-            .add_systems(
-                Update,
-                (
-                    receive_messages.in_set(ServiceMessageIngressSet),
-                    reconnect_disconnected,
-                    finish_connection,
-                    start_connection,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                Last,
-                (queue_requests, send_requests).chain().before(ShutdownSet),
-            )
-            .add_systems(Last, shutdown.in_set(ShutdownSet));
+                .chain(),
+        )
+        .add_systems(
+            Last,
+            (queue_requests, send_requests).chain().before(ShutdownSet),
+        )
+        .add_systems(Last, shutdown.in_set(ShutdownSet));
     }
 }
 

@@ -8,7 +8,7 @@ publish = false
 [features]
 default = []
 local = ["dep:rusqlite"]
-cloud = ["dep:quinn", "dep:tokio", "dep:vmux_transport", "dep:vmux_feature"]
+cloud = ["dep:quinn", "dep:tokio", "dep:vmux_transport", "dep:vmux_feature", "vmux_feature/http", "dep:vmux_api"]
 
 profile-sync = ["cloud", "local"]
 
@@ -28,6 +28,7 @@ url = { workspace = true }
 quinn = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 vmux_transport = { path = "../../util/vmux_transport", optional = true }
+vmux_api = { path = "../../util/vmux_api", optional = true }
 rusqlite = { workspace = true, optional = true }
 
 [dev-dependencies]

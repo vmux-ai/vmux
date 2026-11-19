@@ -1,3 +1,33 @@
+features-configuration = Configurazione
+features-configuration-help = Modifica valore, variante, regole ordinate e generazione. La percentuale usa 0–10000.
+features-configuration-stage = Prepara configurazione
+features-configuration-invalid = La configurazione non è valida o non corrisponde al tipo dichiarato.
+features-typed-unavailable = Questo endpoint supporta solo flag booleani.
+features-authorization-unavailable = L’autorizzazione alla gestione dei flag non è disponibile.
+
+features-assignments = Assegnazioni salvate
+features-assignment-retire = Ritira assegnazioni
+features-assignment-active = Generazione attiva
+features-assignment-unavailable = Non è possibile ritirare assegnazioni in questo contesto.
+
+features-effective = Valore effettivo
+features-reason = Motivo
+features-variant = Variante
+features-owner = Responsabile
+features-expiry = Termine di rimozione
+features-lifecycle = Ciclo di vita
+features-context = Contesto di destinazione
+features-snapshot = Revisione istantanea / scadenza
+features-retained = Revisione di disattivazione conservata
+features-override = Valore forzato di sviluppo
+features-override-apply = Applica valore forzato
+features-override-clear = Rimuovi valore forzato
+features-override-unavailable = I valori forzati non sono disponibili in questo contesto.
+features-override-invalid = Inserisci JSON valido corrispondente al tipo dichiarato.
+features-class = Classe
+features-type = Tipo di valore
+features-age = Età dell’istantanea (secondi)
+
 
 features-all = Tutti i flag
 features-boolean = Booleano

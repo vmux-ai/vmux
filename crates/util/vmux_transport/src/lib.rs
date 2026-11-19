@@ -9,3 +9,5 @@ pub mod framing;
 pub mod quic;
 #[cfg(all(host, feature = "service"))]
 pub mod service;
+#[cfg(all(host, feature = "service"))]
+pub mod service_peer;

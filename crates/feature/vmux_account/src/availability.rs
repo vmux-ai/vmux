@@ -1,6 +1,7 @@
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
-use vmux_feature::{Current, Definition, Provider};
+use vmux_feature::manifest::{FeatureManifest, FeatureManifestOwner};
+use vmux_feature::{Current, Definition, InstallationScope, ReleaseProvider};
 
 use crate::{CloudAvailable, Connection, Root};
 
@@ -13,7 +14,7 @@ impl bevy_app::Plugin for AvailabilityPlugin {
                 Update,
                 (evaluate, cancel)
                     .chain()
-                    .after(vmux_feature::Set::Evaluate)
+                    .after(vmux_feature::Set::Publish)
                     .before(crate::connection::Flow::Intent),
             );
     }
@@ -26,7 +27,9 @@ pub struct AccountCloudFlag;
 pub(crate) struct SecureCredentials;
 
 fn define(
-    providers: Query<Entity, With<Provider>>,
+    providers: Query<Entity, With<ReleaseProvider>>,
+    scopes: Query<Entity, With<InstallationScope>>,
+    sources: Query<(Entity, &FeatureManifest), With<FeatureManifestOwner<crate::Feature>>>,
     flags: Query<(), With<AccountCloudFlag>>,
     mut commands: Commands,
 ) {
@@ -36,9 +39,18 @@ fn define(
     let Ok(provider) = providers.single() else {
         return;
     };
+    let Ok(scope) = scopes.single() else {
+        return;
+    };
+    let Ok((source, manifest)) = sources.single() else {
+        return;
+    };
+    let (index, declaration) = manifest
+        .flag("account.cloud")
+        .expect("Account cloud declaration");
     commands.spawn((
         AccountCloudFlag,
-        Definition::bundle(provider, "account.cloud", false),
+        Definition::bundle(provider, source, index, scope, declaration),
     ));
 }
 
@@ -75,8 +87,9 @@ fn cancel(
 mod tests {
     use std::collections::BTreeMap;
 
+    use vmux_feature::flag::{Configuration, Context, Source};
     use vmux_feature::snapshot::Document;
-    use vmux_feature::{FeaturePlugin, Receive, RefreshFailed, Tick};
+    use vmux_feature::{FeaturePlugin, Provider, Receive, RefreshFailed, Tick};
 
     use super::*;
 
@@ -90,7 +103,15 @@ mod tests {
         fn new(supported: bool) -> Self {
             let mut app = App::new();
             app.add_plugins((FeaturePlugin, crate::AccountPlugin, AvailabilityPlugin));
-            let provider = app.world_mut().spawn(Provider::bundle("production")).id();
+            let provider = app
+                .world_mut()
+                .spawn((Provider::bundle("production"), ReleaseProvider))
+                .id();
+            app.world_mut().spawn((
+                Name::new("Installation flags"),
+                InstallationScope,
+                Context::installation("device-a"),
+            ));
             let root = app.world_mut().spawn(Root).id();
             if supported {
                 app.world_mut().entity_mut(root).insert(SecureCredentials);
@@ -106,6 +127,7 @@ mod tests {
 
         fn decision(&mut self, revision: u64, enabled: bool) {
             self.app.world_mut().write_message(Receive {
+                receipt: None,
                 provider: self.provider,
                 generation: 0,
                 document: Document {
@@ -114,8 +136,12 @@ mod tests {
                     revision,
                     issued_at: 1000,
                     valid_until: 1100,
-                    flags: BTreeMap::from([("account.cloud".into(), enabled)]),
+                    flags: BTreeMap::from([(
+                        "account.cloud".into(),
+                        Configuration::boolean(enabled),
+                    )]),
                 },
+                source: Source::Cloud,
             });
             self.app.update();
         }
@@ -142,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn current_off_and_provider_failure_cancel_active_work_but_keep_local_records() {
+    fn current_off_and_cache_expiry_cancel_active_work_but_keep_local_records() {
         let mut fixture = Fixture::new(true);
         fixture.decision(1, true);
         let local = fixture
@@ -169,6 +195,10 @@ mod tests {
             provider: fixture.provider,
             generation: 0,
         });
+        fixture.app.update();
+        assert!(fixture.available());
+        assert!(fixture.app.world().get_entity(connection).is_ok());
+        fixture.app.world_mut().write_message(Tick(1100));
         fixture.app.update();
         assert!(!fixture.available());
         assert!(fixture.app.world().get_entity(connection).is_err());

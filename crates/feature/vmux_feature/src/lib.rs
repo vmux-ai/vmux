@@ -5,19 +5,30 @@ pub use binding::{CommandBindingRegistration, FeaturePageBinding, PageBindingReg
 
 #[cfg(feature = "ecs")]
 pub use runtime::{
-    Changed, Current, Definition, Failure, FeaturePlugin, Generation, Provider, Receive,
-    RefreshFailed, Set, Tick,
+    Changed, Current, Decided, Definition, DevelopmentOverride, EvaluationFailure, Failure,
+    FeaturePlugin, Generation, InstallationScope, OverridePolicy, Provider, Receive, RefreshFailed,
+    ReleaseProvider, Set, SnapshotAccepted, Tick,
 };
 
+#[cfg(all(feature = "page", host, ui))]
+mod access;
 pub mod administration;
 #[cfg(feature = "manifest")]
 mod binding;
+#[cfg(feature = "cache")]
+pub mod cache;
+#[cfg(feature = "cache")]
+mod cache_document;
+#[cfg(feature = "cache")]
+mod cache_io;
 #[cfg(feature = "manifest")]
 pub mod cli;
 #[cfg(feature = "ecs")]
 pub mod clock;
 #[cfg(feature = "ecs")]
 mod composition;
+#[cfg(feature = "cache")]
+pub mod experiment;
 pub mod flag;
 #[cfg(all(feature = "page", host, ui))]
 mod host;
@@ -25,6 +36,8 @@ mod host;
 pub mod hosting;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(all(feature = "page", host, ui))]
+mod inspection;
 #[cfg(feature = "manifest")]
 pub mod manifest;
 #[cfg(feature = "manifest")]

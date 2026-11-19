@@ -6,11 +6,13 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use vmux_ecs::service::{AbortTask, Executor, Operations, Protocols, Register, Remote, Wake};
 use vmux_process::ProcessRuntime;
-use vmux_transport::service::RemoteOperationStore;
 
+pub use super::peer::TrustedDesktop;
+use super::peer::{ClientPeer, DesktopPeer, PendingClient};
 use super::server_driver::{Connection, ConnectionRuntime, Listener as ListenerDriver};
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
+use vmux_transport::service_peer::LocalPeer;
 
 pub struct ServiceDaemonPlugin;
 
@@ -36,20 +38,41 @@ struct ConnectionInbox(mpsc::UnboundedReceiver<tokio::net::UnixStream>);
 struct Shutdown(mpsc::Sender<()>);
 
 #[derive(Component)]
-struct Client;
+pub(super) struct Client;
 
-type DaemonRuntimeState<'a> = (
-    &'a Executor,
-    &'a Wake,
-    &'a ProcessRuntime,
-    &'a Protocols,
-    &'a Shutdown,
-    &'a StartedAt,
-);
+type DaemonRuntimeState<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Executor,
+        &'static Wake,
+        &'static ProcessRuntime,
+        &'static Protocols,
+        &'static Shutdown,
+        &'static StartedAt,
+    ),
+    With<Daemon>,
+>;
+
+type DaemonState<'w, 's> = Single<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Executor,
+        &'static Wake,
+        &'static ProcessRuntime,
+        &'static Protocols,
+        &'static Shutdown,
+        &'static StartedAt,
+    ),
+    With<Daemon>,
+>;
 
 #[derive(SystemParam)]
 struct DaemonRuntime<'w, 's> {
-    state: Single<'w, 's, DaemonRuntimeState<'static>, With<Daemon>>,
+    state: DaemonState<'w, 's>,
     inbox: Single<'w, 's, &'static mut ConnectionInbox, With<Daemon>>,
 }
 
@@ -59,6 +82,7 @@ impl Plugin for ServiceDaemonPlugin {
             vmux_process::ProcessPlugin,
             vmux_process::ProcessServicePlugin,
             crate::remote::RemotePlugin,
+            super::control::ControlPlugin,
         ))
         .configure_sets(Update, (Register, Launch).chain())
         .add_systems(Startup, prepare)
@@ -68,6 +92,7 @@ impl Plugin for ServiceDaemonPlugin {
                 start.in_set(Launch),
                 ApplyDeferred,
                 start_clients,
+                dispatch_clients,
                 reap_clients,
             )
                 .chain(),
@@ -75,16 +100,21 @@ impl Plugin for ServiceDaemonPlugin {
     }
 }
 
-fn prepare(daemons: Query<(Entity, &Wake), With<Daemon>>, mut commands: Commands) {
-    for (entity, wake) in &daemons {
+fn prepare(
+    daemons: Query<(Entity, &Wake, Has<TrustedDesktop>), With<Daemon>>,
+    mut commands: Commands,
+) {
+    for (entity, wake, configured) in &daemons {
+        if !configured {
+            commands.entity(entity).insert(TrustedDesktop::current());
+        }
         let (processes, process_runtime) = ProcessRuntime::new(wake.0.clone());
         let (client_operations, client_operation_runtime) = ClientOperations::new(wake.0.clone());
         let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.0.clone());
-        let operations: Arc<dyn RemoteOperationStore> = Arc::new(client_operations);
         commands.entity(entity).insert((
             Name::new("vmux service"),
             processes,
-            Operations(operations),
+            Operations(Arc::new(client_operations)),
             Protocols::default(),
             Remote::default(),
             authorizations,
@@ -127,15 +157,72 @@ fn start(
     }
 }
 
-fn start_clients(mut runtime: DaemonRuntime, mut commands: Commands) {
-    let (executor, wake, processes, protocols, shutdown, started_at) = *runtime.state;
+fn start_clients(
+    mut runtime: DaemonRuntime,
+    policies: Query<&TrustedDesktop>,
+    mut commands: Commands,
+) {
+    let (root, _, _, _, _, _, _) = *runtime.state;
+    let policy = policies.get(root).ok();
     while let Ok(stream) = runtime.inbox.0.try_recv() {
-        let client = ConnectionRuntime::new(
+        let requirement = policy.and_then(|policy| policy.requirement.as_ref());
+        let peer = match LocalPeer::inspect(&stream, requirement) {
+            Ok(peer) => peer,
+            Err(error) => {
+                tracing::warn!(%error, "local peer identity unavailable");
+                continue;
+            }
+        };
+        let admitted = policy.is_some_and(|policy| policy.admits(&peer));
+        let mut client = commands.spawn((
+            Name::new("service client"),
+            Client,
+            ChildOf(root),
+            ClientPeer(peer),
+            PendingClient(Some(stream)),
+        ));
+        if admitted {
+            client.insert(DesktopPeer);
+        }
+    }
+}
+
+fn dispatch_clients(
+    mut clients: Query<(
+        Entity,
+        &ChildOf,
+        &ClientPeer,
+        &mut PendingClient,
+        Has<DesktopPeer>,
+    )>,
+    runtimes: DaemonRuntimeState,
+    observations: Query<&crate::remote::server::ObservationSource>,
+    mut commands: Commands,
+) {
+    for (entity, parent, peer, mut pending, admitted) in &mut clients {
+        let Ok((_, executor, wake, processes, protocols, shutdown, started_at)) =
+            runtimes.get(parent.parent())
+        else {
+            continue;
+        };
+        let Some(stream) = pending.0.take() else {
+            continue;
+        };
+        let mut client = ConnectionRuntime::new(
             processes.clone(),
-            protocols.0.clone(),
+            Vec::new(),
             shutdown.0.clone(),
             started_at.0,
+        )
+        .observations(
+            observations
+                .get(parent.parent())
+                .ok()
+                .map(|source| source.subscribe()),
         );
+        for protocol in &protocols.0 {
+            client.add_local(entity.to_bits(), protocol.clone(), peer.0.clone(), admitted);
+        }
         let connection = Connection::new(stream, client);
         let wake = wake.0.clone();
         let task = executor.0.spawn(async move {
@@ -144,7 +231,10 @@ fn start_clients(mut runtime: DaemonRuntime, mut commands: Commands) {
             }
             let _ = wake.send(());
         });
-        commands.spawn((Name::new("service client"), Client, AbortTask(task)));
+        commands
+            .entity(entity)
+            .insert(AbortTask(task))
+            .remove::<PendingClient>();
     }
 }
 
@@ -160,9 +250,118 @@ fn reap_clients(clients: Query<(Entity, &AbortTask), With<Client>>, mut commands
 mod tests {
     use super::*;
 
-    use vmux_api::protocol::{ClientMessage, ProcessId};
+    use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage};
     use vmux_process::ProcessService;
     use vmux_transport::service::{ServiceCodec, ServiceProtocolDriver};
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_local_peer_is_materialized_before_dispatch_without_disabling_legacy_protocols()
+    {
+        for trusted in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let socket = directory.path().join("service.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let binary = if trusted {
+                std::env::current_exe().unwrap()
+            } else {
+                std::path::PathBuf::from("/bin/ls")
+            };
+            let (wake, _wakes) = mpsc::unbounded_channel();
+            let (exit, mut exited) = mpsc::channel(1);
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ServiceDaemonPlugin));
+            app.world_mut().spawn((
+                Daemon,
+                SocketListener(Some(listener)),
+                ExitSignal(exit),
+                Executor(tokio::runtime::Handle::current()),
+                Wake(wake),
+                TrustedDesktop::for_binary(&binary).unwrap(),
+            ));
+            app.update();
+            let (release, held) = tokio::sync::oneshot::channel();
+            let path = socket.clone();
+            let client = tokio::spawn(async move {
+                let stream = tokio::net::UnixStream::connect(path).await.unwrap();
+                let (mut reader, mut writer) = stream.into_split();
+                ServiceCodec::write_client(&mut writer, &ClientMessage::Status)
+                    .await
+                    .unwrap();
+                let response = ServiceCodec::read_service(&mut reader)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let _ = held.await;
+                response
+            });
+            let until = Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                app.update();
+                let world = app.world_mut();
+                if let Ok((peer, admitted)) = world
+                    .query::<(&ClientPeer, Has<DesktopPeer>)>()
+                    .single(world)
+                {
+                    assert_eq!(peer.0.uid(), unsafe { libc::geteuid() });
+                    assert_eq!(peer.0.pid(), Some(std::process::id()));
+                    assert_eq!(peer.0.verified_code(), trusted);
+                    assert_eq!(admitted, trusted);
+                    break;
+                }
+                assert!(
+                    Instant::now() < until,
+                    "native peer facts were not materialized"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            release.send(()).unwrap();
+            while !client.is_finished() {
+                app.update();
+                assert!(Instant::now() < until, "legacy Status did not complete");
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            assert!(matches!(
+                client.await.unwrap(),
+                ServiceMessage::StatusResponse {
+                    process_count: 0,
+                    ..
+                }
+            ));
+            let shutdown = tokio::spawn(async move {
+                let stream = tokio::net::UnixStream::connect(socket).await.unwrap();
+                let (mut reader, mut writer) = stream.into_split();
+                ServiceCodec::write_client(&mut writer, &ClientMessage::Shutdown)
+                    .await
+                    .unwrap();
+                ServiceCodec::read_service(&mut reader).await.unwrap()
+            });
+            let until = Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                app.update();
+                if exited.try_recv().is_ok() && shutdown.is_finished() {
+                    break;
+                }
+                if shutdown.is_finished()
+                    && app
+                        .world_mut()
+                        .query_filtered::<&AbortTask, With<Daemon>>()
+                        .iter(app.world())
+                        .all(|task| task.0.is_finished())
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < until,
+                    "owned local peer fixture did not shut down"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            assert!(
+                matches!(shutdown.await.unwrap(), Some(ServiceMessage::ProcessList { processes }) if processes.is_empty())
+            );
+        }
+    }
 
     struct ProcessAppThread {
         stop: Option<std::sync::mpsc::Sender<()>>,

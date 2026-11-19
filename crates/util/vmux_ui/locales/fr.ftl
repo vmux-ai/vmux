@@ -1,3 +1,33 @@
+features-configuration = Configuration
+features-configuration-help = Modifiez la valeur typée, la variante, les règles ordonnées et la génération. Le pourcentage utilise 0–10000.
+features-configuration-stage = Préparer la configuration
+features-configuration-invalid = La configuration est invalide ou ne correspond pas au type déclaré.
+features-typed-unavailable = Ce point de terminaison prend uniquement en charge les indicateurs booléens.
+features-authorization-unavailable = L’autorisation de gestion des indicateurs est indisponible.
+
+features-assignments = Affectations enregistrées
+features-assignment-retire = Retirer les affectations
+features-assignment-active = Génération active
+features-assignment-unavailable = Le retrait des affectations est indisponible dans ce contexte.
+
+features-effective = Valeur effective
+features-reason = Raison
+features-variant = Variante
+features-owner = Responsable
+features-expiry = Date limite de suppression
+features-lifecycle = Cycle de vie
+features-context = Contexte de ciblage
+features-snapshot = Révision de l’instantané / expiration
+features-retained = Révision de désactivation conservée
+features-override = Valeur forcée de développement
+features-override-apply = Appliquer la valeur forcée
+features-override-clear = Effacer la valeur forcée
+features-override-unavailable = Les valeurs forcées sont indisponibles dans ce contexte.
+features-override-invalid = Saisissez un JSON valide correspondant au type déclaré.
+features-class = Classe
+features-type = Type de valeur
+features-age = Âge de l’instantané (secondes)
+
 
 features-all = Tous les indicateurs
 features-boolean = Booléen

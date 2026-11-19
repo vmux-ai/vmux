@@ -16038,6 +16038,14 @@ impl Inventory {
                 if let Some(module) = self.module_binding(current, name, &mut BTreeSet::new()) {
                     return Some(module);
                 }
+                if let Some(target) = imports.aliases.get(name)
+                    && target.contains("::")
+                    && let Some(root) = target.split("::").next()
+                    && matches!(root, "std" | "core" | "alloc")
+                    && self.external_root(current, root)
+                {
+                    return Some(target.clone());
+                }
                 if imports.aliases.contains_key(name)
                     || self.symbols.contains_key(&format!("{current}::{name}"))
                 {
@@ -16073,6 +16081,30 @@ impl Inventory {
         let target = imports.aliases.get(name)?;
         self.resolve(namespace, target, visiting)
     }
+}
+
+#[test]
+fn standard_module_aliases_keep_their_identity_when_local_type_names_collide() {
+    for (import, path) in [
+        ("use std::io;", "io::ErrorKind"),
+        ("use std::io as native_io;", "native_io::ErrorKind"),
+        ("", "std::io::ErrorKind"),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "{import} enum ErrorKind {{ Invalid }} #[derive(Component)] struct State {{ kind: {path} }} fn read(state: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let state = &inventory.entries[&inventory.key("struct:State")];
+        assert!(inventory.external_type(state, path), "{import} {path}");
+        assert!(
+            inventory.canonical(state, &Policy::default(), &mut BTreeSet::new()),
+            "{path}"
+        );
+    }
+    let inventory = Inventory::fixture(
+        "mod std { pub mod io { pub enum ErrorKind { Invalid } } } use std::io; #[derive(Component)] struct State { kind:io::ErrorKind }",
+    );
+    let state = &inventory.entries[&inventory.key("struct:State")];
+    assert!(!inventory.external_type(state, "io::ErrorKind"));
 }
 
 struct Declarations<'a> {
