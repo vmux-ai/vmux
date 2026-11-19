@@ -16,7 +16,6 @@ legacy: [
     (key: "crates/util/vmux_task/src/lib.rs||impl:Command for Completion < T >", fingerprint: "5900351a5350d083", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:Command for Discard < T >", fingerprint: "600a29fc27eefb4f", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:Command for TaskApply < T , C >", fingerprint: "eb63e641df8eb4b8", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs||impl:Default for TaskPlugin < T >", fingerprint: "8e799b716cfe08aa", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:Plugin for TaskPlugin < T >", fingerprint: "6547b5d240fecaf1", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:TaskResult < T >", fingerprint: "a665311449e2a18b", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:std :: fmt :: Display for TaskFailure", fingerprint: "4f82ff74d830ba80", issue: "VMX-253"),

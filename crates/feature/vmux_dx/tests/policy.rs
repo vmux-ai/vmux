@@ -1163,6 +1163,112 @@ fn component_aliases_do_not_approve_wrappers_shadowed_names_or_cycles() {
 }
 
 #[test]
+fn stateless_plugin_defaults_require_real_markers_and_pure_standard_construction() {
+    for (fields, construction, bindings, expected) in [
+        (
+            "(PhantomData<fn()->T>)",
+            "Self(PhantomData)",
+            "use std::marker::PhantomData;",
+            true,
+        ),
+        (
+            "{ marker: PhantomData<T> }",
+            "Self { marker: PhantomData }",
+            "use std::marker::PhantomData;",
+            true,
+        ),
+        (
+            "(Marker<T>)",
+            "Self(Marker)",
+            "use std::marker::PhantomData as Marker;",
+            true,
+        ),
+        (
+            "(Scope<T>)",
+            "Self(PhantomData)",
+            "use std::marker::PhantomData; type Scope<T> = PhantomData<fn()->T>;",
+            true,
+        ),
+        (
+            "(Scope<T>)",
+            "Self(PhantomData)",
+            "use std::marker::PhantomData; type Scope<T> = std::sync::Mutex<T>;",
+            false,
+        ),
+        (
+            "(Scope<T>)",
+            "Self(PhantomData)",
+            "use std::marker::PhantomData; type Scope<T> = Other<T>; type Other<T> = Scope<T>;",
+            false,
+        ),
+        (
+            "(PhantomData<T>)",
+            "Self(PhantomData)",
+            "struct PhantomData<T>(T);",
+            false,
+        ),
+        (
+            "(PhantomData<T>)",
+            "work(); Self(PhantomData)",
+            "use std::marker::PhantomData;",
+            false,
+        ),
+        (
+            "(PhantomData<T>)",
+            "Self(make())",
+            "use std::marker::PhantomData;",
+            false,
+        ),
+        (
+            "(PhantomData<T>,u64)",
+            "Self(PhantomData,0)",
+            "use std::marker::PhantomData;",
+            false,
+        ),
+        (
+            "(PhantomData<T>)",
+            "Self(PhantomData)",
+            "use std::marker::PhantomData; trait Default { fn default()->Self; }",
+            false,
+        ),
+    ] {
+        let terminator = if fields.starts_with('{') { "" } else { ";" };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; {bindings} #[derive(Component)] struct State; struct BridgePlugin<T>{fields}{terminator} impl<T> Default for BridgePlugin<T> {{ fn default()->Self {{ {construction} }} }} impl<T> Plugin for BridgePlugin<T> {{ fn build(&self, app:&mut App) {{ app.add_systems(Update,read); }} }} fn read(state:Query<&State>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self,app:&mut App) {{ app.add_plugins(BridgePlugin::<State>::default()); }} }}"
+        ));
+        for key in ["impl:Default for BridgePlugin < T >", "struct:RootPlugin"] {
+            assert_eq!(
+                inventory.automatic_boundary(&inventory.entries[&inventory.key(key)]),
+                expected,
+                "{key}: {bindings} {construction}"
+            );
+        }
+    }
+}
+
+#[test]
+fn stateless_plugin_defaults_preserve_registration_and_cycle_refusal() {
+    for (build, expected) in [
+        ("app.add_systems(Update,read);", true),
+        ("", false),
+        ("app.add_systems(Update,read); work();", false),
+        (
+            "app.add_plugins(BridgePlugin::<T>::default()).add_systems(Update,read);",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use std::marker::PhantomData; #[derive(Component)] struct State; struct BridgePlugin<T>(PhantomData<T>); impl<T> Default for BridgePlugin<T> {{ fn default()->Self {{ Self(PhantomData) }} }} impl<T> Plugin for BridgePlugin<T> {{ fn build(&self,app:&mut App) {{ {build} }} }} fn read(state:Query<&State>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self,app:&mut App) {{ app.add_plugins(BridgePlugin::<State>::default()); }} }}"
+        ));
+        assert_eq!(
+            Policy::default().audit(&inventory).is_empty(),
+            expected,
+            "{build}"
+        );
+    }
+}
+
+#[test]
 fn stateless_framework_bootstraps_require_real_interfaces_and_registration() {
     for (binding, fields, body, expected) in [
         (
@@ -1449,7 +1555,12 @@ fn child_only_composition_checks_the_installed_value_without_parent_type_fallbac
         (
             "struct FactoryPlugin; impl Plugin for FactoryPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } } impl Default for FactoryPlugin { fn default() -> Self { Self } }",
             "FactoryPlugin::default()",
-            [false, true],
+            [true, true],
+        ),
+        (
+            "struct FactoryPlugin; impl Plugin for FactoryPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } } impl Default for FactoryPlugin { fn default() -> Self { work(); Self } }",
+            "FactoryPlugin::default()",
+            [false, false],
         ),
         (
             "struct FactoryPlugin; impl Plugin for FactoryPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } } impl Default for FactoryPlugin { fn default() -> Self { Self } } impl FactoryPlugin { fn default() -> RootPlugin { RootPlugin } }",
@@ -5979,6 +6090,7 @@ struct BodyShape {
     bootstrap_defaults: Option<BTreeSet<String>>,
     bootstrap_app: Option<String>,
     returns_self: bool,
+    default_markers: Option<Vec<String>>,
 }
 
 impl BodyShape {
@@ -6193,6 +6305,10 @@ impl BodyShape {
                     if matches!(output.as_ref(), Type::Path(path)
                         if path.qself.is_none() && path.path.is_ident("Self")))
             }),
+            default_markers: method
+                .as_ref()
+                .filter(|method| method.sig.ident == "default" && method.sig.inputs.is_empty())
+                .and_then(|_| Self::default_markers(block)),
             fingerprint: Declaration::fingerprint(&tokens.to_string()),
             lines: footprint.lines.len(),
             production: !Usage::test_only(attributes)
@@ -6200,6 +6316,45 @@ impl BodyShape {
                     .iter()
                     .any(|meta| meta.path().is_ident("test")),
         }
+    }
+
+    fn default_markers(block: &syn::Block) -> Option<Vec<String>> {
+        if block.stmts.len() != 1 {
+            return None;
+        }
+        let syn::Stmt::Expr(expression, None) = &block.stmts[0] else {
+            return None;
+        };
+        let mut markers = Vec::new();
+        match expression {
+            syn::Expr::Path(value) if value.qself.is_none() && value.path.is_ident("Self") => {}
+            syn::Expr::Call(value) if matches!(value.func.as_ref(), syn::Expr::Path(path) if path.qself.is_none() && path.path.is_ident("Self")) => {
+                for argument in &value.args {
+                    let syn::Expr::Path(value) = argument else {
+                        return None;
+                    };
+                    if value.qself.is_some() {
+                        return None;
+                    }
+                    markers.push(References::path(&value.path));
+                }
+            }
+            syn::Expr::Struct(value)
+                if value.qself.is_none() && value.path.is_ident("Self") && value.rest.is_none() =>
+            {
+                for field in &value.fields {
+                    let syn::Expr::Path(value) = &field.expr else {
+                        return None;
+                    };
+                    if value.qself.is_some() {
+                        return None;
+                    }
+                    markers.push(References::path(&value.path));
+                }
+            }
+            _ => return None,
+        }
+        Some(markers)
     }
 }
 
@@ -7484,7 +7639,7 @@ impl Inventory {
                 _ => return false,
             };
         if !matches!(owner.kind, Kind::Struct)
-            || owner.has_fields
+            || !self.plugin_markers(owner)
             || !owner.production
             || owner.local
             || owner.dynamic
@@ -7492,6 +7647,9 @@ impl Inventory {
             || owner.projection
         {
             return false;
+        }
+        if matches!(entry.kind, Kind::Impl) && self.plugin_default(entry, owner) {
+            return self.framework_child_interfaces(owner, visiting);
         }
         for implementation in self.implementations(owner) {
             if matches!(entry.kind, Kind::Impl) && implementation.key != entry.key {
@@ -7532,7 +7690,11 @@ impl Inventory {
                                                 | "bevy_cef_core"
                                         )
                                     )
-                                })
+                                }) && !self.plugin_default_path(
+                                    &implementation.namespace,
+                                    path,
+                                    &mut visiting.clone(),
+                                )
                             })
                         })
                 })
@@ -7574,13 +7736,145 @@ impl Inventory {
         false
     }
 
+    fn phantom_data(&self, namespace: &str, path: &str) -> bool {
+        self.external_path(namespace, path, &mut BTreeSet::new())
+            .is_some_and(|path| {
+                matches!(
+                    path.as_str(),
+                    "std::marker::PhantomData" | "core::marker::PhantomData"
+                )
+            })
+    }
+
+    fn plugin_markers(&self, owner: &Declaration) -> bool {
+        if !owner.has_fields {
+            return true;
+        }
+        if owner.field_types.is_empty() {
+            return false;
+        }
+        for field in &owner.field_types {
+            if !self.phantom_marker_type(&owner.namespace, field, &mut BTreeSet::new()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn phantom_marker_type(
+        &self,
+        namespace: &str,
+        value: &Type,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        let Type::Path(path) = value else {
+            return false;
+        };
+        if path.qself.is_some() {
+            return false;
+        }
+        let name = References::path(&path.path);
+        if self.phantom_data(namespace, &name) {
+            return true;
+        }
+        let Some(alias) = self.resolve(namespace, &name, &mut BTreeSet::new()) else {
+            return false;
+        };
+        if !matches!(alias.kind, Kind::Alias)
+            || !alias.production
+            || alias.field_types.len() != 1
+            || !visiting.insert(alias.key.clone())
+        {
+            return false;
+        }
+        let arguments = References::arguments(&path.path);
+        let Some(bindings) = self.type_bindings(
+            namespace,
+            &alias.generic_parameters,
+            &alias.generic_bindings,
+            &arguments,
+            &BTreeMap::new(),
+        ) else {
+            return false;
+        };
+        let value = Bindings::apply(self, &alias.namespace, &bindings, &alias.field_types[0]);
+        self.phantom_marker_type(&alias.namespace, &value, visiting)
+    }
+
+    fn plugin_default(&self, implementation: &Declaration, owner: &Declaration) -> bool {
+        if !implementation.production || !self.plugin_markers(owner) {
+            return false;
+        }
+        let Some(interface) = &implementation.implemented_trait else {
+            return false;
+        };
+        let interface_path =
+            self.external_path(&implementation.namespace, interface, &mut BTreeSet::new());
+        let standard = match interface_path.as_deref() {
+            Some("std::default::Default" | "core::default::Default") => true,
+            None if interface == "Default"
+                && !self.local_binding(&implementation.namespace, interface) =>
+            {
+                true
+            }
+            _ => false,
+        };
+        if !standard || implementation.bodies.len() != 1 {
+            return false;
+        }
+        let body = &implementation.bodies[0];
+        if !body.production || !body.returns_self {
+            return false;
+        }
+        let Some(markers) = &body.default_markers else {
+            return false;
+        };
+        markers.len() == owner.field_types.len()
+            && markers
+                .iter()
+                .all(|path| self.phantom_data(&implementation.namespace, path))
+    }
+
+    fn plugin_default_path(
+        &self,
+        namespace: &str,
+        path: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        let Some(owner) = self.resolve(namespace, path, &mut BTreeSet::new()) else {
+            return false;
+        };
+        let mut methods = 0;
+        for implementation in self.implementations(owner) {
+            if !implementation.production {
+                continue;
+            }
+            for body in &implementation.bodies {
+                if body.production && body.name == "default" {
+                    methods += 1;
+                }
+            }
+        }
+        if methods != 1 {
+            return false;
+        }
+        if !self.framework_child_interfaces(owner, visiting) {
+            return false;
+        }
+        let defaults: Vec<_> = self
+            .implementations(owner)
+            .into_iter()
+            .filter(|implementation| self.plugin_default(implementation, owner))
+            .collect();
+        defaults.len() == 1
+    }
+
     fn framework_children(
         &self,
         implementation: &Declaration,
         visiting: &mut BTreeSet<String>,
     ) -> bool {
-        if implementation.plugin_children.is_empty() || !implementation.plugin_arguments.is_empty()
-        {
+        if implementation.plugin_children.is_empty() {
             return false;
         }
         for body in &implementation.bodies {
@@ -7595,9 +7889,91 @@ impl Inventory {
                 return false;
             }
         }
+        if !implementation.plugin_arguments.is_empty()
+            && !self.instantiated_plugin_defaults(implementation, visiting)
+        {
+            return false;
+        }
         for path in &implementation.plugin_children {
             if !self.framework_child(&implementation.namespace, path, &mut visiting.clone()) {
                 return false;
+            }
+        }
+        true
+    }
+
+    fn instantiated_plugin_defaults(
+        &self,
+        implementation: &Declaration,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        let contexts: Vec<_> = self
+            .generic_usage
+            .systems
+            .keys()
+            .filter(|context| context.0 == implementation.key)
+            .collect();
+        if contexts.is_empty() {
+            return false;
+        }
+        for (constructor, arguments) in &implementation.plugin_arguments {
+            if !self.plugin_default_path(
+                &implementation.namespace,
+                constructor,
+                &mut visiting.clone(),
+            ) {
+                return false;
+            }
+            let Some(owner) =
+                self.resolve(&implementation.namespace, constructor, &mut BTreeSet::new())
+            else {
+                return false;
+            };
+            for context in &contexts {
+                let mut inherited = BTreeMap::new();
+                for (name, value) in &context.1 {
+                    let Ok(value) = syn::parse_str::<syn::GenericArgument>(value) else {
+                        return false;
+                    };
+                    inherited.insert(name.clone(), value);
+                }
+                let mut resolved = Vec::new();
+                for argument in arguments {
+                    let Ok(value) = syn::parse_str::<syn::GenericArgument>(argument) else {
+                        return false;
+                    };
+                    let value =
+                        Bindings::argument(self, &implementation.namespace, &inherited, &value);
+                    resolved.push(value.to_token_stream().to_string());
+                }
+                let mut matched = 0;
+                for child in self.implementations(owner) {
+                    if !self.actual_plugin(child) {
+                        continue;
+                    }
+                    let Some(values) = self.type_bindings(
+                        &child.namespace,
+                        &child.plugin_parameters,
+                        &child.generic_bindings,
+                        &resolved,
+                        &inherited,
+                    ) else {
+                        continue;
+                    };
+                    let expected = Instantiations::context(&child.key, &values);
+                    if !self
+                        .generic_usage
+                        .children
+                        .get(*context)
+                        .is_some_and(|children| children.contains(&expected))
+                    {
+                        return false;
+                    }
+                    matched += 1;
+                }
+                if matched != 1 {
+                    return false;
+                }
             }
         }
         true
@@ -7656,24 +8032,11 @@ impl Inventory {
                 && self.framework_child_interfaces(child, visiting);
         }
         if let Some((owner, "default")) = path.rsplit_once("::")
-            && let Some(child) = self.resolve(namespace, owner, &mut BTreeSet::new())
+            && self
+                .resolve(namespace, owner, &mut BTreeSet::new())
+                .is_some()
         {
-            let mut declared = false;
-            for implementation in self.implementations(child) {
-                if !implementation.production {
-                    continue;
-                }
-                for body in &implementation.bodies {
-                    if body.name != "default" || !body.production {
-                        continue;
-                    }
-                    declared = true;
-                    if !body.returns_self {
-                        return false;
-                    }
-                }
-            }
-            return declared && self.framework_child_interfaces(child, visiting);
+            return self.plugin_default_path(namespace, owner, visiting);
         }
         self.external_path(namespace, path, &mut BTreeSet::new())
             .is_some_and(|path| {
