@@ -74,6 +74,7 @@ impl Plugin for LayoutUiProjectionPlugin {
                 project_tab_strip,
                 project_side_sheet,
                 project_bookmark_ui,
+                project_remote.after(vmux_api::remote::RemoteProjectionSet),
             )
                 .in_set(LayoutUiProjectionSet::Derive),
         )
@@ -88,6 +89,7 @@ impl Plugin for LayoutUiProjectionPlugin {
                 publish_tab_strip,
                 publish_side_sheet,
                 publish_bookmark_ui,
+                publish_remote,
             )
                 .in_set(LayoutUiProjectionSet::Publish),
         );
@@ -111,6 +113,36 @@ pub struct BookmarkProjection(pub BookmarkStateEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct SpacesProjection(pub vmux_ecs::event::space::SpacesListEvent);
+
+#[derive(Component, Clone, Default, PartialEq)]
+struct RemoteProjection(vmux_api::remote::UiRemote);
+
+fn project_remote(
+    source: Query<&vmux_api::remote::UiRemote>,
+    layouts: Query<(Entity, Option<&RemoteProjection>), With<LayoutCef>>,
+    mut commands: Commands,
+) {
+    let value = source.single().cloned().unwrap_or_default();
+    for (entity, previous) in &layouts {
+        if previous.is_some_and(|previous| previous.0 == value) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .insert(RemoteProjection(value.clone()));
+    }
+}
+
+fn publish_remote(
+    values: Query<(Entity, &RemoteProjection), Changed<RemoteProjection>>,
+    mut commands: Commands,
+) {
+    for (entity, value) in &values {
+        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+            entity, &value.0,
+        ));
+    }
+}
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct TabListProjection(TabListState);

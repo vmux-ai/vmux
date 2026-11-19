@@ -1870,6 +1870,7 @@ dependencies = [
  "ptr_meta",
  "rancor",
  "simdutf8",
+ "uuid",
 ]
 
 [[package]]
@@ -10284,6 +10285,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+ "vmux_api",
  "vmux_ecs",
  "vmux_feature",
  "vmux_profile",
@@ -10361,6 +10363,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_macro",
+ "zeroize",
 ]
 
 [[package]]
@@ -10374,8 +10377,10 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
  "vmux_account",
  "vmux_acp",
+ "vmux_api",
  "vmux_bookmark",
  "vmux_browser",
  "vmux_command",
@@ -10819,6 +10824,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha2",
+ "tempfile",
  "url",
  "uuid",
  "vmux_api",
@@ -10826,6 +10832,7 @@ dependencies = [
  "vmux_macro",
  "vmux_page",
  "vmux_ui",
+ "zeroize",
 ]
 
 [[package]]
@@ -11184,11 +11191,16 @@ name = "vmux_remote"
 version = "0.0.35"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_cef",
+ "bevy_ecs",
+ "serde_json",
+ "tempfile",
  "uuid",
+ "vmux_api",
  "vmux_clipboard",
  "vmux_ecs",
- "vmux_layout",
+ "vmux_feature",
  "vmux_service",
 ]
 
@@ -11196,6 +11208,7 @@ dependencies = [
 name = "vmux_service"
 version = "0.0.35"
 dependencies = [
+ "async-io",
  "base64 0.22.1",
  "bevy",
  "bevy_app",
@@ -11548,6 +11561,7 @@ name = "vmux_transport"
 version = "0.0.35"
 dependencies = [
  "bytes",
+ "libc",
  "quinn",
  "rcgen",
  "ring",
@@ -11561,6 +11575,7 @@ dependencies = [
  "vmux_api",
  "vmux_profile",
  "webpki-roots",
+ "zeroize",
 ]
 
 [[package]]

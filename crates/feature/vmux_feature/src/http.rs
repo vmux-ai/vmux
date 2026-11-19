@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::io::Read;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Waker};
 use std::time::Duration;
 
@@ -8,10 +9,14 @@ use async_io::Timer;
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use reqwest::Url;
+use uuid::Uuid;
+use vmux_api::control::{ControlLease, ControlToken};
 use vmux_ecs::{
     Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, Revision,
 };
+use zeroize::Zeroizing;
 
+use crate::flag::Source;
 use crate::runtime::{Lease, Now};
 use crate::{Generation, Provider, Receive, RefreshFailed, Set, snapshot::Document};
 
@@ -28,9 +33,9 @@ impl bevy_app::Plugin for HttpPlugin {
         app.add_plugins(JobPlugin::<Fetch>::default())
             .add_systems(
                 Update,
-                (remove, reset, poll)
+                (remove, reset, authorization, poll)
                     .chain()
-                    .after(Set::Clock)
+                    .in_set(Set::Prepare)
                     .before(JobSet::Submit),
             )
             .add_systems(Update, receive.after(JobSet::Apply).before(Set::Accept))
@@ -43,7 +48,76 @@ impl bevy_app::Plugin for HttpPlugin {
 #[require(PollState)]
 pub struct Endpoint(Url);
 
+#[derive(Component)]
+#[component(immutable)]
+#[require(Revision)]
+pub struct Credential {
+    lease: Arc<ControlLease>,
+}
+
+impl Credential {
+    pub fn new(
+        token: String,
+        account: Uuid,
+        device: Uuid,
+        workspace: Uuid,
+        environment: String,
+        expires_at: u64,
+    ) -> Result<Self, String> {
+        let token =
+            ControlToken::new(token).map_err(|_| "invalid Control credential".to_string())?;
+        Self::from_lease(ControlLease {
+            token,
+            account_id: account,
+            device_id: device,
+            workspace_id: workspace,
+            environment,
+            expires_at,
+        })
+    }
+
+    pub fn from_lease(lease: ControlLease) -> Result<Self, String> {
+        if !lease.valid() {
+            return Err("invalid Control credential".into());
+        }
+        Ok(Self {
+            lease: Arc::new(lease),
+        })
+    }
+
+    pub fn lease(&self) -> ControlLease {
+        self.lease.as_ref().clone()
+    }
+
+    pub fn account(&self) -> Uuid {
+        self.lease.account_id
+    }
+    pub fn device(&self) -> Uuid {
+        self.lease.device_id
+    }
+    pub fn workspace(&self) -> Uuid {
+        self.lease.workspace_id
+    }
+    pub fn environment(&self) -> &str {
+        &self.lease.environment
+    }
+    pub fn expires_at(&self) -> u64 {
+        self.lease.expires_at
+    }
+}
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[component(immutable)]
+pub struct CredentialSource(pub Entity);
+
+#[derive(Component)]
+pub struct RequireAuthorization;
+
 impl Endpoint {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
     pub fn new(url: &str) -> Result<Self, String> {
         let url = Url::parse(url).map_err(|error| error.to_string())?;
         let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -67,6 +141,8 @@ struct PollState {
     generation: u64,
     failures: u8,
     etag: Option<String>,
+    credential: Option<(Entity, u64)>,
+    requires_authorization: bool,
 }
 
 impl PollState {
@@ -84,10 +160,37 @@ impl PollState {
 struct Pending {
     generation: u64,
     conditional: bool,
+    credential: Option<(Entity, u64)>,
+    contexts: Vec<EvaluationContext>,
+}
+
+#[derive(Clone)]
+struct EvaluationContext {
+    scope: Entity,
+    context: crate::flag::Context,
+}
+
+#[derive(Component)]
+pub(crate) struct Authentication {
+    pub(crate) source: Entity,
+    pub(crate) source_revision: u64,
+    pub(crate) generation: u64,
+    pub(crate) revision: u64,
+    contexts: Vec<EvaluationContext>,
+}
+
+impl Authentication {
+    pub(crate) fn permits(&self, scope: Entity, context: &crate::flag::Context) -> bool {
+        self.contexts
+            .iter()
+            .any(|captured| captured.scope == scope && captured.context == *context)
+    }
 }
 
 #[derive(Component)]
 struct Candidate {
+    receipt: Entity,
+    environment: String,
     generation: u64,
     revision: u64,
     issued_at: u64,
@@ -95,6 +198,8 @@ struct Candidate {
     fingerprint: [u8; 32],
     etag: Option<String>,
     entropy: u64,
+    credential: Option<(Entity, u64)>,
+    contexts: Vec<EvaluationContext>,
 }
 
 #[derive(Component)]
@@ -103,11 +208,13 @@ struct Deadline {
     timer: Timer,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Component)]
+#[component(immutable)]
 struct Fetch {
     endpoint: Endpoint,
     environment: String,
     etag: Option<String>,
+    credential: Option<Arc<Zeroizing<String>>>,
 }
 
 impl Job for Fetch {
@@ -135,6 +242,12 @@ impl Fetch {
             .build()
             .map_err(|error| error.to_string())?;
         let mut request = client.get(self.endpoint.0);
+        if let Some(credential) = self.credential {
+            let mut header = reqwest::header::HeaderValue::from_str(credential.as_str())
+                .map_err(|_| "invalid Control credential header")?;
+            header.set_sensitive(true);
+            request = request.header(reqwest::header::AUTHORIZATION, header);
+        }
         if let Some(etag) = self.etag {
             request = request.header(reqwest::header::IF_NONE_MATCH, etag);
         }
@@ -197,6 +310,76 @@ type PollingProviders<'w, 's> = Query<
     With<Provider>,
 >;
 
+type Credentials<'w, 's> = Query<'w, 's, (&'static Credential, &'static Revision)>;
+
+type CredentialProviders<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Name,
+        &'static Revision,
+        &'static mut Generation,
+        &'static mut Lease,
+        &'static mut PollState,
+        Option<&'static CredentialSource>,
+        Has<RequireAuthorization>,
+        Option<&'static Authentication>,
+    ),
+    (With<Provider>, With<Endpoint>),
+>;
+
+fn authorization(
+    mut providers: CredentialProviders,
+    credentials: Credentials,
+    contexts: Query<&crate::flag::Context>,
+    now: Res<Now>,
+    mut commands: Commands,
+) {
+    for (
+        provider,
+        environment,
+        revision,
+        mut generation,
+        mut lease,
+        mut state,
+        source,
+        required,
+        authentication,
+    ) in &mut providers
+    {
+        let current = source.and_then(|source| {
+            let (credential, revision) = credentials.get(source.0).ok()?;
+            if credential.expires_at() <= now.0 || credential.environment() != environment.as_str()
+            {
+                return None;
+            }
+            Some((source.0, revision.0))
+        });
+        let required = required || source.is_some();
+        if state.credential != current || state.requires_authorization != required {
+            generation.0 = generation.0.saturating_add(1);
+            lease.available = false;
+            state.credential = current;
+            state.requires_authorization = required;
+        }
+        if let Some(authentication) = authentication
+            && (authentication.generation != generation.0
+                || authentication.revision != revision.0
+                || current != Some((authentication.source, authentication.source_revision))
+                || authentication.contexts.iter().any(|captured| {
+                    !contexts
+                        .get(captured.scope)
+                        .is_ok_and(|context| authentication.permits(captured.scope, context))
+                }))
+        {
+            commands.entity(provider).remove::<Authentication>();
+            state.etag = None;
+            state.next_at = 0;
+        }
+    }
+}
+
 type FetchResults<'w, 's> = Query<
     'w,
     's,
@@ -227,7 +410,7 @@ fn remove(
         lease.available = false;
         commands
             .entity(entity)
-            .remove::<(PollState, Candidate, Deadline)>();
+            .remove::<(PollState, Candidate, Deadline, Authentication)>();
     }
 }
 
@@ -259,6 +442,9 @@ fn reset(mut providers: ChangedProviders) {
 
 fn poll(
     mut providers: PollingProviders,
+    credentials: Credentials,
+    definitions: Query<(&ChildOf, &crate::Definition)>,
+    contexts: Query<&crate::flag::Context>,
     now: Res<Now>,
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
@@ -271,11 +457,51 @@ fn poll(
             }
             *state = PollState {
                 generation: generation.0,
+                credential: state.credential,
+                requires_authorization: state.requires_authorization,
                 ..Default::default()
             };
-            commands.entity(provider).remove::<Candidate>();
+            commands
+                .entity(provider)
+                .remove::<(Candidate, Authentication)>();
+        }
+        let credential = state.credential.and_then(|(source, _)| {
+            credentials
+                .get(source)
+                .ok()
+                .map(|(credential, _)| credential)
+        });
+        if state.requires_authorization && credential.is_none() {
+            state.next_at = now.0.saturating_add(60);
         }
         if state.pending.is_none() && now.0 >= state.next_at {
+            let mut captured = Vec::new();
+            for (owner, definition) in &definitions {
+                if owner.parent() != provider
+                    || captured
+                        .iter()
+                        .any(|item: &EvaluationContext| item.scope == definition.scope)
+                {
+                    continue;
+                }
+                if let Ok(context) = contexts.get(definition.scope) {
+                    captured.push(EvaluationContext {
+                        scope: definition.scope,
+                        context: context.clone(),
+                    });
+                }
+            }
+            let operation = Fetch {
+                endpoint: endpoint.clone(),
+                environment: environment.as_str().to_string(),
+                etag: state.etag.clone(),
+                credential: credential.map(|credential| {
+                    Arc::new(Zeroizing::new(format!(
+                        "Bearer {}",
+                        credential.lease.token.as_str()
+                    )))
+                }),
+            };
             let task = commands
                 .spawn((
                     Operation::bundle("feature.fetch").expect("static operation kind"),
@@ -283,12 +509,11 @@ fn poll(
                     Pending {
                         generation: generation.0,
                         conditional: state.etag.is_some(),
+                        credential: state.credential,
+                        contexts: captured,
                     },
-                    JobRequest(Fetch {
-                        endpoint: endpoint.clone(),
-                        environment: environment.as_str().to_string(),
-                        etag: state.etag.clone(),
-                    }),
+                    operation.clone(),
+                    JobRequest(operation),
                 ))
                 .id();
             state.pending = Some(task);
@@ -299,6 +524,9 @@ fn poll(
         }
         if lease.available {
             at = at.min(lease.valid_until);
+        }
+        if let Some(credential) = credential {
+            at = at.min(credential.expires_at());
         }
         let mut context =
             Context::from_waker(wake.as_deref().map_or(Waker::noop(), |wake| &wake.0));
@@ -317,10 +545,32 @@ fn poll(
     }
 }
 
+#[derive(bevy_ecs::system::SystemParam)]
+struct ReceiptContext<'w, 's> {
+    credentials: Credentials<'w, 's>,
+    now: Res<'w, Now>,
+    contexts: Query<'w, 's, &'static crate::flag::Context>,
+}
+
+impl ReceiptContext<'_, '_> {
+    fn has_current_contexts(&self, pending: &Pending) -> bool {
+        for captured in &pending.contexts {
+            if !self
+                .contexts
+                .get(captured.scope)
+                .is_ok_and(|context| *context == captured.context)
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 fn receive(
     mut results: FetchResults,
     mut providers: ReceivingProviders,
-    now: Res<Now>,
+    authority: ReceiptContext,
     mut accepted: MessageWriter<Receive>,
     mut failures: MessageWriter<RefreshFailed>,
     mut commands: Commands,
@@ -334,7 +584,23 @@ fn receive(
         if !job_owner.accepts(Some(owner))
             || generation.0 != pending.generation
             || state.pending != Some(entity)
+            || state.credential != pending.credential
+            || !authority.has_current_contexts(pending)
+            || pending.credential.is_some_and(|(source, revision)| {
+                !authority
+                    .credentials
+                    .get(source)
+                    .is_ok_and(|(credential, current)| {
+                        current.0 == revision && credential.expires_at() > authority.now.0
+                    })
+            })
         {
+            if state.pending == Some(entity) {
+                state.pending = None;
+                state.etag = None;
+                state.next_at = authority.now.0;
+                commands.entity(provider).remove::<Authentication>();
+            }
             commands.entity(entity).despawn();
             continue;
         }
@@ -351,6 +617,8 @@ fn receive(
                 && let Ok(document) = Document::decode(&response.bytes)
             {
                 commands.entity(provider).insert(Candidate {
+                    receipt: entity,
+                    environment: document.environment.clone(),
                     generation: generation.0,
                     revision: document.revision,
                     issued_at: document.issued_at,
@@ -358,11 +626,15 @@ fn receive(
                     fingerprint: document.fingerprint(),
                     etag: response.etag,
                     entropy,
+                    credential: pending.credential,
+                    contexts: pending.contexts.clone(),
                 });
                 accepted.write(Receive {
+                    receipt: Some(entity),
                     provider,
                     generation: generation.0,
                     document,
+                    source: Source::Cloud,
                 });
                 success = true;
             }
@@ -373,19 +645,22 @@ fn receive(
         } else {
             state.failures = state.failures.saturating_add(1);
             state.etag = None;
+            commands.entity(provider).remove::<Authentication>();
             failures.write(RefreshFailed {
                 provider,
                 generation: generation.0,
             });
         }
-        state.next_at = now.0.saturating_add(state.delay(entropy));
+        state.next_at = authority.now.0.saturating_add(state.delay(entropy));
         commands.entity(entity).despawn();
     }
 }
 
 fn validate(
+    mut receipts: MessageReader<crate::SnapshotAccepted>,
     mut providers: Query<(
         Entity,
+        &Name,
         &Revision,
         &Generation,
         &Lease,
@@ -395,8 +670,21 @@ fn validate(
     now: Res<Now>,
     mut commands: Commands,
 ) {
-    for (provider, revision, generation, lease, candidate, mut state) in &mut providers {
+    let mut accepted = std::collections::BTreeMap::new();
+    for receipt in receipts.read() {
+        accepted.insert(receipt.provider, receipt);
+    }
+    for (provider, environment, revision, generation, lease, candidate, mut state) in &mut providers
+    {
         if lease.available
+            && environment.as_str() == candidate.environment
+            && accepted.get(&provider).is_some_and(|receipt| {
+                receipt.receipt == Some(candidate.receipt)
+                    && receipt.generation == candidate.generation
+                    && receipt.document.revision == candidate.revision
+                    && receipt.document.fingerprint() == candidate.fingerprint
+                    && receipt.source == Source::Cloud
+            })
             && generation.0 == candidate.generation
             && revision.0 == candidate.revision
             && lease.fingerprint == candidate.fingerprint
@@ -404,7 +692,19 @@ fn validate(
             && lease.valid_until == candidate.valid_until
         {
             state.etag = candidate.etag.clone();
+            if let Some((source, source_revision)) = candidate.credential {
+                commands.entity(provider).insert(Authentication {
+                    source,
+                    source_revision,
+                    generation: generation.0,
+                    revision: candidate.revision,
+                    contexts: candidate.contexts.clone(),
+                });
+            } else {
+                commands.entity(provider).remove::<Authentication>();
+            }
         } else {
+            commands.entity(provider).remove::<Authentication>();
             state.etag = None;
             state.failures = state.failures.saturating_add(1);
             state.next_at = now.0.saturating_add(state.delay(candidate.entropy));
@@ -414,7 +714,7 @@ fn validate(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;
@@ -424,17 +724,26 @@ mod tests {
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     use super::*;
+    use crate::flag::{Configuration, Context as FlagContext, Subject, SubjectKind};
+    use crate::manifest::{FeatureManifest, FeatureManifestSource};
     use crate::{Current, Definition, Tick};
 
-    struct Server {
-        url: String,
-        requests: Receiver<String>,
+    struct FixtureFeature;
+
+    impl FeatureManifestSource for FixtureFeature {
+        const SOURCE: &'static str =
+            r#"(flags:[(key:"account.cloud",type:Boolean,class:Release,default:Boolean(false))])"#;
+    }
+
+    pub(crate) struct Server {
+        pub(crate) url: String,
+        pub(crate) requests: Receiver<String>,
         stopped: Arc<AtomicBool>,
         worker: Option<JoinHandle<()>>,
     }
 
     impl Server {
-        fn new(replies: Vec<String>) -> Self {
+        pub(crate) fn new(replies: Vec<String>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let url = format!(
                 "http://{}/v1/flags/snapshot",
@@ -489,7 +798,7 @@ mod tests {
             String::from_utf8(bytes).unwrap()
         }
 
-        fn reply(status: u16, body: &str, etag: &str) -> String {
+        pub(crate) fn reply(status: u16, body: &str, etag: &str) -> String {
             format!(
                 "HTTP/1.1 {status} fixture\r\nContent-Length: {}\r\nETag: {etag}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
@@ -530,7 +839,25 @@ mod tests {
         fn new(replies: Vec<String>) -> Self {
             let server = Server::new(replies);
             let mut app = App::new();
-            app.add_plugins(HttpPlugin);
+            app.add_plugins((
+                HttpPlugin,
+                crate::manifest::FeaturePlugin::<FixtureFeature>::default(),
+            ));
+            let source = app.world_mut().query_filtered::<Entity, With<crate::manifest::FeatureManifestOwner<FixtureFeature>>>().single(app.world()).unwrap();
+            let scope = app
+                .world_mut()
+                .spawn((
+                    Name::new("Installation flags"),
+                    FlagContext {
+                        generation: 0,
+                        subject: Subject {
+                            kind: SubjectKind::Installation,
+                            key: "device-a".into(),
+                        },
+                        attributes: Default::default(),
+                    },
+                ))
+                .id();
             let provider = app
                 .world_mut()
                 .spawn((
@@ -540,7 +867,13 @@ mod tests {
                 .id();
             let flag = app
                 .world_mut()
-                .spawn(Definition::bundle(provider, "account.cloud", false))
+                .spawn(Definition::bundle(
+                    provider,
+                    source,
+                    0,
+                    scope,
+                    &FeatureManifest::of::<FixtureFeature>().flags[0],
+                ))
                 .id();
             Self {
                 app,
@@ -597,14 +930,17 @@ mod tests {
                 revision,
                 issued_at: now,
                 valid_until: until,
-                flags: std::collections::BTreeMap::from([("account.cloud".into(), true)]),
+                flags: std::collections::BTreeMap::from([(
+                    "account.cloud".into(),
+                    Configuration::boolean(true),
+                )]),
             })
             .unwrap()
         }
     }
 
     #[test]
-    fn conditional_get_keeps_the_existing_expiry_and_a_failed_fetch_closes_admission() {
+    fn conditional_get_and_refresh_failure_keep_content_without_extending_its_expiry() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -637,7 +973,7 @@ mod tests {
             expiry
         );
         fixture.fetch();
-        assert!(!fixture.enabled());
+        assert!(fixture.enabled());
         assert!(
             fixture
                 .app
@@ -647,6 +983,9 @@ mod tests {
                 .etag
                 .is_none()
         );
+        fixture.app.world_mut().write_message(Tick(expiry));
+        fixture.app.update();
+        assert!(!fixture.enabled());
     }
 
     #[test]
@@ -663,7 +1002,7 @@ mod tests {
         fixture.fetch();
         assert!(fixture.enabled());
         fixture.fetch();
-        assert!(!fixture.enabled());
+        assert!(fixture.enabled());
         assert_eq!(
             fixture
                 .app
@@ -684,6 +1023,82 @@ mod tests {
                 .unwrap()
                 .0,
             2
+        );
+    }
+
+    #[test]
+    fn a_rejected_foreign_environment_echo_cannot_install_a_validator_or_new_authentication() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let valid = Fixture::document(1, now + 100);
+        let foreign = valid.replace("production", "foreign");
+        let mut fixture = Fixture::new(vec![
+            Server::reply(200, &valid, "\"valid\""),
+            Server::reply(200, &foreign, "\"foreign\""),
+            Server::reply(200, &Fixture::document(2, now + 100), "\"next\""),
+        ]);
+        let source = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Credential::new(
+                    "fixture-control-token".into(),
+                    uuid::Uuid::new_v4(),
+                    uuid::Uuid::new_v4(),
+                    uuid::Uuid::new_v4(),
+                    "production".into(),
+                    now + 100,
+                )
+                .unwrap(),
+                Revision(1),
+            ))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.provider)
+            .insert(CredentialSource(source));
+        fixture.fetch();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Authentication>(fixture.provider)
+                .is_some()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.provider)
+            .remove::<Authentication>();
+        fixture.fetch();
+        assert!(fixture.enabled());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Authentication>(fixture.provider)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<PollState>(fixture.provider)
+                .unwrap()
+                .etag
+                .is_none()
+        );
+        let next = fixture.fetch();
+        assert!(!next.to_lowercase().contains("if-none-match:"));
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Authentication>(fixture.provider)
+                .is_some()
         );
     }
 
@@ -775,7 +1190,10 @@ mod tests {
             revision: 1,
             issued_at: now,
             valid_until: now + 100,
-            flags: std::collections::BTreeMap::from([("account.cloud".into(), false)]),
+            flags: std::collections::BTreeMap::from([(
+                "account.cloud".into(),
+                Configuration::boolean(false),
+            )]),
         };
         let mut fixture = Fixture::new(vec![
             Server::reply(200, &Fixture::document(5, now + 100), "\"prod5\""),

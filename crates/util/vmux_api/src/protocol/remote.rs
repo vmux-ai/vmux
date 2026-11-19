@@ -158,10 +158,15 @@ pub enum ClientMessage {
         sid: String,
         cwd: String,
     },
+    ControlHello(crate::control::ControlHello),
+    CredentialOffer(crate::control::CredentialOffer),
+    CredentialWithdraw(crate::control::CredentialWithdraw),
+    SubscribeRemoteObservations,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceMessage {
+    RemoteObserved(crate::remote::Observation),
     ProcessCreated {
         process_id: ProcessId,
         pid: u32,
@@ -309,6 +314,8 @@ pub enum ServiceMessage {
         cwd: String,
         error: Option<String>,
     },
+    ControlReady(crate::control::ControlReady),
+    CredentialReply(crate::control::CredentialReply),
 }
 
 #[vmux_api::contract(Eq)]

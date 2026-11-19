@@ -8,6 +8,8 @@ Enable Remote on the Mac and follow the pairing flow with the phone. Keep the Ma
 
 In development and local builds, open **Live** in the header. Turn it on and choose **Connect device** to show the pairing QR code. Pairing details hide after two minutes; **Show QR** displays them again.
 
+A rollout or operational flag can make Live unavailable. The header control is hidden while availability is off, and the requested preference is preserved. Enabling from an older view cannot override an unavailable decision. Pairing and the connection phase remain separate from availability.
+
 Pairing gives the phone access to that host. You can revoke a paired device or disable Remote when you want to end access.
 
 ## Pick up a task

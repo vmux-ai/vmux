@@ -8,7 +8,7 @@ publish = false
 
 [features]
 default = ["service"]
-service = ["dep:vmux_api", "dep:vmux_profile"]
+service = ["dep:vmux_api", "dep:vmux_profile", "dep:libc", "dep:zeroize"]
 
 [dependencies]
 bytes = { workspace = true }
@@ -25,6 +25,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_api = { path = "../vmux_api", optional = true }
 vmux_profile = { path = "../vmux_profile", optional = true }
+libc = { version = "0.2", optional = true }
+zeroize = { version = "1", optional = true }
 
 [dev-dependencies]
 quinn = { workspace = true }

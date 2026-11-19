@@ -606,6 +606,30 @@ mod tests {
             worker.release();
             self.frame();
         }
+
+        fn drained(&mut self) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let remaining = self
+                    .app
+                    .world_mut()
+                    .query_filtered::<Entity, With<Operation>>()
+                    .iter(self.app.world())
+                    .count();
+                if remaining == 0 {
+                    return;
+                }
+                let timeout = deadline.saturating_duration_since(std::time::Instant::now());
+                assert!(
+                    !timeout.is_zero(),
+                    "native file-load ownership did not drain"
+                );
+                self.wake
+                    .recv_timeout(timeout)
+                    .expect("native retirement must wake its owner");
+                self.app.update();
+            }
+        }
     }
 
     #[test]
@@ -742,7 +766,7 @@ mod tests {
             .count();
         assert!(retained > 0);
         worker.release();
-        host.frame();
+        host.drained();
         let remaining = host
             .app
             .world_mut()

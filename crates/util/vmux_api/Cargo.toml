@@ -11,13 +11,14 @@ bevy = ["dep:bevy_ecs", "dep:bevy_reflect"]
 
 [dependencies]
 base64 = "0.22"
-rkyv = { workspace = true }
+rkyv = { workspace = true, features = ["uuid-1"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 shlex = "1"
 vmux_macro = { path = "../vmux_macro" }
 url = { workspace = true }
 uuid = { workspace = true }
+zeroize = "1"
 
 bevy_ecs = { workspace = true, optional = true }
 bevy_reflect = { workspace = true, optional = true }

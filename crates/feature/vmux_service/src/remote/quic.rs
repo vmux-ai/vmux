@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::authorization::RemoteAuthorizations;
@@ -19,7 +20,8 @@ const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
 
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 
-#[derive(Clone)]
+#[derive(Clone, bevy_ecs::prelude::Component)]
+#[component(immutable)]
 pub(crate) struct RemoteState {
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: RemoteAuthorizations,
@@ -31,6 +33,7 @@ pub(crate) struct RemoteState {
 pub(crate) struct SessionPublisher {
     started: mpsc::UnboundedSender<SessionStarted>,
     ended: mpsc::UnboundedSender<SessionEnded>,
+    registered: Arc<AtomicBool>,
 }
 
 impl SessionPublisher {
@@ -41,7 +44,24 @@ impl SessionPublisher {
     ) {
         let (started, started_inbox) = mpsc::unbounded_channel();
         let (ended, ended_inbox) = mpsc::unbounded_channel();
-        (Self { started, ended }, started_inbox, ended_inbox)
+        (
+            Self {
+                started,
+                ended,
+                registered: Arc::new(AtomicBool::new(false)),
+            },
+            started_inbox,
+            ended_inbox,
+        )
+    }
+
+    pub(crate) fn registered(&self) -> bool {
+        self.registered.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn registration(&self) -> RegistrationLease {
+        self.registered.store(true, Ordering::Release);
+        RegistrationLease(self.registered.clone())
     }
 
     fn open(&self, id: usize, device: DeviceId) -> SessionLease {
@@ -50,6 +70,14 @@ impl SessionPublisher {
             id,
             ended: self.ended.clone(),
         }
+    }
+}
+
+pub(crate) struct RegistrationLease(Arc<AtomicBool>);
+
+impl Drop for RegistrationLease {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
@@ -239,14 +267,38 @@ impl RemoteConnection {
     }
 
     async fn serve(mut self) {
-        let Ok((mut send, mut recv)) = self.connection.accept_bi().await else {
+        let mut stopped = self.liveness.clone();
+        let streams = tokio::select! {
+            streams = self.connection.accept_bi() => streams,
+            _ = stopped.wait_for(|live| !*live) => {
+                self.connection.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+                return;
+            }
+        };
+        let Ok((mut send, mut recv)) = streams else {
             return;
         };
-        let remote_enabled = *self.liveness.borrow();
-        let admitted = match Self::read_setup(&mut recv).await {
-            Ok(setup) => self.state.admit(setup, remote_enabled).await,
-            Err(rejection) => Err(rejection),
+        let admission = async {
+            match Self::read_setup(&mut recv).await {
+                Ok(setup) => {
+                    let enabled = *self.liveness.borrow();
+                    self.state.admit(setup, enabled).await
+                }
+                Err(rejection) => Err(rejection),
+            }
         };
+        let admitted = tokio::select! {
+            admitted = admission => admitted,
+            _ = stopped.wait_for(|live| !*live) => {
+                self.connection.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+                return;
+            }
+        };
+        if !*self.liveness.borrow() {
+            self.connection
+                .close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+            return;
+        }
 
         let (accepted, authorization) = match admitted {
             Ok(accepted) => accepted,
@@ -273,31 +325,40 @@ impl RemoteConnection {
         let mut authorization_poll = tokio::time::interval(AUTHORIZATION_POLL);
         authorization_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         authorization_poll.tick().await;
+        let mut streams = tokio::task::JoinSet::new();
 
         loop {
             tokio::select! {
                 changed = self.liveness.changed() => {
                     if changed.is_err() || !*self.liveness.borrow() {
-                        self.connection.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+                        self.close_streams(&mut streams, CloseCode::RemoteDisabled).await;
                         return;
                     }
                 }
                 _ = authorization_poll.tick() => {
                     if !authorization.is_current(&self.state).await {
-                        self.connection.close(CloseCode::Unauthorized.as_u32().into(), b"revoked");
+                        self.close_streams(&mut streams, CloseCode::Unauthorized).await;
                         return;
                     }
                 }
                 accepted = self.connection.accept_bi() => {
                     match accepted {
                         Ok((send, recv)) => {
-                            tokio::spawn(ControlStream::new(send, recv).dispatch(self.state.clone()));
+                            streams.spawn(ControlStream::new(send, recv).dispatch(self.state.clone()));
                         }
-                        Err(_) => return,
+                        Err(_) => { self.close_streams(&mut streams, CloseCode::ProtocolError).await; return; },
                     }
                 }
+                _ = streams.join_next(), if !streams.is_empty() => {}
             }
         }
+    }
+
+    async fn close_streams(&self, streams: &mut tokio::task::JoinSet<()>, code: CloseCode) {
+        self.connection
+            .close(code.as_u32().into(), b"remote closed");
+        streams.abort_all();
+        while streams.join_next().await.is_some() {}
     }
 
     async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, Rejection> {
@@ -512,7 +573,11 @@ fn spawn_with_identity(
     address: std::net::SocketAddr,
     identity: SelfSignedIdentity,
     liveness: watch::Receiver<bool>,
-) -> std::io::Result<(tokio::task::JoinHandle<()>, std::net::SocketAddr)> {
+) -> std::io::Result<(
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+    mpsc::UnboundedReceiver<()>,
+)> {
     let endpoint = identity.listen(address).map_err(std::io::Error::other)?;
     let bound = endpoint.local_addr()?;
     tracing::info!(
@@ -521,27 +586,43 @@ fn spawn_with_identity(
         "remote quic: listening"
     );
 
+    let (accepted, accepted_inbox) = mpsc::unbounded_channel();
     let handle = tokio::spawn(async move {
-        while let Some(incoming) = endpoint.accept().await {
-            let state = state.clone();
-            let liveness = liveness.clone();
-            tokio::spawn(async move {
-                match incoming.await {
-                    Ok(connection) => {
-                        RemoteConnection::new(connection, state, liveness)
-                            .serve()
-                            .await
-                    }
-                    Err(error) => tracing::debug!(%error, "remote quic: handshake failed"),
+        let mut stopping = liveness.clone();
+        let mut connections = tokio::task::JoinSet::new();
+        loop {
+            tokio::select! {
+                _ = stopping.wait_for(|live| !*live) => break,
+                incoming = endpoint.accept() => {
+                    let Some(incoming) = incoming else { break; };
+                    let state = state.clone();
+                    let liveness = liveness.clone();
+                    let accepted = accepted.clone();
+                    connections.spawn(async move {
+                        let mut stopped = liveness.clone();
+                        tokio::select! {
+                            connected = incoming => {
+                                if let Ok(connection) = connected {
+                                    let _ = accepted.send(());
+                                    RemoteConnection::new(connection, state, liveness).serve().await;
+                                }
+                            }
+                            _ = async { let _ = stopped.wait_for(|live| !*live).await; } => {}
+                        }
+                    });
                 }
-            });
+                _ = connections.join_next(), if !connections.is_empty() => {}
+            }
         }
+        endpoint.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+        while connections.join_next().await.is_some() {}
+        endpoint.wait_idle().await;
     });
-    Ok((handle, bound))
+    Ok((handle, bound, accepted_inbox))
 }
 
 #[cfg(test)]
-mod live {
+pub(crate) mod live {
     use super::*;
     use crate::RemoteAuthorizationStore;
     use crate::remote::authorization::{RemoteAuthorizationPlugin, RemoteAuthorizations};
@@ -556,7 +637,7 @@ mod live {
     use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
     use vmux_transport::service::{RemoteDriver, RemoteFuture};
 
-    struct ClosedRemote;
+    pub(crate) struct ClosedRemote;
 
     impl RemoteDriver for ClosedRemote {
         fn dispatch(&self, request: SharedMessage) -> RemoteFuture<'_, SharedResponse> {
@@ -600,7 +681,10 @@ mod live {
         address: std::net::SocketAddr,
         fingerprint: String,
         authorization_store: RemoteAuthorizationStore,
-        _authorization_runtime: std::thread::JoinHandle<()>,
+        _authorization_runtime: Option<std::thread::JoinHandle<()>>,
+        liveness: watch::Sender<bool>,
+        listener: Option<tokio::task::JoinHandle<()>>,
+        accepted: tokio::sync::Mutex<mpsc::UnboundedReceiver<()>>,
     }
 
     impl Harness {
@@ -634,21 +718,47 @@ mod live {
                 SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
             let fingerprint = identity.fingerprint.clone();
             let (liveness_tx, liveness_rx) = tokio::sync::watch::channel(true);
-            std::mem::forget(liveness_tx);
-            let (handle, address) = spawn_with_identity(
+            let (handle, address, accepted) = spawn_with_identity(
                 state,
                 (Ipv4Addr::LOCALHOST, 0).into(),
                 identity,
                 liveness_rx,
             )
             .expect("listener");
-            std::mem::forget(handle);
             Self {
                 _directory: directory,
                 address,
                 fingerprint,
                 authorization_store,
-                _authorization_runtime: authorization_runtime,
+                _authorization_runtime: Some(authorization_runtime),
+                liveness: liveness_tx,
+                listener: Some(handle),
+                accepted: tokio::sync::Mutex::new(accepted),
+            }
+        }
+
+        async fn stop(&mut self) {
+            self.liveness.send_replace(false);
+            if let Some(mut listener) = self.listener.take() {
+                tokio::time::timeout(Duration::from_secs(5), &mut listener)
+                    .await
+                    .expect("listener drain timed out")
+                    .expect("listener panicked");
+            }
+            let until = std::time::Instant::now() + Duration::from_secs(5);
+            while self
+                ._authorization_runtime
+                .as_ref()
+                .is_some_and(|thread| !thread.is_finished())
+            {
+                assert!(
+                    std::time::Instant::now() < until,
+                    "authorization fixture did not drain"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            if let Some(thread) = self._authorization_runtime.take() {
+                thread.join().unwrap();
             }
         }
 
@@ -723,8 +833,86 @@ mod live {
     }
 
     #[tokio::test]
+    async fn off_closes_a_connection_waiting_for_its_setup_stream() {
+        let mut harness = Harness::start();
+        let endpoint = Trust::Desktop {
+            fingerprint: harness.fingerprint.clone(),
+        }
+        .endpoint(harness.address)
+        .unwrap();
+        let connection = endpoint
+            .connect(harness.address, "localhost")
+            .unwrap()
+            .await
+            .unwrap();
+        harness.accepted.lock().await.recv().await.unwrap();
+        harness.liveness.send_replace(false);
+        let closed = tokio::time::timeout(Duration::from_secs(2), connection.closed())
+            .await
+            .unwrap();
+        let quinn::ConnectionError::ApplicationClosed(closed) = closed else {
+            panic!("unexpected close: {closed:?}");
+        };
+        assert_eq!(
+            closed.error_code.into_inner(),
+            CloseCode::RemoteDisabled.as_u32() as u64
+        );
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn off_refuses_a_partially_received_setup_without_admitting_a_session() {
+        let mut harness = Harness::start();
+        let endpoint = Trust::Desktop {
+            fingerprint: harness.fingerprint.clone(),
+        }
+        .endpoint(harness.address)
+        .unwrap();
+        let connection = endpoint
+            .connect(harness.address, "localhost")
+            .unwrap()
+            .await
+            .unwrap();
+        harness.accepted.lock().await.recv().await.unwrap();
+        let (mut send, _recv) = connection.open_bi().await.unwrap();
+        send.write_all(&[0]).await.unwrap();
+        harness.liveness.send_replace(false);
+        let closed = tokio::time::timeout(Duration::from_secs(2), connection.closed())
+            .await
+            .unwrap();
+        let quinn::ConnectionError::ApplicationClosed(closed) = closed else {
+            panic!("unexpected close: {closed:?}");
+        };
+        assert_eq!(
+            closed.error_code.into_inner(),
+            CloseCode::RemoteDisabled.as_u32() as u64
+        );
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn off_drains_an_admitted_connection_and_a_partial_control_request() {
+        let mut harness = Harness::start();
+        let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
+        let (mut send, _recv) = connection.open_bi().await.unwrap();
+        send.write_all(&[0]).await.unwrap();
+        harness.liveness.send_replace(false);
+        let closed = tokio::time::timeout(Duration::from_secs(2), connection.closed())
+            .await
+            .unwrap();
+        let quinn::ConnectionError::ApplicationClosed(closed) = closed else {
+            panic!("unexpected close: {closed:?}");
+        };
+        assert_eq!(
+            closed.error_code.into_inner(),
+            CloseCode::RemoteDisabled.as_u32() as u64
+        );
+        harness.stop().await;
+    }
+
+    #[tokio::test]
     async fn subscribing_to_an_unknown_session_closes_rather_than_hangs() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
         let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
@@ -750,11 +938,12 @@ mod live {
             matches!(closed, Ok(None)),
             "an unknown session must close the stream, not leave the client waiting"
         );
+        harness.stop().await;
     }
 
     #[tokio::test]
     async fn a_frame_of_a_foreign_type_is_not_answered_as_a_control_request() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
         let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
@@ -783,11 +972,12 @@ mod live {
              subscription to a session that does not exist looks like, so the peer could not \
              tell the two apart. Got {read:?}"
         );
+        harness.stop().await;
     }
 
     #[tokio::test]
     async fn a_paired_client_can_list_sessions() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
 
         let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
         let response = request(&connection, SharedMessage::ListSessions).await;
@@ -796,11 +986,12 @@ mod live {
             matches!(response, SharedResponse::Sessions(ref sessions) if sessions.is_empty()),
             "expected a typed session list, got {response:?}"
         );
+        harness.stop().await;
     }
 
     #[tokio::test]
     async fn a_wrong_token_is_closed_with_unauthorized() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
 
         match harness
             .connect(
@@ -816,11 +1007,12 @@ mod live {
             ),
             other => panic!("expected an Unauthorized close, got {other:?}"),
         }
+        harness.stop().await;
     }
 
     #[tokio::test]
     async fn one_connection_serves_repeated_requests() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
 
         let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
@@ -828,11 +1020,12 @@ mod live {
             let response = request(&connection, SharedMessage::ListSessions).await;
             assert!(matches!(response, SharedResponse::Sessions(_)));
         }
+        harness.stop().await;
     }
 
     #[tokio::test]
     async fn a_device_token_reconnects_after_the_pairing_token_rotates() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
         let client = DeviceId::new("test-device");
         let (_, device_token) = harness.pair(&client).await;
 
@@ -842,11 +1035,12 @@ mod live {
             .expect("device handshake");
 
         assert_eq!(accepted.device_token, None);
+        harness.stop().await;
     }
 
     #[tokio::test]
     async fn revocation_closes_an_existing_connection() {
-        let harness = Harness::start();
+        let mut harness = Harness::start();
         let client = DeviceId::new("test-device");
         let (connection, _) = harness.pair(&client).await;
 
@@ -862,6 +1056,7 @@ mod live {
             closed.error_code.into_inner(),
             CloseCode::Unauthorized.as_u32() as u64
         );
+        harness.stop().await;
     }
 }
 

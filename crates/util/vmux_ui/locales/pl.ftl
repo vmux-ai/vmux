@@ -1,3 +1,33 @@
+features-configuration = Konfiguracja
+features-configuration-help = Edytuj wartość, wariant, uporządkowane reguły i generację. Udział wdrożenia używa 0–10000.
+features-configuration-stage = Przygotuj konfigurację
+features-configuration-invalid = Konfiguracja jest nieprawidłowa lub nie pasuje do zadeklarowanego typu.
+features-typed-unavailable = Ten endpoint obsługuje tylko flagi logiczne.
+features-authorization-unavailable = Autoryzacja zarządzania flagami jest niedostępna.
+
+features-assignments = Zapisane przypisania
+features-assignment-retire = Zakończ przypisania
+features-assignment-active = Aktywna generacja
+features-assignment-unavailable = Nie można zakończyć przypisań w tym kontekście.
+
+features-effective = Wartość efektywna
+features-reason = Powód
+features-variant = Wariant
+features-owner = Osoba odpowiedzialna
+features-expiry = Termin usunięcia
+features-lifecycle = Cykl życia
+features-context = Kontekst kierowania
+features-snapshot = Wersja migawki / ważność
+features-retained = Zachowana wersja wyłączenia
+features-override = Nadpisanie deweloperskie
+features-override-apply = Zastosuj nadpisanie
+features-override-clear = Usuń nadpisanie
+features-override-unavailable = Nadpisania są niedostępne w tym kontekście.
+features-override-invalid = Wprowadź poprawny JSON zgodny z zadeklarowanym typem flagi.
+features-class = Klasa
+features-type = Typ wartości
+features-age = Wiek migawki (sekundy)
+
 
 features-all = Wszystkie flagi
 features-boolean = Wartość logiczna
