@@ -13,29 +13,8 @@ pub struct Axe {
 impl Axe {
     pub const BIN: &'static str = "axe";
 
-    const BREW_PATHS: [&'static str; 2] = ["/opt/homebrew/bin/axe", "/usr/local/bin/axe"];
-
-    pub fn locate() -> Option<Self> {
-        let mut candidates: Vec<PathBuf> = vec![PathBuf::from(Self::BIN)];
-        candidates.extend(Self::BREW_PATHS.iter().map(PathBuf::from));
-        candidates.extend(Self::bundled());
-        for path in candidates {
-            let probe = Command::new(&path).arg("--version").output();
-            let Ok(output) = probe else {
-                continue;
-            };
-            if output.status.success() {
-                return Some(Self { path });
-            }
-        }
-        None
-    }
-
-    fn bundled() -> Option<PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let contents = exe.parent()?.parent()?;
-        let bundled = contents.join("Resources").join("axe").join(Self::BIN);
-        bundled.exists().then_some(bundled)
+    pub(super) fn at(path: PathBuf) -> Self {
+        Self { path }
     }
 
     pub fn version(&self) -> Option<String> {
@@ -78,33 +57,6 @@ pub struct SimulatorDevice {
 }
 
 impl SimulatorDevice {
-    pub fn booted() -> Option<Self> {
-        Self::booted_matching(None, None)
-    }
-
-    pub fn booted_matching(want: Option<&IosVersion>, device_name: Option<&str>) -> Option<Self> {
-        Self::listed("booted", want, device_name).ok().flatten()
-    }
-
-    pub fn booted_or_boot(
-        want: Option<&IosVersion>,
-        device_name: Option<&str>,
-    ) -> Result<Self, String> {
-        if let Some(device) = Self::booted_matching(want, device_name) {
-            return Ok(device);
-        }
-        let Some(device) = Self::listed("available", want, device_name)? else {
-            let runtime = want
-                .map(|version| format!(" for iOS {version}"))
-                .unwrap_or_default();
-            let model = device_name
-                .map(|name| format!(" named {name}"))
-                .unwrap_or_default();
-            return Err(format!("no available iOS Simulator{model}{runtime}"));
-        };
-        device.boot()
-    }
-
     pub(super) fn matches_route(&self, route: &SimulatorRoute) -> bool {
         match route {
             SimulatorRoute::Unpinned => true,
@@ -116,97 +68,6 @@ impl SimulatorDevice {
                     && device_name.as_deref().is_none_or(|name| name == self.name)
             }
         }
-    }
-
-    fn listed(
-        scope: &str,
-        want: Option<&IosVersion>,
-        device_name: Option<&str>,
-    ) -> Result<Option<Self>, String> {
-        let output = Command::new("xcrun")
-            .args(["simctl", "list", "devices", scope, "-j"])
-            .output()
-            .map_err(|error| format!("could not run simctl: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "simctl could not list {scope} devices: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        Ok(Self::from_simctl_json(&output.stdout, want, device_name))
-    }
-
-    fn boot(self) -> Result<Self, String> {
-        bevy::log::info!("booting {} ({})", self.name, self.udid);
-        let boot = Command::new("xcrun")
-            .args(["simctl", "boot", &self.udid])
-            .output()
-            .map_err(|error| format!("could not run simctl boot: {error}"))?;
-        let ready = Command::new("xcrun")
-            .args(["simctl", "bootstatus", &self.udid, "-b"])
-            .output()
-            .map_err(|error| format!("could not run simctl bootstatus: {error}"))?;
-        if !ready.status.success() {
-            let boot_error = String::from_utf8_lossy(&boot.stderr);
-            let ready_error = String::from_utf8_lossy(&ready.stderr);
-            return Err(format!(
-                "could not boot {}: {} {}",
-                self.name,
-                boot_error.trim(),
-                ready_error.trim()
-            ));
-        }
-        bevy::log::info!("booted {} ({})", self.name, self.udid);
-        Ok(self)
-    }
-
-    fn from_simctl_json(
-        bytes: &[u8],
-        want: Option<&IosVersion>,
-        device_name: Option<&str>,
-    ) -> Option<Self> {
-        let parsed: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-        let runtimes = parsed.get("devices")?.as_object()?;
-        let mut selected: Option<Self> = None;
-        for (runtime, entries) in runtimes {
-            let Some(version) = IosVersion::from_runtime_key(runtime) else {
-                continue;
-            };
-            if let Some(want) = want
-                && &version != want
-            {
-                continue;
-            }
-            let Some(entries) = entries.as_array() else {
-                continue;
-            };
-            for entry in entries {
-                if entry.get("isAvailable").and_then(|value| value.as_bool()) == Some(false) {
-                    continue;
-                }
-                let udid = entry.get("udid").and_then(|v| v.as_str());
-                let name = entry.get("name").and_then(|v| v.as_str());
-                let (Some(udid), Some(name)) = (udid, name) else {
-                    continue;
-                };
-                if device_name.is_some_and(|wanted| wanted != name) {
-                    continue;
-                }
-                let replace = match selected.as_ref().and_then(|device| device.version.as_ref()) {
-                    Some(current) => version > *current,
-                    None => true,
-                };
-                if replace {
-                    selected = Some(Self {
-                        udid: udid.to_string(),
-                        name: name.to_string(),
-                        version: Some(version.clone()),
-                    });
-                }
-                break;
-            }
-        }
-        selected
     }
 
     pub fn point_size(&self, axe: &Axe) -> Option<(f32, f32)> {
@@ -225,7 +86,7 @@ impl SimulatorDevice {
         let path = std::env::temp_dir().join(format!(
             "vmux-simulator-{}-{}.png",
             std::process::id(),
-            self.udid
+            uuid::Uuid::new_v4().simple()
         ));
         let status = axe
             .command()
@@ -288,119 +149,6 @@ impl SimulatorDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const TWO_RUNTIMES: &[u8] = br#"{"devices":{
-        "com.apple.CoreSimulator.SimRuntime.iOS-26-5":[
-            {"udid":"AAAAAAAA-0000-0000-0000-000000000000","name":"iPhone 17","state":"Booted"}
-        ],
-        "com.apple.CoreSimulator.SimRuntime.iOS-27-0":[
-            {"udid":"174D774A-1F21-455C-AB54-AF19D513988A","name":"iPhone 17 Pro","state":"Booted"}
-        ]
-    }}"#;
-
-    #[test]
-    fn carries_the_runtime_version_of_the_device_it_picks() {
-        let device = SimulatorDevice::from_simctl_json(TWO_RUNTIMES, None, None).expect("device");
-
-        assert_eq!(
-            device.version.as_ref().map(IosVersion::as_str),
-            Some("27.0")
-        );
-        assert_eq!(device.name, "iPhone 17 Pro");
-    }
-
-    #[test]
-    fn a_pinned_version_selects_that_runtime_and_not_another_booted_one() {
-        let want = IosVersion::parse("27.0").expect("version");
-
-        let device =
-            SimulatorDevice::from_simctl_json(TWO_RUNTIMES, Some(&want), None).expect("device");
-
-        assert_eq!(device.udid, "174D774A-1F21-455C-AB54-AF19D513988A");
-        assert_eq!(device.name, "iPhone 17 Pro");
-        assert_eq!(device.version.as_ref(), Some(&want));
-    }
-
-    #[test]
-    fn a_pinned_version_with_nothing_booted_on_it_yields_nothing() {
-        let want = IosVersion::parse("18.0").expect("version");
-
-        assert_eq!(
-            SimulatorDevice::from_simctl_json(TWO_RUNTIMES, Some(&want), None),
-            None
-        );
-    }
-
-    #[test]
-    fn no_booted_device_when_every_runtime_is_empty() {
-        let json = br#"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[]}}"#;
-
-        assert_eq!(SimulatorDevice::from_simctl_json(json, None, None), None);
-    }
-
-    #[test]
-    fn malformed_output_does_not_panic() {
-        assert_eq!(
-            SimulatorDevice::from_simctl_json(b"not json", None, None),
-            None
-        );
-        assert_eq!(SimulatorDevice::from_simctl_json(b"{}", None, None), None);
-    }
-
-    #[test]
-    fn unavailable_and_non_ios_devices_are_ignored() {
-        let json = br#"{"devices":{
-            "com.apple.CoreSimulator.SimRuntime.watchOS-27-0":[
-                {"udid":"WATCH","name":"Apple Watch"}
-            ],
-            "com.apple.CoreSimulator.SimRuntime.iOS-27-0":[
-                {"udid":"UNAVAILABLE","name":"iPhone 17 Pro","isAvailable":false},
-                {"udid":"AVAILABLE","name":"iPhone 17 Pro Max","isAvailable":true}
-            ]
-        }}"#;
-
-        let device = SimulatorDevice::from_simctl_json(json, None, None).expect("device");
-
-        assert_eq!(device.udid, "AVAILABLE");
-        assert_eq!(device.name, "iPhone 17 Pro Max");
-    }
-
-    #[test]
-    fn a_device_name_selects_that_model_within_the_runtime() {
-        let json = br#"{"devices":{
-            "com.apple.CoreSimulator.SimRuntime.iOS-27-0":[
-                {"udid":"PHONE","name":"iPhone 17","isAvailable":true},
-                {"udid":"PRO","name":"iPhone 17 Pro","isAvailable":true}
-            ]
-        }}"#;
-        let version = IosVersion::parse("27.0").expect("version");
-
-        let device = SimulatorDevice::from_simctl_json(json, Some(&version), Some("iPhone 17 Pro"))
-            .expect("device");
-
-        assert_eq!(device.udid, "PRO");
-    }
-
-    #[test]
-    fn an_attachment_only_answers_for_its_requested_runtime_and_device() {
-        let device = SimulatorDevice::from_simctl_json(TWO_RUNTIMES, None, None).expect("device");
-        let version = IosVersion::parse("27.0").expect("version");
-        let other_version = IosVersion::parse("26.5").expect("version");
-
-        assert!(device.matches_route(&SimulatorRoute::Unpinned));
-        assert!(device.matches_route(&SimulatorRoute::Pinned {
-            version: version.clone(),
-            device_name: None,
-        }));
-        assert!(device.matches_route(&SimulatorRoute::Pinned {
-            version,
-            device_name: Some("iPhone 17 Pro".into()),
-        }));
-        assert!(!device.matches_route(&SimulatorRoute::Pinned {
-            version: other_version,
-            device_name: None,
-        }));
-    }
 
     #[test]
     fn reads_point_size_off_the_accessibility_root() {

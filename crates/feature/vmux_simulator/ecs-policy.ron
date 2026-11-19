@@ -2,17 +2,8 @@
 legacy: [
     (key: "crates/feature/vmux_simulator/src/event.rs||impl:HardwareButton", fingerprint: "928b6147a73eb91d", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/event.rs||impl:SimulatorKeyModifiers", fingerprint: "4ad41e99b4abee58", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||alias:SimulatorViews", fingerprint: "88f406456a2c1002", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||enum:AttachmentPhase", fingerprint: "7921082c22bacc14", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||fn:attach_device", fingerprint: "bfaad809686eb600", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||impl:AttachmentPhase", fingerprint: "55f07eb9eb4c1b96", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||impl:AttachmentProgress", fingerprint: "b50fbdbe60a25791", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||impl:DeviceAttachment", fingerprint: "1593d6ecba58975a", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:SimulatorPlugin", fingerprint: "dbfe3e8d12745762", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||impl:SimulatorScreenshot", fingerprint: "a92b5c58a6c08c2b", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||struct:AttachedDevice", fingerprint: "6a1cc11e6555f519", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||struct:AttachmentProgress", fingerprint: "ee54d063b6afb52e", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||struct:DeviceAttachment", fingerprint: "f675f4311e29a6c8", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||struct:SimulatorScreenshot", fingerprint: "794ccb3af0425eb6", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host.rs||struct:SimulatorScreenshotResponse", fingerprint: "1acafd5032bbdfba", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/core_simulator.rs|fn load_framework|static:LOADED", fingerprint: "f9dfdcb62d31645c", issue: "VMX-253"),
@@ -28,8 +19,6 @@ legacy: [
     (key: "crates/feature/vmux_simulator/src/host/core_simulator.rs||struct:CoreSimulatorPlugin", fingerprint: "b5cbcaacc1d21382", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/core_simulator.rs||struct:HardwareKeyboardState", fingerprint: "83696fb24e92a8e6", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/core_simulator.rs||struct:HardwareKeyboardTask", fingerprint: "5c16f75effd7dc54", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host/device.rs|tests|const:TWO_RUNTIMES", fingerprint: "f7777c3be84836df", issue: "VMX-253"),
-    (key: "crates/feature/vmux_simulator/src/host/device.rs||impl:SimulatorDevice", fingerprint: "6c73d5116e847941", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/hid.rs||enum:HidKind", fingerprint: "abbd4a51b6637b6d", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/hid.rs||impl:HidBroker", fingerprint: "f860555303cffe4c", issue: "VMX-253"),
     (key: "crates/feature/vmux_simulator/src/host/hid.rs||impl:HidBrokerClient", fingerprint: "bd65599e2a742860", issue: "VMX-253"),
@@ -112,19 +101,21 @@ legacy: [
     (key: "crates/feature/vmux_simulator/src/url.rs||struct:InvalidSimulatorRoute", fingerprint: "c94b3acb75d856d5", issue: "VMX-253"),
 ],
 boundaries: [
-    (key: "crates/feature/vmux_simulator/src/host.rs||impl:Plugin for SimulatorPlugin", fingerprint: "9b2ed0b359560eaa", interface: "Bevy simulator feature and schedule registration", input: "external: Bevy App installation and declared simulator feature metadata", output: "ECS: crates/feature/vmux_simulator/src/host.rs||struct:ActiveSimulatorView", lifetime: "One installed simulator host runtime", bounds: "Registers existing lifecycle, typed input and projection systems; prepares focus in PreUpdate for keyboard claims and reconciles current layout focus in Update without a dependency back into command routing", teardown: "App teardown releases registered systems and simulator-owned entities; device adapters retain their existing cleanup ownership", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_simulator/src/host/attachment.rs|tests|impl:Fixture", fingerprint: "58fa4e62f4979d10", interface: "Isolated Bevy App and mock axe/simctl process fixture", input: "ECS: crates/feature/vmux_simulator/src/host/attachment.rs||struct:Attempt", output: "external: mock native command observations and isolated App state assertions", lifetime: "one test-owned App and UUID-named mock process directory", bounds: "test-only native process fixtures; production AttachmentPlugin owns admission, route selection, cancellation and accepted IO", teardown: "remove fixture pages, cancel accepted operations, release mock IO, poll until Attempt ownership retires, then remove the mock directory and App", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_simulator/src/host/attachment.rs|tests|struct:Fixture", fingerprint: "5b66abfc728cc504", interface: "Isolated Bevy App and mock axe/simctl process fixture", input: "ECS: crates/feature/vmux_simulator/src/host/attachment.rs||struct:Attempt", output: "external: mock native command observations and isolated App state assertions", lifetime: "one test-owned App and UUID-named mock process directory", bounds: "test-only native process fixtures; production AttachmentPlugin owns admission, route selection, cancellation and accepted IO", teardown: "remove fixture pages, cancel accepted operations, release mock IO, poll until Attempt ownership retires, then remove the mock directory and App", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_simulator/src/host/attachment.rs|tests|impl:Fixture")),
+    (key: "crates/feature/vmux_simulator/src/host/attachment.rs|tests|impl:Drop for Fixture", fingerprint: "a4d0a8a15a05d0e0", interface: "Isolated Bevy App and mock axe/simctl process fixture", input: "ECS: crates/feature/vmux_simulator/src/host/attachment.rs||struct:Attempt", output: "external: mock native command observations and isolated App state assertions", lifetime: "one test-owned App and UUID-named mock process directory", bounds: "test-only native process fixtures; production AttachmentPlugin owns admission, route selection, cancellation and accepted IO", teardown: "remove fixture pages, cancel accepted operations, release mock IO, poll until Attempt ownership retires, then remove the mock directory and App", architecture: "ECS ownership boundaries", owner: Some("crates/feature/vmux_simulator/src/host/attachment.rs|tests|impl:Fixture")),
+    (key: "crates/feature/vmux_simulator/src/host.rs||impl:Plugin for SimulatorPlugin", fingerprint: "f851df4677919b3e", interface: "Bevy simulator feature and schedule registration", input: "external: Bevy App installation and declared simulator feature metadata", output: "ECS: crates/feature/vmux_simulator/src/host.rs||struct:ActiveSimulatorView", lifetime: "One installed simulator host runtime", bounds: "Registers existing lifecycle, typed input and projection systems; prepares focus in PreUpdate for keyboard claims and reconciles current layout focus in Update without a dependency back into command routing", teardown: "App teardown releases registered systems and simulator-owned entities; device adapters retain their existing cleanup ownership", architecture: "ECS ownership boundaries"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||impl:Plugin for SimulatorNativeKeyPlugin", fingerprint: "399c730ac48fc828", interface: "Bevy App plugin installation", input: "external: typed SimulatorInputPlugin composition", output: "ECS: crates/feature/vmux_simulator/src/host/input.rs||struct:SimulatorNativeKey", lifetime: "one owning desktop App composition", bounds: "register native key binding publication after canonical focus and before native key claim consumption and Simulator input; retained binding entities own claim identity", teardown: "App teardown retires registered schedules and App-owned canonical state", architecture: "ECS ownership boundaries"),
 
 
 
-    (key: "crates/feature/vmux_simulator/src/host.rs||fn:announce", fingerprint: "163bb99b82d075c2", interface: "Bevy CEF native simulator presentation projection", input: "external: bounded framework registration or presentation conversion", output: "ECS: crates/feature/vmux_simulator/src/host/device.rs||struct:SimulatorDevice", lifetime: "one static registration or scoped projection", bounds: "projects current canonical device, stream and attachment facts; updates presentation URL and emits typed UI state only; no lifecycle admission, queue or IO", teardown: "App or mounted projection releases canonical state; static metadata remains immutable", architecture: "ECS ownership boundaries"),
+    (key: "crates/feature/vmux_simulator/src/host.rs||fn:announce", fingerprint: "788ccdcc886d5045", interface: "Bevy CEF native simulator presentation projection", input: "external: bounded framework registration or presentation conversion", output: "ECS: crates/feature/vmux_simulator/src/host/device.rs||struct:SimulatorDevice", lifetime: "one static registration or scoped projection", bounds: "projects current canonical device, stream and attachment facts; updates presentation URL and emits typed UI state only; no lifecycle admission, queue or IO", teardown: "App or mounted projection releases canonical state; static metadata remains immutable", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   debt: [
     (key: "crates/feature/vmux_simulator/src/event.rs||enum:HardwareButton", fingerprint: "80449fdf12f6285c", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/event.rs||enum:SimulatorTouchPhase", fingerprint: "aeb529c7c5e351f5", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/host/hid.rs||enum:HidKind", fingerprint: "abbd4a51b6637b6d", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_simulator/src/host.rs||enum:AttachmentPhase", fingerprint: "7921082c22bacc14", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/url.rs||enum:SimulatorRoute", fingerprint: "230b0cc9fc6b3284", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/host/input.rs||enum:SimulatorClipboardInput", fingerprint: "4ba2ddd54fec1b7d", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/ui.rs||enum:PointerRelease", fingerprint: "562f80bdf56e0a5c", issue: "VMX-253", finding: "AU-13"),
@@ -133,6 +124,9 @@ shape: (
     (key: "crates/feature/vmux_simulator/src/host.rs||enum:SimulatorButton", fingerprint: "8b047fe19da2d478", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/host/tool.rs||enum:ButtonArg", fingerprint: "1bf4ba612b0c4868", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_simulator/src/event.rs||enum:SimulatorClipboardOperation", fingerprint: "a3c5a2f11e5bf443", issue: "VMX-253", finding: "AU-13"),
+  ],
+  enums: [
+    (key: "crates/feature/vmux_simulator/src/host/attachment.rs||enum:Phase", fingerprint: "f2038a0186d5e403", role: Phase, owner: "crates/feature/vmux_simulator/src/host/attachment.rs||struct:Attempt", reason: "One retained attachment operation advances through native discovery, boot readiness and capability handoff; independent Simulator commands retain their own typed requests."),
   ],
 ),
 values: [
