@@ -30,7 +30,17 @@ mod policy;
 #[cfg(all(host, feature = "app"))]
 mod policy_driver;
 #[cfg(all(host, feature = "service"))]
+mod remote;
+#[cfg(all(host, feature = "service"))]
+mod remote_broker;
+#[cfg(all(host, feature = "service"))]
 mod remote_driver;
+#[cfg(all(host, feature = "service"))]
+mod remote_file_io;
+#[cfg(all(host, feature = "service"))]
+mod remote_io;
+#[cfg(all(host, feature = "service"))]
+mod remote_media;
 #[cfg(all(host, feature = "service"))]
 mod service;
 #[cfg(all(host, feature = "service"))]

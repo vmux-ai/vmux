@@ -15,7 +15,9 @@ use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, SharedEvent};
-use vmux_api::session::{Message, RemoteApproval, RemoteSession, RemoteStatus};
+#[cfg(test)]
+use vmux_api::session::Message;
+use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
@@ -81,7 +83,6 @@ pub struct AcpSessions {
     agent_infos: mpsc::UnboundedSender<AcpSessionAgentInfo>,
     config_states: mpsc::UnboundedSender<AcpSessionConfigRequest>,
     statuses: mpsc::UnboundedSender<AcpSessionStatusRequest>,
-    messages: mpsc::UnboundedSender<AcpSessionMessages>,
     lists: mpsc::UnboundedSender<ListAcpSessions>,
     lookups: mpsc::UnboundedSender<FindAcpSession>,
     rebinds: mpsc::UnboundedSender<RebindAcpSession>,
@@ -97,7 +98,6 @@ struct AcpSessionReceivers {
     agent_infos: mpsc::UnboundedReceiver<AcpSessionAgentInfo>,
     config_states: mpsc::UnboundedReceiver<AcpSessionConfigRequest>,
     statuses: mpsc::UnboundedReceiver<AcpSessionStatusRequest>,
-    messages: mpsc::UnboundedReceiver<AcpSessionMessages>,
     lists: mpsc::UnboundedReceiver<ListAcpSessions>,
     lookups: mpsc::UnboundedReceiver<FindAcpSession>,
     rebinds: mpsc::UnboundedReceiver<RebindAcpSession>,
@@ -163,12 +163,6 @@ struct AcpSessionConfigRequest {
 struct AcpSessionStatusRequest {
     sid: String,
     response: Option<oneshot::Sender<Option<ServiceMessage>>>,
-}
-
-#[derive(Component)]
-struct AcpSessionMessages {
-    sid: String,
-    response: Option<oneshot::Sender<Option<Vec<Message>>>>,
 }
 
 #[derive(Component)]
@@ -277,9 +271,6 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
         commands.spawn(request);
     }
     while let Ok(request) = inbox.0.statuses.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.messages.try_recv() {
         commands.spawn(request);
     }
     while let Ok(request) = inbox.0.lists.try_recv() {
@@ -624,7 +615,6 @@ fn read(
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
     mut config_states: Query<(Entity, &mut AcpSessionConfigRequest)>,
     mut statuses: Query<(Entity, &mut AcpSessionStatusRequest)>,
-    mut messages: Query<(Entity, &mut AcpSessionMessages)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut snapshots {
@@ -692,19 +682,6 @@ fn read(
         }
         commands.entity(request_entity).despawn();
     }
-    for (request_entity, mut request) in &mut messages {
-        let mut result = None;
-        for (sid, _, projector, _, _, _, _) in &sessions {
-            if sid.0 == request.sid {
-                result = Some(projector.messages().to_vec());
-                break;
-            }
-        }
-        if let Some(response) = request.response.take() {
-            let _ = response.send(result);
-        }
-        commands.entity(request_entity).despawn();
-    }
 }
 
 fn list(
@@ -747,6 +724,7 @@ fn list(
                 created_at_ms: created_at.0.max(0) as u64,
             });
         }
+        result.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
         if let Some(response) = request.response.take() {
             let _ = response.send(result);
         }
@@ -881,6 +859,465 @@ fn shutdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use vmux_api::protocol::{
+        AgentCommandResult, AgentNewChat, AgentRequest, AgentRequestId, ClientMessage,
+        SharedFailure, SharedMessage, SharedResponse,
+    };
+    use vmux_api::session::ClientOpId;
+    use vmux_transport::service::{
+        RemoteDriver, RemoteFuture, RemoteOperationStore, ServiceProtocolConnection,
+        ServiceProtocolDriver,
+    };
+
+    struct ScriptedOperations {
+        replies: std::sync::Mutex<VecDeque<bool>>,
+        events: std::sync::Mutex<Vec<&'static str>>,
+    }
+
+    impl RemoteOperationStore for ScriptedOperations {
+        fn claim(&self, _id: ClientOpId) -> RemoteFuture<'_, bool> {
+            Box::pin(async {
+                self.events.lock().unwrap().push("claim");
+                self.replies
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("unexpected claim")
+            })
+        }
+
+        fn release(&self, _id: ClientOpId) -> RemoteFuture<'_, ()> {
+            Box::pin(async {
+                self.events.lock().unwrap().push("release");
+            })
+        }
+    }
+
+    struct RemoteFixture {
+        app: App,
+        owner: Entity,
+        driver: Arc<dyn RemoteDriver>,
+        connection: Box<dyn ServiceProtocolConnection>,
+        received: mpsc::UnboundedReceiver<ServiceMessage>,
+        wake: mpsc::UnboundedReceiver<()>,
+        operations: Arc<ScriptedOperations>,
+    }
+
+    impl RemoteFixture {
+        async fn new(replies: &[bool], subscribe: bool) -> Self {
+            let mut app = App::new();
+            app.add_plugins((
+                bevy::prelude::MinimalPlugins,
+                crate::service::AcpServicePlugin,
+            ));
+            let (wake, wake_rx) = mpsc::unbounded_channel();
+            let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+            let (service, native) =
+                crate::service_driver::AcpService::new(Handle::current(), wake.clone(), processes);
+            let (driver, inbox) = service.remote_driver(wake.clone());
+            let operations = Arc::new(ScriptedOperations {
+                replies: std::sync::Mutex::new(replies.iter().copied().collect()),
+                events: std::sync::Mutex::new(Vec::new()),
+            });
+            let owner = app
+                .world_mut()
+                .spawn((
+                    Name::new("Test remote service"),
+                    service.clone(),
+                    native,
+                    inbox,
+                    vmux_ecs::service::Executor(Handle::current()),
+                    vmux_ecs::service::Wake(wake),
+                    vmux_ecs::service::Operations(operations.clone()),
+                ))
+                .id();
+            let (outbound, received) = mpsc::unbounded_channel();
+            let mut connection = service.connect(outbound);
+            if subscribe {
+                connection
+                    .dispatch(ClientMessage::SubscribeAgentCommands)
+                    .await
+                    .unwrap();
+            }
+            Self {
+                app,
+                owner,
+                driver,
+                connection,
+                received,
+                wake: wake_rx,
+                operations,
+            }
+        }
+
+        fn request(&self, request: SharedMessage) -> tokio::task::JoinHandle<SharedResponse> {
+            let driver = self.driver.clone();
+            tokio::spawn(async move { driver.dispatch(request).await })
+        }
+
+        fn chat(&self) -> tokio::task::JoinHandle<SharedResponse> {
+            self.request(SharedMessage::AgentNewChat {
+                request: AgentNewChat {
+                    client_op_id: ClientOpId::new("test-operation"),
+                    prompt: "Start the task".into(),
+                    agent_url: None,
+                },
+            })
+        }
+
+        async fn command(&mut self) -> (AgentRequestId, AgentRequest) {
+            let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+            tokio::pin!(timeout);
+            loop {
+                tokio::select! {
+                    message = self.received.recv() => {
+                        if let Some(ServiceMessage::AgentRequest { request_id, request, .. }) = message { return (request_id, request); }
+                    }
+                    wake = self.wake.recv() => { assert!(wake.is_some()); self.app.update(); }
+                    _ = &mut timeout => panic!("remote command did not wake the owning App"),
+                }
+            }
+        }
+
+        async fn respond(&mut self, id: AgentRequestId, result: AgentCommandResult) {
+            self.connection
+                .dispatch(ClientMessage::AgentCommandResponse {
+                    request_id: id,
+                    result,
+                })
+                .await
+                .unwrap();
+        }
+
+        async fn settle(
+            &mut self,
+            mut task: tokio::task::JoinHandle<SharedResponse>,
+        ) -> SharedResponse {
+            let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+            tokio::pin!(timeout);
+            loop {
+                tokio::select! {
+                    result = &mut task => return result.unwrap(),
+                    wake = self.wake.recv() => { assert!(wake.is_some()); self.app.update(); }
+                    _ = &mut timeout => panic!("remote completion did not wake the owning App"),
+                }
+            }
+        }
+
+        async fn drain_native(&mut self) {
+            let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+            tokio::pin!(timeout);
+            loop {
+                self.app.update();
+                if self
+                    .app
+                    .world_mut()
+                    .query::<&crate::remote_io::Accepted>()
+                    .iter(self.app.world())
+                    .next()
+                    .is_none()
+                {
+                    break;
+                }
+                tokio::select! {
+                    wake = self.wake.recv() => assert!(wake.is_some()),
+                    _ = &mut timeout => panic!("native remote IO did not drain"),
+                }
+            }
+        }
+
+        fn session(&mut self) {
+            let (stream, _stream_rx) = broadcast::channel(4);
+            let shared = Arc::new(AcpShared::new(
+                "remote-session".into(),
+                PathBuf::from("/tmp"),
+                ProcessId::new(),
+                stream,
+                Arc::new(tokio::sync::Mutex::new(
+                    vmux_process::ProcessManager::default(),
+                )),
+            ));
+            let (input, _input_rx) = mpsc::unbounded_channel();
+            self.app.world_mut().spawn((
+                SessionId("remote-session".into()),
+                AcpSessionShared(shared),
+                AcpSessionInput(input),
+                AcpSessionAgent("mock".into()),
+                CreatedAt(1),
+                AcpProjector::default(),
+                AcpAgentName::default(),
+                AcpSessionConfigs::default(),
+                AcpRunState(AgentRunStatus::Idle),
+                AcpApprovalState::default(),
+                AcpHistoryReplay::default(),
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_failed_chat_releases_before_retry_and_success_blocks_duplicate() {
+        let mut fixture = RemoteFixture::new(&[true, true, false], false).await;
+        let failed = fixture.chat();
+        assert!(matches!(
+            fixture.settle(failed).await,
+            SharedResponse::Failed(SharedFailure::NoDesktop)
+        ));
+        assert_eq!(
+            *fixture.operations.events.lock().unwrap(),
+            ["claim", "release"]
+        );
+        fixture
+            .connection
+            .dispatch(ClientMessage::SubscribeAgentCommands)
+            .await
+            .unwrap();
+        let retry = fixture.chat();
+        let (id, request) = fixture.command().await;
+        assert_eq!(request.id, "agent_new_chat@1");
+        fixture.respond(id, AgentCommandResult::Ok).await;
+        assert!(matches!(fixture.settle(retry).await, SharedResponse::Ok));
+        let duplicate = fixture.chat();
+        assert!(matches!(
+            fixture.settle(duplicate).await,
+            SharedResponse::AlreadyApplied
+        ));
+        assert_eq!(
+            *fixture.operations.events.lock().unwrap(),
+            ["claim", "release", "claim", "claim"]
+        );
+        assert!(fixture.received.try_recv().is_err());
+        fixture.connection.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn remote_canonical_model_request_reaches_the_native_broker() {
+        let mut fixture = RemoteFixture::new(&[], true).await;
+        let request = fixture.request(SharedMessage::AgentSelectModel {
+            request: vmux_api::protocol::AgentSelectModel {
+                sid: "target-session".into(),
+                model_id: "provider-model".into(),
+            },
+        });
+        let (id, envelope) = fixture.command().await;
+        assert_eq!(envelope.id, "agent_select_model@1");
+        assert_eq!(
+            envelope.body,
+            br#"{"sid":"target-session","model_id":"provider-model"}"#
+        );
+        fixture
+            .respond(id, AgentCommandResult::Error("not offered".into()))
+            .await;
+        assert!(matches!(
+            fixture.settle(request).await,
+            SharedResponse::Failed(SharedFailure::Invalid)
+        ));
+        assert!(fixture.operations.events.lock().unwrap().is_empty());
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&crate::remote::Response>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&crate::remote_broker::Broker<vmux_api::protocol::AgentSelectModel>>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+        fixture.connection.disconnect().await;
+    }
+
+    #[test]
+    fn remote_shutdown_does_not_poll_an_already_joined_native_task_again() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut fixture = runtime.block_on(RemoteFixture::new(&[], false));
+        let request = {
+            let _entered = runtime.enter();
+            fixture.request(SharedMessage::AgentListModels {
+                request: vmux_api::protocol::AgentListModels {
+                    sid: "missing".into(),
+                },
+            })
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if fixture
+                .app
+                .world_mut()
+                .query::<(&crate::remote_io::Accepted, &crate::remote_io::Joined)>()
+                .iter(fixture.app.world())
+                .next()
+                .is_some()
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            runtime.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(1), fixture.wake.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            });
+        }
+        fixture
+            .app
+            .world_mut()
+            .run_schedule(vmux_ecs::service::Shutdown);
+        fixture
+            .app
+            .world_mut()
+            .run_schedule(vmux_ecs::service::ShutdownComplete);
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&crate::remote_io::Accepted>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+        assert!(matches!(
+            runtime.block_on(request).unwrap(),
+            SharedResponse::Failed(SharedFailure::NoDesktop)
+        ));
+        runtime.block_on(fixture.connection.disconnect());
+    }
+
+    #[tokio::test]
+    async fn remote_owner_retirement_retains_broker_io_until_failure_cleanup() {
+        let mut fixture = RemoteFixture::new(&[true], true).await;
+        let request = fixture.chat();
+        let (id, _) = fixture.command().await;
+        fixture.app.world_mut().despawn(fixture.owner);
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&crate::remote_io::Accepted>()
+                .iter(fixture.app.world())
+                .count(),
+            1
+        );
+        fixture
+            .respond(id, AgentCommandResult::Error("retired".into()))
+            .await;
+        assert!(matches!(
+            fixture.settle(request).await,
+            SharedResponse::Failed(SharedFailure::NoDesktop)
+        ));
+        fixture.drain_native().await;
+        assert_eq!(
+            *fixture.operations.events.lock().unwrap(),
+            ["claim", "release"]
+        );
+        fixture.connection.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn remote_caller_disappearance_does_not_abandon_claim_cleanup() {
+        let mut fixture = RemoteFixture::new(&[true], true).await;
+        let request = fixture.chat();
+        let (id, _) = fixture.command().await;
+        request.abort();
+        let _ = request.await;
+        fixture
+            .respond(id, AgentCommandResult::Error("refused".into()))
+            .await;
+        fixture.drain_native().await;
+        assert_eq!(
+            *fixture.operations.events.lock().unwrap(),
+            ["claim", "release"]
+        );
+        fixture.connection.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn remote_prompt_refuses_invalid_text_and_files_outside_home() {
+        let mut fixture = RemoteFixture::new(&[], false).await;
+        let outside = tempfile::tempdir().unwrap();
+        let path = outside.path().join("outside.txt");
+        std::fs::write(&path, "private").unwrap();
+        let oversized = fixture.request(SharedMessage::AgentInput {
+            sid: "missing".into(),
+            text: "x".repeat(64 * 1024 + 1),
+            context: None,
+            attachments: Vec::new(),
+            preferred_mode: None,
+        });
+        assert!(matches!(
+            fixture.settle(oversized).await,
+            SharedResponse::Failed(SharedFailure::Invalid)
+        ));
+        let outside = fixture.request(SharedMessage::AgentInput {
+            sid: "missing".into(),
+            text: "Read this".into(),
+            context: None,
+            attachments: vec![vmux_api::protocol::AgentAttachment {
+                path: path.to_string_lossy().into_owned(),
+                name: "untrusted".into(),
+                mime_type: "untrusted".into(),
+                size: 0,
+            }],
+            preferred_mode: None,
+        });
+        assert!(matches!(
+            fixture.settle(outside).await,
+            SharedResponse::Failed(SharedFailure::Invalid)
+        ));
+        fixture.connection.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn remote_media_returns_filtered_directory_first_results_and_png_preview() {
+        let mut fixture = RemoteFixture::new(&[], false).await;
+        fixture.session();
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        std::fs::create_dir(directory.path().join("b-folder")).unwrap();
+        std::fs::write(directory.path().join("hidden.txt"), "excluded").unwrap();
+        std::fs::write(directory.path().join(".hidden.png"), "excluded").unwrap();
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=").unwrap();
+        std::fs::write(directory.path().join("a-image.png"), bytes).unwrap();
+        let request = fixture.request(SharedMessage::AgentListMedia {
+            sid: "remote-session".into(),
+            query: directory.path().to_string_lossy().into_owned(),
+        });
+        let SharedResponse::Media(entries) = fixture.settle(request).await else {
+            panic!("missing media projection");
+        };
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            ["b-folder", "a-image.png"]
+        );
+        assert!(entries[0].is_dir);
+        let encoded = entries[1]
+            .preview_data_url
+            .strip_prefix("data:image/png;base64,")
+            .unwrap();
+        let png =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap();
+        let image = image::load_from_memory(&png).unwrap();
+        assert!(
+            image
+                .to_rgba8()
+                .pixels()
+                .all(|pixel| pixel.0 == [255, 255, 255, 255])
+        );
+        fixture.connection.disconnect().await;
+    }
 
     #[tokio::test]
     async fn subscriptions_receive_no_empty_snapshot_while_history_is_replaying() {

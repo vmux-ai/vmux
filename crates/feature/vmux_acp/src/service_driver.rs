@@ -13,8 +13,7 @@ use vmux_api::protocol::{
 };
 use vmux_process::ProcessRuntime;
 use vmux_transport::service::{
-    RemoteDriver, RemoteFuture, RemoteOperationStore, ServiceProtocolConnection,
-    ServiceProtocolDriver,
+    RemoteDriver, RemoteFuture, ServiceProtocolConnection, ServiceProtocolDriver,
 };
 
 use crate::acp::{AcpInput, AcpSessions, CatalogDriver, CatalogRequest};
@@ -66,13 +65,18 @@ impl AcpService {
 
     pub(crate) fn remote_driver(
         &self,
-        operations: Arc<dyn RemoteOperationStore>,
-    ) -> Arc<dyn RemoteDriver> {
-        Arc::new(AgentRemoteDriver::new(
-            self.sessions.clone(),
-            self.broker.clone(),
-            operations,
-        ))
+        wake: mpsc::UnboundedSender<()>,
+    ) -> (Arc<dyn RemoteDriver>, crate::remote::Inbox) {
+        let (driver, inbox) = AgentRemoteDriver::new(self.sessions.clone(), wake);
+        (Arc::new(driver), inbox)
+    }
+
+    pub(crate) fn sessions(&self) -> &AcpSessions {
+        &self.sessions
+    }
+
+    pub(crate) fn broker(&self) -> &AgentBroker {
+        &self.broker
     }
 
     async fn process_response(
