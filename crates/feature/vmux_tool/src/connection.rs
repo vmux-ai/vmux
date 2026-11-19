@@ -328,21 +328,23 @@ fn retire_mcp_operations(
 ) {
     for (entity, result, target, server) in &done {
         if let Ok(mut claim) = servers.get_mut(server.entity())
-            && claim.operation == Some(entity) {
-                claim.operation = None;
-            }
+            && claim.operation == Some(entity)
+        {
+            claim.operation = None;
+        }
         if let Some(target) = target
             && let Ok((mut state, binding)) = states.get_mut(target.entity())
-            && binding.entity() == entity {
-                commands
-                    .entity(target.entity())
-                    .remove::<EntityTarget<McpConnectionOperation>>();
-                commands.entity(target.entity()).insert(PendingMcpSnapshot {
-                    generation: state.generation,
-                    result: Some(result.clone()),
-                });
-                state.loading = true;
-            }
+            && binding.entity() == entity
+        {
+            commands
+                .entity(target.entity())
+                .remove::<EntityTarget<McpConnectionOperation>>();
+            commands.entity(target.entity()).insert(PendingMcpSnapshot {
+                generation: state.generation,
+                result: Some(result.clone()),
+            });
+            state.loading = true;
+        }
         commands
             .entity(entity)
             .remove::<(McpConnectionOperation, OperationRetained, McpCompletion)>();
@@ -431,14 +433,15 @@ fn drain_mcp_snapshots(
         if current != Some(task.owner) || task.sequence < version.current {
             if let Some(page) = page
                 && let Ok(mut state) = states.get_mut(page)
-                && state.generation == task.generation {
-                    state.loading = false;
-                    state.pending = false;
-                    state.loaded = current == Some(task.owner) && version.valid;
-                    if let Some(result) = &task.result {
-                        commands.entity(page).insert(result.clone());
-                    }
+                && state.generation == task.generation
+            {
+                state.loading = false;
+                state.pending = false;
+                state.loaded = current == Some(task.owner) && version.valid;
+                if let Some(result) = &task.result {
+                    commands.entity(page).insert(result.clone());
                 }
+            }
             continue;
         }
         version.current = task.sequence;
@@ -457,16 +460,17 @@ fn drain_mcp_snapshots(
                 version.valid = false;
                 if let Some(page) = page
                     && let Ok(mut state) = states.get_mut(page)
-                    && state.generation == task.generation {
-                        state.loading = false;
-                        state.pending = false;
-                        commands.entity(page).insert(McpCompletion {
-                            id: String::new(),
-                            disconnect: false,
-                            success: false,
-                            message: error,
-                        });
-                    }
+                    && state.generation == task.generation
+                {
+                    state.loading = false;
+                    state.pending = false;
+                    commands.entity(page).insert(McpCompletion {
+                        id: String::new(),
+                        disconnect: false,
+                        success: false,
+                        message: error,
+                    });
+                }
                 continue;
             }
         };
@@ -483,14 +487,15 @@ fn drain_mcp_snapshots(
         }
         if let Some(page) = page
             && let Ok(mut state) = states.get_mut(page)
-            && state.generation == task.generation {
-                state.loading = false;
-                state.pending = false;
-                state.loaded = true;
-                if let Some(result) = &task.result {
-                    commands.entity(page).insert(result.clone());
-                }
+            && state.generation == task.generation
+        {
+            state.loading = false;
+            state.pending = false;
+            state.loaded = true;
+            if let Some(result) = &task.result {
+                commands.entity(page).insert(result.clone());
             }
+        }
     }
 }
 
@@ -606,20 +611,22 @@ fn publish_mcp_connections(
         }
         let mut pending = None;
         if let Some(binding) = binding
-            && let Ok((request, task)) = operations.get(binding.entity()) {
-                pending = request
-                    .map(|request| (&request.id, request.disconnect))
-                    .or_else(|| task.map(|task| (&task.id, task.disconnect)));
-            }
+            && let Ok((request, task)) = operations.get(binding.entity())
+        {
+            pending = request
+                .map(|request| (&request.id, request.disconnect))
+                .or_else(|| task.map(|task| (&task.id, task.disconnect)));
+        }
         if pending.is_none() && state.pending {
             if let Some(result) = snapshot.and_then(|snapshot| snapshot.result.as_ref()) {
                 pending = Some((&result.id, result.disconnect));
             }
             for (snapshot, page) in &snapshots {
                 if page.entity() == target
-                    && let Some(result) = &snapshot.result {
-                        pending = Some((&result.id, result.disconnect));
-                    }
+                    && let Some(result) = &snapshot.result
+                {
+                    pending = Some((&result.id, result.disconnect));
+                }
             }
         }
         let pending = pending.map(|(id, disconnect)| McpServerPending {
