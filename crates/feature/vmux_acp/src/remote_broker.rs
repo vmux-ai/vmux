@@ -122,22 +122,19 @@ fn claim(
         };
         let store = lease.store.clone();
         let id = lease.id.clone();
-        let native = {
-            let (pending, target) = Output::new(
-                loan,
-                Some(entity),
-                Accepted {
-                    owner: owner.entity(),
-                    uuid: uuid.clone(),
-                },
-                async move { store.claim(id).await },
-            );
-            let native = commands.spawn(pending).id();
-            if let Some(target) = target {
-                commands.entity(native).insert(target);
-            }
-            native
-        };
+        let native = commands
+            .spawn((
+                Output::spawn(
+                    loan,
+                    Accepted {
+                        owner: owner.entity(),
+                        uuid: uuid.clone(),
+                    },
+                    async move { store.claim(id).await },
+                ),
+                OperationTarget::new(entity),
+            ))
+            .id();
         commands.entity(native).insert((ClaimIo, lease));
         commands.entity(entity).insert(Waiting(native));
     }
@@ -174,22 +171,19 @@ fn submit<T>(
             }
         };
         let broker = service.broker().clone();
-        let native = {
-            let (pending, target) = Output::new(
-                loan,
-                Some(entity),
-                Accepted {
-                    owner: owner.entity(),
-                    uuid: uuid.clone(),
-                },
-                async move { broker.command(AgentRequestId::new(), None, request).await },
-            );
-            let native = commands.spawn(pending).id();
-            if let Some(target) = target {
-                commands.entity(native).insert(target);
-            }
-            native
-        };
+        let native = commands
+            .spawn((
+                Output::spawn(
+                    loan,
+                    Accepted {
+                        owner: owner.entity(),
+                        uuid: uuid.clone(),
+                    },
+                    async move { broker.command(AgentRequestId::new(), None, request).await },
+                ),
+                OperationTarget::new(entity),
+            ))
+            .id();
         commands.entity(native).insert(BrokerIo);
         if let Some(lease) = lease {
             commands.entity(native).insert(lease.clone());
@@ -240,18 +234,16 @@ fn collect_claims(
             let target = live.matching(entity, accepted, target);
             let store = lease.store.clone();
             let id = lease.id.clone();
-            let release = {
-                let (pending, target) = Output::new(loan, target, accepted.clone(), async move {
+            let release = commands
+                .spawn(Output::spawn(loan, accepted.clone(), async move {
                     store.release(id).await
-                });
-                let native = commands.spawn(pending).id();
-                if let Some(target) = target {
-                    commands.entity(native).insert(target);
-                }
-                native
-            };
+                }))
+                .id();
             commands.entity(release).insert(ReleaseIo);
             if let Some(target) = target {
+                commands
+                    .entity(release)
+                    .insert(OperationTarget::new(target));
                 commands.entity(target).remove::<ClaimLease>().insert((
                     Waiting(release),
                     Response(SharedResponse::Failed(SharedFailure::NoDesktop)),
@@ -305,19 +297,16 @@ fn collect_broker(
             {
                 let store = lease.store.clone();
                 let id = lease.id.clone();
-                let release = {
-                    let (pending, target) =
-                        Output::new(loan, target, accepted.clone(), async move {
-                            store.release(id).await
-                        });
-                    let native = commands.spawn(pending).id();
-                    if let Some(target) = target {
-                        commands.entity(native).insert(target);
-                    }
-                    native
-                };
+                let release = commands
+                    .spawn(Output::spawn(loan, accepted.clone(), async move {
+                        store.release(id).await
+                    }))
+                    .id();
                 commands.entity(release).insert(ReleaseIo);
                 if let Some(target) = target {
+                    commands
+                        .entity(release)
+                        .insert(OperationTarget::new(target));
                     commands.entity(target).remove::<ClaimLease>().insert((
                         Waiting(release),
                         Response(SharedResponse::Failed(SharedFailure::NoDesktop)),
@@ -356,22 +345,19 @@ fn release(
         }
         let store = lease.store.clone();
         let id = lease.id.clone();
-        let native = {
-            let (pending, target) = Output::new(
-                loan,
-                Some(entity),
-                Accepted {
-                    owner: owner.entity(),
-                    uuid: uuid.clone(),
-                },
-                async move { store.release(id).await },
-            );
-            let native = commands.spawn(pending).id();
-            if let Some(target) = target {
-                commands.entity(native).insert(target);
-            }
-            native
-        };
+        let native = commands
+            .spawn((
+                Output::spawn(
+                    loan,
+                    Accepted {
+                        owner: owner.entity(),
+                        uuid: uuid.clone(),
+                    },
+                    async move { store.release(id).await },
+                ),
+                OperationTarget::new(entity),
+            ))
+            .id();
         commands.entity(native).insert(ReleaseIo);
         commands
             .entity(entity)

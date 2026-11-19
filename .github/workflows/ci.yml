@@ -605,6 +605,9 @@ jobs:
       - name: Rust
         if: matrix.reuse == '' && matrix.key == 'test-rust'
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ needs.changes.outputs.args }}
+      - name: ACP service
+        if: matrix.reuse == '' && matrix.key == 'test-rust' && (needs.changes.outputs.args == '' || contains(needs.changes.outputs.args, '--workspace') || contains(format(' {0} ', needs.changes.outputs.args), ' -p vmux_acp '))
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_acp --lib --no-default-features --features service -- --test-threads=1
       - name: Records
         if: matrix.reuse == '' && matrix.key == 'test-rust' && needs.changes.outputs.records == 'true'
         run: cargo test --locked -p vmux_ecs --no-default-features --features store,records

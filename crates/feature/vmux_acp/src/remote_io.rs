@@ -6,8 +6,8 @@ use std::task::{Context, Poll, Wake as TaskWake, Waker};
 use bevy::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
+use vmux_ecs::Uuid;
 use vmux_ecs::service::{AbortTask, Wake};
-use vmux_ecs::{OperationTarget, Uuid};
 
 pub(super) struct RemoteIoPlugin;
 
@@ -36,15 +36,11 @@ pub(super) struct Joined(pub Result<(), String>);
 pub(super) struct Output<T: Send + Sync + 'static>(oneshot::Receiver<T>);
 
 impl<T: Send + Sync + 'static> Output<T> {
-    pub(super) fn new_blocking(
+    pub(super) fn spawn_blocking(
         loan: &Loan,
-        target: Option<Entity>,
         accepted: Accepted,
         operation: impl FnOnce() -> T + Send + 'static,
-    ) -> (
-        (Name, Self, AbortTask, Accepted, Loan, CompletionWake),
-        Option<OperationTarget>,
-    ) {
+    ) -> impl Bundle {
         let (sender, receiver) = oneshot::channel();
         let task = loan.executor.spawn_blocking(move || {
             let result = operation();
@@ -52,27 +48,20 @@ impl<T: Send + Sync + 'static> Output<T> {
         });
         let notify = Waker::from(Arc::new(Notify(loan.wake.0.clone())));
         (
-            (
-                Name::new("Remote blocking IO"),
-                Self(receiver),
-                AbortTask(task),
-                accepted,
-                loan.clone(),
-                CompletionWake(notify),
-            ),
-            target.map(OperationTarget::new),
+            Name::new("Remote blocking IO"),
+            Self(receiver),
+            AbortTask(task),
+            accepted,
+            loan.clone(),
+            CompletionWake(notify),
         )
     }
 
-    pub(super) fn new(
+    pub(super) fn spawn(
         loan: &Loan,
-        target: Option<Entity>,
         accepted: Accepted,
         future: impl Future<Output = T> + Send + 'static,
-    ) -> (
-        (Name, Self, AbortTask, Accepted, Loan, CompletionWake),
-        Option<OperationTarget>,
-    ) {
+    ) -> impl Bundle {
         let (sender, receiver) = oneshot::channel();
         let task = loan.executor.spawn(async move {
             let result = future.await;
@@ -80,15 +69,12 @@ impl<T: Send + Sync + 'static> Output<T> {
         });
         let notify = Waker::from(Arc::new(Notify(loan.wake.0.clone())));
         (
-            (
-                Name::new("Remote native IO"),
-                Self(receiver),
-                AbortTask(task),
-                accepted,
-                loan.clone(),
-                CompletionWake(notify),
-            ),
-            target.map(OperationTarget::new),
+            Name::new("Remote native IO"),
+            Self(receiver),
+            AbortTask(task),
+            accepted,
+            loan.clone(),
+            CompletionWake(notify),
         )
     }
 
@@ -101,7 +87,7 @@ impl<T: Send + Sync + 'static> Output<T> {
 }
 
 #[derive(Component)]
-pub(super) struct CompletionWake(Waker);
+struct CompletionWake(Waker);
 
 struct Notify(mpsc::UnboundedSender<()>);
 
