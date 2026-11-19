@@ -1403,3 +1403,23 @@ common-resume = 再開
 onboarding-connection-choice = 接続方法を選んでください。
 onboarding-connect-description = 開いたページでログインします。
 onboarding-use-key-description = 代わりに API キーを入力します。
+connectors-title = コネクター
+connectors-description = 接続済みアカウントを管理し、会話で使うコネクターを選択します。
+connectors-empty = 利用できるコネクターがありません
+connectors-sign-in-required = サインインが必要です
+connectors-open-sign-in = サインインを開く
+
+connectors-command-description = この会話で使うコネクターを選ぶ
+connectors-use = 会話で使う
+connectors-selected = 選択済み・外す
+connectors-manage = コネクターを管理
+connectors-manage-access = リポジトリへのアクセスを管理
+
+connectors-agent-configuration = エージェントの設定
+connectors-configured = 設定済み
+connectors-open-in-app = Vmux 内で開く
+connectors-open-external = 外部ブラウザで開く
+connectors-verification-code-help = このコードをコピーして { $service } に入力し、サインインを完了してください。
+
+connectors-setup-intro = このプロファイルに { $service } を接続します。ログインを案内します。接続後は会話から選んで使えます。
+connectors-setup-connected = { $service } を接続しました。会話から選んで使えます。

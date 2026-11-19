@@ -1423,3 +1423,23 @@ common-resume = Reprendre
 onboarding-connection-choice = Comment souhaitez-vous vous connecter ?
 onboarding-connect-description = Connectez-vous sur la page qui s’ouvre.
 onboarding-use-key-description = Saisissez une clé API à la place.
+connectors-title = Connecteurs
+connectors-description = Gérez vos comptes connectés et choisissez les connecteurs depuis une conversation.
+connectors-empty = Aucun connecteur disponible
+connectors-sign-in-required = Connexion requise
+connectors-open-sign-in = Ouvrir la connexion
+
+connectors-command-description = Choisir les connecteurs pour cette conversation
+connectors-use = Utiliser dans le chat
+connectors-selected = Sélectionné · retirer
+connectors-manage = Gérer les connecteurs
+connectors-manage-access = Gérer les accès aux dépôts
+
+connectors-agent-configuration = Configuration des agents
+connectors-configured = Configuré
+connectors-open-in-app = Ouvrir dans Vmux
+connectors-open-external = Ouvrir dans le navigateur externe
+connectors-verification-code-help = Copiez ce code et saisissez-le sur { $service } pour terminer la connexion.
+
+connectors-setup-intro = Connectez { $service } à ce profil. Je vous guiderai pour vous connecter ; vous pourrez ensuite le choisir dans vos conversations.
+connectors-setup-connected = { $service } est connecté. Vous pouvez maintenant le choisir dans une conversation.

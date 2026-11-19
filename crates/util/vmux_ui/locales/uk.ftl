@@ -1423,3 +1423,23 @@ common-resume = Відновити
 onboarding-connection-choice = Як ви хочете підключитися?
 onboarding-connect-description = Увійдіть на сторінці, що відкриється.
 onboarding-use-key-description = Або введіть ключ API.
+connectors-title = Конектори
+connectors-description = Керуйте обліковими записами та вибирайте конектори в розмові.
+connectors-empty = Немає доступних конекторів
+connectors-sign-in-required = Потрібен вхід
+connectors-open-sign-in = Відкрити вхід
+
+connectors-command-description = Виберіть конектори для цієї розмови
+connectors-use = Використати в чаті
+connectors-selected = Вибрано · прибрати
+connectors-manage = Керування конекторами
+connectors-manage-access = Керування доступом до репозиторіїв
+
+connectors-agent-configuration = Налаштування агента
+connectors-configured = Налаштовано
+connectors-open-in-app = Відкрити у Vmux
+connectors-open-external = Відкрити в зовнішньому браузері
+connectors-verification-code-help = Скопіюйте цей код і введіть його в { $service }, щоб завершити вхід.
+
+connectors-setup-intro = Підключіть { $service } до цього профілю. Я допоможу вам увійти, після чого ви зможете вибрати сервіс у своїх розмовах.
+connectors-setup-connected = { $service } підключено. Тепер ви можете вибрати його в розмові.

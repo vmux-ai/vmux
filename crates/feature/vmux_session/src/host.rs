@@ -43,6 +43,8 @@ mod catalog;
 mod command_bar;
 #[cfg(host)]
 mod composer;
+#[cfg(host)]
+mod connectors;
 mod conversation;
 mod group;
 #[cfg(host)]
@@ -98,6 +100,7 @@ impl Plugin for SessionClientPlugin {
             catalog::CatalogPlugin,
             resume::ResumePlugin,
             session::ChatHostPlugin,
+            connectors::SessionConnectorsPlugin,
             command_bar::CommandBarPlugin,
             transcript::TranscriptPlugin,
             onboarding::OnboardingPlugin,

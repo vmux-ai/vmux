@@ -28,6 +28,14 @@ impl FaviconSource {
             && source.ends_with(".svg")
     }
 
+    pub fn connector(id: &str) -> Option<&'static str> {
+        match id {
+            "github" => Some("https://github.com"),
+            "linear" => Some("https://linear.app"),
+            _ => None,
+        }
+    }
+
     pub fn vmux(url: &str) -> Option<String> {
         let host = url
             .trim()

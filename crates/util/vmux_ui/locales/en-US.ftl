@@ -1411,3 +1411,23 @@ common-resume = Resume
 onboarding-connection-choice = How would you like to connect?
 onboarding-connect-description = Sign in on the page that opens.
 onboarding-use-key-description = Enter an API key instead.
+connectors-title = Connectors
+connectors-description = Manage signed-in accounts here and choose which connectors to use from a conversation.
+connectors-empty = No connectors available
+connectors-sign-in-required = Sign-in required
+connectors-open-sign-in = Open sign-in
+
+connectors-command-description = Choose connectors for this conversation
+connectors-use = Use in chat
+connectors-selected = Selected · remove
+connectors-manage = Manage connectors
+connectors-manage-access = Manage repository access
+
+connectors-agent-configuration = Agent configuration
+connectors-configured = Configured
+connectors-open-in-app = Open in Vmux
+connectors-open-external = Open in external browser
+connectors-verification-code-help = Copy this code and enter it on { $service } to finish signing in.
+
+connectors-setup-intro = Connect { $service } to this profile. I'll guide you through sign-in; then you can choose it in your conversations.
+connectors-setup-connected = { $service } is connected. You can now choose it in a conversation.
