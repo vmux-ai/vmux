@@ -104,7 +104,7 @@ impl ServiceConnection {
         uid: u32,
     ) -> std::io::Result<Self> {
         let stream = UnixStream::connect(path).await?;
-        let peer = crate::service_peer::LocalPeer::inspect(&stream, Some(requirement))?;
+        let peer = LocalPeer::inspect(&stream, Some(requirement))?;
         if peer.uid() != uid || !peer.verified_code() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,

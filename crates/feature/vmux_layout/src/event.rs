@@ -5,6 +5,13 @@ use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
 use vmux_ecs::PageMetadata;
 
+pub use vmux_api::remote::UiRemote as RemoteUiState;
+
+pub use vmux_api::remote::{
+    RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
+    RemotePhase, RemoteRequest, RemoteRevokeRequest,
+};
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ReloadEffect {
     pub revision: u64,
@@ -677,12 +684,6 @@ impl SideSheetSectionRequest {
         }
     }
 }
-
-pub use vmux_api::remote::UiRemote as RemoteUiState;
-pub use vmux_api::remote::{
-    RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
-    RemotePhase, RemoteRequest, RemoteRevokeRequest,
-};
 
 #[vmux_api::ui_event(Default, Eq)]
 pub struct LayoutOverlayEvent {

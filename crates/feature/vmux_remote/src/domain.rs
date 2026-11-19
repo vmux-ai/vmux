@@ -108,17 +108,8 @@ mod tests {
         provider: Entity,
     }
 
-    struct ConsumerPlugin;
-
     #[derive(Resource, Default)]
     struct Observed(bool);
-
-    impl Plugin for ConsumerPlugin {
-        fn build(&self, app: &mut App) {
-            app.init_resource::<Observed>()
-                .add_systems(Update, consume.after(LiveDecisionSet));
-        }
-    }
 
     fn consume(values: Query<&Decision<bool>, With<Live>>, mut observed: ResMut<Observed>) {
         observed.0 = values.single().is_ok_and(|decision| decision.value);
@@ -137,7 +128,9 @@ mod tests {
     impl Fixture {
         fn new(path: Option<&std::path::Path>) -> Self {
             let mut app = App::new();
-            app.add_plugins((RemoteDomainPlugin, ConsumerPlugin));
+            app.add_plugins(RemoteDomainPlugin)
+                .init_resource::<Observed>()
+                .add_systems(Update, consume.after(LiveDecisionSet));
             let provider = app
                 .world_mut()
                 .spawn((Provider::bundle("production"), ReleaseProvider))
