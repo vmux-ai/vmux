@@ -41,14 +41,14 @@ runs:
       shell: bash
       run: |
         sudo tee /etc/apt/apt-mirrors.txt > /dev/null <<'MIRROR'
-        https://mirrors.edge.kernel.org/ubuntu	priority:1
+        https://mirrors.edge.kernel.org/ubuntu	priority:3
         https://archive.ubuntu.com/ubuntu	priority:2
-        https://azure.archive.ubuntu.com/ubuntu	priority:3
+        https://azure.archive.ubuntu.com/ubuntu	priority:1
         MIRROR
         sudo tee /etc/apt/apt-mirrors-security.txt > /dev/null <<'MIRROR'
-        https://mirrors.edge.kernel.org/ubuntu	priority:1
+        https://mirrors.edge.kernel.org/ubuntu	priority:3
         https://security.ubuntu.com/ubuntu	priority:2
-        https://azure.archive.ubuntu.com/ubuntu	priority:3
+        https://azure.archive.ubuntu.com/ubuntu	priority:1
         MIRROR
         vmux_apt_sources="$RUNNER_TEMP/vmux-ubuntu.sources"
         sed -E 's#https?://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)#mirror+file:///etc/apt/apt-mirrors-security.txt\1#g' \
