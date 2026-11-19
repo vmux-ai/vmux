@@ -17,11 +17,13 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    AsyncTask, EntityTarget, OperationState, PageMetadata, PageOpenRequest, PageOpenTarget,
-    TaskPlugin, TaskResult, TaskSet, TaskWaker, UiState, UiStatePlugin, UiStateWrite,
+    AsyncTask, EntityTarget, Operation, OperationRetained, OperationState, OperationTarget,
+    PageMetadata, PageOpenRequest, PageOpenTarget, TaskPlugin, TaskResult, TaskSet, TaskWaker,
+    UiState, UiStatePlugin, UiStateWrite,
 };
 use vmux_feature::manifest::{FeatureId, FeatureManifest};
 
+use crate::storage::{ReadRequest, ReadResult, WriteRequest, WriteResult};
 use crate::{
     ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,
     ToolOperationFinished, ToolOperationRequest, ToolOperationSucceeded, ToolOperator,
@@ -86,7 +88,12 @@ impl Plugin for ToolHostPlugin {
                 bind,
                 ApplyDeferred,
                 request_scan,
+                load_scans,
+                advance_scans,
+                poll_scans,
                 finish_scans,
+                commit_scans,
+                finish_commits,
                 start_operation,
                 start_external_operations.in_set(ToolTaskSet::Start),
                 finish_external_operations.in_set(ToolTaskSet::Apply),
@@ -182,7 +189,7 @@ fn filter_request(
 
 fn open_request(
     trigger: On<UiInput<ToolOpenRequest>>,
-    stores: Query<&ToolStore>,
+    stores: Query<&ToolStore, With<ToolRegistry>>,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
     let path = Path::new(trigger.event().payload.path.trim());
@@ -222,7 +229,10 @@ fn navigate_request(
     }
 }
 
-fn spawn_registry(mut commands: Commands) {
+fn spawn_registry(registry: Query<Entity, With<ToolRegistry>>, mut commands: Commands) {
+    if !registry.is_empty() {
+        return;
+    }
     commands.spawn((
         Name::new("Tool registry"),
         ToolRegistry::default(),
@@ -415,14 +425,103 @@ impl ToolSubscriber {
 }
 
 #[derive(Component)]
-struct ToolScanTask {
+struct Scan {
     generation: u64,
-    task: Task<ToolScanResult>,
+    refresh_catalogs: bool,
 }
 
-struct ToolScanResult {
-    snapshot: ToolsSnapshot,
+#[derive(Component)]
+struct ScanManifest {
+    original: Option<ToolsManifest>,
+    desired: ToolsManifest,
+}
+
+#[derive(Component)]
+struct ScanSnapshot(ToolsSnapshot);
+
+impl ScanSnapshot {
+    fn error(&mut self, error: &str) {
+        if !self.0.error.is_empty() {
+            self.0.error.push('\n');
+        }
+        self.0.error.push_str(error);
+    }
+
+    fn count(&mut self) {
+        let mut installed = 0;
+        let mut updates = 0;
+        let mut conflicts = 0;
+        for category in &self.0.categories {
+            for item in &category.items {
+                match item.status {
+                    ToolStatus::Installed => installed += 1,
+                    ToolStatus::Outdated => {
+                        installed += 1;
+                        updates += 1;
+                    }
+                    ToolStatus::Conflict => conflicts += 1,
+                    _ => {}
+                }
+            }
+        }
+        self.0.installed = installed;
+        self.0.updates = updates;
+        self.0.conflicts = conflicts;
+    }
+
+    fn management(&mut self, committed: &ToolsManifest) {
+        for category in &mut self.0.categories {
+            for item in &mut category.items {
+                match item.provider.id() {
+                    "dotfiles" => {
+                        item.managed = committed.dotfiles.packages.contains(&item.id);
+                        if !item.managed {
+                            item.operations
+                                .retain(|operation| *operation != ToolOperationKind::Unlink);
+                        }
+                    }
+                    "mcp" => {
+                        item.managed = committed.mcp.servers.contains_key(&item.id);
+                        if !item.managed {
+                            item.operations
+                                .retain(|operation| *operation != ToolOperationKind::Forget);
+                        }
+                    }
+                    _ => {
+                        item.managed = committed.contains(item.provider.id(), &item.id);
+                        if item.managed {
+                            item.operations
+                                .retain(|operation| *operation != ToolOperationKind::Adopt);
+                        } else if matches!(
+                            item.status,
+                            ToolStatus::Installed | ToolStatus::Outdated
+                        ) && !item.operations.contains(&ToolOperationKind::Adopt)
+                        {
+                            item.operations.insert(0, ToolOperationKind::Adopt);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Component)]
+struct ScanProvider {
+    id: ToolProviderId,
+}
+
+#[derive(Component)]
+struct Observed;
+
+#[derive(Component)]
+struct ScanTask(Task<ScanObservation>);
+
+#[derive(Component)]
+struct ScanObservation {
     manifest: ToolsManifest,
+    result: Result<crate::state::ToolCategory, String>,
+    errors: Vec<String>,
 }
 
 type ToolProviderOperationTask = AsyncTask<Result<String, String>>;
@@ -530,8 +629,8 @@ fn start_operation(
         (Entity, &ToolOperationContext),
         (With<PendingToolOperation>, Without<ToolOperationFinished>),
     >,
-    active: Query<&OperationState, With<ToolStoreTarget>>,
-    scans: Query<(), With<ToolScanTask>>,
+    active: Query<&OperationState, With<EntityTarget<ToolStore>>>,
+    scans: Query<(), With<Scan>>,
     stores: Query<(Entity, &ToolStore), With<ToolRegistry>>,
     providers: Query<(Entity, &ToolProviderId)>,
     mut commands: Commands,
@@ -578,15 +677,15 @@ fn start_operation(
 }
 
 fn request_scan(
-    mut registry: Query<(&mut ToolRegistry, &mut Catalog, &ToolStore)>,
-    providers: Query<(&ToolProviderId, &ToolScanner)>,
+    mut registry: Query<(Entity, &mut ToolRegistry, &mut Catalog, &ToolStore)>,
+    providers: Query<(Entity, &ToolProviderId, &ToolScanner)>,
     features: Query<&FeatureManifest>,
-    scans: Query<(), With<ToolScanTask>>,
-    tool_operations: Query<&OperationState, With<ToolStoreTarget>>,
+    scans: Query<(), With<Scan>>,
+    tool_operations: Query<&OperationState, With<EntityTarget<ToolStore>>>,
     pending_tool_operations: Query<(), With<PendingToolOperation>>,
     mut commands: Commands,
 ) {
-    let Ok((mut state, mut catalog, store)) = registry.single_mut() else {
+    let Ok((registry_entity, mut state, mut catalog, store)) = registry.single_mut() else {
         return;
     };
     if !state.dirty
@@ -599,14 +698,6 @@ fn request_scan(
     {
         return;
     }
-    let generation = state.generation;
-    let refresh_catalogs = state.refresh_catalogs;
-    let store = store.clone();
-    let mut providers = providers
-        .iter()
-        .map(|(provider, scanner)| (provider.clone(), *scanner))
-        .collect::<Vec<_>>();
-    providers.sort_by(|(left, _), (right, _)| left.0.cmp(&right.0));
     let mut metadata = Vec::new();
     for feature in &features {
         for entry in &feature.tool_providers {
@@ -631,43 +722,352 @@ fn request_scan(
         catalog.providers = metadata.clone();
         catalog.revision = catalog.revision.wrapping_add(1);
     }
-    let Some(lease) = store.lease() else {
-        return;
-    };
-    let task = IoTaskPool::get().spawn(async move {
-        let _lease = lease;
-        scan_tools(&store, &providers, metadata, refresh_catalogs)
-    });
-    commands.spawn((
-        Name::new("Tool inventory scan"),
-        ToolScanTask { generation, task },
-    ));
+    let scan = commands
+        .spawn((
+            Name::new("Tool inventory scan"),
+            Operation::bundle("tool.inventory").unwrap().running(),
+            OperationTarget::new(registry_entity),
+            OperationRetained,
+            store.clone(),
+            ReadRequest { retain_lease: true },
+            Scan {
+                generation: state.generation,
+                refresh_catalogs: state.refresh_catalogs,
+            },
+            ScanSnapshot(ToolsSnapshot {
+                loaded: true,
+                root: store.root().to_string_lossy().into_owned(),
+                providers: metadata,
+                ..Default::default()
+            }),
+        ))
+        .id();
+    for (entity, id, _) in &providers {
+        commands.spawn((
+            Name::new(format!("Observe {}", id.0.id())),
+            ChildOf(scan),
+            ToolProviderTarget::new(entity),
+            ScanProvider { id: id.clone() },
+        ));
+    }
     state.dirty = false;
     state.refresh_catalogs = false;
 }
 
-fn finish_scans(
-    mut scans: Query<(Entity, &mut ToolScanTask)>,
-    mut registry: Query<(Entity, &mut ToolRegistry, &mut ToolsManifest)>,
+fn load_scans(
+    mut scans: Query<
+        (
+            Entity,
+            &ReadResult,
+            &OperationState,
+            Option<&OperationTarget>,
+            &mut ScanSnapshot,
+        ),
+        With<Scan>,
+    >,
+    registry: Query<&ToolsManifest, With<ToolRegistry>>,
     mut commands: Commands,
 ) {
-    let Ok((registry, mut state, mut manifest)) = registry.single_mut() else {
-        return;
-    };
-    for (entity, mut scan) in &mut scans {
-        let Some(output) = future::block_on(future::poll_once(&mut scan.task)) else {
+    for (entity, result, state, target, mut snapshot) in &mut scans {
+        commands.entity(entity).remove::<ReadResult>();
+        let Some(target) = target.filter(|target| registry.contains(target.entity())) else {
+            commands.entity(entity).despawn();
             continue;
         };
-        commands.entity(entity).despawn();
-        if scan.generation != state.generation {
-            state.dirty = true;
+        if *state != OperationState::Running {
+            commands.entity(entity).despawn();
             continue;
         }
+        let manifest = match &result.0 {
+            Ok(manifest) => ScanManifest {
+                original: Some(manifest.clone()),
+                desired: manifest.clone(),
+            },
+            Err(error) => {
+                snapshot.error(error);
+                ScanManifest {
+                    original: None,
+                    desired: registry.get(target.entity()).unwrap().clone(),
+                }
+            }
+        };
+        commands.entity(entity).insert(manifest);
+    }
+}
+
+fn advance_scans(
+    scans: Query<(Entity, &Scan, &ScanManifest, &ToolStore, &OperationState)>,
+    pending: Query<
+        (
+            Entity,
+            &ChildOf,
+            Option<&EntityTarget<ToolProviderId>>,
+            &ScanProvider,
+            Has<ScanTask>,
+            Has<ScanObservation>,
+        ),
+        Without<Observed>,
+    >,
+    providers: Query<(&ToolProviderId, &ToolScanner)>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+    mut commands: Commands,
+) {
+    for (entity, scan, manifest, store, state) in &scans {
+        let mut selected = None;
+        let mut busy = false;
+        for (child, parent, target, provider, running, observed) in &pending {
+            if parent.parent() != entity {
+                continue;
+            }
+            if running || observed {
+                busy = true;
+                break;
+            }
+            if *state != OperationState::Running {
+                commands.entity(child).despawn();
+                continue;
+            }
+            if selected.as_ref().is_none_or(
+                |(_, _, current): &(
+                    Entity,
+                    Option<&EntityTarget<ToolProviderId>>,
+                    &ScanProvider,
+                )| { provider.id.0 < current.id.0 },
+            ) {
+                selected = Some((child, target, provider));
+            }
+        }
+        if busy {
+            continue;
+        }
+        let Some((child, target, provider)) = selected else {
+            continue;
+        };
+        let current = target.and_then(|target| providers.get(target.entity()).ok());
+        let Some((_, scanner)) = current.filter(|(id, _)| **id == provider.id) else {
+            commands.entity(child).insert(ScanObservation {
+                manifest: manifest.desired.clone(),
+                result: Err("tool provider is unavailable".into()),
+                errors: Vec::new(),
+            });
+            continue;
+        };
+        let store = store.clone();
+        let mut manifest = manifest.desired.clone();
+        let scanner = *scanner;
+        let provider = provider.id.clone();
+        let refresh = scan.refresh_catalogs;
+        let wake = wake.as_deref().map(|wake| wake.0.clone());
+        commands
+            .entity(child)
+            .insert(ScanTask(IoTaskPool::get().spawn(async move {
+                let (result, errors) =
+                    match scanner.scan(&provider.0, &store, &mut manifest, refresh) {
+                        Ok(snapshot) => (Ok(snapshot.category), snapshot.errors),
+                        Err(error) => (Err(error), Vec::new()),
+                    };
+                if let Some(wake) = wake {
+                    wake.wake();
+                }
+                ScanObservation {
+                    manifest,
+                    result,
+                    errors,
+                }
+            })));
+    }
+}
+
+fn poll_scans(mut tasks: Query<(Entity, &mut ScanTask)>, mut commands: Commands) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<ScanTask>().insert(result);
+    }
+}
+
+fn finish_scans(
+    observations: Query<(
+        Entity,
+        &ChildOf,
+        Option<&EntityTarget<ToolProviderId>>,
+        &ScanProvider,
+        &ScanObservation,
+    )>,
+    providers: Query<&ToolProviderId>,
+    mut scans: Query<(&OperationState, &mut ScanManifest, &mut ScanSnapshot)>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+    mut commands: Commands,
+) {
+    for (entity, parent, target, provider, observation) in &observations {
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
+        let Ok((state, mut manifest, mut snapshot)) = scans.get_mut(parent.parent()) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if *state != OperationState::Running {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if target.and_then(|target| providers.get(target.entity()).ok()) != Some(&provider.id) {
+            commands.entity(entity).despawn();
+            snapshot.error(&format!(
+                "{}: tool provider is unavailable",
+                provider.id.0.id()
+            ));
+            continue;
+        }
+        match &observation.result {
+            Ok(result) => {
+                commands
+                    .entity(entity)
+                    .remove::<ScanObservation>()
+                    .insert(Observed);
+                manifest.desired.clone_from(&observation.manifest);
+                snapshot.0.categories.push(result.clone());
+                for error in &observation.errors {
+                    snapshot.error(error);
+                }
+            }
+            Err(error) => {
+                commands.entity(entity).despawn();
+                snapshot.error(&format!("{}: {error}", provider.id.0.id()));
+            }
+        }
+    }
+}
+
+fn commit_scans(
+    mut scans: Query<
+        (
+            Entity,
+            &Scan,
+            Option<&OperationTarget>,
+            &OperationState,
+            &ToolStore,
+            &ScanManifest,
+            &mut ScanSnapshot,
+        ),
+        (Without<WriteRequest>, Without<WriteResult>),
+    >,
+    pending: Query<(
+        &ChildOf,
+        &ScanProvider,
+        Option<&EntityTarget<ToolProviderId>>,
+        Has<Observed>,
+    )>,
+    providers: Query<&ToolProviderId>,
+    mut registry: Query<(&mut ToolRegistry, &ToolStore, &mut ToolsManifest)>,
+    mut commands: Commands,
+) {
+    for (entity, scan, target, state, store, manifest, mut snapshot) in &mut scans {
+        if pending
+            .iter()
+            .any(|(parent, _, _, observed)| parent.parent() == entity && !observed)
+        {
+            continue;
+        }
+        let Some(target) = target else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        let Ok((mut registry, current_store, mut committed)) = registry.get_mut(target.entity())
+        else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if *state != OperationState::Running
+            || scan.generation != registry.generation
+            || store != current_store
+            || pending.iter().any(|(parent, provider, target, _)| {
+                parent.parent() == entity
+                    && target.and_then(|target| providers.get(target.entity()).ok())
+                        != Some(&provider.id)
+            })
+        {
+            registry.dirty = true;
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if let Some(original) = &manifest.original {
+            if original != &manifest.desired {
+                commands.entity(entity).insert(WriteRequest {
+                    manifest: manifest.desired.clone(),
+                    retain_lease: true,
+                });
+                continue;
+            }
+            committed.clone_from(&manifest.desired);
+        }
+        snapshot.management(&committed);
+        snapshot.count();
         commands.trigger(Received {
-            entity: registry,
-            snapshot: output.snapshot,
+            entity: target.entity(),
+            snapshot: snapshot.0.clone(),
         });
-        manifest.clone_from(&output.manifest);
+        commands.entity(entity).despawn();
+    }
+}
+
+fn finish_commits(
+    mut scans: Query<(
+        Entity,
+        &Scan,
+        Option<&OperationTarget>,
+        &OperationState,
+        &ToolStore,
+        &ScanManifest,
+        &mut ScanSnapshot,
+        &WriteResult,
+    )>,
+    observed: Query<(
+        &ChildOf,
+        &ScanProvider,
+        Option<&EntityTarget<ToolProviderId>>,
+    )>,
+    providers: Query<&ToolProviderId>,
+    mut registry: Query<(&mut ToolRegistry, &ToolStore, &mut ToolsManifest)>,
+    mut commands: Commands,
+) {
+    for (entity, scan, target, state, store, manifest, mut snapshot, result) in &mut scans {
+        commands.entity(entity).despawn();
+        let Some(target) = target else {
+            continue;
+        };
+        let Ok((mut registry, current_store, mut committed)) = registry.get_mut(target.entity())
+        else {
+            continue;
+        };
+        if *state != OperationState::Running
+            || scan.generation != registry.generation
+            || store != current_store
+            || observed.iter().any(|(parent, provider, target)| {
+                parent.parent() == entity
+                    && target.and_then(|target| providers.get(target.entity()).ok())
+                        != Some(&provider.id)
+            })
+        {
+            registry.dirty = true;
+            continue;
+        }
+        match &result.0 {
+            Ok(()) => committed.clone_from(&manifest.desired),
+            Err(error) => {
+                snapshot.error(&format!("Tools: {error}"));
+                if let Some(original) = &manifest.original {
+                    committed.clone_from(original);
+                }
+            }
+        }
+        snapshot.management(&committed);
+        snapshot.count();
+        commands.trigger(Received {
+            entity: target.entity(),
+            snapshot: snapshot.0.clone(),
+        });
     }
 }
 
@@ -895,65 +1295,6 @@ fn complete(
     }
 }
 
-fn scan_tools(
-    store: &ToolStore,
-    providers: &[(ToolProviderId, ToolScanner)],
-    metadata: Vec<ToolProviderMetadata>,
-    refresh_catalogs: bool,
-) -> ToolScanResult {
-    let (mut manifest, manifest_error) = match store.load() {
-        Ok(manifest) => (manifest, None),
-        Err(error) => (ToolsManifest::default(), Some(error)),
-    };
-    let can_persist = manifest_error.is_none();
-    let original_manifest = manifest.clone();
-    let mut categories = Vec::new();
-    let mut errors = manifest_error.into_iter().collect::<Vec<_>>();
-    for (provider, scanner) in providers {
-        match scanner.scan(&provider.0, store, &mut manifest, refresh_catalogs) {
-            Ok(snapshot) => {
-                categories.push(snapshot.category);
-                errors.extend(snapshot.errors);
-            }
-            Err(error) => errors.push(format!("{}: {error}", provider.0.id())),
-        }
-    }
-    if can_persist
-        && manifest != original_manifest
-        && let Err(error) = store.save(&manifest)
-    {
-        errors.push(format!("Tools: {error}"));
-    }
-    let installed = categories
-        .iter()
-        .flat_map(|category| &category.items)
-        .filter(|item| matches!(item.status, ToolStatus::Installed | ToolStatus::Outdated))
-        .count() as u32;
-    let updates = categories
-        .iter()
-        .flat_map(|category| &category.items)
-        .filter(|item| item.status == ToolStatus::Outdated)
-        .count() as u32;
-    let conflicts = categories
-        .iter()
-        .flat_map(|category| &category.items)
-        .filter(|item| item.status == ToolStatus::Conflict)
-        .count() as u32;
-    ToolScanResult {
-        snapshot: ToolsSnapshot {
-            loaded: true,
-            root: store.root().to_string_lossy().into_owned(),
-            categories,
-            providers: metadata,
-            installed,
-            updates,
-            conflicts,
-            error: errors.join("\n"),
-        },
-        manifest,
-    }
-}
-
 fn drain_succeeded_operations(
     operations: Query<
         (Entity, &ToolOperationContext, &ToolOperationSucceeded),
@@ -1123,6 +1464,484 @@ mod tests {
                         .is_none()
                 );
             }
+        }
+    }
+
+    struct InventoryFixture {
+        app: App,
+        directory: tempfile::TempDir,
+        registry: Entity,
+        provider: Entity,
+    }
+
+    impl InventoryFixture {
+        fn new(source: &str, hold: bool, provider: &str) -> Self {
+            IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
+            let directory = tempfile::tempdir().unwrap();
+            let store = ToolStore::new(directory.path(), directory.path());
+            std::fs::create_dir_all(store.root()).unwrap();
+            std::fs::write(store.manifest_path(), source).unwrap();
+            if hold {
+                std::fs::write(store.root().join("hold"), "").unwrap();
+            }
+            let mut app = App::new();
+            app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin));
+            let registry = app
+                .world_mut()
+                .spawn((
+                    Name::new("Fixture tool registry"),
+                    ToolRegistry::default(),
+                    Catalog::default(),
+                    store,
+                    ToolsManifest::default(),
+                    OperationRequestSequence::default(),
+                ))
+                .id();
+            let provider = app
+                .world_mut()
+                .spawn((
+                    ToolProviderId(ToolProvider::new(provider)),
+                    ToolScanner::new(Self::observe),
+                ))
+                .id();
+            app.update();
+            Self {
+                app,
+                directory,
+                registry,
+                provider,
+            }
+        }
+
+        fn observe(
+            provider: &ToolProvider,
+            store: &ToolStore,
+            manifest: &mut ToolsManifest,
+            _: bool,
+        ) -> Result<crate::ToolProviderSnapshot, String> {
+            std::fs::write(store.root().join("started"), "").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while store.root().join("hold").exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture observation timed out"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            let operations = match provider.id() {
+                "dotfiles" => vec![ToolOperationKind::Link, ToolOperationKind::Unlink],
+                "mcp" => vec![ToolOperationKind::Forget],
+                _ => {
+                    manifest.set_package(provider.id(), "observed", true);
+                    vec![ToolOperationKind::Uninstall]
+                }
+            };
+            if store.root().join("fail").exists() {
+                return Err("fixture provider failed".into());
+            }
+            Ok(crate::state::ToolCategory {
+                provider: provider.clone(),
+                items: vec![crate::state::ToolItem {
+                    provider: provider.clone(),
+                    id: "observed".into(),
+                    name: "Observed".into(),
+                    icon: None,
+                    version: Some("1".into()),
+                    detail: String::new(),
+                    status: ToolStatus::Installed,
+                    managed: true,
+                    operations,
+                }],
+            }
+            .into())
+        }
+
+        fn scan(&mut self) -> Entity {
+            self.app
+                .world_mut()
+                .query_filtered::<Entity, With<Scan>>()
+                .single(self.app.world())
+                .unwrap()
+        }
+
+        fn wait_started(&mut self) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !self.directory.path().join("tools/started").exists() {
+                self.app.update();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture scan did not start"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        fn drain(&mut self, entity: Entity) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while self.app.world().get_entity(entity).is_ok() {
+                self.app.update();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture scan did not drain"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        fn snapshot(&mut self) -> ToolsSnapshot {
+            let mut state = bevy::ecs::system::SystemState::<Inventory>::new(self.app.world_mut());
+            state
+                .get(self.app.world())
+                .unwrap()
+                .snapshot(self.registry)
+                .unwrap()
+        }
+    }
+
+    struct ScanWake {
+        output: std::sync::mpsc::SyncSender<()>,
+        source: vmux_ecs::JobWake,
+    }
+
+    impl std::task::Wake for ScanWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.source.0.wake_by_ref();
+            let _ = self.output.try_send(());
+        }
+
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.source.0.wake_by_ref();
+            let _ = self.output.try_send(());
+        }
+    }
+
+    #[test]
+    fn completed_provider_observation_wakes_the_next_inventory_step() {
+        IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(directory.path(), directory.path());
+        std::fs::create_dir_all(store.root()).unwrap();
+        std::fs::write(store.manifest_path(), "version = 1\n").unwrap();
+        std::fs::write(store.root().join("hold"), "").unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(32);
+        let mut app = App::new();
+        app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin));
+        let source = app
+            .world()
+            .get_resource::<vmux_ecs::JobWake>()
+            .cloned()
+            .unwrap_or_else(|| vmux_ecs::JobWake(std::task::Waker::noop().clone()));
+        app.insert_resource(vmux_ecs::JobWake(std::task::Waker::from(
+            std::sync::Arc::new(ScanWake {
+                output: sender,
+                source,
+            }),
+        )));
+        let registry = app
+            .world_mut()
+            .spawn((
+                ToolRegistry::default(),
+                Catalog::default(),
+                store.clone(),
+                ToolsManifest::default(),
+                OperationRequestSequence::default(),
+            ))
+            .id();
+        for provider in ["alpha", "beta"] {
+            app.world_mut().spawn((
+                ToolProviderId(ToolProvider::new(provider)),
+                ToolScanner::new(InventoryFixture::observe),
+            ));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let task = loop {
+            app.update();
+            if let Some(entity) = app
+                .world_mut()
+                .query_filtered::<Entity, With<ScanTask>>()
+                .iter(app.world())
+                .next()
+            {
+                break entity;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        std::fs::remove_file(store.root().join("hold")).unwrap();
+        while !app.world().get::<ScanTask>(task).unwrap().0.is_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        while receiver.try_recv().is_ok() {}
+        app.update();
+        assert!(
+            receiver.try_recv().is_ok(),
+            "completed observation must wake its continuation"
+        );
+        while !app.world().get::<Catalog>(registry).unwrap().loaded {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(!app.world().get::<ToolStore>(registry).unwrap().is_busy());
+    }
+
+    #[test]
+    fn inventory_management_uses_dotfile_and_mcp_declarations_without_package_adoption() {
+        for (provider, source, managed, operations) in [
+            (
+                "dotfiles",
+                "version = 1\n[dotfiles]\npackages = ['observed']\n",
+                true,
+                vec![ToolOperationKind::Link, ToolOperationKind::Unlink],
+            ),
+            (
+                "dotfiles",
+                "version = 1\n",
+                false,
+                vec![ToolOperationKind::Link],
+            ),
+            (
+                "mcp",
+                "version = 1\n[mcp.servers.observed]\ntransport = 'stdio'\ncommand = 'server'\n",
+                true,
+                vec![ToolOperationKind::Forget],
+            ),
+            ("mcp", "version = 1\n", false, Vec::new()),
+        ] {
+            let mut fixture = InventoryFixture::new(source, false, provider);
+            let scan = fixture.scan();
+            fixture.drain(scan);
+            let snapshot = fixture.snapshot();
+            let item = &snapshot.categories[0].items[0];
+            assert_eq!(item.managed, managed, "{provider}");
+            assert_eq!(item.operations, operations, "{provider}");
+            assert!(snapshot.error.is_empty(), "{provider}");
+        }
+    }
+
+    #[test]
+    fn inventory_commits_observed_packages_after_read_and_preserves_existing_declarations() {
+        let mut fixture = InventoryFixture::new(
+            "version = 1\n[packages]\nfixture = ['existing']\n",
+            false,
+            "fixture",
+        );
+        let scan = fixture.scan();
+        fixture.drain(scan);
+        let store = fixture
+            .app
+            .world()
+            .get::<ToolStore>(fixture.registry)
+            .unwrap();
+        let saved: ToolsManifest =
+            toml::from_str(&std::fs::read_to_string(store.manifest_path()).unwrap()).unwrap();
+        assert!(saved.contains("fixture", "existing"));
+        assert!(saved.contains("fixture", "observed"));
+        assert!(store.lease().is_some());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolsManifest>(fixture.registry)
+                .unwrap()
+                .contains("fixture", "observed")
+        );
+        let snapshot = fixture.snapshot();
+        assert_eq!(snapshot.installed, 1);
+        assert!(snapshot.categories[0].items[0].managed);
+        assert!(snapshot.error.is_empty());
+    }
+
+    #[test]
+    fn obsolete_inventory_results_cannot_save_or_transfer_to_replacement_owners() {
+        for interruption in ["generation", "store", "registry", "provider", "cancel"] {
+            let source = "version = 1\n[packages]\nfixture = ['existing']\n";
+            let mut fixture = InventoryFixture::new(source, true, "fixture");
+            let scan = fixture.scan();
+            fixture.wait_started();
+            let store = fixture
+                .app
+                .world()
+                .get::<ToolStore>(fixture.registry)
+                .unwrap()
+                .clone();
+            assert!(store.lease().is_none());
+            match interruption {
+                "generation" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<ToolRegistry>(fixture.registry)
+                        .unwrap()
+                        .generation += 1;
+                }
+                "store" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.registry)
+                        .insert(ToolStore::new(
+                            fixture.directory.path().join("replacement"),
+                            fixture.directory.path(),
+                        ));
+                }
+                "registry" => {
+                    fixture.app.world_mut().despawn(fixture.registry);
+                }
+                "provider" => {
+                    fixture.app.world_mut().despawn(fixture.provider);
+                }
+                "cancel" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(scan)
+                        .insert(OperationState::Canceled);
+                }
+                _ => unreachable!(),
+            }
+            fixture.app.update();
+            assert!(store.lease().is_none(), "{interruption}");
+            std::fs::remove_file(store.root().join("hold")).unwrap();
+            fixture.drain(scan);
+            assert_eq!(
+                std::fs::read_to_string(store.manifest_path()).unwrap(),
+                source,
+                "{interruption}"
+            );
+            assert!(store.lease().is_some(), "{interruption}");
+            if let Some(manifest) = fixture.app.world().get::<ToolsManifest>(fixture.registry) {
+                assert!(!manifest.contains("fixture", "observed"), "{interruption}");
+            }
+        }
+    }
+
+    #[test]
+    fn unreadable_inventory_never_overwrites_configuration_or_claims_managed_packages() {
+        let source = "invalid = [";
+        let mut fixture = InventoryFixture::new(source, false, "fixture");
+        let scan = fixture.scan();
+        fixture.drain(scan);
+        let store = fixture
+            .app
+            .world()
+            .get::<ToolStore>(fixture.registry)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(store.manifest_path()).unwrap(),
+            source
+        );
+        let snapshot = fixture.snapshot();
+        assert!(!snapshot.error.is_empty());
+        let item = &snapshot.categories[0].items[0];
+        assert!(!item.managed);
+        assert!(item.operations.contains(&ToolOperationKind::Adopt));
+    }
+
+    #[test]
+    fn failed_inventory_providers_cannot_commit_partial_manifest_changes() {
+        let source = "version = 1\n";
+        let mut fixture = InventoryFixture::new(source, true, "fixture");
+        let scan = fixture.scan();
+        fixture.wait_started();
+        let store = fixture
+            .app
+            .world()
+            .get::<ToolStore>(fixture.registry)
+            .unwrap()
+            .clone();
+        std::fs::write(store.root().join("fail"), "").unwrap();
+        std::fs::remove_file(store.root().join("hold")).unwrap();
+        fixture.drain(scan);
+        assert_eq!(
+            std::fs::read_to_string(store.manifest_path()).unwrap(),
+            source
+        );
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<ToolsManifest>(fixture.registry)
+                .unwrap()
+                .contains("fixture", "observed")
+        );
+        let snapshot = fixture.snapshot();
+        assert!(snapshot.error.contains("fixture provider failed"));
+        assert!(snapshot.categories.is_empty());
+    }
+
+    #[test]
+    fn accepted_inventory_writes_drain_before_releasing_the_store_lease() {
+        for interruption in ["generation", "registry", "provider", "store", "cancel"] {
+            let mut fixture = InventoryFixture::new("version = 1\n", false, "fixture");
+            let scan = fixture.scan();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while fixture.app.world().get::<WriteRequest>(scan).is_none() {
+                fixture.app.update();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "scan did not request a write"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            let store = fixture
+                .app
+                .world()
+                .get::<ToolStore>(fixture.registry)
+                .unwrap()
+                .clone();
+            assert!(store.lease().is_none(), "{interruption}");
+            match interruption {
+                "generation" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<ToolRegistry>(fixture.registry)
+                        .unwrap()
+                        .generation += 1;
+                }
+                "registry" => {
+                    fixture.app.world_mut().despawn(fixture.registry);
+                }
+                "provider" => {
+                    fixture.app.world_mut().despawn(fixture.provider);
+                }
+                "store" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.registry)
+                        .insert(ToolStore::new(
+                            fixture.directory.path().join("replacement"),
+                            fixture.directory.path(),
+                        ));
+                }
+                "cancel" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(scan)
+                        .insert(OperationState::Canceled);
+                }
+                _ => unreachable!(),
+            }
+            fixture.drain(scan);
+            assert!(store.lease().is_some(), "{interruption}");
+            if let Some(manifest) = fixture.app.world().get::<ToolsManifest>(fixture.registry) {
+                assert!(!manifest.contains("fixture", "observed"), "{interruption}");
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<ToolRegistry>(fixture.registry)
+                        .unwrap()
+                        .dirty
+                );
+            }
+            let saved: ToolsManifest =
+                toml::from_str(&std::fs::read_to_string(store.manifest_path()).unwrap()).unwrap();
+            assert!(saved.contains("fixture", "observed"), "{interruption}");
         }
     }
 
