@@ -742,14 +742,23 @@ mod tests {
             .count();
         assert!(retained > 0);
         worker.release();
-        host.frame();
-        let remaining = host
-            .app
-            .world_mut()
-            .query_filtered::<Entity, With<Operation>>()
-            .iter(host.app.world())
-            .count();
-        assert_eq!(remaining, 0);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let timeout = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("native file read did not retire before its deadline");
+            host.wake.recv_timeout(timeout).unwrap();
+            host.app.update();
+            let remaining = host
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<Operation>>()
+                .iter(host.app.world())
+                .count();
+            if remaining == 0 {
+                break;
+            }
+        }
         assert!(host.app.world().get_entity(host.view).is_err());
     }
 
