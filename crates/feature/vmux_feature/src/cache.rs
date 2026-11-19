@@ -2801,12 +2801,11 @@ mod tests {
                     .resource::<Messages<RetentionCleared>>()
                     .is_empty()
             );
-            assert_eq!(
-                Envelope::decode(&std::fs::read(&path).unwrap())
+            assert!(
+                !Envelope::decode(&std::fs::read(&path).unwrap())
                     .unwrap()
                     .retained
-                    .is_empty(),
-                false
+                    .is_empty()
             );
             if !uncertain {
                 while wake.try_recv().is_ok() {}
