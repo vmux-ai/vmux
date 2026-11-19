@@ -77,7 +77,9 @@ pub struct Unavailable(pub crate::Failure);
 #[derive(Message)]
 pub(crate) struct StoredKeyRequest {
     pub entity: Entity,
+    #[cfg(target_os = "macos")]
     pub data: std::path::PathBuf,
+    #[cfg(target_os = "macos")]
     pub scope: String,
 }
 
@@ -179,12 +181,14 @@ fn configure(
         let Some(context) = current.context(root.parent(), &declaration.environment) else {
             continue;
         };
+        #[cfg(target_os = "macos")]
         let scope = format!(
             "{}/{}/{}",
             context.local,
             context.server.authority(),
             context.generation
         );
+        #[cfg(target_os = "macos")]
         let data = context.data.clone();
         let certificate = context.certificate.clone();
         let entity = commands
@@ -199,7 +203,9 @@ fn configure(
             .id();
         requests.write(StoredKeyRequest {
             entity,
+            #[cfg(target_os = "macos")]
             data,
+            #[cfg(target_os = "macos")]
             scope,
         });
         if let Some(certificate) = certificate {

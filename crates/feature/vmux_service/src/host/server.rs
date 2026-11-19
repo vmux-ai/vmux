@@ -250,7 +250,9 @@ fn reap_clients(clients: Query<(Entity, &AbortTask), With<Client>>, mut commands
 mod tests {
     use super::*;
 
-    use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage};
+    #[cfg(target_os = "macos")]
+    use vmux_api::protocol::ServiceMessage;
+    use vmux_api::protocol::{ClientMessage, ProcessId};
     use vmux_process::ProcessService;
     use vmux_transport::service::{ServiceCodec, ServiceProtocolDriver};
 
