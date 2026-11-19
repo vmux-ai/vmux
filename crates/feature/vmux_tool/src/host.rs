@@ -472,12 +472,34 @@ impl ScanSnapshot {
     fn management(&mut self, committed: &ToolsManifest) {
         for category in &mut self.0.categories {
             for item in &mut category.items {
-                item.managed = committed.contains(item.provider.id(), &item.id);
-                if !item.managed
-                    && matches!(item.status, ToolStatus::Installed | ToolStatus::Outdated)
-                    && !item.operations.contains(&ToolOperationKind::Adopt)
-                {
-                    item.operations.insert(0, ToolOperationKind::Adopt);
+                match item.provider.id() {
+                    "dotfiles" => {
+                        item.managed = committed.dotfiles.packages.contains(&item.id);
+                        if !item.managed {
+                            item.operations
+                                .retain(|operation| *operation != ToolOperationKind::Unlink);
+                        }
+                    }
+                    "mcp" => {
+                        item.managed = committed.mcp.servers.contains_key(&item.id);
+                        if !item.managed {
+                            item.operations
+                                .retain(|operation| *operation != ToolOperationKind::Forget);
+                        }
+                    }
+                    _ => {
+                        item.managed = committed.contains(item.provider.id(), &item.id);
+                        if item.managed {
+                            item.operations
+                                .retain(|operation| *operation != ToolOperationKind::Adopt);
+                        } else if matches!(
+                            item.status,
+                            ToolStatus::Installed | ToolStatus::Outdated
+                        ) && !item.operations.contains(&ToolOperationKind::Adopt)
+                        {
+                            item.operations.insert(0, ToolOperationKind::Adopt);
+                        }
+                    }
                 }
             }
         }
@@ -1449,7 +1471,7 @@ mod tests {
     }
 
     impl InventoryFixture {
-        fn new(source: &str, hold: bool) -> Self {
+        fn new(source: &str, hold: bool, provider: &str) -> Self {
             IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
             let directory = tempfile::tempdir().unwrap();
             let store = ToolStore::new(directory.path(), directory.path());
@@ -1474,7 +1496,7 @@ mod tests {
             let provider = app
                 .world_mut()
                 .spawn((
-                    ToolProviderId(ToolProvider::new("fixture")),
+                    ToolProviderId(ToolProvider::new(provider)),
                     ToolScanner::new(Self::observe),
                 ))
                 .id();
@@ -1502,7 +1524,14 @@ mod tests {
                 );
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
-            manifest.set_package(provider.id(), "observed", true);
+            let operations = match provider.id() {
+                "dotfiles" => vec![ToolOperationKind::Link, ToolOperationKind::Unlink],
+                "mcp" => vec![ToolOperationKind::Forget],
+                _ => {
+                    manifest.set_package(provider.id(), "observed", true);
+                    vec![ToolOperationKind::Uninstall]
+                }
+            };
             if store.root().join("fail").exists() {
                 return Err("fixture provider failed".into());
             }
@@ -1517,7 +1546,7 @@ mod tests {
                     detail: String::new(),
                     status: ToolStatus::Installed,
                     managed: true,
-                    operations: vec![ToolOperationKind::Uninstall],
+                    operations,
                 }],
             }
             .into())
@@ -1566,9 +1595,46 @@ mod tests {
     }
 
     #[test]
+    fn inventory_management_uses_dotfile_and_mcp_declarations_without_package_adoption() {
+        for (provider, source, managed, operations) in [
+            (
+                "dotfiles",
+                "version = 1\n[dotfiles]\npackages = ['observed']\n",
+                true,
+                vec![ToolOperationKind::Link, ToolOperationKind::Unlink],
+            ),
+            (
+                "dotfiles",
+                "version = 1\n",
+                false,
+                vec![ToolOperationKind::Link],
+            ),
+            (
+                "mcp",
+                "version = 1\n[mcp.servers.observed]\ntransport = 'stdio'\ncommand = 'server'\n",
+                true,
+                vec![ToolOperationKind::Forget],
+            ),
+            ("mcp", "version = 1\n", false, Vec::new()),
+        ] {
+            let mut fixture = InventoryFixture::new(source, false, provider);
+            let scan = fixture.scan();
+            fixture.drain(scan);
+            let snapshot = fixture.snapshot();
+            let item = &snapshot.categories[0].items[0];
+            assert_eq!(item.managed, managed, "{provider}");
+            assert_eq!(item.operations, operations, "{provider}");
+            assert!(snapshot.error.is_empty(), "{provider}");
+        }
+    }
+
+    #[test]
     fn inventory_commits_observed_packages_after_read_and_preserves_existing_declarations() {
-        let mut fixture =
-            InventoryFixture::new("version = 1\n[packages]\nfixture = ['existing']\n", false);
+        let mut fixture = InventoryFixture::new(
+            "version = 1\n[packages]\nfixture = ['existing']\n",
+            false,
+            "fixture",
+        );
         let scan = fixture.scan();
         fixture.drain(scan);
         let store = fixture
@@ -1599,7 +1665,7 @@ mod tests {
     fn obsolete_inventory_results_cannot_save_or_transfer_to_replacement_owners() {
         for interruption in ["generation", "store", "registry", "provider", "cancel"] {
             let source = "version = 1\n[packages]\nfixture = ['existing']\n";
-            let mut fixture = InventoryFixture::new(source, true);
+            let mut fixture = InventoryFixture::new(source, true, "fixture");
             let scan = fixture.scan();
             fixture.wait_started();
             let store = fixture
@@ -1662,7 +1728,7 @@ mod tests {
     #[test]
     fn unreadable_inventory_never_overwrites_configuration_or_claims_managed_packages() {
         let source = "invalid = [";
-        let mut fixture = InventoryFixture::new(source, false);
+        let mut fixture = InventoryFixture::new(source, false, "fixture");
         let scan = fixture.scan();
         fixture.drain(scan);
         let store = fixture
@@ -1684,7 +1750,7 @@ mod tests {
     #[test]
     fn failed_inventory_providers_cannot_commit_partial_manifest_changes() {
         let source = "version = 1\n";
-        let mut fixture = InventoryFixture::new(source, true);
+        let mut fixture = InventoryFixture::new(source, true, "fixture");
         let scan = fixture.scan();
         fixture.wait_started();
         let store = fixture
@@ -1716,7 +1782,7 @@ mod tests {
     #[test]
     fn accepted_inventory_writes_drain_before_releasing_the_store_lease() {
         for interruption in ["generation", "registry", "provider", "store", "cancel"] {
-            let mut fixture = InventoryFixture::new("version = 1\n", false);
+            let mut fixture = InventoryFixture::new("version = 1\n", false, "fixture");
             let scan = fixture.scan();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while fixture.app.world().get::<WriteRequest>(scan).is_none() {
