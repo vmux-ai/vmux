@@ -11148,6 +11148,7 @@ dependencies = [
 name = "vmux_profile"
 version = "0.0.35"
 dependencies = [
+ "async-lock",
  "chrono",
  "libc",
  "ring",

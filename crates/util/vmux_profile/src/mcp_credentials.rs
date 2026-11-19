@@ -1,4 +1,4 @@
-pub use access::McpCredentialAccess;
+pub use access::{McpCredentialAccess, McpCredentialTransaction};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 pub use storage::McpCredentialStorage;

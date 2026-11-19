@@ -777,6 +777,22 @@ esac
 
     #[test]
     fn production_update_lifecycle_verifies_publishes_and_preserves_channel_preferences() {
+        if std::env::var_os("VMUX_UPDATE_TEST_ISOLATED").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--exact")
+                .arg("updates::tests::production_update_lifecycle_verifies_publishes_and_preserves_channel_preferences")
+                .arg("--test-threads=1")
+                .env("VMUX_UPDATE_TEST_ISOLATED", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let mut managed = Fixture::new();
         managed.installation.release_compatible = false;
         let original = std::fs::read(&managed.installation.executable).unwrap();
