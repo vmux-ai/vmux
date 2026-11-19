@@ -50,14 +50,17 @@ runs:
         https://security.ubuntu.com/ubuntu	priority:2
         https://azure.archive.ubuntu.com/ubuntu	priority:3
         MIRROR
+        vmux_apt_sources="$RUNNER_TEMP/vmux-ubuntu.sources"
+        sed -E 's#https?://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)#mirror+file:///etc/apt/apt-mirrors-security.txt\1#g' \
+          /etc/apt/sources.list.d/ubuntu.sources > "$vmux_apt_sources"
         timeout 180 sudo apt-get -o Acquire::Retries=1 \
           -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 \
-          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+          -o Dir::Etc::sourcelist="$vmux_apt_sources" \
           -o Dir::Etc::sourceparts=- \
           -o APT::Update::Error-Mode=any update
         timeout 300 sudo apt-get -o Acquire::Retries=1 \
           -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 \
-          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+          -o Dir::Etc::sourcelist="$vmux_apt_sources" \
           -o Dir::Etc::sourceparts=- \
           install -y --no-install-recommends \
           pkg-config \
