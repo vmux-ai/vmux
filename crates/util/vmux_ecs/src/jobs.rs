@@ -49,7 +49,8 @@ impl<J: Job> Plugin for JobPlugin<J> {
             .add_systems(
                 PostUpdate,
                 (cancel::<J>, cleanup::<J>).chain().in_set(JobSet::Cleanup),
-            );
+            )
+            .add_systems(PostUpdate, wake::<J>.after(JobSet::Cleanup));
     }
 }
 
@@ -408,6 +409,22 @@ fn cleanup<J: Job>(jobs: CompletedJobs<J>, mut commands: Commands) {
     }
 }
 
+fn wake<J: Job>(
+    ready: Query<Entity, Added<JobResult<J>>>,
+    mut retired: RemovedComponents<CapturedJob<J>>,
+    wake: Option<Res<JobWake>>,
+) {
+    let mut drained = false;
+    for _ in retired.read() {
+        drained = true;
+    }
+    if (!ready.is_empty() || drained)
+        && let Some(wake) = wake
+    {
+        wake.0.wake_by_ref();
+    }
+}
+
 struct WorkerPanic(Box<dyn Any + Send>);
 
 impl WorkerPanic {
@@ -432,6 +449,74 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
     use std::time::{Duration, Instant};
+
+    struct ChannelWake {
+        output: mpsc::SyncSender<()>,
+        source: JobWake,
+    }
+
+    impl std::task::Wake for ChannelWake {
+        fn wake(self: Arc<Self>) {
+            self.source.0.wake_by_ref();
+            let _ = self.output.try_send(());
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.source.0.wake_by_ref();
+            let _ = self.output.try_send(());
+        }
+    }
+
+    #[test]
+    fn native_job_completion_wakes_result_consumers_and_canceled_owner_cleanup() {
+        for canceled in [false, true] {
+            let mut fixture = Fixture::new();
+            let (native_wake, native_events) = mpsc::sync_channel(16);
+            fixture
+                .app
+                .insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
+                    output: native_wake,
+                    source: JobWake(std::task::Waker::noop().clone()),
+                }))));
+            fixture.start();
+            if canceled {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.operation)
+                    .insert(OperationState::Canceled);
+                fixture.app.update();
+            }
+            while native_events.try_recv().is_ok() {}
+            fixture.release.send(()).unwrap();
+            native_events.recv_timeout(Duration::from_secs(3)).unwrap();
+            let (collection_wake, collection_events) = mpsc::sync_channel(16);
+            let source = fixture.app.world().resource::<JobWake>().clone();
+            fixture
+                .app
+                .insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
+                    output: collection_wake,
+                    source,
+                }))));
+            fixture.app.update();
+            assert!(
+                collection_events.try_recv().is_ok(),
+                "result delivery and native drain must wake the next ECS frame; canceled={canceled}"
+            );
+            if canceled {
+                assert!(fixture.cleaned.load(Ordering::Acquire));
+                assert!(!fixture.running());
+            } else {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<JobResult<WriteProbe>>(fixture.operation)
+                        .is_some()
+                );
+            }
+        }
+    }
 
     struct Fixture {
         app: App,
@@ -632,6 +717,13 @@ mod tests {
             .unwrap();
         started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
         let second = runtime.spawn(None, || ()).unwrap();
+        let (drain_wake, drained) = mpsc::sync_channel(16);
+        fixture
+            .app
+            .insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
+                output: drain_wake,
+                source: JobWake(std::task::Waker::noop().clone()),
+            }))));
         fixture.app.update();
         assert_eq!(
             fixture.app.world().get::<OperationState>(fixture.operation),
@@ -643,6 +735,10 @@ mod tests {
             .get_mut::<OperationState>(fixture.operation)
             .unwrap() = OperationState::Canceled;
         fixture.app.world_mut().run_schedule(PostUpdate);
+        assert!(
+            drained.try_recv().is_ok(),
+            "canceling an unstarted native job must wake owner cleanup"
+        );
         assert!(!fixture.running());
         let world = fixture.app.world_mut();
         assert!(
