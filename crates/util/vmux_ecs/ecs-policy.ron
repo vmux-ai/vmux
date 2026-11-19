@@ -193,7 +193,6 @@ legacy: [
     (key: "crates/util/vmux_ecs/src/store.rs||struct:WorkspaceRestoreValidator", fingerprint: "4bc9a409a37ed74d", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/store.rs||trait:Schema", fingerprint: "40829043b5081dd6", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/store.rs||trait:StoreAppExt", fingerprint: "597b8f2ae5685a9f", issue: "VMX-253"),
-    (key: "crates/util/vmux_ecs/src/terminal.rs||alias:PtyExited", fingerprint: "058b23ca91a27b18", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/terminal.rs||alias:TerminalUiStateUpdates", fingerprint: "9116f65304dd8249", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/terminal.rs||enum:TerminalSpawnTarget", fingerprint: "54ae44f34542b6ae", issue: "VMX-253"),
     (key: "crates/util/vmux_ecs/src/terminal.rs||struct:TerminalSpawnRequest", fingerprint: "944f1e4299b3e8e1", issue: "VMX-253"),
