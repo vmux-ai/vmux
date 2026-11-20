@@ -1773,6 +1773,274 @@ fn job_outputs_require_their_own_bevy_borrow_within_mixed_parameters() {
 }
 
 #[test]
+fn job_result_consumers_audit_the_payload_without_approving_the_indexed_input() {
+    for (parameter, output, expected) in [
+        ("Query<&JobResult<Input>>", "Bytes", true),
+        ("Query<Ref<JobResult<Input>>>", "()", true),
+        ("Query<Ref<JobResult<Input>>>", "Bytes", true),
+        ("Query<Ref<JobResult<Input>>>", "Unowned", false),
+        ("Query<Ref<JobResult<Input>>>", "Self", false),
+        ("Query<(Ref<JobResult<Input>>,&Input)>", "()", false),
+        ("Query<&JobResult<Input>>", "Result<Bytes,String>", true),
+        ("Query<&JobResult<Input>>", "OutputAlias", true),
+        ("Query<&JobResult<Input>>", "Callback", false),
+        ("Query<&JobResult<Input>>", "Self", false),
+        ("Query<&JobResult<Input>>", "()", true),
+        ("Query<&JobResult<Input>>", "Unowned", false),
+        ("Query<(&JobResult<Input>,&Input)>", "Bytes", false),
+        ("Query<&JobRequest<Input>>", "Bytes", false),
+        ("Query<&OtherResult<Input>>", "Bytes", false),
+        ("Query<Entity,With<JobResult<Input>>>", "Bytes", false),
+        ("Args<Input>", "Bytes", true),
+        ("Mixed<Input>", "Bytes", false),
+        ("Params<Input>", "Bytes", true),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job { type Output; } #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>); #[derive(Component)] pub struct JobRequest<J:Job>(pub J);");
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::system::SystemParam; use vmux_ecs::jobs::{{Job,JobResult,JobRequest}}; struct Input; struct Unowned; #[derive(Component)] struct Bytes(Vec<u8>); #[derive(Component)] struct OtherResult<T>(T); type OutputAlias=Result<Bytes,String>; type Callback=fn(); type Args<T>=Query<&'static JobResult<T>>; type Mixed<T>=Query<(&'static JobResult<T>,&'static T)>; #[derive(SystemParam)] struct Params<'w,'s,T:Job>{{ values:Query<'w,'s,&'static JobResult<T>> }} impl Job for Input{{ type Output={output}; }} fn receive(input:{parameter}){{}} struct RootPlugin; impl Plugin for RootPlugin{{ fn build(&self,app:&mut App){{app.add_systems(Update,receive);}} }}"));
+        inventory.resolve_usage();
+        let policy = Policy::default();
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &policy,
+                &mut BTreeSet::new(),
+            ),
+            expected,
+            "{parameter}: {output}"
+        );
+        for key in ["struct:Input", "impl:Job for Input"] {
+            assert!(
+                !inventory.canonical(
+                    &inventory.entries[&inventory.key(key)],
+                    &policy,
+                    &mut BTreeSet::new(),
+                ),
+                "{parameter}: {key}"
+            );
+        }
+    }
+}
+
+#[test]
+fn indexed_result_evidence_requires_an_output_projection_and_preserves_concrete_borrows() {
+    for (fields, parameter, expected) in [
+        ("Result<J::Output,String>", "Query<&JobResult<Input>>", true),
+        (
+            "Result<J::Output,String>,J",
+            "Query<&JobResult<Input>>",
+            false,
+        ),
+        ("J", "Query<&JobResult<Input>>", false),
+        ("Result<J::Output,J>", "Query<&JobResult<Input>>", false),
+        (
+            "std::marker::PhantomData<J>",
+            "Query<&JobResult<Input>>",
+            false,
+        ),
+        ("Result<J::Output,String>", "Mixed<Input>", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", &format!("use bevy_ecs::prelude::*; pub trait Job {{type Output;}} #[derive(Component)] pub struct JobResult<J:Job>({fields});"));
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{{Job,JobResult}}; use crate::actual::Input; mod actual{{pub struct Input; impl vmux_ecs::jobs::Job for Input{{type Output=super::Bytes;}}}} #[derive(Component)] struct Bytes(Vec<u8>); type Mixed<T>=Query<(&'static JobResult<T>,&'static crate::actual::Input)>; fn receive(input:{parameter}){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,receive);}}}}"));
+        inventory.resolve_usage();
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            expected,
+            "{fields}: {parameter}"
+        );
+    }
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job{type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+    inventory.source("crates/feature/receiver/src/lib.rs", "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{Job,JobResult}; struct Input<T>(std::marker::PhantomData<T>); struct End; impl<T> Job for Input<T>{type Output=JobResult<Input<Vec<T>>>;} fn receive(input:Query<&JobResult<Input<End>>>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,receive);}}");
+    inventory.resolve_usage();
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("fn:receive")],
+        &Policy::default(),
+        &mut BTreeSet::new(),
+    ));
+}
+
+#[test]
+fn indexed_job_outputs_cannot_turn_ui_projections_into_domain_state() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job {type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+    inventory.source(
+        "crates/util/vmux_ecs/src/ui_state.rs",
+        "use bevy_ecs::prelude::*; #[derive(Component)] pub struct UiState{pub text:String}",
+    );
+    inventory.source("crates/feature/receiver/src/lib.rs", "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{Job,JobResult}; use vmux_ecs::ui_state::UiState; struct Input; impl Job for Input{type Output=UiState;} fn receive(input:Query<&JobResult<Input>>){} fn view(input:Query<&UiState>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,(receive,view));}}");
+    inventory.resolve_usage();
+    let output = &inventory.entries["crates/util/vmux_ecs/src/ui_state.rs||struct:UiState"];
+    assert!(inventory.used(output));
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("fn:receive")],
+        &Policy::default(),
+        &mut BTreeSet::new(),
+    ));
+}
+
+#[test]
+fn indexed_result_inference_does_not_bind_unresolved_parameters_to_shadow_types() {
+    for (definition, parameter, registration) in [
+        (
+            "struct Input; struct T; impl Job for Input{type Output=UiState;} impl Job for T{type Output=Bytes;}",
+            "fn receive<T:Job>(input:Query<&JobResult<T>>){}",
+            "receive::<Input>",
+        ),
+        (
+            "struct Input<T>(std::marker::PhantomData<T>); struct Read; impl Job for Read{type Output=UiState;} impl<T:Job> Job for Input<T>{type Output=T::Output;}",
+            "fn receive(input:Query<&JobResult<Input<Read>>>){}",
+            "receive",
+        ),
+        (
+            "struct Input; impl Job for Input{type Output=Box<dyn Fn()>;}",
+            "fn receive(input:Query<&JobResult<Input>>){}",
+            "receive",
+        ),
+        (
+            "struct Input; impl Job for Input{type Output=fn();}",
+            "fn receive(input:Query<&JobResult<Input>>){}",
+            "receive",
+        ),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job{type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source(
+            "crates/util/vmux_ecs/src/ui_state.rs",
+            "use bevy_ecs::prelude::*; #[derive(Component)] pub struct UiState{pub text:String}",
+        );
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{{Job,JobResult}}; use vmux_ecs::ui_state::UiState; #[derive(Component)] struct Bytes(Vec<u8>); {definition} {parameter} fn bytes(input:Query<&Bytes>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,({registration},bytes));}}}}"));
+        inventory.resolve_usage();
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            "{definition}"
+        );
+    }
+}
+
+#[test]
+fn canonical_job_inputs_cannot_hide_unowned_output_values() {
+    for (output, legacy, expected) in [
+        ("Unowned", false, false),
+        ("Unowned", true, true),
+        ("Self", false, true),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job{type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{{Job,JobResult}}; #[derive(Component)] struct Input; struct Unowned; impl Job for Input{{type Output={output};}} fn own(input:Query<&Input>){{}} fn receive(input:Query<&JobResult<Input>>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,(own,receive));}}}}"));
+        inventory.resolve_usage();
+        let mut policy = Policy::default();
+        if legacy {
+            let key = inventory.key("struct:Unowned");
+            policy.legacy.push(Legacy {
+                key: key.clone(),
+                fingerprint: inventory.entries[&key].fingerprint.clone(),
+                issue: "VMX-253".into(),
+            });
+        }
+        assert!(inventory.canonical(
+            &inventory.entries[&inventory.key("struct:Input")],
+            &policy,
+            &mut BTreeSet::new()
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &policy,
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{output}: legacy={legacy}"
+        );
+    }
+}
+
+#[test]
+fn unit_job_outputs_do_not_turn_presence_filters_into_payload_reads() {
+    for parameter in [
+        "Query<Entity,With<JobResult<Input>>>",
+        "Query<Has<JobResult<Input>>>",
+        "ParamSet<(Query<&JobResult<Other>>,Query<Entity,With<JobResult<Input>>>)>",
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job{type Output;} #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::jobs::{{Job,JobResult}}; struct Input; struct Other; impl Job for Input{{type Output=();}} impl Job for Other{{type Output=();}} fn receive(input:{parameter}){{}} fn payload(input:Query<&JobResult<Other>>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,(receive,payload));}}}}"));
+        inventory.resolve_usage();
+        assert!(
+            inventory
+                .used(&inventory.entries["crates/util/vmux_ecs/src/jobs.rs||struct:JobResult"])
+        );
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "{parameter}"
+        );
+    }
+}
+
+#[test]
+fn indexed_job_result_evidence_refuses_shadowing_cycles_and_unmatched_implementations() {
+    for (binding, implementation, definition, argument) in [
+        (
+            "use vmux_ecs::jobs::Job;",
+            "impl Job for Input {type Output=Bytes;}",
+            "struct JobResult<T>(T);",
+            "Input",
+        ),
+        (
+            "use vmux_ecs::jobs::JobResult; trait Job {type Output;}",
+            "impl Job for Input {type Output=Bytes;}",
+            "",
+            "Input",
+        ),
+        ("use vmux_ecs::jobs::{Job,JobResult};", "", "", "Input"),
+        (
+            "use vmux_ecs::jobs::{Job,JobResult};",
+            "impl Job for Input {type Output=Bytes;}",
+            "type Alias=Other; type Other=Alias;",
+            "Alias",
+        ),
+        (
+            "use vmux_ecs::jobs::{Job,JobResult};",
+            "impl Job for Input {type Output=Alias;}",
+            "type Alias=Other; type Other=Alias;",
+            "Input",
+        ),
+        (
+            "use vmux_ecs::jobs::{Job,JobResult};",
+            "impl Job for Input {type Output=JobResult<Input>;}",
+            "",
+            "Input",
+        ),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job { type Output; } #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; {binding} struct Input; #[derive(Component)] struct Bytes(Vec<u8>); {definition} {implementation} fn receive(input:Query<&JobResult<{argument}>>){{}} struct RootPlugin; impl Plugin for RootPlugin{{ fn build(&self,app:&mut App){{app.add_systems(Update,receive);}} }}"));
+        inventory.resolve_usage();
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            "{binding} {implementation} {definition} {argument}"
+        );
+    }
+}
+
+#[test]
 fn job_output_ownership_requires_payload_reads_instead_of_query_filters() {
     for (parameter, expected) in [
         ("Query<&JobResult<Input>>", true),
@@ -6850,6 +7118,7 @@ struct Declaration {
     enum_shape: Option<EnumShape>,
     bodies: Vec<BodyShape>,
     ecs: bool,
+    syntax_ecs: bool,
     parameter: bool,
     plugin: bool,
     plugin_path: Option<String>,
@@ -6865,7 +7134,9 @@ struct Declaration {
     relation_target: Option<String>,
     relation_source: Option<String>,
     component_hooks: BTreeSet<String>,
+    declared_hooks: BTreeSet<String>,
     component_path: Option<String>,
+    derive_paths: BTreeSet<String>,
     required_components: BTreeSet<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
@@ -7313,6 +7584,7 @@ impl Inventory {
                 enum_shape: None,
                 bodies: Vec::new(),
                 ecs: false,
+                syntax_ecs: false,
                 parameter: false,
                 plugin: false,
                 plugin_path: None,
@@ -7328,7 +7600,9 @@ impl Inventory {
                 relation_target: None,
                 relation_source: None,
                 component_hooks: BTreeSet::new(),
+                declared_hooks: BTreeSet::new(),
                 component_path: None,
+                derive_paths: BTreeSet::new(),
                 required_components: BTreeSet::new(),
                 contract: false,
                 contract_paths: BTreeSet::new(),
@@ -7467,6 +7741,41 @@ impl Inventory {
         if !owned {
             return false;
         }
+        let mut parameters = References {
+            parameter_inventory: Some(self),
+            parameter_namespace: &entry.namespace,
+            valid: true,
+            ..Default::default()
+        };
+        if entry.generic_bindings.is_empty()
+            && (matches!(entry.kind, Kind::Function | Kind::Alias) || entry.parameter)
+        {
+            for field in &entry.field_types {
+                parameters.visit_type(field);
+            }
+        }
+        for key in &parameters.outputs {
+            let field = &self.entries[key];
+            if field.projection
+                || field.path == "crates/util/vmux_ecs/src/ui_state.rs" && field.name == "UiState"
+            {
+                return false;
+            }
+            if policy
+                .legacy
+                .iter()
+                .any(|legacy| legacy.key == field.key && legacy.fingerprint == field.fingerprint)
+                || policy
+                    .upstream
+                    .iter()
+                    .any(|upstream| upstream.entries.get(&field.key) == Some(&field.fingerprint))
+            {
+                continue;
+            }
+            if !self.canonical(field, policy, &mut visiting.clone()) {
+                return false;
+            }
+        }
         for reference in &entry.field_paths {
             let name = reference.rsplit("::").next().unwrap();
             if name == entry.name {
@@ -7481,6 +7790,10 @@ impl Inventory {
                 continue;
             }
             match self.resolve(&entry.namespace, reference, &mut BTreeSet::new()) {
+                Some(field)
+                    if parameters.valid
+                        && parameters.indexed.contains(&field.key)
+                        && !parameters.retained.contains(&field.key) => {}
                 Some(field) if field.projection => {
                     return false;
                 }
@@ -7513,6 +7826,56 @@ impl Inventory {
             }
         }
         true
+    }
+
+    fn indexed_result(&self, entry: &Declaration) -> bool {
+        if entry.key != "crates/util/vmux_ecs/src/jobs.rs||struct:JobResult"
+            || !entry.production
+            || !entry.ecs
+            || entry.generic_parameters.len() != 1
+            || entry.field_types.len() != 1
+        {
+            return false;
+        }
+        let Type::Path(result) = &entry.field_types[0] else {
+            return false;
+        };
+        if result.qself.is_some() || !self.standard_result(entry, &References::path(&result.path)) {
+            return false;
+        }
+        let Some(segment) = result.path.segments.last() else {
+            return false;
+        };
+        let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+            return false;
+        };
+        if arguments.args.len() != 2 {
+            return false;
+        }
+        let Some(syn::GenericArgument::Type(Type::Path(output))) = arguments.args.first() else {
+            return false;
+        };
+        let Some(syn::GenericArgument::Type(Type::Path(error))) = arguments.args.last() else {
+            return false;
+        };
+        let error_path = References::path(&error.path);
+        let native_error = error.qself.is_none()
+            && match self
+                .external_path(&entry.namespace, &error_path, &mut BTreeSet::new())
+                .as_deref()
+            {
+                Some("std::string::String" | "alloc::string::String") => true,
+                None => error_path == "String" && !self.local_binding(&entry.namespace, "String"),
+                _ => false,
+            };
+        if !native_error {
+            return false;
+        }
+
+        output.qself.is_none()
+            && output.path.segments.len() == 2
+            && output.path.segments[0].ident == entry.generic_parameters[0]
+            && output.path.segments[1].ident == "Output"
     }
 
     fn component_alias(
@@ -8830,6 +9193,9 @@ impl Inventory {
                     }
                 }
             }
+            if found.is_some() {
+                return found;
+            }
             scope = current.rsplit_once("::").map(|(parent, _)| parent);
         }
         if found.is_none() && reference == "Option" && !self.local_binding(namespace, "Option") {
@@ -9525,6 +9891,7 @@ impl Inventory {
         }
         self.owner_reference_cache.get_mut().clear();
         *self.implementation_index.get_mut() = None;
+        self.resolve_components();
         let mut keys = BTreeSet::new();
         let mut registered = BTreeSet::new();
         for usage in self.usage.values() {
@@ -9917,6 +10284,44 @@ impl Inventory {
         systems
     }
 
+    fn resolve_components(&mut self) {
+        let mut components = Vec::new();
+        for entry in self.entries.values() {
+            if !matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                continue;
+            }
+            let mut component = None;
+            for path in &entry.derive_paths {
+                if self
+                    .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("Component")
+                {
+                    component = Some(path.clone());
+                    break;
+                }
+            }
+            if component.is_none() {
+                component = entry
+                    .derive_paths
+                    .iter()
+                    .find(|path| path.rsplit("::").next() == Some("Component"))
+                    .cloned();
+            }
+            components.push((entry.key.clone(), component));
+        }
+        for (key, path) in components {
+            let entry = self.entries.get_mut(&key).unwrap();
+            entry.ecs = entry.syntax_ecs || path.is_some();
+            entry.component_path = path;
+            entry.component_hooks = if entry.component_path.is_some() {
+                entry.declared_hooks.clone()
+            } else {
+                BTreeSet::new()
+            };
+        }
+    }
+
     fn job_output_components(&self, namespace: &str, parameter: &Type) -> BTreeSet<String> {
         let Some(result) = self
             .entries
@@ -9946,57 +10351,62 @@ impl Inventory {
         };
         jobs.visit_type(parameter);
         let mut outputs = BTreeSet::new();
-        for (key, concrete) in jobs.jobs {
-            let job = &self.entries[&key];
+        for (_, concrete) in jobs.jobs {
             let Ok(concrete) = syn::parse_str::<Type>(&concrete) else {
                 continue;
             };
-            let implementations = self
-                .implementations(job)
-                .into_iter()
-                .filter(|implementation| {
-                    implementation.production
-                        && implementation
-                            .implemented_trait
-                            .as_ref()
-                            .is_some_and(|interface| {
-                                self.resolve(
-                                    &implementation.namespace,
-                                    interface,
-                                    &mut BTreeSet::new(),
-                                )
-                                .is_some_and(|interface| {
-                                    interface.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
-                                })
-                            })
-                });
-            let mut matched = Vec::new();
-            for implementation in implementations {
-                let Some(pattern) = &implementation.implemented_type else {
-                    continue;
-                };
-                let mut bindings = BTreeMap::new();
-                if self.bind_type(
-                    &implementation.namespace,
-                    pattern,
-                    &concrete,
-                    &implementation.generic_bindings,
-                    &mut bindings,
-                ) {
-                    matched.push((implementation, bindings));
-                }
+            if let Some((implementation, output)) = self.job_output(namespace, &concrete) {
+                outputs.extend(self.job_output_values(
+                    implementation,
+                    &output,
+                    &mut BTreeSet::new(),
+                ));
             }
-            if matched.len() != 1 {
-                continue;
-            }
-            let (implementation, bindings) = &matched[0];
-            let Some(output) = implementation.associated_types.get("Output") else {
-                continue;
-            };
-            let output = Bindings::apply(self, &implementation.namespace, bindings, output);
-            outputs.extend(self.job_output_values(implementation, &output, &mut BTreeSet::new()));
         }
         outputs
+    }
+
+    fn job_output<'a>(&'a self, namespace: &str, value: &Type) -> Option<(&'a Declaration, Type)> {
+        let (key, concrete) = self.concrete_job(namespace, value, &mut BTreeSet::new())?;
+        let job = &self.entries[&key];
+        let mut matched = None;
+        for implementation in self.implementations(job) {
+            if !implementation.production
+                || !implementation
+                    .implemented_trait
+                    .as_ref()
+                    .is_some_and(|interface| {
+                        self.resolve(&implementation.namespace, interface, &mut BTreeSet::new())
+                            .is_some_and(|interface| {
+                                interface.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                            })
+                    })
+            {
+                continue;
+            }
+            let Some(pattern) = &implementation.implemented_type else {
+                continue;
+            };
+            let mut bindings = BTreeMap::new();
+            if !self.bind_type(
+                &implementation.namespace,
+                pattern,
+                &concrete,
+                &implementation.generic_bindings,
+                &mut bindings,
+            ) {
+                continue;
+            }
+            if matched.is_some() {
+                return None;
+            }
+            matched = Some((implementation, bindings));
+        }
+        let (implementation, mut bindings) = matched?;
+        bindings.insert("Self".into(), syn::GenericArgument::Type(concrete));
+        let output = implementation.associated_types.get("Output")?;
+        let output = Bindings::apply(self, &implementation.namespace, &bindings, output);
+        Some((implementation, output))
     }
 
     fn job_output_values(
@@ -11001,9 +11411,9 @@ impl Declarations<'_> {
         let mut parameter = false;
         let mut relation_target = None;
         let mut relation_source = None;
-        let mut component = false;
         let mut component_hooks = BTreeSet::new();
         let mut component_path = None;
+        let mut derive_paths = BTreeSet::new();
         let mut required_components = BTreeSet::new();
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
@@ -11117,12 +11527,12 @@ impl Declarations<'_> {
                     continue;
                 };
                 for path in paths {
+                    derive_paths.insert(path.to_token_stream().to_string().replace(' ', ""));
                     if path
                         .segments
                         .last()
                         .is_some_and(|segment| segment.ident == "Component")
                     {
-                        component = true;
                         component_path = Some(path.to_token_stream().to_string().replace(' ', ""));
                     }
                     if path.segments.last().is_some_and(|segment| {
@@ -11158,9 +11568,6 @@ impl Declarations<'_> {
                     }
                 }
             }
-        }
-        if !component {
-            component_hooks.clear();
         }
         let label = match kind {
             Kind::Struct => "struct",
@@ -11210,6 +11617,7 @@ impl Declarations<'_> {
             },
             bodies: BodyShape::items(&key, parsed_item.as_ref()),
             ecs,
+            syntax_ecs: ecs,
             parameter,
             plugin,
             plugin_path,
@@ -11273,8 +11681,10 @@ impl Declarations<'_> {
             },
             relation_target,
             relation_source,
+            declared_hooks: component_hooks.clone(),
             component_hooks,
             component_path,
+            derive_paths,
             required_components,
             contract: false,
             contract_paths,
@@ -11595,7 +12005,19 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 }
 
 #[derive(Default)]
-struct References {
+struct References<'a> {
+    parameter_inventory: Option<&'a Inventory>,
+    parameter_namespace: &'a str,
+    parameter_inside: bool,
+    parameter_read: bool,
+    parameter_unbound: BTreeSet<String>,
+    indexed: BTreeSet<String>,
+    retained: BTreeSet<String>,
+    outputs: BTreeSet<String>,
+    visiting: BTreeSet<String>,
+    inside: bool,
+    payload: bool,
+    valid: bool,
     include_tests: bool,
     plugins: BTreeSet<String>,
     plugin_arguments: BTreeSet<(String, Vec<String>)>,
@@ -11617,7 +12039,20 @@ struct References {
     dom_mounts: BTreeSet<(String, String)>,
 }
 
-impl<'ast> Visit<'ast> for References {
+impl<'ast> Visit<'ast> for References<'_> {
+    fn visit_type(&mut self, value: &'ast Type) {
+        if self.parameter_inventory.is_some()
+            && let Type::Reference(reference) = value
+        {
+            let previous = self.parameter_read;
+            self.parameter_read = self.parameter_inside;
+            self.visit_type(&reference.elem);
+            self.parameter_read = previous;
+            return;
+        }
+        visit::visit_type(self, value);
+    }
+
     fn visit_expr_call(&mut self, expression: &'ast syn::ExprCall) {
         if let syn::Expr::Path(function) = expression.func.as_ref()
             && let Some(last) = function.path.segments.last()
@@ -11781,12 +12216,23 @@ impl<'ast> Visit<'ast> for References {
     }
 
     fn visit_type_path(&mut self, value: &'ast syn::TypePath) {
+        if self.parameter_inventory.is_some() {
+            self.parameter_type_path(value);
+            return;
+        }
         self.local |= value
             .path
             .segments
             .last()
             .is_some_and(|segment| segment.ident == "Local");
         visit::visit_type_path(self, value);
+    }
+
+    fn visit_type_bare_fn(&mut self, value: &'ast syn::TypeBareFn) {
+        if self.parameter_inventory.is_some() && self.payload {
+            self.dynamic = true;
+        }
+        visit::visit_type_bare_fn(self, value);
     }
 
     fn visit_local(&mut self, local: &'ast syn::Local) {
@@ -11974,7 +12420,192 @@ impl<'ast> Visit<'ast> for References {
     }
 }
 
-impl References {
+impl References<'_> {
+    fn parameter_type_path(&mut self, value: &syn::TypePath) {
+        let inventory = self.parameter_inventory.unwrap();
+        let namespace = self.parameter_namespace;
+        let name = References::path(&value.path);
+        if self.payload && self.unresolved_projection(value) {
+            self.valid = false;
+            return;
+        }
+        let Some(owner) = inventory.resolve(namespace, &name, &mut BTreeSet::new()) else {
+            if self.parameter_handle(value) {
+                return;
+            }
+            let previous = (self.parameter_inside, self.parameter_read);
+            self.parameter_inside = false;
+            self.parameter_read = false;
+            visit::visit_type_path(self, value);
+            (self.parameter_inside, self.parameter_read) = previous;
+            return;
+        };
+        if self.inside {
+            self.indexed.insert(owner.key.clone());
+            visit::visit_type_path(self, value);
+            return;
+        }
+        if !self.payload || !matches!(owner.kind, Kind::Alias) {
+            self.retained.insert(owner.key.clone());
+        }
+        if self.parameter_read
+            && inventory.indexed_result(owner)
+            && value.qself.is_none()
+            && let Some(segment) = value.path.segments.last()
+            && let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments
+            && arguments.args.len() == 1
+            && let Some(syn::GenericArgument::Type(input)) = arguments.args.first()
+            && let Some((implementation, output)) = inventory.job_output(namespace, input)
+        {
+            let identity = format!("{}|{}", implementation.key, input.to_token_stream());
+            if self.visiting.len() >= 64 || !self.visiting.insert(identity.clone()) {
+                self.valid = false;
+                return;
+            }
+            let mut payload = References {
+                parameter_inventory: Some(inventory),
+                parameter_namespace: &implementation.namespace,
+                parameter_inside: true,
+                parameter_read: true,
+                parameter_unbound: implementation.generic_bindings.clone(),
+                visiting: self.visiting.clone(),
+                payload: true,
+                valid: true,
+                ..Default::default()
+            };
+            payload.visit_type(&output);
+            payload.valid &= !payload.dynamic && !payload.local;
+            self.valid &= payload.valid;
+            if payload.valid {
+                self.inside = true;
+                self.visit_type(input);
+                self.inside = false;
+                self.outputs.extend(payload.retained);
+                self.outputs.extend(payload.outputs);
+            } else {
+                visit::visit_type_path(self, value);
+            }
+            self.visiting.remove(&identity);
+            return;
+        }
+        if (matches!(owner.kind, Kind::Alias)
+            || owner.parameter
+                && owner.parameter_path.as_deref().is_some_and(|path| {
+                    inventory
+                        .framework_handle(&owner.namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|kind| matches!(kind.as_str(), "SystemParam" | "QueryData"))
+                }))
+        {
+            if self.visiting.len() >= 64 || !self.visiting.insert(owner.key.clone()) {
+                self.valid = false;
+                return;
+            }
+            let arguments = References::arguments(&value.path);
+            if let Some(bindings) = inventory.type_bindings(
+                namespace,
+                &owner.generic_parameters,
+                &owner.generic_bindings,
+                &arguments,
+                &BTreeMap::new(),
+            ) {
+                let fields: Vec<_> = owner
+                    .field_types
+                    .iter()
+                    .map(|field| Bindings::apply(inventory, &owner.namespace, &bindings, field))
+                    .collect();
+                let mut nested = References {
+                    parameter_inventory: Some(inventory),
+                    parameter_namespace: &owner.namespace,
+                    parameter_inside: self.parameter_inside,
+                    parameter_read: self.parameter_read,
+                    parameter_unbound: self.parameter_unbound.clone(),
+                    visiting: self.visiting.clone(),
+                    payload: self.payload,
+                    valid: true,
+                    ..Default::default()
+                };
+                for field in &fields {
+                    nested.visit_type(field);
+                }
+                self.valid &= nested.valid;
+                self.dynamic |= nested.dynamic;
+                self.local |= nested.local;
+                self.indexed.extend(nested.indexed);
+                self.retained.extend(nested.retained);
+                self.outputs.extend(nested.outputs);
+                self.visiting.remove(&owner.key);
+                return;
+            }
+            self.valid = false;
+            self.visiting.remove(&owner.key);
+        }
+        visit::visit_type_path(self, value);
+    }
+
+    fn parameter_handle(&mut self, value: &syn::TypePath) -> bool {
+        let inventory = self.parameter_inventory.unwrap();
+        let name = Self::path(&value.path);
+        let Some(handle) =
+            inventory.framework_handle(self.parameter_namespace, &name, &mut BTreeSet::new())
+        else {
+            return false;
+        };
+        let previous = (self.parameter_inside, self.parameter_read);
+        match handle.as_str() {
+            "Query" | "Single" => {
+                self.parameter_inside = true;
+                self.parameter_read = false;
+            }
+            "ParamSet" => {
+                self.parameter_inside = false;
+                self.parameter_read = false;
+            }
+            "Res" | "ResMut" | "NonSend" | "NonSendMut" => {
+                self.parameter_inside = true;
+                self.parameter_read = true;
+            }
+            "Option" => {}
+            "Ref" | "Mut" => {
+                self.parameter_read = self.parameter_inside;
+            }
+            _ => return false,
+        }
+        if let Some(segment) = value.path.segments.last()
+            && let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments
+        {
+            for argument in &arguments.args {
+                if let syn::GenericArgument::Type(value) = argument {
+                    self.visit_type(value);
+                    if matches!(handle.as_str(), "Query" | "Single") {
+                        break;
+                    }
+                }
+            }
+        }
+        (self.parameter_inside, self.parameter_read) = previous;
+        true
+    }
+
+    fn unresolved_projection(&self, value: &syn::TypePath) -> bool {
+        if value.qself.is_some() {
+            return true;
+        }
+        if value.path.segments.first().is_some_and(|segment| {
+            self.parameter_unbound
+                .contains(&segment.ident.unraw().to_string())
+        }) {
+            return true;
+        }
+        let name = Self::path(&value.path);
+        let Some((owner, _)) = name.rsplit_once("::") else {
+            return false;
+        };
+        self.parameter_inventory
+            .unwrap()
+            .resolve(self.parameter_namespace, owner, &mut BTreeSet::new())
+            .is_some()
+    }
+
     fn app_receiver(&self, value: &syn::Expr) -> bool {
         match value {
             syn::Expr::Path(value) if value.qself.is_none() && value.path.segments.len() == 1 => {
@@ -12668,4 +13299,109 @@ impl<'ast> Visit<'ast> for Usage {
         }
         visit::visit_expr_call(self, value);
     }
+}
+
+#[test]
+fn local_job_readers_keep_their_verified_framework_imports() {
+    for (imports, expected) in [
+        ("use bevy_ecs::prelude::*;", true),
+        ("use bevy::prelude::*;", true),
+        ("use bevy::ecs::prelude::*;", true),
+        ("use bevy_ecs::prelude::*; struct Query<T>(T);", false),
+        ("use bevy_ecs::prelude::*; use unknown::*;", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job { type Output; } #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source(
+            "crates/feature/receiver/src/lib.rs",
+            "mod child; mod unrelated; pub use unrelated::*;",
+        );
+        inventory.source(
+            "crates/feature/receiver/src/unrelated.rs",
+            "pub struct Unrelated;",
+        );
+        inventory.source("crates/feature/receiver/src/child.rs", &format!("use bevy_app::{{App,Plugin,Update}}; {imports} use vmux_ecs::jobs::{{Job,JobResult}}; struct Input; #[derive(Component)] struct Bytes(Vec<u8>); impl Job for Input {{ type Output=Bytes; }} fn receive(input:Query<&JobResult<Input>>) {{}} struct ReceiverPlugin; impl Plugin for ReceiverPlugin {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,receive); }} }}"));
+        inventory.resolve_usage();
+        let output = &inventory.entries["crates/feature/receiver/src/child.rs||struct:Bytes"];
+        assert_eq!(inventory.used(output), expected, "{imports}");
+    }
+}
+
+#[test]
+fn renamed_component_derives_require_verified_imports_and_real_ownership() {
+    for (binding, after, fields, reader, expected) in [
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            false,
+            "u32",
+            true,
+            true,
+        ),
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            true,
+            "u32",
+            true,
+            true,
+        ),
+        (
+            "use bevy::prelude::Component as StateComponent;",
+            false,
+            "u32",
+            true,
+            true,
+        ),
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            false,
+            "u32",
+            false,
+            false,
+        ),
+        (
+            "use fake::Component as StateComponent; mod fake { pub struct Component; }",
+            false,
+            "u32",
+            true,
+            false,
+        ),
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            false,
+            "Vec<Independent>",
+            true,
+            false,
+        ),
+    ] {
+        let before = if after { "" } else { binding };
+        let after = if after { binding } else { "" };
+        let system = if reader { "read" } else { "unrelated" };
+        let mut inventory = Inventory::default();
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::Query; {before} struct Independent{{id:u32}} #[derive(StateComponent)] struct State({fields}); {after} fn read(state:Query<&State>){{}} fn unrelated(){{}} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,{system});}}}}"));
+        inventory.resolve_usage();
+        let state = &inventory.entries[&inventory.key("struct:State")];
+        assert_eq!(
+            inventory.canonical(state, &Policy::default(), &mut BTreeSet::new()),
+            expected,
+            "{binding}: {fields}: {reader}"
+        );
+    }
+    let mut inventory = Inventory::default();
+    inventory.source("crates/feature/receiver/src/lib.rs", "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Query,Component as StateComponent}; #[derive(StateComponent)] struct State(u32); fn read(state:Query<&State>){} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}");
+    inventory.resolve_usage();
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    inventory.source(
+        "crates/util/bevy_ecs/src/lib.rs",
+        "pub mod prelude { pub struct Component; }",
+    );
+    inventory.resolve_usage();
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
 }
