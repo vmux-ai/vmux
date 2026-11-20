@@ -1358,6 +1358,139 @@ fn stateless_framework_bootstraps_require_real_interfaces_and_registration() {
 }
 
 #[test]
+fn system_set_factories_require_real_derive_and_type_identity_construction() {
+    for (binding, fields, derive, body, expected) in [
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "Self(TypeId::of::<T>())",
+            true,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "return Self(TypeId::of::<T>());",
+            true,
+        ),
+        (
+            "use std::any::TypeId as Key;",
+            "(Key)",
+            "bevy_ecs::schedule::SystemSet",
+            "Self(Key::of::<T>())",
+            true,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "",
+            "Self(TypeId::of::<T>())",
+            false,
+        ),
+        (
+            "struct TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "Self(TypeId::of::<T>())",
+            false,
+        ),
+        (
+            "use std::any::TypeId; struct SystemSet;",
+            "(TypeId)",
+            "SystemSet",
+            "Self(TypeId::of::<T>())",
+            false,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "workflow(); Self(TypeId::of::<T>())",
+            false,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "Self(TypeId::of::<u32>())",
+            false,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "Self(TypeId::of::<T>());",
+            false,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId<u32>)",
+            "SystemSet",
+            "Self(TypeId::of::<T>())",
+            false,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId)",
+            "SystemSet",
+            "Self(TypeId::<u32>::of::<T>())",
+            false,
+        ),
+        (
+            "use std::any::TypeId;",
+            "(TypeId, u32)",
+            "SystemSet",
+            "Self(TypeId::of::<T>(), 0)",
+            false,
+        ),
+    ] {
+        let derive = if derive.is_empty() {
+            String::new()
+        } else {
+            format!("#[derive({derive})]")
+        };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; {binding} #[derive(Component)] struct State; fn read(state:Query<&State>) {{}} {derive} struct Ready{fields}; impl Ready {{ fn of<T:'static>()->Self {{ {body} }} }} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self,app:&mut App) {{ app.configure_sets(Update,Ready::of::<State>().after(read)).add_systems(Update,read); }} }}"
+        ));
+        let entry = &inventory.entries[&inventory.key("impl:Plugin for RootPlugin")];
+        assert_eq!(
+            inventory.framework_bootstrap(entry),
+            expected,
+            "{binding} {fields} {body}"
+        );
+    }
+}
+
+#[test]
+fn deferred_flush_registration_requires_the_real_bevy_system() {
+    for (binding, callback, expected) in [
+        ("", "bevy_ecs::schedule::ApplyDeferred", true),
+        (
+            "use bevy_ecs::schedule::ApplyDeferred as Flush;",
+            "Flush",
+            true,
+        ),
+        ("struct ApplyDeferred;", "ApplyDeferred", false),
+        (
+            "mod bevy_ecs { pub mod schedule { pub struct ApplyDeferred; } }",
+            "bevy_ecs::schedule::ApplyDeferred",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; {binding} #[derive(Component)] struct State; fn read(state:Query<&State>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,(read,{callback}).chain()); }} }}"
+        ));
+        let entry = &inventory.entries[&inventory.key("impl:Plugin for RootPlugin")];
+        assert_eq!(
+            inventory.framework_bootstrap(entry),
+            expected,
+            "{binding} {callback}"
+        );
+    }
+}
+
+#[test]
 fn stateless_framework_bootstraps_do_not_approve_other_implementations_or_test_only_builds() {
     let inventory = Inventory::fixture(
         "use bevy_app::{App, Plugin}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; fn read(state: Query<&State>) {} struct RootPlugin; impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } } impl RootPlugin { fn workflow(&self) { loop {} } }",
@@ -6356,7 +6489,9 @@ struct BodyShape {
     production: bool,
     composition: bool,
     bootstrap_defaults: Option<BTreeSet<String>>,
+    bootstrap_factories: Option<BTreeSet<String>>,
     bootstrap_app: Option<String>,
+    identity_constructor: Option<String>,
     returns_self: bool,
     default_markers: Option<Vec<String>>,
 }
@@ -6567,7 +6702,9 @@ impl BodyShape {
             name,
             composition,
             bootstrap_defaults: (composition && !calls.unsupported).then_some(calls.defaults),
+            bootstrap_factories: (composition && !calls.unsupported).then_some(calls.factories),
             bootstrap_app: method.as_ref().and_then(|method| Self::app(&method.sig)),
+            identity_constructor: method.as_ref().and_then(Self::identity_constructor),
             returns_self: method.as_ref().is_some_and(|method| {
                 matches!(&method.sig.output, syn::ReturnType::Type(_, output)
                     if matches!(output.as_ref(), Type::Path(path)
@@ -6584,6 +6721,80 @@ impl BodyShape {
                     .iter()
                     .any(|meta| meta.path().is_ident("test")),
         }
+    }
+
+    fn identity_constructor(method: &syn::ImplItemFn) -> Option<String> {
+        if !method.sig.inputs.is_empty() || method.sig.generics.params.len() != 1 {
+            return None;
+        }
+        let syn::GenericParam::Type(parameter) = &method.sig.generics.params[0] else {
+            return None;
+        };
+        if !matches!(&method.sig.output, syn::ReturnType::Type(_, output)
+            if matches!(output.as_ref(), Type::Path(path) if path.qself.is_none() && path.path.is_ident("Self")))
+            || method.block.stmts.len() != 1
+        {
+            return None;
+        }
+        let syn::Stmt::Expr(expression, semicolon) = &method.block.stmts[0] else {
+            return None;
+        };
+        let mut expression = expression;
+        let mut returned = false;
+        loop {
+            expression = match expression {
+                syn::Expr::Return(value) => {
+                    returned = true;
+                    value.expr.as_deref()?
+                }
+                syn::Expr::Paren(value) => &value.expr,
+                syn::Expr::Group(value) => &value.expr,
+                _ => break,
+            };
+        }
+        if semicolon.is_some() && !returned {
+            return None;
+        }
+        let syn::Expr::Call(constructor) = expression else {
+            return None;
+        };
+        if !matches!(constructor.func.as_ref(), syn::Expr::Path(value)
+            if value.qself.is_none() && value.path.is_ident("Self"))
+            || constructor.args.len() != 1
+        {
+            return None;
+        }
+        let syn::Expr::Call(identity) = &constructor.args[0] else {
+            return None;
+        };
+        let syn::Expr::Path(value) = identity.func.as_ref() else {
+            return None;
+        };
+        if value.qself.is_some() || !identity.args.is_empty() || value.path.segments.len() < 2 {
+            return None;
+        }
+        let method = value.path.segments.last()?;
+        let syn::PathArguments::AngleBracketed(arguments) = &method.arguments else {
+            return None;
+        };
+        if method.ident != "of" || arguments.args.len() != 1 {
+            return None;
+        }
+        if !matches!(&arguments.args[0], syn::GenericArgument::Type(Type::Path(value))
+            if value.qself.is_none() && value.path.is_ident(&parameter.ident.to_string()))
+        {
+            return None;
+        }
+        let mut path = value.path.clone();
+        path.segments.pop();
+        if path
+            .segments
+            .iter()
+            .any(|segment| !matches!(segment.arguments, syn::PathArguments::None))
+        {
+            return None;
+        }
+        Some(References::path(&path))
     }
 
     fn default_markers(block: &syn::Block) -> Option<Vec<String>> {
@@ -6629,6 +6840,7 @@ impl BodyShape {
 #[derive(Default)]
 struct Footprint {
     defaults: BTreeSet<String>,
+    factories: BTreeSet<String>,
     unsupported: bool,
     lines: BTreeSet<usize>,
     test_spans: Vec<((usize, usize), (usize, usize))>,
@@ -6695,6 +6907,10 @@ impl<'ast> Visit<'ast> for Footprint {
                 .map(|segment| segment.ident.to_string())
                 .collect::<Vec<_>>();
             self.defaults.insert(parts.join("::"));
+        } else if matches!(call.func.as_ref(), syn::Expr::Path(path) if path.qself.is_none() && path.path.segments.len() > 1)
+            && call.args.is_empty()
+        {
+            self.factories.insert(call.to_token_stream().to_string());
         } else {
             self.unsupported = true;
         }
@@ -8029,37 +8245,7 @@ impl Inventory {
             }
             if implementation.bodies.is_empty()
                 || implementation.bodies.iter().any(|body| {
-                    !body.production
-                        || body.bootstrap_defaults.as_ref().is_none_or(|defaults| {
-                            defaults.iter().any(|path| {
-                                let root = self
-                                    .resolve(&implementation.namespace, path, &mut BTreeSet::new())
-                                    .map(|declaration| declaration.namespace.clone())
-                                    .or_else(|| {
-                                        self.external_path(
-                                            &implementation.namespace,
-                                            path,
-                                            &mut BTreeSet::new(),
-                                        )
-                                    });
-                                !root.is_some_and(|root| {
-                                    matches!(
-                                        root.split("::").next(),
-                                        Some(
-                                            "bevy"
-                                                | "bevy_app"
-                                                | "bevy_ecs"
-                                                | "bevy_cef"
-                                                | "bevy_cef_core"
-                                        )
-                                    )
-                                }) && !self.plugin_default_path(
-                                    &implementation.namespace,
-                                    path,
-                                    &mut visiting.clone(),
-                                )
-                            })
-                        })
+                    !body.production || !self.bootstrap_arguments(implementation, body, visiting)
                 })
             {
                 continue;
@@ -8081,6 +8267,13 @@ impl Inventory {
                     {
                         return false;
                     }
+                    if self
+                        .framework_handle(&implementation.namespace, callback, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("ApplyDeferred")
+                    {
+                        return true;
+                    }
                     self.function_reference(
                         &implementation.namespace,
                         callback,
@@ -8097,6 +8290,134 @@ impl Inventory {
             }
         }
         false
+    }
+
+    fn bootstrap_arguments(
+        &self,
+        implementation: &Declaration,
+        body: &BodyShape,
+        visiting: &BTreeSet<String>,
+    ) -> bool {
+        let Some(defaults) = &body.bootstrap_defaults else {
+            return false;
+        };
+        let Some(factories) = &body.bootstrap_factories else {
+            return false;
+        };
+        for path in defaults {
+            let root = self
+                .resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                .map(|declaration| declaration.namespace.clone())
+                .or_else(|| {
+                    self.external_path(&implementation.namespace, path, &mut BTreeSet::new())
+                });
+            if root.is_some_and(|root| {
+                matches!(
+                    root.split("::").next(),
+                    Some("bevy" | "bevy_app" | "bevy_ecs" | "bevy_cef" | "bevy_cef_core")
+                )
+            }) {
+                continue;
+            }
+            if !self.plugin_default_path(&implementation.namespace, path, &mut visiting.clone()) {
+                return false;
+            }
+        }
+        for factory in factories {
+            if !self.system_set_factory(&implementation.namespace, factory) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn system_set_factory(&self, namespace: &str, expression: &str) -> bool {
+        let Ok(syn::Expr::Call(call)) = syn::parse_str::<syn::Expr>(expression) else {
+            return false;
+        };
+        let syn::Expr::Path(value) = call.func.as_ref() else {
+            return false;
+        };
+        if value.qself.is_some() || value.path.segments.len() < 2 || !call.args.is_empty() {
+            return false;
+        }
+        let method = value.path.segments.last().unwrap();
+        let syn::PathArguments::AngleBracketed(arguments) = &method.arguments else {
+            return false;
+        };
+        if arguments.args.len() != 1 || !matches!(&arguments.args[0], syn::GenericArgument::Type(_))
+        {
+            return false;
+        }
+        let mut path = value.path.clone();
+        path.segments.pop();
+        if path
+            .segments
+            .iter()
+            .any(|segment| !matches!(segment.arguments, syn::PathArguments::None))
+        {
+            return false;
+        }
+        let Some(owner) = self.resolve(namespace, &References::path(&path), &mut BTreeSet::new())
+        else {
+            return false;
+        };
+        if !owner.production
+            || !matches!(owner.kind, Kind::Struct)
+            || owner.field_types.len() != 1
+            || !owner.generic_parameters.is_empty()
+            || !owner.derive_paths.iter().any(|path| {
+                self.framework_handle(&owner.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("SystemSet")
+            })
+        {
+            return false;
+        }
+        let Type::Path(field) = &owner.field_types[0] else {
+            return false;
+        };
+        if field.qself.is_some()
+            || field
+                .path
+                .segments
+                .iter()
+                .any(|segment| !matches!(segment.arguments, syn::PathArguments::None))
+            || !matches!(
+                self.external_path(
+                    &owner.namespace,
+                    &References::path(&field.path),
+                    &mut BTreeSet::new()
+                )
+                .as_deref(),
+                Some("std::any::TypeId" | "core::any::TypeId")
+            )
+        {
+            return false;
+        }
+        let mut matched = 0;
+        for implementation in self.implementations(owner) {
+            if !implementation.production || implementation.implemented_trait.is_some() {
+                continue;
+            }
+            for body in &implementation.bodies {
+                if !body.production || method.ident != body.name {
+                    continue;
+                }
+                let Some(identity) = &body.identity_constructor else {
+                    return false;
+                };
+                if !matches!(
+                    self.external_path(&implementation.namespace, identity, &mut BTreeSet::new())
+                        .as_deref(),
+                    Some("std::any::TypeId" | "core::any::TypeId")
+                ) {
+                    return false;
+                }
+                matched += 1;
+            }
+        }
+        matched == 1
     }
 
     fn phantom_data(&self, namespace: &str, path: &str) -> bool {
@@ -9109,6 +9430,23 @@ impl Inventory {
                         | "bevy_ecs::prelude"
                         | "bevy_ecs_macros"
                         | "bevy::ecs::component"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "SystemSet" => matches!(
+                    prefix,
+                    "bevy_ecs::schedule"
+                        | "bevy_ecs::prelude"
+                        | "bevy_ecs_macros"
+                        | "bevy::ecs::schedule"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "ApplyDeferred" => matches!(
+                    prefix,
+                    "bevy_ecs::schedule"
+                        | "bevy_ecs::prelude"
+                        | "bevy::ecs::schedule"
                         | "bevy::ecs::prelude"
                         | "bevy::prelude"
                 ),
