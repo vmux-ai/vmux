@@ -1776,6 +1776,11 @@ fn job_outputs_require_their_own_bevy_borrow_within_mixed_parameters() {
 fn job_result_consumers_audit_the_payload_without_approving_the_indexed_input() {
     for (parameter, output, expected) in [
         ("Query<&JobResult<Input>>", "Bytes", true),
+        ("Query<Ref<JobResult<Input>>>", "()", true),
+        ("Query<Ref<JobResult<Input>>>", "Bytes", true),
+        ("Query<Ref<JobResult<Input>>>", "Unowned", false),
+        ("Query<Ref<JobResult<Input>>>", "Self", false),
+        ("Query<(Ref<JobResult<Input>>,&Input)>", "()", false),
         ("Query<&JobResult<Input>>", "Result<Bytes,String>", true),
         ("Query<&JobResult<Input>>", "OutputAlias", true),
         ("Query<&JobResult<Input>>", "Callback", false),
@@ -12514,7 +12519,10 @@ impl References<'_> {
                 self.parameter_inside = true;
                 self.parameter_read = true;
             }
-            "Option" | "Ref" | "Mut" => {}
+            "Option" => {}
+            "Ref" | "Mut" => {
+                self.parameter_read = self.parameter_inside;
+            }
             _ => return false,
         }
         if let Some(segment) = value.path.segments.last()
