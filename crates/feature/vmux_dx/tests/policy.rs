@@ -9182,6 +9182,9 @@ impl Inventory {
                     }
                 }
             }
+            if found.is_some() {
+                return found;
+            }
             scope = current.rsplit_once("::").map(|(parent, _)| parent);
         }
         if found.is_none() && reference == "Option" && !self.local_binding(namespace, "Option") {
@@ -13242,5 +13245,31 @@ impl<'ast> Visit<'ast> for Usage {
             }
         }
         visit::visit_expr_call(self, value);
+    }
+}
+
+#[test]
+fn local_job_readers_keep_their_verified_framework_imports() {
+    for (imports, expected) in [
+        ("use bevy_ecs::prelude::*;", true),
+        ("use bevy::prelude::*;", true),
+        ("use bevy::ecs::prelude::*;", true),
+        ("use bevy_ecs::prelude::*; struct Query<T>(T);", false),
+        ("use bevy_ecs::prelude::*; use unknown::*;", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/util/vmux_ecs/src/jobs.rs", "use bevy_ecs::prelude::*; pub trait Job { type Output; } #[derive(Component)] pub struct JobResult<J:Job>(pub Result<J::Output,String>);");
+        inventory.source(
+            "crates/feature/receiver/src/lib.rs",
+            "mod child; mod unrelated; pub use unrelated::*;",
+        );
+        inventory.source(
+            "crates/feature/receiver/src/unrelated.rs",
+            "pub struct Unrelated;",
+        );
+        inventory.source("crates/feature/receiver/src/child.rs", &format!("use bevy_app::{{App,Plugin,Update}}; {imports} use vmux_ecs::jobs::{{Job,JobResult}}; struct Input; #[derive(Component)] struct Bytes(Vec<u8>); impl Job for Input {{ type Output=Bytes; }} fn receive(input:Query<&JobResult<Input>>) {{}} struct ReceiverPlugin; impl Plugin for ReceiverPlugin {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,receive); }} }}"));
+        inventory.resolve_usage();
+        let output = &inventory.entries["crates/feature/receiver/src/child.rs||struct:Bytes"];
+        assert_eq!(inventory.used(output), expected, "{imports}");
     }
 }
