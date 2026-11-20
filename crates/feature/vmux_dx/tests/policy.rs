@@ -7118,6 +7118,7 @@ struct Declaration {
     enum_shape: Option<EnumShape>,
     bodies: Vec<BodyShape>,
     ecs: bool,
+    syntax_ecs: bool,
     parameter: bool,
     plugin: bool,
     plugin_path: Option<String>,
@@ -7133,7 +7134,9 @@ struct Declaration {
     relation_target: Option<String>,
     relation_source: Option<String>,
     component_hooks: BTreeSet<String>,
+    declared_hooks: BTreeSet<String>,
     component_path: Option<String>,
+    derive_paths: BTreeSet<String>,
     required_components: BTreeSet<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
@@ -7581,6 +7584,7 @@ impl Inventory {
                 enum_shape: None,
                 bodies: Vec::new(),
                 ecs: false,
+                syntax_ecs: false,
                 parameter: false,
                 plugin: false,
                 plugin_path: None,
@@ -7596,7 +7600,9 @@ impl Inventory {
                 relation_target: None,
                 relation_source: None,
                 component_hooks: BTreeSet::new(),
+                declared_hooks: BTreeSet::new(),
                 component_path: None,
+                derive_paths: BTreeSet::new(),
                 required_components: BTreeSet::new(),
                 contract: false,
                 contract_paths: BTreeSet::new(),
@@ -9885,6 +9891,7 @@ impl Inventory {
         }
         self.owner_reference_cache.get_mut().clear();
         *self.implementation_index.get_mut() = None;
+        self.resolve_components();
         let mut keys = BTreeSet::new();
         let mut registered = BTreeSet::new();
         for usage in self.usage.values() {
@@ -10275,6 +10282,44 @@ impl Inventory {
             }
         }
         systems
+    }
+
+    fn resolve_components(&mut self) {
+        let mut components = Vec::new();
+        for entry in self.entries.values() {
+            if !matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                continue;
+            }
+            let mut component = None;
+            for path in &entry.derive_paths {
+                if self
+                    .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("Component")
+                {
+                    component = Some(path.clone());
+                    break;
+                }
+            }
+            if component.is_none() {
+                component = entry
+                    .derive_paths
+                    .iter()
+                    .find(|path| path.rsplit("::").next() == Some("Component"))
+                    .cloned();
+            }
+            components.push((entry.key.clone(), component));
+        }
+        for (key, path) in components {
+            let entry = self.entries.get_mut(&key).unwrap();
+            entry.ecs = entry.syntax_ecs || path.is_some();
+            entry.component_path = path;
+            entry.component_hooks = if entry.component_path.is_some() {
+                entry.declared_hooks.clone()
+            } else {
+                BTreeSet::new()
+            };
+        }
     }
 
     fn job_output_components(&self, namespace: &str, parameter: &Type) -> BTreeSet<String> {
@@ -11366,9 +11411,9 @@ impl Declarations<'_> {
         let mut parameter = false;
         let mut relation_target = None;
         let mut relation_source = None;
-        let mut component = false;
         let mut component_hooks = BTreeSet::new();
         let mut component_path = None;
+        let mut derive_paths = BTreeSet::new();
         let mut required_components = BTreeSet::new();
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
@@ -11482,12 +11527,12 @@ impl Declarations<'_> {
                     continue;
                 };
                 for path in paths {
+                    derive_paths.insert(path.to_token_stream().to_string().replace(' ', ""));
                     if path
                         .segments
                         .last()
                         .is_some_and(|segment| segment.ident == "Component")
                     {
-                        component = true;
                         component_path = Some(path.to_token_stream().to_string().replace(' ', ""));
                     }
                     if path.segments.last().is_some_and(|segment| {
@@ -11523,9 +11568,6 @@ impl Declarations<'_> {
                     }
                 }
             }
-        }
-        if !component {
-            component_hooks.clear();
         }
         let label = match kind {
             Kind::Struct => "struct",
@@ -11575,6 +11617,7 @@ impl Declarations<'_> {
             },
             bodies: BodyShape::items(&key, parsed_item.as_ref()),
             ecs,
+            syntax_ecs: ecs,
             parameter,
             plugin,
             plugin_path,
@@ -11638,8 +11681,10 @@ impl Declarations<'_> {
             },
             relation_target,
             relation_source,
+            declared_hooks: component_hooks.clone(),
             component_hooks,
             component_path,
+            derive_paths,
             required_components,
             contract: false,
             contract_paths,
@@ -13280,4 +13325,83 @@ fn local_job_readers_keep_their_verified_framework_imports() {
         let output = &inventory.entries["crates/feature/receiver/src/child.rs||struct:Bytes"];
         assert_eq!(inventory.used(output), expected, "{imports}");
     }
+}
+
+#[test]
+fn renamed_component_derives_require_verified_imports_and_real_ownership() {
+    for (binding, after, fields, reader, expected) in [
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            false,
+            "u32",
+            true,
+            true,
+        ),
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            true,
+            "u32",
+            true,
+            true,
+        ),
+        (
+            "use bevy::prelude::Component as StateComponent;",
+            false,
+            "u32",
+            true,
+            true,
+        ),
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            false,
+            "u32",
+            false,
+            false,
+        ),
+        (
+            "use fake::Component as StateComponent; mod fake { pub struct Component; }",
+            false,
+            "u32",
+            true,
+            false,
+        ),
+        (
+            "use bevy_ecs::prelude::Component as StateComponent;",
+            false,
+            "Vec<Independent>",
+            true,
+            false,
+        ),
+    ] {
+        let before = if after { "" } else { binding };
+        let after = if after { binding } else { "" };
+        let system = if reader { "read" } else { "unrelated" };
+        let mut inventory = Inventory::default();
+        inventory.source("crates/feature/receiver/src/lib.rs", &format!("use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::Query; {before} struct Independent{{id:u32}} #[derive(StateComponent)] struct State({fields}); {after} fn read(state:Query<&State>){{}} fn unrelated(){{}} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,{system});}}}}"));
+        inventory.resolve_usage();
+        let state = &inventory.entries[&inventory.key("struct:State")];
+        assert_eq!(
+            inventory.canonical(state, &Policy::default(), &mut BTreeSet::new()),
+            expected,
+            "{binding}: {fields}: {reader}"
+        );
+    }
+    let mut inventory = Inventory::default();
+    inventory.source("crates/feature/receiver/src/lib.rs", "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Query,Component as StateComponent}; #[derive(StateComponent)] struct State(u32); fn read(state:Query<&State>){} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}");
+    inventory.resolve_usage();
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    inventory.source(
+        "crates/util/bevy_ecs/src/lib.rs",
+        "pub mod prelude { pub struct Component; }",
+    );
+    inventory.resolve_usage();
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
 }
