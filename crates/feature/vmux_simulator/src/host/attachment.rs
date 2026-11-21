@@ -1252,20 +1252,23 @@ exit 1
             fs::write(
                 &path,
                 r#"#!/bin/sh
+set -eu
 fixture_dir=$(dirname "$0")
 output=$5
 printf '%s\n' "$output" >> "$fixture_dir/pixel-outputs"
 if mkdir "$fixture_dir/first" 2>/dev/null; then
-    printf '%s\n' "$output" > "$fixture_dir/first-output"
     cp "$fixture_dir/first.png" "$output"
-    while [ ! -f "$fixture_dir/second-ready" ]; do sleep 0.01; done
+    touch "$fixture_dir/first-ready"
 else
-    while [ ! -f "$fixture_dir/first-output" ]; do sleep 0.01; done
     cp "$fixture_dir/second.png" "$output"
     touch "$fixture_dir/second-ready"
-    first_output=$(cat "$fixture_dir/first-output")
-    while [ -f "$first_output" ]; do sleep 0.01; done
 fi
+attempt=0
+while [ ! -f "$fixture_dir/release-pixels" ]; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 1000 ]; then exit 1; fi
+    sleep 0.01
+done
 "#,
             )
             .unwrap();
@@ -1279,7 +1282,22 @@ fi
             std::thread::scope(|threads| {
                 let first = threads.spawn(|| device.pixel_size(&axe));
                 let second = threads.spawn(|| device.pixel_size(&axe));
-                [first.join().unwrap(), second.join().unwrap()]
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut ready = false;
+                while Instant::now() < deadline {
+                    if self.directory.join("first-ready").is_file()
+                        && self.directory.join("second-ready").is_file()
+                    {
+                        ready = true;
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let release = fs::write(self.directory.join("release-pixels"), "");
+                let results = [first.join().unwrap(), second.join().unwrap()];
+                release.unwrap();
+                assert!(ready, "both native snapshot commands must overlap");
+                results
             })
         }
 
