@@ -131,7 +131,7 @@ pub struct ArchiveWrite {
 
 #[cfg(feature = "app")]
 #[derive(Component, Clone, PartialEq, Eq)]
-pub struct NativeContext(Option<(Entity, String, std::path::PathBuf)>);
+pub struct NativeContext(Option<(Entity, String, PathBuf)>);
 
 #[cfg(feature = "app")]
 impl NativeContext {

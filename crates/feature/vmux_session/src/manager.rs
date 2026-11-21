@@ -1,4 +1,5 @@
 use crate::event::{ProviderSessionTarget, SessionRepositories};
+pub use ManagerUiState as ManagerPresentation;
 use chrono::{Duration, Local, NaiveDate, TimeZone};
 use std::collections::HashSet;
 use vmux_session::{CatalogSnapshot, SessionSummary, StageSummary};
@@ -56,8 +57,6 @@ impl Default for ManagerUiState {
         }
     }
 }
-
-pub use ManagerUiState as ManagerPresentation;
 
 #[vmux_api::contract(Eq)]
 pub enum SessionFilter {
