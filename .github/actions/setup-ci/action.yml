@@ -9,10 +9,17 @@ inputs:
     description: Comma-separated rustup targets
     required: false
     default: ""
+  runtime-sha256:
+    description: Checksum of this run's verified Linux CI runtime
+    required: false
+    default: ""
 outputs:
   channel:
     description: Pinned Rust toolchain channel
     value: ${{ steps.rust.outputs.channel }}
+  runtime-sha256:
+    description: Checksum of the installed CI runtime
+    value: ${{ steps.activate.outputs.sha256 }}
 runs:
   using: composite
   steps:
@@ -32,21 +39,83 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
     - uses: ./.github/actions/setup-compiler-cache
+      if: env.VMUX_CI_COMPILER_CACHE_READY != '1'
+    - name: Download this run's CI runtime
+      if: env.VMUX_CI_RUNTIME_READY != '1' && runner.os == 'Linux' && inputs.runtime-sha256 != ''
+      uses: actions/download-artifact@v7
+      with:
+        name: ci-runtime-${{ runner.os }}-${{ runner.arch }}
+        path: .build-tools/bootstrap
+    - name: Restore identical CI runtime
+      id: runtime-cache
+      if: env.VMUX_CI_RUNTIME_READY != '1' && (runner.os != 'Linux' || inputs.runtime-sha256 == '')
+      uses: actions/cache/restore@v5
+      with:
+        path: .build-tools/bootstrap
+        key: ci-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/**', 'patches/**', 'scripts/**', '.github/actions/setup-ci/action.yml') }}
+    - name: Verify CI runtime checksum
+      id: reuse
       if: env.VMUX_CI_RUNTIME_READY != '1'
+      shell: bash
+      env:
+        EXPECTED_SHA256: ${{ runner.os == 'Linux' && inputs.runtime-sha256 || '' }}
+      run: |
+        binary=.build-tools/bootstrap/vmux-ci
+        expected="$EXPECTED_SHA256"
+        if [ -z "$expected" ] && [ -f "$binary.sha256" ] && [ ! -L "$binary.sha256" ]; then
+          expected="$(cat "$binary.sha256")"
+        fi
+        actual=""
+        if [ -f "$binary" ] && [ ! -L "$binary" ]; then
+          actual="$(shasum -a 256 "$binary")"
+          actual="${actual%% *}"
+        fi
+        if [[ "$expected" =~ ^[0-9a-f]{64}$ ]] && [ "$actual" = "$expected" ]; then
+          echo 'reused=true' >> "$GITHUB_OUTPUT"
+        elif [ -n "$EXPECTED_SHA256" ]; then
+          echo '::error::CI runtime checksum differs from the verified Plan artifact'
+          exit 1
+        else
+          echo 'reused=false' >> "$GITHUB_OUTPUT"
+        fi
     - uses: Swatinem/rust-cache@v2
-      if: env.VMUX_CI_RUNTIME_READY != '1'
+      if: env.VMUX_CI_RUNTIME_READY != '1' && steps.reuse.outputs.reused != 'true'
+      env:
+        RUSTFLAGS: "-C opt-level=1 -C codegen-units=16"
+        CARGO_PROFILE_DEV_LTO: "off"
+        CARGO_PROFILE_DEV_DEBUG: "0"
       with:
         workspaces: . -> .build-tools/ci-cargo
-        shared-key: ci-runtime-v1
+        shared-key: ci-runtime-v2
         cache-workspace-crates: "false"
-        save-if: ${{ github.ref == 'refs/heads/main' }}
+        cache-on-failure: "true"
+        save-if: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
     - name: Build CI runtime
+      if: env.VMUX_CI_RUNTIME_READY != '1' && steps.reuse.outputs.reused != 'true'
+      shell: bash
+      run: |
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS -u VMUX_UPDATE_PUBLIC_KEY RUSTFLAGS="-C opt-level=1 -C codegen-units=16" CARGO_PROFILE_DEV_LTO=off CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked -p vmux_dx --bin vmux-ci --no-default-features --features ci-runtime --target-dir .build-tools/ci-cargo
+        if [ -L .build-tools/bootstrap ]; then
+          rm .build-tools/bootstrap
+        fi
+        mkdir -p .build-tools/bootstrap
+        rm -f .build-tools/bootstrap/vmux-ci .build-tools/bootstrap/vmux-ci.sha256
+        install -m 0755 .build-tools/ci-cargo/debug/vmux-ci .build-tools/bootstrap/vmux-ci
+    - name: Activate CI runtime
+      id: activate
       if: env.VMUX_CI_RUNTIME_READY != '1'
       shell: bash
       run: |
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS cargo clean -p vmux_dx -p vmux_ecs -p vmux_task -p vmux_api -p vmux_macro --target-dir .build-tools/ci-cargo
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS="-C opt-level=1 -C codegen-units=16" CARGO_PROFILE_DEV_LTO=off cargo build --locked -p vmux_dx --bin vmux-ci --no-default-features --features ci-runtime --target-dir .build-tools/ci-cargo
-        mkdir -p .build-tools/bootstrap
-        install -m 0755 .build-tools/ci-cargo/debug/vmux-ci .build-tools/bootstrap/vmux-ci
+        chmod 0755 .build-tools/bootstrap/vmux-ci
+        checksum="$(shasum -a 256 .build-tools/bootstrap/vmux-ci)"
+        checksum="${checksum%% *}"
+        echo "$checksum" > .build-tools/bootstrap/vmux-ci.sha256
+        echo "sha256=$checksum" >> "$GITHUB_OUTPUT"
         echo "$GITHUB_WORKSPACE/.build-tools/bootstrap" >> "$GITHUB_PATH"
         echo 'VMUX_CI_RUNTIME_READY=1' >> "$GITHUB_ENV"
+    - name: Save identical CI runtime
+      if: steps.reuse.outputs.reused == 'false' && steps.runtime-cache.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+      uses: actions/cache/save@v5
+      with:
+        path: .build-tools/bootstrap
+        key: ${{ steps.runtime-cache.outputs.cache-primary-key }}

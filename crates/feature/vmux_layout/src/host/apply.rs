@@ -6,7 +6,7 @@ use vmux_ecs::{OperationTarget, OperationTargetRevision};
 use vmux_ecs::{Order, PageOpenRequest};
 
 use crate::TerminalLayoutSpawnRequest;
-use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind};
+use crate::protocol::{LayoutSnapshot, NodeKind};
 use crate::snapshot::LayoutSnapshotQuery;
 
 use super::archive::TabArchiveLayout;
@@ -284,7 +284,7 @@ fn serve_snapshot_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{Focus, SplitDirection, Stack as StackDto, Tab as TabDto};
+    use crate::protocol::{Focus, LayoutNode, SplitDirection, Stack as StackDto, Tab as TabDto};
     use bevy_app::{App, Plugin, Update};
     use bevy_ecs::prelude::{ChildOf, Children, Commands, Component, Entity, On, Query};
 
