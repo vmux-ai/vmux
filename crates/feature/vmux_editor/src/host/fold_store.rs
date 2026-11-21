@@ -220,6 +220,7 @@ mod tests {
     use crate::host::fold::{FoldRegion, FoldState};
     use crate::host::fold_io::FileStore;
     use crate::host::fold_preferences::{LoadRequest, Snapshot};
+    use bevy::app::Plugin as BevyPlugin;
     use bevy::prelude::{App, Commands, Component, Entity, Query, World};
 
     struct Fixture {
@@ -232,25 +233,36 @@ mod tests {
     #[derive(Component)]
     struct PendingEditor(Entity);
 
-    impl PendingEditor {
-        fn finish(pending: Query<(Entity, &Self)>, mut commands: Commands) {
-            for (entity, pending) in &pending {
-                let source = pending.0;
-                commands.queue(move |world: &mut World| {
-                    let Some(editor) = world
-                        .entity_mut(source)
-                        .take::<crate::host::editor::EditorBundle>()
-                    else {
-                        return;
-                    };
-                    world
-                        .entity_mut(entity)
-                        .remove::<crate::host::editor::EditorBundle>()
-                        .insert(editor)
-                        .remove::<Self>();
-                    world.despawn(source);
-                });
-            }
+    struct MaterializationPlugin;
+
+    impl BevyPlugin for MaterializationPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(
+                Update,
+                materialize
+                    .after(FoldSet::Restore)
+                    .in_set(EditorFileLoadedSet),
+            );
+        }
+    }
+
+    fn materialize(pending: Query<(Entity, &PendingEditor)>, mut commands: Commands) {
+        for (entity, pending) in &pending {
+            let source = pending.0;
+            commands.queue(move |world: &mut World| {
+                let Some(editor) = world
+                    .entity_mut(source)
+                    .take::<crate::host::editor::EditorBundle>()
+                else {
+                    return;
+                };
+                world
+                    .entity_mut(entity)
+                    .remove::<crate::host::editor::EditorBundle>()
+                    .insert(editor)
+                    .remove::<PendingEditor>();
+                world.despawn(source);
+            });
         }
     }
 
@@ -267,12 +279,7 @@ mod tests {
                 },
             )
             .unwrap();
-            app.add_plugins(FoldStorePlugin).add_systems(
-                Update,
-                PendingEditor::finish
-                    .after(FoldSet::Restore)
-                    .in_set(EditorFileLoadedSet),
-            );
+            app.add_plugins((FoldStorePlugin, MaterializationPlugin));
             app.world_mut().spawn((
                 Root(root),
                 ActiveProfile(vmux_ecs::profile::Profile::current()),
