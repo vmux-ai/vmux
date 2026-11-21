@@ -6,7 +6,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use bevy_ecs::prelude::Component as EcsComponent;
 use vmux_ecs::{BlockingCancellation, Job};
@@ -19,6 +19,28 @@ struct Receipt {
     changed: bool,
     directories: Vec<OwnedDirectory>,
     displaced: Vec<DisplacedEntry>,
+    unverified: Vec<UnverifiedDirectory>,
+    private: Arc<Mutex<Vec<PrivateCleanup>>>,
+}
+
+impl Receipt {
+    fn cleanup_private(&self) -> Result<(), String> {
+        let mut pending = {
+            let mut queue = self.private.lock().map_err(|error| error.to_string())?;
+            std::mem::take(&mut *queue)
+        };
+        while let Some(directory) = pending.pop() {
+            if let Err(error) = directory.cleanup() {
+                pending.push(directory);
+                self.private
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .extend(pending);
+                return Err(error.to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl PathReceipt {
@@ -28,7 +50,10 @@ impl PathReceipt {
 
     pub fn pending(&self) -> bool {
         let receipt = self.0.lock().unwrap();
-        !receipt.directories.is_empty() || !receipt.displaced.is_empty()
+        !receipt.directories.is_empty()
+            || !receipt.displaced.is_empty()
+            || !receipt.unverified.is_empty()
+            || !receipt.private.lock().unwrap().is_empty()
     }
 
     pub(crate) fn commit(&self) {
@@ -47,21 +72,51 @@ impl PathReceipt {
         self.0.lock().unwrap().displaced.push(entry);
     }
 
+    fn private(&self, parent: Arc<NativeDirectory>) -> io::Result<OwnedDirectory> {
+        let mut receipt = self
+            .0
+            .lock()
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        let Receipt {
+            unverified,
+            private,
+            ..
+        } = &mut *receipt;
+        NativeDirectory::private(parent, unverified, private)
+    }
+
     fn reconcile(&self) -> Result<(), String> {
         let mut receipt = self.0.lock().map_err(|error| error.to_string())?;
+        while let Some(directory) = receipt.unverified.pop() {
+            if let Err(error) = directory.released() {
+                receipt.unverified.push(directory);
+                return Err(error.to_string());
+            }
+        }
         while let Some(entry) = receipt.displaced.pop() {
             if let Err(error) = entry.restore() {
                 receipt.displaced.push(entry);
                 return Err(error.to_string());
             }
         }
+        receipt.cleanup_private()?;
         while let Some(directory) = receipt.directories.pop() {
-            if let Err(error) = directory.cleanup(&mut receipt.displaced) {
+            let Receipt {
+                displaced,
+                unverified,
+                private,
+                ..
+            } = &mut *receipt;
+            if let Err(error) = directory.cleanup(displaced, unverified, private) {
                 receipt.directories.push(directory);
                 return Err(error.to_string());
             }
+            if let Err(error) = receipt.cleanup_private() {
+                receipt.directories.push(directory);
+                return Err(error);
+            }
         }
-        Ok(())
+        receipt.cleanup_private()
     }
 }
 
@@ -195,7 +250,10 @@ impl UnlinkPath {
         name: std::ffi::OsString,
         original: std::fs::File,
     ) -> Result<PathChanged, String> {
-        let slot = NativeDirectory::private(parent.clone()).map_err(|error| error.to_string())?;
+        let slot = self
+            .receipt
+            .private(parent.clone())
+            .map_err(|error| error.to_string())?;
         let holder = std::ffi::OsString::from("entry");
         match parent.move_exclusive(&name, &slot.directory, &holder) {
             Ok(()) => {}
@@ -299,15 +357,17 @@ impl LinkPaths {
             directory = match directory.child(name, scoped) {
                 Ok(child) => child,
                 Err(error) if error.kind() == ErrorKind::NotFound && create => {
-                    let staged = NativeDirectory::private(directory.clone())?;
+                    let mut staged = receipt.private(directory.clone())?;
                     match staged.parent.move_exclusive(&staged.name, &directory, name) {
                         Ok(()) => {
+                            staged.private = false;
                             let child = staged.directory.clone();
                             let owned = OwnedDirectory {
                                 parent: directory.clone(),
                                 name: name.to_os_string(),
                                 directory: child.clone(),
                                 private: false,
+                                cleanup: Weak::new(),
                             };
                             receipt.directory(owned);
                             child
@@ -377,18 +437,73 @@ struct OwnedDirectory {
     name: std::ffi::OsString,
     directory: Arc<NativeDirectory>,
     private: bool,
+    cleanup: Weak<Mutex<Vec<PrivateCleanup>>>,
+}
+
+struct PrivateCleanup {
+    parent: Arc<NativeDirectory>,
+    name: std::ffi::OsString,
+    directory: Arc<NativeDirectory>,
+}
+
+impl PrivateCleanup {
+    fn cleanup(&self) -> io::Result<()> {
+        let current = match self.parent.entry(&self.name) {
+            Ok(current) => current,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !NativeDirectory::same(&current, &self.directory.file)? {
+            return Err(io::Error::other(
+                "private native directory ownership changed",
+            ));
+        }
+        self.parent.remove(&self.name, true)
+    }
+}
+
+struct UnverifiedDirectory {
+    parent: Arc<NativeDirectory>,
+    name: std::ffi::OsString,
+}
+
+impl UnverifiedDirectory {
+    fn released(&self) -> io::Result<()> {
+        match self.parent.entry(&self.name) {
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+            Ok(_) => {
+                let path = self.parent.location()?.join(&self.name);
+                Err(io::Error::other(format!(
+                    "unverified native directory retained at {}; explicit artifact disposition is required",
+                    path.display()
+                )))
+            }
+        }
+    }
 }
 
 impl Drop for OwnedDirectory {
     fn drop(&mut self) {
-        if self.private {
-            let _ = self.parent.remove(&self.name, true);
+        if self.private
+            && let Some(cleanup) = self.cleanup.upgrade()
+        {
+            cleanup.lock().unwrap().push(PrivateCleanup {
+                parent: self.parent.clone(),
+                name: self.name.clone(),
+                directory: self.directory.clone(),
+            });
         }
     }
 }
 
 impl OwnedDirectory {
-    fn cleanup(&self, displaced: &mut Vec<DisplacedEntry>) -> io::Result<()> {
+    fn cleanup(
+        &self,
+        displaced: &mut Vec<DisplacedEntry>,
+        unverified: &mut Vec<UnverifiedDirectory>,
+        private: &Arc<Mutex<Vec<PrivateCleanup>>>,
+    ) -> io::Result<()> {
         let current = match self.parent.entry(&self.name) {
             Ok(current) => current,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -397,7 +512,7 @@ impl OwnedDirectory {
         if !NativeDirectory::same(&current, &self.directory.file)? {
             return Ok(());
         }
-        let slot = NativeDirectory::private(self.parent.clone())?;
+        let slot = NativeDirectory::private(self.parent.clone(), unverified, private)?;
         let holder = std::ffi::OsString::from("entry");
         self.parent
             .move_exclusive(&self.name, &slot.directory, &holder)?;
@@ -501,7 +616,11 @@ impl NativeDirectory {
         Ok(unsafe { std::fs::File::from_raw_fd(fd) })
     }
 
-    fn private(parent: Arc<Self>) -> io::Result<OwnedDirectory> {
+    fn private(
+        parent: Arc<Self>,
+        unverified: &mut Vec<UnverifiedDirectory>,
+        private: &Arc<Mutex<Vec<PrivateCleanup>>>,
+    ) -> io::Result<OwnedDirectory> {
         for _ in 0..8 {
             let name =
                 std::ffi::OsString::from(format!(".vmux-link-{}", uuid::Uuid::new_v4().simple()));
@@ -513,12 +632,18 @@ impl NativeDirectory {
                 }
                 return Err(error);
             }
+            unverified.push(UnverifiedDirectory {
+                parent: parent.clone(),
+                name: name.clone(),
+            });
             let directory = parent.child(&name, true)?;
+            unverified.pop();
             return Ok(OwnedDirectory {
                 parent,
                 name,
                 directory,
                 private: true,
+                cleanup: Arc::downgrade(private),
             });
         }
         Err(io::Error::other(
@@ -649,7 +774,11 @@ impl NativeDirectory {
     fn entry(&self, _: &std::ffi::OsStr) -> io::Result<std::fs::File> {
         Err(Self::unsupported())
     }
-    fn private(_: Arc<Self>) -> io::Result<OwnedDirectory> {
+    fn private(
+        _: Arc<Self>,
+        _: &mut Vec<UnverifiedDirectory>,
+        _: &Arc<Mutex<Vec<PrivateCleanup>>>,
+    ) -> io::Result<OwnedDirectory> {
         Err(Self::unsupported())
     }
     fn move_exclusive(&self, _: &std::ffi::OsStr, _: &Self, _: &std::ffi::OsStr) -> io::Result<()> {
@@ -675,6 +804,141 @@ impl NativeDirectory {
 #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_directory_drop_defers_native_removal_until_cleanup_acknowledges_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let parent = NativeDirectory::open(directory.path()).unwrap();
+        let receipt = PathReceipt::default();
+        let slot = receipt.private(parent).unwrap();
+        let path = slot.directory.location().unwrap();
+        drop(slot);
+        assert!(path.is_dir());
+        assert!(receipt.pending());
+        CleanupPath {
+            receipt: receipt.clone(),
+        }
+        .run()
+        .unwrap();
+        assert!(!path.exists());
+        assert!(!receipt.pending());
+    }
+
+    #[test]
+    fn failed_private_cleanup_retains_foreign_content_and_recovers_without_losing_ownership() {
+        let directory = tempfile::tempdir().unwrap();
+        let parent = NativeDirectory::open(directory.path()).unwrap();
+        let receipt = PathReceipt::default();
+        let slot = receipt.private(parent).unwrap();
+        let path = slot.directory.location().unwrap();
+        std::fs::write(path.join("sentinel"), b"foreign content").unwrap();
+        drop(slot);
+        assert!(
+            CleanupPath {
+                receipt: receipt.clone()
+            }
+            .run()
+            .is_err()
+        );
+        assert!(receipt.pending());
+        assert_eq!(
+            std::fs::read(path.join("sentinel")).unwrap(),
+            b"foreign content"
+        );
+        std::fs::remove_file(path.join("sentinel")).unwrap();
+        CleanupPath {
+            receipt: receipt.clone(),
+        }
+        .run()
+        .unwrap();
+        assert!(!path.exists());
+        assert!(!receipt.pending());
+    }
+
+    #[test]
+    fn failed_private_directory_open_retains_an_unverified_remnant_and_preserves_replacement() {
+        if std::env::var_os("VMUX_LINK_DESCRIPTOR_PRESSURE_CHILD").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "io::links::tests::failed_private_directory_open_retains_an_unverified_remnant_and_preserves_replacement",
+                    "--test-threads=1",
+                ])
+                .env("VMUX_LINK_DESCRIPTOR_PRESSURE_CHILD", "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let parent = NativeDirectory::open(directory.path()).unwrap();
+        let receipt = PathReceipt::default();
+        let mut previous = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut previous) },
+            0
+        );
+        let limited = libc::rlimit {
+            rlim_cur: previous.rlim_cur.min(64),
+            rlim_max: previous.rlim_max,
+        };
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limited) }, 0);
+        let mut files = Vec::new();
+        let mut exhausted = false;
+        for _ in 0..256 {
+            match std::fs::File::open("/dev/null") {
+                Ok(file) => files.push(file),
+                Err(error) => {
+                    exhausted = error.raw_os_error() == Some(libc::EMFILE);
+                    break;
+                }
+            }
+        }
+        let result = receipt.private(parent);
+        drop(files);
+        assert_eq!(
+            unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &previous) },
+            0
+        );
+        assert!(exhausted);
+        assert!(result.is_err());
+        assert!(receipt.pending());
+        let entries: Vec<_> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(entries.len(), 1);
+        let retained = directory.path().join("explicit-disposition");
+        std::fs::rename(&entries[0], &retained).unwrap();
+        std::fs::create_dir(&entries[0]).unwrap();
+        std::fs::write(entries[0].join("sentinel"), b"foreign replacement").unwrap();
+        assert!(
+            CleanupPath {
+                receipt: receipt.clone()
+            }
+            .run()
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(entries[0].join("sentinel")).unwrap(),
+            b"foreign replacement"
+        );
+        assert!(receipt.pending());
+        std::fs::remove_file(entries[0].join("sentinel")).unwrap();
+        std::fs::remove_dir(&entries[0]).unwrap();
+        assert!(
+            CleanupPath {
+                receipt: receipt.clone()
+            }
+            .run()
+            .is_ok()
+        );
+        assert!(!receipt.pending());
+        assert!(retained.is_dir());
+    }
 
     struct Fixture {
         directory: tempfile::TempDir,
@@ -722,7 +986,10 @@ mod tests {
         assert!(link.run().unwrap().0);
         assert_eq!(std::fs::read(&fixture.target).unwrap(), b"managed input");
         assert!(!fixture.link().run().unwrap().0);
-        assert!(fixture.unlink().run().unwrap().0);
+        let unlink = fixture.unlink();
+        let removal = unlink.receipt.clone();
+        assert!(unlink.run().unwrap().0);
+        CleanupPath { receipt: removal }.run().unwrap();
         CleanupPath { receipt }.run().unwrap();
         assert!(!fixture.target.parent().unwrap().exists());
     }
@@ -818,7 +1085,7 @@ mod tests {
         .unwrap();
         let parent = pair.parent(true, &receipt).unwrap();
         std::fs::write(&fixture.target, b"first foreign").unwrap();
-        let slot = NativeDirectory::private(parent.clone()).unwrap();
+        let slot = receipt.private(parent.clone()).unwrap();
         let holder = std::ffi::OsString::from("entry");
         parent
             .move_exclusive(&pair.name().unwrap(), &slot.directory, &holder)

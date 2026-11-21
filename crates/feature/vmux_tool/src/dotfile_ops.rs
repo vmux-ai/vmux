@@ -20,8 +20,8 @@ use crate::dotfiles::{
     UnlinkDotfilePackage, UnlinkedDotfilePackage,
 };
 use crate::io::{
-    CleanupPath, FileIdentity, InspectLink, LinkPath, MovePath, ObservePath, PathReceipt, ReadDirectory,
-    UnlinkPath,
+    CleanupPath, FileIdentity, InspectLink, LinkPath, MovePath, ObservePath, PathReceipt,
+    ReadDirectory, UnlinkPath,
 };
 use crate::storage::{
     ManifestOnly, ManifestReceipt, ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult,
@@ -826,7 +826,12 @@ fn relocated(
 
 fn return_adopted(
     work: Query<
-        (Entity, Has<ConfigPublished>, Has<ConfigRestored>, Has<ConfigFailure>),
+        (
+            Entity,
+            Has<ConfigPublished>,
+            Has<ConfigRestored>,
+            Has<ConfigFailure>,
+        ),
         (
             With<Captured<AdoptDotfile>>,
             With<Failure>,
@@ -1760,7 +1765,9 @@ fn recover_paths(
             }
             if !failed && saved {
                 receipt.0.commit();
-                continue;
+                if !receipt.0.pending() {
+                    continue;
+                }
             }
             if reverting || captures.iter().any(|capture| capture.entity() == file) {
                 continue;
@@ -1782,8 +1789,7 @@ fn recover_paths(
                 }
                 commands.entity(file).remove::<ReverseReceipt>();
             }
-            if !failed
-                || changed && !reverted
+            if failed && changed && !reverted
                 || !receipt.0.pending()
                 || captures.iter().any(|capture| capture.entity() == file)
             {
@@ -1890,6 +1896,8 @@ fn mutation_completed(
                     || reverse.is_some_and(|receipt| receipt.0.pending())
             } else {
                 !done
+                    || receipt.is_some_and(|receipt| receipt.0.pending())
+                    || reverse.is_some_and(|receipt| receipt.0.pending())
             };
         }
         if !pending {
@@ -2154,6 +2162,7 @@ fn finish_available(
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    use vmux_ecs::cli::{CliInvocation, CliResult};
 
     struct Fixture {
         app: App,
@@ -2175,8 +2184,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 bevy::app::TaskPoolPlugin::default(),
-                crate::ToolRuntimePlugin,
-                DotfileOperationsPlugin,
+                crate::cli::ToolCliPlugin,
             ));
             let source = app.world_mut().spawn(store.clone()).id();
             Self {
@@ -2364,17 +2372,24 @@ mod tests {
             },
         );
         let blocked = manifest.clone();
-        fixture.app.add_observer(move |_: On<Add, ConfigPublished>| {
-            std::fs::remove_file(&blocked).unwrap();
-            std::fs::create_dir(&blocked).unwrap();
-        });
+        fixture
+            .app
+            .add_observer(move |_: On<Add, ConfigPublished>| {
+                std::fs::remove_file(&blocked).unwrap();
+                std::fs::create_dir(&blocked).unwrap();
+            });
         let request = fixture
             .app
             .world_mut()
             .spawn((
-                Operation::bundle("test.dotfile.adoption.config-recovery").unwrap(),
-                ToolStoreTarget::new(fixture.source),
-                AdoptDotfile::new(&source, "shell"),
+                fixture.store.clone(),
+                CliInvocation {
+                    command: "tool.adopt".into(),
+                    arguments: std::collections::BTreeMap::from([
+                        ("path".into(), vec![source.clone().into_os_string()]),
+                        ("package".into(), vec!["shell".into()]),
+                    ]),
+                },
             ))
             .id();
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -2394,9 +2409,27 @@ mod tests {
         }
         assert_eq!(std::fs::read(&source).unwrap(), b"original content");
         assert!(fixture.store.lease().is_none());
-        assert!(fixture.app.world().get::<ToolOperationFinished>(request).is_none());
+        assert!(fixture.app.world().get::<CliResult>(request).is_none());
         std::fs::remove_dir(&manifest).unwrap();
         fixture.finish(request);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fixture.app.world().get::<CliResult>(request).is_none() {
+            fixture.app.update();
+            assert!(
+                Instant::now() < deadline,
+                "adoption CLI did not return after recovery"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<CliResult>(request)
+                .unwrap()
+                .0
+                .is_err()
+        );
         assert_eq!(crate::ToolsManifest::read(&manifest).unwrap(), before);
         assert!(fixture.app.world().get::<AdoptedDotfile>(request).is_none());
         assert!(fixture.store.lease().is_some());

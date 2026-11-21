@@ -448,12 +448,12 @@ fn status_cancelled(
             Entity,
             &StatusSource,
             Option<&ToolStore>,
-            Option<&vmux_ecs::OperationState>,
+            Option<&OperationState>,
         ),
         Without<CliResult>,
     >,
     mut children: Query<
-        (&ChildOf, &mut vmux_ecs::OperationState),
+        (&ChildOf, &mut OperationState),
         (
             Or<(With<StatusPlan>, With<StatusDiscovery>)>,
             Without<StatusSource>,
@@ -464,10 +464,7 @@ fn status_cancelled(
     for (entity, source, current, state) in &status {
         let valid = current == Some(&source.0)
             && state.is_none_or(|state| {
-                matches!(
-                    state,
-                    vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
-                )
+                matches!(state, OperationState::Pending | OperationState::Running)
             });
         if valid {
             continue;
@@ -475,7 +472,7 @@ fn status_cancelled(
         commands.entity(entity).insert(StatusCancelled);
         for (parent, mut state) in &mut children {
             if parent.parent() == entity {
-                *state = vmux_ecs::OperationState::Canceled;
+                *state = OperationState::Canceled;
             }
         }
     }
@@ -531,7 +528,7 @@ fn complete_imports(
             Option<&ImportedNpmManifest>,
             Option<&ImportedBrewfile>,
             Option<&ToolOperationFailed>,
-            Option<&vmux_ecs::OperationState>,
+            Option<&OperationState>,
         ),
         (
             Or<(With<WaitingNpm>, With<WaitingBrewfile>)>,
@@ -543,7 +540,7 @@ fn complete_imports(
     mut commands: Commands,
 ) {
     for (entity, npm, brew, failure, state) in &requests {
-        let result = if state == Some(&vmux_ecs::OperationState::Canceled) {
+        let result = if state == Some(&OperationState::Canceled) {
             CliResult(Err("tool operation was canceled".into()))
         } else if let Some(failure) = failure {
             CliResult(Err(failure.0.clone()))
@@ -593,13 +590,23 @@ fn complete_physical(
             Entity,
             Option<&ImportedDotfiles>,
             Option<&ToolOperationFailed>,
+            Option<&OperationState>,
+            Has<crate::ToolOperationFinished>,
         ),
-        (With<WaitingPhysical>, With<crate::ToolOperationFinished>),
+        With<WaitingPhysical>,
     >,
     mut commands: Commands,
+    drain: crate::dotfile_staging::ImportDrain,
 ) {
-    for (entity, imported, failure) in &requests {
-        let result = if let Some(failure) = failure {
+    for (entity, imported, failure, state, finished) in &requests {
+        if !drain.is_drained(entity) {
+            continue;
+        }
+        let result = if state == Some(&OperationState::Canceled) {
+            CliResult(Err("dotfile import canceled".into()))
+        } else if !finished {
+            continue;
+        } else if let Some(failure) = failure {
             CliResult(Err(failure.0.clone()))
         } else if let Some(imported) = imported {
             println!("imported {} dotfile package(s)", imported.packages);
@@ -635,13 +642,23 @@ fn complete_adoption(
             Entity,
             Option<&AdoptedDotfile>,
             Option<&ToolOperationFailed>,
+            Option<&OperationState>,
+            Has<crate::ToolOperationFinished>,
         ),
-        (With<WaitingAdoption>, With<crate::ToolOperationFinished>),
+        With<WaitingAdoption>,
     >,
     mut commands: Commands,
+    drain: crate::dotfile_ops::DotfileDrain,
 ) {
-    for (entity, adopted, failure) in &requests {
-        let result = if let Some(failure) = failure {
+    for (entity, adopted, failure, state, finished) in &requests {
+        if !drain.is_drained(entity) {
+            continue;
+        }
+        let result = if state == Some(&OperationState::Canceled) {
+            CliResult(Err("dotfile adoption canceled".into()))
+        } else if !finished {
+            continue;
+        } else if let Some(failure) = failure {
             CliResult(Err(failure.0.clone()))
         } else if let Some(adopted) = adopted {
             println!("{}", adopted.path.display());
@@ -720,13 +737,23 @@ fn complete_available(
             Entity,
             Option<&ImportedAvailableDotfiles>,
             Option<&ToolOperationFailed>,
+            Option<&OperationState>,
+            Has<crate::ToolOperationFinished>,
         ),
-        (With<WaitingAvailable>, With<crate::ToolOperationFinished>),
+        With<WaitingAvailable>,
     >,
     mut commands: Commands,
+    drain: crate::dotfile_ops::DotfileDrain,
 ) {
-    for (entity, imported, failure) in &requests {
-        let result = if let Some(failure) = failure {
+    for (entity, imported, failure, state, finished) in &requests {
+        if !drain.is_drained(entity) {
+            continue;
+        }
+        let result = if state == Some(&OperationState::Canceled) {
+            CliResult(Err("dotfile import canceled".into()))
+        } else if !finished {
+            continue;
+        } else if let Some(failure) = failure {
             CliResult(Err(failure.0.clone()))
         } else if let Some(imported) = imported {
             println!("imported {} dotfile package(s)", imported.packages);
@@ -1027,7 +1054,7 @@ mod tests {
             if interruption == "cancel" {
                 app.world_mut()
                     .entity_mut(request)
-                    .insert(vmux_ecs::OperationState::Canceled);
+                    .insert(OperationState::Canceled);
             } else {
                 app.world_mut().entity_mut(request).insert(ToolStore::new(
                     directory.path().join("replacement"),
@@ -1180,7 +1207,13 @@ mod tests {
 
     #[test]
     fn cancelled_cli_dotfile_requests_return_errors_before_and_after_admission() {
-        for command in ["tool.apply", "tool.unlink"] {
+        for (command, kind) in [
+            ("tool.apply", "apply"),
+            ("tool.unlink", "unlink"),
+            ("tool.adopt", "adopt"),
+            ("tool.import.dotfiles", "available"),
+            ("tool.import.dotfiles", "physical"),
+        ] {
             for admitted in [false, true] {
                 let directory = tempfile::tempdir().unwrap();
                 let store = ToolStore::new(
@@ -1191,6 +1224,11 @@ mod tests {
                 std::fs::create_dir_all(&root).unwrap();
                 std::fs::create_dir_all(store.home()).unwrap();
                 std::fs::write(root.join(".zshrc"), b"shell").unwrap();
+                let original = store.home().join(".adopt-original");
+                std::fs::write(&original, b"original").unwrap();
+                let input = directory.path().join("input");
+                std::fs::create_dir_all(input.join("incoming")).unwrap();
+                std::fs::write(input.join("incoming/.profile"), b"incoming").unwrap();
                 let mut manifest = ToolsManifest::default();
                 manifest.set_dotfile_package("shell", true);
                 manifest.write_to(&store.manifest_path()).unwrap();
@@ -1198,16 +1236,20 @@ mod tests {
                 let blocker = store.lease().unwrap();
                 let mut app = App::new();
                 app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+                let mut arguments =
+                    BTreeMap::from([("package".into(), vec![OsString::from("shell")])]);
+                if kind == "adopt" {
+                    arguments.insert("path".into(), vec![original.clone().into_os_string()]);
+                } else if kind == "physical" {
+                    arguments.insert("path".into(), vec![input.into_os_string()]);
+                }
                 let request = app
                     .world_mut()
                     .spawn((
                         store.clone(),
                         CliInvocation {
                             command: command.into(),
-                            arguments: BTreeMap::from([(
-                                "package".into(),
-                                vec![OsString::from("shell")],
-                            )]),
+                            arguments,
                         },
                     ))
                     .id();
@@ -1238,6 +1280,8 @@ mod tests {
                 assert!(app.world().get::<CliResult>(request).unwrap().0.is_err());
                 assert_eq!(std::fs::read(store.manifest_path()).unwrap(), before);
                 assert!(store.home().join(".zshrc").symlink_metadata().is_err());
+                assert_eq!(std::fs::read(&original).unwrap(), b"original");
+                assert!(!store.dotfiles_dir().join("incoming").exists());
                 assert!(store.lease().is_some());
             }
         }

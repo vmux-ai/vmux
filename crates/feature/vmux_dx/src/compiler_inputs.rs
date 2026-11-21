@@ -18,6 +18,7 @@ pub(super) struct CompilerInputs {
     included: BTreeSet<String>,
     harness: String,
     constructors: BTreeSet<String>,
+    mutexes: BTreeSet<String>,
     methods: BTreeMap<String, BTreeMap<usize, BTreeSet<usize>>>,
     parameters: BTreeMap<String, usize>,
     temporaries: BTreeSet<String>,
@@ -169,36 +170,7 @@ impl CompilerInputs {
             source_directory: Self::cargo_directory(source)?,
             ..Self::default()
         };
-        for item in &file.items {
-            if let Item::Use(item) = item {
-                proof.imports(&item.tree, "");
-            }
-            if let Item::Mod(item) = item
-                && matches!(item.ident.to_string().as_str(), "std" | "tempfile")
-            {
-                return Err("Compiler harness shadows an external interface".into());
-            }
-            if let Item::Macro(item) = item
-                && item.ident.as_ref().is_some_and(|name| {
-                    matches!(name.to_string().as_str(), "include_str" | "format" | "env")
-                })
-            {
-                return Err("Compiler harness shadows source inclusion".into());
-            }
-        }
-        for item in &file.items {
-            let name = match item {
-                Item::Struct(value) => &value.ident,
-                Item::Enum(value) => &value.ident,
-                Item::Union(value) => &value.ident,
-                Item::Type(value) => &value.ident,
-                Item::Trait(value) => &value.ident,
-                _ => continue,
-            };
-            if proof.aliases.contains_key(&name.to_string()) {
-                return Err("Compiler harness shadows an imported interface".into());
-            }
-        }
+        proof.interfaces(file)?;
         let structure = file
             .items
             .iter()
@@ -253,12 +225,189 @@ impl CompilerInputs {
                     .any(|attribute| attribute.path().is_ident("test"))
             {
                 proof.bindings.clear();
+                proof.uncertain = false;
                 if Self::enabled(&function.attrs, false) {
                     proof.visit_item_fn(function);
                 }
             }
         }
         Ok(proof)
+    }
+
+    fn interfaces(&mut self, file: &syn::File) -> Result<(), String> {
+        for item in &file.items {
+            if let Item::Use(item) = item {
+                if Self::glob_import(&item.tree) {
+                    return Err("Compiler harness has unresolved glob imports".into());
+                }
+                self.imports(&item.tree, "");
+            }
+            if let Item::Mod(item) = item
+                && item
+                    .attrs
+                    .iter()
+                    .any(|attribute| attribute.path().is_ident("macro_use"))
+            {
+                return Err("Compiler harness has unresolved textual macro imports".into());
+            }
+            if let Item::ExternCrate(item) = item
+                && (item
+                    .attrs
+                    .iter()
+                    .any(|attribute| attribute.path().is_ident("macro_use"))
+                    || item.rename.as_ref().is_some_and(|(_, name)| {
+                        matches!(name.to_string().as_str(), "std" | "tempfile")
+                    }))
+            {
+                return Err("Compiler harness shadows an external macro or crate interface".into());
+            }
+            if let Item::Mod(item) = item
+                && matches!(item.ident.to_string().as_str(), "std" | "tempfile")
+            {
+                return Err("Compiler harness shadows an external interface".into());
+            }
+            if let Item::Macro(item) = item
+                && item.ident.as_ref().is_some_and(|name| {
+                    matches!(name.to_string().as_str(), "include_str" | "format" | "env")
+                })
+            {
+                return Err("Compiler harness shadows source inclusion".into());
+            }
+        }
+        for name in ["include_str", "format", "env"] {
+            if let Some(path) = self.aliases.get(name)
+                && path != &format!("std::{name}")
+            {
+                return Err("Compiler harness shadows a builtin macro".into());
+            }
+        }
+        if self.aliases.get("std").is_some_and(|path| path != "std") {
+            return Err("Compiler harness shadows the standard crate".into());
+        }
+        for item in &file.items {
+            let name = match item {
+                Item::Struct(value) => &value.ident,
+                Item::Enum(value) => &value.ident,
+                Item::Union(value) => &value.ident,
+                Item::Type(value) => &value.ident,
+                Item::Trait(value) => &value.ident,
+                _ => continue,
+            };
+            if self.aliases.contains_key(&name.to_string()) {
+                return Err("Compiler harness shadows an imported interface".into());
+            }
+        }
+        for item in &file.items {
+            if let Item::Static(item) = item
+                && Self::testing(&item.attrs)
+                && self.unit_mutex(item)
+            {
+                self.mutexes.insert(item.ident.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn unit_mutex(&self, item: &syn::ItemStatic) -> bool {
+        let Type::Path(value) = item.ty.as_ref() else {
+            return false;
+        };
+        let mut path = value.path.clone();
+        let Some(last) = path.segments.last_mut() else {
+            return false;
+        };
+        let syn::PathArguments::AngleBracketed(arguments) = &last.arguments else {
+            return false;
+        };
+        if arguments.args.len() != 1
+            || !matches!(arguments.args.first(), Some(syn::GenericArgument::Type(Type::Tuple(value))) if value.elems.is_empty())
+        {
+            return false;
+        }
+        last.arguments = syn::PathArguments::None;
+        if self.external(&path) != "std::sync::Mutex" {
+            return false;
+        }
+        let Expr::Call(value) = item.expr.as_ref() else {
+            return false;
+        };
+        let Expr::Path(function) = value.func.as_ref() else {
+            return false;
+        };
+        self.external(&function.path) == "std::sync::Mutex::new"
+            && value.args.len() == 1
+            && matches!(value.args.first(), Some(Expr::Tuple(value)) if value.elems.is_empty())
+    }
+
+    fn synchronized(&self, expression: &Expr) -> bool {
+        let Expr::Match(value) = expression else {
+            return false;
+        };
+        let Expr::MethodCall(lock) = value.expr.as_ref() else {
+            return false;
+        };
+        let Expr::Path(receiver) = lock.receiver.as_ref() else {
+            return false;
+        };
+        let Some(name) = receiver.path.get_ident() else {
+            return false;
+        };
+        if lock.method != "lock"
+            || !lock.args.is_empty()
+            || !self.mutexes.contains(&name.to_string())
+            || value.arms.len() != 2
+        {
+            return false;
+        }
+        let mut seen = BTreeSet::new();
+        for arm in &value.arms {
+            if arm.guard.is_some() {
+                return false;
+            }
+            let Pat::TupleStruct(pattern) = &arm.pat else {
+                return false;
+            };
+            let Some(variant) = pattern.path.get_ident() else {
+                return false;
+            };
+            if pattern.elems.len() != 1 || self.aliases.contains_key(&variant.to_string()) {
+                return false;
+            }
+            let Some(Pat::Ident(binding)) = pattern.elems.first() else {
+                return false;
+            };
+            if binding.by_ref.is_some() || binding.mutability.is_some() || binding.subpat.is_some()
+            {
+                return false;
+            }
+            match variant.to_string().as_str() {
+                "Ok" if matches!(arm.body.as_ref(), Expr::Path(value) if value.path.is_ident(&binding.ident)) =>
+                    {}
+                "Err" if matches!(arm.body.as_ref(), Expr::MethodCall(value) if value.method == "into_inner" && value.args.is_empty() && matches!(value.receiver.as_ref(), Expr::Path(value) if value.path.is_ident(&binding.ident))) =>
+                    {}
+                _ => return false,
+            }
+            if !seen.insert(variant.to_string()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn glob_import(tree: &UseTree) -> bool {
+        match tree {
+            UseTree::Path(value) => Self::glob_import(&value.tree),
+            UseTree::Group(value) => {
+                for item in &value.items {
+                    if Self::glob_import(item) {
+                        return true;
+                    }
+                }
+                false
+            }
+            UseTree::Glob(_) => true,
+            _ => false,
+        }
     }
 
     fn cargo_directory(source: &Path) -> Result<PathBuf, String> {
@@ -372,13 +521,34 @@ impl CompilerInputs {
 
     fn project(&mut self, function: &syn::ImplItemFn) -> Result<(), String> {
         let previous = std::mem::take(&mut self.projects);
+        let mutexes = self.mutexes.clone();
         self.constructor = true;
         self.uncertain = false;
         self.local_paths.clear();
         self.fixed_paths.clear();
         self.local_temporaries.clear();
-        self.visit_block(&function.block);
+        for statement in &function.block.stmts {
+            if let Stmt::Local(local) = statement
+                && let Some(init) = &local.init
+                && init.diverge.is_none()
+                && self.synchronized(&init.expr)
+            {
+                if let Pat::Ident(binding) = &local.pat {
+                    self.mutexes.remove(&binding.ident.to_string());
+                }
+                continue;
+            }
+            self.visit_stmt(statement);
+            if matches!(
+                statement,
+                Stmt::Expr(Expr::Return(_) | Expr::Break(_) | Expr::Continue(_), _)
+            ) {
+                self.unknown();
+                break;
+            }
+        }
         self.constructor = false;
+        self.mutexes = mutexes;
         if self.uncertain {
             return Err("Compiler project has unproven control flow".into());
         }
@@ -982,8 +1152,8 @@ impl CompilerInputs {
 
 impl<'ast> Visit<'ast> for CompilerInputs {
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        self.unknown();
         if !self.method.is_empty() || self.constructor {
-            self.unknown();
             return;
         }
         visit::visit_item_use(self, item);
@@ -1085,6 +1255,7 @@ impl<'ast> Visit<'ast> for CompilerInputs {
 
     fn visit_local(&mut self, local: &'ast syn::Local) {
         if let Pat::Ident(binding) = &local.pat {
+            self.mutexes.remove(&binding.ident.to_string());
             let name = binding.ident.to_string();
             self.bindings.remove(&name);
             self.parameters.remove(&name);
@@ -1109,6 +1280,11 @@ impl<'ast> Visit<'ast> for CompilerInputs {
 
     fn visit_block(&mut self, block: &'ast syn::Block) {
         let bindings = self.bindings.clone();
+        let parameters = self.parameters.clone();
+        let local_paths = self.local_paths.clone();
+        let fixed_paths = self.fixed_paths.clone();
+        let local_temporaries = self.local_temporaries.clone();
+        let mutexes = self.mutexes.clone();
         for statement in &block.stmts {
             self.visit_stmt(statement);
             if matches!(
@@ -1120,6 +1296,11 @@ impl<'ast> Visit<'ast> for CompilerInputs {
             }
         }
         self.bindings = bindings;
+        self.parameters = parameters;
+        self.local_paths = local_paths;
+        self.fixed_paths = fixed_paths;
+        self.local_temporaries = local_temporaries;
+        self.mutexes = mutexes;
     }
 
     fn visit_expr_assign(&mut self, assignment: &'ast syn::ExprAssign) {
@@ -1157,6 +1338,10 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     fn visit_expr_for_loop(&mut self, expression: &'ast syn::ExprForLoop) {
         if !self.method.is_empty() || self.constructor {
             self.unknown();
+            return;
+        }
+        if self.uncertain {
+            visit::visit_expr_for_loop(self, expression);
             return;
         }
         let (Pat::Tuple(pattern), Expr::Array(inputs)) =
@@ -1237,6 +1422,13 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if item
+            .attrs
+            .iter()
+            .any(|attribute| attribute.path().is_ident("macro_use"))
+        {
+            self.unknown();
+        }
         if !self.method.is_empty() || self.constructor {
             self.unknown();
             return;
@@ -1278,6 +1470,9 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_macro(&mut self, value: &'ast syn::Macro) {
+        if value.path.is_ident("macro_rules") {
+            self.unknown();
+        }
         if (!self.method.is_empty() || self.constructor)
             && !matches!(
                 value.path.get_ident().map(ToString::to_string).as_deref(),

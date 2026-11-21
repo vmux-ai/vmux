@@ -96,7 +96,9 @@ fn observe(
             home: store.home().to_path_buf(),
         },
         JobRequest(ReadDirectory {
-            path: store.dotfiles_dir(), limit: 4096 }),
+            path: store.dotfiles_dir(),
+            limit: 4096,
+        }),
     ));
 }
 
@@ -130,6 +132,12 @@ fn packages(
                 continue;
             }
         };
+        if entries.exists && !entries.is_directory {
+            commands.entity(entity).insert(Finished {
+                error: Some("dotfile root is not a directory".into()),
+            });
+            continue;
+        }
         let Ok(manifest) = manifests.get(parent.parent()) else {
             continue;
         };
@@ -182,7 +190,10 @@ fn packages(
             } else {
                 commands.entity(package).insert((
                     Directory { package, depth: 0 },
-                    JobRequest(ReadDirectory { path: root, limit: 4096 }),
+                    JobRequest(ReadDirectory {
+                        path: root,
+                        limit: 4096,
+                    }),
                 ));
             }
         }
@@ -220,7 +231,7 @@ fn directories(
             continue;
         };
         let entries = match &result.0 {
-            Ok(Ok(entries)) if entries.exists => entries,
+            Ok(Ok(entries)) if entries.exists && entries.is_directory => entries,
             Ok(Ok(_)) => {
                 commands
                     .entity(directory.package)
@@ -256,7 +267,9 @@ fn directories(
                         depth: directory.depth + 1,
                     },
                     JobRequest(ReadDirectory {
-                        path: entry.path.clone(), limit: 4096 }),
+                        path: entry.path.clone(),
+                        limit: 4096,
+                    }),
                 ));
             } else if entry.file_type.is_file() {
                 let Ok(relative) = entry.path.strip_prefix(&root.0) else {

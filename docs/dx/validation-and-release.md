@@ -64,6 +64,8 @@ Use this when the change affects native integration, resources, or packaging. `v
 
 Set `VMUX_DATA_DIR` to an absolute copied data root for persistence QA. Configuration lives under its `config/` directory, and Tools uses its `home/` directory for dotfile targets. Copy the relevant configuration and home files into those directories; keep them separate from live paths. This does not relocate external package managers such as Homebrew, so use managed ACP/LSP packages for isolated install and removal checks. Ordinary runs without the override keep the existing user paths. Copied managed dotfile symlinks can still point to live package sources. Before testing enable/disable, recreate or retarget only the managed links inside the copied home to the copied sources under `config/tools/dotfiles`; preserve unrelated copied files and links. A copied parent such as `home/.config` must also resolve inside the copy. Do not modify the live home to prepare QA.
 
+Dotfile status supports up to 100,000 entries in the package catalog directory. Each package directory and the Tools inventory support up to 4,096 entries per directory; larger directories return an explicit error.
+
 ## Choose how to share
 
 A local build can be the finished result. Push to your fork if you want a durable personal branch or a reviewable PR. For an upstream contribution, keep the diff focused and explain the behavior and validation.

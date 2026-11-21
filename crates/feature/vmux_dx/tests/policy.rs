@@ -635,6 +635,12 @@ fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
         "effectful_library_expect",
         "format_named_override",
         "effectful_output_argument",
+        "scoped_path_shadow",
+        "imported_format_shadow",
+        "macro_use_format_shadow",
+        "glob_format_shadow",
+        "local_inclusion_shadow",
+        "std_macro_import",
         "unhandled_write_failure",
         "absolute_target",
         "generated_manifest",
@@ -673,6 +679,11 @@ fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
             "effectful_library_expect" => check.block.stmts[1] = syn::parse_quote!(let output = Command::new("cargo").current_dir(self.directory.path()).args(["dylint", "--path", self.library.to_str().expect({ std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), "changed").unwrap(); "path" }), "--", "--example", name]).output().unwrap();),
             "format_named_override" => check.block.stmts[0] = syn::parse_quote!(std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs", name = "unused")), source).unwrap();),
             "effectful_output_argument" => check.block.stmts[1] = syn::parse_quote!(let output = Command::new("cargo").current_dir(self.directory.path()).args(["dylint", "--path", self.library.to_str().unwrap(), "--", "--example", name]).output({ std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), "changed").unwrap(); }).unwrap();),
+            "scoped_path_shadow" => {
+                check.block.stmts[0] = syn::parse_quote!(std::fs::write(path, source).unwrap(););
+                check.block.stmts.insert(0, syn::parse_quote!({ let path = self.directory.path().join("examples").join(format!("{name}.rs")); }));
+                check.block.stmts.insert(0, syn::parse_quote!(let path = self.directory.path().join("unused.rs");));
+            }
             "runtime_manifest_disabled" => check.block.stmts.insert(0, syn::parse_quote!(std::fs::write(self.directory.path().join("Cargo.toml"), "[package]\nname=\"fixture\"\nversion=\"0.0.0\"\nautoexamples=false\n[workspace]\n").unwrap();)),
             "removed_target" => check.block.stmts.insert(1, syn::parse_quote!(std::fs::remove_file(self.directory.path().join("examples").join(format!("{name}.rs"))).unwrap();)),
             "unexecuted_loop" => {
@@ -697,6 +708,7 @@ fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
             }
             "unhandled_write_failure" => check.block.stmts[0] = syn::parse_quote!(let _failed = std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), source);),
             "absolute_target" => check.block.stmts[0] = syn::parse_quote!(std::fs::write(self.directory.path().join("/examples").join(format!("{name}.rs")), source).unwrap();),
+            "std_macro_import" | "imported_format_shadow" | "glob_format_shadow" | "macro_use_format_shadow" | "local_inclusion_shadow" => {},
             "valid" | "generated_manifest" | "renamed_directory" => {}
             _ => unreachable!(),
         }
@@ -714,6 +726,69 @@ fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
                 })
                 .unwrap();
             constructor.block.stmts[5] = syn::parse_quote!(std::fs::write(directory.path().join("Cargo.toml"), #manifest).unwrap(););
+        }
+        match change {
+            "std_macro_import" => file.items.push(syn::parse_quote!(
+                use std::format;
+            )),
+            "imported_format_shadow" | "glob_format_shadow" => {
+                file.items.push(syn::parse_quote!(
+                    mod aliases {
+                        macro_rules! other {
+                            ($($tokens:tt)*) => {
+                                ::std::string::String::from("unused.rs")
+                            };
+                        }
+                        pub(crate) use other as format;
+                    }
+                ));
+                if change == "glob_format_shadow" {
+                    file.items.push(syn::parse_quote!(
+                        use aliases::*;
+                    ));
+                } else {
+                    file.items.push(syn::parse_quote!(
+                        use aliases::format;
+                    ));
+                }
+            }
+            "macro_use_format_shadow" => file.items.push(syn::parse_quote!(
+                #[macro_use]
+                mod aliases {
+                    macro_rules! format {
+                        ($($tokens:tt)*) => {
+                            ::std::string::String::from("unused.rs")
+                        };
+                    }
+                }
+            )),
+            "local_inclusion_shadow" => {
+                file.items.push(syn::parse_quote!(
+                    mod aliases {
+                        macro_rules! other {
+                            ($($tokens:tt)*) => {
+                                "fn main() {}"
+                            };
+                        }
+                        pub(crate) use other as include_str;
+                    }
+                ));
+                let test = file
+                    .items
+                    .iter_mut()
+                    .find_map(|item| match item {
+                        Item::Fn(value) if value.sig.ident == "compiled_inputs" => Some(value),
+                        _ => None,
+                    })
+                    .unwrap();
+                test.block.stmts.insert(
+                    0,
+                    syn::parse_quote!(
+                        use aliases::include_str;
+                    ),
+                );
+            }
+            _ => {}
         }
         if change == "local_native_shadow" {
             file.items.push(syn::parse_quote!(
@@ -742,7 +817,10 @@ fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
         }
         std::fs::write(&source, text).unwrap();
         let result = CompilerInputs::read(fixture.0.path());
-        if matches!(change, "valid" | "generated_manifest" | "renamed_directory") {
+        if matches!(
+            change,
+            "valid" | "generated_manifest" | "renamed_directory" | "std_macro_import"
+        ) {
             assert!(
                 result.unwrap().owner(&fixture.input("private")).is_some(),
                 "{change}"
@@ -754,6 +832,135 @@ fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
             );
         }
     }
+}
+
+#[test]
+fn compiler_inputs_preserve_native_fixture_serialization_without_admitting_shadowed_workflows() {
+    for change in ["valid", "side_effect", "fake_mutex", "local_shadow"] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        file.items.push(syn::parse_quote!(
+            #[cfg(test)]
+            static COMPILER_QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        ));
+        let structure = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Struct(value) if value.ident == "Fixture" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let syn::Fields::Named(fields) = &mut structure.fields else {
+            unreachable!();
+        };
+        fields
+            .named
+            .push(syn::parse_quote!(_queue: std::sync::MutexGuard<'static, ()>));
+        let implementation = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Impl(value) => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let constructor = implementation
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                syn::ImplItem::Fn(value) if value.sig.ident == "new" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        constructor.block.stmts.insert(
+            0,
+            syn::parse_quote!(
+                let queue = match COMPILER_QUEUE.lock() {
+                    Ok(queue) => queue,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+            ),
+        );
+        let Some(syn::Stmt::Expr(syn::Expr::Struct(returned), _)) =
+            constructor.block.stmts.last_mut()
+        else {
+            unreachable!();
+        };
+        returned.fields.push(syn::parse_quote!(_queue: queue));
+        if change == "side_effect" {
+            constructor.block.stmts[0] = syn::parse_quote!(
+                let queue = match COMPILER_QUEUE.lock() {
+                    Ok(queue) => {
+                        std::fs::write(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"), "changed").unwrap();
+                        queue
+                    }
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+            );
+        }
+        if change == "local_shadow" {
+            constructor
+                .block
+                .stmts
+                .insert(0, syn::parse_quote!(let COMPILER_QUEUE = FakeMutex;));
+        }
+        if matches!(change, "fake_mutex" | "local_shadow") {
+            file.items.push(syn::parse_quote!(
+                struct FakeMutex;
+            ));
+            file.items.push(syn::parse_quote!(
+                static REAL_QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            ));
+            file.items.push(syn::parse_quote!(impl FakeMutex {
+                fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'static, ()>> {
+                    std::fs::write(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"), "changed").unwrap();
+                    REAL_QUEUE.lock()
+                }
+            }));
+            if change == "fake_mutex" {
+                let declaration = file.items.iter_mut().find(|item| matches!(item, Item::Static(value) if value.ident == "COMPILER_QUEUE")).unwrap();
+                *declaration = syn::parse_quote!(
+                    #[cfg(test)]
+                    static COMPILER_QUEUE: FakeMutex = FakeMutex;
+                );
+            }
+        }
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let result = CompilerInputs::read(fixture.0.path());
+        if change == "valid" {
+            assert!(result.unwrap().owner(&fixture.input("private")).is_some());
+        } else if let Ok(inputs) = result {
+            assert!(
+                inputs.owner(&fixture.input("private")).is_none(),
+                "{change}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compiler_inputs_keep_the_registered_production_corpus_connected_to_its_cargo_harness() {
+    let root = Workspace::current();
+    let inputs = CompilerInputs::read(&root.0).unwrap();
+    let files = std::fs::read_dir(root.0.join("crates/feature/vmux_dx/lints/ui")).unwrap();
+    let mut checked = 0;
+    for file in files {
+        let path = file.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "rs") {
+            assert!(
+                inputs.owner(&path).is_some(),
+                "uncompiled input {}",
+                path.display()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "compiler input corpus is missing");
 }
 
 #[test]
