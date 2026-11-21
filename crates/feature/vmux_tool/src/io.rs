@@ -3,6 +3,10 @@ use bevy_ecs::schedule::IntoScheduleConfigs;
 use vmux_ecs::{JobPlugin, JobSet};
 
 pub use crate::process::Execute;
+pub use files::{
+    BytesCopied, CopyFile, CreateDirectory, DirectoryCreated, FileIdentity, MovePath, ObservePath,
+    PathFacts,
+};
 pub use fs::{
     DirectoryEntries, DirectoryEntry, ExecutableFacts, FileBytes, FindExecutable, InspectLink,
     LinkFacts, ReadDirectory, ReadFile, WriteFile,
@@ -11,6 +15,7 @@ pub use http::{Authorization, Get};
 pub use links::{LinkPath, PathChanged, PathReceipt, UnlinkPath};
 pub use temporary::{CloseTemporary, CreateTemporary, TemporaryDirectory, TemporaryTransfer};
 
+mod files;
 mod fs;
 mod http;
 mod links;
@@ -30,6 +35,10 @@ impl Plugin for ObservationIoPlugin {
             JobPlugin::<FindExecutable>::default(),
             JobPlugin::<LinkPath>::default(),
             JobPlugin::<UnlinkPath>::default(),
+            JobPlugin::<ObservePath>::default(),
+            JobPlugin::<MovePath>::default(),
+            JobPlugin::<CopyFile>::default(),
+            JobPlugin::<CreateDirectory>::default(),
         ))
         .configure_sets(
             Update,
