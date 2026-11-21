@@ -1572,7 +1572,7 @@ mod tests {
                 bearer_token_env_var: None,
             },
         );
-        store.save(&original).unwrap();
+        original.write_to(&store.manifest_path()).unwrap();
         let access = McpCredentialAccess::default();
         let transaction = future::block_on(access.transaction()).unwrap();
         let store_lease = future::block_on(store.lease_async());
@@ -1626,14 +1626,20 @@ mod tests {
             .id();
         let mut corrupted = original.clone();
         corrupted.mcp.servers.clear();
-        store.save(&corrupted).unwrap();
+        corrupted.write_to(&store.manifest_path()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while app.world().get::<Active>(operation).is_some() {
             app.update();
             assert!(Instant::now() < deadline, "manifest rollback did not drain");
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(store.load().unwrap().mcp.servers, original.mcp.servers);
+        assert_eq!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .mcp
+                .servers,
+            original.mcp.servers
+        );
         assert_eq!(
             app.world().get::<OperationState>(operation),
             Some(&OperationState::Failed)

@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::task::Waker;
 
-use crate::state::ToolProvider;
 use async_lock::{Semaphore, SemaphoreGuardArc};
 use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
@@ -278,75 +277,6 @@ impl ToolStore {
             std::env::current_dir()
                 .map(|cwd| cwd.join(path))
                 .map_err(|error| error.to_string())
-        }
-    }
-
-    pub fn load(&self) -> Result<ToolsManifest, String> {
-        self.migrate_legacy_storage()?;
-        let mut manifest = ToolsManifest::read(&self.manifest_path())?;
-        let brewfile = self.brewfile_path();
-        if brewfile.is_file() {
-            manifest.sync_brewfile(&brewfile)?;
-        } else {
-            self.write_brewfile(&manifest)?;
-        }
-        Ok(manifest)
-    }
-
-    pub fn save(&self, manifest: &ToolsManifest) -> Result<(), String> {
-        self.migrate_legacy_storage()?;
-        manifest.write_to(&self.manifest_path())?;
-        self.write_brewfile(manifest)
-    }
-
-    pub fn set_managed_package(
-        &self,
-        provider: &ToolProvider,
-        name: &str,
-        managed: bool,
-    ) -> Result<(), String> {
-        let mut manifest = self.load()?;
-        manifest.set_package(provider.id(), name, managed);
-        self.save(&manifest)
-    }
-
-    pub(crate) fn migrate_legacy_storage(&self) -> Result<(), String> {
-        let legacy_root = self.config_dir.join("registry");
-        let tools_root = self.config_dir.join("tools");
-        if legacy_root.symlink_metadata().is_ok() {
-            if tools_root.symlink_metadata().is_ok() {
-                return Err(format!(
-                    "cannot migrate {} because {} already exists",
-                    legacy_root.display(),
-                    tools_root.display()
-                ));
-            }
-            Self::rename_for_migration(&legacy_root, &tools_root)?;
-        }
-        let legacy_manifest = tools_root.join("registry.toml");
-        let tools_manifest = tools_root.join("tools.toml");
-        if legacy_manifest.symlink_metadata().is_ok() {
-            if tools_manifest.symlink_metadata().is_ok() {
-                return Err(format!(
-                    "cannot migrate {} because {} already exists",
-                    legacy_manifest.display(),
-                    tools_manifest.display()
-                ));
-            }
-            Self::rename_for_migration(&legacy_manifest, &tools_manifest)?;
-        }
-        Ok(())
-    }
-
-    fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String> {
-        match std::fs::rename(source, destination) {
-            Ok(()) => Ok(()),
-            Err(_)
-                if source.symlink_metadata().is_err() && destination.symlink_metadata().is_ok() =>
-            {
-                Ok(())
-            }
-            Err(error) => Err(error.to_string()),
         }
     }
 }

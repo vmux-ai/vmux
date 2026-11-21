@@ -1,28 +1,26 @@
 use std::collections::BTreeSet;
 
-use crate::storage::{ReadRequest, ReadResult, StoreLease};
-use crate::{McpServerManifest, McpTransport, ToolStore, ToolsManifest};
+use crate::{McpServerManifest, McpTransport};
 use bevy::app::{App, Plugin};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServersRequest, McpServersUiState,
 };
-use vmux_ecs::profile::McpCredentials;
-use vmux_ecs::profile::mcp_credentials::McpOauthCredentials;
 use vmux_ecs::{EntityTarget, PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{
-    Operation, OperationCompleted, OperationPlugin, OperationRetained, OperationTarget,
-    UiStatePlugin, UiStateWrite,
+    Operation, OperationPlugin, OperationRetained, OperationTarget, UiStatePlugin, UiStateWrite,
 };
 use vmux_feature::manifest::FeatureManifest;
 
 mod auth;
 mod remove;
+mod snapshot;
 mod transport;
+
+use snapshot::SnapshotContext;
 
 pub struct McpConnectionPlugin;
 
@@ -37,31 +35,30 @@ impl Plugin for McpConnectionPlugin {
         if !app.is_plugin_added::<crate::storage::StoragePlugin>() {
             app.add_plugins(crate::storage::StoragePlugin);
         }
-        app.add_plugins((auth::AuthPlugin, remove::RemovePlugin))
-            .init_resource::<McpObservationVersion>()
-            .add_plugins((
-                UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
-                UiStatePlugin::<McpServersUiState>::default(),
-            ))
-            .add_systems(Startup, spawn_mcp_catalog)
-            .add_message::<PageOpenRequest>()
-            .add_observer(request_mcp_connections)
-            .add_observer(begin_mcp_snapshot)
-            .add_observer(request_mcp_server)
-            .add_systems(
-                Update,
-                (
-                    publish_mcp_authorization,
-                    retire_mcp_operations,
-                    start_mcp_snapshots,
-                    read_credentials,
-                    drain_mcp_snapshots,
-                    publish_mcp_connections,
-                )
-                    .chain()
-                    .after(auth::AuthSet)
-                    .after(remove::RemoveSet),
-            );
+        app.add_plugins((
+            auth::AuthPlugin,
+            remove::RemovePlugin,
+            snapshot::SnapshotPlugin,
+        ))
+        .init_resource::<McpObservationVersion>()
+        .add_plugins((
+            UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
+            UiStatePlugin::<McpServersUiState>::default(),
+        ))
+        .add_systems(Startup, spawn_mcp_catalog)
+        .add_message::<PageOpenRequest>()
+        .add_observer(request_mcp_connections)
+        .add_observer(begin_mcp_snapshot)
+        .add_observer(request_mcp_server)
+        .add_systems(
+            Update,
+            (publish_mcp_authorization, retire_mcp_operations)
+                .chain()
+                .after(auth::AuthSet)
+                .after(remove::RemoveSet)
+                .before(snapshot::SnapshotSet),
+        )
+        .add_systems(Update, publish_mcp_connections.after(snapshot::SnapshotSet));
     }
 }
 
@@ -123,6 +120,7 @@ fn request_mcp_server(
         &mut McpServerClaim,
     )>,
     version: Res<McpObservationVersion>,
+    credentials: Query<(Entity, Ref<vmux_ecs::profile::McpCredentials>)>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -135,6 +133,9 @@ fn request_mcp_server(
         || !version.valid
         || version.owner.is_none()
         || state.owner != version.owner
+        || !credentials.single().is_ok_and(|(owner, source)| {
+            Some(owner) == version.owner && Some(source.last_changed()) == version.source_tick
+        })
     {
         return;
     }
@@ -255,254 +256,6 @@ fn retire_mcp_operations(
         commands
             .entity(entity)
             .remove::<(McpConnectionOperation, OperationRetained, McpCompletion)>();
-    }
-}
-
-fn start_mcp_snapshots(
-    requests: Query<(Entity, &PendingMcpSnapshot), Without<McpSnapshotTask>>,
-    credentials: Query<(Entity, &McpCredentials)>,
-    mut version: ResMut<McpObservationVersion>,
-    mut states: Query<&mut McpPageState>,
-    mut commands: Commands,
-) {
-    let Ok((owner, credentials)) = credentials.single() else {
-        version.valid = false;
-        version.owner = None;
-        for (target, request) in &requests {
-            if let Ok(mut state) = states.get_mut(target) {
-                state.loading = false;
-                state.pending = false;
-                state.loaded = false;
-                state.owner = None;
-            }
-            commands.entity(target).remove::<PendingMcpSnapshot>();
-            commands
-                .entity(target)
-                .insert(request.result.clone().unwrap_or(McpCompletion {
-                    id: String::new(),
-                    disconnect: false,
-                    success: false,
-                    message: "MCP source Profile is unavailable".into(),
-                }));
-        }
-        return;
-    };
-    for (target, request) in &requests {
-        let Ok(mut state) = states.get_mut(target) else {
-            continue;
-        };
-        state.owner = Some(owner);
-        version.next = version.next.wrapping_add(1).max(1);
-        let sequence = version.next;
-        let generation = request.generation;
-        let result = request.result.clone();
-        let credentials = (*credentials).clone();
-        commands.entity(target).remove::<PendingMcpSnapshot>();
-        commands.spawn((
-            Operation::bundle("mcp.snapshot").unwrap().running(),
-            OperationTarget::new(target),
-            OperationRetained,
-            SnapshotContext {
-                generation,
-                sequence,
-                owner,
-                result,
-            },
-            auth::Credentials(credentials),
-            ToolStore::current(),
-            ReadRequest { retain_lease: true },
-        ));
-    }
-}
-
-fn read_credentials(
-    requests: Query<
-        (Entity, &ReadResult, &auth::Credentials),
-        (With<SnapshotContext>, Without<McpSnapshotTask>),
-    >,
-    catalog: McpCatalog,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, result, credentials) in &requests {
-        let manifest = result.0.clone();
-        let credentials = credentials.0.clone();
-        let mut ids = Vec::new();
-        for (_, server) in &catalog.servers {
-            ids.push(server.id.clone());
-        }
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        commands
-            .entity(entity)
-            .remove::<ReadResult>()
-            .insert(McpSnapshotTask {
-                task: IoTaskPool::get().spawn(async move {
-                    let mut records = Vec::new();
-                    for id in ids {
-                        records.push((id.clone(), credentials.storage.load(&id)));
-                    }
-                    if let Some(wake) = wake {
-                        let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                    }
-                    (manifest, records)
-                }),
-            });
-    }
-}
-
-fn drain_mcp_snapshots(
-    mut tasks: Query<(
-        Entity,
-        &SnapshotContext,
-        &mut McpSnapshotTask,
-        Option<&OperationTarget>,
-    )>,
-    mut states: Query<&mut McpPageState>,
-    catalog: Query<(Entity, &Name, &McpCatalogServer)>,
-    extras: Query<Entity, With<McpConfiguredServer>>,
-    credentials: Query<Entity, With<McpCredentials>>,
-    mut version: ResMut<McpObservationVersion>,
-    mut commands: Commands,
-) {
-    for (entity, context, mut task, target) in &mut tasks {
-        let page = target.map(|target| target.entity());
-        let Some((manifest, credentials_observed)) =
-            future::block_on(future::poll_once(&mut task.task))
-        else {
-            continue;
-        };
-        commands.entity(entity).remove::<(
-            McpSnapshotTask,
-            SnapshotContext,
-            OperationRetained,
-            StoreLease,
-            ToolStore,
-            auth::Credentials,
-        )>();
-        commands.trigger(OperationCompleted {
-            entity,
-            result: manifest.as_ref().map(|_| ()).map_err(Clone::clone),
-        });
-        let current = credentials.single().ok();
-        if current != Some(context.owner) || context.sequence < version.current {
-            if let Some(page) = page
-                && let Ok(mut state) = states.get_mut(page)
-                && state.generation == context.generation
-            {
-                state.loading = false;
-                state.pending = false;
-                state.loaded = current == Some(context.owner) && version.valid;
-                if let Some(result) = &context.result {
-                    commands.entity(page).insert(result.clone());
-                }
-            }
-            continue;
-        }
-        version.current = context.sequence;
-        version.owner = Some(context.owner);
-        for mut state in &mut states {
-            if state.owner == Some(context.owner) {
-                state.set_changed();
-            }
-        }
-        let manifest = match manifest {
-            Ok(manifest) => {
-                version.valid = true;
-                manifest
-            }
-            Err(error) => {
-                version.valid = false;
-                if let Some(page) = page
-                    && let Ok(mut state) = states.get_mut(page)
-                    && state.generation == context.generation
-                {
-                    state.loading = false;
-                    state.pending = false;
-                    commands.entity(page).insert(McpCompletion {
-                        id: String::new(),
-                        disconnect: false,
-                        success: false,
-                        message: error,
-                    });
-                }
-                continue;
-            }
-        };
-        materialize_mcp_observations(
-            (Ok(manifest), credentials_observed),
-            &catalog,
-            &extras,
-            &mut commands,
-        );
-        for mut state in &mut states {
-            if state.owner == Some(context.owner) {
-                state.set_changed();
-            }
-        }
-        if let Some(page) = page
-            && let Ok(mut state) = states.get_mut(page)
-            && state.generation == context.generation
-        {
-            state.loading = false;
-            state.pending = false;
-            state.loaded = true;
-            if let Some(result) = &context.result {
-                commands.entity(page).insert(result.clone());
-            }
-        }
-    }
-}
-
-fn materialize_mcp_observations(
-    records: SnapshotRecords,
-    catalog: &Query<(Entity, &Name, &McpCatalogServer)>,
-    extras: &Query<Entity, With<McpConfiguredServer>>,
-    commands: &mut Commands,
-) {
-    let (manifest, credentials_observed) = records;
-    let manifest = manifest.unwrap();
-    for old in extras {
-        commands.entity(old).despawn();
-    }
-    let mut catalog_ids = BTreeSet::new();
-    for (server_entity, _, server) in catalog {
-        catalog_ids.insert(server.id.clone());
-        let occupied = manifest.mcp.servers.contains_key(&server.id);
-        let owned = manifest
-            .mcp
-            .servers
-            .get(&server.id)
-            .is_some_and(|configured| server.owns(configured));
-        let mut authenticated = false;
-        let mut readable = false;
-        for (id, observed) in &credentials_observed {
-            if id != &server.id {
-                continue;
-            }
-            readable = observed.is_ok();
-            if let Ok(Some(observed)) = observed {
-                authenticated = owned && observed.authorizes(&server.url);
-            }
-        }
-        commands.entity(server_entity).insert(McpServerFacts {
-            occupied,
-            owned,
-            authenticated,
-            readable,
-        });
-    }
-    for (id, server) in manifest.mcp.servers {
-        if catalog_ids.contains(&id) || id == "vmux" {
-            continue;
-        }
-        let description = server
-            .url
-            .or(server.command)
-            .unwrap_or_else(|| format!("{:?}", server.transport).to_ascii_lowercase());
-        commands.spawn((
-            Name::new(id.clone()),
-            McpConfiguredServer { id, description },
-        ));
     }
 }
 
@@ -636,7 +389,7 @@ struct McpServerClaim {
     operation: Option<Entity>,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 struct McpServerFacts {
     occupied: bool,
     owned: bool,
@@ -656,6 +409,7 @@ struct McpObservationVersion {
     current: u64,
     owner: Option<Entity>,
     valid: bool,
+    source_tick: Option<bevy::ecs::change_detection::Tick>,
 }
 
 #[derive(Component, Clone)]
@@ -689,24 +443,6 @@ struct PendingMcpSnapshot {
     result: Option<McpCompletion>,
 }
 
-type SnapshotRecords = (
-    Result<ToolsManifest, String>,
-    Vec<(String, Result<Option<McpOauthCredentials>, String>)>,
-);
-
-#[derive(Component)]
-struct McpSnapshotTask {
-    task: Task<SnapshotRecords>,
-}
-
-#[derive(Component)]
-struct SnapshotContext {
-    generation: u64,
-    sequence: u64,
-    owner: Entity,
-    result: Option<McpCompletion>,
-}
-
 #[derive(Component, Clone)]
 struct McpCatalogServer {
     id: String,
@@ -727,6 +463,16 @@ impl McpCatalogServer {
             header_env: Default::default(),
             bearer_token_env_var: None,
         }
+    }
+
+    fn authorizes(&self, resource: &str) -> bool {
+        let Ok(stored) = url::Url::parse(resource) else {
+            return false;
+        };
+        let Ok(requested) = url::Url::parse(&self.url) else {
+            return false;
+        };
+        stored.scheme() == "https" && requested.scheme() == "https" && stored == requested
     }
 
     fn owns(&self, server: &McpServerManifest) -> bool {
@@ -765,22 +511,15 @@ struct McpServerProjection<'w, 's> {
     version: Res<'w, McpObservationVersion>,
 }
 
-#[derive(SystemParam)]
-struct McpCatalog<'w, 's> {
-    servers: Query<'w, 's, (&'static Name, &'static McpCatalogServer)>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::McpConnectionOperation;
     use super::transport::{Http, McpCallback};
     use super::{McpPageState, PendingMcpOperation};
     use bevy::prelude::*;
-    use bevy::tasks::{IoTaskPool, TaskPoolBuilder};
     use bevy_cef::prelude::UiInput;
     use vmux_api::mcp::McpServerRequest;
     use vmux_ecs::EntityTarget;
-    use vmux_ecs::{Operation, OperationRetained, OperationTarget};
 
     #[test]
     fn oauth_callback_requires_the_matching_state() {
@@ -822,12 +561,30 @@ mod tests {
         ] {
             let mut app = App::new();
             app.add_plugins(super::McpConnectionPlugin);
-            let owner = app.world_mut().spawn_empty().id();
+            let directory = tempfile::tempdir().unwrap();
+            let profile = vmux_profile::Profile::named("admission-contract");
+            let owner = app
+                .world_mut()
+                .spawn(vmux_ecs::profile::McpCredentials {
+                    access: vmux_profile::mcp_credentials::McpCredentialAccess::default(),
+                    storage: vmux_profile::mcp_credentials::McpCredentialStorage::at(
+                        profile.clone(),
+                        vmux_profile::ProfilePaths::at(profile, directory.path().to_path_buf()),
+                    ),
+                })
+                .id();
+            let tick = app
+                .world()
+                .entity(owner)
+                .get_ref::<vmux_ecs::profile::McpCredentials>()
+                .unwrap()
+                .last_changed();
             {
                 let mut version = app
                     .world_mut()
                     .resource_mut::<super::McpObservationVersion>();
                 version.owner = Some(owner);
+                version.source_tick = Some(tick);
                 version.valid = true;
             }
             app.world_mut().spawn((
@@ -888,12 +645,30 @@ mod tests {
     fn one_server_binding_refuses_a_second_page_admission() {
         let mut app = App::new();
         app.add_plugins(super::McpConnectionPlugin);
-        let owner = app.world_mut().spawn_empty().id();
+        let directory = tempfile::tempdir().unwrap();
+        let profile = vmux_profile::Profile::named("admission-contract");
+        let owner = app
+            .world_mut()
+            .spawn(vmux_ecs::profile::McpCredentials {
+                access: vmux_profile::mcp_credentials::McpCredentialAccess::default(),
+                storage: vmux_profile::mcp_credentials::McpCredentialStorage::at(
+                    profile.clone(),
+                    vmux_profile::ProfilePaths::at(profile, directory.path().to_path_buf()),
+                ),
+            })
+            .id();
+        let tick = app
+            .world()
+            .entity(owner)
+            .get_ref::<vmux_ecs::profile::McpCredentials>()
+            .unwrap()
+            .last_changed();
         {
             let mut version = app
                 .world_mut()
                 .resource_mut::<super::McpObservationVersion>();
             version.owner = Some(owner);
+            version.source_tick = Some(tick);
             version.valid = true;
         }
         app.world_mut().spawn((
@@ -950,77 +725,5 @@ mod tests {
                 .get::<EntityTarget<McpConnectionOperation>>(second)
                 .is_none()
         );
-    }
-
-    #[test]
-    fn snapshot_from_an_old_profile_cannot_replace_current_global_observations() {
-        IoTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(2).build());
-        let mut app = App::new();
-        app.add_plugins(super::McpConnectionPlugin);
-        let old_owner = app.world_mut().spawn_empty().id();
-        let current_owner = app
-            .world_mut()
-            .spawn(vmux_ecs::profile::McpCredentials {
-                access: vmux_profile::mcp_credentials::McpCredentialAccess::default(),
-                storage: vmux_profile::mcp_credentials::McpCredentialStorage::at(
-                    vmux_profile::Profile::named("mcp-snapshot-contract"),
-                    vmux_profile::ProfilePaths::current(),
-                ),
-            })
-            .id();
-        {
-            let mut version = app
-                .world_mut()
-                .resource_mut::<super::McpObservationVersion>();
-            version.current = 2;
-            version.owner = Some(current_owner);
-            version.valid = true;
-        }
-        let page = app
-            .world_mut()
-            .spawn(McpPageState {
-                generation: 1,
-                owner: Some(old_owner),
-                loading: true,
-                ..Default::default()
-            })
-            .id();
-        let operation = app
-            .world_mut()
-            .spawn((
-                Operation::bundle("mcp.snapshot").unwrap().running(),
-                OperationRetained,
-                OperationTarget::new(page),
-                super::SnapshotContext {
-                    generation: 1,
-                    sequence: 1,
-                    owner: old_owner,
-                    result: None,
-                },
-                super::McpSnapshotTask {
-                    task: IoTaskPool::get()
-                        .spawn(async move { (Ok(crate::ToolsManifest::default()), Vec::new()) }),
-                },
-            ))
-            .id();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while app
-            .world()
-            .get::<super::McpSnapshotTask>(operation)
-            .is_some()
-        {
-            app.update();
-            assert!(
-                std::time::Instant::now() < deadline,
-                "old snapshot did not drain"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        let version = app.world().resource::<super::McpObservationVersion>();
-        assert_eq!(version.current, 2);
-        assert_eq!(version.owner, Some(current_owner));
-        assert!(version.valid);
-        assert!(!app.world().get::<McpPageState>(page).unwrap().loading);
-        assert!(app.world().get::<OperationRetained>(operation).is_none());
     }
 }

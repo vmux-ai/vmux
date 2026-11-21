@@ -441,9 +441,3 @@ impl ToolsManifest {
         }
     }
 }
-
-impl ToolStore {
-    pub(crate) fn write_brewfile(&self, manifest: &ToolsManifest) -> Result<(), String> {
-        manifest.write_brewfile_to(&self.brewfile_path())
-    }
-}

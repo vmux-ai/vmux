@@ -607,7 +607,9 @@ mod tests {
             .mcp
             .servers
             .insert(server.id.clone(), server.manifest());
-        store.save(&ToolsManifest::default()).unwrap();
+        ToolsManifest::default()
+            .write_to(&store.manifest_path())
+            .unwrap();
         let access = McpCredentialAccess::default();
         let transaction = future::block_on(access.transaction()).unwrap();
         let store_lease = future::block_on(store.lease_async());
@@ -666,7 +668,13 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(store.load().unwrap().mcp.servers, original.mcp.servers);
+        assert_eq!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .mcp
+                .servers,
+            original.mcp.servers
+        );
         assert_eq!(
             app.world().get::<OperationState>(operation),
             Some(&OperationState::Failed)
