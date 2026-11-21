@@ -24,8 +24,8 @@ pub use query::*;
 pub use registry::*;
 use std::result::Result;
 use vmux_ecs::{
-    AsyncTask, Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
-    TaskPlugin, TaskResult, TaskSet, TaskToken,
+    Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget, TaskPlugin,
+    TaskResult, TaskSet, TaskToken,
 };
 use vmux_feature::manifest::FeaturePlugin;
 pub use vmux_macro::input;
@@ -59,6 +59,8 @@ mod connection;
 mod dotfile_inventory;
 #[cfg(host)]
 mod dotfile_ops;
+#[cfg(host)]
+mod dotfile_staging;
 mod dotfiles;
 #[cfg(ui)]
 mod extension;
@@ -153,9 +155,6 @@ impl Plugin for ToolRuntimePlugin {
             app.add_plugins(io::ObservationIoPlugin);
         }
         app.add_plugins((
-            TaskPlugin::<Result<dotfiles::ImportedDotfiles, String>>::default(),
-            TaskPlugin::<Result<dotfiles::ImportedAvailableDotfiles, String>>::default(),
-            TaskPlugin::<Result<dotfiles::AdoptedDotfile, String>>::default(),
             TaskPlugin::<Result<homebrew::ImportedBrewfile, String>>::default(),
             TaskPlugin::<Result<npm::ImportedNpmManifest, String>>::default(),
         ))
@@ -181,9 +180,6 @@ impl Plugin for ToolRuntimePlugin {
         .configure_sets(
             Update,
             (
-                TaskSet::of::<Result<dotfiles::ImportedDotfiles, String>>(),
-                TaskSet::of::<Result<dotfiles::ImportedAvailableDotfiles, String>>(),
-                TaskSet::of::<Result<dotfiles::AdoptedDotfile, String>>(),
                 TaskSet::of::<Result<homebrew::ImportedBrewfile, String>>(),
                 TaskSet::of::<Result<npm::ImportedNpmManifest, String>>(),
             )
@@ -199,9 +195,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_observer(accept::<ToolApplyRequest>)
         .add_observer(accept::<ToolImportRequest>)
         .add_observer(completed)
-        .add_observer(store::<dotfiles::ImportedDotfiles>)
-        .add_observer(store::<dotfiles::ImportedAvailableDotfiles>)
-        .add_observer(store::<dotfiles::AdoptedDotfile>)
         .add_observer(store::<homebrew::ImportedBrewfile>)
         .add_observer(store::<npm::ImportedNpmManifest>)
         .add_message::<ToolInventoryChanged>()
@@ -231,9 +224,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                finish_operation::<dotfiles::ImportedDotfiles>,
-                finish_operation::<dotfiles::ImportedAvailableDotfiles>,
-                finish_operation::<dotfiles::AdoptedDotfile>,
                 finish_operation::<homebrew::ImportedBrewfile>,
                 finish_operation::<npm::ImportedNpmManifest>,
             )
@@ -274,8 +264,6 @@ pub type ToolProviderTarget = vmux_ecs::EntityTarget<ToolProviderId>;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationFailed(pub String);
-
-pub(crate) type ToolOperationTask<T> = AsyncTask<Result<T, String>>;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ToolTaskSet {
@@ -480,6 +468,7 @@ fn route_external_operation<R: Clone + Send + Sync + 'static>(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use vmux_ecs::AsyncTask;
 
     #[test]
     fn overridden_data_root_keeps_configuration_and_link_effects_in_the_copy() {
@@ -594,7 +583,7 @@ mod tests {
                         value: String::new(),
                     }),
                     ToolStoreTarget::new(self.store),
-                    ToolOperationTask::new(task),
+                    AsyncTask::new(task),
                 ))
                 .id();
             self.app.world_mut().flush();
@@ -645,15 +634,20 @@ mod tests {
                 .unwrap()
                 .clone();
             let lease = store.lease().unwrap();
+            let path = store.manifest_path();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let mut manifest = ToolsManifest::default();
+            manifest.set_package("npm", "first", true);
+            let bytes = toml::to_string_pretty(&manifest).unwrap();
             let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
             let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
             let task = self.pool.spawn(async move {
                 let _lease = lease;
                 started_tx.send(()).map_err(|error| error.to_string())?;
-                release_rx.recv().map_err(|error| error.to_string())?;
-                let mut manifest = store.load()?;
-                manifest.set_package("npm", "first", true);
-                store.save(&manifest)?;
+                release_rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .map_err(|error| error.to_string())?;
+                std::fs::write(path, bytes).map_err(|error| error.to_string())?;
                 Err::<ImportedNpmManifest, _>("canceled writer finished".to_string())
             });
             let entity = self
@@ -665,7 +659,7 @@ mod tests {
                         value: String::new(),
                     }),
                     ToolStoreTarget::new(self.store),
-                    ToolOperationTask::new(task),
+                    AsyncTask::new(task),
                 ))
                 .id();
             self.app.world_mut().flush();
@@ -729,7 +723,7 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<ToolOperationTask<ImportedNpmManifest>>(second)
+                .get::<AsyncTask<Result<ImportedNpmManifest, String>>>(second)
                 .is_none()
         );
         let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
@@ -806,7 +800,7 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<ToolOperationTask<ImportedNpmManifest>>(entity)
+                .get::<AsyncTask<Result<ImportedNpmManifest, String>>>(entity)
                 .is_none()
         );
         assert!(
@@ -840,7 +834,7 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<ToolOperationTask<ImportedNpmManifest>>(entity)
+                .get::<AsyncTask<Result<ImportedNpmManifest, String>>>(entity)
                 .is_none()
         );
     }
@@ -1109,146 +1103,5 @@ brew "ripgrep"
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
         assert_eq!(loaded.packages["homebrew-formula"], ["ripgrep"]);
         assert_eq!(loaded.packages["homebrew-cask"], ["ghostty"]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn plan_apply_and_unlink_dotfile_package() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let store = ToolStore::new(temp.path(), &home);
-        let dotfiles = store.dotfiles_dir();
-        std::fs::create_dir_all(dotfiles.join("shell/.config/nushell")).unwrap();
-        std::fs::write(dotfiles.join("shell/.config/nushell/config.nu"), "echo hi").unwrap();
-
-        let plan = store.plan_dotfile_package("shell").unwrap();
-        assert_eq!(plan.missing(), 1);
-        assert_eq!(store.apply_dotfile_package("shell").unwrap(), 1);
-        let target = home.join(".config/nushell/config.nu");
-        assert!(target.symlink_metadata().unwrap().file_type().is_symlink());
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "echo hi");
-        assert_eq!(store.unlink_dotfile_package("shell").unwrap(), 1);
-        assert!(!target.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn disable_and_unlink_dotfile_package_updates_links_and_manifest() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let store = ToolStore::new(temp.path(), &home);
-        let dotfiles = store.dotfiles_dir();
-        let manifest_path = store.manifest_path();
-        std::fs::create_dir_all(dotfiles.join("shell")).unwrap();
-        std::fs::write(dotfiles.join("shell/.zshrc"), "managed").unwrap();
-        let mut manifest = ToolsManifest::default();
-        manifest.set_dotfile_package("shell", true);
-        manifest.write_to(&manifest_path).unwrap();
-        store.apply_dotfile_package("shell").unwrap();
-
-        assert_eq!(
-            store.disable_and_unlink_dotfile_package("shell").unwrap(),
-            1
-        );
-        assert!(!home.join(".zshrc").exists());
-        assert!(
-            ToolsManifest::read(&manifest_path)
-                .unwrap()
-                .dotfiles
-                .packages
-                .is_empty()
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn conflicts_block_the_entire_apply() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let store = ToolStore::new(temp.path(), &home);
-        let dotfiles = store.dotfiles_dir();
-        std::fs::create_dir_all(dotfiles.join("git")).unwrap();
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(dotfiles.join("git/.gitconfig"), "managed").unwrap();
-        std::fs::write(home.join(".gitconfig"), "existing").unwrap();
-
-        let error = store.apply_dotfile_package("git").unwrap_err();
-        assert!(error.contains("1 conflict"));
-        assert_eq!(
-            std::fs::read_to_string(home.join(".gitconfig")).unwrap(),
-            "existing"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn enabled_packages_are_preflighted_before_any_links_are_created() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let store = ToolStore::new(temp.path(), &home);
-        let dotfiles = store.dotfiles_dir();
-        std::fs::create_dir_all(dotfiles.join("git")).unwrap();
-        std::fs::create_dir_all(dotfiles.join("shell/.config/nushell")).unwrap();
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(dotfiles.join("git/.gitconfig"), "managed").unwrap();
-        std::fs::write(dotfiles.join("shell/.config/nushell/config.nu"), "echo hi").unwrap();
-        std::fs::write(home.join(".gitconfig"), "existing").unwrap();
-        let mut manifest = ToolsManifest::default();
-        manifest.set_dotfile_package("shell", true);
-        manifest.set_dotfile_package("git", true);
-
-        let result = store.apply_enabled_dotfiles(&manifest);
-
-        assert!(result.unwrap_err().contains("git"));
-        assert!(!home.join(".config/nushell/config.nu").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn adopt_moves_file_links_it_and_updates_manifest() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let store = ToolStore::new(temp.path(), &home);
-        let dotfiles = store.dotfiles_dir();
-        let manifest = store.manifest_path();
-        std::fs::create_dir_all(home.join(".config/nushell")).unwrap();
-        let source = home.join(".config/nushell/config.nu");
-        std::fs::write(&source, "echo hi").unwrap();
-
-        let destination = store.adopt_dotfile(&source, "shell").unwrap();
-        assert_eq!(
-            destination,
-            dotfiles.join("shell/.config/nushell/config.nu")
-        );
-        assert!(source.symlink_metadata().unwrap().file_type().is_symlink());
-        assert_eq!(std::fs::read_to_string(source).unwrap(), "echo hi");
-        assert_eq!(
-            ToolsManifest::read(&manifest).unwrap().dotfiles.packages,
-            ["shell"]
-        );
-    }
-
-    #[test]
-    fn dotfile_import_copies_stow_packages_and_enables_them() {
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("stow");
-        let store = ToolStore::new(temp.path(), temp.path().join("home"));
-        let dotfiles = store.dotfiles_dir();
-        let manifest = store.manifest_path();
-        std::fs::create_dir_all(source.join("git")).unwrap();
-        std::fs::create_dir_all(source.join("shell/.config/nushell")).unwrap();
-        std::fs::write(source.join("git/.gitconfig"), "git").unwrap();
-        std::fs::write(source.join("shell/.config/nushell/config.nu"), "nu").unwrap();
-
-        assert_eq!(store.import_dotfiles(&source).unwrap(), 2);
-        assert_eq!(
-            std::fs::read_to_string(dotfiles.join("git/.gitconfig")).unwrap(),
-            "git"
-        );
-        assert_eq!(
-            ToolsManifest::read(&manifest).unwrap().dotfiles.packages,
-            ["git", "shell"]
-        );
-        assert!(source.join("git/.gitconfig").is_file());
     }
 }

@@ -1,4 +1,3 @@
-use std::io;
 use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
@@ -7,8 +6,10 @@ use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_feature::manifest::FeaturePlugin;
 
 use crate::dotfiles::{
-    AppliedEnabledDotfiles, ApplyEnabledDotfiles, DisableDotfilePackage, DisabledDotfilePackage,
-    DiscoverDotfilePackages, DiscoveredDotfilePackages, DotfilePlan, PlanDotfilePackage,
+    AdoptDotfile, AdoptedDotfile, AppliedEnabledDotfiles, ApplyEnabledDotfiles,
+    DisableDotfilePackage, DisabledDotfilePackage, DiscoverDotfilePackages,
+    DiscoveredDotfilePackages, DotfilePlan, ImportAvailableDotfiles, ImportDotfiles,
+    ImportedAvailableDotfiles, ImportedDotfiles, PlanDotfilePackage,
 };
 use crate::homebrew::ImportedBrewfile;
 use crate::npm::ImportedNpmManifest;
@@ -53,6 +54,9 @@ impl Plugin for ToolCliPlugin {
                     execute_adopt,
                     execute_unlink,
                     complete_dotfiles,
+                    complete_available,
+                    complete_adoption,
+                    complete_physical,
                     complete_imports,
                 )
                     .chain(),
@@ -86,6 +90,15 @@ struct ToolApplyRequest;
 
 #[derive(Component)]
 struct WaitingDotfiles;
+
+#[derive(Component)]
+struct WaitingAvailable;
+
+#[derive(Component)]
+struct WaitingAdoption;
+
+#[derive(Component)]
+struct WaitingPhysical;
 
 #[derive(Component)]
 struct HomebrewImportRequest(PathBuf);
@@ -144,18 +157,22 @@ fn route(
                 }
             }
             "tool.import.dotfiles" => {
-                entity.insert(DotfileImportRequest(
-                    invocation.value_os("path").map(PathBuf::from),
+                entity.insert((
+                    DotfileImportRequest(invocation.value_os("path").map(PathBuf::from)),
+                    store.clone(),
                 ));
             }
             "tool.adopt" => {
                 if let (Some(path), Some(package)) =
                     (invocation.value_os("path"), invocation.value("package"))
                 {
-                    entity.insert(DotfileAdoptRequest {
-                        path: PathBuf::from(path),
-                        package: package.to_string(),
-                    });
+                    entity.insert((
+                        DotfileAdoptRequest {
+                            path: PathBuf::from(path),
+                            package: package.to_string(),
+                        },
+                        store.clone(),
+                    ));
                 }
             }
             "tool.unlink" => {
@@ -501,23 +518,45 @@ fn execute_dotfile_import(
     requests: Query<(Entity, &DotfileImportRequest), Added<DotfileImportRequest>>,
     mut commands: Commands,
 ) {
-    let store = ToolStore::current();
     for (entity, request) in &requests {
-        let result = match &request.0 {
-            Some(path) => store.import_dotfiles(path).map_err(io::Error::other),
-            None => import_dotfile_packages(&store),
+        let Some(path) = &request.0 else {
+            commands
+                .entity(entity)
+                .remove::<DotfileImportRequest>()
+                .insert((WaitingAvailable, ImportAvailableDotfiles));
+            continue;
         };
-        match result {
-            Ok(imported) => {
-                println!("imported {imported} dotfile package(s)");
-                commands.entity(entity).insert(CliResult::default());
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-            }
-        }
+        commands
+            .entity(entity)
+            .remove::<DotfileImportRequest>()
+            .insert((WaitingPhysical, ImportDotfiles::new(path.clone())));
+    }
+}
+
+fn complete_physical(
+    requests: Query<
+        (
+            Entity,
+            Option<&ImportedDotfiles>,
+            Option<&ToolOperationFailed>,
+        ),
+        (With<WaitingPhysical>, With<crate::ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, imported, failure) in &requests {
+        let result = if let Some(failure) = failure {
+            CliResult(Err(failure.0.clone()))
+        } else if let Some(imported) = imported {
+            println!("imported {} dotfile package(s)", imported.packages);
+            CliResult::default()
+        } else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(result)
+            .remove::<(WaitingPhysical, ImportDotfiles, ToolStore)>();
     }
 }
 
@@ -525,22 +564,41 @@ fn execute_adopt(
     requests: Query<(Entity, &DotfileAdoptRequest), Added<DotfileAdoptRequest>>,
     mut commands: Commands,
 ) {
-    let store = ToolStore::current();
     for (entity, request) in &requests {
-        match store
-            .adopt_dotfile(&request.path, &request.package)
-            .map_err(io::Error::other)
-        {
-            Ok(destination) => {
-                println!("{}", destination.display());
-                commands.entity(entity).insert(CliResult::default());
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-            }
-        }
+        commands
+            .entity(entity)
+            .remove::<DotfileAdoptRequest>()
+            .insert((
+                WaitingAdoption,
+                AdoptDotfile::new(request.path.clone(), request.package.clone()),
+            ));
+    }
+}
+
+fn complete_adoption(
+    requests: Query<
+        (
+            Entity,
+            Option<&AdoptedDotfile>,
+            Option<&ToolOperationFailed>,
+        ),
+        (With<WaitingAdoption>, With<crate::ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, adopted, failure) in &requests {
+        let result = if let Some(failure) = failure {
+            CliResult(Err(failure.0.clone()))
+        } else if let Some(adopted) = adopted {
+            println!("{}", adopted.path.display());
+            CliResult::default()
+        } else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(result)
+            .remove::<(WaitingAdoption, AdoptDotfile, ToolStore)>();
     }
 }
 
@@ -592,16 +650,32 @@ fn complete_dotfiles(
     }
 }
 
-fn import_dotfile_packages(store: &ToolStore) -> io::Result<usize> {
-    let packages = store.dotfile_packages().map_err(io::Error::other)?;
-    let mut manifest = store.load().map_err(io::Error::other)?;
-    let mut imported = 0;
-    for package in packages {
-        imported += usize::from(!manifest.dotfiles.packages.contains(&package));
-        manifest.set_dotfile_package(&package, true);
+fn complete_available(
+    requests: Query<
+        (
+            Entity,
+            Option<&ImportedAvailableDotfiles>,
+            Option<&ToolOperationFailed>,
+        ),
+        (With<WaitingAvailable>, With<crate::ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, imported, failure) in &requests {
+        let result = if let Some(failure) = failure {
+            CliResult(Err(failure.0.clone()))
+        } else if let Some(imported) = imported {
+            println!("imported {} dotfile package(s)", imported.packages);
+            CliResult::default()
+        } else {
+            continue;
+        };
+        commands.entity(entity).insert(result).remove::<(
+            WaitingAvailable,
+            ImportAvailableDotfiles,
+            ToolStore,
+        )>();
     }
-    store.save(&manifest).map_err(io::Error::other)?;
-    Ok(imported)
 }
 
 #[cfg(test)]
@@ -610,6 +684,146 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn cli_adoption_uses_the_selected_home_and_commits_after_linking() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        ToolsManifest::default()
+            .write_to(&store.manifest_path())
+            .unwrap();
+        std::fs::create_dir_all(store.home()).unwrap();
+        let source = store.home().join(".adopt-qa");
+        std::fs::write(&source, b"original").unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        let request = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.adopt".into(),
+                    arguments: BTreeMap::from([
+                        ("path".into(), vec![source.clone().into_os_string()]),
+                        ("package".into(), vec!["shell".into()]),
+                    ]),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(request).is_none() {
+            app.update();
+            assert!(Instant::now() < deadline, "CLI adoption did not drain");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
+        assert!(source.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&source).unwrap(), b"original");
+        assert_eq!(
+            std::fs::read(store.dotfiles_dir().join("shell/.adopt-qa")).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .dotfiles
+                .packages,
+            ["shell"]
+        );
+        assert!(store.lease().is_some());
+    }
+
+    #[test]
+    fn cli_available_import_uses_the_selected_store_and_preserves_other_packages() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let mut manifest = ToolsManifest::default();
+        manifest.set_package("npm", "preserved", true);
+        manifest.write_to(&store.manifest_path()).unwrap();
+        let package = store.dotfiles_dir().join("shell");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join(".zshrc"), b"shell").unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        let request = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.import.dotfiles".into(),
+                    arguments: BTreeMap::new(),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(request).is_none() {
+            app.update();
+            assert!(Instant::now() < deadline, "available import did not drain");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
+        let saved = ToolsManifest::read(&store.manifest_path()).unwrap();
+        assert_eq!(saved.dotfiles.packages, ["shell"]);
+        assert_eq!(saved.packages["npm"], ["preserved"]);
+        assert!(store.lease().is_some());
+    }
+
+    #[test]
+    fn cli_physical_import_uses_the_selected_store_and_refuses_duplicate_packages() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let mut manifest = ToolsManifest::default();
+        manifest.set_package("npm", "preserved", true);
+        manifest.write_to(&store.manifest_path()).unwrap();
+        let input = directory.path().join("input");
+        std::fs::create_dir_all(input.join("shell")).unwrap();
+        std::fs::write(input.join("shell/.zshrc"), b"shell").unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        for duplicate in [false, true] {
+            let request = app
+                .world_mut()
+                .spawn((
+                    store.clone(),
+                    CliInvocation {
+                        command: "tool.import.dotfiles".into(),
+                        arguments: BTreeMap::from([("path".into(), vec![OsString::from(&input)])]),
+                    },
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while app.world().get::<CliResult>(request).is_none() {
+                app.update();
+                assert!(
+                    Instant::now() < deadline,
+                    "physical CLI import did not drain"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(
+                app.world().get::<CliResult>(request).unwrap().0.is_err(),
+                duplicate
+            );
+            assert_eq!(
+                std::fs::read(store.dotfiles_dir().join("shell/.zshrc")).unwrap(),
+                b"shell"
+            );
+            let saved = ToolsManifest::read(&store.manifest_path()).unwrap();
+            assert_eq!(saved.dotfiles.packages, ["shell"]);
+            assert_eq!(saved.packages["npm"], ["preserved"]);
+            assert!(store.lease().is_some());
+            app.world_mut().despawn(request);
+        }
+    }
 
     #[test]
     fn cli_apply_and_unlink_share_dotfile_operations_for_the_selected_store() {

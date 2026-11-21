@@ -14,7 +14,7 @@ impl PathReceipt {
         self.0.load(Ordering::Acquire)
     }
 
-    fn record(&self) {
+    pub(super) fn record(&self) {
         self.0.store(true, Ordering::Release);
     }
 }

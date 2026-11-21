@@ -8,12 +8,16 @@ use vmux_ecs::{
 };
 
 use crate::dotfiles::{
-    AppliedEnabledDotfiles, ApplyEnabledDotfiles, DisableDotfilePackage, DisabledDotfilePackage,
-    DiscoverDotfilePackages, DiscoveredDotfilePackages, DotfileLink, DotfileLinkState, DotfilePlan,
-    LinkDotfilePackage, LinkedDotfilePackage, PlanDotfilePackage, UnlinkDotfilePackage,
-    UnlinkedDotfilePackage,
+    AdoptDotfile, AdoptedDotfile, AppliedEnabledDotfiles, ApplyEnabledDotfiles,
+    DisableDotfilePackage, DisabledDotfilePackage, DiscoverDotfilePackages,
+    DiscoveredDotfilePackages, DotfileLink, DotfileLinkState, DotfilePlan, ImportAvailableDotfiles,
+    ImportedAvailableDotfiles, LinkDotfilePackage, LinkedDotfilePackage, PlanDotfilePackage,
+    UnlinkDotfilePackage, UnlinkedDotfilePackage,
 };
-use crate::io::{InspectLink, LinkPath, PathReceipt, ReadDirectory, UnlinkPath};
+use crate::io::{
+    FileIdentity, InspectLink, LinkPath, MovePath, ObservePath, PathReceipt, ReadDirectory,
+    UnlinkPath,
+};
 use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
 use crate::{
     ExternalToolOperation, ToolOperationFailed, ToolOperationFinished, ToolOperationSucceeded,
@@ -34,6 +38,8 @@ impl Plugin for DotfileOperationsPlugin {
                     accept::<DisableDotfilePackage>,
                     accept::<UnlinkDotfilePackage>,
                     accept::<ApplyEnabledDotfiles>,
+                    accept::<ImportAvailableDotfiles>,
+                    accept::<AdoptDotfile>,
                 ),
                 (
                     cancel::<PlanDotfilePackage>,
@@ -42,6 +48,8 @@ impl Plugin for DotfileOperationsPlugin {
                     cancel::<DisableDotfilePackage>,
                     cancel::<UnlinkDotfilePackage>,
                     cancel::<ApplyEnabledDotfiles>,
+                    cancel::<ImportAvailableDotfiles>,
+                    cancel::<AdoptDotfile>,
                 ),
                 begin,
                 loaded,
@@ -51,12 +59,13 @@ impl Plugin for DotfileOperationsPlugin {
                     select_disable,
                     select_unlink,
                     select_apply,
+                    select_adopt,
                 ),
-                (plan, discover),
+                (plan, discover, adopt_observed, adopt_selected).chain(),
                 directories,
                 inspected,
                 planned,
-                discovered,
+                (discovered, import_available, relocated).chain(),
                 retry_cleanup,
                 cancel_files,
                 mutate,
@@ -67,7 +76,7 @@ impl Plugin for DotfileOperationsPlugin {
                 save,
                 saved,
                 rollback,
-                restored_config,
+                (restored_config, return_adopted, returned_adopted).chain(),
                 (
                     reverted::<LinkPath, Linking>,
                     reverted::<UnlinkPath, Unlinking>,
@@ -79,7 +88,8 @@ impl Plugin for DotfileOperationsPlugin {
         )
         .add_systems(
             PostUpdate,
-            (finish, finish_mutations).after(vmux_ecs::JobSet::Cleanup),
+            (finish, finish_mutations, finish_available, finish_adoption)
+                .after(vmux_ecs::JobSet::Cleanup),
         )
         .add_observer(cleanup_failed);
     }
@@ -150,6 +160,30 @@ struct ConfigRestored;
 struct CleanupFailed(String);
 #[derive(Component)]
 struct MutationFinished(usize);
+#[derive(Component)]
+struct ImportedCount(usize);
+#[derive(Component)]
+struct Adopting;
+#[derive(Component)]
+struct AdoptHome;
+#[derive(Component)]
+struct AdoptRoot;
+#[derive(Component)]
+struct AdoptInput(crate::io::PathFacts);
+#[derive(Component)]
+struct AdoptHomePath(PathBuf);
+#[derive(Component)]
+struct AdoptStorePath(PathBuf);
+#[derive(Component)]
+struct MovingFile;
+#[derive(Component, Default)]
+struct MovementReceipt(PathReceipt);
+#[derive(Component)]
+struct Relocated;
+#[derive(Component)]
+struct ReturningFile;
+#[derive(Component)]
+struct ReturnedFile;
 #[derive(Component)]
 struct Changing;
 #[derive(Component)]
@@ -429,6 +463,338 @@ fn select_apply(
     }
 }
 
+fn select_adopt(
+    work: Query<
+        (Entity, &Captured<AdoptDotfile>, &ToolStore, &OperationState),
+        (With<Loaded>, Without<Adopting>, Without<Failure>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, request, store, state) in &work {
+        if *state != OperationState::Running {
+            continue;
+        }
+        if !Package::valid(&request.0.package) {
+            commands
+                .entity(entity)
+                .insert(Failure("invalid dotfile package name".into()));
+            continue;
+        }
+        let path = match request.0.path.strip_prefix("~") {
+            Ok(relative) => store.home().join(relative),
+            Err(_) => request.0.path.clone(),
+        };
+        commands.entity(entity).insert((
+            Adopting,
+            Selected,
+            Mutation,
+            Enable,
+            Names(vec![request.0.package.clone()]),
+            JobRequest(ObservePath { path }),
+        ));
+        commands.spawn((
+            Name::new("Adopt home"),
+            Operation::bundle("tool.dotfile.home").unwrap().running(),
+            OperationRetained,
+            ChildOf(entity),
+            AdoptHome,
+            JobRequest(ObservePath {
+                path: store.home().to_path_buf(),
+            }),
+        ));
+        commands.spawn((
+            Name::new("Adopt root"),
+            Operation::bundle("tool.dotfile.root").unwrap().running(),
+            OperationRetained,
+            ChildOf(entity),
+            AdoptRoot,
+            JobRequest(ObservePath {
+                path: store.dotfiles_dir(),
+            }),
+        ));
+    }
+}
+
+fn adopt_observed(
+    work: Query<
+        (
+            Entity,
+            &Captured<AdoptDotfile>,
+            &OperationState,
+            &JobResult<ObservePath>,
+        ),
+        With<Adopting>,
+    >,
+    paths: Query<(
+        Entity,
+        &ChildOf,
+        &JobResult<ObservePath>,
+        Has<AdoptHome>,
+        Has<AdoptRoot>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, _request, state, result) in &work {
+        let mut home = None;
+        let mut root = None;
+        for (child, parent, facts, is_home, is_root) in &paths {
+            if parent.parent() != entity {
+                continue;
+            }
+            if is_home {
+                home = Some((child, facts));
+            }
+            if is_root {
+                root = Some((child, facts));
+            }
+        }
+        let (Some((home_child, home_result)), Some((root_child, root_result))) = (home, root)
+        else {
+            continue;
+        };
+        commands.entity(entity).remove::<JobResult<ObservePath>>();
+        commands
+            .entity(home_child)
+            .remove::<JobResult<ObservePath>>();
+        commands
+            .entity(root_child)
+            .remove::<JobResult<ObservePath>>();
+        if *state != OperationState::Running {
+            continue;
+        }
+        let home = match &home_result.0 {
+            Ok(Ok(facts)) => &facts.path,
+            Ok(Err(error)) | Err(error) => {
+                commands.entity(entity).insert(Failure(error.clone()));
+                continue;
+            }
+        };
+        let root = match &root_result.0 {
+            Ok(Ok(facts)) => &facts.path,
+            Ok(Err(error)) | Err(error) => {
+                commands.entity(entity).insert(Failure(error.clone()));
+                continue;
+            }
+        };
+        let facts = match &result.0 {
+            Ok(Ok(facts)) => facts,
+            Ok(Err(error)) | Err(error) => {
+                commands.entity(entity).insert(Failure(error.clone()));
+                continue;
+            }
+        };
+        commands.entity(entity).insert((
+            AdoptInput(facts.clone()),
+            AdoptHomePath(home.clone()),
+            AdoptStorePath(root.clone()),
+        ));
+    }
+}
+
+fn adopt_selected(
+    work: Query<
+        (
+            Entity,
+            &Captured<AdoptDotfile>,
+            &AdoptInput,
+            &AdoptHomePath,
+            &AdoptStorePath,
+            &OperationState,
+        ),
+        (Without<Ready>, Without<Failure>),
+    >,
+    files: Query<&ChildOf, With<MovingFile>>,
+    mut commands: Commands,
+) {
+    for (entity, request, input, home, root, state) in &work {
+        if *state != OperationState::Running || files.iter().any(|owner| owner.parent() == entity) {
+            continue;
+        }
+        let facts = &input.0;
+        let home = &home.0;
+        let root = &root.0;
+        let Some(metadata) = &facts.metadata else {
+            commands
+                .entity(entity)
+                .insert(Failure("adopt source does not exist".into()));
+            continue;
+        };
+        if !metadata.is_file() || facts.path.starts_with(root) {
+            commands.entity(entity).insert(Failure(
+                "adopt source must be a regular home file outside Tools".into(),
+            ));
+            continue;
+        }
+        let Ok(relative) = facts.path.strip_prefix(home) else {
+            commands.entity(entity).insert(Failure(
+                "adopt source must be inside the accepted home".into(),
+            ));
+            continue;
+        };
+        if relative.as_os_str().is_empty() {
+            commands
+                .entity(entity)
+                .insert(Failure("adopt source has no relative path".into()));
+            continue;
+        }
+        let identity = match FileIdentity::from_metadata(metadata) {
+            Ok(identity) => identity,
+            Err(error) => {
+                commands.entity(entity).insert(Failure(error));
+                continue;
+            }
+        };
+        let root = root.join(&request.0.package);
+        let destination = root.join(relative);
+        let package = commands
+            .spawn((
+                Name::new(request.0.package.clone()),
+                Package,
+                PackageRoot(root),
+                ChildOf(entity),
+            ))
+            .id();
+        let receipt = PathReceipt::default();
+        commands.spawn((
+            Name::new("Adopted file"),
+            Operation::bundle("tool.dotfile.move").unwrap().running(),
+            OperationRetained,
+            ChildOf(entity),
+            EntityTarget::<Package>::new(package),
+            File,
+            Source(destination.clone()),
+            Target(facts.path.clone()),
+            identity.clone(),
+            LinkState(DotfileLinkState::Missing),
+            MovingFile,
+            MovementReceipt(receipt.clone()),
+            JobRequest(MovePath {
+                source: facts.path.clone(),
+                target: destination,
+                expected: identity,
+                receipt,
+            }),
+        ));
+    }
+}
+
+fn relocated(
+    files: Query<
+        (
+            Entity,
+            &ChildOf,
+            &MovementReceipt,
+            Option<&JobResult<MovePath>>,
+            Has<JobRequest<MovePath>>,
+        ),
+        With<MovingFile>,
+    >,
+    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    mut commands: Commands,
+) {
+    for (entity, owner, receipt, result, requested) in &files {
+        if requested || captures.iter().any(|target| target.entity() == entity) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .remove::<(MovingFile, JobResult<MovePath>)>();
+        if receipt.0.changed() {
+            commands.entity(entity).insert(Relocated);
+        }
+        match result.map(|result| &result.0) {
+            Some(Ok(Ok(_))) => {
+                commands.entity(owner.parent()).insert(Ready);
+            }
+            Some(Ok(Err(error))) | Some(Err(error)) => {
+                commands
+                    .entity(owner.parent())
+                    .insert(Failure(error.clone()));
+            }
+            None => {
+                commands
+                    .entity(owner.parent())
+                    .insert(Failure("native adopt move result is unavailable".into()));
+            }
+        }
+    }
+}
+
+fn return_adopted(
+    work: Query<
+        (Entity, Has<SaveStarted>, Has<ConfigRestored>),
+        (
+            With<Captured<AdoptDotfile>>,
+            With<Failure>,
+            Without<CleanupFailed>,
+        ),
+    >,
+    files: Query<
+        (
+            Entity,
+            &ChildOf,
+            &Source,
+            &Target,
+            &FileIdentity,
+            Has<Changed>,
+            Has<Reverted>,
+        ),
+        (
+            With<Relocated>,
+            Without<MovingFile>,
+            Without<ReturningFile>,
+            Without<ReturnedFile>,
+        ),
+    >,
+    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    mut commands: Commands,
+) {
+    for (owner, saved, restored) in &work {
+        if saved && !restored {
+            continue;
+        }
+        for (file, parent, source, target, identity, changed, reverted) in &files {
+            if parent.parent() != owner
+                || changed && !reverted
+                || captures.iter().any(|capture| capture.entity() == file)
+            {
+                continue;
+            }
+            commands.entity(file).insert((
+                ReturningFile,
+                OperationState::Running,
+                JobRequest(MovePath {
+                    source: source.0.clone(),
+                    target: target.0.clone(),
+                    expected: identity.clone(),
+                    receipt: PathReceipt::default(),
+                }),
+            ));
+        }
+    }
+}
+
+fn returned_adopted(
+    files: Query<(Entity, &ChildOf, &JobResult<MovePath>), With<ReturningFile>>,
+    mut commands: Commands,
+) {
+    for (entity, owner, result) in &files {
+        commands
+            .entity(entity)
+            .remove::<(ReturningFile, JobResult<MovePath>)>();
+        match &result.0 {
+            Ok(Ok(_)) => {
+                commands.entity(entity).insert(ReturnedFile);
+            }
+            Ok(Err(error)) | Err(error) => {
+                commands
+                    .entity(owner.parent())
+                    .insert(CleanupFailed(error.clone()));
+            }
+        }
+    }
+}
+
 fn plan(
     work: Query<
         (Entity, &Names, &ToolStore, &OperationState),
@@ -486,7 +852,10 @@ fn discover(
     work: Query<
         (Entity, &ToolStore, &OperationState),
         (
-            With<Captured<DiscoverDotfilePackages>>,
+            Or<(
+                With<Captured<DiscoverDotfilePackages>>,
+                With<Captured<ImportAvailableDotfiles>>,
+            )>,
             With<Loaded>,
             Without<Selected>,
             Without<Failure>,
@@ -643,7 +1012,12 @@ fn planned(
             Has<Mutation>,
             Has<RemoveLinks>,
         ),
-        (With<Selected>, Without<Ready>, Without<Failure>),
+        (
+            With<Selected>,
+            Without<Ready>,
+            Without<Failure>,
+            Without<Adopting>,
+        ),
     >,
     directories: Query<(&ChildOf, Has<DirectoryDone>), With<Directory>>,
     files: Query<(&ChildOf, &Source, &Target, Option<&LinkState>), With<File>>,
@@ -733,6 +1107,30 @@ fn discovered(
     }
 }
 
+fn import_available(
+    work: Query<
+        (Entity, &DiscoveryOutput, &Before, &OperationState),
+        (With<Captured<ImportAvailableDotfiles>>, Without<Mutation>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, packages, before, state) in &work {
+        if *state != OperationState::Running {
+            continue;
+        }
+        let mut imported = 0;
+        for package in &packages.0 {
+            imported += usize::from(!before.0.dotfiles.packages.contains(package));
+        }
+        commands.entity(entity).insert((
+            Mutation,
+            Enable,
+            Names(packages.0.clone()),
+            ImportedCount(imported),
+        ));
+    }
+}
+
 fn retry_cleanup(
     added: Query<(Entity, &ToolStore), (With<Work>, Added<Work>)>,
     failed: Query<(Entity, &ToolStore), With<CleanupFailed>>,
@@ -769,7 +1167,15 @@ fn cancel_files(
     work: Query<(Entity, &OperationState, Has<Failure>, Has<Rollback>), With<Work>>,
     mut files: Query<
         (&ChildOf, &mut OperationState),
-        (Or<(With<File>, With<Directory>)>, Without<Work>),
+        (
+            Or<(
+                With<File>,
+                With<Directory>,
+                With<AdoptHome>,
+                With<AdoptRoot>,
+            )>,
+            Without<Work>,
+        ),
     >,
 ) {
     for (entity, state, failed, rollback) in &work {
@@ -1255,7 +1661,12 @@ fn finish_mutations(
             Has<Disable>,
             Has<RemoveLinks>,
         ),
-        (With<Mutation>, Without<CleanupFailed>),
+        (
+            With<Mutation>,
+            Without<CleanupFailed>,
+            Without<Captured<ImportAvailableDotfiles>>,
+            Without<Captured<AdoptDotfile>>,
+        ),
     >,
     mut commands: Commands,
     wake: Option<Res<vmux_ecs::JobWake>>,
@@ -1292,6 +1703,112 @@ fn finish_mutations(
                 requester.insert((
                     AppliedEnabledDotfiles { files: count.0 },
                     ToolOperationSucceeded(String::new()),
+                    ToolOperationFinished,
+                    OperationState::Succeeded,
+                ));
+            }
+            if !original.retained {
+                requester.remove::<OperationRetained>();
+            }
+        }
+        commands.entity(entity).despawn();
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn finish_adoption(
+    work: Query<
+        (Entity, &Work, Option<&Children>, Option<&Failure>),
+        (
+            With<Captured<AdoptDotfile>>,
+            With<MutationFinished>,
+            Without<CleanupFailed>,
+        ),
+    >,
+    files: Query<
+        (
+            &ChildOf,
+            &Source,
+            Has<MovingFile>,
+            Has<Relocated>,
+            Has<ReturnedFile>,
+        ),
+        With<File>,
+    >,
+    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    mut commands: Commands,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+) {
+    for (entity, original, children, failure) in &work {
+        let mut destination = None;
+        let mut pending = false;
+        for (owner, source, moving, relocated, returned) in &files {
+            if owner.parent() != entity {
+                continue;
+            }
+            destination = Some(source.0.clone());
+            pending |= moving || failure.is_some() && relocated && !returned;
+        }
+        if pending
+            || captures.iter().any(|target| {
+                target.entity() == entity
+                    || children.is_some_and(|children| children.contains(&target.entity()))
+            })
+        {
+            continue;
+        }
+        if let Ok(mut requester) = commands.get_entity(original.requester) {
+            if let Some(failure) = failure {
+                requester.insert((
+                    ToolOperationFailed(failure.0.clone()),
+                    ToolOperationFinished,
+                ));
+            } else if let Some(path) = destination {
+                requester.insert((
+                    AdoptedDotfile { path: path.clone() },
+                    ToolOperationSucceeded(path.display().to_string()),
+                    ToolOperationFinished,
+                    OperationState::Succeeded,
+                ));
+            }
+            if !original.retained {
+                requester.remove::<OperationRetained>();
+            }
+        }
+        commands.entity(entity).despawn();
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn finish_available(
+    work: Query<
+        (Entity, &Work, &ImportedCount, Option<&Failure>),
+        (
+            With<Captured<ImportAvailableDotfiles>>,
+            With<MutationFinished>,
+            Without<CleanupFailed>,
+        ),
+    >,
+    mut commands: Commands,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+) {
+    for (entity, original, imported, failure) in &work {
+        if let Ok(mut requester) = commands.get_entity(original.requester) {
+            if let Some(failure) = failure {
+                requester.insert((
+                    ToolOperationFailed(failure.0.clone()),
+                    ToolOperationFinished,
+                ));
+            } else {
+                requester.insert((
+                    ImportedAvailableDotfiles {
+                        packages: imported.0,
+                    },
+                    ToolOperationSucceeded(format!("imported {} dotfile package(s)", imported.0)),
                     ToolOperationFinished,
                     OperationState::Succeeded,
                 ));
@@ -1389,6 +1906,251 @@ mod tests {
                 );
                 std::thread::sleep(Duration::from_millis(1));
             }
+        }
+    }
+
+    #[test]
+    fn adoption_moves_and_links_before_committing_configuration() {
+        let mut fixture = Fixture::new();
+        let source = fixture.store.home().join(".adopt-qa");
+        std::fs::write(&source, b"original content").unwrap();
+        let request = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.adoption").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                AdoptDotfile::new(&source, "shell"),
+            ))
+            .id();
+        fixture.finish(request);
+        let destination = fixture.store.dotfiles_dir().join("shell/.adopt-qa");
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationSucceeded>(request)
+                .is_some(),
+            "adoption failed: {:?}",
+            fixture.app.world().get::<ToolOperationFailed>(request)
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"original content");
+        assert!(source.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&source).unwrap(), b"original content");
+        assert_eq!(
+            vmux_path::PathIdentity::resolve(
+                &fixture
+                    .app
+                    .world()
+                    .get::<AdoptedDotfile>(request)
+                    .unwrap()
+                    .path
+            ),
+            vmux_path::PathIdentity::resolve(&destination)
+        );
+        assert_eq!(
+            crate::ToolsManifest::read(&fixture.store.manifest_path())
+                .unwrap()
+                .dotfiles
+                .packages,
+            ["shell"]
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn adoption_cancellation_after_move_restores_the_original_file_and_configuration() {
+        for interruption in ["cancel", "store", "requester"] {
+            let mut fixture = Fixture::new();
+            let source = fixture.store.home().join(".adopt-qa");
+            std::fs::write(&source, b"original content").unwrap();
+            let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+            let destination = fixture.store.dotfiles_dir().join("shell/.adopt-qa");
+            let request = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.dotfile.adoption.cancel").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    AdoptDotfile::new(&source, "shell"),
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !destination.is_file() {
+                fixture.app.update();
+                assert!(Instant::now() < deadline, "adopt file was not moved");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            match interruption {
+                "cancel" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(request)
+                        .insert(OperationState::Canceled);
+                }
+                "store" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.source)
+                        .insert(ToolStore::new(
+                            fixture.directory.path().join("replacement"),
+                            fixture.store.home(),
+                        ));
+                }
+                "requester" => {
+                    fixture.app.world_mut().despawn(request);
+                }
+                _ => unreachable!(),
+            }
+            fixture.finish(request);
+            assert_eq!(
+                std::fs::read(&source).unwrap(),
+                b"original content",
+                "{interruption}"
+            );
+            assert!(source.symlink_metadata().unwrap().is_file());
+            assert!(!destination.exists());
+            assert_eq!(
+                std::fs::read(fixture.store.manifest_path()).unwrap(),
+                before
+            );
+            assert!(fixture.app.world().get::<AdoptedDotfile>(request).is_none());
+            assert!(fixture.store.lease().is_some());
+        }
+    }
+
+    #[test]
+    fn adoption_refuses_an_occupied_destination_without_replacing_either_file() {
+        let mut fixture = Fixture::new();
+        let source = fixture.store.home().join(".adopt-qa");
+        let destination = fixture.store.dotfiles_dir().join("shell/.adopt-qa");
+        std::fs::write(&source, b"original").unwrap();
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::write(&destination, b"foreign").unwrap();
+        let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+        let request = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.adoption.refusal").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                AdoptDotfile::new(&source, "shell"),
+            ))
+            .id();
+        fixture.finish(request);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(request)
+                .is_some()
+        );
+        assert_eq!(std::fs::read(source).unwrap(), b"original");
+        assert_eq!(std::fs::read(destination).unwrap(), b"foreign");
+        assert_eq!(
+            std::fs::read(fixture.store.manifest_path()).unwrap(),
+            before
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn available_import_commits_selected_packages_and_is_idempotent() {
+        let mut fixture = Fixture::new();
+        fixture.package("shell");
+        fixture.package("editor");
+        fixture.package(".hidden");
+        let mut manifest = crate::ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.set_package("npm", "preserved", true);
+        manifest.write_to(&fixture.store.manifest_path()).unwrap();
+        for expected in [1, 0] {
+            let request = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.dotfile.available.import").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    ImportAvailableDotfiles,
+                ))
+                .id();
+            fixture.finish(request);
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<ImportedAvailableDotfiles>(request)
+                    .unwrap()
+                    .packages,
+                expected
+            );
+            let saved = crate::ToolsManifest::read(&fixture.store.manifest_path()).unwrap();
+            assert_eq!(saved.dotfiles.packages, ["editor", "shell"]);
+            assert_eq!(saved.packages["npm"], ["preserved"]);
+            assert_eq!(
+                std::fs::read(fixture.store.dotfiles_dir().join("editor/.zshrc")).unwrap(),
+                b"shell"
+            );
+            assert!(fixture.store.lease().is_some());
+        }
+    }
+
+    #[test]
+    fn queued_available_import_refuses_retired_owners_without_changing_configuration() {
+        for interruption in ["cancel", "store", "requester"] {
+            let mut fixture = Fixture::new();
+            fixture.package("shell");
+            let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+            let blocker = fixture.store.lease().unwrap();
+            let request = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.dotfile.available.refusal").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    ImportAvailableDotfiles,
+                ))
+                .id();
+            fixture.app.update();
+            match interruption {
+                "cancel" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(request)
+                        .insert(OperationState::Canceled);
+                }
+                "store" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.source)
+                        .insert(ToolStore::new(
+                            fixture.directory.path().join("replacement"),
+                            fixture.store.home(),
+                        ));
+                }
+                "requester" => {
+                    fixture.app.world_mut().despawn(request);
+                }
+                _ => unreachable!(),
+            }
+            drop(blocker);
+            fixture.finish(request);
+            assert_eq!(
+                std::fs::read(fixture.store.manifest_path()).unwrap(),
+                before
+            );
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<ImportedAvailableDotfiles>(request)
+                    .is_none()
+            );
+            assert!(fixture.store.lease().is_some());
         }
     }
 
@@ -1609,6 +2371,53 @@ mod tests {
         assert_eq!(plan.links.len(), 3);
         assert_eq!(
             std::fs::read(fixture.store.home().join(".config/editor")).unwrap(),
+            b"foreign"
+        );
+        assert_eq!(
+            std::fs::read(fixture.store.manifest_path()).unwrap(),
+            before
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn enabled_packages_are_all_preflighted_before_any_link_is_created() {
+        let mut fixture = Fixture::new();
+        fixture.package("shell");
+        fixture.package("editor");
+        std::fs::write(fixture.store.home().join(".zshrc"), b"foreign").unwrap();
+        let mut manifest = crate::ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.set_dotfile_package("editor", true);
+        manifest.write_to(&fixture.store.manifest_path()).unwrap();
+        let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+        let request = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.apply.enabled").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                ApplyEnabledDotfiles,
+            ))
+            .id();
+        fixture.finish(request);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(request)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .store
+                .home()
+                .join(".config/editor")
+                .symlink_metadata()
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read(fixture.store.home().join(".zshrc")).unwrap(),
             b"foreign"
         );
         assert_eq!(
