@@ -6,6 +6,8 @@ use bevy::prelude::*;
 use vmux_ecs::RegistrationOrder;
 
 use crate::ToolProviderId;
+#[cfg(ui)]
+use crate::state::ToolsView;
 use crate::state::{
     ToolCategory, ToolItem, ToolOperationKind, ToolProvider, ToolProviderMetadata, ToolStatus,
     ToolsSnapshot,
@@ -92,6 +94,127 @@ pub(crate) struct Inventory<'w, 's> {
 }
 
 impl Inventory<'_, '_> {
+    #[cfg(ui)]
+    pub(crate) fn view(&self, entity: Entity, route: &str, query: &str) -> Option<ToolsView> {
+        let catalog = self.catalogs.get(entity).ok()?;
+        let route = if route.is_empty() {
+            catalog
+                .providers
+                .first()
+                .map(|provider| provider.route.as_str())
+                .unwrap_or_default()
+        } else {
+            route
+        };
+        let provider = catalog
+            .providers
+            .iter()
+            .find(|provider| provider.route == route);
+        let mut view = ToolsView {
+            route: route.to_string(),
+            query: query.to_string(),
+            ..Default::default()
+        };
+        if let Some(provider) = provider {
+            view.route_title = provider.route_title.clone();
+            view.route_title_message_id = provider.route_title_message_id.clone();
+            if provider.apply {
+                view.apply_provider = Some(provider.provider.clone());
+            }
+        }
+        view.show_brewfile = catalog
+            .providers
+            .iter()
+            .any(|provider| provider.route == route && provider.brewfile);
+        let query = query.trim().to_ascii_lowercase();
+        for id in &catalog.categories {
+            let Some(metadata) = catalog
+                .providers
+                .iter()
+                .find(|provider| &provider.provider == id)
+            else {
+                continue;
+            };
+            if metadata.route != route {
+                continue;
+            }
+            let entries = self.filtered(entity, id, &query, &metadata.title);
+            if entries.is_empty() {
+                continue;
+            }
+            let mut category = ToolCategory {
+                provider: id.clone(),
+                items: Vec::new(),
+            };
+            for entry in entries {
+                let (
+                    _,
+                    provider,
+                    id,
+                    name,
+                    _,
+                    version,
+                    icon,
+                    detail,
+                    status,
+                    operations,
+                    managed,
+                    _,
+                ) = self.items.get(entry).ok()?;
+                category.items.push(ToolItem {
+                    provider: provider.0.clone(),
+                    id: id.0.clone(),
+                    name: name.as_str().to_string(),
+                    icon: icon.0.clone(),
+                    version: version.0.clone(),
+                    detail: detail.0.clone(),
+                    status: status.0,
+                    managed,
+                    operations: operations.0.clone(),
+                });
+                view.visible_count += 1;
+            }
+            view.categories.push(category);
+        }
+        Some(view)
+    }
+
+    #[cfg(ui)]
+    fn filtered(
+        &self,
+        owner: Entity,
+        provider: &ToolProvider,
+        query: &str,
+        title: &str,
+    ) -> Vec<Entity> {
+        let mut entries = Vec::new();
+        for (entity, id, item, name, order, _, _, detail, status, _, managed, parent) in &self.items
+        {
+            if parent.parent() != owner || &id.0 != provider {
+                continue;
+            }
+            let lower_name = name.as_str().to_ascii_lowercase();
+            if !query.is_empty()
+                && !lower_name.contains(query)
+                && !item.0.to_ascii_lowercase().contains(query)
+                && !detail.0.to_ascii_lowercase().contains(query)
+                && !title.to_ascii_lowercase().contains(query)
+            {
+                continue;
+            }
+            entries.push((
+                (status.0.display_order(), !managed, lower_name, order.0),
+                entity,
+            ));
+        }
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut selected = Vec::new();
+        for (_, entity) in entries {
+            selected.push(entity);
+        }
+        selected
+    }
+
     pub(crate) fn snapshot(&self, entity: Entity) -> Option<ToolsSnapshot> {
         let catalog = self.catalogs.get(entity).ok()?;
         let mut snapshot = ToolsSnapshot {

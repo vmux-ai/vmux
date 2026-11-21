@@ -1,27 +1,24 @@
-use std::collections::BTreeMap;
-use std::path::Path;
 use std::result::Result;
-use std::task::Waker;
 
-use crate::catalog::{Catalog, Inventory, ProjectionSet};
+use crate::catalog::ProjectionSet;
 use crate::inventory::{
     InventorySet, PendingToolOperation, Registry as ToolRegistry, Scan,
     Sequence as OperationRequestSequence,
 };
+use crate::presentation::{Context as ToolOperationContext, State as ToolPageState};
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
     ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest,
-    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot, ToolsUiState, ToolsView,
+    ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
 use bevy::prelude::*;
 use bevy::prelude::{Commands, On, Query};
 use bevy::tasks::IoTaskPool;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    AsyncTask, EntityTarget, OperationState, PageMetadata, PageOpenRequest, PageOpenTarget,
-    TaskPlugin, TaskResult, TaskSet, TaskWaker, UiState, UiStatePlugin, UiStateWrite,
+    AsyncTask, EntityTarget, OperationState, PageMetadata, TaskPlugin, TaskResult, TaskSet,
+    TaskWaker, UiStatePlugin,
 };
 
 use crate::{
@@ -34,8 +31,13 @@ pub(crate) struct ToolHostPlugin;
 
 impl Plugin for ToolHostPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
+            app.add_plugins(vmux_ecs::wake::WakePlugin);
+        }
         app.add_plugins((
             crate::McpConnectionPlugin,
+            crate::presentation::ToolPagePlugin,
+            crate::open::ToolOpenPlugin,
             TaskPlugin::<Result<String, String>>::default(),
             UiStatePlugin::<ToolsUiState>::default(),
         ))
@@ -64,8 +66,6 @@ impl Plugin for ToolHostPlugin {
             TaskSet::of::<Result<String, String>>().in_set(ToolTaskSet::Collect),
         )
         .add_systems(Update, wake.in_set(ToolTaskSet::Wake))
-        .add_observer(page_ready)
-        .add_observer(refresh_request)
         .add_observer(operation_request::<ToolInstallRequest>)
         .add_observer(operation_request::<ToolUpdateRequest>)
         .add_observer(operation_request::<ToolUninstallRequest>)
@@ -75,14 +75,11 @@ impl Plugin for ToolHostPlugin {
         .add_observer(operation_request::<ToolUnlinkRequest>)
         .add_observer(operation_request::<ToolApplyRequest>)
         .add_observer(operation_request::<ToolImportRequest>)
-        .add_observer(open_request)
-        .add_observer(filter_request)
-        .add_observer(navigate_request)
+        .add_systems(Update, cancel.in_set(crate::ToolOperationCancelSet))
         .add_observer(complete)
         .add_systems(
             Update,
             (
-                start_operation,
                 (
                     start_external_operations::<ToolInstallRequest>,
                     start_external_operations::<ToolUpdateRequest>,
@@ -95,272 +92,30 @@ impl Plugin for ToolHostPlugin {
                 drain_succeeded_operations,
                 drain_failed_operations,
                 drain_canceled_operations,
-                emit_tools_state.in_set(ProjectionSet),
             )
                 .chain()
-                .after(InventorySet),
-        );
+                .after(InventorySet)
+                .before(ProjectionSet),
+        )
+        .add_systems(PostUpdate, start_operation.after(vmux_ecs::JobSet::Cleanup));
     }
 }
 
 fn wake(
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    notification: Option<Res<vmux_ecs::JobWake>>,
     mut tasks: Query<&mut TaskWaker>,
     stores: Query<&ToolStore>,
-    mut notification: Local<Option<Waker>>,
 ) {
-    let Some(proxy) = proxy else {
+    let Some(notification) = notification else {
         return;
     };
-    if notification.is_none() || proxy.is_changed() {
-        *notification = Some(vmux_ecs::wake::Wake::waker(Some(&proxy)));
-    }
-    let notification = notification.as_ref().unwrap();
     for store in &stores {
-        store.bind_waker(notification.clone());
+        store.bind_waker(notification.0.clone());
     }
     for mut waker in &mut tasks {
         if !waker.is_bound() {
-            waker.bind(notification.clone());
+            waker.bind(notification.0.clone());
         }
-    }
-}
-
-fn page_ready(
-    trigger: On<UiInput<PageReady>>,
-    pages: Query<&PageMetadata>,
-    mut subscribers: Query<&mut ToolSubscriber>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok(page) = pages.get(webview) else {
-        return;
-    };
-    if !page.url.starts_with(crate::ToolPlugin::url()) {
-        return;
-    }
-    if let Ok(mut subscriber) = subscribers.get_mut(webview) {
-        subscriber.navigate(&page.url);
-    } else {
-        let mut subscriber = ToolSubscriber::default();
-        subscriber.navigate(&page.url);
-        commands.entity(webview).insert(subscriber);
-    }
-}
-
-fn filter_request(
-    trigger: On<UiInput<ToolsFilterRequest>>,
-    mut subscribers: Query<&mut ToolSubscriber>,
-) {
-    let Ok(mut subscriber) = subscribers.get_mut(trigger.event().webview) else {
-        return;
-    };
-    subscriber.filter(&trigger.event().payload.query);
-}
-
-fn open_request(
-    trigger: On<UiInput<ToolOpenRequest>>,
-    stores: Query<&ToolStore, With<ToolRegistry>>,
-    mut requests: MessageWriter<PageOpenRequest>,
-) {
-    let path = Path::new(trigger.event().payload.path.trim());
-    let Ok(store) = stores.single() else {
-        return;
-    };
-    if path == store.brewfile_path() && !path.exists() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, "");
-    }
-    let Ok(url) = url::Url::from_file_path(path) else {
-        return;
-    };
-    requests.write(PageOpenRequest {
-        target: PageOpenTarget::NewStack,
-        url: url.to_string(),
-        request_id: None,
-    });
-}
-
-fn navigate_request(
-    trigger: On<UiInput<ToolsNavigateRequest>>,
-    mut subscribers: Query<&mut ToolSubscriber>,
-    mut pages: Query<&mut PageMetadata>,
-) {
-    let Some(route) = crate::route::ToolRoute::from_request(&trigger.event().payload) else {
-        return;
-    };
-    let webview = trigger.event().webview;
-    if let Ok(mut subscriber) = subscribers.get_mut(webview) {
-        subscriber.navigate(&route.url());
-    }
-    if let Ok(mut page) = pages.get_mut(webview) {
-        page.url = route.url();
-    }
-}
-
-#[derive(Component, Default)]
-#[require(UiState<ToolsUiState>)]
-struct ToolSubscriber {
-    snapshot_revision: u64,
-    revision: u64,
-    emitted_revision: u64,
-    pending: BTreeMap<u64, ToolOperationKey>,
-    state: ToolsUiState,
-}
-
-impl ToolSubscriber {
-    fn pending(operation_id: u64, operation: ToolOperationKey) -> Self {
-        let mut subscriber = Self::default();
-        subscriber.begin(operation_id, operation);
-        subscriber
-    }
-
-    fn begin(&mut self, operation_id: u64, operation: ToolOperationKey) {
-        self.pending.insert(operation_id, operation);
-        self.state.pending = self.pending.values().cloned().collect();
-        self.state.notice = None;
-        self.touch();
-    }
-
-    fn complete(
-        &mut self,
-        operation_id: u64,
-        fallback: ToolOperationKey,
-        success: bool,
-        message: String,
-    ) {
-        let operation = self.pending.remove(&operation_id).unwrap_or(fallback);
-        self.state.pending = self.pending.values().cloned().collect();
-        self.state.notice = Some(ToolOperationNotice {
-            operation,
-            success,
-            message,
-        });
-        self.touch();
-    }
-
-    fn cancel(&mut self, operation_id: u64) {
-        if self.pending.remove(&operation_id).is_none() {
-            return;
-        }
-        self.state.pending = self.pending.values().cloned().collect();
-        self.touch();
-    }
-
-    fn synchronize(&mut self, revision: u64, snapshot: &ToolsSnapshot) {
-        if self.snapshot_revision == revision {
-            return;
-        }
-        self.snapshot_revision = revision;
-        self.state.snapshot = snapshot.clone();
-        self.project();
-        self.touch();
-    }
-
-    fn navigate(&mut self, url: &str) {
-        let Some(route) = crate::route::ToolRoute::parse(url) else {
-            return;
-        };
-        if self.state.view.route == route.id() {
-            return;
-        }
-        self.state.view.route = route.id().to_string();
-        self.project();
-        self.touch();
-    }
-
-    fn filter(&mut self, query: &str) {
-        let query = query.to_string();
-        if self.state.view.query == query {
-            return;
-        }
-        self.state.view.query = query;
-        self.project();
-        self.touch();
-    }
-
-    fn project(&mut self) {
-        let snapshot = &self.state.snapshot;
-        let route = if self.state.view.route.is_empty() {
-            snapshot
-                .providers
-                .first()
-                .map(|provider| provider.route.clone())
-                .unwrap_or_default()
-        } else {
-            self.state.view.route.clone()
-        };
-        let query = self.state.view.query.trim().to_ascii_lowercase();
-        let provider = snapshot
-            .providers
-            .iter()
-            .find(|provider| provider.route == route);
-        let mut categories = Vec::new();
-        for category in &snapshot.categories {
-            let Some(metadata) = snapshot.provider(&category.provider) else {
-                continue;
-            };
-            if metadata.route != route {
-                continue;
-            }
-            let mut items = Vec::new();
-            for item in &category.items {
-                if query.is_empty()
-                    || item.name.to_ascii_lowercase().contains(&query)
-                    || item.id.to_ascii_lowercase().contains(&query)
-                    || item.detail.to_ascii_lowercase().contains(&query)
-                    || metadata.title.to_ascii_lowercase().contains(&query)
-                {
-                    items.push(item.clone());
-                }
-            }
-            items.sort_by(|left, right| {
-                left.status
-                    .display_order()
-                    .cmp(&right.status.display_order())
-                    .then_with(|| right.managed.cmp(&left.managed))
-                    .then_with(|| {
-                        left.name
-                            .to_ascii_lowercase()
-                            .cmp(&right.name.to_ascii_lowercase())
-                    })
-            });
-            if !items.is_empty() {
-                categories.push(crate::state::ToolCategory {
-                    provider: category.provider.clone(),
-                    items,
-                });
-            }
-        }
-        let visible_count = categories
-            .iter()
-            .map(|category| category.items.len() as u32)
-            .sum();
-        self.state.view = ToolsView {
-            route: route.clone(),
-            query: self.state.view.query.clone(),
-            route_title: provider
-                .map(|provider| provider.route_title.clone())
-                .unwrap_or_default(),
-            route_title_message_id: provider
-                .map(|provider| provider.route_title_message_id.clone())
-                .unwrap_or_default(),
-            categories,
-            visible_count,
-            apply_provider: provider
-                .filter(|provider| provider.apply)
-                .map(|provider| provider.provider.clone()),
-            show_brewfile: snapshot
-                .providers
-                .iter()
-                .any(|provider| provider.route == route && provider.brewfile),
-        };
-    }
-
-    fn touch(&mut self) {
-        self.revision = self.revision.wrapping_add(1).max(1);
     }
 }
 
@@ -369,93 +124,83 @@ struct ExternalWorker;
 
 type ToolProviderOperationTask = AsyncTask<Result<String, String>>;
 
-#[derive(Component)]
-struct ToolOperationContext {
-    operation_id: u64,
-    target: Entity,
-    operation: ToolOperationKey,
-}
-
-fn refresh_request(
-    trigger: On<UiInput<ToolsRefreshRequest>>,
-    registry: Query<Entity, With<ToolRegistry>>,
-    subscribers: Query<(), With<ToolSubscriber>>,
+fn operation_request<R>(
+    trigger: On<UiInput<R>>,
+    mut registries: Query<(Entity, &ToolStore, &mut OperationRequestSequence), With<ToolRegistry>>,
+    mut pages: Query<&mut ToolPageState>,
+    metadata: Query<&PageMetadata>,
     mut commands: Commands,
-) {
-    let Ok(registry) = registry.single() else {
+) where
+    R: Clone + Send + Sync + 'static,
+    ToolOperationKey: From<R>,
+{
+    let target = trigger.event().webview;
+    let Ok(metadata) = metadata.get(target) else {
         return;
     };
-    if !subscribers.contains(trigger.event().webview) {
-        commands
-            .entity(trigger.event().webview)
-            .insert(ToolSubscriber::default());
-    }
-    commands.trigger(crate::inventory::RefreshRequest {
-        entity: registry,
-        refresh_catalogs: trigger.event().payload.refresh,
-    });
-}
-
-fn queue_tool_operation<R: Clone + Send + Sync + 'static>(
-    target: Entity,
-    request: R,
-    operation: ToolOperationKey,
-    mut registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
-    mut subscribers: Query<&mut ToolSubscriber>,
-    mut commands: Commands,
-) {
-    let Ok(mut sequence) = registries.single_mut() else {
+    let Some(route) = crate::route::ToolRoute::parse(&metadata.url) else {
         return;
     };
+    let Ok((registry, store, mut sequence)) = registries.single_mut() else {
+        return;
+    };
+    let request = trigger.event().payload.clone();
+    let operation = ToolOperationKey::from(request.clone());
     let operation_id = sequence.next();
-    if let Ok(mut subscriber) = subscribers.get_mut(target) {
-        subscriber.begin(operation_id, operation.clone());
-    } else {
-        commands
-            .entity(target)
-            .insert(ToolSubscriber::pending(operation_id, operation.clone()));
-    }
+    let generation = match pages.get_mut(target) {
+        Ok(mut page) => {
+            page.bind(registry, store, operation_id);
+            page.navigate(&route);
+            page.begin();
+            page.generation
+        }
+        Err(_) => {
+            let mut page = ToolPageState::new(operation_id);
+            page.bind(registry, store, operation_id);
+            page.navigate(&route);
+            commands.entity(target).insert(page);
+            operation_id
+        }
+    };
     commands.spawn((
         PendingToolOperation,
         ToolOperationContext {
             operation_id,
             target,
+            generation,
             operation,
+            registry,
+            store: store.clone(),
         },
         ToolOperationRequest(request),
     ));
 }
 
-fn operation_request<R>(
-    trigger: On<UiInput<R>>,
-    registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
-    subscribers: Query<&mut ToolSubscriber>,
-    commands: Commands,
-) where
-    R: Clone + Send + Sync + 'static,
-    ToolOperationKey: From<R>,
-{
-    let request = trigger.event().payload.clone();
-    let operation = ToolOperationKey::from(request.clone());
-    queue_tool_operation(
-        trigger.event().webview,
-        request,
-        operation,
-        registries,
-        subscribers,
-        commands,
-    );
+fn cancel(
+    operations: Query<(Entity, &ToolOperationContext, &OperationState)>,
+    stores: Query<&ToolStore, With<ToolRegistry>>,
+    mut commands: Commands,
+) {
+    for (entity, context, state) in &operations {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            continue;
+        }
+        if stores.get(context.registry).ok() != Some(&context.store) {
+            commands.entity(entity).insert(OperationState::Canceled);
+        }
+    }
 }
 
 fn start_operation(
     pending: Query<
-        (Entity, &ToolOperationContext),
+        (Entity, &ToolOperationContext, &OperationState),
         (With<PendingToolOperation>, Without<ToolOperationFinished>),
     >,
     active: Query<&OperationState, With<EntityTarget<ToolStore>>>,
     scans: Query<(), With<Scan>>,
-    stores: Query<(Entity, &ToolStore), With<ToolRegistry>>,
+    stores: Query<&ToolStore, With<ToolRegistry>>,
     providers: Query<(Entity, &ToolProviderId), With<crate::ToolProviderBinding>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
     if active
@@ -466,36 +211,36 @@ fn start_operation(
         return;
     }
     let mut next = None;
-    for (entity, operation) in &pending {
+    for (entity, operation, state) in &pending {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            continue;
+        }
         match next {
             Some((_, operation_id, _)) if operation_id <= operation.operation_id => {}
-            _ => {
-                next = Some((
-                    entity,
-                    operation.operation_id,
-                    operation.operation.provider.clone(),
-                ))
-            }
+            _ => next = Some((entity, operation.operation_id, operation)),
         }
     }
-    let Some((entity, _, provider_id)) = next else {
+    let Some((entity, _, context)) = next else {
         return;
     };
-    let Ok((store, storage)) = stores.single() else {
+    let Ok(storage) = stores.get(context.registry) else {
         return;
     };
-    if storage.is_busy() {
+    if storage != &context.store || storage.is_busy() {
         return;
     }
     let mut operation_entity = commands.entity(entity);
     operation_entity
         .remove::<PendingToolOperation>()
-        .insert(ToolStoreTarget::new(store));
+        .insert(ToolStoreTarget::new(context.registry));
     if let Some((provider, _)) = providers
         .iter()
-        .find(|(_, provider)| provider.0 == provider_id)
+        .find(|(_, provider)| provider.0 == context.operation.provider)
     {
         operation_entity.insert(ToolProviderTarget::new(provider));
+    }
+    if let Some(wake) = &wake {
+        wake.0.wake_by_ref();
     }
 }
 
@@ -658,24 +403,26 @@ fn drain_succeeded_operations(
         ),
         With<ToolOperationFinished>,
     >,
-    mut registry: Query<&mut ToolRegistry>,
-    mut subscribers: Query<&mut ToolSubscriber>,
+    mut registry: Query<(Entity, &ToolStore, &mut ToolRegistry)>,
+    mut pages: Query<&mut ToolPageState>,
     mut changed: MessageWriter<ToolInventoryChanged>,
     mut commands: Commands,
 ) {
-    let Ok(mut state) = registry.single_mut() else {
+    let Ok((registry, store, mut state)) = registry.single_mut() else {
         return;
     };
     for (entity, operation, completion, published) in &operations {
-        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
-            subscriber.complete(
-                operation.operation_id,
-                operation.operation.clone(),
-                true,
-                completion.0.clone(),
+        if let Ok(mut page) = pages.get_mut(operation.target) {
+            page.complete(
+                operation,
+                ToolOperationNotice {
+                    operation: operation.operation.clone(),
+                    success: true,
+                    message: completion.0.clone(),
+                },
             );
         }
-        if !published {
+        if !published && operation.registry == registry && &operation.store == store {
             state.dirty = true;
             state.generation = state.generation.wrapping_add(1);
             changed.write(ToolInventoryChanged(operation.operation.provider.clone()));
@@ -689,16 +436,18 @@ fn drain_failed_operations(
         (Entity, &ToolOperationContext, &ToolOperationFailed),
         With<ToolOperationFinished>,
     >,
-    mut subscribers: Query<&mut ToolSubscriber>,
+    mut pages: Query<&mut ToolPageState>,
     mut commands: Commands,
 ) {
     for (entity, operation, failure) in &operations {
-        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
-            subscriber.complete(
-                operation.operation_id,
-                operation.operation.clone(),
-                false,
-                failure.0.clone(),
+        if let Ok(mut page) = pages.get_mut(operation.target) {
+            page.complete(
+                operation,
+                ToolOperationNotice {
+                    operation: operation.operation.clone(),
+                    success: false,
+                    message: failure.0.clone(),
+                },
             );
         }
         commands.entity(entity).remove::<ToolOperationContext>();
@@ -707,15 +456,15 @@ fn drain_failed_operations(
 
 fn drain_canceled_operations(
     operations: Query<(Entity, &ToolOperationContext, &OperationState)>,
-    mut subscribers: Query<&mut ToolSubscriber>,
+    mut pages: Query<&mut ToolPageState>,
     mut commands: Commands,
 ) {
     for (entity, operation, state) in &operations {
         if *state != OperationState::Canceled {
             continue;
         }
-        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
-            subscriber.cancel(operation.operation_id);
+        if let Ok(mut page) = pages.get_mut(operation.target) {
+            page.canceled(operation);
         }
         commands
             .entity(entity)
@@ -723,142 +472,9 @@ fn drain_canceled_operations(
     }
 }
 
-fn emit_tools_state(
-    registry: Query<(Entity, &Catalog), With<ToolRegistry>>,
-    inventory: Inventory,
-    mut subscribers: Query<(Entity, &mut ToolSubscriber)>,
-    mut commands: Commands,
-) {
-    let Ok((registry, catalog)) = registry.single() else {
-        return;
-    };
-    let snapshot = if subscribers
-        .iter()
-        .any(|(_, subscriber)| subscriber.snapshot_revision != catalog.revision)
-    {
-        inventory.snapshot(registry)
-    } else {
-        None
-    };
-    for (entity, mut subscriber) in &mut subscribers {
-        if let Some(snapshot) = &snapshot {
-            subscriber.synchronize(catalog.revision, snapshot);
-        }
-        if subscriber.emitted_revision == subscriber.revision {
-            continue;
-        }
-        commands.trigger(UiStateWrite::<ToolsUiState>::from_event(
-            entity,
-            &subscriber.state,
-        ));
-        subscriber.emitted_revision = subscriber.revision;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ToolCategory, ToolItem, ToolOperationKind, ToolProvider, ToolStatus};
-
-    #[test]
-    fn catalog_items_cannot_be_selected_as_the_provider_for_a_page_import() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = ToolStore::new(
-            directory.path().join("config"),
-            directory.path().join("home"),
-        );
-        crate::ToolsManifest::default()
-            .write_to(&store.manifest_path())
-            .unwrap();
-        let path = directory.path().join("package.json");
-        std::fs::write(&path, br#"{"dependencies":{"typescript":"1"}}"#).unwrap();
-        let mut app = App::new();
-        app.world_mut()
-            .spawn(ToolProviderId(ToolProvider::new("npm")));
-        app.add_plugins((
-            bevy::app::TaskPoolPlugin::default(),
-            crate::ToolRuntimePlugin,
-            ToolHostPlugin,
-            crate::npm::NpmToolPlugin,
-        ));
-        let registry = app
-            .world_mut()
-            .spawn((
-                ToolRegistry::default(),
-                Catalog::default(),
-                store.clone(),
-                crate::inventory::Sequence::default(),
-            ))
-            .id();
-        app.world_mut().trigger(crate::catalog::Received {
-            entity: registry,
-            snapshot: ToolsSnapshot {
-                loaded: true,
-                categories: vec![ToolCategory {
-                    provider: ToolProvider::new("npm"),
-                    items: vec![ToolItem {
-                        provider: ToolProvider::new("npm"),
-                        id: "already-installed".into(),
-                        name: "Existing package".into(),
-                        icon: None,
-                        version: None,
-                        detail: String::new(),
-                        status: ToolStatus::Installed,
-                        managed: true,
-                        operations: Vec::new(),
-                    }],
-                }],
-                ..Default::default()
-            },
-        });
-        app.world_mut().spawn((
-            crate::npm::NpmProvider,
-            ToolProviderId(ToolProvider::new("npm")),
-            crate::ToolProviderBinding::new::<crate::Feature>(2),
-            crate::observation::Handler,
-            crate::observation::PackageProvider,
-        ));
-        let page = app
-            .world_mut()
-            .spawn(PageMetadata {
-                url: "vmux://tools/npm".into(),
-                ..Default::default()
-            })
-            .id();
-        app.world_mut().trigger(UiInput {
-            webview: page,
-            payload: PageReady {},
-        });
-        app.update();
-        app.world_mut().trigger(UiInput {
-            webview: page,
-            payload: ToolImportRequest {
-                provider: ToolProvider::new("npm"),
-                value: path.to_string_lossy().into_owned(),
-            },
-        });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            app.update();
-            let state = app.world().get::<ToolSubscriber>(page).unwrap();
-            if let Some(notice) = &state.state.notice {
-                assert!(notice.success, "{}", notice.message);
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "page import did not complete"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        assert_eq!(
-            crate::ToolsManifest::read(&store.manifest_path())
-                .unwrap()
-                .packages["npm"],
-            ["typescript"]
-        );
-        assert!(store.lease().is_some());
-    }
 
     #[test]
     fn queued_provider_completion_refuses_cancellation_and_retired_stores() {
@@ -934,82 +550,5 @@ mod tests {
         app.world_mut().schedule_scope(Update, |world, schedule| {
             schedule.initialize(world).unwrap();
         });
-    }
-
-    #[test]
-    fn tools_page_ready_registers_state_subscriber() {
-        let mut app = App::new();
-        app.add_observer(page_ready);
-        let webview = app
-            .world_mut()
-            .spawn(PageMetadata {
-                url: "vmux://tools/npm".to_string(),
-                ..Default::default()
-            })
-            .id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: PageReady {},
-        });
-        app.update();
-
-        assert!(app.world().get::<ToolSubscriber>(webview).is_some());
-    }
-
-    #[test]
-    fn tools_navigation_keeps_the_emitting_page() {
-        let mut app = App::new();
-        app.add_observer(navigate_request);
-        let mut subscriber = ToolSubscriber::default();
-        subscriber.state.view.route = "acp".to_string();
-        let webview = app
-            .world_mut()
-            .spawn((
-                PageMetadata {
-                    url: "vmux://tools/acp".to_string(),
-                    ..Default::default()
-                },
-                subscriber,
-            ))
-            .id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ToolsNavigateRequest {
-                url: "vmux://tools/lsp".to_string(),
-            },
-        });
-
-        let page = app.world().get::<PageMetadata>(webview).unwrap();
-        let subscriber = app.world().get::<ToolSubscriber>(webview).unwrap();
-        assert_eq!(page.url, "vmux://tools/lsp");
-        assert_eq!(subscriber.state.view.route, "lsp");
-    }
-
-    #[test]
-    fn tool_operation_state_tracks_pending_and_completion() {
-        let operation = ToolOperationKey::new(
-            ToolProvider::new("npm"),
-            ToolOperationKind::Install,
-            "typescript",
-        );
-        let mut subscriber = ToolSubscriber::pending(7, operation.clone());
-
-        assert_eq!(
-            subscriber.state.pending,
-            vec![ToolOperationKey::new(
-                ToolProvider::new("npm"),
-                ToolOperationKind::Install,
-                "typescript",
-            )]
-        );
-
-        subscriber.complete(7, operation, true, "installed".to_string());
-
-        assert!(subscriber.state.pending.is_empty());
-        let notice = subscriber.state.notice.as_ref().unwrap();
-        assert!(notice.success);
-        assert_eq!(notice.message, "installed");
     }
 }

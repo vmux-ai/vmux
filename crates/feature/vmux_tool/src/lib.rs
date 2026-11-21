@@ -82,8 +82,12 @@ mod npm;
 mod npm_inventory;
 #[cfg(host)]
 pub mod observation;
+#[cfg(all(host, ui))]
+mod open;
 #[cfg(host)]
 mod package;
+#[cfg(all(host, ui))]
+mod presentation;
 mod process;
 mod provider;
 #[cfg(host)]
