@@ -64,7 +64,7 @@ jobs:
           path: .build-tools/bootstrap/vmux-ci
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
           overwrite: true
       - name: Resolve cef crate version from Cargo.lock
         id: resolve

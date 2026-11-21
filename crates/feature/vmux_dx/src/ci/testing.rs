@@ -227,12 +227,13 @@ impl Fixture {
     }
 
     pub(super) fn mock_gh(&mut self, source: &str) {
-        self.write("bin/gh", source);
-        std::fs::set_permissions(
-            self.root().join("bin/gh"),
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        self.mock_tool("gh", source);
+    }
+
+    pub(super) fn mock_tool(&mut self, name: &str, source: &str) {
+        let path = self.root().join("bin").join(name);
+        self.write(&format!("bin/{name}"), source);
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let original = self.environment.get("PATH").unwrap().to_string_lossy();
         self.environment.set(
             "PATH",

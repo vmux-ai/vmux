@@ -273,27 +273,31 @@ fn plugin_names_follow_framework_and_type_aliases() {
 #[test]
 fn changed_sources_revoke_removed_component_ownership() {
     let source = "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Component,Query}; #[derive(Component)] struct State(u32); fn read(state:Query<&State>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}";
-    for changed in [
-        source.replace("struct State(u32)", "struct State(Foreign); struct Foreign"),
-        source.replace(
-            "use bevy_ecs::prelude::{Component,Query};",
-            "use bevy_ecs::prelude::Query; struct Component;",
+    let original = Inventory::fixture(source);
+    for (changed, expected) in [
+        (source.to_string(), true),
+        (
+            source.replace("struct State(u32)", "struct State(Foreign); struct Foreign"),
+            false,
         ),
+        (source.replace("#[derive(Component)]", ""), false),
     ] {
-        let mut inventory = Inventory::fixture(source);
-        let key = inventory.key("struct:State");
-        assert!(inventory.canonical(
-            &inventory.entries[&key],
-            &Policy::default(),
-            &mut BTreeSet::new()
-        ));
+        let mut inventory = Inventory {
+            parsed: original.parsed.clone(),
+            ..Default::default()
+        };
         inventory.source("fixture.rs", &changed);
         inventory.resolve_usage();
-        assert!(!inventory.canonical(
-            &inventory.entries[&key],
-            &Policy::default(),
-            &mut BTreeSet::new()
-        ));
+        let key = inventory.key("struct:State");
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{changed}"
+        );
     }
 }
 
