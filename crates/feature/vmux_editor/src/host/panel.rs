@@ -566,7 +566,6 @@ mod tests {
     struct CompletionFixture {
         world: World,
         entity: Entity,
-        panel: FilePanel,
     }
 
     impl CompletionFixture {
@@ -577,21 +576,25 @@ mod tests {
             core.carets.place(caret);
             let mut world = World::new();
             let entity = world
-                .spawn(crate::host::editor::EditorBundle::new(
-                    core,
-                    HighlightCache::new(&path),
-                    crate::fold::FoldState::default(),
+                .spawn((
+                    crate::host::editor::EditorBundle::new(
+                        core,
+                        HighlightCache::new(&path),
+                        crate::fold::FoldState::default(),
+                    ),
+                    FilePanel::default(),
                 ))
                 .id();
-            Self {
-                world,
-                entity,
-                panel: FilePanel::default(),
-            }
+            Self { world, entity }
         }
 
         fn show(&mut self) {
-            self.panel.show_completion(
+            let (edit, mut panel) = self
+                .world
+                .entity_mut(self.entity)
+                .into_components_mut::<(EditReadOnly, &mut FilePanel)>()
+                .unwrap();
+            panel.show_completion(
                 vec![
                     CompletionItem {
                         label: "print".into(),
@@ -614,8 +617,25 @@ mod tests {
                 ],
                 0,
                 0,
-                &Editor::read(&self.world, self.entity).unwrap(),
+                &edit,
             );
+        }
+
+        fn panel(&self) -> &FilePanel {
+            self.world.get::<FilePanel>(self.entity).unwrap()
+        }
+
+        fn panel_mut(&mut self) -> Mut<'_, FilePanel> {
+            self.world.get_mut::<FilePanel>(self.entity).unwrap()
+        }
+
+        fn refresh(&mut self) -> bool {
+            let (edit, mut panel) = self
+                .world
+                .entity_mut(self.entity)
+                .into_components_mut::<(EditReadOnly, &mut FilePanel)>()
+                .unwrap();
+            panel.refresh(&edit)
         }
     }
 
@@ -624,7 +644,8 @@ mod tests {
         let mut fixture = CompletionFixture::new("pri", 3);
         fixture.show();
 
-        let Some(FilePanelContent::Completion { items, .. }) = &fixture.panel.state.content else {
+        let Some(FilePanelContent::Completion { items, .. }) = &fixture.panel().state.content
+        else {
             panic!("completion panel is closed");
         };
         assert_eq!(
@@ -639,12 +660,9 @@ mod tests {
             .unwrap()
             .core
             .set_caret(1);
-        assert!(
-            fixture
-                .panel
-                .refresh(&Editor::read(&fixture.world, fixture.entity).unwrap())
-        );
-        let Some(FilePanelContent::Completion { items, .. }) = &fixture.panel.state.content else {
+        assert!(fixture.refresh());
+        let Some(FilePanelContent::Completion { items, .. }) = &fixture.panel().state.content
+        else {
             panic!("completion panel is closed");
         };
         assert_eq!(items.len(), 3);
@@ -655,12 +673,12 @@ mod tests {
         let mut fixture = CompletionFixture::new("p", 1);
         fixture.show();
 
-        assert!(fixture.panel.select_previous());
-        assert_eq!(fixture.panel.state.selected, 2);
+        assert!(fixture.panel_mut().select_previous());
+        assert_eq!(fixture.panel().state.selected, 2);
         assert!(matches!(
-            fixture.panel.choice(None),
+            fixture.panel_mut().choice(None),
             Some(FilePanelChoice::Completion { item, .. }) if item.label == "panic"
         ));
-        assert!(fixture.panel.state.content.is_none());
+        assert!(fixture.panel().state.content.is_none());
     }
 }
