@@ -231,8 +231,9 @@ struct ScanProvider {
 struct Observed;
 
 #[derive(Component, Default)]
-pub(crate) struct Sequence(u64);
+pub(crate) struct Sequence(#[cfg(ui)] u64);
 
+#[cfg(ui)]
 impl Sequence {
     pub(crate) fn next(&mut self) -> u64 {
         let order = self.0;
