@@ -643,7 +643,7 @@ fn sync_page_targets(
             continue;
         }
         let Some(target) = GitDiffTarget::for_page(&state, &controller) else {
-            queued_diffs.despawn_for(entity, &mut commands);
+            queued_diffs.cancel_for(entity, &mut commands);
             if current.is_some() || pending.is_some() || state.snapshot.diff_viewport.is_some() {
                 state.snapshot.diff_loading = false;
                 state.snapshot.diff_viewport = None;
@@ -659,7 +659,7 @@ fn sync_page_targets(
         let target_changed = current.is_some_and(|current| current.target != target)
             || pending.is_some_and(|pending| pending.target != target);
         if target_changed {
-            queued_diffs.despawn_for(entity, &mut commands);
+            queued_diffs.cancel_for(entity, &mut commands);
             state.snapshot.diff_loading = true;
             state.snapshot.diff_viewport = None;
             state.snapshot.diff_rows.clear();
@@ -714,7 +714,6 @@ fn sync_branch_files(
         &GitPageControllerState,
         Option<&GitBranchFilesQuery>,
     )>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
     queued_jobs: QueuedGitJobs<BranchFilesJob>,
     mut commands: Commands,
 ) {
@@ -750,8 +749,10 @@ fn sync_branch_files(
             .bypass_change_detection()
             .snapshot
             .apply_branch_files_patch(&patch);
-        ui_state.push(entity, patch);
-        queued_jobs.despawn_for(entity, &mut commands);
+        commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            entity, &patch,
+        ));
+        queued_jobs.cancel_for(entity, &mut commands);
         commands.entity(entity).insert(GitBranchFilesQuery {
             repository: repo_root.clone(),
             reference: controller.selected_branch.clone(),
@@ -1096,7 +1097,7 @@ fn start_requests(
         let content = source
             .filter(|source| source.dirty)
             .map(|source| source.content.clone());
-        queued_diffs.despawn_for(entity, &mut commands);
+        queued_diffs.cancel_for(entity, &mut commands);
         let mut branch = match &target.scope {
             DiffScope::Branch(_) => {
                 branch_files.map(|query| BranchDiffProgress::new(query.catalog.clone()))

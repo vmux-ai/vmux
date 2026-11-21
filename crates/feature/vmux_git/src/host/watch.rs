@@ -376,6 +376,7 @@ impl GitWatchRefreshes<'_, '_> {
             if let Some((path, revision)) = self.states.mark_changed(entity) {
                 self.commands.spawn((
                     super::job_runner::GitJob::new(entity),
+                    super::read::RepositoryRequestIdentity::capture(Path::new(&path)),
                     super::job::RepositoryJob {
                         path: path.into(),
                         refresh_catalogs,
@@ -1466,6 +1467,7 @@ fn sync_page_subscriptions(
         state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
         commands.spawn((
             super::job_runner::GitJob::new(entity),
+            super::read::RepositoryRequestIdentity::capture(&path),
             super::job::RepositoryJob {
                 path,
                 refresh_catalogs: true,
