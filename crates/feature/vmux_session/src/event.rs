@@ -103,6 +103,52 @@ pub struct SessionsRestoreDeleted {
     pub sessions: Vec<ProviderSessionTarget>,
 }
 
+#[vmux_api::ui_event]
+pub struct ManagerQueryChanged {
+    pub query: String,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerFilterAdded {
+    pub filter: crate::manager::SessionFilter,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerFilterRemoved {
+    pub id: u64,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerCategorySelected {
+    pub stage: Option<String>,
+    pub archived: bool,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerModeChanged {
+    pub grid: bool,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerSelectionChanged {
+    pub id: String,
+    pub selected: bool,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerSelectionCleared;
+
+#[vmux_api::ui_event]
+pub struct ManagerDateFilterAdded {
+    pub comparison: crate::manager::UpdatedComparison,
+    pub value: String,
+}
+
+#[vmux_api::ui_event]
+pub struct ManagerWithinFilterAdded {
+    pub days: u64,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct SessionDirectorySelection {
     pub revision: u64,

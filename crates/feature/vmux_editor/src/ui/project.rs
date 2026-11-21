@@ -3,8 +3,10 @@ use std::path::Path;
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_git::event::{RepositorySummary, RepositorySummaryRequest, RepositorySummaryUiState};
+#[cfg(test)]
+use vmux_session::SessionSummary;
+use vmux_session::StageSummary;
 use vmux_session::state::SessionScopeUiState;
-use vmux_session::{SessionSummary, SessionSummaryProjection, StageSummary};
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
@@ -519,43 +521,26 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
 #[component]
 fn ProjectSessionsPanel() -> Element {
     let sessions = use_ui_state::<SessionScopeUiState>();
-    let projection = sessions.use_selector(|state| {
-        let now = vmux_ecs::UnixMillis::now().0;
-        ProjectSessionList {
-            sessions: state
-                .sessions
-                .iter()
-                .filter(|session| {
-                    !SessionSummaryProjection::new(session, &state.stages, now).terminal
-                })
-                .cloned()
-                .collect(),
-            stages: state.stages.clone(),
-        }
+    let projection = sessions.use_selector(|state| ProjectSessionList {
+        groups: state.groups.clone(),
+        stages: state.stages.clone(),
+        visible: state.visible_count,
     });
     rsx! { ProjectSessions { projection: projection() } }
 }
 
 #[derive(Clone, Default, PartialEq)]
 struct ProjectSessionList {
-    sessions: Vec<SessionSummary>,
+    groups: Vec<vmux_session::manager::StageGroup>,
+    visible: usize,
     stages: Vec<StageSummary>,
-}
-
-impl ProjectSessionList {
-    fn visible_len(&self) -> usize {
-        self.sessions
-            .iter()
-            .filter(|session| session.archived_at == 0)
-            .count()
-    }
 }
 
 #[component]
 fn ProjectSessions(projection: ProjectSessionList) -> Element {
     let mut view = use_signal(ManagerView::default);
     let selected_view = view();
-    let visible = projection.visible_len();
+    let visible = projection.visible;
     rsx! {
         ProjectSection {
             title: translate("sessions-title"),
@@ -577,7 +562,7 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
                 }
             } else {
                 vmux_session::ui::SessionCollection {
-                    sessions: projection.sessions,
+                    groups: projection.groups,
                     stages: projection.stages,
                     view: selected_view,
                     preview: Some(5),
@@ -751,20 +736,25 @@ mod tests {
             .unwrap();
         let _runtime = runtime.enter();
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let stage = StageSummary {
+            id: "active".into(),
+            name: "Active".into(),
+            order: 0,
+            terminal: false,
+        };
         let projection = ProjectSessionList {
-            sessions: vec![SessionSummary {
-                id: "test".into(),
-                sid: "test".into(),
-                name: "Example session".into(),
-                stage: "active".into(),
-                ..Default::default()
+            groups: vec![vmux_session::manager::StageGroup {
+                stage: stage.clone(),
+                sessions: vec![SessionSummary {
+                    id: "test".into(),
+                    sid: "test".into(),
+                    name: "Example session".into(),
+                    stage: "active".into(),
+                    ..Default::default()
+                }],
             }],
-            stages: vec![StageSummary {
-                id: "active".into(),
-                name: "Active".into(),
-                order: 0,
-                terminal: false,
-            }],
+            visible: 1,
+            stages: vec![stage],
         };
         let mut dom =
             VirtualDom::new_with_props(ProjectSessions, ProjectSessionsProps { projection });

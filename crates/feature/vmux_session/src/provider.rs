@@ -129,6 +129,27 @@ pub struct ArchiveWrite {
     pub archived: bool,
 }
 
+#[cfg(feature = "app")]
+#[derive(Component, Clone, PartialEq, Eq)]
+pub struct NativeContext(Option<(Entity, String, std::path::PathBuf)>);
+
+#[cfg(feature = "app")]
+impl NativeContext {
+    pub fn capture(profile: &vmux_ecs::profile::CurrentProfile) -> Self {
+        let context = match (profile.entity(), profile.profile(), profile.paths()) {
+            (Some(entity), Some(profile), Some(paths)) => {
+                Some((entity, profile.id().to_string(), paths.profile()))
+            }
+            _ => None,
+        };
+        Self(context)
+    }
+
+    pub fn matches(&self, profile: &vmux_ecs::profile::CurrentProfile) -> bool {
+        *self == Self::capture(profile)
+    }
+}
+
 #[derive(Message, Event)]
 pub struct ArchivesReceived {
     pub operation: Entity,
@@ -1199,13 +1220,15 @@ fn archive(
     mut receipt: On<ArchivesReceived>,
     mut operations: Query<(
         &ArchiveRead,
-        &ChildOf,
+        &EntityTarget<Source>,
         &mut OperationState,
         Option<&Started>,
     )>,
     sources: Sources,
     mut entries: EntryWrites,
     mut commands: Commands,
+    #[cfg(feature = "app")] contexts: Query<Option<&NativeContext>>,
+    #[cfg(feature = "app")] profile: vmux_ecs::profile::CurrentProfile,
 ) {
     let receipt = receipt.event_mut();
     let Ok((read, parent, mut state, started)) = operations.get_mut(receipt.operation) else {
@@ -1214,7 +1237,29 @@ fn archive(
     if *state != OperationState::Running {
         return;
     }
-    let source = parent.parent();
+    commands
+        .entity(receipt.operation)
+        .remove::<vmux_ecs::OperationRetained>();
+    let source = parent.entity();
+    #[cfg(feature = "app")]
+    if contexts
+        .get(receipt.operation)
+        .ok()
+        .flatten()
+        .is_some_and(|context| !context.matches(&profile))
+    {
+        *state = OperationState::Canceled;
+        if sources
+            .archives
+            .get(source)
+            .is_ok_and(|target| target.entity() == receipt.operation)
+        {
+            commands
+                .entity(source)
+                .remove::<EntityTarget<ArchiveRead>>();
+        }
+        return;
+    }
     if !sources.current_archive(source, receipt.operation, read.generation) {
         *state = OperationState::Canceled;
         if sources
@@ -1276,7 +1321,7 @@ fn written(
     receipt: On<ArchiveWritten>,
     mut operations: Query<(
         &ArchiveWrite,
-        &ChildOf,
+        &EntityTarget<Source>,
         &mut OperationState,
         Option<&ProviderKind>,
         Option<&ProviderSessionId>,
@@ -1284,6 +1329,8 @@ fn written(
     sources: Sources,
     mut entries: EntryWrites,
     mut commands: Commands,
+    #[cfg(feature = "app")] contexts: Query<Option<&NativeContext>>,
+    #[cfg(feature = "app")] profile: vmux_ecs::profile::CurrentProfile,
 ) {
     let Ok((_, parent, mut state, Some(kind), Some(id))) = operations.get_mut(receipt.operation)
     else {
@@ -1292,7 +1339,20 @@ fn written(
     if *state != OperationState::Running {
         return;
     }
-    let source = parent.parent();
+    #[cfg(feature = "app")]
+    if contexts
+        .get(receipt.operation)
+        .ok()
+        .flatten()
+        .is_some_and(|context| !context.matches(&profile))
+    {
+        *state = OperationState::Canceled;
+        commands
+            .entity(receipt.operation)
+            .remove::<vmux_ecs::OperationRetained>();
+        return;
+    }
+    let source = parent.entity();
     let family = AgentFamily::of(kind.0.strip_prefix("acp:").unwrap_or(&kind.0));
     let Ok((_, origin, Some(agent), _)) = sources.details.get(source) else {
         return;
@@ -1319,6 +1379,9 @@ fn written(
         }
     }
     *state = OperationState::Succeeded;
+    commands
+        .entity(receipt.operation)
+        .remove::<vmux_ecs::OperationRetained>();
 }
 
 #[cfg(test)]
@@ -1500,7 +1563,7 @@ mod tests {
                 .spawn((
                     ArchiveRead { generation: 1 },
                     OperationState::Running,
-                    ChildOf(source),
+                    EntityTarget::<Source>::new(source),
                 ))
                 .id();
             fixture
@@ -1839,7 +1902,7 @@ mod tests {
                 ArchiveRead { generation: 2 },
                 Started(started_at),
                 OperationState::Running,
-                ChildOf(fixture.source),
+                EntityTarget::<Source>::new(fixture.source),
             ))
             .id();
         fixture
@@ -1858,7 +1921,7 @@ mod tests {
                 OperationState::Running,
                 ProviderKind("acp:test".into()),
                 ProviderSessionId("id".into()),
-                ChildOf(fixture.source),
+                EntityTarget::<Source>::new(fixture.source),
             ))
             .id();
         fixture.app.world_mut().write_message(ArchiveWritten {
@@ -1903,7 +1966,7 @@ mod tests {
                 ArchiveRead { generation: 2 },
                 Started(Instant::now()),
                 OperationState::Running,
-                ChildOf(fixture.source),
+                EntityTarget::<Source>::new(fixture.source),
             ))
             .id();
         fixture
@@ -1943,7 +2006,7 @@ mod tests {
                 ArchiveRead { generation: 1 },
                 Started(Instant::now()),
                 OperationState::Running,
-                ChildOf(fixture.source),
+                EntityTarget::<Source>::new(fixture.source),
             ))
             .id();
         let current = fixture
@@ -1953,7 +2016,7 @@ mod tests {
                 ArchiveRead { generation: 1 },
                 Started(Instant::now()),
                 OperationState::Running,
-                ChildOf(fixture.source),
+                EntityTarget::<Source>::new(fixture.source),
             ))
             .id();
         fixture

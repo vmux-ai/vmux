@@ -1,15 +1,19 @@
 use std::collections::HashSet;
 
+use crate::event::{
+    ManagerCategorySelected, ManagerDateFilterAdded, ManagerFilterAdded, ManagerFilterRemoved,
+    ManagerModeChanged, ManagerQueryChanged, ManagerSelectionChanged, ManagerSelectionCleared,
+    ManagerWithinFilterAdded,
+};
+use crate::state::ManagerUiState;
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
-use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
+use vmux_ui::components::manager::ManagerView;
+use vmux_ui::hooks::send;
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
 use crate::SessionId;
-use crate::event::{
-    ProviderSessionTarget, SessionsArchive, SessionsCleanup, SessionsRestoreDeleted,
-    SessionsStageChange,
-};
+use crate::event::{SessionsArchive, SessionsCleanup, SessionsRestoreDeleted, SessionsStageChange};
 use crate::route::Route;
 
 use super::manager_model::{
@@ -38,16 +42,12 @@ impl SessionFilterPicker {
         (self.filter_value)()
     }
 
-    pub fn toggle(self, controls: CollectionController<SessionFilter>) {
+    pub fn toggle(self, controls: SessionControls) {
         controls.toggle_filter();
         self.reset_filter_input();
     }
 
-    pub fn select_step(
-        mut self,
-        controls: CollectionController<SessionFilter>,
-        step: SessionFilterStep,
-    ) {
+    pub fn select_step(mut self, controls: SessionControls, step: SessionFilterStep) {
         self.filter_step.set(step);
         self.filter_value.set(String::new());
         controls.set_query("#".to_string());
@@ -57,8 +57,21 @@ impl SessionFilterPicker {
         self.filter_value.set(value);
     }
 
-    pub fn apply(self, controls: CollectionController<SessionFilter>, filter: SessionFilter) {
-        controls.update_filters(|filters| SessionFilter::upsert(filters, filter));
+    pub fn apply(self, controls: SessionControls, filter: SessionFilter) {
+        match filter {
+            SessionFilter::Updated(_) => match self.filter_step() {
+                SessionFilterStep::Date(comparison) => {
+                    controls.date(comparison, self.filter_value())
+                }
+                SessionFilterStep::Within => {
+                    if let Ok(days) = self.filter_value().parse() {
+                        controls.within(days);
+                    }
+                }
+                _ => return,
+            },
+            filter => controls.add_filter(filter),
+        }
         controls.dismiss_filter();
         self.reset_filter_input();
     }
@@ -69,154 +82,142 @@ impl SessionFilterPicker {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct SessionMutations {
-    stages: OptimisticMap<String, String>,
-    archives: OptimisticMap<String, bool>,
-    leaving: Signal<HashSet<String>>,
-    deleted_providers: Signal<Vec<ProviderSessionTarget>>,
-}
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct SessionControls(pub Signal<ManagerUiState>);
 
-impl SessionMutations {
-    pub fn new(
-        stages: OptimisticMap<String, String>,
-        archives: OptimisticMap<String, bool>,
-    ) -> Self {
-        Self {
-            stages,
-            archives,
-            leaving: use_signal(HashSet::new),
-            deleted_providers: use_signal(Vec::new),
+impl SessionControls {
+    pub fn query(self) -> String {
+        self.0.read().query.clone()
+    }
+    pub fn view(self) -> ManagerView {
+        if self.0.read().grid {
+            ManagerView::Grid
+        } else {
+            ManagerView::List
         }
     }
-
-    pub fn change(self, target: StageTarget, stage: String) {
-        if target.stage == stage {
+    pub fn filters(self) -> Vec<SessionFilter> {
+        self.0.read().filters.clone()
+    }
+    pub fn set_query(self, query: String) {
+        let _ = send(&ManagerQueryChanged { query });
+    }
+    pub fn set_view(self, view: ManagerView) {
+        let _ = send(&ManagerModeChanged {
+            grid: view == ManagerView::Grid,
+        });
+    }
+    pub fn add_filter(self, filter: SessionFilter) {
+        let _ = send(&ManagerFilterAdded { filter });
+    }
+    pub fn remove_filter(self, index: usize) {
+        let Some(id) = self.0.read().filter_ids.get(index).copied() else {
             return;
+        };
+        let _ = send(&ManagerFilterRemoved { id });
+    }
+    pub fn pop_filter(self) {
+        if let Some(index) = self.filters().len().checked_sub(1) {
+            self.remove_filter(index);
         }
-        self.stages
-            .set(target.id.clone(), target.stage.clone(), stage.clone());
-        let id = target.id.clone();
-        if send(&SessionsStageChange {
+    }
+    pub fn dismiss_filter(self) {
+        self.set_query(String::new());
+    }
+    pub fn toggle_filter(self) {
+        self.set_query(if self.query().starts_with('#') {
+            String::new()
+        } else {
+            "#".into()
+        });
+    }
+    pub fn select_stage(self, stage: Option<String>) {
+        let _ = send(&ManagerCategorySelected {
+            stage,
+            archived: false,
+        });
+    }
+    pub fn archived(self) {
+        let _ = send(&ManagerCategorySelected {
+            stage: None,
+            archived: true,
+        });
+    }
+    pub fn date(self, comparison: crate::manager::UpdatedComparison, value: String) {
+        let _ = send(&ManagerDateFilterAdded { comparison, value });
+    }
+    pub fn within(self, days: u64) {
+        let _ = send(&ManagerWithinFilterAdded { days });
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SessionMutations(Option<Signal<ManagerUiState>>);
+
+impl SessionMutations {
+    pub fn new(state: Signal<ManagerUiState>) -> Self {
+        Self(Some(state))
+    }
+    pub fn collection() -> Self {
+        Self(None)
+    }
+    pub fn change(self, target: StageTarget, stage: String) {
+        let _ = send(&SessionsStageChange {
             id: target.id,
             kind: target.kind,
             sid: target.sid,
             stage,
-        })
-        .is_err()
-        {
-            self.stages.clear(&id);
-        }
-    }
-
-    pub fn set_archived(mut self, targets: Vec<ArchiveTarget>, archived: bool) {
-        let leaving = self.leaving.read();
-        let targets = targets
-            .into_iter()
-            .filter(|target| target.archived != archived && !leaving.contains(&target.id))
-            .collect::<Vec<_>>();
-        drop(leaving);
-        if targets.is_empty() {
-            return;
-        }
-        self.leaving
-            .write()
-            .extend(targets.iter().map(|target| target.id.clone()));
-        self.archives.set_many(
-            targets
-                .iter()
-                .map(|target| (target.id.clone(), target.archived, archived)),
-        );
-        if send(&SessionsArchive {
-            ids: targets.iter().map(|target| target.id.clone()).collect(),
-            archived,
-        })
-        .is_err()
-        {
-            for target in &targets {
-                self.archives.clear(&target.id);
-                self.leaving.write().remove(&target.id);
-            }
-        }
-        spawn(async move {
-            vmux_ui::platform::Platform::sleep(200).await;
-            let ids = targets
-                .iter()
-                .map(|target| target.id.as_str())
-                .collect::<HashSet<_>>();
-            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
         });
     }
-
+    pub fn set_archived(self, targets: Vec<ArchiveTarget>, archived: bool) {
+        let _ = send(&SessionsArchive {
+            ids: targets.into_iter().map(|target| target.id).collect(),
+            archived,
+        });
+    }
     pub fn archive(self, targets: Vec<ArchiveTarget>) {
         self.set_archived(targets, true);
     }
-
     pub fn restore(self, targets: Vec<ArchiveTarget>) {
         self.set_archived(targets, false);
     }
-
     pub fn is_leaving(self, id: &str) -> bool {
-        self.leaving.read().contains(id)
+        self.0
+            .is_some_and(|state| state.read().leaving_ids.contains(id))
     }
-
     pub fn cleanup(self, target: DeleteTarget) {
         self.cleanup_many(vec![target]);
     }
-
-    pub fn cleanup_many(mut self, targets: Vec<DeleteTarget>) {
-        let leaving = self.leaving.read();
-        let mut targets = targets
-            .into_iter()
-            .filter(|target| !leaving.contains(&target.id))
-            .collect::<Vec<_>>();
-        drop(leaving);
-        targets.sort_by(|left, right| left.id.cmp(&right.id));
-        targets.dedup_by(|left, right| left.id == right.id);
-        if targets.is_empty() {
-            return;
-        }
-        let ids = targets
-            .iter()
-            .map(|target| target.id.clone())
-            .collect::<Vec<_>>();
-        let mut providers = targets
-            .iter()
-            .filter_map(|target| target.provider.clone())
-            .collect::<Vec<_>>();
-        providers.sort_by(|left, right| (&left.kind, &left.sid).cmp(&(&right.kind, &right.sid)));
-        providers.dedup();
-        self.leaving.write().extend(ids.iter().cloned());
-        if send(&SessionsCleanup { ids: ids.clone() }).is_err() {
-            let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
-            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
-            return;
-        }
-        if !providers.is_empty() {
-            let mut deleted = self.deleted_providers.write();
-            deleted.extend(providers);
-            deleted.sort_by(|left, right| (&left.kind, &left.sid).cmp(&(&right.kind, &right.sid)));
-            deleted.dedup();
-        }
-        spawn(async move {
-            vmux_ui::platform::Platform::sleep(1_500).await;
-            let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
-            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
+    pub fn cleanup_many(self, targets: Vec<DeleteTarget>) {
+        let _ = send(&SessionsCleanup {
+            ids: targets.into_iter().map(|target| target.id).collect(),
         });
     }
-
     pub fn deleted_provider_count(self) -> usize {
-        self.deleted_providers.read().len()
+        self.0.map_or(0, |state| state.read().restorable.len())
     }
-
-    pub fn restore_deleted(mut self) {
-        let sessions = self.deleted_providers.peek().clone();
-        if sessions.is_empty() {
+    pub fn restore_deleted(self) {
+        let Some(state) = self.0 else {
             return;
-        }
-        if send(&SessionsRestoreDeleted { sessions }).is_ok() {
-            self.deleted_providers.set(Vec::new());
-        }
+        };
+        let _ = send(&SessionsRestoreDeleted {
+            sessions: state.read().restorable.clone(),
+        });
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct SessionSelection(pub Signal<ManagerUiState>);
+
+impl SessionSelection {
+    pub fn ids(self) -> HashSet<String> {
+        self.0.read().selected_ids.clone()
+    }
+    pub fn toggle(self, id: String, selected: bool) {
+        let _ = send(&ManagerSelectionChanged { id, selected });
+    }
+    pub fn clear(self) {
+        let _ = send(&ManagerSelectionCleared);
     }
 }
 

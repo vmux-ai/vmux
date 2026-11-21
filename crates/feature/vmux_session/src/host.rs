@@ -46,6 +46,12 @@ mod handoff;
 #[cfg(host)]
 mod key;
 #[cfg(host)]
+mod manager;
+#[cfg(all(test, host))]
+pub(crate) mod manager_fixture;
+#[cfg(host)]
+mod manager_operations;
+#[cfg(host)]
 mod media;
 mod model;
 mod presentation;

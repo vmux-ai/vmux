@@ -1,8 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
@@ -29,10 +27,7 @@ use vmux_ui::components::motion::{Collapse, Collapsible};
 use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{
-    CollectionController, UiStateBinding, send, use_collection_controller, use_optimistic_map,
-    use_theme,
-};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
@@ -40,6 +35,8 @@ use vmux_ui::navigation::PageNavigation;
 use crate::event::{
     SessionRepositories, SessionRepository, SessionsDescriptionUpdate, SessionsStageChange,
 };
+use crate::state::ManagerUiState;
+#[cfg(test)]
 use crate::state::SessionCatalogUiState;
 
 use super::manager_controller::*;
@@ -48,64 +45,18 @@ use super::manager_model::*;
 #[component]
 pub fn SessionsManager() -> Element {
     use_theme();
-    let ui = UiStateBinding::<SessionCatalogUiState>::use_context();
-    let controls = use_collection_controller::<SessionFilter>(ManagerView::List);
-    let route = try_consume_context::<vmux_ecs::PageMetadata>()
-        .map(|metadata| metadata.url)
-        .unwrap_or_default();
-    use_hook(move || {
-        controls.update_filters(|filters| {
-            if let Some(project) = crate::Route::manager_filter(&route, "project") {
-                SessionFilter::upsert(filters, SessionFilter::Project(project));
-            }
-            match crate::Route::manager_filter(&route, "status").as_deref() {
-                Some("current") => SessionFilter::upsert(filters, SessionFilter::Current),
-                Some("stale") => {
-                    SessionFilter::upsert(filters, SessionFilter::Stage("stale".to_string()))
-                }
-                Some("archived") => SessionFilter::upsert(filters, SessionFilter::Archived),
-                _ => {}
-            }
-        });
-    });
+    let ui = use_ui_state::<ManagerUiState>();
+    let controls = SessionControls(ui.state);
     let filter_picker = SessionFilterPicker::use_state();
-    let catalog = ui.use_selector(|state| state.catalog.clone());
-    let repositories = ui.use_selector(|state| state.repositories.clone());
-    let loading = ui.use_selector(|state| state.loading)();
-    let display = use_hook(|| Rc::new(std::cell::RefCell::new(CatalogDisplay::default())));
-    let incoming = catalog();
-    let settled = display.borrow_mut().update(incoming.clone(), loading);
-    let waiting = settled.is_none();
-    let snapshot = settled.unwrap_or(vmux_session::CatalogSnapshot {
-        stages: incoming.stages,
-        sessions: Vec::new(),
-    });
-    let repositories = repositories();
-    let optimistic_stages = use_optimistic_map(ManagerPresentation::stage_observations(&snapshot));
-    let optimistic_archives =
-        use_optimistic_map(ManagerPresentation::archive_observations(&snapshot));
-    let stage_catalog = use_memo(move || catalog.read().stages.clone());
-    let mutations = SessionMutations::new(optimistic_stages, optimistic_archives);
-    let selection = SessionSelection::use_state();
+    let presentation = ui.use_selector(|state| state.clone());
+    let state = presentation();
+    let stage_catalog = use_memo(move || presentation.read().snapshot.stages.clone());
+    let mutations = SessionMutations::new(ui.state);
+    let selection = SessionSelection(ui.state);
     use_context_provider(|| mutations);
     use_context_provider(|| selection);
     use_context_provider(|| stage_catalog);
-    let filters = controls.filters();
-    let mut presentation = ManagerPresentation::new(
-        snapshot,
-        repositories,
-        &controls.query(),
-        &filters,
-        |id, stage| optimistic_stages.value(id, stage),
-        |id, archived| optimistic_archives.value(id, &archived),
-        |id| mutations.is_leaving(id),
-    );
-    presentation.loading = waiting;
-    let presentation = Rc::new(presentation);
-    let visible_ids = presentation.visible_ids.clone();
-    use_effect(use_reactive!(|(visible_ids,)| {
-        selection.retain(&visible_ids);
-    }));
+    let presentation = Rc::new(state);
     rsx! {
         ManagerPage {
             SessionsManagerContent { controls, filter_picker, presentation }
@@ -113,86 +64,28 @@ pub fn SessionsManager() -> Element {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct SessionSelection(Signal<HashSet<String>>);
-
-impl SessionSelection {
-    fn use_state() -> Self {
-        Self(use_signal(HashSet::new))
-    }
-
-    fn ids(self) -> HashSet<String> {
-        self.0.read().clone()
-    }
-
-    fn toggle(mut self, id: String, selected: bool) {
-        if selected {
-            self.0.write().insert(id);
-        } else {
-            self.0.write().remove(&id);
-        }
-    }
-
-    fn clear(mut self) {
-        self.0.write().clear();
-    }
-
-    fn retain(mut self, visible: &HashSet<String>) {
-        if self.0.peek().iter().all(|id| visible.contains(id)) {
-            return;
-        }
-        self.0.write().retain(|id| visible.contains(id));
-    }
-}
-
 #[component]
 pub fn SessionCollection(
-    sessions: Vec<SessionSummary>,
+    groups: Vec<StageGroup>,
     stages: Vec<StageSummary>,
     view: ManagerView,
     #[props(default)] preview: Option<usize>,
 ) -> Element {
     let reactive_stages = stages.clone();
     let stage_catalog = use_memo(use_reactive!(|(reactive_stages,)| reactive_stages.clone()));
-    let optimistic_stages = use_optimistic_map(
-        sessions
-            .iter()
-            .map(|session| (session.id.clone(), session.stage.clone()))
-            .collect(),
-    );
-    let optimistic_archives = use_optimistic_map(
-        sessions
-            .iter()
-            .map(|session| (session.id.clone(), session.archived_at > 0))
-            .collect(),
-    );
-    let mutations = SessionMutations::new(optimistic_stages, optimistic_archives);
+    let mutations = SessionMutations::collection();
     use_context_provider(|| mutations);
     use_context_provider(|| stage_catalog);
-    let mut sessions = sessions;
-    for session in &mut sessions {
-        session.stage = optimistic_stages.value(&session.id, &session.stage);
-        session.archived_at = if optimistic_archives.value(&session.id, &(session.archived_at > 0))
-        {
-            session.archived_at.max(1)
-        } else {
-            0
-        };
-    }
-    sessions.retain(|session| session.archived_at == 0 || mutations.is_leaving(&session.id));
-    let groups = StageGroup::inbox(&StageGroup::from_catalog(&stages, &sessions, ""));
     let repositories = SessionRepositories {
         ready: true,
         ..Default::default()
     };
-    rsx! {
-        SessionGroups { groups, repositories, view, preview }
-    }
+    rsx! { SessionGroups { groups, repositories, view, preview } }
 }
 
 #[component]
 fn SessionsManagerActions(
-    controls: CollectionController<SessionFilter>,
+    controls: SessionControls,
     location: PageAddress,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
@@ -270,7 +163,8 @@ fn SessionsManagerActions(
                 .icon(LineIcon::X),
         );
     }
-    for (index, filter) in presentation.selected_filters.iter().enumerate() {
+    for (index, filter) in presentation.filters.iter().enumerate() {
+        let filter = filter.presentation(&presentation.snapshot.stages);
         toolbar.push(
             ToolbarControl::button(filter.label.clone(), move |_| controls.remove_filter(index))
                 .icon(LineIcon::X)
@@ -292,15 +186,9 @@ fn SessionsManagerActions(
         PageBreadcrumbs { state: location,
             onintent: move |intent| {
                 let AddressIntent::SessionLocation { value } = intent else { return; };
-                controls.update_filters(|filters| {
-                    if value == SessionLocationBreadcrumb::ARCHIVED {
-                        SessionFilter::upsert(filters, SessionFilter::Archived);
-                    } else if value == SessionLocationBreadcrumb::INBOX {
-                        SessionFilter::set_stage(filters, None);
-                    } else {
-                        SessionFilter::set_stage(filters, Some(value));
-                    }
-                });
+                if value == SessionLocationBreadcrumb::ARCHIVED { controls.archived(); }
+                else if value == SessionLocationBreadcrumb::INBOX { controls.select_stage(None); }
+                else { controls.select_stage(Some(value)); }
                 controls.set_query(String::new());
             },
         }
@@ -342,7 +230,7 @@ fn SessionsManagerActions(
 
 #[component]
 fn SessionsManagerContent(
-    controls: CollectionController<SessionFilter>,
+    controls: SessionControls,
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
@@ -360,13 +248,11 @@ fn SessionsManagerContent(
                     archived: presentation.selected_archived,
                     archived_count: presentation.archived_count,
                     onselect: move |stage| {
-                        controls.update_filters(|filters| SessionFilter::set_stage(filters, stage));
+                        controls.select_stage(stage);
                         controls.set_query(String::new());
                     },
                     onarchived: move |_| {
-                        controls.update_filters(|filters| {
-                            SessionFilter::upsert(filters, SessionFilter::Archived);
-                        });
+                        controls.archived();
                         controls.set_query(String::new());
                     },
                 }
@@ -519,7 +405,7 @@ fn StartSessionButton() -> Element {
 
 #[component]
 fn SessionSearch(
-    controls: CollectionController<SessionFilter>,
+    controls: SessionControls,
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
@@ -555,8 +441,8 @@ fn SessionSearch(
                 vmux_ui::components::dropdown::DropdownPopup { class: "w-72 p-0",
                     SessionFilterMenu {
                         groups: presentation.category_groups.clone(),
-                        sessions: presentation.snapshot.sessions.clone(),
-                        repositories: presentation.repositories.clone(),
+                        agents: presentation.agent_options.clone(),
+                        projects: presentation.project_options.clone(),
                         needle: presentation.filter_needle.clone(),
                         step: filter_picker.filter_step(),
                         value: filter_picker.filter_value(),
@@ -623,8 +509,8 @@ fn SessionCategories(
 #[component]
 fn SessionFilterMenu(
     groups: Vec<StageGroup>,
-    sessions: Vec<SessionSummary>,
-    repositories: SessionRepositories,
+    agents: Vec<(String, usize)>,
+    projects: Vec<(String, usize)>,
     needle: String,
     step: SessionFilterStep,
     value: String,
@@ -641,7 +527,7 @@ fn SessionFilterMenu(
             SessionValueFilters {
                 title: translate("resume-column-agent"),
                 kind: SessionFilterValueKind::Agent,
-                values: SessionFilterMenuPresentation::agents(&sessions),
+                values: agents,
                 needle,
                 onstep,
                 onselect,
@@ -651,7 +537,7 @@ fn SessionFilterMenu(
             SessionValueFilters {
                 title: translate("resume-column-project"),
                 kind: SessionFilterValueKind::Project,
-                values: SessionFilterMenuPresentation::projects(&sessions, &repositories),
+                values: projects,
                 needle,
                 onstep,
                 onselect,
@@ -895,16 +781,12 @@ fn SessionsList(
 
 #[component]
 fn SessionsBoard(
-    mut groups: Vec<StageGroup>,
+    groups: Vec<StageGroup>,
     repositories: SessionRepositories,
     selection: Option<SessionSelection>,
     preview: Option<usize>,
     scrollable: bool,
 ) -> Element {
-    groups.sort_by_key(|group| match group.stage.id.as_str() {
-        "stale" => (0, 0),
-        _ => (1, group.stage.order),
-    });
     rsx! {
         div { class: if scrollable { "min-h-0 flex-1 overflow-auto px-2 pb-2" } else { "shrink-0 px-2 pb-2" },
             div { class: "flex min-h-full w-max items-start gap-2",
@@ -1116,7 +998,8 @@ fn SessionItem(
 
 #[component]
 fn SessionSelectionToggle(selection: SessionSelection, id: String, size: String) -> Element {
-    let selected = selection.0.read().contains(&id);
+    let state: Signal<ManagerUiState> = selection.0;
+    let selected = state.read().selected_ids.contains(&id);
     let visibility = if selected {
         "opacity-100"
     } else {
@@ -1846,8 +1729,8 @@ mod tests {
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostBinding, PageHost};
 
-    #[derive(Default)]
     struct ManagerHost {
+        fixture: RefCell<crate::host::manager_fixture::ManagerFixture>,
         listeners: RefCell<Vec<BytesListener>>,
         archived: RefCell<Vec<String>>,
     }
@@ -1858,13 +1741,16 @@ mod tests {
                 let request =
                     rkyv::from_bytes::<crate::event::SessionsArchive, rkyv::rancor::Error>(bytes)
                         .unwrap();
-                *self.archived.borrow_mut() = request.ids;
+                *self.archived.borrow_mut() = request.ids.clone();
+                let mut fixture = self.fixture.borrow_mut();
+                fixture.input(request);
+                fixture.update();
             }
             Ok(())
         }
 
         fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
-            if id == SessionCatalogUiState::id() {
+            if id == ManagerUiState::id() {
                 self.listeners.borrow_mut().push(listener);
             }
             Ok(())
@@ -1872,37 +1758,22 @@ mod tests {
     }
 
     impl ManagerHost {
-        fn load(&self) {
-            let mut sessions = Vec::new();
-            for index in 0..90 {
-                sessions.push(SessionSummary {
-                    id: format!("session-{index}"),
-                    name: format!("Task {index}"),
-                    stage: "active".into(),
-                    runtime: "idle".into(),
-                    last_activated_at: vmux_ecs::UnixMillis::now().0 - 4 * 24 * 60 * 60 * 1_000,
-                    ..Default::default()
-                });
+        fn new() -> Self {
+            Self {
+                fixture: RefCell::new(crate::host::manager_fixture::ManagerFixture::new()),
+                listeners: RefCell::new(Vec::new()),
+                archived: RefCell::new(Vec::new()),
             }
-            let state = SessionCatalogUiState {
-                loading: true,
-                repositories: SessionRepositories {
-                    ready: true,
-                    ..Default::default()
-                },
-                catalog: vmux_session::CatalogSnapshot {
-                    stages: vec![StageSummary {
-                        id: "active".into(),
-                        name: "Active".into(),
-                        ..Default::default()
-                    }],
-                    sessions,
-                },
-            };
-            let frame = vmux_api::UiStateFrame::<
-                SessionCatalogUiState,
-                crate::state::SessionCatalogUiStatePatch,
-            >::Snapshot(state);
+        }
+
+        fn load(&self) {
+            let mut fixture = self.fixture.borrow_mut();
+            if fixture.app.world_mut().query_filtered::<bevy_ecs::prelude::Entity, bevy_ecs::prelude::With<crate::Session>>().iter(fixture.app.world()).next().is_none() {
+                for index in 0..90 { fixture.session(&format!("session-{index}"), &format!("Task {index}"), vmux_ecs::UnixMillis::now().0-4*24*60*60*1000); }
+            }
+            let state = fixture.update();
+            drop(fixture);
+            let frame = vmux_api::UiStateFrame::<ManagerUiState, ManagerUiState>::Snapshot(state);
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
             for listener in self.listeners.borrow_mut().iter_mut() {
                 listener(&bytes);
@@ -1926,7 +1797,7 @@ mod tests {
     impl ManagerFixture {
         fn loaded() -> Self {
             dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
-            let host = Rc::new(ManagerHost::default());
+            let host = Rc::new(ManagerHost::new());
             let mut dom = VirtualDom::new(ManagerPage);
             dom.provide_root_context(HostBinding(host.clone()));
             dom.rebuild_in_place();
@@ -2039,76 +1910,6 @@ mod tests {
     }
 
     #[test]
-    fn project_activity_filters_include_nested_work_and_exclude_stale_terminal_and_sibling_projects()
-     {
-        let now = vmux_ecs::UnixMillis::now().0;
-        let stages = vec![
-            StageSummary {
-                id: "active".to_string(),
-                ..Default::default()
-            },
-            StageSummary {
-                id: "queued".to_string(),
-                ..Default::default()
-            },
-            StageSummary {
-                id: "done".to_string(),
-                terminal: true,
-                ..Default::default()
-            },
-        ];
-        let mut sessions = Vec::new();
-        for (id, stage, cwd, activated) in [
-            ("active", "active", "/work/repo/src", now),
-            ("queued", "queued", "/work/repo/.worktrees/task", now),
-            (
-                "stale",
-                "active",
-                "/work/repo",
-                now - 4 * 24 * 60 * 60 * 1_000,
-            ),
-            ("done", "done", "/work/repo", now),
-            ("sibling", "active", "/work/repo-other", now),
-        ] {
-            sessions.push(SessionSummary {
-                id: id.to_string(),
-                stage: stage.to_string(),
-                cwd: cwd.to_string(),
-                runtime: "idle".to_string(),
-                last_activated_at: activated,
-                ..Default::default()
-            });
-        }
-        let groups = StageGroup::from_catalog(&stages, &sessions, "");
-        let filters = [
-            SessionFilter::Project("/work/repo".to_string()),
-            SessionFilter::Current,
-        ];
-        let filtered = StageGroup::filtered(&groups, &filters, &SessionRepositories::default());
-        let ids = filtered
-            .iter()
-            .flat_map(|group| group.sessions.iter().map(|session| session.id.as_str()))
-            .collect::<HashSet<_>>();
-        assert_eq!(ids, HashSet::from(["active", "queued"]));
-    }
-
-    #[test]
-    fn session_without_stage_definition_remains_visible() {
-        let session = SessionSummary {
-            id: "session-1".into(),
-            name: "Task".into(),
-            stage: "active".into(),
-            ..Default::default()
-        };
-
-        let groups = StageGroup::from_catalog(&[], std::slice::from_ref(&session), "");
-
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].stage.id, "active");
-        assert_eq!(groups[0].sessions, vec![session]);
-    }
-
-    #[test]
     fn session_identity_preserves_both_ends() {
         let id = SessionIdentity::new("01a0fc43-68f9-7121-a388-59e1891fdc41");
 
@@ -2143,197 +1944,5 @@ mod tests {
             ..Default::default()
         }];
         assert!(!SessionSummaryProjection::new(&session, &terminal, now).stale);
-    }
-
-    #[test]
-    fn stale_session_moves_out_of_its_persisted_stage() {
-        let stages = vec![StageSummary {
-            id: "in_progress".into(),
-            name: "session-stage-active".into(),
-            order: 10,
-            terminal: false,
-        }];
-        let session = SessionSummary {
-            id: "session-1".into(),
-            stage: "in_progress".into(),
-            runtime: "idle".into(),
-            last_activated_at: vmux_ecs::UnixMillis::now().0
-                - (SessionSummaryProjection::STALE_AFTER as i64 * 1_000),
-            ..Default::default()
-        };
-
-        let groups = StageGroup::from_catalog(&stages, std::slice::from_ref(&session), "");
-        let active = groups
-            .iter()
-            .find(|group| group.stage.id == "in_progress")
-            .unwrap();
-        let stale = groups
-            .iter()
-            .find(|group| group.stage.id == "stale")
-            .unwrap();
-
-        assert!(active.sessions.is_empty());
-        assert_eq!(stale.sessions, vec![session]);
-    }
-
-    #[test]
-    fn stage_and_updated_filters_compose() {
-        let recent = SessionSummary {
-            id: "recent".into(),
-            stage: "in_progress".into(),
-            last_activated_at: 200,
-            ..Default::default()
-        };
-        let old = SessionSummary {
-            id: "old".into(),
-            stage: "in_progress".into(),
-            last_activated_at: 50,
-            ..Default::default()
-        };
-        let done = SessionSummary {
-            id: "done".into(),
-            stage: "done".into(),
-            last_activated_at: 200,
-            ..Default::default()
-        };
-        let groups = vec![
-            StageGroup {
-                stage: StageSummary {
-                    id: "in_progress".into(),
-                    ..Default::default()
-                },
-                sessions: vec![recent.clone(), old],
-            },
-            StageGroup {
-                stage: StageSummary {
-                    id: "done".into(),
-                    ..Default::default()
-                },
-                sessions: vec![done],
-            },
-        ];
-        let filters = vec![
-            SessionFilter::Stage("in_progress".into()),
-            SessionFilter::Updated(UpdatedFilter {
-                comparison: UpdatedComparison::OnOrAfter,
-                threshold: 100,
-                value_label: String::new(),
-            }),
-        ];
-
-        let filtered = StageGroup::filtered(&groups, &filters, &SessionRepositories::default());
-
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].sessions, vec![recent]);
-    }
-
-    #[test]
-    fn agent_and_project_filters_compose() {
-        let codex = SessionSummary {
-            id: "codex".into(),
-            stage: "in_progress".into(),
-            agent_name: "Codex".into(),
-            ..Default::default()
-        };
-        let claude = SessionSummary {
-            id: "claude".into(),
-            stage: "in_progress".into(),
-            agent_name: "Claude".into(),
-            ..Default::default()
-        };
-        let groups = vec![StageGroup {
-            stage: StageSummary {
-                id: "in_progress".into(),
-                ..Default::default()
-            },
-            sessions: vec![codex.clone(), claude],
-        }];
-        let filters = vec![
-            SessionFilter::Agent("Codex".into()),
-            SessionFilter::Project("vmux".into()),
-        ];
-        let repositories = SessionRepositories {
-            ready: true,
-            sessions: vec![SessionRepository {
-                id: "codex".into(),
-                project: "vmux".into(),
-                ..Default::default()
-            }],
-        };
-
-        let filtered = StageGroup::filtered(&groups, &filters, &repositories);
-
-        assert_eq!(filtered[0].sessions, vec![codex]);
-    }
-
-    #[test]
-    fn inbox_excludes_terminal_stages() {
-        let active = StageGroup {
-            stage: StageSummary {
-                id: "in_progress".into(),
-                terminal: false,
-                ..Default::default()
-            },
-            sessions: vec![SessionSummary {
-                id: "active".into(),
-                ..Default::default()
-            }],
-        };
-        let completed = StageGroup {
-            stage: StageSummary {
-                id: "done".into(),
-                terminal: true,
-                ..Default::default()
-            },
-            sessions: vec![SessionSummary {
-                id: "completed".into(),
-                ..Default::default()
-            }],
-        };
-
-        let inbox = StageGroup::inbox(&[active.clone(), completed]);
-
-        assert_eq!(inbox.len(), 1);
-        assert_eq!(inbox[0].stage.id, active.stage.id);
-        assert_eq!(inbox[0].sessions, active.sessions);
-    }
-
-    #[test]
-    fn archived_session_remains_during_its_leave_animation() {
-        let snapshot = vmux_session::CatalogSnapshot {
-            stages: vec![StageSummary {
-                id: "in_progress".into(),
-                terminal: false,
-                ..Default::default()
-            }],
-            sessions: vec![SessionSummary {
-                id: "leaving".into(),
-                stage: "in_progress".into(),
-                archived_at: 10,
-                ..Default::default()
-            }],
-        };
-
-        let leaving = ManagerPresentation::new(
-            snapshot.clone(),
-            SessionRepositories::default(),
-            "",
-            &[],
-            |_, stage| stage.clone(),
-            |_, archived| archived,
-            |id| id == "leaving",
-        );
-        let settled = ManagerPresentation::new(
-            snapshot,
-            SessionRepositories::default(),
-            "",
-            &[],
-            |_, stage| stage.clone(),
-            |_, archived| archived,
-            |_| false,
-        );
-
-        assert!(leaving.visible_sessions);
-        assert!(!settled.visible_sessions);
     }
 }
