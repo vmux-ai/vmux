@@ -4,9 +4,6 @@ use bevy_cef::prelude::*;
 use ropey::Rope;
 use vmux_ecs::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
 
-use crate::edit::EditCommand;
-use crate::host::editing::EditRequest;
-
 pub(super) struct ShapePlugin;
 
 impl Plugin for ShapePlugin {
@@ -158,8 +155,11 @@ fn file_set(
         line_ending: wanted.line_ending,
     };
     edit.set_shape(shape);
-    EditRequest::new(entity, vec![EditCommand::Reshape(shape)])
-        .emit(edit.core.revision.identity, &mut commands);
+    commands.trigger(crate::host::editing::document::ReshapeRequest {
+        entity,
+        document: Some(edit.core.revision.identity),
+        shape,
+    });
     if !browsers.can_emit_to(&entity) {
         return;
     }

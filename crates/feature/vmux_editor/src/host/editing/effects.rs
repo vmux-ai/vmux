@@ -19,17 +19,17 @@ impl Plugin for EffectsPlugin {
 }
 
 #[derive(EntityEvent)]
-pub(super) struct SaveRequest {
+pub(crate) struct SaveRequest {
     #[event_target]
-    pub(super) entity: Entity,
-    pub(super) document: Option<uuid::Uuid>,
+    pub(crate) entity: Entity,
+    pub(crate) document: Option<uuid::Uuid>,
 }
 
 #[derive(EntityEvent)]
-pub(super) struct PasteRequest {
+pub(crate) struct PasteRequest {
     #[event_target]
-    pub(super) entity: Entity,
-    pub(super) document: Option<uuid::Uuid>,
+    pub(crate) entity: Entity,
+    pub(crate) document: Option<uuid::Uuid>,
 }
 
 #[derive(EntityEvent)]
@@ -412,76 +412,4 @@ fn unfold_all(trigger: On<UnfoldAllRequest>, mut views: Query<Edit>, mut command
     commands.entity(entity).insert(FoldsDirty);
     commands.trigger(ViewportRenderRequest::new(entity));
     commands.trigger(CursorRenderRequest::new(entity));
-}
-
-impl EditCommand {
-    pub(super) fn emit_effect(
-        self,
-        entity: Entity,
-        document: Option<uuid::Uuid>,
-        commands: &mut Commands,
-    ) {
-        match self {
-            Self::Save => {
-                commands.trigger(SaveRequest { entity, document });
-            }
-            Self::Paste => {
-                commands.trigger(PasteRequest { entity, document });
-            }
-            Self::ScrollViewport(lines) => {
-                commands.trigger(ScrollRequest {
-                    entity,
-                    document,
-                    lines,
-                });
-            }
-            Self::ScrollCursorTo(placement) => {
-                commands.trigger(ScrollCursorRequest {
-                    entity,
-                    document,
-                    placement,
-                });
-            }
-            Self::FoldToggle => {
-                commands.trigger(FoldToggleRequest { entity, document });
-            }
-            Self::FoldOpen => {
-                commands.trigger(FoldOpenRequest { entity, document });
-            }
-            Self::FoldClose => {
-                commands.trigger(FoldCloseRequest { entity, document });
-            }
-            Self::FoldToggleRecursive => {
-                commands.trigger(FoldToggleRecursiveRequest { entity, document });
-            }
-            Self::FoldAll => {
-                commands.trigger(FoldAllRequest { entity, document });
-            }
-            Self::UnfoldAll => {
-                commands.trigger(UnfoldAllRequest { entity, document });
-            }
-            Self::Hover => {
-                commands.trigger(EditorHoverRequest::from(entity));
-            }
-            Self::GotoDefinition => {
-                commands.trigger(EditorDefinitionRequest::from(entity));
-            }
-            Self::FindReferences => {
-                commands.trigger(EditorReferencesRequest::from(entity));
-            }
-            Self::BeginRename => {
-                commands.trigger(EditorRenameRequest::from(entity));
-            }
-            Self::TriggerCompletion => {
-                commands.trigger(EditorCompletionRequest::from(entity));
-            }
-            Self::OpenFind { forward } => {
-                commands.trigger(FileFindOpenRequest::new(entity, forward));
-            }
-            Self::OpenCommandLine => {
-                commands.write_message(CommandInvocation::new(entity, "browser_open_ex_bar"));
-            }
-            _ => {}
-        }
-    }
 }

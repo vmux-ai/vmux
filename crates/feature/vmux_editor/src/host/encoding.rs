@@ -8,8 +8,6 @@ use vmux_ecs::event::{
     FileEncoding, FileEncodingEvent, FileEncodingReopenRequest, FileEncodingSaveRequest,
 };
 
-use crate::edit::EditCommand;
-use crate::host::editing::EditRequest;
 use crate::host::editor::FileView;
 use crate::host::file_lifecycle::{FileBuffer, FileLoadTask, ForcedEncoding};
 use crate::host::status::FileInitialMetaSent;
@@ -69,8 +67,10 @@ fn save_with(
         return;
     };
     edit.core.buffer.encoding = trigger.event().payload.encoding;
-    EditRequest::new(entity, vec![EditCommand::Save])
-        .emit(edit.core.revision.identity, &mut commands);
+    commands.trigger(crate::host::editing::effects::SaveRequest {
+        entity,
+        document: Some(edit.core.revision.identity),
+    });
     if !browsers.can_emit_to(&entity) {
         return;
     }

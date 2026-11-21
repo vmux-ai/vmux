@@ -5,9 +5,9 @@ use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::Browsers;
 
-use super::editing::EditRequest;
 use super::editor::FileView;
 use super::file_lifecycle::SelfWrites;
+#[cfg(test)]
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 
@@ -245,11 +245,12 @@ impl WorkspaceEdits<'_, '_> {
                     document.path.as_path().display()
                 ));
             };
-            EditRequest::new(
-                entity,
-                vec![EditCommand::ReplaceText(document.updated.clone())],
-            )
-            .emit(editor.core.revision.identity, &mut self.commands);
+            self.commands
+                .trigger(super::editing::document::ReplaceTextRequest {
+                    entity,
+                    document: Some(editor.core.revision.identity),
+                    text: document.updated.clone(),
+                });
         }
         Ok(())
     }

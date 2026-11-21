@@ -613,7 +613,7 @@ impl DocumentPropertyInput {
         values: Vec<String>,
         remove: bool,
     ) {
-        let _ = send(&Self {
+        let _ = send(&DocumentPropertyInput {
             revision,
             edit: FilePropertyEdit {
                 original_key,

@@ -148,6 +148,10 @@ pub struct Editor {
 }
 
 impl Editor {
+    pub(super) fn note_blocks(&self) -> Option<&[vmux_ecs::event::NoteBlock]> {
+        self.parsed_note.as_ref().map(|note| note.blocks.as_slice())
+    }
+
     #[cfg(test)]
     pub(crate) fn read(world: &World, entity: Entity) -> Option<EditReadOnlyItem<'_, 'static>> {
         world
@@ -271,13 +275,6 @@ impl EditItem<'_, '_> {
 impl EditReadOnlyItem<'_, '_> {
     pub(crate) fn parsed_note(&self) -> Option<ParsedNote> {
         self.cache.parsed_note.clone()
-    }
-
-    pub(super) fn note_blocks(&self) -> Option<&[vmux_ecs::event::NoteBlock]> {
-        self.cache
-            .parsed_note
-            .as_ref()
-            .map(|note| note.blocks.as_slice())
     }
 
     pub(crate) fn cursor_line(&self) -> u32 {
