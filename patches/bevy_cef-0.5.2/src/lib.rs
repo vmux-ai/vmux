@@ -29,8 +29,8 @@ use bevy_cef_core::prelude::{
 pub mod prelude {
     pub use crate::{
         CefPlugin, RunOnMainThread, cef_state::*,
-        common::custom_scheme::asset_loader::CefResponseHandle, common::*, loading_state::*,
-        navigation::*, popup_state::*, renderer_state::*, webview::prelude::*,
+        common::custom_scheme::asset_loader::CefResponseHandle, loading_state::*, navigation::*,
+        popup_state::*, renderer_state::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
         BinIpcBlocked, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,

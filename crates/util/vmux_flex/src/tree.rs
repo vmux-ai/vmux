@@ -84,7 +84,7 @@ impl LayoutContext {
 
     fn length_percentage(&self, value: Val) -> taffy::LengthPercentage {
         match value {
-            Val::Auto => style_helpers::length(0.0),
+            Val::Auto => style_helpers::length(0.0_f32),
             Val::Px(px) => style_helpers::length(self.scale_factor * px),
             Val::Percent(percent) => style_helpers::percent(percent / 100.0),
         }
@@ -200,8 +200,8 @@ impl FlexTree {
                 let style = taffy::Style {
                     display: taffy::Display::Grid,
                     size: taffy::Size {
-                        width: style_helpers::percent(1.0),
-                        height: style_helpers::percent(1.0),
+                        width: style_helpers::percent(1.0_f32),
+                        height: style_helpers::percent(1.0_f32),
                     },
                     align_items: Some(taffy::AlignItems::Start),
                     justify_items: Some(taffy::AlignItems::Start),
