@@ -31,8 +31,18 @@ impl Paths {
         })
     }
 
-    pub(super) fn write_manifest(&self, source: String) -> Result<ManifestWritten, String> {
-        vmux_path::AtomicFile::write(self.root.join("tools.toml"), source.as_bytes())
+    pub(super) fn write_manifest(
+        &self,
+        source: String,
+        receipt: super::write::ManifestReceipt,
+    ) -> Result<ManifestWritten, String> {
+        let publication =
+            vmux_path::AtomicFile::write_observed(self.root.join("tools.toml"), source.as_bytes());
+        if publication.published {
+            receipt.record();
+        }
+        publication
+            .result
             .map(|_| ManifestWritten)
             .map_err(|error| error.to_string())
     }

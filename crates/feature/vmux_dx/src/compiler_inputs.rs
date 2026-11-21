@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use quote::ToTokens;
+use syn::parse::Parser;
 use syn::visit::{self, Visit};
 use syn::{Expr, Item, Pat, Stmt, Type, UseTree};
 
@@ -17,11 +18,19 @@ pub(super) struct CompilerInputs {
     included: BTreeSet<String>,
     harness: String,
     constructors: BTreeSet<String>,
-    methods: BTreeMap<String, BTreeSet<usize>>,
+    methods: BTreeMap<String, BTreeMap<usize, BTreeSet<usize>>>,
     parameters: BTreeMap<String, usize>,
     temporaries: BTreeSet<String>,
-    written: BTreeMap<String, BTreeSet<usize>>,
-    executed: BTreeSet<String>,
+    written: BTreeMap<(String, Vec<String>), Option<usize>>,
+    projects: BTreeMap<String, toml::Value>,
+    local_paths: BTreeMap<String, (String, Vec<String>)>,
+    fixed_paths: BTreeMap<String, PathBuf>,
+    source_paths: BTreeMap<String, PathBuf>,
+    local_temporaries: BTreeSet<String>,
+    source_directory: PathBuf,
+    method: String,
+    constructor: bool,
+    uncertain: bool,
     modules: BTreeSet<PathBuf>,
     file_base: PathBuf,
     module_base: PathBuf,
@@ -94,7 +103,7 @@ impl CompilerInputs {
                 continue;
             }
             let name = structure.ident.to_string();
-            let Ok(proof) = Self::harness(file, &name) else {
+            let Ok(proof) = Self::harness(file, &name, &source) else {
                 continue;
             };
             let owner = format!("{}||impl:{name}", relative.display());
@@ -154,9 +163,10 @@ impl CompilerInputs {
         std::fs::read_to_string(path).map_err(|error| error.to_string())
     }
 
-    fn harness(file: &syn::File, name: &str) -> Result<Self, String> {
+    fn harness(file: &syn::File, name: &str, source: &Path) -> Result<Self, String> {
         let mut proof = Self {
             harness: name.into(),
+            source_directory: Self::cargo_directory(source)?,
             ..Self::default()
         };
         for item in &file.items {
@@ -169,10 +179,9 @@ impl CompilerInputs {
                 return Err("Compiler harness shadows an external interface".into());
             }
             if let Item::Macro(item) = item
-                && item
-                    .ident
-                    .as_ref()
-                    .is_some_and(|name| name == "include_str")
+                && item.ident.as_ref().is_some_and(|name| {
+                    matches!(name.to_string().as_str(), "include_str" | "format" | "env")
+                })
             {
                 return Err("Compiler harness shadows source inclusion".into());
             }
@@ -224,6 +233,14 @@ impl CompilerInputs {
         if !Self::testing(&implementation.attrs) {
             return Err("Compiler harness implementation must be test-only".into());
         }
+        for item in &implementation.items {
+            let syn::ImplItem::Fn(function) = item else {
+                continue;
+            };
+            if Self::constructor(function, name) && Self::enabled(&function.attrs, false) {
+                proof.project(function)?;
+            }
+        }
         proof.visit_item_impl(implementation);
         if proof.methods.is_empty() {
             return Err("Compiler harness must compile its written source through Cargo".into());
@@ -242,6 +259,15 @@ impl CompilerInputs {
             }
         }
         Ok(proof)
+    }
+
+    fn cargo_directory(source: &Path) -> Result<PathBuf, String> {
+        let directory = source
+            .ancestors()
+            .skip(1)
+            .find(|path| path.join("Cargo.toml").is_file())
+            .ok_or("Compiler harness has no Cargo manifest")?;
+        Ok(directory.to_path_buf())
     }
 
     fn testing(attributes: &[syn::Attribute]) -> bool {
@@ -335,48 +361,550 @@ impl CompilerInputs {
         Ok(())
     }
 
-    fn temporary(&self, expression: &Expr) -> Option<String> {
+    fn constructor(function: &syn::ImplItemFn, owner: &str) -> bool {
+        !function
+            .sig
+            .inputs
+            .iter()
+            .any(|input| matches!(input, syn::FnArg::Receiver(_)))
+            && matches!(&function.sig.output, syn::ReturnType::Type(_, value) if matches!(value.as_ref(), Type::Path(value) if value.path.is_ident("Self") || value.path.is_ident(owner)))
+    }
+
+    fn project(&mut self, function: &syn::ImplItemFn) -> Result<(), String> {
+        let previous = std::mem::take(&mut self.projects);
+        self.constructor = true;
+        self.uncertain = false;
+        self.local_paths.clear();
+        self.fixed_paths.clear();
+        self.local_temporaries.clear();
+        self.visit_block(&function.block);
+        self.constructor = false;
+        if self.uncertain {
+            return Err("Compiler project has unproven control flow".into());
+        }
+        let Some(Stmt::Expr(Expr::Struct(value), _)) = function.block.stmts.last() else {
+            return Err("Compiler project constructor must return its owned fields".into());
+        };
+        if !value.path.is_ident("Self") && !value.path.is_ident(&self.harness) {
+            return Err("Compiler project constructor returns a different owner".into());
+        }
+        let mut projects = previous;
+        let mut owned = false;
+        for field in &value.fields {
+            let syn::Member::Named(name) = &field.member else {
+                continue;
+            };
+            if let Some(path) = self.fixed(&field.expr)
+                && let Some(previous) = self.source_paths.insert(name.to_string(), path.clone())
+                && previous != path
+            {
+                return Err("Compiler project constructors use different source roots".into());
+            }
+            if !self.temporaries.contains(&name.to_string()) {
+                continue;
+            }
+            let Expr::Path(path) = &field.expr else {
+                return Err("Compiler project field must retain its created temporary".into());
+            };
+            let local = path
+                .path
+                .get_ident()
+                .ok_or("Compiler project field is unresolved")?;
+            let manifest = self
+                .projects
+                .get(&local.to_string())
+                .ok_or("Compiler project has no proven manifest")?;
+            if let Some(previous) = projects.insert(name.to_string(), manifest.clone())
+                && previous != *manifest
+            {
+                return Err("Compiler project constructors use different targets".into());
+            }
+            owned = true;
+        }
+        self.projects = projects;
+        if owned {
+            self.constructors.insert(function.sig.ident.to_string());
+        }
+        self.local_paths.clear();
+        self.fixed_paths.clear();
+        self.local_temporaries.clear();
+        Ok(())
+    }
+
+    fn relative(value: &str) -> Option<Vec<String>> {
+        let mut parts = Vec::new();
+        for part in Path::new(value).components() {
+            match part {
+                std::path::Component::Normal(value) => parts.push(value.to_str()?.to_owned()),
+                std::path::Component::CurDir => {}
+                _ => return None,
+            }
+        }
+        Some(parts)
+    }
+
+    fn string(&self, expression: &Expr) -> Option<String> {
         match expression {
-            Expr::MethodCall(call) => self.temporary(&call.receiver),
+            Expr::Lit(value) => {
+                let syn::Lit::Str(value) = &value.lit else {
+                    return None;
+                };
+                let value = value.value();
+                (!value.contains('\0')).then_some(value)
+            }
+            Expr::Path(value) => {
+                let position = self.parameters.get(&value.path.get_ident()?.to_string())?;
+                Some(format!("\0{position}\0"))
+            }
+            Expr::Macro(value) if value.mac.path.is_ident("format") => self.formatted(&value.mac),
+            Expr::Reference(value) => self.string(&value.expr),
+            Expr::Paren(value) => self.string(&value.expr),
+            _ => None,
+        }
+    }
+
+    fn formatted(&self, value: &syn::Macro) -> Option<String> {
+        let arguments = syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated
+            .parse2(value.tokens.clone())
+            .ok()?;
+        let Expr::Lit(first) = arguments.first()? else {
+            return None;
+        };
+        let syn::Lit::Str(template) = &first.lit else {
+            return None;
+        };
+        let template = template.value();
+        if template.contains('\0') {
+            return None;
+        }
+        let mut result = String::new();
+        let mut chars = template.chars().peekable();
+        let mut positional = 1;
+        let mut consumed = BTreeSet::new();
+        while let Some(character) = chars.next() {
+            if character != '{' {
+                if character == '}' && chars.next()? != '}' {
+                    return None;
+                }
+                result.push(character);
+                continue;
+            }
+            if chars.peek() == Some(&'{') {
+                chars.next();
+                result.push('{');
+                continue;
+            }
+            let mut placeholder = String::new();
+            loop {
+                let character = chars.next()?;
+                if character == '}' {
+                    break;
+                }
+                placeholder.push(character);
+            }
+            if placeholder.is_empty() {
+                result.push_str(&self.string(arguments.iter().nth(positional)?)?);
+                consumed.insert(positional);
+                positional += 1;
+            } else if let Ok(index) = placeholder.parse::<usize>() {
+                result.push_str(&self.string(arguments.iter().nth(index + 1)?)?);
+                consumed.insert(index + 1);
+            } else {
+                let expression = syn::parse_str::<Expr>(&placeholder).ok()?;
+                result.push_str(&self.string(&expression)?);
+            }
+        }
+        if consumed.len() + 1 != arguments.len() {
+            return None;
+        }
+        Some(result)
+    }
+
+    fn destination(&self, expression: &Expr) -> Option<(String, Vec<String>)> {
+        match expression {
+            Expr::MethodCall(call) if call.method == "path" && call.args.is_empty() => {
+                let name = match call.receiver.as_ref() {
+                    Expr::Field(field) if matches!(field.base.as_ref(), Expr::Path(value) if value.path.is_ident("self")) =>
+                    {
+                        let syn::Member::Named(name) = &field.member else {
+                            return None;
+                        };
+                        self.temporaries
+                            .contains(&name.to_string())
+                            .then(|| name.to_string())?
+                    }
+                    Expr::Path(path) => {
+                        let name = path.path.get_ident()?.to_string();
+                        self.local_temporaries.contains(&name).then_some(name)?
+                    }
+                    _ => return None,
+                };
+                Some((name, Vec::new()))
+            }
+            Expr::MethodCall(call) if call.method == "join" && call.args.len() == 1 => {
+                let (root, mut parts) = self.destination(&call.receiver)?;
+                parts.extend(Self::relative(&self.string(call.args.first()?)?)?);
+                Some((root, parts))
+            }
+            Expr::Path(path) => self
+                .local_paths
+                .get(&path.path.get_ident()?.to_string())
+                .cloned(),
+            Expr::Reference(value) => self.destination(&value.expr),
+            Expr::Paren(value) => self.destination(&value.expr),
+            _ => None,
+        }
+    }
+
+    fn fixed(&self, expression: &Expr) -> Option<PathBuf> {
+        match expression {
+            Expr::Path(path) => self
+                .fixed_paths
+                .get(&path.path.get_ident()?.to_string())
+                .cloned(),
+            Expr::MethodCall(call) if call.method == "join" && call.args.len() == 1 => {
+                let mut path = self.fixed(&call.receiver)?;
+                let value = self.string(call.args.first()?)?;
+                if value.contains('\0') {
+                    return None;
+                }
+                for part in Self::relative(&value)? {
+                    path.push(part);
+                }
+                Some(path)
+            }
             Expr::Field(field) if matches!(field.base.as_ref(), Expr::Path(value) if value.path.is_ident("self")) =>
             {
                 let syn::Member::Named(name) = &field.member else {
                     return None;
                 };
-                self.temporaries
-                    .contains(&name.to_string())
-                    .then(|| name.to_string())
+                self.source_paths.get(&name.to_string()).cloned()
             }
-            Expr::Reference(value) => self.temporary(&value.expr),
-            Expr::Paren(value) => self.temporary(&value.expr),
+            Expr::MethodCall(call)
+                if call.method == "to_str" && call.args.is_empty() || Self::guarded(call) =>
+            {
+                self.fixed(&call.receiver)
+            }
+            Expr::Reference(value) => self.fixed(&value.expr),
+            Expr::Paren(value) => self.fixed(&value.expr),
             _ => None,
         }
     }
 
-    fn command(&self, expression: &Expr) -> Option<(bool, Option<String>)> {
+    fn command<'a>(&self, expression: &'a Expr) -> Option<(String, Vec<&'a Expr>)> {
         match expression {
             Expr::Call(call)
                 if matches!(call.func.as_ref(), Expr::Path(value) if self.external(&value.path) == "std::process::Command::new")
                     && matches!(call.args.first(), Some(Expr::Lit(value)) if matches!(&value.lit, syn::Lit::Str(value) if value.value() == "cargo")) =>
             {
-                Some((false, None))
+                Some((String::new(), Vec::new()))
             }
             Expr::MethodCall(call) => {
-                let (mut dylint, mut directory) = self.command(&call.receiver)?;
-                if call.method == "args"
-                    && let Some(Expr::Array(arguments)) = call.args.first()
-                {
-                    dylint |= arguments.elems.iter().any(|argument| matches!(argument, Expr::Lit(value) if matches!(&value.lit, syn::Lit::Str(value) if value.value() == "dylint")));
+                let (mut directory, mut arguments) = self.command(&call.receiver)?;
+                match call.method.to_string().as_str() {
+                    "args" => {
+                        let Some(Expr::Array(values)) = call.args.first() else {
+                            return None;
+                        };
+                        arguments.extend(values.elems.iter());
+                    }
+                    "arg" => arguments.push(call.args.first()?),
+                    "current_dir" => {
+                        let (root, parts) = self.destination(call.args.first()?)?;
+                        if !parts.is_empty() {
+                            return None;
+                        }
+                        directory = root;
+                    }
+                    _ => return None,
                 }
-                if call.method == "current_dir"
-                    && let Some(argument) = call.args.first()
-                {
-                    directory = self.temporary(argument);
-                }
-                Some((dylint, directory))
+                Some((directory, arguments))
             }
             Expr::Paren(value) => self.command(&value.expr),
             _ => None,
+        }
+    }
+
+    fn compilation(&mut self, expression: &Expr) {
+        if self.uncertain {
+            return;
+        }
+        let Some((directory, arguments)) = self.command(expression) else {
+            return;
+        };
+        let Some(separator) = arguments
+            .iter()
+            .position(|argument| self.string(argument).as_deref() == Some("--"))
+        else {
+            return;
+        };
+        if !self.dylint_arguments(&arguments[..separator]) {
+            return;
+        }
+        let mut selected = None;
+        let mut index = separator + 1;
+        while index < arguments.len() {
+            let Some(argument) = self.string(arguments[index]) else {
+                return;
+            };
+            match argument.as_str() {
+                "--example" | "--bin" => {
+                    if selected.is_some() {
+                        return;
+                    }
+                    index += 1;
+                    let Some(name) = arguments.get(index).and_then(|value| self.string(value))
+                    else {
+                        return;
+                    };
+                    selected = Some((argument, name));
+                }
+                "--lib" => {
+                    if selected.is_some() {
+                        return;
+                    }
+                    selected = Some((argument, String::new()));
+                }
+                "--locked" | "--offline" | "--release" | "--message-format=json" => {}
+                _ => return,
+            }
+            index += 1;
+        }
+        let Some((kind, name)) = selected else {
+            return;
+        };
+        for path in self.target_paths(&directory, &kind, &name) {
+            let key = (directory.clone(), path.clone());
+            let Some(Some(position)) = self.written.get(&key) else {
+                continue;
+            };
+            let mut parameters = BTreeSet::new();
+            for part in &path {
+                for (index, value) in part.split('\0').enumerate() {
+                    if index % 2 == 1 {
+                        let Ok(position) = value.parse::<usize>() else {
+                            return;
+                        };
+                        parameters.insert(position);
+                    }
+                }
+            }
+            self.methods
+                .entry(self.method.clone())
+                .or_default()
+                .entry(*position)
+                .or_default()
+                .extend(parameters);
+        }
+    }
+
+    fn dylint_arguments(&self, arguments: &[&Expr]) -> bool {
+        if arguments
+            .first()
+            .and_then(|value| self.string(value))
+            .as_deref()
+            != Some("dylint")
+        {
+            return false;
+        }
+        let mut index = 1;
+        let mut library = false;
+        while index < arguments.len() {
+            if self.string(arguments[index]).as_deref() != Some("--path") || library {
+                return false;
+            }
+            index += 1;
+            if arguments
+                .get(index)
+                .and_then(|value| self.fixed(value))
+                .as_deref()
+                != Some(self.source_directory.as_path())
+            {
+                return false;
+            }
+            library = true;
+            index += 1;
+        }
+        library
+    }
+
+    fn target_paths(&self, directory: &str, kind: &str, name: &str) -> Vec<Vec<String>> {
+        let Some(manifest) = self.projects.get(directory) else {
+            return Vec::new();
+        };
+        let group = match kind {
+            "--example" => "example",
+            "--bin" => "bin",
+            "--lib" => "lib",
+            _ => return Vec::new(),
+        };
+        if group == "lib" {
+            let path = manifest
+                .get("lib")
+                .and_then(|value| value.get("path"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("src/lib.rs");
+            return Self::relative(path).into_iter().collect();
+        }
+        if let Some(targets) = manifest.get(group).and_then(toml::Value::as_array) {
+            if name.contains('\0') && !targets.is_empty() {
+                return Vec::new();
+            }
+            for target in targets {
+                if target.get("name").and_then(toml::Value::as_str) != Some(name) {
+                    continue;
+                }
+                if let Some(path) = target.get("path").and_then(toml::Value::as_str) {
+                    return Self::relative(path).into_iter().collect();
+                }
+            }
+        }
+        let automatic = if group == "example" {
+            "autoexamples"
+        } else {
+            "autobins"
+        };
+        if manifest
+            .get("package")
+            .and_then(|value| value.get(automatic))
+            .and_then(toml::Value::as_bool)
+            == Some(false)
+        {
+            return Vec::new();
+        }
+        let parts = match Self::relative(name) {
+            Some(parts) if parts.len() == 1 => parts,
+            _ => return Vec::new(),
+        };
+        let prefix = if group == "example" {
+            vec!["examples".into()]
+        } else {
+            vec!["src".into(), "bin".into()]
+        };
+        let mut file = prefix.clone();
+        file.push(format!("{}.rs", parts[0]));
+        let mut main = prefix;
+        main.push(parts[0].clone());
+        main.push("main.rs".into());
+        vec![file, main]
+    }
+
+    fn filesystem(&mut self, call: &syn::ExprCall, successful: bool) -> bool {
+        let Expr::Path(function) = call.func.as_ref() else {
+            return false;
+        };
+        let operation = self.external(&function.path);
+        if operation != "std::fs::write" && operation != "std::fs::copy" {
+            return false;
+        }
+        let destination = if operation == "std::fs::copy" {
+            call.args.iter().nth(1)
+        } else {
+            call.args.first()
+        };
+        let Some(destination) = destination.and_then(|value| self.destination(value)) else {
+            self.unknown();
+            return true;
+        };
+        if destination.1 == ["Cargo.toml"] {
+            let source = if operation == "std::fs::copy" {
+                call.args
+                    .first()
+                    .and_then(|value| self.fixed(value))
+                    .and_then(|path| Self::regular(&path).ok())
+            } else {
+                call.args.iter().nth(1).and_then(|value| self.string(value))
+            };
+            let manifest = source
+                .filter(|_| successful)
+                .and_then(|source| toml::from_str::<toml::Value>(&source).ok());
+            match manifest {
+                Some(manifest)
+                    if manifest
+                        .get("package")
+                        .and_then(|value| value.get("name"))
+                        .and_then(toml::Value::as_str)
+                        .is_some() =>
+                {
+                    self.projects.insert(destination.0, manifest);
+                }
+                _ => {
+                    self.projects.remove(&destination.0);
+                }
+            }
+            return true;
+        }
+        if self.constructor {
+            return true;
+        }
+        let position = if successful && operation == "std::fs::write" {
+            call.args.iter().nth(1).and_then(|value| match value {
+                Expr::Path(path) => self
+                    .parameters
+                    .get(&path.path.get_ident()?.to_string())
+                    .copied(),
+                _ => None,
+            })
+        } else {
+            None
+        };
+        self.written.insert(destination, position);
+        true
+    }
+
+    fn guarded(call: &syn::ExprMethodCall) -> bool {
+        match call.method.to_string().as_str() {
+            "unwrap" => call.args.is_empty(),
+            "expect" => {
+                call.args.len() == 1
+                    && matches!(call.args.first(), Some(Expr::Lit(value)) if matches!(value.lit, syn::Lit::Str(_)))
+            }
+            _ => false,
+        }
+    }
+
+    fn unknown(&mut self) {
+        self.written.clear();
+        self.projects.clear();
+        self.uncertain = true;
+    }
+
+    fn local_origin(&mut self, name: &str, expression: &Expr) {
+        self.local_paths.remove(name);
+        self.fixed_paths.remove(name);
+        self.local_temporaries.remove(name);
+        let origin = match expression {
+            Expr::MethodCall(call) if Self::guarded(call) => call.receiver.as_ref(),
+            _ => expression,
+        };
+        if self.constructor
+            && let Expr::Call(call) = origin
+            && let Expr::Path(function) = call.func.as_ref()
+        {
+            match self.external(&function.path).as_str() {
+                "tempfile::tempdir" if !std::ptr::eq(origin, expression) => {
+                    self.local_temporaries.insert(name.to_owned());
+                    return;
+                }
+                "std::path::PathBuf::from" => {
+                    if let Some(Expr::Macro(value)) = call.args.first()
+                        && value.mac.path.is_ident("env")
+                        && let Ok(value) = syn::parse2::<syn::LitStr>(value.mac.tokens.clone())
+                        && value.value() == "CARGO_MANIFEST_DIR"
+                    {
+                        self.fixed_paths
+                            .insert(name.to_owned(), self.source_directory.clone());
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(path) = self.destination(expression) {
+            self.local_paths.insert(name.to_owned(), path);
+        }
+        if let Some(path) = self.fixed(expression) {
+            self.fixed_paths.insert(name.to_owned(), path);
         }
     }
 
@@ -453,10 +981,24 @@ impl CompilerInputs {
 }
 
 impl<'ast> Visit<'ast> for CompilerInputs {
+    fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        if !self.method.is_empty() || self.constructor {
+            self.unknown();
+            return;
+        }
+        visit::visit_item_use(self, item);
+    }
+
     fn visit_impl_item_fn(&mut self, function: &'ast syn::ImplItemFn) {
+        if Self::constructor(function, &self.harness) || !Self::enabled(&function.attrs, false) {
+            return;
+        }
+        let projects = self.projects.clone();
+        self.uncertain = false;
         self.parameters.clear();
         self.written.clear();
-        self.executed.clear();
+        self.local_paths.clear();
+        self.method = function.sig.ident.to_string();
         let mut position = 0;
         for input in &function.sig.inputs {
             if let syn::FnArg::Typed(input) = input {
@@ -466,52 +1008,89 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                 position += 1;
             }
         }
-        if !function
-            .sig
-            .inputs
-            .iter()
-            .any(|input| matches!(input, syn::FnArg::Receiver(_)))
-            && matches!(&function.sig.output, syn::ReturnType::Type(_, value) if matches!(value.as_ref(), Type::Path(value) if value.path.is_ident("Self") || value.path.is_ident(&self.harness)))
-        {
-            self.constructors.insert(function.sig.ident.to_string());
-        }
         visit::visit_impl_item_fn(self, function);
-        for directory in &self.executed {
-            if let Some(inputs) = self.written.get(directory) {
-                self.methods
-                    .entry(function.sig.ident.to_string())
-                    .or_default()
-                    .extend(inputs.iter().copied());
-            }
-        }
+        self.method.clear();
+        self.parameters.clear();
+        self.local_paths.clear();
+        self.written.clear();
+        self.projects = projects;
     }
 
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if matches!(call.func.as_ref(), Expr::Path(value) if self.external(&value.path) == "std::fs::write")
-            && let (Some(path), Some(Expr::Path(input))) =
-                (call.args.first(), call.args.iter().nth(1))
-            && let Some(name) = input.path.get_ident()
-            && let Some(position) = self.parameters.get(&name.to_string())
-            && let Some(directory) = self.temporary(path)
+        if self.filesystem(call, false) {
+            return;
+        }
+        if (!self.method.is_empty() || self.constructor)
+            && !matches!(call.func.as_ref(), Expr::Path(value) if matches!(self.external(&value.path).as_str(), "std::process::Command::new" | "std::path::PathBuf::from" | "tempfile::tempdir" | "std::fs::create_dir" | "std::fs::create_dir_all"))
         {
-            self.written.entry(directory).or_default().insert(*position);
+            self.unknown();
         }
         visit::visit_expr_call(self, call);
     }
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if matches!(call.method.to_string().as_str(), "output" | "status")
-            && let Some((true, Some(directory))) = self.command(&call.receiver)
+        if Self::guarded(call)
+            && let Expr::Call(operation) = call.receiver.as_ref()
+            && self.filesystem(operation, true)
         {
-            self.executed.insert(directory);
+            return;
+        }
+        let mechanical = Self::guarded(call)
+            || (matches!(call.method.to_string().as_str(), "output" | "status")
+                && call.args.is_empty()
+                && self.command(&call.receiver).is_some())
+            || self.command(&Expr::MethodCall(call.clone())).is_some()
+            || self.destination(&Expr::MethodCall(call.clone())).is_some()
+            || self.fixed(&Expr::MethodCall(call.clone())).is_some();
+        if (!self.method.is_empty() || self.constructor) && !mechanical {
+            self.unknown();
         }
         visit::visit_expr_method_call(self, call);
+        if !self.method.is_empty()
+            && call.args.is_empty()
+            && matches!(call.method.to_string().as_str(), "output" | "status")
+        {
+            self.compilation(&call.receiver);
+        }
+    }
+
+    fn visit_expr_try(&mut self, expression: &'ast syn::ExprTry) {
+        if let Expr::Call(operation) = expression.expr.as_ref()
+            && self.filesystem(operation, true)
+        {
+            return;
+        }
+        visit::visit_expr_try(self, expression);
+    }
+
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+
+    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+
+    fn visit_expr_while(&mut self, expression: &'ast syn::ExprWhile) {
+        if self.harness.is_empty() {
+            visit::visit_expr_while(self, expression);
+            return;
+        }
+        self.unknown();
+    }
+
+    fn visit_expr_loop(&mut self, expression: &'ast syn::ExprLoop) {
+        if self.harness.is_empty() {
+            visit::visit_expr_loop(self, expression);
+            return;
+        }
+        self.unknown();
     }
 
     fn visit_local(&mut self, local: &'ast syn::Local) {
         if let Pat::Ident(binding) = &local.pat {
             let name = binding.ident.to_string();
             self.bindings.remove(&name);
+            self.parameters.remove(&name);
+            if let Some(value) = &local.init {
+                self.local_origin(&name, &value.expr);
+            }
             if let Some(value) = &local.init
                 && let Expr::Call(call) = value.expr.as_ref()
                 && let Expr::Path(path) = call.func.as_ref()
@@ -536,6 +1115,7 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                 statement,
                 Stmt::Expr(Expr::Return(_) | Expr::Break(_) | Expr::Continue(_), _)
             ) {
+                self.unknown();
                 break;
             }
         }
@@ -543,10 +1123,15 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_expr_assign(&mut self, assignment: &'ast syn::ExprAssign) {
+        self.unknown();
         if let Expr::Path(path) = assignment.left.as_ref()
             && let Some(name) = path.path.get_ident()
         {
             self.bindings.remove(&name.to_string());
+            self.parameters.remove(&name.to_string());
+            self.local_paths.remove(&name.to_string());
+            self.fixed_paths.remove(&name.to_string());
+            self.local_temporaries.remove(&name.to_string());
         }
         visit::visit_expr_assign(self, assignment);
     }
@@ -556,6 +1141,7 @@ impl<'ast> Visit<'ast> for CompilerInputs {
             visit::visit_expr_if(self, expression);
         } else {
             self.bindings.clear();
+            self.unknown();
         }
     }
 
@@ -564,10 +1150,15 @@ impl<'ast> Visit<'ast> for CompilerInputs {
             visit::visit_expr_match(self, expression);
         } else {
             self.bindings.clear();
+            self.unknown();
         }
     }
 
     fn visit_expr_for_loop(&mut self, expression: &'ast syn::ExprForLoop) {
+        if !self.method.is_empty() || self.constructor {
+            self.unknown();
+            return;
+        }
         let (Pat::Tuple(pattern), Expr::Array(inputs)) =
             (expression.pat.as_ref(), expression.expr.as_ref())
         else {
@@ -605,7 +1196,7 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                     let Some(positions) = self.methods.get(&call.method.to_string()) else {
                         continue;
                     };
-                    for position in positions {
+                    for (position, dependencies) in positions {
                         let Some(Expr::Path(argument)) = call.args.iter().nth(*position) else {
                             continue;
                         };
@@ -618,6 +1209,15 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                         let Some(index) = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *argument)) else { continue; };
                         for input in &inputs.elems {
                             if let Expr::Tuple(tuple) = input
+                                && dependencies.iter().all(|position| {
+                                    let Some(Expr::Path(argument)) = call.args.iter().nth(*position) else { return false; };
+                                    let Some(argument) = argument.path.get_ident() else { return false; };
+                                    if invalid.contains(&argument.to_string()) { return false; }
+                                    let Some(index) = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *argument)) else { return false; };
+                                    let Some(Expr::Lit(value)) = tuple.elems.iter().nth(index) else { return false; };
+                                    let syn::Lit::Str(value) = &value.lit else { return false; };
+                                    matches!(Self::relative(&value.value()), Some(parts) if parts.len() == 1 && !parts[0].contains('\0'))
+                                })
                                 && let Some(Expr::Macro(value)) = tuple.elems.iter().nth(index)
                                 && value.mac.path.is_ident("include_str")
                                 && let Ok(path) =
@@ -637,6 +1237,10 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if !self.method.is_empty() || self.constructor {
+            self.unknown();
+            return;
+        }
         if !Self::enabled(&item.attrs, true) {
             return;
         }
@@ -674,6 +1278,14 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_macro(&mut self, value: &'ast syn::Macro) {
+        if (!self.method.is_empty() || self.constructor)
+            && !matches!(
+                value.path.get_ident().map(ToString::to_string).as_deref(),
+                Some("format" | "env")
+            )
+        {
+            self.unknown();
+        }
         if value.path.is_ident("include")
             && let Ok(path) = syn::parse2::<syn::LitStr>(value.tokens.clone())
         {

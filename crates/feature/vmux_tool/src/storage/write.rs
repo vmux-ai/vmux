@@ -1,5 +1,9 @@
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use super::migration::{MigrationRequest, MigrationResult};
 use super::native::{Brewfile, BrewfileWritten, ManifestWritten, Paths};
@@ -30,6 +34,21 @@ pub(super) struct WriteSet;
 pub(crate) struct WriteRequest {
     pub(crate) manifest: ToolsManifest,
     pub(crate) retain_lease: bool,
+}
+
+#[derive(Component)]
+pub(crate) struct ManifestOnly;
+
+#[derive(Component, Clone, Default)]
+pub(crate) struct ManifestReceipt(Arc<AtomicBool>);
+
+impl ManifestReceipt {
+    pub(crate) fn published(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    pub(super) fn record(&self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 #[derive(Component)]
@@ -100,7 +119,13 @@ fn begin(
         commands
             .entity(entity)
             .remove::<(WriteResult, Failure)>()
-            .insert((Active, Writing, Acquire, Paths::from_store(store)));
+            .insert((
+                Active,
+                Writing,
+                Acquire,
+                Paths::from_store(store),
+                ManifestReceipt::default(),
+            ));
     }
 }
 
@@ -176,6 +201,8 @@ fn manifest(
             Entity,
             &Paths,
             &WriteRequest,
+            &ManifestReceipt,
+            Has<ManifestOnly>,
             Option<&ManifestWritten>,
             Option<&Failed<ManifestWritten>>,
         ),
@@ -183,17 +210,20 @@ fn manifest(
     >,
     mut commands: Commands,
 ) {
-    for (entity, paths, request, written, failure) in &requests {
+    for (entity, paths, request, receipt, manifest_only, written, failure) in &requests {
         if let Some(failure) = failure {
             commands
                 .entity(entity)
                 .remove::<WriteManifest>()
                 .insert((Failure(failure.0.clone()), Done));
         } else if written.is_some() {
-            commands
-                .entity(entity)
-                .remove::<WriteManifest>()
-                .insert(ReadBrewfile);
+            let mut entity = commands.entity(entity);
+            entity.remove::<WriteManifest>();
+            if manifest_only {
+                entity.insert(Done);
+            } else {
+                entity.insert(ReadBrewfile);
+            }
         } else {
             let mut manifest = request.manifest.clone();
             manifest.version = ToolsManifest::default().version;
@@ -209,9 +239,12 @@ fn manifest(
                 }
             };
             let paths = paths.clone();
+            let receipt = receipt.clone();
             commands.entity(entity).insert((
                 Busy,
-                IoTask(IoTaskPool::get().spawn(async move { paths.write_manifest(source) })),
+                IoTask(
+                    IoTaskPool::get().spawn(async move { paths.write_manifest(source, receipt) }),
+                ),
             ));
         }
     }
@@ -334,6 +367,7 @@ fn finish(
                 Brewfile,
                 AcquiredLease,
                 Failure,
+                ManifestOnly,
                 BrewfileTemplate,
                 MigrationResult,
             )>();

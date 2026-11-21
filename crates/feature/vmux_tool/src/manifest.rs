@@ -145,9 +145,16 @@ impl PartialEq for ToolStore {
 
 impl Eq for ToolStore {}
 
+#[derive(Clone)]
 pub(crate) struct Lease {
     execution: Arc<Execution>,
-    guard: Option<SemaphoreGuardArc>,
+    guard: Option<Arc<SemaphoreGuardArc>>,
+}
+
+impl Lease {
+    pub(crate) fn matches(&self, store: &ToolStore) -> bool {
+        Arc::ptr_eq(&self.execution, &store.execution)
+    }
 }
 
 impl Drop for Lease {
@@ -219,7 +226,7 @@ impl ToolStore {
     pub(crate) fn lease(&self) -> Option<Lease> {
         Some(Lease {
             execution: Arc::clone(&self.execution),
-            guard: Some(self.execution.permit.try_acquire_arc()?),
+            guard: Some(Arc::new(self.execution.permit.try_acquire_arc()?)),
         })
     }
 
@@ -227,7 +234,7 @@ impl ToolStore {
     pub(crate) async fn lease_async(&self) -> Lease {
         Lease {
             execution: Arc::clone(&self.execution),
-            guard: Some(self.execution.permit.acquire_arc().await),
+            guard: Some(Arc::new(self.execution.permit.acquire_arc().await)),
         }
     }
 

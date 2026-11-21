@@ -36,11 +36,29 @@ impl DisplayPath {
     }
 }
 
+pub struct AtomicPublication {
+    pub published: bool,
+    pub result: io::Result<()>,
+}
+
 pub struct AtomicFile;
 
 impl AtomicFile {
     pub fn write(path: impl AsRef<Path>, bytes: &[u8]) -> io::Result<()> {
+        Self::write_observed(path, bytes).result
+    }
+
+    pub fn write_observed(path: impl AsRef<Path>, bytes: &[u8]) -> AtomicPublication {
         let path = path.as_ref();
+        let mut publication = AtomicPublication {
+            published: false,
+            result: Ok(()),
+        };
+        publication.result = Self::publish(path, bytes, &mut publication.published);
+        publication
+    }
+
+    fn publish(path: &Path, bytes: &[u8], published: &mut bool) -> io::Result<()> {
         let parent = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -57,6 +75,7 @@ impl AtomicFile {
             temporary.as_file().set_permissions(permissions)?;
         }
         temporary.persist(path).map_err(|error| error.error)?;
+        *published = true;
         Self::sync_parent(parent)
     }
 

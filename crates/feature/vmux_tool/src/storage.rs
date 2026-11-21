@@ -7,7 +7,9 @@ use std::task::{Context, Poll};
 use crate::{ToolStore, ToolsManifest};
 pub(crate) use file::{FileReadRequest, FileReadResult};
 pub(crate) use read::{ReadRequest, ReadResult};
-pub(crate) use write::{BrewfileTemplate, WriteRequest, WriteResult};
+pub(crate) use write::{
+    BrewfileTemplate, ManifestOnly, ManifestReceipt, WriteRequest, WriteResult,
+};
 
 mod file;
 mod migration;
@@ -50,7 +52,7 @@ impl Plugin for StoragePlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub(crate) struct StoreLease {
     pub(crate) _lease: crate::manifest::Lease,
 }

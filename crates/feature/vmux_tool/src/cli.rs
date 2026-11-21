@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use vmux_ecs::OperationState;
 use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_feature::manifest::FeaturePlugin;
 
@@ -136,6 +137,7 @@ fn route(
                 entity.insert((
                     ToolStatusRequest,
                     store.clone(),
+                    StatusSource(store.clone()),
                     ReadRequest { retain_lease: true },
                 ));
             }
@@ -188,21 +190,50 @@ fn route(
 }
 
 fn execute_status(
-    requests: Query<(Entity, &ToolStore, &ReadResult), With<ToolStatusRequest>>,
+    requests: Query<
+        (
+            Entity,
+            Option<&ToolStore>,
+            &StatusSource,
+            &ReadResult,
+            Option<&StoreLease>,
+            Has<StatusCancelled>,
+        ),
+        With<ToolStatusRequest>,
+    >,
     mut commands: Commands,
 ) {
-    for (entity, store, loaded) in &requests {
+    for (entity, store, source, loaded, lease, cancelled) in &requests {
         commands
             .entity(entity)
-            .remove::<(ToolStatusRequest, ReadResult, StoreLease)>();
+            .remove::<(ToolStatusRequest, ReadResult)>();
         let manifest = match &loaded.0 {
             Ok(manifest) => manifest,
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(CliResult(Err(error.clone())));
+                    .insert(CliResult(Err(error.clone())))
+                    .remove::<(StoreLease, StatusSource, StatusCancelled)>();
                 continue;
             }
+        };
+        let Some(lease) = lease else {
+            commands
+                .entity(entity)
+                .insert(CliResult(Err(
+                    "tool status read did not retain its store lease".into(),
+                )))
+                .remove::<(StatusSource, StatusCancelled)>();
+            continue;
+        };
+        let Some(store) =
+            store.filter(|store| !cancelled && **store == source.0 && lease._lease.matches(store))
+        else {
+            commands
+                .entity(entity)
+                .insert(CliResult(Err("tool status source changed".into())))
+                .remove::<(StoreLease, StatusSource, StatusCancelled)>();
+            continue;
         };
         println!("{}", store.root().display());
         for (provider, packages) in &manifest.packages {
@@ -227,6 +258,10 @@ fn execute_status(
             bevy_ecs::hierarchy::ChildOf(entity),
             StatusDiscovery,
             store.clone(),
+            crate::dotfile_ops::SharedReadLease {
+                store: store.clone(),
+                lease: lease.clone(),
+            },
             DiscoverDotfilePackages,
         ));
     }
@@ -243,19 +278,33 @@ fn status_discovered(
         ),
         With<StatusDiscovery>,
     >,
-    status: Query<(&StatusSource, &StatusSnapshot, Has<StatusCancelled>), Without<CliResult>>,
+    status: Query<
+        (
+            &StatusSource,
+            &StatusSnapshot,
+            &StoreLease,
+            Has<StatusCancelled>,
+        ),
+        Without<CliResult>,
+    >,
     drain: crate::dotfile_ops::DotfileDrain,
     mut commands: Commands,
 ) {
-    for (entity, parent, packages, error, finished) in &discovery {
-        let Ok((source, snapshot, cancelled)) = status.get(parent.parent()) else {
+    for (entity, parent, packages, error, _) in &discovery {
+        let Ok((source, snapshot, lease, cancelled)) = status.get(parent.parent()) else {
             continue;
         };
-        if cancelled && finished && drain.is_drained(entity) {
+        if cancelled && drain.is_drained(entity) {
             commands
                 .entity(parent.parent())
                 .insert(CliResult(Err("tool status source changed".into())))
-                .remove::<(StatusSource, StatusSnapshot, ToolStore, StatusCancelled)>();
+                .remove::<(
+                    StatusSource,
+                    StatusSnapshot,
+                    ToolStore,
+                    StatusCancelled,
+                    StoreLease,
+                )>();
             commands.entity(entity).despawn();
             continue;
         }
@@ -263,7 +312,7 @@ fn status_discovered(
             commands
                 .entity(parent.parent())
                 .insert(CliResult(Err(error.0.clone())))
-                .remove::<(StatusSource, StatusSnapshot, ToolStore)>();
+                .remove::<(StatusSource, StatusSnapshot, ToolStore, StoreLease)>();
             commands.entity(entity).despawn();
             continue;
         }
@@ -281,7 +330,7 @@ fn status_discovered(
             commands
                 .entity(parent.parent())
                 .insert(CliResult::default())
-                .remove::<(StatusSource, StatusSnapshot, ToolStore)>();
+                .remove::<(StatusSource, StatusSnapshot, ToolStore, StoreLease)>();
         } else {
             println!("dotfiles ({})", names.len());
             for (order, name) in names.into_iter().enumerate() {
@@ -295,6 +344,10 @@ fn status_discovered(
                         u32::try_from(order).expect("bounded dotfile status package count"),
                     ),
                     source.0.clone(),
+                    crate::dotfile_ops::SharedReadLease {
+                        store: source.0.clone(),
+                        lease: lease.clone(),
+                    },
                     PlanDotfilePackage::new(name),
                 ));
             }
@@ -335,10 +388,10 @@ fn status_reported(
         ordered.sort_by_key(|(order, _)| *order);
         let mut pending = false;
         for (_, plan) in ordered {
-            let Ok((_, _, name, _, output, error, _, finished)) = plans.get_mut(plan) else {
+            let Ok((_, _, name, _, output, error, _, _)) = plans.get_mut(plan) else {
                 continue;
             };
-            if cancelled && finished && drain.is_drained(plan) {
+            if cancelled && drain.is_drained(plan) {
             } else if let Some(output) = output {
                 println!(
                     "  {}{} · {} linked · {} missing · {} conflicts",
@@ -384,6 +437,7 @@ fn status_reported(
             StatusSnapshot,
             ToolStore,
             StatusCancelled,
+            StoreLease,
         )>();
     }
 }
@@ -624,13 +678,23 @@ fn complete_dotfiles(
             Option<&AppliedEnabledDotfiles>,
             Option<&DisabledDotfilePackage>,
             Option<&ToolOperationFailed>,
+            Option<&OperationState>,
+            Has<crate::ToolOperationFinished>,
         ),
-        (With<WaitingDotfiles>, With<crate::ToolOperationFinished>),
+        With<WaitingDotfiles>,
     >,
     mut commands: Commands,
+    drain: crate::dotfile_ops::DotfileDrain,
 ) {
-    for (entity, applied, disabled, failure) in &requests {
-        let result = if let Some(failure) = failure {
+    for (entity, applied, disabled, failure, state, finished) in &requests {
+        if !drain.is_drained(entity) {
+            continue;
+        }
+        let result = if state == Some(&OperationState::Canceled) {
+            CliResult(Err("dotfile operation canceled".into()))
+        } else if !finished {
+            continue;
+        } else if let Some(failure) = failure {
             CliResult(Err(failure.0.clone()))
         } else if let Some(applied) = applied {
             println!("linked {} file(s)", applied.files);
@@ -1035,6 +1099,229 @@ mod tests {
             "tap \"homebrew/cask-fonts\"\n# keep\nbrew \"ripgrep\", link: false\n"
         );
         assert!(!store.is_busy());
+    }
+
+    #[test]
+    fn status_holds_one_store_read_until_all_link_counts_are_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let root = store.dotfiles_dir().join("shell");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(store.home()).unwrap();
+        std::fs::write(root.join(".zshrc"), b"shell").unwrap();
+        std::os::unix::fs::symlink(root.join(".zshrc"), store.home().join(".zshrc")).unwrap();
+        let mut manifest = ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.write_to(&store.manifest_path()).unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        let status = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.status".into(),
+                    arguments: BTreeMap::new(),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<StatusSnapshot>(status).is_none() {
+            app.update();
+            assert!(
+                Instant::now() < deadline,
+                "status did not accept its store read"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let disable = app
+            .world_mut()
+            .spawn((
+                vmux_ecs::Operation::bundle("test.status.concurrent.disable").unwrap(),
+                store.clone(),
+                DisableDotfilePackage::new("shell"),
+            ))
+            .id();
+        while app.world().get::<CliResult>(status).is_none() {
+            assert!(store.home().join(".zshrc").symlink_metadata().is_ok());
+            assert!(
+                ToolsManifest::read(&store.manifest_path())
+                    .unwrap()
+                    .dotfiles
+                    .packages
+                    .contains(&"shell".to_string())
+            );
+            app.update();
+            assert!(Instant::now() < deadline, "shared status read deadlocked");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(status).unwrap().0, Ok(0));
+        while app.world().get::<DisabledDotfilePackage>(disable).is_none() {
+            app.update();
+            assert!(
+                Instant::now() < deadline,
+                "status did not release its lease"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(store.home().join(".zshrc").symlink_metadata().is_err());
+        assert!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .dotfiles
+                .packages
+                .is_empty()
+        );
+        assert!(store.lease().is_some());
+    }
+
+    #[test]
+    fn cancelled_cli_dotfile_requests_return_errors_before_and_after_admission() {
+        for command in ["tool.apply", "tool.unlink"] {
+            for admitted in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let store = ToolStore::new(
+                    directory.path().join("config"),
+                    directory.path().join("home"),
+                );
+                let root = store.dotfiles_dir().join("shell");
+                std::fs::create_dir_all(&root).unwrap();
+                std::fs::create_dir_all(store.home()).unwrap();
+                std::fs::write(root.join(".zshrc"), b"shell").unwrap();
+                let mut manifest = ToolsManifest::default();
+                manifest.set_dotfile_package("shell", true);
+                manifest.write_to(&store.manifest_path()).unwrap();
+                let before = std::fs::read(store.manifest_path()).unwrap();
+                let blocker = store.lease().unwrap();
+                let mut app = App::new();
+                app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+                let request = app
+                    .world_mut()
+                    .spawn((
+                        store.clone(),
+                        CliInvocation {
+                            command: command.into(),
+                            arguments: BTreeMap::from([(
+                                "package".into(),
+                                vec![OsString::from("shell")],
+                            )]),
+                        },
+                    ))
+                    .id();
+                if admitted {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while app
+                        .world()
+                        .get::<crate::ToolStoreOperation>(request)
+                        .is_none()
+                    {
+                        app.update();
+                        assert!(Instant::now() < deadline, "CLI request was not admitted");
+                    }
+                }
+                app.world_mut()
+                    .entity_mut(request)
+                    .insert(OperationState::Canceled);
+                drop(blocker);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while app.world().get::<CliResult>(request).is_none() {
+                    app.update();
+                    assert!(
+                        Instant::now() < deadline,
+                        "canceled CLI request did not drain"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                assert!(app.world().get::<CliResult>(request).unwrap().0.is_err());
+                assert_eq!(std::fs::read(store.manifest_path()).unwrap(), before);
+                assert!(store.home().join(".zshrc").symlink_metadata().is_err());
+                assert!(store.lease().is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn status_read_failures_and_pre_cancel_release_the_store() {
+        for cancelled in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ToolStore::new(
+                directory.path().join("config"),
+                directory.path().join("home"),
+            );
+            std::fs::create_dir_all(store.root()).unwrap();
+            std::fs::write(store.manifest_path(), b"not a valid TOML document").unwrap();
+            let mut app = App::new();
+            app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+            let request = app
+                .world_mut()
+                .spawn((
+                    store.clone(),
+                    CliInvocation {
+                        command: "tool.status".into(),
+                        arguments: BTreeMap::new(),
+                    },
+                ))
+                .id();
+            if cancelled {
+                app.world_mut()
+                    .entity_mut(request)
+                    .insert(OperationState::Canceled);
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.world().get::<CliResult>(request).is_none() {
+                app.update();
+                assert!(Instant::now() < deadline, "status failure did not return");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(app.world().get::<CliResult>(request).unwrap().0.is_err());
+            assert!(store.lease().is_some());
+        }
+    }
+
+    #[test]
+    fn status_reports_package_directories_among_more_than_4096_ordinary_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        std::fs::create_dir_all(store.dotfiles_dir().join("shell")).unwrap();
+        for index in 0..4097 {
+            std::fs::write(
+                store.dotfiles_dir().join(format!("entry-{index}")),
+                b"ordinary",
+            )
+            .unwrap();
+        }
+        ToolsManifest::default()
+            .write_to(&store.manifest_path())
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        let request = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.status".into(),
+                    arguments: BTreeMap::new(),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(request).is_none() {
+            app.update();
+            assert!(
+                Instant::now() < deadline,
+                "large-directory status did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
+        assert!(store.lease().is_some());
     }
 
     #[test]

@@ -96,8 +96,7 @@ fn observe(
             home: store.home().to_path_buf(),
         },
         JobRequest(ReadDirectory {
-            path: store.dotfiles_dir(),
-        }),
+            path: store.dotfiles_dir(), limit: 4096 }),
     ));
 }
 
@@ -183,7 +182,7 @@ fn packages(
             } else {
                 commands.entity(package).insert((
                     Directory { package, depth: 0 },
-                    JobRequest(ReadDirectory { path: root }),
+                    JobRequest(ReadDirectory { path: root, limit: 4096 }),
                 ));
             }
         }
@@ -257,8 +256,7 @@ fn directories(
                         depth: directory.depth + 1,
                     },
                     JobRequest(ReadDirectory {
-                        path: entry.path.clone(),
-                    }),
+                        path: entry.path.clone(), limit: 4096 }),
                 ));
             } else if entry.file_type.is_file() {
                 let Ok(relative) = entry.path.strip_prefix(&root.0) else {

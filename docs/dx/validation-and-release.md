@@ -62,7 +62,7 @@ vmux run my-vmux -p local
 
 Use this when the change affects native integration, resources, or packaging. `vmux cache status` reports build storage, and `vmux cache clean` previews reclaimable caches; add `--apply` to clean them. Running apps and locked build outputs are retained. Try the behavior in that completed build. Use copied data for storage/migration changes.
 
-Set `VMUX_DATA_DIR` to an absolute copied data root for persistence QA. Configuration lives under its `config/` directory, and Tools uses its `home/` directory for dotfile targets. Copy the relevant configuration and home files into those directories; keep them separate from live paths. This does not relocate external package managers such as Homebrew, so use managed ACP/LSP packages for isolated install and removal checks. Ordinary runs without the override keep the existing user paths.
+Set `VMUX_DATA_DIR` to an absolute copied data root for persistence QA. Configuration lives under its `config/` directory, and Tools uses its `home/` directory for dotfile targets. Copy the relevant configuration and home files into those directories; keep them separate from live paths. This does not relocate external package managers such as Homebrew, so use managed ACP/LSP packages for isolated install and removal checks. Ordinary runs without the override keep the existing user paths. Copied managed dotfile symlinks can still point to live package sources. Before testing enable/disable, recreate or retarget only the managed links inside the copied home to the copied sources under `config/tools/dotfiles`; preserve unrelated copied files and links. A copied parent such as `home/.config` must also resolve inside the copy. Do not modify the live home to prepare QA.
 
 ## Choose how to share
 
