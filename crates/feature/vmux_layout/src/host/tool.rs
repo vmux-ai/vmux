@@ -38,7 +38,13 @@ impl Plugin for LayoutToolPlugin {
                     .in_set(ToolQueryRouteSet)
                     .after(ServiceMessageSet),
             )
-            .add_systems(Update, (forward_apply_responses, forward_snapshots));
+            .add_systems(
+                Update,
+                (
+                    forward_apply_responses.after(crate::apply::Respond),
+                    forward_snapshots,
+                ),
+            );
     }
 }
 

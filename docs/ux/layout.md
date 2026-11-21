@@ -12,6 +12,8 @@ For a flight comparison, keep two offers beside the Session. For a code change, 
 
 Keep related pages in one Tab's arrangement. Use another Tab when you want a different set of pages without replacing the first.
 
+An assistant can rearrange the current Space while keeping the same pages and edited files. A layout request is refused if the workspace changes before it can apply or a page cannot yet close safely. Closed file pages keep their unsaved buffers available for reopening.
+
 Each Pane keeps its own page history. Back and Forward in one Pane do not replace the pages in its neighbors.
 
 ## Know what has focus

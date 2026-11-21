@@ -52,8 +52,6 @@ pub mod event;
 #[cfg(feature = "contracts")]
 pub mod protocol;
 #[cfg(feature = "contracts")]
-pub mod reconcile;
-#[cfg(feature = "contracts")]
 pub mod state;
 
 #[cfg(all(ui, feature = "host"))]
