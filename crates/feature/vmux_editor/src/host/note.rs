@@ -1,3 +1,5 @@
+use crate::event::DocumentPropertyInput;
+use crate::host::editor::EditReadOnly;
 use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
@@ -6,7 +8,7 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     FileNoteEditDismissRequest, FileNoteEditRequest, FileNoteEvent,
     FileNotePropertiesToggleRequest, FilePropertyDraftRequest, FilePropertyDraftState,
-    FilePropertyEdit, FileViewMode, MdBlock, NoteBlock,
+    FileViewMode, MdBlock, NoteBlock,
 };
 
 use crate::host::editor::{Editor, FileView};
@@ -68,7 +70,7 @@ type ReadyNotes<'w, 's> = Query<
     (
         Entity,
         &'static FileView,
-        &'static Editor,
+        EditReadOnly,
         Option<&'static NoteRevealLine>,
         Option<&'static NoteEditing>,
         Option<&'static NotePresentation>,
@@ -241,17 +243,20 @@ fn toggle_properties(
 }
 
 fn commit_property(
-    trigger: On<UiInput<FilePropertyEdit>>,
-    mut presentations: Query<&mut NotePresentation>,
+    trigger: On<UiInput<DocumentPropertyInput>>,
+    mut presentations: Query<(&mut NotePresentation, &super::editor::FileDocumentRevision)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(mut presentation) = presentations.get_mut(entity) else {
+    let Ok((mut presentation, revision)) = presentations.get_mut(entity) else {
         return;
     };
+    if revision.get() != trigger.event().payload.revision {
+        return;
+    }
     presentation
         .drafts
-        .remove(&trigger.event().payload.original_key);
+        .remove(&trigger.event().payload.edit.original_key);
     commands.entity(entity).remove::<NoteSent>();
 }
 
@@ -274,5 +279,70 @@ fn mark_notes_on_knowledge_change(
     }
     for entity in &files {
         commands.entity(entity).remove::<NoteSent>();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn property_submission_clears_only_the_current_documents_draft() {
+        let mut app = App::new();
+        app.add_plugins(NotePlugin);
+        let revision = super::super::editor::FileDocumentRevision::default();
+        let entity = app
+            .world_mut()
+            .spawn((
+                revision,
+                NotePresentation {
+                    properties_open: true,
+                    drafts: BTreeMap::from([(
+                        "title".into(),
+                        FilePropertyDraftState {
+                            original_key: "title".into(),
+                            key: "title".into(),
+                            scalar: "draft".into(),
+                            item: String::new(),
+                        },
+                    )]),
+                },
+            ))
+            .id();
+        let edit = vmux_ecs::event::FilePropertyEdit {
+            original_key: "title".into(),
+            key: "title".into(),
+            kind: vmux_api::knowledge::KnowledgePropertyKind::Text,
+            values: vec!["committed".into()],
+            remove: false,
+        };
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload: DocumentPropertyInput {
+                revision: revision.get() + 1,
+                edit: edit.clone(),
+            },
+        });
+        assert!(
+            app.world()
+                .get::<NotePresentation>(entity)
+                .unwrap()
+                .drafts
+                .contains_key("title")
+        );
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload: DocumentPropertyInput {
+                revision: revision.get(),
+                edit,
+            },
+        });
+        assert!(
+            !app.world()
+                .get::<NotePresentation>(entity)
+                .unwrap()
+                .drafts
+                .contains_key("title")
+        );
     }
 }

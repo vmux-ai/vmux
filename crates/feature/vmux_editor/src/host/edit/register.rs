@@ -34,7 +34,7 @@ pub const UNNAMED: char = '"';
 pub const BLACKHOLE: char = '_';
 pub const SMALL_DELETE: char = '-';
 
-#[derive(Default)]
+#[derive(bevy::prelude::Component, Default)]
 pub struct Registers {
     slots: BTreeMap<char, RegisterValue>,
     pub clipboard_shadow: String,

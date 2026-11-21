@@ -1,3 +1,4 @@
+use crate::host::editor::{Edit, EditReadOnly};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::FileUiStateWrite;
@@ -132,10 +133,7 @@ impl DocumentRenderRequest {
 
 fn render_document(
     request: On<DocumentRenderRequest>,
-    mut files: Query<
-        (&FileView, &FileDocumentRevision, &mut Editor, &FileViewport),
-        With<PageReady>,
-    >,
+    mut files: Query<(&FileView, &FileDocumentRevision, Edit, &FileViewport), With<PageReady>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -304,7 +302,7 @@ fn apply_file_view_mode_requests(
 
 fn file_view_mode_set(
     trigger: On<UiInput<FileViewModeSet>>,
-    files: Query<(&FileView, Option<&Editor>)>,
+    files: Query<(&FileView, Option<EditReadOnly>)>,
     state: Single<(&mut SharedFileViewMode, &mut FileViewModeRevision)>,
     mut commands: Commands,
 ) {
@@ -319,7 +317,7 @@ fn file_view_mode_set(
         commands.entity(entity).remove::<NoteEditing>();
         return;
     }
-    let reveal_line = edit.map(Editor::cursor_line);
+    let reveal_line = edit.map(|edit| edit.cursor_line());
     let mut entity_commands = commands.entity(entity);
     entity_commands.remove::<NoteSent>();
     if let Some(line) = reveal_line {
@@ -357,7 +355,6 @@ mod tests {
 
     use super::*;
     use crate::host::edit::highlight_cache::HighlightCache;
-    use crate::host::edit::{EditCommand, EditCore, Motion};
 
     #[test]
     fn file_view_mode_is_shared_across_editors() {
@@ -416,18 +413,18 @@ mod tests {
         ));
 
         let path = PathBuf::from("/note.md");
-        let mut core = EditCore::new(
+        let mut core = crate::edit::Document::new(
             path.clone(),
             "Markdown".into(),
             "one\ntwo\nthree\n",
             crate::host::edit::EditMode::Normal,
         );
-        core.apply(EditCommand::Move(Motion::GotoLine(2)));
+        core.carets.place(core.buffer.line_to_char(2));
         let entity = app
             .world_mut()
             .spawn((
                 FileView { path: path.clone() },
-                Editor::new(
+                crate::host::editor::EditorBundle::new(
                     core,
                     HighlightCache::new(&path),
                     crate::host::fold::FoldState::default(),

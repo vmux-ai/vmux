@@ -1,3 +1,4 @@
+use crate::host::editor::{EditReadOnly, EditReadOnlyItem};
 use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
@@ -6,7 +7,7 @@ use vmux_ecs::event::*;
 use crate::edit::EditCommand;
 use crate::event::*;
 use crate::host::editing::EditRequest;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::FileView;
 use crate::host::markdown::ParsedNote;
 use crate::lsp::manager::LspLine;
 use crate::text::DisplayCells;
@@ -225,7 +226,7 @@ impl LspPosition {
     }
 }
 
-impl Editor {
+impl EditReadOnlyItem<'_, '_> {
     fn caret_lsp_position(&self) -> LspPosition {
         let head = self.core.primary().head;
         let (line, char_col) = self.core.buffer.char_to_coords(head);
@@ -255,59 +256,9 @@ impl Editor {
     }
 }
 
-struct WikiCompletion {
-    line: u32,
-    replace_from_col: u32,
-    prefix: String,
-}
-
-impl WikiCompletion {
-    fn for_edit(edit: &Editor, index: &vmux_knowledge::KnowledgeIndex) -> Option<Self> {
-        if !index.loaded()
-            || !edit.core.buffer.path.starts_with(index.root())
-            || !ParsedNote::supports(&edit.core.buffer.path)
-        {
-            return None;
-        }
-        let position = edit.caret_lsp_position();
-        let chars = position.line_text.chars().collect::<Vec<_>>();
-        let open = (0..position.char_col.saturating_sub(1))
-            .rev()
-            .find(|offset| chars[*offset] == '[' && chars[*offset + 1] == '[')?;
-        let prefix = chars[open + 2..position.char_col]
-            .iter()
-            .collect::<String>();
-        if prefix.contains("]]") || prefix.contains('|') || prefix.contains('#') {
-            return None;
-        }
-        Some(Self {
-            line: position.line,
-            replace_from_col: open as u32 + 2,
-            prefix,
-        })
-    }
-
-    fn result(
-        self,
-        entity: Entity,
-        entries: Vec<(String, String)>,
-    ) -> crate::host::panel::CompletionResult {
-        let items = entries
-            .into_iter()
-            .map(|(title, relative)| CompletionItem {
-                label: title.clone(),
-                insert_text: format!("{title}]]"),
-                detail: relative,
-                kind: "knowledge".to_string(),
-            })
-            .collect();
-        crate::host::panel::CompletionResult::new(entity, items, self.replace_from_col, self.line)
-    }
-}
-
 fn hover(
     trigger: On<EditorHoverRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -330,7 +281,7 @@ fn hover(
 
 fn definition(
     trigger: On<EditorDefinitionRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -352,7 +303,7 @@ fn definition(
 
 fn references(
     trigger: On<EditorReferencesRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -374,7 +325,7 @@ fn references(
 
 fn rename(
     trigger: On<EditorRenameRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -402,7 +353,7 @@ fn rename(
 
 fn completion(
     trigger: On<EditorCompletionRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -425,7 +376,7 @@ fn completion(
 
 fn declaration(
     trigger: On<EditorDeclarationRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -447,7 +398,7 @@ fn declaration(
 
 fn type_definition(
     trigger: On<EditorTypeDefinitionRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -469,7 +420,7 @@ fn type_definition(
 
 fn implementation(
     trigger: On<EditorImplementationRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -491,7 +442,7 @@ fn implementation(
 
 fn format_document(
     trigger: On<EditorFormatDocumentRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -506,7 +457,7 @@ fn format_document(
 
 fn format_selection(
     trigger: On<EditorFormatSelectionRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -522,7 +473,7 @@ fn format_selection(
 
 fn code_action(
     trigger: On<EditorCodeActionRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     mut requests: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
 ) {
     let entity = trigger.event_target();
@@ -540,7 +491,7 @@ fn code_action(
 
 fn wiki_completion(
     trigger: On<WikiCompletionRequest>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     graph: vmux_knowledge::KnowledgeGraph,
     mut commands: Commands,
 ) {
@@ -551,16 +502,29 @@ fn wiki_completion(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let Some(completion) = WikiCompletion::for_edit(edit, index) else {
+    if !index.loaded()
+        || !edit.core.buffer.path.starts_with(index.root())
+        || !ParsedNote::supports(&edit.core.buffer.path)
+    {
+        return;
+    }
+    let Some((line, replace_from_col, prefix)) =
+        edit.core.buffer.wiki_prefix(edit.core.primary().head)
+    else {
         return;
     };
-    let entries = graph.completions(owner, &completion.prefix, 32);
-    commands.trigger(completion.result(entity, entries));
+    let entries = graph.completions(owner, &prefix, 32);
+    commands.trigger(crate::host::panel::CompletionResult::from_knowledge(
+        entity,
+        entries,
+        replace_from_col,
+        line,
+    ));
 }
 
 fn request_hover(
     trigger: On<UiInput<FileHoverRequest>>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -591,7 +555,7 @@ fn dismiss_hover(trigger: On<UiInput<FileHoverDismissRequest>>, mut commands: Co
 
 fn request_definition(
     trigger: On<UiInput<FileDefinitionRequest>>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -665,48 +629,74 @@ fn request_rename_prompt(trigger: On<UiInput<FileEditorRenameRequest>>, mut comm
     commands.trigger(EditorRenameRequest::from(trigger.event().webview));
 }
 
-fn copy_selection(trigger: On<UiInput<FileEditorCopyRequest>>, mut commands: Commands) {
-    commands.trigger(EditRequest::new(
+fn copy_selection(
+    trigger: On<UiInput<FileEditorCopyRequest>>,
+    documents: Query<&crate::edit::document::Revision>,
+    mut commands: Commands,
+) {
+    let Ok(revision) = documents.get(trigger.event().webview) else {
+        return;
+    };
+    EditRequest::new(
         trigger.event().webview,
         vec![EditCommand::Op {
             operator: crate::edit::command::Operator::Yank,
             target: crate::edit::command::Target::Selection,
             register: None,
         }],
-    ));
+    )
+    .emit(revision.identity, &mut commands);
 }
 
-fn cut_selection(trigger: On<UiInput<FileEditorCutRequest>>, mut commands: Commands) {
-    commands.trigger(EditRequest::new(
+fn cut_selection(
+    trigger: On<UiInput<FileEditorCutRequest>>,
+    documents: Query<&crate::edit::document::Revision>,
+    mut commands: Commands,
+) {
+    let Ok(revision) = documents.get(trigger.event().webview) else {
+        return;
+    };
+    EditRequest::new(
         trigger.event().webview,
         vec![EditCommand::Op {
             operator: crate::edit::command::Operator::Delete,
             target: crate::edit::command::Target::Selection,
             register: None,
         }],
-    ));
+    )
+    .emit(revision.identity, &mut commands);
 }
 
-fn paste(trigger: On<UiInput<FileEditorPasteRequest>>, mut commands: Commands) {
-    commands.trigger(EditRequest::new(
-        trigger.event().webview,
-        vec![EditCommand::Paste],
-    ));
+fn paste(
+    trigger: On<UiInput<FileEditorPasteRequest>>,
+    documents: Query<&crate::edit::document::Revision>,
+    mut commands: Commands,
+) {
+    let Ok(revision) = documents.get(trigger.event().webview) else {
+        return;
+    };
+    EditRequest::new(trigger.event().webview, vec![EditCommand::Paste])
+        .emit(revision.identity, &mut commands);
 }
 
 fn select_occurrences(
     trigger: On<UiInput<FileEditorChangeAllOccurrencesRequest>>,
+    documents: Query<&crate::edit::document::Revision>,
     mut commands: Commands,
 ) {
-    commands.trigger(EditRequest::new(
+    let Ok(revision) = documents.get(trigger.event().webview) else {
+        return;
+    };
+    EditRequest::new(
         trigger.event().webview,
         vec![EditCommand::SelectAllOccurrences],
-    ));
+    )
+    .emit(revision.identity, &mut commands);
 }
 
 fn request_rename(
     trigger: On<UiInput<FileRenameRequest>>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -764,7 +754,7 @@ fn dismiss_rename(trigger: On<UiInput<FileRenameDismissRequest>>, mut commands: 
 
 fn request_references(
     trigger: On<UiInput<FileReferencesRequest>>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
@@ -787,7 +777,7 @@ fn request_references(
 
 fn request_completion(
     trigger: On<UiInput<FileCompletionRequest>>,
-    views: Query<&Editor>,
+    views: Query<EditReadOnly>,
     graph: vmux_knowledge::KnowledgeGraph,
     mut commands: Commands,
     manager: crate::lsp::manager::LspManager<'_, '_>,
@@ -798,10 +788,19 @@ fn request_completion(
         return;
     };
     if let Some((owner, index)) = graph.index()
-        && let Some(completion) = WikiCompletion::for_edit(edit, index)
+        && index.loaded()
+        && edit.core.buffer.path.starts_with(index.root())
+        && ParsedNote::supports(&edit.core.buffer.path)
+        && let Some((line, replace_from_col, prefix)) =
+            edit.core.buffer.wiki_prefix(edit.core.primary().head)
     {
-        let entries = graph.completions(owner, &completion.prefix, 32);
-        commands.trigger(completion.result(entity, entries));
+        let entries = graph.completions(owner, &prefix, 32);
+        commands.trigger(crate::host::panel::CompletionResult::from_knowledge(
+            entity,
+            entries,
+            replace_from_col,
+            line,
+        ));
         return;
     }
     let position = edit.lsp_position_at_cell(request.line, request.col);
@@ -819,7 +818,7 @@ fn request_completion(
 
 fn flush_lsp_changes(
     time: Res<Time>,
-    mut views: Query<(Entity, &FileView, &Editor, &mut LspChangeElapsed), With<LspEditDirty>>,
+    mut views: Query<(Entity, &FileView, EditReadOnly, &mut LspChangeElapsed), With<LspEditDirty>>,
     mut lsp_changes: Option<MessageWriter<vmux_lsp::ChangeDocument>>,
     mut commands: Commands,
 ) {
@@ -859,8 +858,8 @@ mod tests {
                 .world_mut()
                 .spawn((
                     FileView { path: path.clone() },
-                    Editor::new(
-                        crate::edit::EditCore::new(
+                    crate::host::editor::EditorBundle::new(
+                        crate::edit::Document::new(
                             path.clone(),
                             "Rust".into(),
                             name,

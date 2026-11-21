@@ -1,3 +1,6 @@
+#[cfg(test)]
+use crate::host::editor::Editor;
+use crate::host::editor::{Edit, EditReadOnly};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Wake;
@@ -13,7 +16,7 @@ use bevy::winit::EventLoopProxyWrapper;
 use vmux_ecs::Revision;
 use vmux_ecs::profile::{ActiveProfile, ProfileDirectories};
 
-use super::editor::{Editor, FileView};
+use super::editor::FileView;
 use super::file_lifecycle::EditorFileLoadedSet;
 use super::viewport::{CursorRenderRequest, FoldsDirty, ViewportRenderRequest};
 
@@ -74,7 +77,12 @@ fn bind(
 fn attach(
     roots: Query<Entity, (With<Root>, With<ActiveProfile>)>,
     preferences: Preferences,
-    views: Query<(Entity, &FileView, Ref<Editor>, Option<&Binding>)>,
+    views: Query<(
+        Entity,
+        &FileView,
+        Ref<crate::edit::buffer::TextBuffer>,
+        Option<&Binding>,
+    )>,
     mut commands: Commands,
 ) {
     let Ok(root) = roots.single() else {
@@ -83,9 +91,9 @@ fn attach(
     let Some(ticket) = preferences.ticket(root) else {
         return;
     };
-    for (entity, file, editor, binding) in &views {
+    for (entity, file, buffer, binding) in &views {
         let path = vmux_path::PathIdentity::resolve(&file.path).into_path_buf();
-        if !editor.is_added()
+        if !buffer.is_added()
             && binding.is_some_and(|binding| binding.ticket == *ticket && binding.path == path)
         {
             continue;
@@ -104,7 +112,7 @@ fn attach(
 }
 
 fn forward(
-    views: Query<(Entity, &FileView, &Editor, &Binding), With<FoldsDirty>>,
+    views: Query<(Entity, &FileView, EditReadOnly, &Binding), With<FoldsDirty>>,
     preferences: Preferences,
     roots: Query<&State, With<Root>>,
     mut updates: MessageWriter<UpdateRequest>,
@@ -148,13 +156,7 @@ fn forward(
 
 fn project(
     preferences: Preferences,
-    mut views: Query<(
-        Entity,
-        &FileView,
-        &mut Editor,
-        &mut Binding,
-        Has<FoldsDirty>,
-    )>,
+    mut views: Query<(Entity, &FileView, Edit, &mut Binding, Has<FoldsDirty>)>,
     mut commands: Commands,
 ) {
     for (entity, file, mut editor, mut binding, dirty) in &mut views {
@@ -214,7 +216,7 @@ fn report(roots: Query<(&Root, &State), Changed<State>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::edit::{EditCore, EditMode, highlight_cache::HighlightCache};
+    use crate::host::edit::{EditMode, highlight_cache::HighlightCache};
     use crate::host::fold::{FoldRegion, FoldState};
     use crate::host::fold_io::FileStore;
     use crate::host::fold_preferences::{LoadRequest, Snapshot};
@@ -227,18 +229,26 @@ mod tests {
     }
 
     #[derive(Component)]
-    struct PendingEditor(Option<Editor>);
+    struct PendingEditor(Entity);
 
     impl PendingEditor {
-        fn finish(mut pending: Query<(Entity, &mut Self)>, mut commands: Commands) {
-            for (entity, mut pending) in &mut pending {
-                if let Some(editor) = pending.0.take() {
-                    commands
-                        .entity(entity)
-                        .remove::<Editor>()
+        fn finish(pending: Query<(Entity, &Self)>, mut commands: Commands) {
+            for (entity, pending) in &pending {
+                let source = pending.0;
+                commands.queue(move |world: &mut World| {
+                    let Some(editor) = world
+                        .entity_mut(source)
+                        .take::<crate::host::editor::EditorBundle>()
+                    else {
+                        return;
+                    };
+                    world
+                        .entity_mut(entity)
+                        .remove::<crate::host::editor::EditorBundle>()
                         .insert(editor)
                         .remove::<Self>();
-                }
+                    world.despawn(source);
+                });
             }
         }
     }
@@ -268,7 +278,7 @@ mod tests {
             ));
             let mut views = Vec::new();
             for _ in 0..2 {
-                let core = EditCore::new(
+                let core = crate::edit::Document::new(
                     path.clone(),
                     "Rust".into(),
                     "first:\n  one\nsecond:\n  two\n",
@@ -280,7 +290,11 @@ mod tests {
                     app.world_mut()
                         .spawn((
                             FileView { path: path.clone() },
-                            Editor::new(core, HighlightCache::plain(&path), folds),
+                            crate::host::editor::EditorBundle::new(
+                                core,
+                                HighlightCache::plain(&path),
+                                folds,
+                            ),
                         ))
                         .id(),
                 );
@@ -350,18 +364,14 @@ mod tests {
                     end: start + 1,
                 })
                 .collect();
-            self.app
-                .world_mut()
-                .get_mut::<Editor>(self.views[index])
+            Editor::get_mut(self.app.world_mut(), self.views[index])
                 .unwrap()
                 .folds
                 .set_regions(regions);
         }
 
         fn toggle(&mut self, index: usize, line: u32) {
-            self.app
-                .world_mut()
-                .get_mut::<Editor>(self.views[index])
+            Editor::get_mut(self.app.world_mut(), self.views[index])
                 .unwrap()
                 .folds
                 .toggle_header(line);
@@ -372,9 +382,7 @@ mod tests {
         }
 
         fn collapsed(&self, index: usize) -> std::collections::HashSet<u32> {
-            self.app
-                .world()
-                .get::<Editor>(self.views[index])
+            Editor::read(self.app.world(), self.views[index])
                 .unwrap()
                 .folds
                 .collapsed
@@ -494,7 +502,7 @@ mod tests {
             .unwrap()
             .path
             .clone();
-        let core = EditCore::new(
+        let core = crate::edit::Document::new(
             path.clone(),
             "Rust".into(),
             "first:\n  one\nsecond:\n  two\n",
@@ -502,15 +510,19 @@ mod tests {
         );
         let mut folds = FoldState::default();
         folds.set_indented(&core.buffer.rope);
+        let source = fixture
+            .app
+            .world_mut()
+            .spawn((
+                crate::host::editor::EditorBundle::new(core, HighlightCache::plain(&path), folds),
+                ChildOf(entity),
+            ))
+            .id();
         fixture
             .app
             .world_mut()
             .entity_mut(entity)
-            .insert(PendingEditor(Some(Editor::new(
-                core,
-                HighlightCache::plain(&path),
-                folds,
-            ))));
+            .insert(PendingEditor(source));
         fixture.app.update();
         assert_eq!(
             fixture.collapsed(0),

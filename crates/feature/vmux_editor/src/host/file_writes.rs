@@ -274,14 +274,13 @@ mod tests {
             ))
             .id();
         FileLoadTask::settle(&mut app, view);
-        app.world_mut()
-            .trigger(EditRequest::new(view, vec![EditCommand::Save]));
+        EditRequest::new(view, vec![EditCommand::Save]).emit_world(app.world_mut());
         app.world_mut().write_message(Observed(Ok(
             notify::Event::new(notify::EventKind::Any).add_path(path.clone())
         )));
         app.update();
         assert!(app.world().get::<FileLoadTask>(view).is_none());
-        assert!(app.world().get::<Editor>(view).is_some());
+        assert!(Editor::read(app.world(), view).is_some());
         let receipts: Vec<_> = app
             .world_mut()
             .query_filtered::<Entity, With<WrittenAt>>()
@@ -296,7 +295,7 @@ mod tests {
         )));
         FileLoadTask::settle(&mut app, view);
         assert_eq!(
-            app.world().get::<Editor>(view).unwrap().core.buffer.text(),
+            Editor::read(app.world(), view).unwrap().core.buffer.text(),
             "external\n"
         );
     }
