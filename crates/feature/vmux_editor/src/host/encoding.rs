@@ -1,3 +1,4 @@
+use crate::host::editor::Edit;
 use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
@@ -9,7 +10,7 @@ use vmux_ecs::event::{
 
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::FileView;
 use crate::host::file_lifecycle::{FileBuffer, FileLoadTask, ForcedEncoding};
 use crate::host::status::FileInitialMetaSent;
 
@@ -43,7 +44,7 @@ fn reopen_with(
             path: view.path.clone(),
             encoding,
         })
-        .remove::<Editor>()
+        .remove::<crate::host::editor::EditorBundle>()
         .remove::<vmux_git::GitDiffSource>()
         .remove::<FileBuffer>()
         .remove::<FileLoadTask>()
@@ -59,7 +60,7 @@ fn reopen_with(
 
 fn save_with(
     trigger: On<UiInput<FileEncodingSaveRequest>>,
-    mut editors: Query<&mut Editor>,
+    mut editors: Query<Edit>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -68,7 +69,8 @@ fn save_with(
         return;
     };
     edit.core.buffer.encoding = trigger.event().payload.encoding;
-    commands.trigger(EditRequest::new(entity, vec![EditCommand::Save]));
+    EditRequest::new(entity, vec![EditCommand::Save])
+        .emit(edit.core.revision.identity, &mut commands);
     if !browsers.can_emit_to(&entity) {
         return;
     }

@@ -12,7 +12,8 @@ struct Node {
     children: Vec<usize>,
 }
 
-pub struct UndoTree {
+#[derive(bevy::prelude::Component)]
+pub struct History {
     nodes: Vec<Node>,
     current: usize,
     next_seq: u64,
@@ -24,7 +25,7 @@ pub struct Restored {
     pub rev: u64,
 }
 
-impl UndoTree {
+impl History {
     pub fn new(rope: Rope, selections: Vec<Selection>, rev: u64) -> Self {
         Self {
             nodes: vec![Node {
@@ -125,66 +126,60 @@ impl UndoTree {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
-    fn rope(text: &str) -> Rope {
-        Rope::from_str(text)
-    }
-
-    fn sel() -> Vec<Selection> {
-        vec![Selection::caret(0)]
-    }
+    use crate::edit::{Document, EditCommand, EditMode};
+    use crate::host::editing::EditRequest;
+    use bevy::prelude::*;
 
     struct Doc {
-        tree: UndoTree,
-        text: String,
+        app: App,
+        entity: Entity,
     }
 
     impl Doc {
         fn new(text: &str) -> Self {
-            Self {
-                tree: UndoTree::new(rope(text), sel(), 0),
-                text: text.to_string(),
-            }
+            let mut app = App::new();
+            app.add_plugins(crate::host::editing::document::DocumentPlugin);
+            let entity = app
+                .world_mut()
+                .spawn(Document::new(
+                    std::path::PathBuf::from("history.txt"),
+                    "Plain Text".into(),
+                    text,
+                    EditMode::Insert,
+                ))
+                .id();
+            Self { app, entity }
+        }
+
+        fn text(&self) -> String {
+            self.app
+                .world()
+                .get::<crate::edit::buffer::TextBuffer>(self.entity)
+                .unwrap()
+                .text()
         }
 
         fn edit(&mut self, next: &str) {
-            self.tree.push(&rope(&self.text), &sel(), 0);
-            self.text = next.to_string();
+            self.apply(EditCommand::ReplaceText(next.into()));
         }
 
         fn undo(&mut self) -> bool {
-            self.apply(UndoTree::undo)
+            self.apply(EditCommand::Undo)
         }
 
         fn redo(&mut self) -> bool {
-            self.apply(UndoTree::redo)
+            self.apply(EditCommand::Redo)
         }
 
-        fn apply(
-            &mut self,
-            f: fn(&mut UndoTree, &Rope, &[Selection], u64) -> Option<Restored>,
-        ) -> bool {
-            match f(&mut self.tree, &rope(&self.text), &sel(), 0) {
-                Some(state) => {
-                    self.text = state.rope.to_string();
-                    true
-                }
-                None => false,
-            }
+        fn apply(&mut self, command: EditCommand) -> bool {
+            let before = self.text();
+            EditRequest::new(self.entity, vec![command]).emit_world(self.app.world_mut());
+            self.text() != before
         }
 
         fn time(&mut self, forward: bool, count: usize) -> bool {
-            match self
-                .tree
-                .step_time(&rope(&self.text), &sel(), 0, forward, count)
-            {
-                Some(state) => {
-                    self.text = state.rope.to_string();
-                    true
-                }
-                None => false,
-            }
+            self.apply(EditCommand::UndoTime { forward, count })
         }
     }
 
@@ -195,13 +190,13 @@ mod tests {
         doc.edit("abc");
 
         assert!(doc.undo());
-        assert_eq!(doc.text, "ab");
+        assert_eq!(doc.text(), "ab");
         assert!(doc.undo());
-        assert_eq!(doc.text, "a");
+        assert_eq!(doc.text(), "a");
         assert!(!doc.undo(), "the root has no parent");
 
         assert!(doc.redo());
-        assert_eq!(doc.text, "ab");
+        assert_eq!(doc.text(), "ab");
     }
 
     #[test]
@@ -212,9 +207,9 @@ mod tests {
         doc.edit("second");
 
         doc.undo();
-        assert_eq!(doc.text, "");
+        assert_eq!(doc.text(), "");
         doc.redo();
-        assert_eq!(doc.text, "second", "redo follows the newest branch");
+        assert_eq!(doc.text(), "second", "redo follows the newest branch");
     }
 
     #[test]
@@ -225,9 +220,9 @@ mod tests {
         doc.edit("second");
 
         assert!(doc.time(false, 1));
-        assert_eq!(doc.text, "first", "g- reaches what redo cannot");
+        assert_eq!(doc.text(), "first", "g- reaches what redo cannot");
         assert!(doc.time(true, 1));
-        assert_eq!(doc.text, "second");
+        assert_eq!(doc.text(), "second");
     }
 
     #[test]
@@ -236,7 +231,7 @@ mod tests {
         doc.edit("1");
         doc.edit("2");
         assert!(doc.time(false, 2));
-        assert_eq!(doc.text, "0");
+        assert_eq!(doc.text(), "0");
         assert!(!doc.time(false, 1), "already at the oldest state");
     }
 }

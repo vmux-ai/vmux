@@ -1,3 +1,4 @@
+use crate::host::editor::EditReadOnly;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +8,7 @@ use bevy_cef::prelude::*;
 use vmux_ecs::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
-use crate::host::editor::{Editor, FileNavigateRequest, FileView};
+use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::parked_edits::{Buffers, Parked};
 use vmux_ecs::store::StoreAppExt;
 
@@ -244,7 +245,7 @@ fn capture(
         let Ok(mut document) = world.get_entity_mut(source) else {
             return;
         };
-        let editor = document.take::<Editor>();
+        let editor = document.take::<crate::host::editor::EditorBundle>();
         let diff = if editor.is_some() {
             document.take::<vmux_git::GitDiffSource>()
         } else {
@@ -362,12 +363,12 @@ impl Delivery<'_, '_> {
 
 #[allow(clippy::type_complexity)]
 fn emit_open_editors(
-    query: Query<(Entity, &FileView, &ExplorerState, Option<&Editor>), OpenEditorsDirtyReady>,
+    query: Query<(Entity, &FileView, &ExplorerState, Option<EditReadOnly>), OpenEditorsDirtyReady>,
     children: Query<&Children>,
     parked: Query<
         (
             &super::super::fold_preferences::FileId,
-            &Editor,
+            EditReadOnly,
             &super::super::parked_edits::Modified,
         ),
         With<Parked>,
@@ -379,7 +380,7 @@ fn emit_open_editors(
         if !delivery.available(entity) {
             continue;
         }
-        let active_dirty = edit.map(|edit| edit.core.dirty).unwrap_or(false);
+        let active_dirty = edit.map(|edit| edit.core.revision.dirty).unwrap_or(false);
         let mut name_counts = HashMap::new();
         for path in &state.open_editors {
             let name = OpenEditorPath::name(path);
@@ -392,9 +393,9 @@ fn emit_open_editors(
                 true => active_dirty,
                 false => children.get(entity).is_ok_and(|children| {
                     children.iter().any(|child| {
-                        parked
-                            .get(child)
-                            .is_ok_and(|(file, edit, _)| file.0 == *path && edit.core.dirty)
+                        parked.get(child).is_ok_and(|(file, edit, _)| {
+                            file.0 == *path && edit.core.revision.dirty
+                        })
                     })
                 }),
             };

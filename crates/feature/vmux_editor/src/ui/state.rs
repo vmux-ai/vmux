@@ -20,6 +20,11 @@ impl FileUi {
         }
     }
 
+    pub(crate) fn use_revision(self) -> Memo<u64> {
+        self.binding
+            .use_selector(|state| state.document.meta.as_ref().map_or(0, |meta| meta.revision))
+    }
+
     pub(crate) fn use_field<T>(self, select: fn(&FileUiState) -> Option<&T>) -> FileUiField<T>
     where
         T: Clone + PartialEq + 'static,

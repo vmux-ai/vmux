@@ -1,10 +1,10 @@
+use crate::host::editor::EditReadOnly;
 use std::path::Path;
 use std::time::SystemTime;
 
 use bevy::prelude::*;
 use vmux_ecs::Order;
 
-use super::editor::Editor;
 use super::fold_preferences::FileId;
 
 #[derive(Component)]
@@ -18,7 +18,7 @@ pub(super) struct Buffers<'w, 's> {
     owners: Query<'w, 's, ()>,
     children: Query<'w, 's, &'static Children>,
     parked: Query<'w, 's, (), With<Parked>>,
-    incoming: Query<'w, 's, (&'static Editor, Option<&'static vmux_git::GitDiffSource>)>,
+    incoming: Query<'w, 's, (EditReadOnly, Option<&'static vmux_git::GitDiffSource>)>,
     keymaps: Query<'w, 's, (), With<super::keymap::EditorKeymap>>,
     buffers: Query<
         'w,
@@ -26,7 +26,7 @@ pub(super) struct Buffers<'w, 's> {
         (
             &'static FileId,
             &'static Order,
-            &'static Editor,
+            EditReadOnly,
             &'static Modified,
         ),
         With<Parked>,
@@ -54,12 +54,12 @@ impl Buffers<'_, '_> {
                 if file.0 == path {
                     existing = Some(entity);
                 } else {
-                    entries.push((entity, order.0, edit.core.dirty));
+                    entries.push((entity, order.0, edit.core.revision.dirty));
                 }
             }
         }
         entries.sort_by_key(|(_, order, _)| *order);
-        let dirty = edit.core.dirty;
+        let dirty = edit.core.revision.dirty;
         if let Some(existing) = existing {
             self.commands.entity(existing).despawn();
         }
@@ -109,7 +109,9 @@ impl Buffers<'_, '_> {
             let Ok(mut entry) = world.get_entity_mut(entity) else {
                 return;
             };
-            let Some((edit, diff)) = entry.take::<(Editor, vmux_git::GitDiffSource)>() else {
+            let Some((edit, diff)) =
+                entry.take::<(crate::host::editor::EditorBundle, vmux_git::GitDiffSource)>()
+            else {
                 return;
             };
             entry.despawn();
@@ -136,7 +138,9 @@ impl Buffers<'_, '_> {
                 return;
             };
             let mut entry = world.entity_mut(entity);
-            let Some((edit, diff)) = entry.take::<(Editor, vmux_git::GitDiffSource)>() else {
+            let Some((edit, diff)) =
+                entry.take::<(crate::host::editor::EditorBundle, vmux_git::GitDiffSource)>()
+            else {
                 return;
             };
             entry.despawn();
@@ -153,7 +157,7 @@ impl Buffers<'_, '_> {
                     continue;
                 };
                 if file.0 == path {
-                    selected = Some((entity, edit.core.dirty, modified.0));
+                    selected = Some((entity, edit.core.revision.dirty, modified.0));
                     break;
                 }
             }

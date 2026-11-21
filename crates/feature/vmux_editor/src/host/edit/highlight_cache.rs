@@ -7,6 +7,7 @@ use vmux_ecs::event::{FileLine, StyledSpan};
 
 use crate::host::highlight::Highlighter;
 
+#[derive(bevy::prelude::Component)]
 pub struct HighlightCache {
     syntax: &'static SyntaxReference,
     theme: Theme,

@@ -56,7 +56,7 @@ impl Default for FileDocumentRevision {
 }
 
 impl FileDocumentRevision {
-    fn advance(&mut self) {
+    pub(super) fn advance(&mut self) {
         self.0 = self.0.wrapping_add(1).max(1);
     }
 
@@ -141,9 +141,6 @@ impl FileView {
 
 #[derive(Component)]
 pub struct Editor {
-    pub core: EditCore,
-    pub hl: HighlightCache,
-    pub folds: crate::fold::FoldState,
     indent_width: u16,
     parsed_note: Option<ParsedNote>,
     wrap_generation: u64,
@@ -151,7 +148,39 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
+    #[cfg(test)]
+    pub(crate) fn read(world: &World, entity: Entity) -> Option<EditReadOnlyItem<'_, 'static>> {
+        world
+            .get_entity(entity)
+            .ok()?
+            .get_components::<EditReadOnly>()
+            .ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get_mut(world: &mut World, entity: Entity) -> Option<EditItem<'_, 'static>> {
+        world
+            .get_entity_mut(entity)
+            .ok()?
+            .into_components_mut::<Edit>()
+            .ok()
+    }
+}
+
+#[derive(Bundle)]
+pub(crate) struct EditorBundle {
+    pub core: crate::edit::Document,
+    pub hl: HighlightCache,
+    pub folds: crate::fold::FoldState,
+    pub cache: Editor,
+}
+
+impl EditorBundle {
+    pub(crate) fn new(
+        core: crate::edit::Document,
+        hl: HighlightCache,
+        folds: crate::fold::FoldState,
+    ) -> Self {
         let parsed_note =
             ParsedNote::supports(&core.buffer.path).then(|| ParsedNote::parse(&core.buffer.text()));
         let indent_width = crate::shape::BufferShape::detect(&core.buffer.rope)
@@ -161,36 +190,44 @@ impl Editor {
             core,
             hl,
             folds,
-            indent_width,
-            parsed_note,
-            wrap_generation: 0,
-            wrap_cache: None,
+            cache: Editor {
+                indent_width,
+                parsed_note,
+                wrap_generation: 0,
+                wrap_cache: None,
+            },
         }
     }
+}
 
-    pub(crate) fn parsed_note(&self) -> Option<ParsedNote> {
-        self.parsed_note.clone()
+#[derive(bevy::ecs::query::QueryData)]
+#[query_data(mutable)]
+pub(crate) struct Edit {
+    pub core: EditCore,
+    pub hl: &'static mut HighlightCache,
+    pub folds: &'static mut crate::fold::FoldState,
+    pub cache: &'static mut Editor,
+}
+
+impl EditItem<'_, '_> {
+    pub(crate) fn is_changed(&self) -> bool {
+        self.core.buffer.is_changed()
+            || self.core.carets.is_changed()
+            || self.folds.is_changed()
+            || self.cache.is_changed()
     }
 
     pub(super) fn is_note(&self) -> bool {
-        self.parsed_note.is_some()
-    }
-
-    pub(super) fn note_blocks(&self) -> Option<&[vmux_ecs::event::NoteBlock]> {
-        self.parsed_note.as_ref().map(|note| note.blocks.as_slice())
-    }
-
-    pub(crate) fn cursor_line(&self) -> u32 {
-        self.core.cursor_pos().line
+        self.cache.parsed_note.is_some()
     }
 
     pub(crate) fn indent_width(&self) -> u16 {
-        self.indent_width
+        self.cache.indent_width
     }
 
     pub(crate) fn wrapped_view<'a>(&'a mut self, viewport: &FileViewport) -> &'a WrapView {
-        let stale = self.wrap_cache.as_ref().is_none_or(|cache| {
-            cache.generation != self.wrap_generation
+        let stale = self.cache.wrap_cache.as_ref().is_none_or(|cache| {
+            cache.generation != self.cache.wrap_generation
                 || cache.mode != viewport.word_wrap
                 || cache.viewport_columns != viewport.wrap_columns
                 || cache.word_wrap_column != viewport.word_wrap_column
@@ -198,8 +235,8 @@ impl Editor {
         if stale {
             let total = self.core.buffer.len_lines() as u32;
             let folds = self.folds.view(total);
-            self.wrap_cache = Some(CachedWrapView {
-                generation: self.wrap_generation,
+            self.cache.wrap_cache = Some(CachedWrapView {
+                generation: self.cache.wrap_generation,
                 mode: viewport.word_wrap,
                 viewport_columns: viewport.wrap_columns,
                 word_wrap_column: viewport.word_wrap_column,
@@ -212,22 +249,39 @@ impl Editor {
                 ),
             });
         }
-        &self.wrap_cache.as_ref().expect("wrap cache").view
+        &self.cache.wrap_cache.as_ref().expect("wrap cache").view
     }
 
     pub(crate) fn sync_fold_view(&mut self) {
         let total = self.core.buffer.len_lines() as u32;
-        self.core.fold_view = self.folds.view(total);
-        self.wrap_generation = self.wrap_generation.wrapping_add(1);
+        self.core.viewport.fold_view = self.folds.view(total);
+        self.cache.wrap_generation = self.cache.wrap_generation.wrapping_add(1);
     }
 
     pub(super) fn set_shape(&mut self, shape: crate::shape::BufferShape) {
-        self.indent_width = shape.indent.width;
+        self.cache.indent_width = shape.indent.width;
     }
 
     pub(super) fn refresh_parsed_note(&mut self) {
-        self.parsed_note = ParsedNote::supports(&self.core.buffer.path)
+        self.cache.parsed_note = ParsedNote::supports(&self.core.buffer.path)
             .then(|| ParsedNote::parse(&self.core.buffer.text()));
+    }
+}
+
+impl EditReadOnlyItem<'_, '_> {
+    pub(crate) fn parsed_note(&self) -> Option<ParsedNote> {
+        self.cache.parsed_note.clone()
+    }
+
+    pub(super) fn note_blocks(&self) -> Option<&[vmux_ecs::event::NoteBlock]> {
+        self.cache
+            .parsed_note
+            .as_ref()
+            .map(|note| note.blocks.as_slice())
+    }
+
+    pub(crate) fn cursor_line(&self) -> u32 {
+        self.core.cursor_pos().line
     }
 }
 
@@ -340,9 +394,7 @@ mod tests {
         }
 
         fn encoding(&self) -> FileEncoding {
-            self.app
-                .world()
-                .get::<Editor>(self.entity)
+            Editor::read(self.app.world(), self.entity)
                 .expect("a loaded buffer")
                 .core
                 .buffer
@@ -423,19 +475,16 @@ mod tests {
         }
 
         fn type_into_buffer(&mut self, text: &str) {
-            self.app
-                .world_mut()
-                .trigger(crate::host::editing::EditRequest::new(
-                    self.entity,
-                    vec![EditCommand::InsertText(text.to_string())],
-                ));
+            crate::host::editing::EditRequest::new(
+                self.entity,
+                vec![EditCommand::InsertText(text.to_string())],
+            )
+            .emit_world(self.app.world_mut());
             self.app.world_mut().flush();
         }
 
         fn text(&self) -> String {
-            self.app
-                .world()
-                .get::<Editor>(self.entity)
+            Editor::read(self.app.world(), self.entity)
                 .unwrap()
                 .core
                 .buffer
@@ -443,12 +492,8 @@ mod tests {
         }
 
         fn undo(&mut self) {
-            self.app
-                .world_mut()
-                .trigger(crate::host::editing::EditRequest::new(
-                    self.entity,
-                    vec![EditCommand::Undo],
-                ));
+            crate::host::editing::EditRequest::new(self.entity, vec![EditCommand::Undo])
+                .emit_world(self.app.world_mut());
             self.app.world_mut().flush();
         }
     }
@@ -520,7 +565,7 @@ mod tests {
 
         assert_eq!(session.failure(), Some(LoadFailure::Undecodable));
         assert!(
-            session.app.world().get::<Editor>(session.entity).is_none(),
+            Editor::read(session.app.world(), session.entity).is_none(),
             "no buffer is loaded, so the footer chooser has nothing to hang off"
         );
 
@@ -615,13 +660,8 @@ mod tests {
             .insert(ChildOf(tab));
         session.settle();
         session.type_into_buffer("BLOCKED");
-        session
-            .app
-            .world_mut()
-            .trigger(crate::host::editing::EditRequest::new(
-                session.entity,
-                vec![EditCommand::Save],
-            ));
+        crate::host::editing::EditRequest::new(session.entity, vec![EditCommand::Save])
+            .emit_world(session.app.world_mut());
         session.app.world_mut().flush();
         assert_eq!(session.text(), "original\n");
         assert_eq!(session.bytes("main.rs"), b"original\n");
@@ -633,13 +673,8 @@ mod tests {
             .startup_dir = Some(session.dir.path().to_string_lossy().into_owned());
         session.app.update();
         session.type_into_buffer("ALLOWED");
-        session
-            .app
-            .world_mut()
-            .trigger(crate::host::editing::EditRequest::new(
-                session.entity,
-                vec![EditCommand::Save],
-            ));
+        crate::host::editing::EditRequest::new(session.entity, vec![EditCommand::Save])
+            .emit_world(session.app.world_mut());
         session.app.world_mut().flush();
         assert_eq!(session.bytes("main.rs"), b"ALLOWEDoriginal\n");
         session.write(".worktrees/task/other.rs", "feature\n");
@@ -903,28 +938,20 @@ mod tests {
             session.write(&format!("{index}.rs"), "first\nsecond\n");
         }
         session.settle();
-        session
-            .app
-            .world_mut()
-            .trigger(crate::host::editing::EditRequest::new(
-                session.entity,
-                vec![EditCommand::Move(crate::host::edit::Motion::GotoLine(1))],
-            ));
+        crate::host::editing::EditRequest::new(
+            session.entity,
+            vec![EditCommand::Move(crate::host::edit::Motion::GotoLine(1))],
+        )
+        .emit_world(session.app.world_mut());
         session.app.world_mut().flush();
-        let line = session
-            .app
-            .world()
-            .get::<Editor>(session.entity)
+        let line = Editor::read(session.app.world(), session.entity)
             .unwrap()
             .cursor_line();
         assert_eq!(line, 1);
         session.navigate_to("1.rs");
         session.navigate_to("0.rs");
         assert_eq!(
-            session
-                .app
-                .world()
-                .get::<Editor>(session.entity)
+            Editor::read(session.app.world(), session.entity)
                 .unwrap()
                 .cursor_line(),
             line
@@ -934,10 +961,7 @@ mod tests {
         }
         session.navigate_to("0.rs");
         assert_eq!(
-            session
-                .app
-                .world()
-                .get::<Editor>(session.entity)
+            Editor::read(session.app.world(), session.entity)
                 .unwrap()
                 .cursor_line(),
             0

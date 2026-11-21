@@ -1,3 +1,4 @@
+use crate::host::editor::EditReadOnly;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker, PickRequest};
@@ -13,7 +14,7 @@ use vmux_ecs::event::{
 use vmux_feature::manifest::FeaturePlugin;
 
 use crate::host::editing::FileFindOpenRequest;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::FileView;
 use crate::host::explorer::{
     ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest,
 };
@@ -271,7 +272,7 @@ fn apply_status_picks(
     mut picked: MessageReader<FileStatusPicked>,
     children: Query<&Children>,
     editors: Query<(), With<FileView>>,
-    shapes: Query<&Editor>,
+    shapes: Query<EditReadOnly>,
     mut commands: Commands,
 ) {
     for message in picked.read() {

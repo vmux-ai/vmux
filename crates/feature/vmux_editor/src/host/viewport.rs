@@ -1,3 +1,4 @@
+use crate::host::editor::{Edit, EditItem};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{
@@ -62,11 +63,11 @@ impl FileViewport {
         })
     }
 
-    pub(crate) fn visible_rows(&self, edit: &mut Editor) -> u32 {
+    pub(crate) fn visible_rows(&self, edit: &mut EditItem<'_, '_>) -> u32 {
         edit.wrapped_view(self).total_rows()
     }
 
-    pub(crate) fn autoscroll(&self, edit: &mut Editor) -> Option<u32> {
+    pub(crate) fn autoscroll(&self, edit: &mut EditItem<'_, '_>) -> Option<u32> {
         if self.rows == 0 {
             return None;
         }
@@ -81,7 +82,7 @@ impl FileViewport {
         None
     }
 
-    pub(crate) fn follow_scrolled_cursor(&self, edit: &mut Editor) -> bool {
+    pub(crate) fn follow_scrolled_cursor(&self, edit: &mut EditItem<'_, '_>) -> bool {
         ScrolledCursor::follow(edit, self)
     }
 
@@ -89,7 +90,7 @@ impl FileViewport {
         DriftedWindow::between(previous_top, self).left_the_band()
     }
 
-    pub(crate) fn patch(&self, edit: &mut Editor) -> FileViewportPatch {
+    pub(crate) fn patch(&self, edit: &mut EditItem<'_, '_>) -> FileViewportPatch {
         let total = edit.core.buffer.len_lines() as u32;
         let wrap = edit.wrapped_view(self);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
@@ -170,7 +171,7 @@ impl ViewportRenderRequest {
 
 fn render(
     trigger: On<ViewportRenderRequest>,
-    mut views: Query<(&mut Editor, &FileViewport)>,
+    mut views: Query<(Edit, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -201,7 +202,12 @@ impl CursorRenderRequest {
 
 fn render_cursor(
     trigger: On<CursorRenderRequest>,
-    mut views: Query<(&mut Editor, &EditorKeymap, &FileViewport)>,
+    mut views: Query<(
+        Edit,
+        &EditorKeymap,
+        &crate::keymap::vim::VimKeymap,
+        &FileViewport,
+    )>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -209,7 +215,7 @@ fn render_cursor(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let Ok((mut edit, keymap, viewport)) = views.get_mut(entity) else {
+    let Ok((mut edit, keymap, parser, viewport)) = views.get_mut(entity) else {
         return;
     };
     let total = edit.core.buffer.len_lines() as u32;
@@ -264,8 +270,11 @@ fn render_cursor(
         &FileCursorEvent {
             search_total,
             search_index,
-            mode: keymap.0.mode(),
-            mode_label: keymap.0.mode_label(),
+            mode: edit.core.mode.value,
+            mode_label: match keymap.0 {
+                crate::keymap::KeymapKind::Vim => parser.label(edit.core.mode.value),
+                crate::keymap::KeymapKind::Vscode => String::new(),
+            },
             primary,
             carets,
             selections,
@@ -283,7 +292,7 @@ fn render_cursor(
 struct HighlightedLines;
 
 impl HighlightedLines {
-    fn window(edit: &mut Editor, viewport: &FileViewport) -> (u32, u16) {
+    fn window(edit: &mut EditItem<'_, '_>, viewport: &FileViewport) -> (u32, u16) {
         let wrap = edit.wrapped_view(viewport);
         let visible = wrap.total_rows();
         let (first_row, end_row) =
@@ -331,7 +340,7 @@ impl DriftedWindow {
 struct ScrolledCursor;
 
 impl ScrolledCursor {
-    fn follow(edit: &mut Editor, viewport: &FileViewport) -> bool {
+    fn follow(edit: &mut EditItem<'_, '_>, viewport: &FileViewport) -> bool {
         if viewport.rows == 0 {
             return false;
         }
@@ -357,9 +366,9 @@ impl ScrolledCursor {
         }
         let col = edit.core.char_at_cell(line as usize, cursor.col);
         let at = edit.core.buffer.coords_to_char(line as usize, col);
-        if edit.core.mode.is_visual() {
+        if edit.core.mode.value.is_visual() {
             let anchor = edit.core.primary().anchor;
-            edit.core.selections = vec![Selection { anchor, head: at }];
+            edit.core.carets.selections = vec![Selection { anchor, head: at }];
             return true;
         }
         edit.core.collapse_carets();
@@ -384,12 +393,7 @@ fn rehighlight_on_color_scheme(
 
 fn sync_wrap_settings(
     settings: Res<vmux_setting::AppSettings>,
-    mut views: Query<(
-        Entity,
-        &mut FileViewport,
-        Option<&mut Editor>,
-        Has<EditorKeymap>,
-    )>,
+    mut views: Query<(Entity, &mut FileViewport, Option<Edit>, Has<EditorKeymap>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -413,7 +417,7 @@ fn sync_wrap_settings(
                 {
                     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
                 }
-                edit.core.top_row = viewport.top_row;
+                edit.core.viewport.top_row = viewport.top_row;
             }
             commands.trigger(ViewportRenderRequest::new(entity));
             if has_keymap {
@@ -425,7 +429,7 @@ fn sync_wrap_settings(
 
 fn file_resize(
     trigger: On<UiInput<FileResizeEvent>>,
-    mut views: Query<(&mut FileViewport, Option<&mut Editor>, Has<EditorKeymap>)>,
+    mut views: Query<(&mut FileViewport, Option<Edit>, Has<EditorKeymap>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -440,8 +444,8 @@ fn file_resize(
     viewport.rows = rows;
     viewport.wrap_columns = event.wrap_columns;
     if let Some(mut edit) = edit {
-        edit.core.rows = viewport.rows;
-        edit.core.top_row = viewport.top_row;
+        edit.core.viewport.rows = viewport.rows;
+        edit.core.viewport.top_row = viewport.top_row;
         commands.trigger(ViewportRenderRequest::new(entity));
         if has_keymap {
             commands.trigger(CursorRenderRequest::new(entity));
@@ -451,7 +455,7 @@ fn file_resize(
 
 fn file_scroll(
     trigger: On<UiInput<FileScrollEvent>>,
-    mut views: Query<(&mut Editor, &mut FileViewport), With<EditorKeymap>>,
+    mut views: Query<(Edit, &mut FileViewport), With<EditorKeymap>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -461,7 +465,7 @@ fn file_scroll(
     };
     let visible = viewport.visible_rows(&mut edit);
     viewport.top_row = ScrollWindow::new(visible, event.top_row, viewport.rows).top();
-    edit.core.top_row = viewport.top_row;
+    edit.core.viewport.top_row = viewport.top_row;
     if !event.needs_rows {
         return;
     }
@@ -471,7 +475,7 @@ fn file_scroll(
 
 fn file_fold_toggle(
     trigger: On<UiInput<FileFoldToggle>>,
-    mut views: Query<&mut Editor, (With<EditorKeymap>, With<FileViewport>)>,
+    mut views: Query<Edit, (With<EditorKeymap>, With<FileViewport>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -486,12 +490,8 @@ fn file_fold_toggle(
     commands.entity(entity).insert(FoldsDirty);
 }
 
-type FoldViews<'w, 's> = Query<
-    'w,
-    's,
-    (&'static mut Editor, &'static FileView),
-    (With<EditorKeymap>, With<FileViewport>),
->;
+type FoldViews<'w, 's> =
+    Query<'w, 's, (Edit, &'static FileView), (With<EditorKeymap>, With<FileViewport>)>;
 
 fn apply_lsp_folds(
     mut folds: MessageReader<crate::host::lsp::manager::LspFolds>,
@@ -533,21 +533,38 @@ mod tests {
     use ropey::Rope;
 
     use super::*;
+    use crate::host::edit::EditCommand;
     use crate::host::edit::highlight_cache::HighlightCache;
-    use crate::host::edit::{EditCommand, EditCore};
-    use crate::host::keymap::KeymapKindExt;
+
+    struct Fixture {
+        world: World,
+        entity: Entity,
+    }
+
+    impl Fixture {
+        fn new(editor: crate::host::editor::EditorBundle) -> Self {
+            let mut world = World::new();
+            let entity = world.spawn(editor).id();
+            Self { world, entity }
+        }
+
+        fn edit(&mut self) -> EditItem<'_, 'static> {
+            Editor::get_mut(&mut self.world, self.entity).unwrap()
+        }
+    }
 
     impl ScrolledCursor {
-        fn at(cursor_line: usize, top_row: u32, rows: u16) -> (Editor, FileViewport) {
+        fn at(cursor_line: usize, top_row: u32, rows: u16) -> (Fixture, FileViewport) {
             let text = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
-            let mut core = EditCore::new(
+            let mut core = crate::edit::Document::new(
                 PathBuf::from("/tmp/scroll.rs"),
                 "Rust".into(),
                 &text,
                 crate::host::edit::EditMode::Normal,
             );
-            core.set_caret(core.buffer.coords_to_char(cursor_line, 3));
-            let edit = Editor::new(
+            core.carets
+                .place(core.buffer.coords_to_char(cursor_line, 3));
+            let edit = crate::host::editor::EditorBundle::new(
                 core,
                 HighlightCache::new(Path::new("/tmp/scroll.rs")),
                 crate::host::fold::FoldState::default(),
@@ -560,10 +577,10 @@ mod tests {
                 word_wrap_column: 80,
                 scroll_revision: 0,
             };
-            (edit, viewport)
+            (Fixture::new(edit), viewport)
         }
 
-        fn cursor_line(edit: &Editor) -> u32 {
+        fn cursor_line(edit: &EditItem<'_, '_>) -> u32 {
             edit.core.cursor_pos().line
         }
     }
@@ -572,13 +589,13 @@ mod tests {
         fn scrolling(top_row: u32, rows: u16) -> (App, Entity) {
             let text = (0..400).map(|i| format!("line {i}\n")).collect::<String>();
             let path = PathBuf::from("/tmp/scroll-report.rs");
-            let core = EditCore::new(
+            let core = crate::edit::Document::new(
                 path.clone(),
                 "Rust".into(),
                 &text,
                 crate::host::edit::EditMode::Normal,
             );
-            let edit = Editor::new(
+            let edit = crate::host::editor::EditorBundle::new(
                 core,
                 HighlightCache::new(&path),
                 crate::host::fold::FoldState::default(),
@@ -598,7 +615,7 @@ mod tests {
                         word_wrap_column: 80,
                         scroll_revision: 0,
                     },
-                    EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    EditorKeymap(vmux_api::editor::KeymapKind::Vscode),
                 ))
                 .id();
             (app, entity)
@@ -608,7 +625,7 @@ mod tests {
     struct TestEditorWindow;
 
     impl TestEditorWindow {
-        fn nested_file(lines: usize) -> Editor {
+        fn nested_file(lines: usize) -> Fixture {
             let mut text = String::new();
             for i in 0..lines {
                 match i % 8 {
@@ -618,7 +635,7 @@ mod tests {
                 }
             }
             let path = PathBuf::from("/tmp/window.rs");
-            let core = EditCore::new(
+            let core = crate::edit::Document::new(
                 path.clone(),
                 "Rust".into(),
                 &text,
@@ -626,9 +643,13 @@ mod tests {
             );
             let mut folds = crate::host::fold::FoldState::default();
             folds.set_indented(&core.buffer.rope);
-            let mut edit = Editor::new(core, HighlightCache::new(&path), folds);
-            edit.sync_fold_view();
-            edit
+            let mut fixture = Fixture::new(crate::host::editor::EditorBundle::new(
+                core,
+                HighlightCache::new(&path),
+                folds,
+            ));
+            fixture.edit().sync_fold_view();
+            fixture
         }
 
         fn scrolled(top_row: u32, wrap_columns: u16) -> FileViewport {
@@ -665,28 +686,32 @@ mod tests {
 
     #[test]
     fn scrolling_past_the_caret_drags_it_to_the_top_edge() {
-        let (mut edit, viewport) = ScrolledCursor::at(2, 10, 20);
+        let (mut fixture, viewport) = ScrolledCursor::at(2, 10, 20);
+        let mut edit = fixture.edit();
         assert!(ScrolledCursor::follow(&mut edit, &viewport));
         assert_eq!(ScrolledCursor::cursor_line(&edit), 10);
     }
 
     #[test]
     fn scrolling_back_past_the_caret_drags_it_to_the_bottom_edge() {
-        let (mut edit, viewport) = ScrolledCursor::at(30, 0, 20);
+        let (mut fixture, viewport) = ScrolledCursor::at(30, 0, 20);
+        let mut edit = fixture.edit();
         assert!(ScrolledCursor::follow(&mut edit, &viewport));
         assert_eq!(ScrolledCursor::cursor_line(&edit), 19);
     }
 
     #[test]
     fn a_caret_still_on_screen_is_left_alone() {
-        let (mut edit, viewport) = ScrolledCursor::at(12, 10, 20);
+        let (mut fixture, viewport) = ScrolledCursor::at(12, 10, 20);
+        let mut edit = fixture.edit();
         assert!(!ScrolledCursor::follow(&mut edit, &viewport));
         assert_eq!(ScrolledCursor::cursor_line(&edit), 12);
     }
 
     #[test]
     fn a_dragged_caret_keeps_its_column() {
-        let (mut edit, viewport) = ScrolledCursor::at(2, 10, 20);
+        let (mut fixture, viewport) = ScrolledCursor::at(2, 10, 20);
+        let mut edit = fixture.edit();
         ScrolledCursor::follow(&mut edit, &viewport);
         assert_eq!(edit.core.cursor_pos().col, 3);
     }
@@ -707,9 +732,13 @@ mod tests {
             120
         );
         assert_eq!(
-            app.world().get::<Editor>(entity).unwrap().core.top_row,
+            Editor::read(app.world(), entity)
+                .unwrap()
+                .core
+                .viewport
+                .top_row,
             120,
-            "screen-relative motions read core.top_row"
+            "screen-relative motions read core.viewport.top_row"
         );
     }
 
@@ -734,7 +763,8 @@ mod tests {
     fn every_laid_out_row_carries_its_line_however_the_window_is_placed() {
         for wrap_columns in [0u16, 12, 100] {
             for collapsed in [false, true] {
-                let mut edit = TestEditorWindow::nested_file(400);
+                let mut fixture = TestEditorWindow::nested_file(400);
+                let mut edit = fixture.edit();
                 if collapsed {
                     for header in (0..400).step_by(8) {
                         edit.folds.close(header as u32);
@@ -759,7 +789,8 @@ mod tests {
 
     #[test]
     fn opening_a_line_deep_in_the_file_keeps_the_window_whole() {
-        let mut edit = TestEditorWindow::nested_file(400);
+        let mut fixture = TestEditorWindow::nested_file(400);
+        let mut edit = fixture.edit();
         let viewport = TestEditorWindow::scrolled(300, 100);
         let at = edit.core.buffer.coords_to_char(316, 0);
         edit.core.set_caret(at);
