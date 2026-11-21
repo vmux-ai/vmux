@@ -1,7 +1,8 @@
 use crate::host::editor::{Edit, EditReadOnly};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
 #[cfg(test)]
@@ -1367,9 +1368,28 @@ fn refresh_bindings(
 type UnavailableServers<'w, 's> =
     Query<'w, 's, (&'static ServerKey, Has<Stopped>), Or<(With<ServerFailure>, With<Stopped>)>>;
 
-fn open_documents(
+#[derive(SystemParam)]
+struct ServerAvailability<'w, 's> {
+    states: UnavailableServers<'w, 's>,
+}
+
+impl ServerAvailability<'_, '_> {
+    fn failed(&self, key: &ServerKey) -> bool {
+        self.states
+            .iter()
+            .any(|(candidate, stopped)| !stopped && candidate == key)
+    }
+
+    fn stopped(&self, key: &ServerKey) -> bool {
+        self.states
+            .iter()
+            .any(|(candidate, stopped)| stopped && candidate == key)
+    }
+}
+
+fn prepare_servers(
     q: Query<(Entity, &FileView, EditReadOnly), Without<LspOpened>>,
-    unavailable: UnavailableServers,
+    availability: ServerAvailability,
     registry: Single<&LspRegistry>,
     settings: Res<AppSettings>,
     manager: LspManager,
@@ -1377,18 +1397,9 @@ fn open_documents(
     mut commands: Commands,
 ) {
     let overrides = server_overrides(&settings);
-    let mut failed = HashSet::new();
-    let mut stopped_keys = HashSet::new();
-    for (key, stopped) in &unavailable {
-        if stopped {
-            stopped_keys.insert(key.clone());
-        } else {
-            failed.insert(key.clone());
-        }
-    }
     let mut pending_roots = Vec::<(PathBuf, Entity)>::new();
     let mut pending_servers = Vec::<(ServerKey, Entity)>::new();
-    for (entity, view, editor) in &q {
+    for (entity, view, _) in &q {
         let Some(extension) = view
             .path
             .extension()
@@ -1411,89 +1422,118 @@ fn open_documents(
         }
         let root = spec.workspace_root(view.path.parent().unwrap_or(&view.path));
         let key = ServerKey::new(&root, &spec.command).with_arguments(spec.args.clone());
-        if let Some(server) = manager.server_entity(&key) {
+        commands
+            .entity(entity)
+            .insert(DocumentLanguage(spec.language_id));
+        let existing = manager.server_entity(&key);
+        if let Some(server) = existing {
             commands.entity(entity).insert(ServerBinding::new(server));
         }
-        if failed.contains(&key) {
+        if availability.failed(&key) {
             commands.entity(entity).insert(LspOpened);
             continue;
         }
-        if stopped_keys.contains(&key) {
+        if availability.stopped(&key) {
             continue;
         }
-        let Some(_client) = manager.client(&key) else {
-            let mut pending = None;
-            for (candidate, server) in &pending_servers {
-                if *candidate == key {
-                    pending = Some(*server);
+        if existing.is_some() {
+            continue;
+        }
+        let mut pending = None;
+        for (candidate, server) in &pending_servers {
+            if *candidate == key {
+                pending = Some(*server);
+                break;
+            }
+        }
+        if let Some(server) = pending {
+            commands.entity(entity).insert(ServerBinding::new(server));
+        } else if manager.server_entity(&key).is_none() {
+            let mut owner = None;
+            for (candidate, directory) in &manager.roots {
+                if directory.0 == root {
+                    owner = Some(candidate);
                     break;
                 }
             }
-            if let Some(server) = pending {
-                commands.entity(entity).insert(ServerBinding::new(server));
-            } else if manager.server_entity(&key).is_none() {
-                let mut owner = None;
-                for (candidate, directory) in &manager.roots {
-                    if directory.0 == root {
-                        owner = Some(candidate);
-                        break;
-                    }
-                }
-                for (directory, candidate) in &pending_roots {
-                    if *directory == root {
-                        owner = Some(*candidate);
-                        break;
-                    }
-                }
-                let owner = match owner {
-                    Some(owner) => owner,
-                    None => {
-                        let owner = commands
-                            .spawn((
-                                WorkspaceRoot,
-                                vmux_ecs::Cwd(root.clone()),
-                                Name::new(root.to_string_lossy().into_owned()),
-                            ))
-                            .id();
-                        pending_roots.push((root.clone(), owner));
-                        owner
-                    }
-                };
-                let server = commands
-                    .spawn((
-                        Server,
-                        StartServer,
-                        key.clone(),
-                        ChildOf(owner),
-                        Name::new(format!("Starting LSP server {}", spec.command)),
-                    ))
-                    .id();
-                commands.entity(entity).insert(ServerBinding::new(server));
-                pending_servers.push((key.clone(), server));
-                if let Some(wake) = &wake {
-                    wake.0.wake_by_ref();
+            for (directory, candidate) in &pending_roots {
+                if *directory == root {
+                    owner = Some(*candidate);
+                    break;
                 }
             }
+            let owner = match owner {
+                Some(owner) => owner,
+                None => {
+                    let owner = commands
+                        .spawn((
+                            WorkspaceRoot,
+                            vmux_ecs::Cwd(root.clone()),
+                            Name::new(root.to_string_lossy().into_owned()),
+                        ))
+                        .id();
+                    pending_roots.push((root.clone(), owner));
+                    owner
+                }
+            };
+            let server = commands
+                .spawn((
+                    Server,
+                    StartServer,
+                    key.clone(),
+                    ChildOf(owner),
+                    Name::new(format!("Starting LSP server {}", spec.command)),
+                ))
+                .id();
+            commands.entity(entity).insert(ServerBinding::new(server));
+            pending_servers.push((key.clone(), server));
+            if let Some(wake) = &wake {
+                wake.0.wake_by_ref();
+            }
+        }
+    }
+}
+
+#[derive(Component)]
+struct DocumentLanguage(String);
+
+fn open_documents(
+    views: Query<
+        (
+            Entity,
+            &FileView,
+            EditReadOnly,
+            &ServerBinding,
+            &DocumentLanguage,
+        ),
+        Without<LspOpened>,
+    >,
+    servers: Query<&ServerKey, With<Server>>,
+    availability: ServerAvailability,
+    manager: LspManager,
+    mut commands: Commands,
+) {
+    for (entity, view, editor, binding, language) in &views {
+        let Ok(key) = servers.get(binding.server()) else {
             continue;
         };
-        if editor.core.buffer.path != view.path {
+        if availability.failed(key) || availability.stopped(key) {
+            continue;
+        }
+        if manager.client(key).is_none() || editor.core.buffer.path != view.path {
             continue;
         }
         if editor.core.buffer.rope.len_bytes() as u64 > LSP_MAX_BYTES {
             commands.entity(entity).insert(LspOpened);
             continue;
         }
-        let server = manager.server_entity(&key).unwrap();
-        commands.entity(entity).insert((
-            ServerBinding::new(server),
-            vmux_lsp::OpenDocument {
-                server,
-                path: view.path.clone(),
-                language: spec.language_id,
-                text: editor.core.buffer.text(),
-                revision: Some(editor.core.content_version()),
-            },
-        ));
+        commands.entity(entity).insert(vmux_lsp::OpenDocument {
+            server: binding.server(),
+            path: view.path.clone(),
+            language: language.0.clone(),
+            text: editor.core.buffer.text(),
+            revision: Some(editor.core.content_version()),
+        });
     }
 }
 
@@ -1973,7 +2013,12 @@ impl Plugin for ManagerPlugin {
         .add_message::<LspCodeActionRequest>()
         .add_systems(
             Update,
-            (refresh_bindings, sync_ready_buffers, open_documents)
+            (
+                refresh_bindings,
+                sync_ready_buffers,
+                prepare_servers,
+                open_documents,
+            )
                 .chain()
                 .after(vmux_lsp::Set::Servers)
                 .before(vmux_lsp::Set::Documents)

@@ -20,6 +20,7 @@ use super::toolbar::{EditorTabStrip, FindBar, VimStatus};
 use std::collections::HashMap;
 
 use dioxus::html::input_data::MouseButton;
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use vmux_api::editor::KeymapKind;
 use vmux_api::editor::{CursorPos, EditMode};

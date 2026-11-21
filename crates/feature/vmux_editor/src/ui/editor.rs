@@ -1,6 +1,7 @@
 use crate::event::DocumentPointerInput;
 use std::collections::HashMap;
 
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use vmux_ecs::event::{
     DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHoverDismissRequest,

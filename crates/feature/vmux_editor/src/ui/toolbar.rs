@@ -1,4 +1,5 @@
 use crate::event::DocumentFindInput;
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use vmux_ecs::event::{ExplorerCloseEditor, FileOpenEvent, OpenEditorItem};
 use vmux_ui::file_icon::TypeIcon;

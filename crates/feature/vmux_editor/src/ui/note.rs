@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use vmux_ecs::event::{
     CompletionItem, FileNoteEditDismissRequest, FileNoteEditRequest,

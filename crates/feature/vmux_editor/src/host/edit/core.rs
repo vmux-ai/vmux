@@ -100,20 +100,26 @@ pub struct EditCore {
     pub registers: &'static mut Registers,
 }
 
-pub struct CoreView<'a> {
-    pub buffer: &'a TextBuffer,
-    pub carets: &'a Carets,
-    pub mode: &'a Mode,
-    pub viewport: &'a Viewport,
-    pub revision: &'a Revision,
-    pub history: &'a History,
-    pub transaction: &'a Transaction,
-    pub search: &'a SearchState,
-    pub navigation: &'a Navigation,
-    pub registers: &'a Registers,
-}
+impl<'w, 's> EditCoreReadOnlyItem<'w, 's> {
+    pub(crate) fn content_version(&self) -> uuid::Uuid {
+        self.revision.content
+    }
 
-impl<'a> CoreView<'a> {
+    pub fn view(&self) -> EditCoreReadOnlyItem<'_, '_> {
+        EditCoreReadOnlyItem {
+            buffer: self.buffer,
+            carets: self.carets,
+            mode: self.mode,
+            viewport: self.viewport,
+            revision: self.revision,
+            history: self.history,
+            transaction: self.transaction,
+            search: self.search,
+            navigation: self.navigation,
+            registers: self.registers,
+        }
+    }
+
     pub fn primary(&self) -> Selection {
         self.carets.selections[self.carets.active.min(self.carets.selections.len() - 1)]
     }
@@ -304,7 +310,7 @@ impl<'a> CoreView<'a> {
         }
     }
 
-    fn motion(&self) -> MotionResolver<'a> {
+    fn motion(&self) -> MotionResolver<'w> {
         MotionResolver::new(
             self.buffer,
             &self.viewport.fold_view,
@@ -330,7 +336,7 @@ impl<'a> CoreView<'a> {
         out
     }
 
-    pub fn cached_search_matches(&self) -> &'a [std::ops::Range<usize>] {
+    pub fn cached_search_matches(&self) -> &'w [std::ops::Range<usize>] {
         match self.search.cache.as_ref() {
             Some((_, _, matches)) => matches,
             None => &[],
@@ -1257,8 +1263,8 @@ impl EditCoreItem<'_, '_> {
         (false, None)
     }
 
-    pub fn view(&self) -> CoreView<'_> {
-        CoreView {
+    pub fn view(&self) -> EditCoreReadOnlyItem<'_, '_> {
+        EditCoreReadOnlyItem {
             buffer: &self.buffer,
             carets: &self.carets,
             mode: &self.mode,
@@ -2506,103 +2512,6 @@ impl EditCoreItem<'_, '_> {
             scroll_to: None,
             yank,
         }
-    }
-}
-
-impl EditCoreReadOnlyItem<'_, '_> {
-    pub(crate) fn content_version(&self) -> uuid::Uuid {
-        self.revision.content
-    }
-
-    pub fn view(&self) -> CoreView<'_> {
-        CoreView {
-            buffer: self.buffer,
-            carets: self.carets,
-            mode: self.mode,
-            viewport: self.viewport,
-            revision: self.revision,
-            history: self.history,
-            transaction: self.transaction,
-            search: self.search,
-            navigation: self.navigation,
-            registers: self.registers,
-        }
-    }
-
-    pub fn primary(&self) -> Selection {
-        self.view().primary()
-    }
-
-    pub fn selected_lines(&self) -> (u32, u32) {
-        self.view().selected_lines()
-    }
-
-    pub fn word_occurrences(
-        &self,
-    ) -> Option<(std::ops::Range<usize>, Vec<std::ops::Range<usize>>)> {
-        self.view().word_occurrences()
-    }
-
-    pub fn caret_count(&self) -> usize {
-        self.view().caret_count()
-    }
-
-    pub fn char_at_cell(&self, line: usize, cell: u32) -> usize {
-        self.view().char_at_cell(line, cell)
-    }
-
-    pub fn cursor_pos(&self) -> CursorPos {
-        self.view().cursor_pos()
-    }
-
-    pub fn cursor_positions(&self) -> Vec<CursorPos> {
-        self.view().cursor_positions()
-    }
-
-    pub fn visual_range(&self) -> std::ops::Range<usize> {
-        self.view().visual_range()
-    }
-
-    pub fn sel_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
-        self.view().sel_spans(first, rows)
-    }
-
-    pub fn search_matches(&self) -> Vec<std::ops::Range<usize>> {
-        self.view().search_matches()
-    }
-
-    pub fn cached_search_matches(&self) -> &[std::ops::Range<usize>] {
-        self.view().cached_search_matches()
-    }
-
-    pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
-        self.view().word_highlight_spans(first, rows)
-    }
-
-    pub fn search_spans(
-        &self,
-        matches: &[std::ops::Range<usize>],
-        first: u32,
-        rows: u16,
-    ) -> Vec<SelSpan> {
-        self.view().search_spans(matches, first, rows)
-    }
-
-    pub fn block_rows(&self) -> Vec<std::ops::Range<usize>> {
-        self.view().block_rows()
-    }
-
-    pub fn autoscroll(&self, top: u32, rows: u16) -> Option<u32> {
-        self.view().autoscroll(top, rows)
-    }
-
-    pub fn autoscroll_rows(
-        &self,
-        top: u32,
-        rows: u16,
-        folds: &crate::fold::FoldState,
-    ) -> Option<u32> {
-        self.view().autoscroll_rows(top, rows, folds)
     }
 }
 
