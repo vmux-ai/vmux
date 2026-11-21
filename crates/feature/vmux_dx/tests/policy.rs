@@ -2568,6 +2568,14 @@ fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
             true,
         ),
         (
+            "use rustc_lint::LintStore; use rustc_session::Session; fn register_lints(_: &Session, store: &mut LintStore) {}",
+            true,
+        ),
+        (
+            "struct LintStore; struct Session; fn register_lints(_: &Session, store: &mut LintStore) {}",
+            false,
+        ),
+        (
             "trait LateLintPass {} struct Adapter; impl LateLintPass for Adapter {}",
             false,
         ),
@@ -2585,7 +2593,11 @@ fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
         ),
     ] {
         let inventory = Inventory::fixture(source);
-        let adapter = &inventory.entries["fixture.rs||struct:Adapter"];
+        let adapter = inventory
+            .entries
+            .get("fixture.rs||struct:Adapter")
+            .or_else(|| inventory.entries.get("fixture.rs||fn:register_lints"))
+            .unwrap();
         assert_eq!(inventory.compiler_boundary(adapter), accepted, "{source}");
     }
 }
@@ -8908,13 +8920,40 @@ impl Inventory {
         false
     }
 
-    fn compiler_boundary(&self, adapter: &Declaration) -> bool {
+    fn compiler_registration(&self, adapter: &Declaration) -> bool {
         if matches!(adapter.kind, Kind::Macro) {
             let name = adapter.name.replace(' ', "");
             return self
                 .external_path(&adapter.namespace, &name, &mut BTreeSet::new())
                 .as_deref()
-                == Some("dylint_linting::impl_late_lint");
+                .is_some_and(|interface| {
+                    matches!(
+                        interface,
+                        "dylint_linting::impl_late_lint"
+                            | "dylint_linting::dylint_library"
+                            | "rustc_session::declare_lint"
+                            | "rustc_session::impl_lint_pass"
+                    )
+                });
+        }
+        if matches!(adapter.kind, Kind::Function) && adapter.name == "register_lints" {
+            let mut interfaces = BTreeSet::new();
+            for path in &adapter.field_paths {
+                if let Some(interface) =
+                    self.external_path(&adapter.namespace, path, &mut BTreeSet::new())
+                {
+                    interfaces.insert(interface);
+                }
+            }
+            return interfaces.contains("rustc_lint::LintStore")
+                && interfaces.contains("rustc_session::Session");
+        }
+        false
+    }
+
+    fn compiler_boundary(&self, adapter: &Declaration) -> bool {
+        if self.compiler_registration(adapter) {
+            return true;
         }
         let source = match &adapter.owner {
             Some(owner) => self.resolve(&adapter.namespace, owner, &mut BTreeSet::new()),
