@@ -1,59 +1,59 @@
 use std::collections::HashMap;
-use std::collections::HashSet as ApplyHashSet;
 
-use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind};
-use crate::reconcile::*;
-
-use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
-use crate::protocol as proto;
-use crate::snapshot::LayoutSnapshotQuery;
-use crate::stack::Stack;
-use crate::tab::Tab as LayoutTab;
-use crate::{TerminalLayoutSpawnRequest, event::PANE_GAP_PX};
-use bevy::ecs::message::{MessageReader, MessageWriter};
-use bevy::ecs::relationship::Relationship;
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
-use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
-use vmux_flex::prelude::*;
-use vmux_history::{CreatedAt, LastActivatedAt};
+use vmux_ecs::{OperationTarget, OperationTargetRevision};
+use vmux_ecs::{Order, PageOpenRequest};
+
+use crate::TerminalLayoutSpawnRequest;
+use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind};
+use crate::snapshot::LayoutSnapshotQuery;
+
+use super::archive::TabArchiveLayout;
+use current::CurrentLayout;
+use mutation::Topology;
+
+mod current;
+mod intent;
+mod mutation;
 
 pub(super) struct LayoutApplyPlugin;
 
 impl Plugin for LayoutApplyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<LayoutApplyPlan>()
-            .add_message::<LayoutApplyResult>()
-            .add_systems(Update, plan_requests.in_set(LayoutApplySet::Plan))
+        app.add_message::<LayoutApplyRequest>()
+            .add_message::<LayoutApplyResponse>()
+            .add_message::<LayoutApplyCancelRequest>()
+            .add_message::<LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotResponse>()
+            .add_message::<TerminalLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, accept.in_set(Accept))
+            .add_systems(Update, cancel.after(Accept).before(Commit))
+            .add_systems(Update, commit.in_set(Commit).after(Accept))
             .add_systems(
                 Update,
-                apply
-                    .in_set(LayoutApplySet::Mutate)
-                    .after(LayoutApplySet::Plan),
-            )
-            .add_systems(
-                Update,
-                bevy::ecs::schedule::ApplyDeferred
-                    .after(LayoutApplySet::Mutate)
-                    .before(crate::active::ActiveSystemSet::Descendants),
-            )
-            .add_systems(
-                Update,
-                respond_to
-                    .in_set(LayoutApplySet::Respond)
-                    .after(LayoutApplySet::Mutate)
+                respond
+                    .in_set(Respond)
+                    .after(Commit)
                     .after(crate::stack::ComputeFocusSet),
             )
             .add_systems(Update, serve_snapshot_requests);
+        app.configure_sets(
+            Update,
+            Commit.before(crate::active::ActiveSystemSet::Descendants),
+        );
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum LayoutApplySet {
-    Plan,
-    Mutate,
-    Respond,
-}
+pub(super) struct Accept;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Commit;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct Respond;
 
 #[derive(Message, Clone)]
 pub struct LayoutApplyRequest {
@@ -65,6 +65,11 @@ pub struct LayoutApplyRequest {
 pub struct LayoutApplyResponse {
     pub request_id: [u8; 16],
     pub result: Result<LayoutSnapshot, String>,
+}
+
+#[derive(Message, Clone, Copy)]
+pub struct LayoutApplyCancelRequest {
+    pub request_id: [u8; 16],
 }
 
 #[derive(Message, Clone)]
@@ -79,17 +84,158 @@ pub struct LayoutSnapshotResponse {
     pub snapshot: LayoutSnapshot,
 }
 
-#[derive(Message)]
-struct LayoutApplyPlan {
+#[derive(Component, Clone)]
+struct Reconcile {
     request_id: [u8; 16],
     snapshot: LayoutSnapshot,
-    diff: DiffPlan,
 }
 
-#[derive(Message)]
-struct LayoutApplyResult {
-    request_id: [u8; 16],
-    result: Result<(), String>,
+#[derive(Component)]
+struct Completed(Result<(), String>);
+
+fn accept(
+    mut reader: MessageReader<LayoutApplyRequest>,
+    layout: CurrentLayout,
+    mut commands: Commands,
+) {
+    for (index, request) in reader.read().enumerate() {
+        let intent = Reconcile {
+            request_id: request.request_id,
+            snapshot: request.snapshot.clone(),
+        };
+        let scope = layout.scope();
+        let mut operation = commands.spawn((intent, Order(index as u32)));
+        match scope {
+            Ok(scope) => {
+                operation.insert(OperationTargetRevision(layout.revision(scope)));
+                if let Some(scope) = scope {
+                    operation.insert(OperationTarget::new(scope));
+                }
+            }
+            Err(error) => {
+                operation.insert(Completed(Err(error)));
+            }
+        }
+    }
+}
+
+fn cancel(
+    mut requests: MessageReader<LayoutApplyCancelRequest>,
+    operations: Query<(Entity, &Reconcile), Without<Completed>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        for (entity, intent) in &operations {
+            if intent.request_id == request.request_id {
+                commands
+                    .entity(entity)
+                    .insert(Completed(Err("update_layout: canceled".into())));
+            }
+        }
+    }
+}
+
+fn commit(
+    world: &mut World,
+    operations: &mut QueryState<(Entity, &Order), (With<Reconcile>, Without<Completed>)>,
+    params: &mut SystemState<(CurrentLayout, TabArchiveLayout, Topology)>,
+) {
+    let mut pending = Vec::new();
+    for (entity, order) in operations.iter(world) {
+        pending.push((order.0, entity));
+    }
+    pending.sort_by_key(|(order, _)| *order);
+    for (_, entity) in pending {
+        let intent = world.get::<Reconcile>(entity).unwrap().clone();
+        let scope = world
+            .get::<OperationTarget>(entity)
+            .map(OperationTarget::entity);
+        let revision = *world.get::<OperationTargetRevision>(entity).unwrap();
+        let (validated, previous) = {
+            let (layout, _, _) = params.get_mut(world).unwrap();
+            (
+                intent.preflight(&layout, scope, revision),
+                layout.entities(scope),
+            )
+        };
+        let (retained, roots) = match validated {
+            Ok(retained) => retained,
+            Err(error) => {
+                world.entity_mut(entity).insert(Completed(Err(error)));
+                continue;
+            }
+        };
+        {
+            let (layout, archive, mut topology) = params.get_mut(world).unwrap();
+            for &target in &previous {
+                if !retained.contains(&target) && layout.is_stack(target) {
+                    archive.capture_stack(target, &mut topology.commands);
+                }
+            }
+        }
+        params.apply(world);
+        world.flush();
+        for &target in &retained {
+            world.entity_mut(target).remove::<ChildOf>();
+        }
+        let mut active = None;
+        {
+            let (_, _, mut topology) = params.get_mut(world).unwrap();
+            let window = topology.window(scope);
+            let mut tabs = Vec::new();
+            for tab in &intent.snapshot.tabs {
+                let target = topology.tab(tab, scope);
+                let (root, zoomed, hidden) =
+                    topology.node(&tab.root, target, roots.get(&target).copied(), true, window);
+                topology.children(target, &[root]);
+                topology.zoom(target, zoomed, hidden);
+                tabs.push(target);
+                if tab.is_active {
+                    active = Some(target);
+                }
+            }
+            if let Some(scope) = scope {
+                topology.children(scope, &tabs);
+            }
+        }
+        params.apply(world);
+        world.flush();
+        for target in previous.into_iter().rev() {
+            if !retained.contains(&target) && world.get_entity(target).is_ok() {
+                world.despawn(target);
+            }
+        }
+        if let Some(active) = active {
+            world.trigger(vmux_ecs::ActivateRequest { entity: active });
+        }
+        {
+            let (_, _, mut topology) = params.get_mut(world).unwrap();
+            topology.focus(&intent.snapshot.focused);
+        }
+        params.apply(world);
+        world.flush();
+        world.entity_mut(entity).insert(Completed(Ok(())));
+    }
+}
+
+fn respond(
+    operations: Query<(Entity, &Reconcile, &Completed)>,
+    snapshot_query: LayoutSnapshotQuery,
+    focused: crate::stack::FocusedStack,
+    mut writer: MessageWriter<LayoutApplyResponse>,
+    mut commands: Commands,
+) {
+    for (entity, intent, completed) in &operations {
+        let result = match &completed.0 {
+            Ok(()) => Ok(snapshot_query.build(&focused, None)),
+            Err(error) => Err(error.clone()),
+        };
+        writer.write(LayoutApplyResponse {
+            request_id: intent.request_id,
+            result,
+        });
+        commands.entity(entity).despawn();
+    }
 }
 
 fn serve_snapshot_requests(
@@ -103,14 +249,14 @@ fn serve_snapshot_requests(
 ) {
     let pid_by_stack: HashMap<u64, String> = process_ids
         .iter()
-        .map(|(pid, co)| (co.get().to_bits(), pid.to_string()))
+        .map(|(pid, co)| (co.parent().to_bits(), pid.to_string()))
         .collect();
     for request in reader.read() {
         let self_stack = request.anchor.and_then(|anchor| {
             process_ids
                 .iter()
                 .find(|(pid, _)| **pid == anchor)
-                .map(|(_, co)| co.get())
+                .map(|(_, co)| co.parent())
         });
         let target_space = self_stack
             .and_then(|stack| space_hierarchy.get(stack))
@@ -126,7 +272,7 @@ fn serve_snapshot_requests(
             });
         }
         for tab in &mut snapshot.tabs {
-            LayoutTree::fill_process_ids(&mut tab.root, &pid_by_stack);
+            snapshot_query.fill_process_ids(&mut tab.root, &pid_by_stack);
         }
         writer.write(LayoutSnapshotResponse {
             request_id: request.request_id,
@@ -135,511 +281,125 @@ fn serve_snapshot_requests(
     }
 }
 
-struct LayoutTree;
-
-impl LayoutTree {
-    fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) {
-        match node {
-            LayoutNode::Split { children, .. } => {
-                for child in children {
-                    Self::fill_process_ids(child, pid_by_stack);
-                }
-            }
-            LayoutNode::Pane { stacks, .. } => {
-                for stack in stacks {
-                    if let Some(id) = &stack.id
-                        && let Ok((NodeKind::Stack, bits)) = NodeKind::parse_id(id)
-                        && let Some(pid) = pid_by_stack.get(&bits)
-                    {
-                        stack.process_id = Some(pid.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    fn entity(node: &LayoutNode) -> Option<Entity> {
-        match node {
-            LayoutNode::Split { id, .. } | LayoutNode::Pane { id, .. } => {
-                id.as_deref().and_then(|id| {
-                    NodeKind::parse_id(id)
-                        .ok()
-                        .map(|(_, value)| Entity::from_bits(value))
-                })
-            }
-        }
-    }
-}
-
-#[derive(SystemParam)]
-struct ExistingLayout<'w, 's> {
-    active_space: Query<'w, 's, Entity, (With<crate::space::Space>, With<vmux_ecs::Active>)>,
-    tabs: Query<'w, 's, (Entity, Option<&'static ChildOf>), With<LayoutTab>>,
-    nodes: Query<
-        'w,
-        's,
-        (
-            Option<&'static Children>,
-            Has<LayoutTab>,
-            Has<PaneSplit>,
-            Has<Pane>,
-            Has<Stack>,
-        ),
-    >,
-}
-
-impl ExistingLayout<'_, '_> {
-    fn ids(&self) -> ApplyHashSet<String> {
-        let active_space = self.active_space.iter().next();
-        let mut ids = ApplyHashSet::new();
-        for (tab, child_of) in &self.tabs {
-            if active_space.is_some() && child_of.map(Relationship::get) != active_space {
-                continue;
-            }
-            self.collect(tab, &mut ids);
-        }
-        ids
-    }
-
-    fn collect(&self, entity: Entity, ids: &mut ApplyHashSet<String>) {
-        let Ok((children, is_tab, is_split, is_pane, is_stack)) = self.nodes.get(entity) else {
-            return;
-        };
-        if is_tab {
-            ids.insert(NodeKind::Tab.id(entity.to_bits()));
-        } else if is_split {
-            ids.insert(NodeKind::Split.id(entity.to_bits()));
-        } else if is_pane {
-            ids.insert(NodeKind::Pane.id(entity.to_bits()));
-        } else if is_stack {
-            ids.insert(NodeKind::Stack.id(entity.to_bits()));
-        }
-        if let Some(children) = children {
-            for child in children.iter() {
-                self.collect(child, ids);
-            }
-        }
-    }
-}
-
-fn plan_requests(
-    mut reader: MessageReader<LayoutApplyRequest>,
-    layout: ExistingLayout,
-    mut plans: MessageWriter<LayoutApplyPlan>,
-    mut results: MessageWriter<LayoutApplyResult>,
-) {
-    for request in reader.read() {
-        let existing = layout.ids();
-        match DiffPlan::build(&request.snapshot, &existing) {
-            Ok(diff) => {
-                plans.write(LayoutApplyPlan {
-                    request_id: request.request_id,
-                    snapshot: request.snapshot.clone(),
-                    diff,
-                });
-            }
-            Err(error) => {
-                results.write(LayoutApplyResult {
-                    request_id: request.request_id,
-                    result: Err(format!("update_layout: {error:?}")),
-                });
-            }
-        }
-    }
-}
-
-fn apply(
-    mut plans: MessageReader<LayoutApplyPlan>,
-    mut layout: LayoutWriter,
-    mut results: MessageWriter<LayoutApplyResult>,
-) {
-    for plan in plans.read() {
-        layout.apply(&plan.snapshot, &plan.diff);
-        results.write(LayoutApplyResult {
-            request_id: plan.request_id,
-            result: Ok(()),
-        });
-    }
-}
-
-#[derive(SystemParam)]
-struct LayoutWriter<'w, 's> {
-    children: Query<'w, 's, &'static Children>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    activated: Query<'w, 's, &'static LastActivatedAt>,
-    tabs: Query<'w, 's, &'static mut LayoutTab>,
-    splits: Query<'w, 's, (Entity, &'static mut PaneSplit, Option<&'static mut Node>)>,
-    pane_sizes: Query<'w, 's, &'static mut PaneSize>,
-    metadata: Query<'w, 's, &'static mut PageMetadata>,
-    terminal_spawn: MessageWriter<'w, TerminalLayoutSpawnRequest>,
-    page_open: MessageWriter<'w, PageOpenRequest>,
-    commands: Commands<'w, 's>,
-}
-
-fn respond_to(
-    mut reader: MessageReader<LayoutApplyResult>,
-    snapshot_query: LayoutSnapshotQuery,
-    focused: crate::stack::FocusedStack,
-    mut writer: MessageWriter<LayoutApplyResponse>,
-) {
-    for result in reader.read() {
-        let response = match &result.result {
-            Ok(()) => Ok(snapshot_query.build(&focused, None)),
-            Err(error) => Err(error.clone()),
-        };
-        writer.write(LayoutApplyResponse {
-            request_id: result.request_id,
-            result: response,
-        });
-    }
-}
-
-impl LayoutWriter<'_, '_> {
-    fn apply(&mut self, snapshot: &LayoutSnapshot, plan: &DiffPlan) {
-        let mut new_entities: HashMap<*const proto::LayoutNode, Entity> = HashMap::new();
-        let mut materialized: Vec<(&proto::Tab, Entity, i64)> =
-            Vec::with_capacity(snapshot.tabs.len());
-        let tab_parent: Option<Entity> = snapshot
-            .tabs
-            .iter()
-            .filter_map(|t| t.id.as_deref())
-            .filter_map(|id| NodeKind::parse_id(id).ok())
-            .map(|(_, v)| Entity::from_bits(v))
-            .find_map(|entity| self.child_of.get(entity).ok().map(|parent| parent.parent()));
-        for tab in &snapshot.tabs {
-            let (tab_entity, activated_at) = match &tab.id {
-                Some(id) => match NodeKind::parse_id(id) {
-                    Ok((_, value)) => {
-                        let entity = Entity::from_bits(value);
-                        let activated_at = self.activated.get(entity).map_or(0, |value| value.0);
-                        (entity, activated_at)
-                    }
-                    Err(_) => continue,
-                },
-                None => {
-                    let activated_at = LastActivatedAt::now();
-                    let entity = self
-                        .commands
-                        .spawn((LayoutTab::bundle(), activated_at, CreatedAt::now()))
-                        .id();
-                    if let Some(parent) = tab_parent {
-                        self.commands.entity(entity).insert(ChildOf(parent));
-                    }
-                    if !tab.name.is_empty() {
-                        self.commands.entity(entity).insert(LayoutTab {
-                            name: tab.name.clone(),
-                            ..default()
-                        });
-                    }
-                    (entity, activated_at.0)
-                }
-            };
-            self.materialize(tab_entity, true, &tab.root, &mut new_entities);
-            materialized.push((tab, tab_entity, activated_at));
-        }
-
-        for (tab, tab_entity, _) in &materialized {
-            self.structure(Some(*tab_entity), &tab.root, &new_entities);
-        }
-        for tab in &snapshot.tabs {
-            self.tab(tab);
-        }
-        if let Some((_, active_entity, _)) = materialized.iter().find(|(tab, _, _)| tab.is_active) {
-            let newest = materialized
-                .iter()
-                .map(|(_, _, activated_at)| *activated_at)
-                .max()
-                .unwrap_or(0);
-            self.commands
-                .entity(*active_entity)
-                .insert(LastActivatedAt(newest + 1));
-        }
-        let rescued: ApplyHashSet<String> = new_entities
-            .iter()
-            .filter_map(|(ptr, &entity)| {
-                let node = unsafe { &**ptr };
-                let kind = match node {
-                    proto::LayoutNode::Split { .. } => NodeKind::Split,
-                    proto::LayoutNode::Pane { .. } => NodeKind::Pane,
-                };
-                let id = kind.id(entity.to_bits());
-                plan.closes.contains(&id).then_some(id)
-            })
-            .collect();
-        for id in &plan.closes {
-            if rescued.contains(id) {
-                continue;
-            }
-            self.close(id);
-        }
-        self.focus(&snapshot.focused);
-    }
-
-    fn materialize(
-        &mut self,
-        parent: Entity,
-        parent_is_tab: bool,
-        node: &proto::LayoutNode,
-        new_entities: &mut HashMap<*const proto::LayoutNode, Entity>,
-    ) {
-        let node_entity = match node {
-            proto::LayoutNode::Split { id, direction, .. } => match id {
-                Some(id_str) => match NodeKind::parse_id(id_str) {
-                    Ok((_, v)) => Entity::from_bits(v),
-                    Err(_) => return,
-                },
-                None => {
-                    if parent_is_tab && let Some(existing_root) = self.root_split(parent) {
-                        self.split_direction(existing_root, *direction);
-                        new_entities.insert(node as *const _, existing_root);
-                        existing_root
-                    } else {
-                        let pane_split_dir = match direction {
-                            proto::SplitDirection::Row => PaneSplitDirection::Row,
-                            proto::SplitDirection::Column => PaneSplitDirection::Column,
-                        };
-                        let entity = self
-                            .commands
-                            .spawn((
-                                Pane::split_bundle(pane_split_dir),
-                                LastActivatedAt::now(),
-                                ChildOf(parent),
-                            ))
-                            .id();
-                        new_entities.insert(node as *const _, entity);
-                        entity
-                    }
-                }
-            },
-            proto::LayoutNode::Pane { id, .. } => match id {
-                Some(id_str) => match NodeKind::parse_id(id_str) {
-                    Ok((_, v)) => Entity::from_bits(v),
-                    Err(_) => return,
-                },
-                None => {
-                    let entity = self
-                        .commands
-                        .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
-                        .id();
-                    new_entities.insert(node as *const _, entity);
-                    entity
-                }
-            },
-        };
-
-        match node {
-            proto::LayoutNode::Split { children, .. } => {
-                for child in children {
-                    self.materialize(node_entity, false, child, new_entities);
-                }
-            }
-            proto::LayoutNode::Pane { stacks, .. } => {
-                for t in stacks {
-                    if t.id.is_none() {
-                        let stack = self
-                            .commands
-                            .spawn((
-                                Stack::bundle(),
-                                LastActivatedAt::now(),
-                                ChildOf(node_entity),
-                            ))
-                            .id();
-                        match t.kind.as_str() {
-                            "terminal" => {
-                                self.terminal_spawn
-                                    .write(TerminalLayoutSpawnRequest { stack });
-                            }
-                            _ => {
-                                self.page_open.write(PageOpenRequest {
-                                    target: PageOpenTarget::Stack(stack),
-                                    url: t.url.clone(),
-                                    request_id: None,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn root_split(&self, tab: Entity) -> Option<Entity> {
-        self.children
-            .get(tab)
-            .ok()?
-            .iter()
-            .find(|&entity| self.splits.contains(entity))
-    }
-
-    fn split_direction(&mut self, entity: Entity, direction: proto::SplitDirection) {
-        let pane_split_dir = match direction {
-            proto::SplitDirection::Row => PaneSplitDirection::Row,
-            proto::SplitDirection::Column => PaneSplitDirection::Column,
-        };
-        if let Ok((_, mut split, node)) = self.splits.get_mut(entity) {
-            split.direction = pane_split_dir;
-            if let Some(mut node) = node {
-                node.flex_direction = match pane_split_dir {
-                    PaneSplitDirection::Row => FlexDirection::Row,
-                    PaneSplitDirection::Column => FlexDirection::Column,
-                };
-                let gap = pane_split_dir.gaps(PANE_GAP_PX);
-                node.column_gap = gap.column_gap;
-                node.row_gap = gap.row_gap;
-            }
-        }
-    }
-
-    fn close(&mut self, id: &str) {
-        let Ok((_kind, value)) = NodeKind::parse_id(id) else {
-            return;
-        };
-        self.commands.entity(Entity::from_bits(value)).try_despawn();
-    }
-
-    fn tab(&mut self, tab: &proto::Tab) {
-        if let Some(id) = &tab.id
-            && let Ok((_, value)) = NodeKind::parse_id(id)
-        {
-            let entity = Entity::from_bits(value);
-            if let Ok(mut layout_tab) = self.tabs.get_mut(entity) {
-                layout_tab.name = tab.name.clone();
-            }
-        }
-        self.node(&tab.root);
-    }
-
-    fn structure(
-        &mut self,
-        parent: Option<Entity>,
-        node: &proto::LayoutNode,
-        new_entities: &HashMap<*const proto::LayoutNode, Entity>,
-    ) {
-        let Some(entity) =
-            LayoutTree::entity(node).or_else(|| new_entities.get(&(node as *const _)).copied())
-        else {
-            match node {
-                proto::LayoutNode::Split { children, .. } => {
-                    for child in children {
-                        self.structure(parent, child, new_entities);
-                    }
-                }
-                proto::LayoutNode::Pane { .. } => {}
-            }
-            return;
-        };
-        if let Some(parent) = parent {
-            self.commands.entity(entity).insert(ChildOf(parent));
-        }
-        match node {
-            proto::LayoutNode::Split { children, .. } => {
-                for child in children {
-                    self.structure(Some(entity), child, new_entities);
-                }
-            }
-            proto::LayoutNode::Pane { stacks, .. } => {
-                for t in stacks {
-                    if let Some(tid) = t.id.as_deref()
-                        && let Ok((_, value)) = NodeKind::parse_id(tid)
-                    {
-                        self.commands
-                            .entity(Entity::from_bits(value))
-                            .insert(ChildOf(entity));
-                    }
-                }
-            }
-        }
-    }
-
-    fn node(&mut self, layout: &proto::LayoutNode) {
-        match layout {
-            proto::LayoutNode::Split {
-                id,
-                direction,
-                flex_weights,
-                children,
-            } => {
-                if let Some(id) = id
-                    && let Ok((_, value)) = NodeKind::parse_id(id)
-                {
-                    let entity = Entity::from_bits(value);
-                    let pane_split_dir = match direction {
-                        proto::SplitDirection::Row => PaneSplitDirection::Row,
-                        proto::SplitDirection::Column => PaneSplitDirection::Column,
-                    };
-                    if let Ok((_, mut split, node)) = self.splits.get_mut(entity) {
-                        split.direction = pane_split_dir;
-                        if let Some(mut node) = node {
-                            node.flex_direction = match pane_split_dir {
-                                PaneSplitDirection::Row => FlexDirection::Row,
-                                PaneSplitDirection::Column => FlexDirection::Column,
-                            };
-                            let gap = pane_split_dir.gaps(PANE_GAP_PX);
-                            node.column_gap = gap.column_gap;
-                            node.row_gap = gap.row_gap;
-                        }
-                    }
-                }
-                if !flex_weights.is_empty() && flex_weights.len() == children.len() {
-                    for (child_dto, weight) in children.iter().zip(flex_weights.iter()) {
-                        if let Some(child_entity) = LayoutTree::entity(child_dto)
-                            && let Ok(mut size) = self.pane_sizes.get_mut(child_entity)
-                        {
-                            size.flex_grow = *weight;
-                        }
-                    }
-                }
-                for child in children {
-                    self.node(child);
-                }
-            }
-            proto::LayoutNode::Pane { stacks, .. } => {
-                for t in stacks {
-                    if let Some(tid) = &t.id
-                        && let Ok((_, value)) = NodeKind::parse_id(tid)
-                    {
-                        let entity = Entity::from_bits(value);
-                        if !t.title.is_empty()
-                            && let Ok(mut page) = self.metadata.get_mut(entity)
-                        {
-                            page.title = t.title.clone();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn focus(&mut self, focus: &proto::Focus) {
-        let target = focus
-            .stack
-            .as_deref()
-            .or(focus.pane.as_deref())
-            .or(focus.tab.as_deref())
-            .and_then(|id| NodeKind::parse_id(id).ok())
-            .map(|(_, value)| Entity::from_bits(value));
-        let Some(target) = target else {
-            return;
-        };
-        self.commands
-            .trigger(vmux_ecs::ActivateRequest { entity: target });
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::{Focus, SplitDirection, Stack as StackDto, Tab as TabDto};
-    use std::collections::HashSet;
+    use bevy_app::{App, Plugin, Update};
+    use bevy_ecs::prelude::{ChildOf, Children, Commands, Component, Entity, On, Query};
 
-    use crate::pane::{Pane, PaneSplitDirection};
+    use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
+    use crate::protocol as proto;
+    use crate::stack::Stack;
     use crate::tab::Tab as LayoutTab;
+    use vmux_flex::prelude::{FlexDirection, Node};
+    use vmux_history::LastActivatedAt;
 
     use bevy::ecs::message::Messages;
 
-    struct ApplyHarness;
+    struct ApplyHarness {
+        app: App,
+        space: Entity,
+        tab: Entity,
+        pane: Entity,
+        stack: Entity,
+    }
 
     impl ApplyHarness {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            Self::install(&mut app);
+            let space = app
+                .world_mut()
+                .spawn((crate::space::Space, vmux_ecs::Active))
+                .id();
+            let tab = app
+                .world_mut()
+                .spawn((
+                    LayoutTab {
+                        name: "Work".into(),
+                        startup_dir: None,
+                    },
+                    ChildOf(space),
+                ))
+                .id();
+            let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
+            let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
+            Self {
+                app,
+                space,
+                tab,
+                pane,
+                stack,
+            }
+        }
+
+        fn intent(&self) -> LayoutSnapshot {
+            LayoutSnapshot {
+                tabs: vec![proto::Tab {
+                    id: Some(NodeKind::Tab.id(self.tab.to_bits())),
+                    name: "Work".into(),
+                    is_active: false,
+                    root: ApplyHarness::pane(
+                        Some(&NodeKind::Pane.id(self.pane.to_bits())),
+                        vec![StackDto {
+                            id: Some(NodeKind::Stack.id(self.stack.to_bits())),
+                            ..default()
+                        }],
+                    ),
+                }],
+                focused: default(),
+            }
+        }
+
+        fn submit(&mut self, request_id: [u8; 16], snapshot: LayoutSnapshot) {
+            self.app.world_mut().write_message(LayoutApplyRequest {
+                request_id,
+                snapshot,
+            });
+        }
+
+        fn response(&self, request_id: [u8; 16]) -> Result<LayoutSnapshot, String> {
+            let messages = self.app.world().resource::<Messages<LayoutApplyResponse>>();
+            messages
+                .get_cursor()
+                .read(messages)
+                .find(|response| response.request_id == request_id)
+                .expect("correlated layout result")
+                .result
+                .clone()
+        }
+
+        fn pane(id: Option<&str>, stacks: Vec<StackDto>) -> LayoutNode {
+            LayoutNode::Pane {
+                id: id.map(str::to_string),
+                is_zoomed: false,
+                stacks,
+            }
+        }
+
+        fn split(id: Option<&str>, children: Vec<LayoutNode>, weights: Vec<f32>) -> LayoutNode {
+            LayoutNode::Split {
+                id: id.map(str::to_string),
+                direction: SplitDirection::Row,
+                flex_weights: weights,
+                children,
+            }
+        }
+
+        fn snapshot(root: LayoutNode, focus: Focus) -> LayoutSnapshot {
+            LayoutSnapshot {
+                tabs: vec![TabDto {
+                    id: Some("tab:1".into()),
+                    name: "S".into(),
+                    is_active: true,
+                    root,
+                }],
+                focused: focus,
+            }
+        }
+
         fn install(app: &mut App) {
             app.add_message::<LayoutApplyRequest>()
                 .add_message::<LayoutApplyResponse>()
@@ -654,7 +414,10 @@ mod tests {
         }
 
         fn apply(app: &mut App, snapshot: LayoutSnapshot) -> Result<LayoutSnapshot, String> {
-            if !app.world().contains_resource::<Messages<LayoutApplyPlan>>() {
+            if !app
+                .world()
+                .contains_resource::<Messages<LayoutApplyCancelRequest>>()
+            {
                 Self::install(app);
             }
             let request_id = [42; 16];
@@ -715,39 +478,10 @@ mod tests {
         assert!(app.world().get_entity(pane_b).is_ok());
     }
 
-    fn pane(id: Option<&str>, stacks: Vec<StackDto>) -> LayoutNode {
-        LayoutNode::Pane {
-            id: id.map(str::to_string),
-            is_zoomed: false,
-            stacks,
-        }
-    }
-
-    fn split(id: Option<&str>, children: Vec<LayoutNode>, weights: Vec<f32>) -> LayoutNode {
-        LayoutNode::Split {
-            id: id.map(str::to_string),
-            direction: SplitDirection::Row,
-            flex_weights: weights,
-            children,
-        }
-    }
-
-    fn snapshot(root: LayoutNode, focus: Focus) -> LayoutSnapshot {
-        LayoutSnapshot {
-            tabs: vec![TabDto {
-                id: Some("tab:1".into()),
-                name: "S".into(),
-                is_active: true,
-                root,
-            }],
-            focused: focus,
-        }
-    }
-
     #[test]
     fn validate_accepts_minimal_existing_layout() {
-        let snap = snapshot(
-            pane(
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::pane(
                 Some("pane:2"),
                 vec![StackDto {
                     id: Some("stack:3".into()),
@@ -760,38 +494,48 @@ mod tests {
                 stack: Some("stack:3".into()),
             },
         );
-        assert!(DiffPlan::validate(&snap).is_ok());
+        assert!(
+            Reconcile {
+                request_id: [0; 16],
+                snapshot: snap
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     #[test]
     fn validate_rejects_duplicate_pane_id() {
-        let snap = snapshot(
-            split(
-                Some("split:1"),
-                vec![pane(Some("pane:2"), vec![]), pane(Some("pane:2"), vec![])],
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::split(
+                Some("split:4"),
+                vec![
+                    ApplyHarness::pane(Some("pane:2"), vec![]),
+                    ApplyHarness::pane(Some("pane:2"), vec![]),
+                ],
                 vec![1.0, 1.0],
             ),
             Focus::default(),
         );
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::DuplicateId(_))
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("DuplicateId")
         ));
     }
 
     #[test]
     fn validate_rejects_new_pane_without_tabs() {
-        let snap = snapshot(pane(None, vec![]), Focus::default());
+        let snap = ApplyHarness::snapshot(ApplyHarness::pane(None, vec![]), Focus::default());
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::NewPaneMissingStacks)
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("NewPaneMissingStacks")
         ));
     }
 
     #[test]
     fn validate_rejects_new_tab_without_url() {
-        let snap = snapshot(
-            pane(
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::pane(
                 None,
                 vec![StackDto {
                     id: None,
@@ -803,15 +547,15 @@ mod tests {
             Focus::default(),
         );
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::NewStackMissingUrl)
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("NewStackMissingUrl")
         ));
     }
 
     #[test]
     fn validate_rejects_new_tab_without_kind() {
-        let snap = snapshot(
-            pane(
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::pane(
                 None,
                 vec![StackDto {
                     id: None,
@@ -823,15 +567,15 @@ mod tests {
             Focus::default(),
         );
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::NewStackMissingKind)
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("NewStackMissingKind")
         ));
     }
 
     #[test]
     fn validate_rejects_focus_to_unknown_id() {
-        let snap = snapshot(
-            pane(
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::pane(
                 Some("pane:2"),
                 vec![StackDto {
                     id: Some("stack:3".into()),
@@ -845,26 +589,29 @@ mod tests {
             },
         );
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::FocusReferencesUnknownId(_))
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("FocusReferencesUnknownId")
         ));
     }
 
     #[test]
     fn validate_rejects_wrong_kind_in_position() {
-        let snap = snapshot(pane(Some("stack:2"), vec![]), Focus::default());
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::pane(Some("stack:2"), vec![]),
+            Focus::default(),
+        );
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::WrongKindForPosition { .. })
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("WrongKindForPosition")
         ));
     }
 
     #[test]
     fn validate_rejects_flex_weights_length_mismatch() {
-        let snap = snapshot(
-            split(
-                Some("split:1"),
-                vec![pane(
+        let snap = ApplyHarness::snapshot(
+            ApplyHarness::split(
+                Some("split:4"),
+                vec![ApplyHarness::pane(
                     Some("pane:2"),
                     vec![StackDto {
                         id: Some("stack:3".into()),
@@ -876,120 +623,8 @@ mod tests {
             Focus::default(),
         );
         assert!(matches!(
-            DiffPlan::validate(&snap),
-            Err(ValidationError::FlexWeightsLengthMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn plan_marks_existing_ids_as_matches() {
-        let snap = snapshot(
-            pane(
-                Some("pane:2"),
-                vec![StackDto {
-                    id: Some("stack:3".into()),
-                    ..Default::default()
-                }],
-            ),
-            Focus {
-                tab: Some("tab:1".into()),
-                pane: Some("pane:2".into()),
-                stack: Some("stack:3".into()),
-            },
-        );
-        let existing: HashSet<String> = ["tab:1", "pane:2", "stack:3"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let plan = DiffPlan::build(&snap, &existing).unwrap();
-        assert!(plan.actions_by_id.contains_key("pane:2"));
-        assert!(plan.actions_by_id.contains_key("stack:3"));
-        assert!(plan.closes.is_empty());
-    }
-
-    #[test]
-    fn plan_lists_unreferenced_ids_for_close() {
-        let snap = snapshot(
-            pane(
-                Some("pane:2"),
-                vec![StackDto {
-                    id: Some("stack:3".into()),
-                    ..Default::default()
-                }],
-            ),
-            Focus {
-                tab: Some("tab:1".into()),
-                pane: Some("pane:2".into()),
-                stack: Some("stack:3".into()),
-            },
-        );
-        let existing: HashSet<String> = ["tab:1", "pane:2", "stack:3", "stack:4"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let plan = DiffPlan::build(&snap, &existing).unwrap();
-        assert_eq!(plan.closes, vec!["stack:4".to_string()]);
-    }
-
-    #[test]
-    fn plan_treats_id_omission_as_create() {
-        let snap = snapshot(
-            pane(
-                None,
-                vec![StackDto {
-                    id: None,
-                    url: "https://x".into(),
-                    kind: "browser".into(),
-                    ..Default::default()
-                }],
-            ),
-            Focus {
-                tab: Some("tab:1".into()),
-                pane: None,
-                stack: None,
-            },
-        );
-        let existing: HashSet<String> = ["tab:1"].into_iter().map(String::from).collect();
-        let plan = DiffPlan::build(&snap, &existing).unwrap();
-        assert!(plan.closes.is_empty());
-        assert_eq!(plan.actions_by_id.len(), 1);
-    }
-
-    #[test]
-    fn plan_rejects_referenced_tab_id_not_in_existing() {
-        let snap = snapshot(
-            pane(
-                Some("pane:2"),
-                vec![StackDto {
-                    id: Some("stack:99".into()),
-                    ..Default::default()
-                }],
-            ),
-            Focus {
-                tab: Some("tab:1".into()),
-                pane: Some("pane:2".into()),
-                stack: Some("stack:99".into()),
-            },
-        );
-        let existing: HashSet<String> = ["tab:1", "pane:2"].into_iter().map(String::from).collect();
-        match DiffPlan::build(&snap, &existing) {
-            Err(ValidationError::MissingReferencedEntity(ids)) => {
-                assert!(
-                    ids.contains(&"stack:99".to_string()),
-                    "expected stale tab:99 in error, got {ids:?}"
-                );
-            }
-            other => panic!("expected MissingReferencedEntity, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn plan_rejects_referenced_pane_id_not_in_existing() {
-        let snap = snapshot(pane(Some("pane:42"), vec![]), Focus::default());
-        let existing: HashSet<String> = ["tab:1"].into_iter().map(String::from).collect();
-        assert!(matches!(
-            DiffPlan::build(&snap, &existing),
-            Err(ValidationError::MissingReferencedEntity(_))
+            Reconcile { request_id: [0; 16], snapshot: snap }.validate(),
+            Err(error) if error.contains("FlexWeightsLengthMismatch")
         ));
     }
 
@@ -2292,6 +1927,962 @@ mod tests {
         assert_eq!(
             children[1], existing_pane,
             "existing pane should be second per submitted order"
+        );
+    }
+    #[derive(Component)]
+    struct UnsavedText(String);
+
+    fn transfer_text(
+        request: On<vmux_ecs::page::ArchiveCaptureRequest>,
+        children: Query<&Children>,
+        buffers: Query<&UnsavedText>,
+        archives: Query<&vmux_ecs::ArchivedPage>,
+        mut commands: Commands,
+    ) {
+        let Ok(archive) = archives.get(request.archive) else {
+            return;
+        };
+        if !archive.url.starts_with("file:") {
+            return;
+        }
+        if let Ok(children) = children.get(request.source) {
+            for child in children.iter() {
+                if buffers.get(child).is_ok() {
+                    commands.entity(child).insert(ChildOf(request.archive));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn competing_intents_commit_in_admission_order_and_refuse_stale_revision() {
+        let mut fixture = ApplyHarness::new();
+        let mut first = fixture.intent();
+        first.tabs[0].name = "First".into();
+        let mut second = fixture.intent();
+        second.tabs[0].name = "Second".into();
+        fixture.submit([1; 16], first);
+        fixture.submit([2; 16], second);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        assert!(fixture.response([2; 16]).unwrap_err().contains("revision"));
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "First"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
+        );
+    }
+
+    #[test]
+    fn cancellation_precedes_mutation_and_does_not_open_content() {
+        let mut fixture = ApplyHarness::new();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].name = "Canceled".into();
+        snapshot.tabs.push(proto::Tab {
+            id: None,
+            name: "New".into(),
+            is_active: false,
+            root: ApplyHarness::pane(
+                None,
+                vec![StackDto {
+                    url: "https://example.com".into(),
+                    kind: "browser".into(),
+                    ..default()
+                }],
+            ),
+        });
+        fixture.submit([1; 16], snapshot);
+        fixture
+            .app
+            .world_mut()
+            .write_message(LayoutApplyCancelRequest {
+                request_id: [1; 16],
+            });
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).unwrap_err().contains("canceled"));
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<PageOpenRequest>>()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<LayoutTab>>()
+                .iter(fixture.app.world())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn wrong_live_entity_kind_refuses_the_whole_intent() {
+        let mut fixture = ApplyHarness::new();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].name = "Refused".into();
+        snapshot.tabs[0].root =
+            ApplyHarness::pane(Some(&NodeKind::Pane.id(fixture.stack.to_bits())), vec![]);
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(
+            fixture
+                .response([1; 16])
+                .unwrap_err()
+                .contains("WrongKindForPosition")
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
+        );
+    }
+
+    #[test]
+    fn foreign_space_identity_refuses_without_touching_either_space() {
+        let mut fixture = ApplyHarness::new();
+        let foreign = fixture.app.world_mut().spawn(crate::space::Space).id();
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((LayoutTab::default(), ChildOf(foreign)))
+            .id();
+        let leaf = fixture
+            .app
+            .world_mut()
+            .spawn((Pane::bundle(), ChildOf(tab)))
+            .id();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].name = "Refused".into();
+        snapshot.tabs[0].root =
+            ApplyHarness::pane(Some(&NodeKind::Pane.id(leaf.to_bits())), vec![]);
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_err());
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(leaf).unwrap().parent(),
+            tab
+        );
+        assert!(fixture.app.world().get_entity(fixture.stack).is_ok());
+    }
+
+    #[test]
+    fn protected_descendant_refuses_closure_before_rename_or_archive() {
+        let mut fixture = ApplyHarness::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.stack)
+            .insert(vmux_ecs::PageMetadata {
+                url: "file:///work.txt".into(),
+                ..default()
+            });
+        let buffer = fixture
+            .app
+            .world_mut()
+            .spawn((
+                crate::CloseRequiresConfirmation,
+                UnsavedText("unsaved".into()),
+                ChildOf(fixture.stack),
+            ))
+            .id();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].name = "Refused".into();
+        snapshot.tabs[0].root =
+            ApplyHarness::pane(Some(&NodeKind::Pane.id(fixture.pane.to_bits())), vec![]);
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(
+            fixture
+                .response([1; 16])
+                .unwrap_err()
+                .contains("confirmation")
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            fixture.app.world().get::<UnsavedText>(buffer).unwrap().0,
+            "unsaved"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&vmux_ecs::ArchivedPage>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn deleting_an_omitted_page_flushes_archive_transfer_before_despawn() {
+        let mut fixture = ApplyHarness::new();
+        fixture.app.add_plugins(ReconciliationFixturePlugin);
+        let metadata = vmux_ecs::PageMetadata {
+            url: "file:///work.txt".into(),
+            title: "Work".into(),
+            ..default()
+        };
+        let surface = fixture
+            .app
+            .world_mut()
+            .spawn((crate::Browser, metadata.clone(), ChildOf(fixture.stack)))
+            .id();
+        let buffer = fixture
+            .app
+            .world_mut()
+            .spawn((UnsavedText("unsaved bytes".into()), ChildOf(surface)))
+            .id();
+        fixture.app.world_mut().entity_mut(fixture.stack).insert((
+            vmux_ecs::PageMetadata {
+                url: "file:///stale-stack.txt".into(),
+                ..default()
+            },
+            crate::page_slot::Current::new(Some(surface), metadata),
+        ));
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root =
+            ApplyHarness::pane(Some(&NodeKind::Pane.id(fixture.pane.to_bits())), vec![]);
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        assert!(fixture.app.world().get_entity(fixture.stack).is_err());
+        assert!(fixture.app.world().get_entity(surface).is_err());
+        let owner = fixture.app.world().get::<ChildOf>(buffer).unwrap().parent();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::ArchivedPage>(owner)
+                .unwrap()
+                .url,
+            "file:///work.txt"
+        );
+        assert_eq!(
+            fixture.app.world().get::<UnsavedText>(buffer).unwrap().0,
+            "unsaved bytes"
+        );
+    }
+
+    #[test]
+    fn moved_stack_preserves_unsaved_child_and_does_not_reopen_or_archive() {
+        let mut fixture = ApplyHarness::new();
+        let buffer = fixture
+            .app
+            .world_mut()
+            .spawn((UnsavedText("unsaved bytes".into()), ChildOf(fixture.stack)))
+            .id();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root =
+            ApplyHarness::pane(Some(&NodeKind::Pane.id(fixture.pane.to_bits())), vec![]);
+        snapshot.tabs.push(proto::Tab {
+            id: None,
+            name: "Moved".into(),
+            is_active: true,
+            root: ApplyHarness::pane(
+                None,
+                vec![StackDto {
+                    id: Some(NodeKind::Stack.id(fixture.stack.to_bits())),
+                    ..default()
+                }],
+            ),
+        });
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        let pane = fixture
+            .app
+            .world()
+            .get::<ChildOf>(fixture.stack)
+            .unwrap()
+            .parent();
+        assert_ne!(pane, fixture.pane);
+        let tab = fixture.app.world().get::<ChildOf>(pane).unwrap().parent();
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(tab).unwrap().parent(),
+            fixture.space
+        );
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(buffer).unwrap().parent(),
+            fixture.stack
+        );
+        assert_eq!(
+            fixture.app.world().get::<UnsavedText>(buffer).unwrap().0,
+            "unsaved bytes"
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<PageOpenRequest>>()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&vmux_ecs::ArchivedPage>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn all_new_tabs_attach_to_captured_space_after_original_tab_is_removed() {
+        let mut fixture = ApplyHarness::new();
+        let snapshot = LayoutSnapshot {
+            tabs: vec![proto::Tab {
+                id: None,
+                name: "New".into(),
+                is_active: true,
+                root: ApplyHarness::pane(
+                    None,
+                    vec![StackDto {
+                        url: "https://example.com".into(),
+                        kind: "browser".into(),
+                        ..default()
+                    }],
+                ),
+            }],
+            focused: default(),
+        };
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        assert!(fixture.app.world().get_entity(fixture.tab).is_err());
+        let tabs: Vec<Entity> = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<LayoutTab>>()
+            .iter(fixture.app.world())
+            .collect();
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(tabs[0])
+                .unwrap()
+                .parent(),
+            fixture.space
+        );
+    }
+
+    #[test]
+    fn invalid_entity_bits_and_numeric_id_aliases_refuse_without_panicking() {
+        for bad in [
+            "pane:4294967295".to_string(),
+            NodeKind::Pane.id(Entity::PLACEHOLDER.to_bits()),
+        ] {
+            let mut fixture = ApplyHarness::new();
+            let mut snapshot = fixture.intent();
+            snapshot.tabs[0].root = ApplyHarness::pane(Some(&bad), vec![]);
+            fixture.submit([1; 16], snapshot);
+            fixture.app.update();
+            assert!(fixture.response([1; 16]).is_err());
+            assert!(fixture.app.world().get_entity(fixture.stack).is_ok());
+        }
+        let mut fixture = ApplyHarness::new();
+        let mut snapshot = fixture.intent();
+        let id = NodeKind::Pane.id(fixture.pane.to_bits());
+        let alias = format!("pane:0{}", fixture.pane.to_bits());
+        snapshot.tabs[0].root = ApplyHarness::split(
+            None,
+            vec![
+                ApplyHarness::pane(Some(&id), vec![]),
+                ApplyHarness::pane(Some(&alias), vec![]),
+            ],
+            vec![],
+        );
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(
+            fixture
+                .response([1; 16])
+                .unwrap_err()
+                .contains("DuplicateId")
+        );
+        assert!(fixture.app.world().get_entity(fixture.stack).is_ok());
+    }
+
+    #[derive(Component)]
+    struct ReparentAfterAccept(Entity);
+
+    #[derive(Component)]
+    struct RebindWindowAfterAccept(Entity);
+
+    struct ReconciliationFixturePlugin;
+
+    impl Plugin for ReconciliationFixturePlugin {
+        fn build(&self, app: &mut App) {
+            app.add_observer(transfer_text).add_systems(
+                Update,
+                (reparent_after_accept, rebind_window_after_accept)
+                    .after(Accept)
+                    .before(Commit),
+            );
+        }
+    }
+
+    fn reparent_after_accept(
+        changes: Query<(Entity, &ReparentAfterAccept)>,
+        operations: Query<&Reconcile, Without<Completed>>,
+        mut commands: Commands,
+    ) {
+        if operations.is_empty() {
+            return;
+        }
+        for (entity, change) in &changes {
+            commands.entity(entity).insert(ChildOf(change.0));
+        }
+    }
+
+    fn rebind_window_after_accept(
+        mut changes: Query<(&RebindWindowAfterAccept, &mut bevy_cef::prelude::HostWindow)>,
+        operations: Query<&Reconcile, Without<Completed>>,
+    ) {
+        if operations.is_empty() {
+            return;
+        }
+        for (change, mut host) in &mut changes {
+            host.0 = change.0;
+        }
+    }
+
+    #[test]
+    fn topology_changed_after_acceptance_refuses_before_any_other_effect() {
+        let mut fixture = ApplyHarness::new();
+        fixture.app.add_plugins(ReconciliationFixturePlugin);
+        let foreign = fixture.app.world_mut().spawn(crate::space::Space).id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.pane)
+            .insert(ReparentAfterAccept(foreign));
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].name = "Refused".into();
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).unwrap_err().contains("revision"));
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.pane)
+                .unwrap()
+                .parent(),
+            foreign
+        );
+        assert!(fixture.app.world().get_entity(fixture.stack).is_ok());
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<PageOpenRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn reversing_existing_ancestor_order_detaches_retained_nodes_before_reparenting() {
+        let mut fixture = ApplyHarness::new();
+        let outer = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(PaneSplitDirection::Row),
+                ChildOf(fixture.tab),
+            ))
+            .id();
+        let inner = fixture
+            .app
+            .world_mut()
+            .spawn((Pane::split_bundle(PaneSplitDirection::Row), ChildOf(outer)))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.pane)
+            .insert(ChildOf(inner));
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root = ApplyHarness::split(
+            Some(&NodeKind::Split.id(inner.to_bits())),
+            vec![ApplyHarness::split(
+                Some(&NodeKind::Split.id(outer.to_bits())),
+                vec![ApplyHarness::pane(
+                    Some(&NodeKind::Pane.id(fixture.pane.to_bits())),
+                    vec![StackDto {
+                        id: Some(NodeKind::Stack.id(fixture.stack.to_bits())),
+                        ..default()
+                    }],
+                )],
+                vec![],
+            )],
+            vec![],
+        );
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(inner).unwrap().parent(),
+            fixture.tab
+        );
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(outer).unwrap().parent(),
+            inner
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.pane)
+                .unwrap()
+                .parent(),
+            outer
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
+        );
+    }
+
+    #[test]
+    fn a_new_pane_receives_its_requested_weight_and_zoom_without_losing_existing_content() {
+        let mut fixture = ApplyHarness::new();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root = ApplyHarness::split(
+            None,
+            vec![
+                LayoutNode::Pane {
+                    id: None,
+                    is_zoomed: true,
+                    stacks: vec![StackDto {
+                        url: "https://example.com".into(),
+                        kind: "browser".into(),
+                        ..default()
+                    }],
+                },
+                ApplyHarness::pane(
+                    Some(&NodeKind::Pane.id(fixture.pane.to_bits())),
+                    vec![StackDto {
+                        id: Some(NodeKind::Stack.id(fixture.stack.to_bits())),
+                        ..default()
+                    }],
+                ),
+            ],
+            vec![3.0, 1.0],
+        );
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        let root = fixture
+            .app
+            .world()
+            .get::<Children>(fixture.tab)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        let children: Vec<Entity> = fixture
+            .app
+            .world()
+            .get::<Children>(root)
+            .unwrap()
+            .iter()
+            .collect();
+        assert_eq!(children[1], fixture.pane);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<crate::pane::PaneSize>(children[0])
+                .unwrap()
+                .flex_grow,
+            3.0
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<crate::pane::Zoomed>(fixture.tab)
+                .unwrap()
+                .leaf,
+            children[0]
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
+        );
+    }
+    #[test]
+    fn response_reports_requested_tab_order_from_canonical_siblings() {
+        let mut fixture = ApplyHarness::new();
+        let second = fixture
+            .app
+            .world_mut()
+            .spawn((
+                LayoutTab {
+                    name: "Second".into(),
+                    startup_dir: None,
+                },
+                ChildOf(fixture.space),
+            ))
+            .id();
+        let leaf = fixture
+            .app
+            .world_mut()
+            .spawn((Pane::bundle(), ChildOf(second)))
+            .id();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs.insert(
+            0,
+            proto::Tab {
+                id: Some(NodeKind::Tab.id(second.to_bits())),
+                name: "Second".into(),
+                is_active: false,
+                root: ApplyHarness::pane(Some(&NodeKind::Pane.id(leaf.to_bits())), vec![]),
+            },
+        );
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        let response = fixture.response([1; 16]).unwrap();
+        let expected = vec![
+            Some(NodeKind::Tab.id(second.to_bits())),
+            Some(NodeKind::Tab.id(fixture.tab.to_bits())),
+        ];
+        assert_eq!(
+            response
+                .tabs
+                .into_iter()
+                .map(|tab| tab.id)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn an_unsettled_page_without_a_capture_source_refuses_closure() {
+        let mut fixture = ApplyHarness::new();
+        let surface = fixture
+            .app
+            .world_mut()
+            .spawn((crate::Browser, ChildOf(fixture.stack)))
+            .id();
+        let buffer = fixture
+            .app
+            .world_mut()
+            .spawn((UnsavedText("unsaved bytes".into()), ChildOf(surface)))
+            .id();
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root =
+            ApplyHarness::pane(Some(&NodeKind::Pane.id(fixture.pane.to_bits())), vec![]);
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_err());
+        assert_eq!(
+            fixture.app.world().get::<UnsavedText>(buffer).unwrap().0,
+            "unsaved bytes"
+        );
+        assert!(fixture.app.world().get_entity(fixture.stack).is_ok());
+    }
+    #[test]
+    fn new_layout_roots_inherit_the_canonical_host_window() {
+        let mut fixture = ApplyHarness::new();
+        let window = fixture.app.world_mut().spawn_empty().id();
+        let host = fixture
+            .app
+            .world_mut()
+            .spawn(bevy_cef::prelude::HostWindow(window))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.space)
+            .insert(ChildOf(host));
+        let snapshot = LayoutSnapshot {
+            tabs: vec![proto::Tab {
+                id: None,
+                name: "New".into(),
+                is_active: false,
+                root: ApplyHarness::pane(
+                    None,
+                    vec![StackDto {
+                        url: "https://example.com".into(),
+                        kind: "browser".into(),
+                        ..default()
+                    }],
+                ),
+            }],
+            focused: default(),
+        };
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        let tab = fixture
+            .app
+            .world()
+            .get::<Children>(fixture.space)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        let root = fixture
+            .app
+            .world()
+            .get::<Children>(tab)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<bevy_cef::prelude::HostWindow>(root)
+                .unwrap()
+                .0,
+            window
+        );
+    }
+
+    #[test]
+    fn window_binding_changed_after_acceptance_refuses_before_mutation() {
+        let mut fixture = ApplyHarness::new();
+        fixture.app.add_plugins(ReconciliationFixturePlugin);
+        let first = fixture.app.world_mut().spawn_empty().id();
+        let second = fixture.app.world_mut().spawn_empty().id();
+        let host = fixture
+            .app
+            .world_mut()
+            .spawn((
+                bevy_cef::prelude::HostWindow(first),
+                RebindWindowAfterAccept(second),
+            ))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.space)
+            .insert(ChildOf(host));
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].name = "Refused".into();
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).unwrap_err().contains("revision"));
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<bevy_cef::prelude::HostWindow>(host)
+                .unwrap()
+                .0,
+            second
+        );
+    }
+    #[test]
+    fn multiple_active_spaces_use_the_canonical_focused_owner() {
+        let mut fixture = ApplyHarness::new();
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_ecs::Active))
+            .id();
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((
+                LayoutTab {
+                    name: "Other".into(),
+                    startup_dir: None,
+                },
+                ChildOf(other),
+            ))
+            .id();
+        let leaf = fixture
+            .app
+            .world_mut()
+            .spawn((Pane::bundle(), ChildOf(tab)))
+            .id();
+        let profile = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::active_pane::ProfileId>>()
+            .single(fixture.app.world())
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(profile)
+            .insert(crate::active_pane::ActiveStack {
+                tab: Some(tab),
+                pane: Some(leaf),
+                stack: None,
+            });
+        let snapshot = LayoutSnapshot {
+            tabs: vec![proto::Tab {
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
+                name: "Selected".into(),
+                is_active: false,
+                root: ApplyHarness::pane(Some(&NodeKind::Pane.id(leaf.to_bits())), vec![]),
+            }],
+            focused: default(),
+        };
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        assert_eq!(
+            fixture.app.world().get::<LayoutTab>(tab).unwrap().name,
+            "Selected"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LayoutTab>(fixture.tab)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
+        );
+    }
+    #[test]
+    fn coupled_split_direction_and_weight_commit_to_the_same_render_node() {
+        let mut fixture = ApplyHarness::new();
+        let nested = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(PaneSplitDirection::Row),
+                ChildOf(fixture.tab),
+            ))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.pane)
+            .insert(ChildOf(nested));
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root = ApplyHarness::split(
+            None,
+            vec![LayoutNode::Split {
+                id: Some(NodeKind::Split.id(nested.to_bits())),
+                direction: SplitDirection::Column,
+                flex_weights: vec![1.0],
+                children: vec![ApplyHarness::pane(
+                    Some(&NodeKind::Pane.id(fixture.pane.to_bits())),
+                    vec![StackDto {
+                        id: Some(NodeKind::Stack.id(fixture.stack.to_bits())),
+                        ..default()
+                    }],
+                )],
+            }],
+            vec![3.0],
+        );
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        let render = fixture.app.world().get::<Node>(nested).unwrap();
+        assert_eq!(render.flex_direction, FlexDirection::Column);
+        assert_eq!(render.flex_grow, 3.0);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
         );
     }
 }

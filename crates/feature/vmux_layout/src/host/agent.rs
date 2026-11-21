@@ -59,7 +59,11 @@ impl Plugin for LayoutAgentPlugin {
             .add_message::<FocusPaneRequest>()
             .add_systems(
                 Update,
-                (request_focus, focus_pane, update)
+                (
+                    request_focus,
+                    focus_pane,
+                    update.before(crate::apply::Accept),
+                )
                     .chain()
                     .after(AgentRequestRouteSet),
             )

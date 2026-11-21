@@ -107,30 +107,9 @@ fn stack_close(
         if request.reason != CloseStackReason::ByUser || !seen.insert(request.stack) {
             continue;
         }
-        let stack = request.stack;
-        let Ok((_, meta, launch, _, workspace)) = layout.stack_pages.get(stack) else {
-            continue;
-        };
-        if meta.url.is_empty() {
-            continue;
+        if let Some(archive) = layout.request(request.stack) {
+            writer.write(archive);
         }
-        let space = layout.space_hierarchy.get(stack);
-        let space_id = layout.space_hierarchy.id(stack).unwrap_or_default();
-        let tab_index = space.and_then(|space| layout.tab_index(stack, space));
-        let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
-        let request = PageArchiveRequest {
-            source: layout.surfaces.current(stack),
-            url: meta.url.clone(),
-            title: meta.title.clone(),
-            space_id,
-            launch: launch.cloned(),
-            tab_index,
-            leaf_pane_id,
-            stack_index,
-            pane_path,
-            workspace: workspace.copied(),
-        };
-        writer.write(request);
     }
 }
 
@@ -246,8 +225,9 @@ fn maintain(
 }
 
 #[derive(SystemParam)]
-struct TabArchiveLayout<'w, 's> {
+pub(super) struct TabArchiveLayout<'w, 's> {
     surfaces: crate::hosted_page::StackSurface<'w, 's>,
+    surface_metadata: Query<'w, 's, &'static PageMetadata, With<crate::Browser>>,
     stack_pages: Query<
         'w,
         's,
@@ -273,6 +253,40 @@ struct TabArchiveLayout<'w, 's> {
 }
 
 impl TabArchiveLayout<'_, '_> {
+    pub(super) fn capture_stack(&self, stack: Entity, commands: &mut Commands) {
+        let Some(request) = self.request(stack) else {
+            return;
+        };
+        if let Some(bundle) = ArchivedPageBundle::new(&request, UnixMillis::now().0, None) {
+            commands.queue(bundle.with_source(request.source));
+        }
+    }
+
+    fn request(&self, stack: Entity) -> Option<PageArchiveRequest> {
+        let (_, metadata, launch, _, workspace) = self.stack_pages.get(stack).ok()?;
+        let source = self.surfaces.current(stack);
+        let metadata = source
+            .and_then(|source| self.surface_metadata.get(source).ok())
+            .unwrap_or(metadata);
+        if metadata.url.is_empty() {
+            return None;
+        }
+        let space = self.space_hierarchy.get(stack);
+        let (leaf_pane_id, stack_index, pane_path) = self.pane_path(stack).unwrap_or_default();
+        Some(PageArchiveRequest {
+            source,
+            url: metadata.url.clone(),
+            title: metadata.title.clone(),
+            space_id: self.space_hierarchy.id(stack).unwrap_or_default(),
+            launch: launch.cloned(),
+            tab_index: space.and_then(|space| self.tab_index(stack, space)),
+            leaf_pane_id,
+            stack_index,
+            pane_path,
+            workspace: workspace.copied(),
+        })
+    }
+
     fn tab_index(&self, stack: Entity, space: Entity) -> Option<usize> {
         let mut current = stack;
         let tab = loop {

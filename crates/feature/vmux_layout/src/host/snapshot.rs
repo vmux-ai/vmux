@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::page::PagePlacementCatalog;
@@ -28,33 +30,33 @@ pub struct LayoutSnapshotQuery<'w, 's> {
     pane_sizes: Query<'w, 's, &'static PaneSize>,
     zoomed: Query<'w, 's, &'static Zoomed>,
     pages: PagePlacementCatalog<'w, 's>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    children: Query<'w, 's, &'static Children>,
 }
 
 impl LayoutSnapshotQuery<'_, '_> {
     pub fn build(&self, focused: &ActiveStack, self_stack: Option<Entity>) -> LayoutSnapshot {
-        let active_tab = focused.tab;
-        let tabs = self
-            .tabs
-            .iter()
-            .map(|(tab_entity, tab, children)| {
-                let zoomed_leaf = self.zoomed.get(tab_entity).ok().map(|zoomed| zoomed.leaf);
-                let root = children
-                    .and_then(|children| children.iter().next())
-                    .map(|root| self.node(root, zoomed_leaf, self_stack))
-                    .unwrap_or(LayoutNode::Pane {
-                        id: None,
-                        is_zoomed: false,
-                        stacks: Vec::new(),
-                    });
-                TabDto {
-                    id: Some(NodeKind::Tab.id(tab_entity.to_bits())),
-                    name: tab.name.clone(),
-                    is_active: Some(tab_entity) == active_tab,
-                    root,
-                }
-            })
-            .collect();
-
+        let mut ordered: Vec<Entity> = self.tabs.iter().map(|(entity, _, _)| entity).collect();
+        ordered.sort_by_key(|&entity| self.ordinal(entity));
+        let mut tabs = Vec::new();
+        for tab_entity in ordered {
+            let (_, tab, children) = self.tabs.get(tab_entity).unwrap();
+            let zoomed_leaf = self.zoomed.get(tab_entity).ok().map(|zoomed| zoomed.leaf);
+            let root = children
+                .and_then(|children| children.iter().next())
+                .map(|root| self.node(root, zoomed_leaf, self_stack))
+                .unwrap_or(LayoutNode::Pane {
+                    id: None,
+                    is_zoomed: false,
+                    stacks: Vec::new(),
+                });
+            tabs.push(TabDto {
+                id: Some(NodeKind::Tab.id(tab_entity.to_bits())),
+                name: tab.name.clone(),
+                is_active: Some(tab_entity) == focused.tab,
+                root,
+            });
+        }
         LayoutSnapshot {
             tabs,
             focused: Focus {
@@ -66,6 +68,39 @@ impl LayoutSnapshotQuery<'_, '_> {
                     .stack
                     .map(|entity| NodeKind::Stack.id(entity.to_bits())),
             },
+        }
+    }
+
+    fn ordinal(&self, entity: Entity) -> (Option<Entity>, usize, Entity) {
+        let parent = self.parents.get(entity).ok().map(ChildOf::parent);
+        let order = parent
+            .and_then(|parent| self.children.get(parent).ok())
+            .and_then(|children| children.iter().position(|child| child == entity))
+            .unwrap_or(usize::MAX);
+        (parent, order, entity)
+    }
+
+    pub(super) fn fill_process_ids(
+        &self,
+        node: &mut LayoutNode,
+        pid_by_stack: &HashMap<u64, String>,
+    ) {
+        match node {
+            LayoutNode::Split { children, .. } => {
+                for child in children {
+                    self.fill_process_ids(child, pid_by_stack);
+                }
+            }
+            LayoutNode::Pane { stacks, .. } => {
+                for stack in stacks {
+                    if let Some(id) = &stack.id
+                        && let Ok((NodeKind::Stack, bits)) = NodeKind::parse_id(id)
+                        && let Some(pid) = pid_by_stack.get(&bits)
+                    {
+                        stack.process_id = Some(pid.clone());
+                    }
+                }
+            }
         }
     }
 

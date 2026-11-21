@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use crate::active_pane::ActivatePane;
 use crate::apply::{
-    LayoutApplyRequest, LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse,
+    LayoutApplyCancelRequest, LayoutApplyRequest, LayoutApplyResponse, LayoutSnapshotRequest,
+    LayoutSnapshotResponse,
 };
 use crate::bookmark::{
     AddRequest, CreateFolderRequest, MoveFolderRequest, MovePinRequest, MoveRequest, PinRequest,
@@ -30,6 +31,7 @@ impl Plugin for LayoutContractPlugin {
             .add_message::<BrowserNavigateRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<ContributedCommandChosen>()
+            .add_message::<LayoutApplyCancelRequest>()
             .add_message::<LayoutApplyRequest>()
             .add_message::<LayoutApplyResponse>()
             .add_message::<LayoutSnapshotRequest>()
