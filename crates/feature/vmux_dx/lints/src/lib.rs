@@ -2,7 +2,9 @@
 
 extern crate rustc_errors;
 extern crate rustc_hir;
+extern crate rustc_lint;
 extern crate rustc_middle;
+extern crate rustc_session;
 
 use rustc_errors::DiagDecorator;
 use rustc_hir::def::Res;
@@ -13,29 +15,55 @@ use rustc_middle::ty::{Ty, TyKind, Visibility};
 use std::collections::HashSet;
 
 mod aliases;
+mod ownership;
 #[cfg(test)]
 mod registrations;
 
-dylint_linting::impl_late_lint! {
+dylint_linting::dylint_library!();
+
+rustc_session::declare_lint! {
     pub VMUX_EXPORTED_SYSTEM,
     Deny,
-    "registered Vmux systems must remain private to their defining module",
-    VmuxExportedSystem::default()
+    "registered Vmux systems must remain private to their defining module"
 }
 
+rustc_session::declare_lint! {
+    pub VMUX_ECS_OWNERSHIP,
+    Warn,
+    "Vmux state must have a resolved registered ECS owner"
+}
+
+#[unsafe(no_mangle)]
+pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintStore) {
+    store.register_lints(&[VMUX_EXPORTED_SYSTEM, VMUX_ECS_OWNERSHIP]);
+    store.register_late_lint_pass(Box::new(|_| Box::new(VmuxExportedSystem::default())));
+}
+
+rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_ECS_OWNERSHIP]);
+
 #[derive(Default)]
-struct VmuxExportedSystem {
+struct VmuxExportedSystem<'tcx> {
+    ownership: ownership::Ownership<'tcx>,
     reported: HashSet<DefId>,
     configurations: HashSet<HirId>,
 }
 
-impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
+impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
+    fn check_crate(&mut self, cx: &LateContext<'tcx>) {
+        self.ownership.traits(cx);
+    }
+
+    fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        self.ownership.finish(cx);
+    }
+
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
         let package = std::env::var("CARGO_PKG_NAME")
             .unwrap_or_else(|_| cx.tcx.crate_name(LOCAL_CRATE).as_str().to_owned());
         if !package.starts_with("vmux_") {
             return;
         }
+        self.ownership.call(cx, expression);
         let (method, arguments, qualified) = match expression.kind {
             ExprKind::MethodCall(_, _, arguments, _) => {
                 let Some(method) = cx.typeck_results().type_dependent_def_id(expression.hir_id)
@@ -88,13 +116,14 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem {
             _ => return,
         };
         if let Some(systems) = arguments.get(index) {
+            self.ownership.site = Some(expression.hir_id.owner.def_id.to_def_id());
             self.configuration(cx, systems);
         }
     }
 }
 
-impl VmuxExportedSystem {
-    fn configuration<'tcx>(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
+impl<'tcx> VmuxExportedSystem<'tcx> {
+    fn configuration(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
         if !self.configurations.insert(expression.hir_id) {
             return;
         }
@@ -102,7 +131,7 @@ impl VmuxExportedSystem {
         self.configurations.remove(&expression.hir_id);
     }
 
-    fn visit_configuration<'tcx>(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
+    fn visit_configuration(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
         self.system_type(cx, cx.typeck_results().expr_ty(expression));
         match expression.kind {
             ExprKind::Tup(values) => {
@@ -201,9 +230,13 @@ impl VmuxExportedSystem {
             )
     }
 
-    fn system_type<'tcx>(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>) {
+    fn system_type(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>) {
         match ty.kind() {
-            TyKind::FnDef(function, _) => self.system(cx, *function),
+            TyKind::FnDef(function, arguments) => {
+                self.ownership
+                    .system(cx, *function, arguments.skip_binder());
+                self.system(cx, *function);
+            }
             TyKind::Tuple(values) => {
                 for value in values.iter() {
                     self.system_type(cx, value);

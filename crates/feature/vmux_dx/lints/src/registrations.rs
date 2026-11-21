@@ -1,15 +1,24 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::MutexGuard;
+
+#[cfg(test)]
+static COMPILER_QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 struct Fixture {
     directory: tempfile::TempDir,
     library: PathBuf,
+    _queue: MutexGuard<'static, ()>,
 }
 
 #[cfg(test)]
 impl Fixture {
     fn new() -> Self {
+        let queue = match COMPILER_QUEUE.lock() {
+            Ok(queue) => queue,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let directory = tempfile::tempdir().unwrap();
         let library = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         std::fs::create_dir(directory.path().join("src")).unwrap();
@@ -25,10 +34,14 @@ impl Fixture {
             directory.path().join("Cargo.lock"),
         )
         .unwrap();
-        Self { directory, library }
+        Self {
+            directory,
+            library,
+            _queue: queue,
+        }
     }
 
-    fn check(&self, name: &str, source: &str, expected: &[&str]) {
+    fn check(&self, name: &str, source: &str, expected: &[&str], ownership: bool) {
         std::fs::write(
             self.directory
                 .path()
@@ -53,6 +66,29 @@ impl Fixture {
             .expect("run the prepared Dylint compiler");
         let stdout = String::from_utf8(output.stdout).unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
+        let (mut diagnostics, unexpected) = self.diagnostics(name, &stdout, ownership);
+        assert!(unexpected.is_empty(), "{name}: {unexpected:?}\n{stderr}");
+        let mut expected: Vec<String> = expected
+            .iter()
+            .map(|name| {
+                if ownership {
+                    name.to_string()
+                } else {
+                    format!("registered system `{name}` must be private to its defining module")
+                }
+            })
+            .collect();
+        expected.sort();
+        diagnostics.sort();
+        assert_eq!(diagnostics, expected, "{name}: {stderr}");
+        assert_eq!(
+            output.status.success(),
+            expected.is_empty(),
+            "{name}: {stderr}"
+        );
+    }
+
+    fn diagnostics(&self, name: &str, stdout: &str, ownership: bool) -> (Vec<String>, Vec<String>) {
         let mut diagnostics = Vec::new();
         let mut unexpected = Vec::new();
         for line in stdout.lines() {
@@ -66,7 +102,12 @@ impl Fixture {
             if message["level"] != "error" {
                 continue;
             }
-            if message["code"]["code"] != "vmux_exported_system" {
+            let code = if ownership {
+                "vmux_ecs_ownership"
+            } else {
+                "vmux_exported_system"
+            };
+            if message["code"]["code"] != code {
                 unexpected.push(message.to_string());
                 continue;
             }
@@ -84,23 +125,23 @@ impl Fixture {
                 }),
                 "{name}: {message}"
             );
-            diagnostics.push(message["message"].as_str().unwrap().to_owned());
+            let mut diagnostic = message["message"].as_str().unwrap().to_owned();
+            if ownership {
+                let primary = spans
+                    .iter()
+                    .find(|span| span["is_primary"] == true)
+                    .unwrap();
+                diagnostic.push_str(&format!(
+                    " @ {}:{}-{}:{}",
+                    primary["line_start"],
+                    primary["column_start"],
+                    primary["line_end"],
+                    primary["column_end"]
+                ));
+            }
+            diagnostics.push(diagnostic);
         }
-        assert!(unexpected.is_empty(), "{name}: {unexpected:?}\n{stderr}");
-        let mut expected: Vec<String> = expected
-            .iter()
-            .map(|name| {
-                format!("registered system `{name}` must be private to its defining module")
-            })
-            .collect();
-        expected.sort();
-        diagnostics.sort();
-        assert_eq!(diagnostics, expected, "{name}: {stderr}\n{stdout}");
-        assert_eq!(
-            output.status.success(),
-            expected.is_empty(),
-            "{name}: {stderr}\n{stdout}"
-        );
+        (diagnostics, unexpected)
     }
 }
 
@@ -128,7 +169,7 @@ fn compiler_resolves_observers_and_ignores_lookalike_registration_apis() {
             &[][..],
         ),
     ] {
-        fixture.check(name, source, expected);
+        fixture.check(name, source, expected, false);
     }
 }
 
@@ -186,6 +227,70 @@ fn compiler_resolves_registered_systems_and_ignores_other_contracts() {
             &["carried", "continued", "from_loop"][..],
         ),
     ] {
-        fixture.check(name, source, expected);
+        fixture.check(name, source, expected, false);
+    }
+}
+
+#[test]
+fn compiler_proves_registered_ownership_and_rejects_hidden_or_unused_models() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        ("owned", include_str!("../ui/owned.rs"), &[][..]),
+        (
+            "shared",
+            include_str!("../ui/shared.rs"),
+            &[
+                "declaration has no unique resolved registered ECS owner @ 7:1-7:14",
+                "canonical ECS state hides a dynamic engine @ 21:5-21:20",
+            ][..],
+        ),
+        ("projected", include_str!("../ui/projected.rs"), &[][..]),
+        (
+            "reachability",
+            include_str!("../ui/reachability.rs"),
+            &["declaration has no unique resolved registered ECS owner @ 27:5-27:20"][..],
+        ),
+        (
+            "value_graph",
+            include_str!("../ui/value_graph.rs"),
+            &[
+                "canonical ECS state embeds an independently owned model @ 12:5-12:23",
+                "canonical ECS state embeds an independently owned model @ 17:5-17:29",
+                "canonical ECS state retains a recursive model @ 22:5-22:33",
+                "declaration has no unique resolved registered ECS owner @ 7:1-7:11",
+            ][..],
+        ),
+        (
+            "unused",
+            include_str!("../ui/unused.rs"),
+            &[
+                "declaration has no unique resolved registered ECS owner @ 7:1-7:14",
+                "declaration has no unique resolved registered ECS owner @ 10:1-10:20",
+                "declaration has no unique resolved registered ECS owner @ 18:5-18:18",
+            ][..],
+        ),
+        (
+            "hidden",
+            include_str!("../ui/hidden.rs"),
+            &[
+                "canonical ECS state embeds an independently owned model @ 12:5-12:19",
+                "canonical ECS state embeds an independently owned model @ 22:5-22:31",
+                "canonical ECS state embeds an independently owned model @ 37:5-37:17",
+                "canonical ECS state hides a dynamic engine @ 29:5-29:28",
+                "declaration has no unique resolved registered ECS owner @ 11:1-11:13",
+                "declaration has no unique resolved registered ECS owner @ 7:1-7:11",
+            ][..],
+        ),
+        (
+            "filtered",
+            include_str!("../ui/filtered.rs"),
+            &[
+                "declaration has no unique resolved registered ECS owner @ 10:1-10:15",
+                "declaration has no unique resolved registered ECS owner @ 8:1-8:18",
+                "registered system retains Local state without a canonical ECS owner @ 17:1-17:59",
+            ][..],
+        ),
+    ] {
+        fixture.check(name, source, expected, true);
     }
 }
