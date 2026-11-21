@@ -42,8 +42,6 @@ legacy: [
     (key: "crates/feature/vmux_terminal/src/host/input_queue.rs|tests|fn:indexed_entity", fingerprint: "2273fa98638e546a", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/input_queue.rs|tests|fn:process_id", fingerprint: "3770b2fd30920b6a", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/input_queue.rs||fn:pending_terminal_input", fingerprint: "96ea67f2c11a0f59", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/host/input_queue.rs||impl:Plugin for InputQueuePlugin", fingerprint: "3946c08bee04d69b", issue: "VMX-253"),
-    (key: "crates/feature/vmux_terminal/src/host/input_queue.rs||struct:InputQueuePlugin", fingerprint: "49e16ea098384f58", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/link.rs|tests::fn link_open_emits_stack_open_request|fn:capture", fingerprint: "f37ac4d1b8ad13f6", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/link.rs|tests::fn link_open_emits_stack_open_request|struct:Captured", fingerprint: "60769e5073adf667", issue: "VMX-253"),
     (key: "crates/feature/vmux_terminal/src/host/link.rs|tests|fn:line_of", fingerprint: "bcd706a7c366bc87", issue: "VMX-253"),

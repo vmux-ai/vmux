@@ -12,10 +12,8 @@ legacy: [
     (key: "crates/util/vmux_mcp/src/protocol.rs||impl:AgentBridge", fingerprint: "8fea16884bfb22bc", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||impl:McpExecution", fingerprint: "95803b84c907870e", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||impl:McpResponse", fingerprint: "7d2c2e48b508b233", issue: "VMX-253"),
-    (key: "crates/util/vmux_mcp/src/protocol.rs||impl:Plugin for McpPlugin", fingerprint: "2bb487539e804f1e", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||struct:AgentBridge", fingerprint: "021477d438af9b05", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||struct:McpExecution", fingerprint: "84ee8b11f998372a", issue: "VMX-253"),
-    (key: "crates/util/vmux_mcp/src/protocol.rs||struct:McpPlugin", fingerprint: "65141b28be58c87f", issue: "VMX-253"),
     (key: "crates/util/vmux_mcp/src/protocol.rs||struct:McpResponse", fingerprint: "f4d6dc71c5f91343", issue: "VMX-253"),
 ],
 shape: (

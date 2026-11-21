@@ -293,7 +293,6 @@ legacy: [
     (key: "crates/feature/vmux_git/src/host/watch.rs||struct:WatchPlugin", fingerprint: "1473a87a9a1e4ada", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs|tests|fn:commit_initial", fingerprint: "6991d5a8c73124ef", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:BaseRef", fingerprint: "a4ecc5a70ac98989", issue: "VMX-253"),
-    (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:BranchChange", fingerprint: "758367fa8e6ae18f", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:Drop for RepositoryWorktreeLock", fingerprint: "859f932c7109d8af", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:LinkedRepoRoot", fingerprint: "1134b3537f7dc83a", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/worktree.rs||impl:ProjectRoot < \'_ >", fingerprint: "9eca549e425dbed5", issue: "VMX-253"),
