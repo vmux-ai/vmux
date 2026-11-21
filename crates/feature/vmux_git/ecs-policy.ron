@@ -132,7 +132,6 @@ legacy: [
     (key: "crates/feature/vmux_git/src/host/repository.rs||impl:Drop for GitChild", fingerprint: "6d95826316f4e09c", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitBranchEntry", fingerprint: "09cd4394e8ab8120", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitBranchFileEntries", fingerprint: "3f3f84ec50fd2cf8", issue: "VMX-253"),
-    (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitCatalogSnapshot", fingerprint: "1fd544bf1f809e41", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitChild", fingerprint: "02cb3cfdbfd5cad7", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitCommand", fingerprint: "e2ccd4188b3e32d5", issue: "VMX-253"),
     (key: "crates/feature/vmux_git/src/host/repository.rs||impl:GitCommitEntry", fingerprint: "f0d7628c614a514e", issue: "VMX-253"),
