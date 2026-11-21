@@ -32,8 +32,8 @@ impl Plugin for BranchesPlugin {
                     materialize_registrations,
                     publish,
                     cleanup,
-                    start_refs,
-                    start_registrations,
+                    read_refs,
+                    read_registrations,
                     start,
                 )
                     .chain(),
@@ -470,7 +470,7 @@ fn cleanup(
     }
 }
 
-fn start_refs(
+fn read_refs(
     reads: Query<
         (Entity, &Discovered),
         (
@@ -497,7 +497,7 @@ fn start_refs(
     }
 }
 
-fn start_registrations(
+fn read_registrations(
     reads: Query<
         (Entity, &Discovered),
         (
