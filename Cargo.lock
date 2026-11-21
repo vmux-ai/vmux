@@ -10318,6 +10318,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -11135,6 +11136,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "tempfile",
  "tokio",
  "url",
  "vmux_api",
@@ -11523,11 +11525,14 @@ dependencies = [
  "bevy_tasks",
  "dioxus",
  "inventory",
+ "libc",
  "parking_lot",
+ "rcgen",
  "reqwest",
  "ring",
  "rkyv",
  "ron 0.8.1",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
@@ -11542,6 +11547,7 @@ dependencies = [
  "vmux_path",
  "vmux_profile",
  "vmux_ui",
+ "zeroize",
 ]
 
 [[package]]

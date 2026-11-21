@@ -76,6 +76,7 @@ pub struct CurrentProfile<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static ActiveProfile,
             &'static Name,
             &'static ProfileDirectories,
@@ -84,16 +85,26 @@ pub struct CurrentProfile<'w, 's> {
 }
 
 impl CurrentProfile<'_, '_> {
+    pub fn entity(&self) -> Option<Entity> {
+        self.active.single().ok().map(|(entity, _, _, _)| entity)
+    }
+
     pub fn profile(&self) -> Option<&Profile> {
-        self.active.single().ok().map(|(profile, _, _)| &profile.0)
+        self.active
+            .single()
+            .ok()
+            .map(|(_, profile, _, _)| &profile.0)
     }
 
     pub fn label(&self) -> Option<&str> {
-        self.active.single().ok().map(|(_, name, _)| name.as_str())
+        self.active
+            .single()
+            .ok()
+            .map(|(_, _, name, _)| name.as_str())
     }
 
     pub fn paths(&self) -> Option<&ProfilePaths> {
-        self.active.single().ok().map(|(_, _, paths)| &paths.0)
+        self.active.single().ok().map(|(_, _, _, paths)| &paths.0)
     }
 }
 

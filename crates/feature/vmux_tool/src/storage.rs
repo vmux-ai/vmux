@@ -28,6 +28,10 @@ impl Plugin for StoragePlugin {
             read::ReadPlugin,
             write::WritePlugin,
         ))
+        .configure_sets(
+            Update,
+            (read::ReadSet, write::WriteSet).after(crate::ToolTaskSet::Start),
+        )
         .add_systems(Update, admit.before(read::ReadSet).before(write::WriteSet))
         .add_systems(PostUpdate, wake)
         .add_systems(
@@ -233,6 +237,138 @@ mod tests {
                 assert!(Instant::now() < deadline, "storage write did not drain");
                 std::thread::sleep(Duration::from_millis(2));
             }
+        }
+    }
+
+    #[test]
+    fn canceled_pending_write_preserves_the_committed_manifest() {
+        let mut fixture = Fixture::new();
+        let mut committed = ToolsManifest::default();
+        committed.set_package("npm", "keep", true);
+        committed.write_to(&fixture.store.manifest_path()).unwrap();
+        let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+        let entity = fixture
+            .app
+            .world_mut()
+            .spawn((
+                fixture.store.clone(),
+                vmux_ecs::OperationState::Canceled,
+                WriteRequest {
+                    manifest: ToolsManifest::default(),
+                    retain_lease: false,
+                },
+            ))
+            .id();
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<WriteResult>(entity)
+                .unwrap()
+                .0
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read(fixture.store.manifest_path()).unwrap(),
+            before
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn canceled_storage_work_drains_a_pending_lease_without_writing() {
+        for write in [false, true] {
+            let mut fixture = Fixture::new();
+            let mut committed = ToolsManifest::default();
+            committed.set_package("npm", "keep", true);
+            committed.write_to(&fixture.store.manifest_path()).unwrap();
+            let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+            std::fs::write(fixture.store.brewfile_path(), "tap 'preserved'\n").unwrap();
+            let blocker = fixture.store.lease().unwrap();
+            let entity = fixture
+                .app
+                .world_mut()
+                .spawn((fixture.store.clone(), vmux_ecs::OperationState::Running))
+                .id();
+            if write {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(entity)
+                    .insert(WriteRequest {
+                        manifest: ToolsManifest::default(),
+                        retain_lease: false,
+                    });
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(entity)
+                    .insert(ReadRequest {
+                        retain_lease: false,
+                    });
+            }
+            fixture.app.update();
+            assert!(fixture.app.world().get::<Busy>(entity).is_some());
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(entity)
+                .insert(vmux_ecs::OperationState::Canceled);
+            fixture.app.update();
+            assert!(fixture.app.world().get::<Busy>(entity).is_some());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_ecs::OperationRetained>(entity)
+                    .is_some()
+            );
+            drop(blocker);
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                fixture.app.update();
+                let completed = if write {
+                    fixture
+                        .app
+                        .world()
+                        .get::<WriteResult>(entity)
+                        .map(|result| result.0.is_err())
+                } else {
+                    fixture
+                        .app
+                        .world()
+                        .get::<ReadResult>(entity)
+                        .map(|result| result.0.is_err())
+                };
+                if let Some(failed) = completed {
+                    assert!(failed);
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "canceled storage work did not drain"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(
+                std::fs::read(fixture.store.manifest_path()).unwrap(),
+                before
+            );
+            assert_eq!(
+                std::fs::read_to_string(fixture.store.brewfile_path()).unwrap(),
+                "tap 'preserved'\n"
+            );
+            assert!(fixture.app.world().get::<Busy>(entity).is_none());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_ecs::OperationRetained>(entity)
+                    .is_none()
+            );
+            assert!(fixture.store.lease().is_some());
         }
     }
 

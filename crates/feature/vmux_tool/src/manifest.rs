@@ -234,7 +234,7 @@ impl ToolStore {
         }
     }
 
-    #[cfg(any(all(host, ui), test))]
+    #[cfg(any(host, test))]
     pub(crate) fn bind_waker(&self, waker: Waker) {
         let mut current = self.execution.waker.lock().unwrap();
         if current

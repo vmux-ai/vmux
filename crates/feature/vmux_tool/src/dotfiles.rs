@@ -1,10 +1,8 @@
-use std::collections::BTreeSet;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::state::{
-    ToolAdoptRequest, ToolCategory, ToolImportRequest, ToolInstallRequest, ToolItem,
-    ToolLinkRequest, ToolOperationKind, ToolProvider, ToolStatus, ToolUninstallRequest,
+    ToolAdoptRequest, ToolImportRequest, ToolInstallRequest, ToolLinkRequest, ToolUninstallRequest,
     ToolUnlinkRequest, ToolUpdateRequest,
 };
 use bevy_app::{App, Plugin, Startup, Update};
@@ -17,10 +15,9 @@ use vmux_ecs::OperationState;
 
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
-    ToolApplier, ToolOperationFailed, ToolOperationFinished, ToolOperationRequest,
-    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding,
-    ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation, ToolStoreTarget,
-    ToolTaskSet,
+    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteSet,
+    ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding, ToolProviderTarget,
+    ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct DotfileToolPlugin;
@@ -30,6 +27,8 @@ struct DotfileProvider;
 
 impl Plugin for DotfileToolPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(host)]
+        app.add_plugins(crate::dotfile_inventory::DotfileInventoryPlugin);
         app.add_systems(Startup, spawn_provider)
             .add_systems(
                 Update,
@@ -74,87 +73,18 @@ impl Plugin for DotfileToolPlugin {
 }
 
 fn spawn_provider(mut commands: Commands) {
-    commands.spawn((
-        ToolProviderBinding::new::<crate::Feature>(4),
-        DotfileProvider,
-        ToolScanner::new(scan),
-        ToolApplier::new(apply),
-    ));
-}
-
-fn apply(store: &ToolStore) -> Result<usize, String> {
-    let manifest = store.load()?;
-    store.apply_enabled_dotfiles(&manifest)
-}
-
-fn scan(
-    provider: &ToolProvider,
-    store: &ToolStore,
-    manifest: &mut ToolsManifest,
-    _refresh: bool,
-) -> Result<ToolProviderSnapshot, String> {
-    let discovered = store.dotfile_packages()?;
-    for package in &discovered {
-        manifest.set_dotfile_package(package, true);
-    }
-    let mut package_names = discovered.into_iter().collect::<BTreeSet<_>>();
-    package_names.extend(manifest.dotfiles.packages.iter().cloned());
-    let mut items = Vec::new();
-    for package in package_names {
-        let managed = manifest.dotfiles.packages.contains(&package);
-        let (status, detail, operations) = match store.plan_dotfile_package(&package) {
-            Ok(plan) => {
-                let detail = format!(
-                    "{} linked · {} missing · {} conflicts",
-                    plan.linked(),
-                    plan.missing(),
-                    plan.conflicts()
-                );
-                let status = if plan.conflicts() > 0 {
-                    ToolStatus::Conflict
-                } else if plan.missing() > 0 {
-                    if managed {
-                        ToolStatus::Missing
-                    } else {
-                        ToolStatus::Available
-                    }
-                } else {
-                    ToolStatus::Installed
-                };
-                let operations = if managed {
-                    vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
-                } else {
-                    vec![ToolOperationKind::Link]
-                };
-                (status, detail, operations)
-            }
-            Err(error) => (
-                ToolStatus::Missing,
-                error,
-                if managed {
-                    vec![ToolOperationKind::Unlink]
-                } else {
-                    Vec::new()
-                },
-            ),
-        };
-        items.push(ToolItem {
-            provider: provider.clone(),
-            id: package.clone(),
-            name: package,
-            icon: None,
-            version: None,
-            detail,
-            status,
-            managed,
-            operations,
-        });
-    }
-    Ok(ToolCategory {
-        provider: provider.clone(),
-        items,
-    }
-    .into())
+    let provider = commands
+        .spawn((
+            ToolProviderBinding::new::<crate::Feature>(4),
+            DotfileProvider,
+        ))
+        .id();
+    #[cfg(host)]
+    commands
+        .entity(provider)
+        .insert(crate::observation::Handler);
+    #[cfg(not(host))]
+    let _ = provider;
 }
 
 fn route_import(
@@ -838,7 +768,7 @@ pub struct ApplyEnabledDotfiles;
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct AppliedEnabledDotfiles {
-    files: usize,
+    pub(crate) files: usize,
 }
 
 fn apply_enabled(

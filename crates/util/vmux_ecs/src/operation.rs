@@ -204,13 +204,15 @@ fn finish(
 ) {
     for (entity, state) in &operations {
         if matches!(state, OperationState::Pending | OperationState::Running) {
-            commands.entity(entity).remove::<OperationExpiresAt>();
+            commands.entity(entity).try_remove::<OperationExpiresAt>();
         } else {
             let deadline = Instant::now() + RETENTION;
             if expiry.0.is_none_or(|current| deadline < current) {
                 expiry.0 = Some(deadline);
             }
-            commands.entity(entity).insert(OperationExpiresAt(deadline));
+            commands
+                .entity(entity)
+                .try_insert(OperationExpiresAt(deadline));
         }
     }
 }

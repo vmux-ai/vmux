@@ -35,8 +35,10 @@ impl bevy::prelude::Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         crate::policy::add(app);
-        crate::host::acp::add_registry(app);
-        crate::host::acp::add(app);
+        app.add_plugins((
+            crate::host::acp::registry::RegistryPlugin,
+            crate::host::acp::AgentProviderPlugin,
+        ));
         app.add_message::<ServiceRequest>()
             .add_message::<AcpAgentInfo>()
             .add_message::<AcpWorkspaceChanged>()
@@ -837,7 +839,7 @@ mod tests {
 
     #[test]
     fn unbound_workspace_context_requires_project_selection_before_file_access() {
-        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let policy = crate::policy::AcpWorkspacePolicy::bundled();
         let context =
             PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Unbound), false)
                 .unwrap();
@@ -856,7 +858,7 @@ mod tests {
 
     #[test]
     fn repository_context_defers_worktree_until_mutation() {
-        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let policy = crate::policy::AcpWorkspacePolicy::bundled();
         let context = PromptWorkspace::prompt(
             &policy,
             None,
@@ -875,7 +877,7 @@ mod tests {
 
     #[test]
     fn pending_worktree_context_requires_waiting_for_activation() {
-        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let policy = crate::policy::AcpWorkspacePolicy::bundled();
         let context = PromptWorkspace::prompt(
             &policy,
             Some("prior conversation".into()),
@@ -892,7 +894,7 @@ mod tests {
 
     #[test]
     fn bound_workspace_keeps_only_handoff_context() {
-        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let policy = crate::policy::AcpWorkspacePolicy::bundled();
         assert_eq!(
             PromptWorkspace::prompt(
                 &policy,
@@ -907,7 +909,7 @@ mod tests {
 
     #[test]
     fn provisional_title_requires_model_written_summary() {
-        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let policy = crate::policy::AcpWorkspacePolicy::bundled();
         let context =
             PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Bound), true).unwrap();
 

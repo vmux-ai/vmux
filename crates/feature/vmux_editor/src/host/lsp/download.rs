@@ -9,7 +9,6 @@ use crate::lsp::package_path::Sha256Digest;
 pub const CATALOG_MAX_BYTES: u64 = 32 * 1024 * 1024;
 pub const PACKAGE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 pub const CHECKSUM_MAX_BYTES: u64 = 1024 * 1024;
-const GITHUB_RELEASE_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 struct BoundedResponse(reqwest::blocking::Response);
 
@@ -115,72 +114,15 @@ impl RemoteArtifact {
         }
     }
 
-    pub fn github_release(
-        owner: &str,
-        repository: &str,
-        tag: Option<&str>,
-        asset_name: &str,
-        max_bytes: u64,
-    ) -> Result<Self, String> {
-        let mut endpoint = url::Url::parse("https://api.github.com").map_err(|e| e.to_string())?;
-        {
-            let mut path = endpoint
-                .path_segments_mut()
-                .map_err(|_| "invalid GitHub API base URL".to_string())?;
-            path.extend(["repos", owner, repository, "releases"]);
-            match tag {
-                Some(tag) => path.extend(["tags", tag]),
-                None => path.push("latest"),
-            };
-        }
-        let mut request = client()?.get(endpoint);
-        if let Ok(token) = std::env::var("GITHUB_TOKEN")
-            && !token.trim().is_empty()
-        {
-            request = request.bearer_auth(token);
-        }
-        let response = request.send().map_err(|e| e.to_string())?;
-        if !response.status().is_success() {
-            return Err(format!("GitHub API returned {}", response.status()));
-        }
-        let bytes =
-            BoundedResponse(response).read(GITHUB_RELEASE_MAX_BYTES, "GitHub release metadata")?;
-        let release: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-        let asset = release
-            .get("assets")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|assets| {
-                assets.iter().find(|asset| {
-                    asset.get("name").and_then(serde_json::Value::as_str) == Some(asset_name)
-                })
-            })
-            .ok_or_else(|| format!("GitHub release asset not found: {asset_name}"))?;
-        let size = asset
-            .get("size")
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| format!("GitHub release asset size missing: {asset_name}"))?;
-        if size > max_bytes {
-            return Err(format!("download exceeds {max_bytes} bytes"));
-        }
-        let url = asset
-            .get("browser_download_url")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| format!("GitHub release asset URL missing: {asset_name}"))?;
-        checked_url(url)?;
-        let digest = asset
-            .get("digest")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| format!("GitHub release asset digest missing: {asset_name}"))?;
-        Ok(Self::new(url, Sha256Digest::parse(digest)?))
-    }
-
     pub fn download_to(
         &self,
         destination: &Path,
         max_bytes: u64,
         mut progress: impl FnMut(u64, Option<u64>),
     ) -> Result<(), String> {
+        if vmux_ecs::BlockingCancellation::canceled() {
+            return Err("download canceled".into());
+        }
         let url = checked_url(&self.url)?;
         let mut response = client()?
             .get(url)
@@ -203,6 +145,9 @@ impl RemoteArtifact {
         let mut downloaded = 0u64;
         let mut hasher = Sha256::new();
         loop {
+            if vmux_ecs::BlockingCancellation::canceled() {
+                return Err("download canceled".into());
+            }
             let count = response
                 .read(&mut buffer)
                 .map_err(|error| error.to_string())?;
@@ -235,6 +180,9 @@ impl RemoteArtifact {
         file.as_file()
             .sync_all()
             .map_err(|error| error.to_string())?;
+        if vmux_ecs::BlockingCancellation::canceled() {
+            return Err("download canceled".into());
+        }
         file.persist(destination)
             .map_err(|error| error.error.to_string())?;
         Ok(())

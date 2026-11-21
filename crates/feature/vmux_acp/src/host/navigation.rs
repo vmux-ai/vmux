@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -61,6 +63,7 @@ impl bevy::prelude::Plugin for NavigationPlugin {
                 )
                     .chain()
                     .in_set(PageOpenSet::HandleKnownPages)
+                    .after(super::acp::installed::InstalledSet)
                     .after(vmux_layout::warm_page::PrewarmPageOpenSet),
             )
             .add_systems(
@@ -521,46 +524,20 @@ fn open(
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
-        let default_cwd = if matches!(route, Route::Manager | Route::Provider { .. }) {
-            PathBuf::new()
-        } else {
-            let tab = opener.tab(task.stack);
-            let tab_dir = tab
-                .as_ref()
-                .and_then(|(_, startup_dir)| startup_dir.clone());
-            let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
-            let restored_cwd = restoring
-                .then(|| launches.get(task.stack).ok())
-                .flatten()
-                .map(|launch| PathBuf::from(&launch.cwd));
-            if let Some(cwd) = restored_cwd {
-                cwd
-            } else {
-                match vmux_space::WorkspaceCwd::from_tab(tab_dir.as_deref()) {
-                    Ok(Some(path)) => path,
-                    Ok(None) => match space_startup_dir {
-                        Some(dir) => dir.path,
-                        None => match projects.path() {
-                            Ok(path) => path.to_path_buf(),
-                            Err(message) => {
-                                opener
-                                    .commands
-                                    .entity(entity)
-                                    .insert(PageOpenError { message });
-                                continue;
-                            }
-                        },
-                    },
-                    Err(message) => {
-                        opener
-                            .commands
-                            .entity(entity)
-                            .insert(PageOpenError { message });
-                        continue;
-                    }
+        if opener.waiting_for_installed(&task) {
+            continue;
+        }
+        let default_cwd =
+            match opener.default_cwd(&task, restoring, &route, &workspace, &launches, &projects) {
+                Ok(cwd) => cwd,
+                Err(message) => {
+                    opener
+                        .commands
+                        .entity(entity)
+                        .insert(PageOpenError { message });
+                    continue;
                 }
-            }
-        };
+            };
         let (initial_prompt, initial_attachments) = open_q
             .p1()
             .get(task.stack)

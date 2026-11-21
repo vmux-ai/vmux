@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde::Deserialize;
 use vmux_editor::lsp::package_path::Sha256Digest;
 
@@ -10,38 +8,6 @@ impl std::str::FromStr for Registry {
 
     fn from_str(json: &str) -> Result<Self, Self::Err> {
         serde_json::from_str(json).map_err(|error| format!("acp registry: parse failed: {error}"))
-    }
-}
-
-impl Registry {
-    pub fn agent(self, id: &str) -> Option<RegistryAgent> {
-        self.agents.into_iter().find(|agent| agent.id == id)
-    }
-
-    pub fn cached() -> Option<Self> {
-        std::fs::read_to_string(Self::cache_path())
-            .ok()?
-            .parse()
-            .ok()
-    }
-
-    pub fn fetch_blocking(url: &str) -> Result<Self, String> {
-        let text = reqwest::blocking::get(url)
-            .and_then(|response| response.error_for_status())
-            .and_then(|response| response.text())
-            .map_err(|error| format!("acp registry: fetch failed: {error}"))?;
-        let registry = text.parse()?;
-        let dir = vmux_ecs::profile::ProfilePaths::current().agents();
-        if std::fs::create_dir_all(&dir).is_ok() {
-            let _ = vmux_path::AtomicFile::write(Self::cache_path(), text.as_bytes());
-        }
-        Ok(registry)
-    }
-
-    fn cache_path() -> PathBuf {
-        vmux_ecs::profile::ProfilePaths::current()
-            .agents()
-            .join("registry.json")
     }
 }
 

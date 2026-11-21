@@ -2,8 +2,9 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+#[cfg(not(unix))]
 use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock, TryLockError};
 use std::time::Duration;
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -12,18 +13,60 @@ const ENV_BEGIN: &str = "__VMUX_LOGIN_ENV_BEGIN_7Qz9__";
 const ENV_END: &str = "__VMUX_LOGIN_ENV_END_7Qz9__";
 
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
+const CAPTURE_MAX_BYTES: usize = 1024 * 1024;
 
-static CACHE: OnceLock<Vec<(String, String)>> = OnceLock::new();
+static CACHE: EnvironmentCache = EnvironmentCache::new();
+
+struct EnvironmentCache {
+    values: OnceLock<Vec<(String, String)>>,
+    capture: Mutex<()>,
+}
+
+impl EnvironmentCache {
+    const fn new() -> Self {
+        Self {
+            values: OnceLock::new(),
+            capture: Mutex::new(()),
+        }
+    }
+
+    fn get(&self, shell: &str) -> &[(String, String)] {
+        if let Some(values) = self.values.get() {
+            return values;
+        }
+        let _capture = loop {
+            if vmux_ecs::BlockingCancellation::canceled() {
+                return &[];
+            }
+            match self.capture.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(5)),
+            }
+        };
+        if let Some(values) = self.values.get() {
+            return values;
+        }
+        let Some(values) = LoginShellEnvironment::capture_via_pty(shell) else {
+            return &[];
+        };
+        if vmux_ecs::BlockingCancellation::canceled() {
+            return &[];
+        }
+        let _ = self.values.set(values);
+        self.values.get().map(Vec::as_slice).unwrap_or(&[])
+    }
+}
 
 pub struct LoginShellEnvironment;
 
 impl LoginShellEnvironment {
     pub fn get(shell: &str) -> &'static [(String, String)] {
-        CACHE.get_or_init(|| Self::capture(shell)).as_slice()
+        CACHE.get(shell)
     }
 
     pub fn prewarm(shell: String) {
-        if CACHE.get().is_some() {
+        if CACHE.values.get().is_some() {
             return;
         }
         let _ = std::thread::Builder::new()
@@ -38,10 +81,98 @@ impl LoginShellEnvironment {
         Self::dedup(env);
     }
 
+    #[cfg(test)]
     fn capture(shell: &str) -> Vec<(String, String)> {
         Self::capture_via_pty(shell).unwrap_or_default()
     }
 
+    #[cfg(unix)]
+    fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
+        let args = Self::capture_args(shell);
+        if vmux_ecs::BlockingCancellation::canceled() {
+            return None;
+        }
+        let pair = NativePtySystem::default()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .ok()?;
+        let descriptor = pair.master.as_raw_fd()?;
+        let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
+        if flags < 0
+            || unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+        {
+            return None;
+        }
+        let mut reader = pair.master.try_clone_reader().ok()?;
+        let mut command = CommandBuilder::new(shell);
+        command.args(&args);
+        for (key, value) in std::env::vars() {
+            command.env(key, value);
+        }
+        command.env("TERM", "xterm-256color");
+        if let Some(home) = std::env::var_os("HOME") {
+            command.cwd(home);
+        }
+        let mut child = pair.slave.spawn_command(command).ok()?;
+        drop(pair.slave);
+        let deadline = std::time::Instant::now() + CAPTURE_TIMEOUT;
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 8192];
+        let mut accepted = true;
+        loop {
+            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+                accepted = false;
+                break;
+            }
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    if bytes.len().saturating_add(count) > CAPTURE_MAX_BYTES {
+                        accepted = false;
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
+                Err(_) => {
+                    accepted = false;
+                    break;
+                }
+            }
+        }
+        while accepted && child.try_wait().ok().flatten().is_none() {
+            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+                accepted = false;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if !accepted {
+            if let Some(id) = child.process_id() {
+                unsafe {
+                    libc::kill(-(id as libc::pid_t), libc::SIGKILL);
+                }
+            }
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+        drop(reader);
+        drop(pair.master);
+        if !accepted {
+            return None;
+        }
+        Some(Self::extract(&bytes))
+    }
+
+    #[cfg(not(unix))]
     fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
         let args = Self::capture_args(shell);
 
@@ -133,6 +264,85 @@ impl LoginShellEnvironment {
         }
     }
 
+    #[cfg(unix)]
+    fn nu_config_paths(shell: &str) -> Option<(String, String)> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        if vmux_ecs::BlockingCancellation::canceled() {
+            return None;
+        }
+        let mut child = Command::new(shell)
+            .args(["-c", "[$nu.env-path $nu.config-path] | to text"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .ok()?;
+        let mut stdout = child.stdout.take().unwrap();
+        let descriptor = stdout.as_raw_fd();
+        let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
+        if flags < 0
+            || unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+        {
+            unsafe {
+                libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        let deadline = std::time::Instant::now() + CAPTURE_TIMEOUT;
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 4096];
+        let mut accepted = true;
+        loop {
+            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+                accepted = false;
+                break;
+            }
+            match stdout.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    if bytes.len().saturating_add(count) > 16 * 1024 {
+                        accepted = false;
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => {
+                    accepted = false;
+                    break;
+                }
+            }
+        }
+        while accepted && child.try_wait().ok().flatten().is_none() {
+            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+                accepted = false;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if !accepted {
+            unsafe {
+                libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+            }
+            let _ = child.kill();
+        }
+        let status = child.wait().ok()?;
+        if !accepted || !status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+        Some((lines.next()?.to_string(), lines.next()?.to_string()))
+    }
+
+    #[cfg(not(unix))]
     fn nu_config_paths(shell: &str) -> Option<(String, String)> {
         let output = Command::new(shell)
             .args(["-c", "[$nu.env-path $nu.config-path] | to text"])
@@ -195,6 +405,250 @@ impl LoginShellEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    struct CaptureFixture {
+        app: bevy::prelude::App,
+    }
+
+    #[cfg(unix)]
+    #[derive(bevy::prelude::Resource)]
+    struct CaptureInput {
+        name: String,
+        body: String,
+    }
+
+    #[cfg(unix)]
+    #[derive(bevy::prelude::Resource)]
+    struct CapturePaths {
+        _directory: tempfile::TempDir,
+        shell: std::path::PathBuf,
+        pid: std::path::PathBuf,
+    }
+
+    #[cfg(unix)]
+    struct CaptureFixturePlugin;
+
+    #[cfg(unix)]
+    impl bevy::prelude::Plugin for CaptureFixturePlugin {
+        fn build(&self, app: &mut bevy::prelude::App) {
+            app.init_resource::<CaptureProcess>()
+                .add_systems(bevy::prelude::Startup, create)
+                .add_systems(bevy::prelude::Update, observe);
+        }
+    }
+
+    #[cfg(unix)]
+    fn create(input: bevy::prelude::Res<CaptureInput>, mut commands: bevy::prelude::Commands) {
+        commands.insert_resource(CapturePaths::new(&input.name, &input.body));
+    }
+
+    #[cfg(unix)]
+    #[derive(bevy::prelude::Resource, Default)]
+    struct CaptureProcess(Option<libc::pid_t>);
+
+    #[cfg(unix)]
+    fn observe(
+        paths: bevy::prelude::Res<CapturePaths>,
+        mut process: bevy::prelude::ResMut<CaptureProcess>,
+    ) {
+        if let Ok(text) = std::fs::read_to_string(&paths.pid)
+            && let Ok(pid) = text.parse::<libc::pid_t>()
+            && pid > 0
+        {
+            process.0 = Some(pid);
+        }
+    }
+
+    #[cfg(unix)]
+    impl CapturePaths {
+        fn new(name: &str, body: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let directory = tempfile::tempdir().unwrap();
+            let shell = directory.path().join(name);
+            let pid = directory.path().join("pid");
+            let quoted = pid.to_string_lossy().replace('\'', "'\\''");
+            std::fs::write(
+                &shell,
+                format!("#!/bin/sh\nprintf '%s' $$ > '{quoted}'\n{body}\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+            Self {
+                _directory: directory,
+                shell,
+                pid,
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl CaptureFixture {
+        fn new(name: &str, body: &str) -> Self {
+            let mut app = bevy::prelude::App::new();
+            app.insert_resource(CaptureInput {
+                name: name.to_string(),
+                body: body.to_string(),
+            })
+            .add_plugins(CaptureFixturePlugin);
+            app.update();
+            Self { app }
+        }
+
+        fn paths(&self) -> &CapturePaths {
+            self.app.world().resource::<CapturePaths>()
+        }
+
+        fn process(&mut self) -> libc::pid_t {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                self.app.update();
+                if let Some(pid) = self.app.world().resource::<CaptureProcess>().0 {
+                    return pid;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture child must report its owned PID"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_pty_output_is_refused_and_the_owned_child_is_reaped() {
+        let mut fixture = CaptureFixture::new("flood-shell", "exec head -c 2097152 /dev/zero");
+        assert!(
+            LoginShellEnvironment::capture_via_pty(fixture.paths().shell.to_str().unwrap())
+                .is_none()
+        );
+        let pid = fixture.process();
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "owned capture child must already be reaped"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configuration_probe_cancellation_drains_and_reaps_before_capture() {
+        let mut fixture = CaptureFixture::new("nu", "exec sleep 600");
+        let runtime = vmux_ecs::BlockingRuntime::default();
+        let shell = fixture.paths().shell.to_string_lossy().into_owned();
+        let mut task = runtime
+            .spawn_process(None, move || LoginShellEnvironment::capture_via_pty(&shell))
+            .unwrap();
+        let pid = fixture.process();
+        task.cancel();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !task.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let canceled_before_timeout = task.is_finished();
+        if !canceled_before_timeout {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+            let cleanup = std::time::Instant::now() + Duration::from_secs(3);
+            while !task.is_finished() && std::time::Instant::now() < cleanup {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert!(
+            task.is_finished(),
+            "fixture native operation must drain even after a failed assertion"
+        );
+        assert!(
+            canceled_before_timeout,
+            "cancellation must not wait for configuration probe timeout"
+        );
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "owned configuration process must be reaped"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canceled_initial_capture_does_not_poison_later_native_cache_reads() {
+        let mut blocked = CaptureFixture::new("nu", "exec sleep 600");
+        let successful = CaptureFixture::new(
+            "ready-shell",
+            &format!("printf '%s\n' '{ENV_BEGIN}' 'VMUX_CAPTURE_FIXTURE=retained' '{ENV_END}'"),
+        );
+        let cache = std::sync::Arc::new(EnvironmentCache::new());
+        let captured = cache.clone();
+        let shell = blocked.paths().shell.to_string_lossy().into_owned();
+        let runtime = vmux_ecs::BlockingRuntime::default();
+        let mut task = runtime
+            .spawn_process(None, move || captured.get(&shell).to_vec())
+            .unwrap();
+        let pid = blocked.process();
+        task.cancel();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !task.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let canceled = task.is_finished();
+        if !canceled {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+            let cleanup = std::time::Instant::now() + Duration::from_secs(3);
+            while !task.is_finished() && std::time::Instant::now() < cleanup {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert!(
+            task.is_finished(),
+            "fixture must drain its native capture before release"
+        );
+        assert!(
+            canceled,
+            "cancellation must terminate the first native capture"
+        );
+        let expected = [("VMUX_CAPTURE_FIXTURE".to_string(), "retained".to_string())];
+        assert_eq!(
+            cache.get(successful.paths().shell.to_str().unwrap()),
+            expected
+        );
+        assert_eq!(
+            cache.get(blocked.paths().shell.to_str().unwrap()),
+            expected,
+            "a successful snapshot stays cached"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configuration_probe_waits_for_delayed_descendant_output_and_eof() {
+        let fixture = CaptureFixture::new(
+            "nu",
+            "printf '%s\n' /fixture/env.nu; (sleep 0.1; printf '%s\n' /fixture/config.nu) &",
+        );
+        assert_eq!(
+            LoginShellEnvironment::nu_config_paths(fixture.paths().shell.to_str().unwrap()),
+            Some(("/fixture/env.nu".into(), "/fixture/config.nu".into()))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_capture_retains_sparse_environment_output_until_stream_completion() {
+        let fixture = CaptureFixture::new(
+            "delayed-shell",
+            &format!(
+                "trap '' HUP; printf '%s\n' '{ENV_BEGIN}'; (sleep 0.1; printf '%s\n' 'VMUX_CAPTURE_FIXTURE=delayed' '{ENV_END}') & wait"
+            ),
+        );
+        assert_eq!(
+            LoginShellEnvironment::capture_via_pty(fixture.paths().shell.to_str().unwrap()),
+            Some(vec![("VMUX_CAPTURE_FIXTURE".into(), "delayed".into())])
+        );
+    }
 
     #[test]
     fn parse_env_splits_on_first_equals() {

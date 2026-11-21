@@ -27,8 +27,6 @@ mod host;
 mod mcp_driver;
 #[cfg(all(host, feature = "app"))]
 mod policy;
-#[cfg(all(host, feature = "app"))]
-mod policy_driver;
 #[cfg(all(host, feature = "service"))]
 mod remote;
 #[cfg(all(host, feature = "service"))]

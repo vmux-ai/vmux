@@ -111,6 +111,9 @@ struct CapturedJob<J: Job> {
 }
 
 #[derive(Component)]
+pub struct JobCapture;
+
+#[derive(Component)]
 #[component(immutable)]
 struct JobSubmitted<J: Job> {
     task: Entity,
@@ -237,6 +240,7 @@ fn accept<J: Job>(requests: PendingJobs<J>, mut commands: Commands) {
                     input: request.0.clone(),
                     owner: JobOwner::of(parent),
                 },
+                JobCapture,
             ))
             .id();
         commands.entity(entity).insert(JobSubmitted::<J> {

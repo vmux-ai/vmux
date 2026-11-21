@@ -1,9 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
 
-use crate::state::{
-    ToolCategory, ToolForgetRequest, ToolItem, ToolOperationKind, ToolProvider, ToolStatus,
-};
+use crate::state::ToolForgetRequest;
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
@@ -11,11 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use vmux_ecs::OperationState;
 
-use crate::manifest::{ToolStore, ToolsManifest};
+use crate::manifest::ToolStore;
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteSet,
-    ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding, ToolProviderSnapshot,
-    ToolProviderTarget, ToolScanner, ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
+    ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding, ToolProviderTarget,
+    ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct McpToolPlugin;
@@ -25,6 +22,8 @@ struct McpProvider;
 
 impl Plugin for McpToolPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(host)]
+        app.add_plugins(crate::mcp_inventory::McpInventoryPlugin);
         app.add_systems(Startup, spawn)
             .add_systems(Update, request_forget.in_set(ToolOperationRouteSet))
             .add_systems(Update, forget.in_set(ToolTaskSet::Start))
@@ -33,90 +32,15 @@ impl Plugin for McpToolPlugin {
 }
 
 fn spawn(mut commands: Commands) {
-    commands.spawn((
-        ToolProviderBinding::new::<crate::Feature>(3),
-        McpProvider,
-        ToolScanner::new(McpProvider::scan),
-    ));
-}
-
-impl McpProvider {
-    fn scan(
-        provider: &ToolProvider,
-        store: &ToolStore,
-        manifest: &mut ToolsManifest,
-        _refresh: bool,
-    ) -> Result<ToolProviderSnapshot, String> {
-        let (discovered, errors) = store.discover_mcp_servers();
-        let errors = errors
-            .into_iter()
-            .map(|error| format!("MCP Servers: {error}"))
-            .collect();
-        let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
-        names.extend(manifest.mcp.servers.keys().cloned());
-        let items = names
-            .into_iter()
-            .map(|name| {
-                let managed = manifest.mcp.servers.contains_key(&name);
-                let external = discovered.get(&name);
-                let status = if external.is_some_and(|server| server.conflict) {
-                    ToolStatus::Conflict
-                } else {
-                    ToolStatus::Installed
-                };
-                let definition = manifest
-                    .mcp
-                    .servers
-                    .get(&name)
-                    .or_else(|| external.map(|server| &server.definition));
-                let transport = definition
-                    .map(|server| format!("{:?}", server.transport).to_ascii_lowercase())
-                    .unwrap_or_else(|| "unknown".to_string());
-                let sources = external
-                    .map(|server| {
-                        server
-                            .sources
-                            .iter()
-                            .map(|path| path.to_string_lossy())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                let detail = if external.is_some_and(|server| server.conflict) {
-                    format!("Conflicting definitions in {sources}")
-                } else if managed && sources.is_empty() {
-                    format!("{transport} · legacy tools.toml")
-                } else if managed {
-                    format!("{transport} · configured in {sources} · duplicated in tools.toml")
-                } else {
-                    format!("{transport} · configured in {sources}")
-                };
-                let operations = if managed {
-                    vec![ToolOperationKind::Forget]
-                } else {
-                    Vec::new()
-                };
-                ToolItem {
-                    provider: provider.clone(),
-                    id: name.clone(),
-                    name,
-                    icon: None,
-                    version: None,
-                    detail,
-                    status,
-                    managed,
-                    operations,
-                }
-            })
-            .collect();
-        Ok(ToolProviderSnapshot {
-            category: ToolCategory {
-                provider: provider.clone(),
-                items,
-            },
-            errors,
-        })
-    }
+    let provider = commands
+        .spawn((ToolProviderBinding::new::<crate::Feature>(3), McpProvider))
+        .id();
+    #[cfg(host)]
+    commands
+        .entity(provider)
+        .insert(crate::observation::Handler);
+    #[cfg(not(host))]
+    let _ = provider;
 }
 
 fn request_forget(
@@ -160,63 +84,6 @@ fn finish_forget(
             ToolOperationFinished,
             ToolOperationSucceeded(format!("{} removed from tools.toml", output.name)),
         ));
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct DiscoveredMcpServers {
-    servers: BTreeMap<String, DiscoveredMcpServer>,
-    errors: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct McpConfigSources(Vec<PathBuf>);
-
-impl McpConfigSources {
-    fn at(home: &Path) -> Self {
-        Self(
-            [
-                home.join(".codex/config.toml"),
-                home.join(".claude.json"),
-                home.join(".vibe/config.toml"),
-                home.join(".gemini/settings.json"),
-                home.join(".mcp.json"),
-            ]
-            .into_iter()
-            .filter(|path| path.is_file())
-            .collect(),
-        )
-    }
-
-    fn discover(&self) -> DiscoveredMcpServers {
-        let mut servers = BTreeMap::<String, DiscoveredMcpServer>::new();
-        let mut errors = Vec::new();
-        for path in &self.0 {
-            match McpConfigDocument::from_file(path) {
-                Ok(document) => {
-                    for (name, definition) in document.into_servers() {
-                        match servers.get_mut(&name) {
-                            Some(existing) => {
-                                existing.conflict |= existing.definition != definition;
-                                existing.sources.push(path.clone());
-                            }
-                            None => {
-                                servers.insert(
-                                    name,
-                                    DiscoveredMcpServer {
-                                        definition,
-                                        sources: vec![path.clone()],
-                                        conflict: false,
-                                    },
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(error) => errors.push(format!("{}: {error}", path.display())),
-            }
-        }
-        DiscoveredMcpServers { servers, errors }
     }
 }
 
@@ -287,7 +154,7 @@ impl McpManifest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerManifest {
     pub transport: McpTransport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -308,6 +175,21 @@ pub struct McpServerManifest {
     pub bearer_token_env_var: Option<String>,
 }
 
+impl McpServerManifest {
+    pub(crate) fn description(&self, sources: &str, managed: bool, conflict: bool) -> String {
+        let transport = format!("{:?}", self.transport).to_ascii_lowercase();
+        if conflict {
+            format!("Conflicting definitions in {sources}")
+        } else if managed && sources.is_empty() {
+            format!("{transport} · legacy tools.toml")
+        } else if managed {
+            format!("{transport} · configured in {sources} · duplicated in tools.toml")
+        } else {
+            format!("{transport} · configured in {sources}")
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum McpTransport {
@@ -317,113 +199,66 @@ pub enum McpTransport {
     Sse,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DiscoveredMcpServer {
-    pub definition: McpServerManifest,
-    pub sources: Vec<PathBuf>,
-    pub conflict: bool,
+#[derive(Component)]
+pub struct McpConfigDocument {
+    document: serde_json::Value,
+    toml: bool,
 }
-
-impl ToolStore {
-    fn default_mcp_config_paths(&self) -> McpConfigSources {
-        McpConfigSources::at(self.home())
-    }
-
-    fn discover_mcp_servers(&self) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
-        let discovered = self.default_mcp_config_paths().discover();
-        (discovered.servers, discovered.errors)
-    }
-}
-
-pub struct McpConfigDocument(BTreeMap<String, McpServerManifest>);
 
 impl McpConfigDocument {
-    pub fn from_file(path: &Path) -> Result<Self, String> {
-        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-        Self::parse(&source)
-    }
-
     pub fn parse(source: &str) -> Result<Self, String> {
-        let servers = if let Ok(document) = serde_json::from_str::<serde_json::Value>(source) {
-            Self::parse_json_document(&document)?
-        } else {
-            let document: toml::Value =
-                toml::from_str(source).map_err(|error| error.to_string())?;
-            Self::parse_toml_document(&document)?
-        };
-        Ok(Self(servers))
-    }
-
-    pub fn servers(&self) -> &BTreeMap<String, McpServerManifest> {
-        &self.0
-    }
-
-    pub fn into_servers(self) -> BTreeMap<String, McpServerManifest> {
-        self.0
-    }
-
-    fn parse_json_document(
-        document: &serde_json::Value,
-    ) -> Result<BTreeMap<String, McpServerManifest>, String> {
-        let Some(servers) = document
-            .get("mcpServers")
-            .or_else(|| document.get("mcp_servers"))
-            .and_then(serde_json::Value::as_object)
-        else {
-            return Ok(BTreeMap::new());
-        };
-        let mut parsed = BTreeMap::new();
-        for (name, value) in servers {
-            if name == "vmux"
-                || value.get("enabled").and_then(serde_json::Value::as_bool) == Some(false)
-            {
-                continue;
-            }
-            parsed.insert(name.clone(), Self::parse_json_server(value)?);
+        if let Ok(document) = serde_json::from_str::<serde_json::Value>(source) {
+            return Ok(Self {
+                document,
+                toml: false,
+            });
         }
-        Ok(parsed)
+        let document: toml::Value = toml::from_str(source).map_err(|error| error.to_string())?;
+        let document = serde_json::to_value(document).map_err(|error| error.to_string())?;
+        Ok(Self {
+            document,
+            toml: true,
+        })
     }
 
-    fn parse_toml_document(
-        document: &toml::Value,
-    ) -> Result<BTreeMap<String, McpServerManifest>, String> {
-        let Some(servers) = document.get("mcp_servers") else {
-            return Ok(BTreeMap::new());
+    pub(crate) fn entries(&self) -> Result<Vec<(String, serde_json::Value)>, String> {
+        let servers = if self.toml {
+            self.document.get("mcp_servers")
+        } else {
+            self.document
+                .get("mcpServers")
+                .or_else(|| self.document.get("mcp_servers"))
         };
-        let mut parsed = BTreeMap::new();
+        let Some(servers) = servers else {
+            return Ok(Vec::new());
+        };
+        if !self.toml && !servers.is_object() {
+            return Ok(Vec::new());
+        }
+        let mut entries = Vec::new();
         match servers {
-            toml::Value::Table(table) => {
-                for (name, value) in table {
-                    if name == "vmux"
-                        || value.get("enabled").and_then(toml::Value::as_bool) == Some(false)
-                    {
-                        continue;
-                    }
-                    let value = serde_json::to_value(value).map_err(|error| error.to_string())?;
-                    parsed.insert(name.clone(), Self::parse_json_server(&value)?);
+            serde_json::Value::Object(servers) => {
+                for (name, value) in servers {
+                    entries.push((name.clone(), value.clone()));
                 }
             }
-            toml::Value::Array(entries) => {
-                for entry in entries {
+            serde_json::Value::Array(servers) => {
+                for entry in servers {
                     let name = entry
                         .get("name")
-                        .and_then(toml::Value::as_str)
+                        .and_then(serde_json::Value::as_str)
                         .ok_or("MCP server is missing name")?;
-                    if name == "vmux"
-                        || entry.get("enabled").and_then(toml::Value::as_bool) == Some(false)
-                    {
-                        continue;
-                    }
-                    let value = serde_json::to_value(entry).map_err(|error| error.to_string())?;
-                    parsed.insert(name.to_string(), Self::parse_json_server(&value)?);
+                    entries.push((name.to_string(), entry.clone()));
                 }
             }
             _ => return Err("mcp_servers must be a table or array".to_string()),
         }
-        Ok(parsed)
+        Ok(entries)
     }
+}
 
-    fn parse_json_server(value: &serde_json::Value) -> Result<McpServerManifest, String> {
+impl McpServerManifest {
+    pub(crate) fn decode(value: &serde_json::Value) -> Result<Self, String> {
         let object = value.as_object().ok_or("MCP server must be an object")?;
         let command = Self::string_field(object, "command");
         let url = Self::string_field(object, "url");
@@ -501,36 +336,5 @@ impl McpConfigDocument {
                     })
                     .collect()
             })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn discovery_reads_agent_config_without_mutating_tools_manifest() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let gemini = home.join(".gemini/settings.json");
-        std::fs::create_dir_all(gemini.parent().unwrap()).unwrap();
-        std::fs::write(
-            gemini,
-            r#"{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}"#,
-        )
-        .unwrap();
-        let store = ToolStore::new(temp.path().join("tools"), home);
-        let mut manifest = ToolsManifest::default();
-
-        let snapshot =
-            McpProvider::scan(&ToolProvider::new("mcp"), &store, &mut manifest, false).unwrap();
-
-        assert!(manifest.mcp.servers.is_empty());
-        assert_eq!(snapshot.category.items.len(), 1);
-        let item = &snapshot.category.items[0];
-        assert_eq!(item.id, "docs");
-        assert_eq!(item.status, ToolStatus::Installed);
-        assert!(!item.managed);
-        assert!(item.operations.is_empty());
     }
 }

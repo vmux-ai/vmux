@@ -14,7 +14,9 @@ impl Plugin for WritePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (begin, lease, migrate, manifest, brewfile, write, finish)
+            (
+                cancel, begin, lease, migrate, manifest, brewfile, write, finish,
+            )
                 .chain()
                 .in_set(WriteSet),
         );
@@ -50,6 +52,33 @@ struct ReadBrewfile;
 struct WriteBrewfile;
 #[derive(Component)]
 struct Done;
+
+fn cancel(
+    requests: Query<
+        (Entity, &vmux_ecs::OperationState, Has<Active>),
+        (With<WriteRequest>, Without<Busy>, Without<MigrationRequest>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, state, active) in &requests {
+        if matches!(
+            state,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            continue;
+        }
+        let mut request = commands.entity(entity);
+        if active {
+            request
+                .remove::<(Acquire, Migrate, WriteManifest, ReadBrewfile, WriteBrewfile)>()
+                .insert((Failure("tool storage write canceled".into()), Done));
+        } else {
+            request
+                .remove::<WriteRequest>()
+                .insert(WriteResult(Err("tool storage write canceled".into())));
+        }
+    }
+}
 
 fn begin(
     requests: Query<
@@ -306,6 +335,7 @@ fn finish(
                 AcquiredLease,
                 Failure,
                 BrewfileTemplate,
+                MigrationResult,
             )>();
         commands.entity(entity).remove::<(
             BrewfileWritten,

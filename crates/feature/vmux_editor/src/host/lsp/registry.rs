@@ -8,8 +8,12 @@ use vmux_feature::manifest::{FeatureManifestSource, FeaturePlugin};
 #[cfg(test)]
 use vmux_path::Executable;
 
-pub(crate) fn add(app: &mut App) {
-    app.add_systems(Startup, load);
+pub(crate) struct RegistryPlugin;
+
+impl Plugin for RegistryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, load);
+    }
 }
 
 #[derive(Deserialize)]
@@ -175,7 +179,7 @@ mod tests {
             FeaturePlugin::<crate::Feature>::default(),
             FeaturePlugin::<ForeignFeature>::default(),
         ));
-        add(&mut app);
+        app.add_plugins(RegistryPlugin);
         app.update();
 
         let registries = app
