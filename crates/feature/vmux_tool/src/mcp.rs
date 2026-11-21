@@ -1,145 +1,32 @@
 use std::collections::BTreeMap;
 
-use crate::state::ToolForgetRequest;
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
-use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
 
-use vmux_ecs::OperationState;
-
-use crate::manifest::ToolStore;
-use crate::{
-    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteSet,
-    ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding, ToolProviderTarget,
-    ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
-};
+use crate::ToolProviderBinding;
 
 pub(crate) struct McpToolPlugin;
-
-#[derive(Component)]
-struct McpProvider;
 
 impl Plugin for McpToolPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(host)]
         app.add_plugins(crate::mcp_inventory::McpInventoryPlugin);
-        app.add_systems(Startup, spawn)
-            .add_systems(Update, request_forget.in_set(ToolOperationRouteSet))
-            .add_systems(Update, forget.in_set(ToolTaskSet::Start))
-            .add_systems(Update, finish_forget.after(ToolTaskSet::Apply));
+        app.add_systems(Startup, spawn);
     }
 }
 
 fn spawn(mut commands: Commands) {
     let provider = commands
-        .spawn((ToolProviderBinding::new::<crate::Feature>(3), McpProvider))
+        .spawn(ToolProviderBinding::new::<crate::Feature>(3))
         .id();
     #[cfg(host)]
-    commands
-        .entity(provider)
-        .insert(crate::observation::Handler);
+    commands.entity(provider).insert((
+        crate::observation::Handler,
+        crate::observation::ManifestProvider,
+    ));
     #[cfg(not(host))]
     let _ = provider;
-}
-
-fn request_forget(
-    requests: Query<
-        (
-            Entity,
-            &ToolOperationRequest<ToolForgetRequest>,
-            &ToolProviderTarget,
-        ),
-        Added<ToolStoreTarget>,
-    >,
-    providers: Query<(), With<McpProvider>>,
-    mut commands: Commands,
-) {
-    for (entity, operation, provider) in &requests {
-        if !providers.contains(provider.entity()) {
-            continue;
-        }
-        let request = &operation.0;
-        if request.id.trim().is_empty() {
-            continue;
-        }
-        commands.entity(entity).insert((
-            ToolStoreOperation,
-            ForgetMcpServer {
-                name: request.id.trim().to_string(),
-            },
-        ));
-    }
-}
-
-fn finish_forget(
-    operations: Query<
-        (Entity, &ForgottenMcpServer),
-        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &operations {
-        commands.entity(entity).insert((
-            ToolOperationFinished,
-            ToolOperationSucceeded(format!("{} removed from tools.toml", output.name)),
-        ));
-    }
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct ForgetMcpServer {
-    name: String,
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(super) struct ForgottenMcpServer {
-    name: String,
-}
-
-fn forget(
-    operations: Query<
-        (Entity, &ForgetMcpServer, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<ForgottenMcpServer>>,
-            Without<ForgottenMcpServer>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, operation, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let name = operation.name.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    let mut manifest = store.load()?;
-                    manifest.mcp.servers.remove(&name);
-                    store.save(&manifest)?;
-                    Ok(ForgottenMcpServer { name })
-                },
-            )));
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

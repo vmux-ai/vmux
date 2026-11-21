@@ -9,7 +9,11 @@ pub struct ObservationSet;
 #[derive(Component)]
 pub struct Handler;
 
+#[derive(Component, Default)]
+pub(crate) struct ManifestProvider;
+
 #[derive(Component)]
+#[require(ManifestProvider)]
 pub struct PackageProvider;
 
 #[derive(Component)]

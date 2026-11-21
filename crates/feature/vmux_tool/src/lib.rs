@@ -151,7 +151,6 @@ impl Plugin for ToolRuntimePlugin {
             app.add_plugins(io::ObservationIoPlugin);
         }
         app.add_plugins((
-            TaskPlugin::<Result<mcp::ForgottenMcpServer, String>>::default(),
             TaskPlugin::<Result<dotfiles::DiscoveredDotfilePackages, String>>::default(),
             TaskPlugin::<Result<dotfiles::DotfilePlan, String>>::default(),
             TaskPlugin::<Result<dotfiles::ImportedDotfiles, String>>::default(),
@@ -186,7 +185,6 @@ impl Plugin for ToolRuntimePlugin {
         .configure_sets(
             Update,
             (
-                TaskSet::of::<Result<mcp::ForgottenMcpServer, String>>(),
                 TaskSet::of::<Result<dotfiles::DiscoveredDotfilePackages, String>>(),
                 TaskSet::of::<Result<dotfiles::DotfilePlan, String>>(),
                 TaskSet::of::<Result<dotfiles::ImportedDotfiles, String>>(),
@@ -211,7 +209,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_observer(accept::<ToolApplyRequest>)
         .add_observer(accept::<ToolImportRequest>)
         .add_observer(completed)
-        .add_observer(store::<mcp::ForgottenMcpServer>)
         .add_observer(store::<dotfiles::DiscoveredDotfilePackages>)
         .add_observer(store::<dotfiles::DotfilePlan>)
         .add_observer(store::<dotfiles::ImportedDotfiles>)
@@ -250,7 +247,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                finish_operation::<mcp::ForgottenMcpServer>,
                 finish_operation::<dotfiles::DiscoveredDotfilePackages>,
                 finish_operation::<dotfiles::DotfilePlan>,
                 finish_operation::<dotfiles::ImportedDotfiles>,
