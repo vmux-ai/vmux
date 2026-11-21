@@ -455,7 +455,7 @@ fn start_operation(
     active: Query<&OperationState, With<EntityTarget<ToolStore>>>,
     scans: Query<(), With<Scan>>,
     stores: Query<(Entity, &ToolStore), With<ToolRegistry>>,
-    providers: Query<(Entity, &ToolProviderId)>,
+    providers: Query<(Entity, &ToolProviderId), With<crate::ToolProviderBinding>>,
     mut commands: Commands,
 ) {
     if active
@@ -758,7 +758,107 @@ fn emit_tools_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ToolOperationKind, ToolProvider};
+    use crate::state::{ToolCategory, ToolItem, ToolOperationKind, ToolProvider, ToolStatus};
+
+    #[test]
+    fn catalog_items_cannot_be_selected_as_the_provider_for_a_page_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        crate::ToolsManifest::default()
+            .write_to(&store.manifest_path())
+            .unwrap();
+        let path = directory.path().join("package.json");
+        std::fs::write(&path, br#"{"dependencies":{"typescript":"1"}}"#).unwrap();
+        let mut app = App::new();
+        app.world_mut()
+            .spawn(ToolProviderId(ToolProvider::new("npm")));
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            crate::ToolRuntimePlugin,
+            ToolHostPlugin,
+            crate::npm::NpmToolPlugin,
+        ));
+        let registry = app
+            .world_mut()
+            .spawn((
+                ToolRegistry::default(),
+                Catalog::default(),
+                store.clone(),
+                crate::inventory::Sequence::default(),
+            ))
+            .id();
+        app.world_mut().trigger(crate::catalog::Received {
+            entity: registry,
+            snapshot: ToolsSnapshot {
+                loaded: true,
+                categories: vec![ToolCategory {
+                    provider: ToolProvider::new("npm"),
+                    items: vec![ToolItem {
+                        provider: ToolProvider::new("npm"),
+                        id: "already-installed".into(),
+                        name: "Existing package".into(),
+                        icon: None,
+                        version: None,
+                        detail: String::new(),
+                        status: ToolStatus::Installed,
+                        managed: true,
+                        operations: Vec::new(),
+                    }],
+                }],
+                ..Default::default()
+            },
+        });
+        app.world_mut().spawn((
+            crate::npm::NpmProvider,
+            ToolProviderId(ToolProvider::new("npm")),
+            crate::ToolProviderBinding::new::<crate::Feature>(2),
+            crate::observation::Handler,
+            crate::observation::PackageProvider,
+        ));
+        let page = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://tools/npm".into(),
+                ..Default::default()
+            })
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: PageReady {},
+        });
+        app.update();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ToolImportRequest {
+                provider: ToolProvider::new("npm"),
+                value: path.to_string_lossy().into_owned(),
+            },
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            app.update();
+            let state = app.world().get::<ToolSubscriber>(page).unwrap();
+            if let Some(notice) = &state.state.notice {
+                assert!(notice.success, "{}", notice.message);
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "page import did not complete"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            crate::ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .packages["npm"],
+            ["typescript"]
+        );
+        assert!(store.lease().is_some());
+    }
 
     #[test]
     fn queued_provider_completion_refuses_cancellation_and_retired_stores() {
