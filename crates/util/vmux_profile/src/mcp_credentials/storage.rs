@@ -9,10 +9,12 @@ use std::io::Write;
 #[cfg(all(not(target_os = "macos"), unix))]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct McpCredentialStorage {
     profile: Profile,
     paths: ProfilePaths,
+    #[cfg(target_os = "macos")]
+    context: SafeStorageContext,
 }
 
 #[cfg(target_os = "macos")]
@@ -24,7 +26,26 @@ struct McpCredentialFile {
 
 impl McpCredentialStorage {
     pub fn at(profile: Profile, paths: ProfilePaths) -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            let context = SafeStorageContext::at(paths.application_data());
+            Self::with_context(profile, paths, context)
+        }
+        #[cfg(not(target_os = "macos"))]
         Self { profile, paths }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn with_context(
+        profile: Profile,
+        paths: ProfilePaths,
+        context: SafeStorageContext,
+    ) -> Self {
+        Self {
+            profile,
+            paths,
+            context,
+        }
     }
 
     pub fn load(&self, server: &str) -> Result<Option<McpOauthCredentials>, String> {
@@ -49,10 +70,19 @@ impl McpCredentialStorage {
     }
 }
 
+impl std::fmt::Debug for McpCredentialStorage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpCredentialStorage")
+            .field("profile", &self.profile)
+            .field("paths", &self.paths)
+            .finish()
+    }
+}
+
 #[cfg(target_os = "macos")]
 impl McpCredentialFile {
-    fn new(account: &str, application_data: std::path::PathBuf) -> Self {
-        let context = SafeStorageContext::at(application_data);
+    fn new(account: &str, context: SafeStorageContext) -> Self {
         let file = context.protected_file(
             std::path::PathBuf::from("mcp").join(format!("{}.bin", SafeStorageName::of(account))),
         );
@@ -88,16 +118,16 @@ impl McpCredentialFile {
 #[cfg(target_os = "macos")]
 impl McpCredentialStorage {
     fn load_account(&self, account: &str) -> Result<Option<McpOauthCredentials>, String> {
-        McpCredentialFile::new(account, self.paths.application_data()).load()
+        McpCredentialFile::new(account, self.context.clone()).load()
     }
 
     fn store_account(&self, account: &str, bytes: &[u8]) -> Result<(), String> {
         Self::decode(bytes)?;
-        McpCredentialFile::new(account, self.paths.application_data()).store(bytes)
+        McpCredentialFile::new(account, self.context.clone()).store(bytes)
     }
 
     fn remove_account(&self, account: &str) -> Result<(), String> {
-        McpCredentialFile::new(account, self.paths.application_data()).remove()
+        McpCredentialFile::new(account, self.context.clone()).remove()
     }
 }
 

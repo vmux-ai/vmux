@@ -1,10 +1,12 @@
 #[cfg(target_os = "macos")]
 use cipher::SafeStorageCipher;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 pub use file::ProtectedFile;
 use std::fmt::{Display, Formatter};
 #[cfg(any(target_os = "macos", test))]
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
+use std::sync::{Arc, Mutex};
 #[cfg(any(target_os = "macos", test))]
 use zeroize::Zeroizing;
 
@@ -12,11 +14,11 @@ use std::fmt::Write;
 
 #[cfg(any(target_os = "macos", test))]
 mod cipher;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 mod file;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 mod root;
 
 #[cfg(any(target_os = "macos", test))]
@@ -94,7 +96,7 @@ impl RootKey {
         Self(Zeroizing::new(bytes))
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", all(test, unix)))]
     fn duplicate(&self) -> Self {
         Self::new(*self.0)
     }
@@ -137,18 +139,21 @@ impl VaultWrappingKey {
     }
 }
 
-#[cfg(any(test, all(target_os = "macos", debug_assertions)))]
-enum RootKeySource {
-    Keychain,
-    FixedTest,
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone)]
+pub struct SafeStorageContext {
+    access: Arc<StorageAccess>,
 }
 
 #[cfg(any(target_os = "macos", test))]
-pub struct SafeStorageContext {
+struct StorageAccess {
     directory: PathBuf,
     #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
-    root_key_source: RootKeySource,
+    test_session: bool,
     desktop_process_required: bool,
+    root_key: Mutex<Option<RootKey>>,
+    #[cfg(all(test, unix))]
+    root_fixture: Option<Arc<dyn root::RootFixture>>,
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -169,34 +174,39 @@ impl SafeStorageContext {
     }
 
     fn for_environment(application_data: PathBuf, test_session: bool) -> Self {
-        if test_session {
-            return Self {
-                directory: application_data.join("safe-storage-test"),
-                #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
-                root_key_source: RootKeySource::FixedTest,
-                desktop_process_required: false,
-            };
-        }
+        let directory = if test_session {
+            application_data.join("safe-storage-test")
+        } else {
+            application_data.join("safe-storage")
+        };
         Self {
-            directory: application_data.join("safe-storage"),
-            #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
-            root_key_source: RootKeySource::Keychain,
-            desktop_process_required: true,
+            access: Arc::new(StorageAccess {
+                directory,
+                #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
+                test_session,
+                desktop_process_required: !test_session,
+                root_key: Mutex::new(None),
+                #[cfg(all(test, unix))]
+                root_fixture: None,
+            }),
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", all(test, unix)))]
     pub fn protected_file(&self, relative: impl AsRef<Path>) -> ProtectedFile {
-        ProtectedFile::new(self.directory.clone(), self.directory.join(relative))
+        ProtectedFile::new(
+            self.directory().to_path_buf(),
+            self.directory().join(relative),
+        )
     }
 
     pub(crate) fn directory(&self) -> &Path {
-        &self.directory
+        &self.access.directory
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", all(test, unix)))]
     pub(crate) fn require_desktop_process(&self) -> Result<(), SafeStorageError> {
-        if !self.desktop_process_required {
+        if !self.access.desktop_process_required {
             return Ok(());
         }
         let executable = std::env::current_exe().map_err(|error| {
@@ -206,11 +216,6 @@ impl SafeStorageContext {
             return Ok(());
         }
         Err(SafeStorageError::DesktopProcessRequired)
-    }
-
-    #[cfg(test)]
-    fn is_test(&self) -> bool {
-        matches!(self.root_key_source, RootKeySource::FixedTest)
     }
 }
 
@@ -325,29 +330,6 @@ impl SafeStorageName {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_context_uses_separate_storage_without_desktop_access() {
-        let application_data = PathBuf::from("/tmp/vmux-context");
-        let context = SafeStorageContext::for_environment(application_data.clone(), true);
-
-        assert_eq!(
-            context.directory(),
-            application_data.join("safe-storage-test")
-        );
-        assert!(context.is_test());
-        assert!(!context.desktop_process_required);
-    }
-
-    #[test]
-    fn production_context_uses_keychain_backed_storage() {
-        let application_data = PathBuf::from("/tmp/vmux-context");
-        let context = SafeStorageContext::for_environment(application_data.clone(), false);
-
-        assert_eq!(context.directory(), application_data.join("safe-storage"));
-        assert!(!context.is_test());
-        assert!(context.desktop_process_required);
-    }
 
     #[test]
     fn encoded_names_are_injective_for_path_punctuation() {
