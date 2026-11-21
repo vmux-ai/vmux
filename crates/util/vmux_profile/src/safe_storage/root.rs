@@ -184,6 +184,8 @@ impl<'a> SafeStorageState<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    use crate::mcp_credentials::{McpCredentialStorage, McpOauthCredentials};
     use crate::safe_storage::cipher::SafeStorageCipher;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier, mpsc};
@@ -479,13 +481,15 @@ mod tests {
             cipher.unwrap_vault_key("test", &stored).unwrap().as_slice(),
             b"test key"
         );
+        let file = context.protected_file("vault/key.bin");
+        file.remove().unwrap();
+        assert!(file.read().unwrap().is_none());
         assert_eq!(std::fs::read(production).unwrap(), b"production envelope");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn cloned_mcp_storage_reuses_authorization_without_sharing_accounts() {
-        use crate::mcp_credentials::{McpCredentialStorage, McpOauthCredentials};
         let fixture = Fixture::new(Some(NativeRoot::payload(59)));
         let profile = crate::Profile::named("personal");
         let paths =
