@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -134,8 +135,8 @@ fn request(
         return;
     };
     let input = &trigger.event().payload;
-    let project = input.project.trim().to_owned();
-    if project.is_empty() || input.request_id == 0 {
+    let project = input.project.clone();
+    if project.trim().is_empty() || input.request_id == 0 {
         return;
     }
     if current.is_some_and(|current| input.request_id <= current.request_id) {
@@ -316,7 +317,13 @@ fn materialize_registrations(
 type FinishedReads<'w, 's> = Query<
     'w,
     's,
-    (Entity, Option<&'static LookupFailure>),
+    (
+        Entity,
+        &'static BranchRead,
+        Option<&'static Discovered>,
+        Option<&'static LookupFailure>,
+        Has<ReadRetired>,
+    ),
     (
         With<BranchRead>,
         Without<NativeTask<DiscoveryOutput>>,
@@ -331,13 +338,21 @@ type FinishedReads<'w, 's> = Query<
 
 fn publish(
     reads: FinishedReads,
-    requests: Query<(Entity, &BranchRequest, &BranchSubscriber), Without<RequestRetired>>,
+    requests: Query<
+        (
+            Entity,
+            &BranchRequest,
+            &BranchSubscriber,
+            Has<RequestRefused>,
+        ),
+        Without<RequestRetired>,
+    >,
     current: Query<(&CurrentRequest, Option<&PageMetadata>)>,
     refs: Query<(&Observation, &Name, &vmux_ecs::Order), With<BranchRef>>,
     registrations: Query<(&Observation, &Registration, &vmux_ecs::Order)>,
     mut commands: Commands,
 ) {
-    for (read, failure) in &reads {
+    for (read, state, discovered, failure, retired) in &reads {
         let mut ordered = Vec::new();
         for (owner, name, order) in &refs {
             if owner.0 == read {
@@ -345,21 +360,27 @@ fn publish(
             }
         }
         ordered.sort_by_key(|(order, _)| *order);
+        let mut holders = HashMap::new();
+        for (owner, registration, order) in &registrations {
+            if owner.0 != read || registration.prunable || !registration.directory {
+                continue;
+            }
+            let Some(branch) = registration.branch.as_deref() else {
+                continue;
+            };
+            if holders
+                .get(branch)
+                .is_none_or(|(_, earlier)| order.0 < *earlier)
+            {
+                holders.insert(branch, (registration, order.0));
+            }
+        }
         let mut branches = Vec::new();
-        if failure.is_none() {
+        if failure.is_none() && !retired {
             for (_, branch) in ordered {
-                let mut selected = None;
-                for (owner, registration, order) in &registrations {
-                    if owner.0 == read
-                        && !registration.prunable
-                        && registration.directory
-                        && registration.branch.as_deref() == Some(branch)
-                        && selected.is_none_or(|(earlier, _)| order.0 < earlier)
-                    {
-                        selected = Some((order.0, registration));
-                    }
-                }
-                let checkout = selected.map(|(_, registration)| &registration.path);
+                let checkout = holders
+                    .get(branch)
+                    .map(|(registration, _)| &registration.path);
                 branches.push(ProjectBranch {
                     branch: branch.to_owned(),
                     checkout: checkout
@@ -374,15 +395,22 @@ fn publish(
                 });
             }
         }
-        for (entity, request, subscriber) in &requests {
+        for (entity, request, subscriber, refused) in &requests {
             if subscriber.0 != read {
                 continue;
             }
-            if current
+            let current = current
                 .get(request.owner)
-                .is_ok_and(|(current, page)| request.current(current, page))
-            {
-                let result = if request.source.matches(Path::new(&request.project)) {
+                .is_ok_and(|(current, page)| request.current(current, page));
+            let accepted = !refused
+                && !retired
+                && failure.is_none()
+                && request.source.matches(Path::new(&request.project))
+                && state.source.matches(state.source.path())
+                && discovered
+                    .is_some_and(|discovered| discovered.source.matches(discovered.source.path()));
+            if current {
+                let result = if accepted {
                     branches.clone()
                 } else {
                     Vec::new()
@@ -402,11 +430,12 @@ fn publish(
                     },
                 ));
             }
-            let state = if failure.is_some() || !request.source.matches(Path::new(&request.project))
-            {
-                OperationState::Failed
-            } else {
+            let outcome = if !current {
+                OperationState::Canceled
+            } else if accepted {
                 OperationState::Succeeded
+            } else {
+                OperationState::Failed
             };
             commands
                 .entity(entity)
@@ -416,7 +445,7 @@ fn publish(
                     RequestRefused,
                     OperationRetained,
                 )>()
-                .insert(state);
+                .insert(outcome);
         }
     }
 }
@@ -627,7 +656,11 @@ mod tests {
 
     impl Repository {
         fn new() -> Self {
-            let repo = Self(tempfile::tempdir().unwrap());
+            Self::with_suffix("")
+        }
+
+        fn with_suffix(suffix: &str) -> Self {
+            let repo = Self(tempfile::Builder::new().suffix(suffix).tempdir().unwrap());
             repo.run(&["init", "-qb", "main"]);
             repo.run(&["config", "user.name", "Fixture"]);
             repo.run(&["config", "user.email", "fixture@example.test"]);
@@ -763,6 +796,171 @@ mod tests {
         fn blocked(&self) -> BlockedWorkers {
             BlockedWorkers::new(self.0.world().resource::<GitRuntime>())
         }
+
+        fn operation(&mut self, owner: Entity) -> Entity {
+            self.0
+                .world_mut()
+                .query::<(Entity, &BranchRequest)>()
+                .iter(self.0.world())
+                .find(|(_, request)| request.owner == owner)
+                .unwrap()
+                .0
+        }
+
+        fn swap_metadata_before_publish(&mut self, replacement: &Path) {
+            self.0.add_systems(
+                Update,
+                MetadataSwap::apply
+                    .after(materialize_registrations)
+                    .before(publish),
+            );
+            let directory = self.1.path().canonicalize().unwrap();
+            self.0.world_mut().spawn(MetadataSwap {
+                target: directory.join(".git"),
+                replacement: replacement.join(".git"),
+                backup: directory.join("parked-git"),
+            });
+        }
+    }
+
+    #[derive(Component)]
+    struct MetadataSwap {
+        target: PathBuf,
+        replacement: PathBuf,
+        backup: PathBuf,
+    }
+
+    impl MetadataSwap {
+        fn apply(
+            swaps: Query<(Entity, &Self)>,
+            completed: Query<
+                Entity,
+                (
+                    With<BranchRead>,
+                    With<RefsComplete>,
+                    With<RegistrationsComplete>,
+                ),
+            >,
+            requests: Query<(&BranchRequest, &BranchSubscriber)>,
+            mut commands: Commands,
+        ) {
+            if completed.is_empty() {
+                return;
+            }
+            for (entity, swap) in &swaps {
+                let directory = swap.target.parent().unwrap();
+                if !requests.iter().any(|(request, subscriber)| {
+                    request.source.path().starts_with(directory) && completed.contains(subscriber.0)
+                }) {
+                    continue;
+                }
+                std::fs::rename(&swap.target, &swap.backup).unwrap();
+                std::fs::rename(&swap.replacement, &swap.target).unwrap();
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+
+    #[test]
+    fn significant_project_path_spaces_preserve_request_and_native_refs() {
+        let repo = Repository::with_suffix(" ");
+        let path = repo.path().to_path_buf();
+        let mut pages = BranchPages::new(repo);
+        let page = pages.page();
+        pages.request(page, &path, 1);
+        let response = pages.wait(page, 1);
+        assert_eq!(response.project, path.to_string_lossy());
+        assert!(
+            response
+                .branches
+                .iter()
+                .any(|branch| branch.branch == "topic")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_temporarily_retargeted_alias_stays_refused_after_native_drain() {
+        let repo = Repository::new();
+        let other = Repository::new();
+        let path = repo.path().to_path_buf();
+        let temporary = tempfile::tempdir().unwrap();
+        let alias = temporary.path().join("project");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let mut pages = BranchPages::new(repo);
+        let blocked = pages.blocked();
+        let page = pages.page();
+        pages.request(page, &alias, 1);
+        let operation = pages.operation(page);
+        pages.0.update();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(other.path(), &alias).unwrap();
+        pages.0.update();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        pages.0.update();
+        drop(blocked);
+        assert!(pages.wait(page, 1).branches.is_empty());
+        assert_eq!(
+            pages.0.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refusing_one_alias_does_not_refuse_its_shared_repository_subscriber() {
+        let repo = Repository::new();
+        let other = Repository::new();
+        let path = repo.path().to_path_buf();
+        let temporary = tempfile::tempdir().unwrap();
+        let alias = temporary.path().join("project");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let mut pages = BranchPages::new(repo);
+        let blocked = pages.blocked();
+        let refused = pages.page();
+        let accepted = pages.page();
+        pages.request(refused, &alias, 1);
+        pages.request(accepted, &path, 1);
+        let operation = pages.operation(refused);
+        pages.0.update();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(other.path(), &alias).unwrap();
+        pages.0.update();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        pages.0.update();
+        drop(blocked);
+        assert!(pages.wait(refused, 1).branches.is_empty());
+        assert!(
+            pages
+                .wait(accepted, 1)
+                .branches
+                .iter()
+                .any(|branch| branch.branch == "topic")
+        );
+        assert_eq!(
+            pages.0.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+    }
+
+    #[test]
+    fn repository_metadata_replacement_before_publication_refuses_subdirectory_refs() {
+        let repo = Repository::new();
+        let other = Repository::new();
+        let path = repo.path().join("nested");
+        std::fs::create_dir(&path).unwrap();
+        let mut pages = BranchPages::new(repo);
+        pages.swap_metadata_before_publish(other.path());
+        let page = pages.page();
+        pages.request(page, &path, 1);
+        let operation = pages.operation(page);
+        assert!(pages.wait(page, 1).branches.is_empty());
+        assert_eq!(
+            pages.0.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
     }
 
     #[test]

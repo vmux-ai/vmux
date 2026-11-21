@@ -181,9 +181,13 @@ mod tests {
         }
 
         fn open(&mut self, page: Entity, open_id: u64) {
+            self.open_project(page, open_id, "/project");
+        }
+
+        fn open_project(&mut self, page: Entity, open_id: u64, project: &str) {
             self.0.world_mut().entity_mut(page).insert(PaletteContext {
                 open_id: OpenId(open_id),
-                project: "/project".into(),
+                project: project.to_owned(),
                 ..Default::default()
             });
             self.0.update();
@@ -216,6 +220,23 @@ mod tests {
                 ));
             self.0.world_mut().flush();
         }
+    }
+
+    #[test]
+    fn a_project_path_with_significant_space_completes_its_palette_flight() {
+        let mut pages = PalettePages::new();
+        let page = pages
+            .0
+            .world_mut()
+            .spawn((PaletteBranch::default(), PaletteSnapshot::default()))
+            .id();
+        pages.open_project(page, 1, "/project ");
+        let request = pages.requested();
+        assert_eq!(request.project, "/project ");
+        pages.respond(page, &request, "current");
+        let state = &pages.0.world().get::<PaletteSnapshot>(page).unwrap().0;
+        assert_eq!(state.branch_project, "/project ");
+        assert_eq!(state.branches[0].branch, "current");
     }
 
     #[test]
