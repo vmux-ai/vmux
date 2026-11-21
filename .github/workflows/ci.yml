@@ -62,6 +62,7 @@ jobs:
         with:
           name: ci-runtime-${{ runner.os }}-${{ runner.arch }}
           path: .build-tools/bootstrap/vmux-ci
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
           overwrite: true
