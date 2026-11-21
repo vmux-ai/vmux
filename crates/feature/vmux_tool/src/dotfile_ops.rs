@@ -1423,7 +1423,7 @@ mod tests {
             assert!(!path.is_absolute());
             assert_eq!(
                 vmux_path::PathIdentity::resolve(&target),
-                vmux_path::PathIdentity::resolve(&root.join(relative))
+                vmux_path::PathIdentity::resolve(root.join(relative))
             );
         }
         let disable = fixture

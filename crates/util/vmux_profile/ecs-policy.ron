@@ -7,7 +7,6 @@ legacy: [
     (key: "crates/util/vmux_profile/src/lib.rs||fn:cef_keychain_switches_for", fingerprint: "226b0b713532497f", issue: "VMX-253"),
     (key: "crates/util/vmux_profile/src/lib.rs||fn:config_suffix", fingerprint: "4902b1674e98ef9d", issue: "VMX-253"),
     (key: "crates/util/vmux_profile/src/lib.rs||fn:git_hash", fingerprint: "077fbdd399da6663", issue: "VMX-253"),
-    (key: "crates/util/vmux_profile/src/lib.rs||fn:home_dir", fingerprint: "ae0f29fefbbc6af7", issue: "VMX-253"),
     (key: "crates/util/vmux_profile/src/lib.rs||fn:recording_dir_for", fingerprint: "ae4e16b25338ae28", issue: "VMX-253"),
     (key: "crates/util/vmux_profile/src/lib.rs||fn:settings_candidates_in", fingerprint: "ecd12a3c1e4f8444", issue: "VMX-253"),
     (key: "crates/util/vmux_profile/src/lib.rs||fn:space_dir_path", fingerprint: "58e6228fb4154134", issue: "VMX-253"),

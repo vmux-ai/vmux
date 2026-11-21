@@ -492,6 +492,11 @@ fn compiler_inputs_require_actual_cargo_data_flow_and_cannot_be_product_modules(
         } else {
             "crates/feature/vmux_dx/lints/src/registrations.rs||impl:Fixture"
         };
+        assert_eq!(
+            inputs.owner(Path::new("crates/feature/vmux_dx/lints/ui/private.rs")),
+            Some(owner),
+            "workspace-relative input must not depend on the test process directory: {change}"
+        );
         for name in [
             "adapters",
             "aliases",

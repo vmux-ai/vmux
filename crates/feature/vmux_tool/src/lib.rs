@@ -479,6 +479,78 @@ fn route_external_operation<R: Clone + Send + Sync + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn overridden_data_root_keeps_configuration_and_link_effects_in_the_copy() {
+        if let Some(root) = std::env::var_os("VMUX_QA_PATHS_CHILD") {
+            let root = PathBuf::from(root);
+            let store = ToolStore::current();
+            assert!(
+                store.root().starts_with(&root),
+                "refuse live configuration writes"
+            );
+            assert!(
+                store.home().starts_with(&root),
+                "refuse live home mutations"
+            );
+            ToolsManifest::default()
+                .write_to(&store.manifest_path())
+                .unwrap();
+            let source = store.dotfiles_dir().join("qa/.vmx-qa");
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(&source, b"copied input").unwrap();
+            let mut app = App::new();
+            app.add_plugins((
+                bevy_app::TaskPoolPlugin::default(),
+                ToolRuntimePlugin,
+                dotfiles::DotfileToolPlugin,
+            ));
+            let owner = app.world_mut().spawn(store.clone()).id();
+            let request = app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.copied.dotfile.link").unwrap(),
+                    ToolStoreTarget::new(owner),
+                    LinkDotfilePackage::new("qa"),
+                ))
+                .id();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while app.world().get::<ToolOperationFinished>(request).is_none() {
+                app.update();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "copied operation did not drain"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(app.world().get::<ToolOperationSucceeded>(request).is_some());
+            assert!(store.lease().is_some());
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let live = ToolStore::current().manifest_path();
+        let before = std::fs::read(&live).ok();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::overridden_data_root_keeps_configuration_and_link_effects_in_the_copy",
+                "--nocapture",
+            ])
+            .env("VMUX_DATA_DIR", directory.path())
+            .env("VMUX_QA_PATHS_CHILD", directory.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let config = directory.path().join("config/tools/tools.toml");
+        let manifest = ToolsManifest::read(&config).unwrap();
+        assert_eq!(manifest.dotfiles.packages, ["qa"]);
+        assert_eq!(
+            std::fs::read(directory.path().join("home/.vmx-qa")).unwrap(),
+            b"copied input"
+        );
+        assert_eq!(std::fs::read(&live).ok(), before);
+    }
 
     struct TaskFixture {
         app: App,

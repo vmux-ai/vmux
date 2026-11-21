@@ -10,6 +10,7 @@ static CURRENT: OnceLock<CompilerInputs> = OnceLock::new();
 
 #[derive(Default)]
 pub(super) struct CompilerInputs {
+    workspace: PathBuf,
     files: BTreeMap<PathBuf, String>,
     aliases: BTreeMap<String, String>,
     bindings: BTreeSet<String>,
@@ -40,6 +41,11 @@ impl CompilerInputs {
     }
 
     pub(super) fn owner(&self, path: &Path) -> Option<&str> {
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.workspace.join(path)
+        };
         let Ok(path) = path.canonicalize() else {
             return None;
         };
@@ -55,7 +61,10 @@ impl CompilerInputs {
                 Self::paths(&directory, &mut paths)?;
             }
         }
-        let mut inputs = Self::default();
+        let mut inputs = Self {
+            workspace: root.canonicalize().map_err(|error| error.to_string())?,
+            ..Self::default()
+        };
         for path in &paths {
             if path.extension().is_none_or(|extension| extension != "rs") {
                 continue;
