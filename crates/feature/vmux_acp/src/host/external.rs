@@ -13,6 +13,7 @@ use vmux_api::chat::ResumeSession;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
 use vmux_ecs::page::{Activity, PageReady};
+use vmux_ecs::profile::CurrentProfile;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
@@ -44,6 +45,8 @@ use vmux_session::{CreateRequest, Created, ProviderArchiveCompleted, ProviderArc
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
 
+use super::acp::installed::{Checked, InstalledAgent, InstalledSet};
+use super::acp::installed_launch;
 use super::acp::{AcpLaunch, AcpPackageChanged, registry::RegistryAgent};
 use crate::AcpSessionId;
 
@@ -136,11 +139,19 @@ impl bevy::prelude::Plugin for CatalogPlugin {
                 Update,
                 (
                     register,
-                    request_catalogs,
+                    refresh_catalogs,
+                    cancel_catalogs,
+                    begin_catalogs,
+                    installed_catalogs,
+                    configured_catalogs.before(installed_launch::PreparationSet),
+                    prepared_catalogs.after(installed_launch::PreparationSet),
+                    retire_catalogs,
+                    send_catalogs,
                     receive_catalogs.after(ServiceMessageSet),
                 )
                     .chain()
-                    .before(CatalogPrepared),
+                    .before(CatalogPrepared)
+                    .after(InstalledSet),
             );
         app.world_mut()
             .spawn((CatalogControl::default(), CatalogDiscovery::default()));
@@ -215,7 +226,44 @@ struct CatalogControl {
 }
 
 #[derive(Component)]
+struct CatalogBatch {
+    generation: u64,
+    shell: String,
+    cwd: PathBuf,
+}
+
+#[derive(Component)]
 struct CatalogQueued(vmux_api::protocol::ClientMessage);
+
+#[derive(Component)]
+struct CatalogBinding {
+    agent: Entity,
+    source: Checked,
+}
+
+#[derive(SystemParam)]
+struct CatalogWitness<'w, 's> {
+    installed: Query<'w, 's, &'static Checked, With<InstalledAgent>>,
+    profile: CurrentProfile<'w, 's>,
+}
+
+impl CatalogWitness<'_, '_> {
+    fn accepts(&self, binding: &CatalogBinding) -> bool {
+        binding.source.profile_matches(&self.profile)
+            && self.installed.get(binding.agent).ok() == Some(&binding.source)
+    }
+}
+
+#[derive(Component)]
+struct RetiringCatalog;
+
+#[derive(Component)]
+struct CatalogPreparing {
+    preparation: Entity,
+    agent: String,
+    name: String,
+    cwd: PathBuf,
+}
 
 #[derive(Component)]
 struct CatalogStarted(Instant);
@@ -235,7 +283,8 @@ impl CatalogCwd {
 }
 
 fn register(
-    agents: Query<&RegistryAgent>,
+    agents: Query<&RegistryAgent, With<InstalledAgent>>,
+    pending: Query<&RegistryAgent, Without<Checked>>,
     settings: Option<Res<AppSettings>>,
     sources: Query<(Entity, &AgentId, &CatalogOrigin, Option<&Name>), With<CatalogSource>>,
     mut state: Single<&mut CatalogControl>,
@@ -253,9 +302,6 @@ fn register(
     let mut present = HashSet::new();
     let mut installed_families = HashSet::new();
     for agent in &agents {
-        if !agent.is_installed() {
-            continue;
-        }
         present.insert(agent.id.as_str());
         installed_families.insert(AgentFamily::of(&agent.id));
         if let Some((source, name)) = registered.get(agent.id.as_str()) {
@@ -276,6 +322,11 @@ fn register(
             Name::new(agent.name.clone()),
         ));
         state.refresh = true;
+    }
+    for agent in &pending {
+        if registered.contains_key(agent.id.as_str()) {
+            present.insert(agent.id.as_str());
+        }
     }
     for config in &settings.agent.acp {
         if config.command.trim().is_empty()
@@ -306,13 +357,13 @@ fn register(
     }
     for (agent, (source, _)) in registered {
         if !present.contains(agent) {
-            commands.entity(source).despawn();
+            commands.entity(source).insert(RetiringCatalog);
             state.refresh = true;
         }
     }
 }
 
-fn request_catalogs(
+fn refresh_catalogs(
     activity: Activity<SessionManagerView>,
     provider_pages: Query<
         &vmux_ecs::PageMetadata,
@@ -324,20 +375,43 @@ fn request_catalogs(
         ),
     >,
     connected: Query<Ref<ServiceConnected>>,
+    agents: Query<(Ref<RegistryAgent>, Option<Ref<Checked>>)>,
+    mut packages: MessageReader<AcpPackageChanged>,
+    mut tools: MessageReader<ToolInventoryChanged>,
+    mut state: Single<&mut CatalogControl>,
+) {
+    let present = Activity::present(activity)
+        || provider_pages
+            .iter()
+            .any(|page| matches!(Route::parse(&page.url), Some(Route::Provider { .. })));
+    if present != state.active || !present {
+        state.refresh = true;
+    }
+    state.active = present;
+    let mut changed = packages.read().count() > 0;
+    for change in tools.read() {
+        changed |= change.0.is("acp");
+    }
+    changed |= agents.iter().any(|(agent, checked)| {
+        agent.is_changed() || checked.is_some_and(|checked| checked.is_changed())
+    });
+    changed |= connected.iter().any(|connected| connected.is_added());
+    state.refresh |= changed;
+}
+
+fn cancel_catalogs(
+    witness: CatalogWitness,
+    connected: Query<(), With<ServiceConnected>>,
     unavailable: Query<(), With<vmux_ecs::service::ServiceUnavailable>>,
-    agents: Query<Ref<RegistryAgent>>,
-    settings: Option<Res<AppSettings>>,
-    mut package_changes: MessageReader<AcpPackageChanged>,
-    mut tool_changes: MessageReader<ToolInventoryChanged>,
     mut state: Single<&mut CatalogControl>,
     mut requests: MessageWriter<ServiceRequest>,
     sources: Query<
         (
             Entity,
-            &AgentId,
             &CatalogOrigin,
             Option<&EntityTarget<CatalogRead>>,
             &CatalogCapability,
+            Has<RetiringCatalog>,
         ),
         With<CatalogSource>,
     >,
@@ -348,45 +422,22 @@ fn request_catalogs(
             &CatalogRead,
             &vmux_ecs::OperationState,
             Option<&CatalogStarted>,
-            Option<&CatalogQueued>,
+            Option<&CatalogBinding>,
         ),
         With<AcpCatalogRead>,
     >,
     mut commands: Commands,
 ) {
-    let mut source_entities = HashMap::new();
-    for (entity, agent, origin, _, _) in &sources {
-        if *origin == CatalogOrigin::Acp {
-            source_entities.insert(agent.0.clone(), entity);
-        }
-    }
-    let package_changed = package_changes.read().count() > 0;
-    let mut tool_changed = false;
-    for changed in tool_changes.read() {
-        tool_changed |= changed.0.is("acp");
-    }
-    let registry_changed = agents.iter().any(|agent| agent.is_changed());
-    let present = Activity::present(activity)
-        || provider_pages
-            .iter()
-            .any(|page| matches!(Route::parse(&page.url), Some(Route::Provider { .. })));
     let online = !connected.is_empty();
-    if connected.iter().any(|connected| connected.is_added()) {
-        state.refresh = true;
-    }
-    if present && !online && !unavailable.is_empty() {
-        for source in source_entities.values() {
-            if sources
-                .get(*source)
-                .is_ok_and(|(_, _, _, _, capability)| *capability != CatalogCapability::Failed)
-            {
-                commands.entity(*source).insert(CatalogCapability::Failed);
+    if state.active && !online && !unavailable.is_empty() {
+        for (entity, origin, _, capability, _) in &sources {
+            if *origin == CatalogOrigin::Acp && *capability != CatalogCapability::Failed {
+                commands.entity(entity).insert(CatalogCapability::Failed);
             }
         }
         state.refresh = true;
     }
-    let mut canceled = HashSet::new();
-    for (operation, parent, read, status, started, _) in &operations {
+    for (entity, parent, read, status, started, binding) in &operations {
         if !matches!(
             status,
             vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
@@ -394,9 +445,14 @@ fn request_catalogs(
             continue;
         }
         let timeout = started.is_some_and(|started| started.0.elapsed() >= CATALOG_REQUEST_TIMEOUT);
-        if present && online && !timeout {
+        let retiring = sources
+            .get(parent.parent())
+            .is_ok_and(|(_, _, _, _, retiring)| retiring);
+        let revoked = binding.is_some_and(|binding| !witness.accepts(binding));
+        if state.active && online && !timeout && !retiring && !revoked {
             continue;
         }
+        state.refresh |= retiring || revoked;
         if started.is_some() && online {
             requests.write(ServiceRequest(
                 vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog {
@@ -404,249 +460,353 @@ fn request_catalogs(
                 },
             ));
         }
+        let status = if timeout {
+            vmux_ecs::OperationState::Failed
+        } else {
+            vmux_ecs::OperationState::Canceled
+        };
         commands
-            .entity(operation)
-            .insert(if timeout {
-                vmux_ecs::OperationState::Failed
-            } else {
-                vmux_ecs::OperationState::Canceled
-            })
+            .entity(entity)
+            .insert(status)
             .remove::<CatalogQueued>();
-        canceled.insert(operation);
-        let source = parent.parent();
-        if let Ok((_, _, _, target, _)) = sources.get(source)
-            && target.is_some_and(|target| target.entity() == operation)
+        if !online {
+            state.refresh = true;
+        }
+        if let Ok((_, _, target, _, _)) = sources.get(parent.parent())
+            && target.is_some_and(|target| target.entity() == entity)
         {
             commands
-                .entity(source)
+                .entity(parent.parent())
                 .insert(CatalogCapability::Failed)
                 .remove::<EntityTarget<CatalogRead>>();
         }
     }
-    if !present {
-        state.active = false;
-        state.refresh = true;
-        return;
-    }
-    if !state.active {
-        state.active = true;
-        state.refresh = true;
-    }
-    if package_changed || tool_changed || registry_changed {
-        state.refresh = true;
-    }
-    if !online {
-        if !canceled.is_empty() {
-            state.refresh = true;
-        }
-        return;
-    }
-    let mut outstanding = 0;
-    let mut running = 0;
-    let mut queued = Vec::new();
-    for (entity, _, read, status, started, wire) in &operations {
-        if canceled.contains(&entity)
-            || !matches!(
+}
+
+fn begin_catalogs(
+    connected: Query<(), With<ServiceConnected>>,
+    operations: Query<&vmux_ecs::OperationState, With<AcpCatalogRead>>,
+    settings: Option<Res<AppSettings>>,
+    mut state: Single<(Entity, &mut CatalogControl)>,
+    sources: Query<(Entity, &CatalogOrigin), With<CatalogSource>>,
+    mut commands: Commands,
+) {
+    let (entity, control) = &mut *state;
+    if !control.active
+        || !control.refresh
+        || connected.is_empty()
+        || operations.iter().any(|status| {
+            matches!(
                 status,
                 vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
             )
+        })
+    {
+        return;
+    }
+    let Some(settings) = settings else {
+        return;
+    };
+    let Some(cwd) = CatalogCwd::current() else {
+        return;
+    };
+    control.refresh = false;
+    let Some(generation) = control.generation.checked_add(1) else {
+        for (source, origin) in &sources {
+            if *origin != CatalogOrigin::Acp {
+                continue;
+            }
+            commands.entity(source).insert(CatalogCapability::Failed);
+            if let Ok(error) = vmux_ecs::OperationError::new("catalog generation exhausted") {
+                commands.entity(source).insert(error);
+            }
+        }
+        return;
+    };
+    control.generation = generation;
+    commands.entity(*entity).insert(CatalogBatch {
+        generation,
+        shell: settings.shell(),
+        cwd,
+    });
+}
+
+fn installed_catalogs(
+    batches: Query<&CatalogBatch>,
+    agents: Query<(Entity, &RegistryAgent, &Checked), With<InstalledAgent>>,
+    sources: Query<(Entity, &AgentId, &CatalogOrigin), With<CatalogSource>>,
+    mut state: Single<&mut CatalogControl>,
+    mut commands: Commands,
+) {
+    let Ok(batch) = batches.single() else {
+        return;
+    };
+    for (agent_entity, agent, checked) in &agents {
+        let Some((source, _, _)) = sources
+            .iter()
+            .find(|(_, id, origin)| **origin == CatalogOrigin::Acp && id.0 == agent.id)
+        else {
+            continue;
+        };
+        commands.entity(source).insert((
+            Name::new(agent.name.clone()),
+            CatalogGeneration(batch.generation),
+        ));
+        let Some(wire_id) = state.next_request_id.checked_add(1) else {
+            commands.entity(source).insert(CatalogCapability::Failed);
+            if let Ok(error) = vmux_ecs::OperationError::new("catalog wire ID exhausted") {
+                commands.entity(source).insert(error);
+            }
+            continue;
+        };
+        state.next_request_id = wire_id;
+        let operation = commands
+            .spawn((
+                AcpCatalogRead,
+                CatalogBinding {
+                    agent: agent_entity,
+                    source: checked.clone(),
+                },
+                CatalogRead {
+                    generation: batch.generation,
+                    wire_id,
+                },
+                vmux_ecs::Operation::bundle("provider catalog").expect("catalog operation kind"),
+                ChildOf(source),
+            ))
+            .id();
+        commands
+            .entity(source)
+            .insert((
+                CatalogCapability::Pending,
+                EntityTarget::<CatalogRead>::new(operation),
+            ))
+            .remove::<moonshine_save::prelude::Save>();
+        let preparation = commands
+            .spawn((
+                Name::new(format!("Prepare installed ACP catalog {}", agent.id)),
+                vmux_ecs::Operation::bundle("acp.catalog.prepare").unwrap(),
+                vmux_ecs::OperationRetained,
+                vmux_ecs::OperationTarget::new(operation),
+                installed_launch::Request {
+                    agent: agent_entity,
+                    source: checked.clone(),
+                    shell: batch.shell.clone(),
+                },
+            ))
+            .id();
+        commands.entity(operation).insert(CatalogPreparing {
+            preparation,
+            agent: agent.id.clone(),
+            name: agent.name.clone(),
+            cwd: batch.cwd.clone(),
+        });
+    }
+}
+
+fn configured_catalogs(
+    batches: Query<(Entity, &CatalogBatch)>,
+    agents: Query<&RegistryAgent, With<InstalledAgent>>,
+    sources: Query<(Entity, &AgentId, &CatalogOrigin), With<CatalogSource>>,
+    settings: Option<Res<AppSettings>>,
+    mut state: Single<&mut CatalogControl>,
+    mut commands: Commands,
+) {
+    let Ok((batch_entity, batch)) = batches.single() else {
+        return;
+    };
+    let Some(settings) = settings else {
+        commands.entity(batch_entity).remove::<CatalogBatch>();
+        return;
+    };
+    let mut present = HashSet::new();
+    let mut families = HashSet::new();
+    for agent in &agents {
+        present.insert(agent.id.clone());
+        families.insert(AgentFamily::of(&agent.id));
+    }
+    for config in &settings.agent.acp {
+        if config.command.trim().is_empty()
+            || present.contains(&config.id)
+            || families.contains(&AgentFamily::of(&config.id))
         {
             continue;
         }
-        outstanding += 1;
-        if started.is_some() {
-            running += 1;
-        } else if wire.is_some() {
-            queued.push((read.wire_id, entity));
+        present.insert(config.id.clone());
+        let Some((source, _, _)) = sources
+            .iter()
+            .find(|(_, id, origin)| **origin == CatalogOrigin::Acp && id.0 == config.id)
+        else {
+            continue;
+        };
+        commands.entity(source).insert((
+            Name::new(config.name.clone()),
+            CatalogGeneration(batch.generation),
+        ));
+        let launch = match AcpLaunch::configured_catalog(config, &batch.shell) {
+            Ok(launch) => launch,
+            Err(error) => {
+                bevy::log::debug!("configured ACP catalog skipped for {}: {error}", config.id);
+                commands.entity(source).insert(CatalogCapability::Failed);
+                if let Ok(error) = vmux_ecs::OperationError::new(error) {
+                    commands.entity(source).insert(error);
+                }
+                continue;
+            }
+        };
+        let Some(wire_id) = state.next_request_id.checked_add(1) else {
+            commands.entity(source).insert(CatalogCapability::Failed);
+            if let Ok(error) = vmux_ecs::OperationError::new("catalog wire ID exhausted") {
+                commands.entity(source).insert(error);
+            }
+            continue;
+        };
+        state.next_request_id = wire_id;
+        let operation = commands
+            .spawn((
+                AcpCatalogRead,
+                CatalogRead {
+                    generation: batch.generation,
+                    wire_id,
+                },
+                vmux_ecs::Operation::bundle("provider catalog").expect("catalog operation kind"),
+                ChildOf(source),
+            ))
+            .id();
+        commands
+            .entity(source)
+            .insert((
+                CatalogCapability::Pending,
+                EntityTarget::<CatalogRead>::new(operation),
+            ))
+            .remove::<moonshine_save::prelude::Save>();
+        let cwd = config
+            .cwd
+            .as_deref()
+            .filter(|path| path.is_dir())
+            .unwrap_or(&batch.cwd);
+        commands
+            .entity(operation)
+            .insert(CatalogQueued(launch.catalog_message(
+                wire_id,
+                &config.id,
+                &config.name,
+                cwd,
+            )));
+    }
+    commands.entity(batch_entity).remove::<CatalogBatch>();
+}
+
+fn prepared_catalogs(
+    operations: Query<(
+        Entity,
+        &CatalogPreparing,
+        &CatalogRead,
+        &ChildOf,
+        &vmux_ecs::OperationState,
+    )>,
+    preparations: Query<&installed_launch::Completed>,
+    mut commands: Commands,
+) {
+    for (entity, preparing, read, parent, state) in &operations {
+        let Ok(result) = preparations.get(preparing.preparation) else {
+            continue;
+        };
+        if !matches!(
+            state,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            continue;
+        }
+        commands.entity(entity).remove::<CatalogPreparing>();
+        match &result.0 {
+            Ok(launch) => {
+                commands
+                    .entity(entity)
+                    .insert(CatalogQueued(launch.catalog_message(
+                        read.wire_id,
+                        &preparing.agent,
+                        &preparing.name,
+                        &preparing.cwd,
+                    )));
+            }
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert(vmux_ecs::OperationState::Failed);
+                commands
+                    .entity(parent.parent())
+                    .insert(CatalogCapability::Failed)
+                    .remove::<EntityTarget<CatalogRead>>();
+                if let Ok(error) = vmux_ecs::OperationError::new(error.clone()) {
+                    commands.entity(parent.parent()).insert(error);
+                }
+            }
         }
     }
-    if state.refresh && outstanding == 0 {
-        let Some(settings) = settings else {
-            return;
-        };
-        let Some(cwd) = CatalogCwd::current() else {
-            return;
-        };
-        state.refresh = false;
-        let Some(generation) = state.generation.checked_add(1) else {
-            for source in source_entities.values() {
-                commands.entity(*source).insert(CatalogCapability::Failed);
-                if let Ok(error) = vmux_ecs::OperationError::new("catalog generation exhausted") {
-                    commands.entity(*source).insert(error);
-                }
-            }
-            return;
-        };
-        state.generation = generation;
-        let shell = settings.shell();
-        let mut installed = HashSet::new();
-        let mut installed_families = HashSet::new();
-        let mut created = Vec::new();
-        for agent in &agents {
-            if !agent.is_installed() {
-                continue;
-            }
-            installed.insert(agent.id.clone());
-            installed_families.insert(AgentFamily::of(&agent.id));
-            let Some(source_entity) = source_entities.get(&agent.id).copied() else {
-                continue;
-            };
-            commands
-                .entity(source_entity)
-                .insert((Name::new(agent.name.clone()), CatalogGeneration(generation)));
-            let launch = match AcpLaunch::installed_catalog(&agent, &shell) {
-                Ok(launch) => launch,
-                Err(error) => {
-                    bevy::log::warn!("failed to resolve installed ACP {}: {error}", agent.id);
-                    commands
-                        .entity(source_entity)
-                        .insert(CatalogCapability::Failed);
-                    if let Ok(error) = vmux_ecs::OperationError::new(error) {
-                        commands.entity(source_entity).insert(error);
-                    }
-                    continue;
-                }
-            };
-            let Some(request_id) = state.next_request_id.checked_add(1) else {
-                commands
-                    .entity(source_entity)
-                    .insert(CatalogCapability::Failed);
-                if let Ok(error) = vmux_ecs::OperationError::new("catalog wire ID exhausted") {
-                    commands.entity(source_entity).insert(error);
-                }
-                continue;
-            };
-            state.next_request_id = request_id;
-            let operation = commands
-                .spawn((
-                    AcpCatalogRead,
-                    CatalogRead {
-                        generation,
-                        wire_id: request_id,
-                    },
-                    vmux_ecs::Operation::bundle("provider catalog")
-                        .expect("catalog operation kind"),
-                    ChildOf(source_entity),
-                ))
-                .id();
-            commands
-                .entity(source_entity)
-                .insert((
-                    Name::new(agent.name.clone()),
-                    CatalogGeneration(generation),
-                    CatalogCapability::Pending,
-                    EntityTarget::<CatalogRead>::new(operation),
-                ))
-                .remove::<moonshine_save::prelude::Save>();
+}
 
-            let message = launch.catalog_message(request_id, &agent.id, &agent.name, &cwd);
-            if created.len() < CATALOG_CONCURRENCY {
-                requests.write(ServiceRequest(message));
-                commands.entity(operation).insert((
-                    vmux_ecs::OperationState::Running,
-                    CatalogStarted(Instant::now()),
-                ));
-                commands
-                    .entity(source_entity)
-                    .insert(CatalogCapability::Pending);
-            } else {
-                commands.entity(operation).insert(CatalogQueued(message));
-            }
-            created.push(operation);
-        }
-        for config in &settings.agent.acp {
-            if config.command.trim().is_empty()
-                || installed.contains(&config.id)
-                || installed_families.contains(&AgentFamily::of(&config.id))
-            {
-                continue;
-            }
-            installed.insert(config.id.clone());
-            let Some(source_entity) = source_entities.get(&config.id).copied() else {
-                continue;
-            };
-            commands.entity(source_entity).insert((
-                Name::new(config.name.clone()),
-                CatalogGeneration(generation),
-            ));
-            let launch = match AcpLaunch::configured_catalog(config, &shell) {
-                Ok(launch) => launch,
-                Err(error) => {
-                    bevy::log::debug!("configured ACP catalog skipped for {}: {error}", config.id);
-                    commands
-                        .entity(source_entity)
-                        .insert(CatalogCapability::Failed);
-                    if let Ok(error) = vmux_ecs::OperationError::new(error) {
-                        commands.entity(source_entity).insert(error);
-                    }
-                    continue;
-                }
-            };
-            let Some(request_id) = state.next_request_id.checked_add(1) else {
-                commands
-                    .entity(source_entity)
-                    .insert(CatalogCapability::Failed);
-                if let Ok(error) = vmux_ecs::OperationError::new("catalog wire ID exhausted") {
-                    commands.entity(source_entity).insert(error);
-                }
-                continue;
-            };
-            state.next_request_id = request_id;
-            let operation = commands
-                .spawn((
-                    AcpCatalogRead,
-                    CatalogRead {
-                        generation,
-                        wire_id: request_id,
-                    },
-                    vmux_ecs::Operation::bundle("provider catalog")
-                        .expect("catalog operation kind"),
-                    ChildOf(source_entity),
-                ))
-                .id();
-            commands
-                .entity(source_entity)
-                .insert((
-                    Name::new(config.name.clone()),
-                    CatalogGeneration(generation),
-                    CatalogCapability::Pending,
-                    EntityTarget::<CatalogRead>::new(operation),
-                ))
-                .remove::<moonshine_save::prelude::Save>();
+fn retire_catalogs(sources: Query<Entity, With<RetiringCatalog>>, mut commands: Commands) {
+    for entity in &sources {
+        commands.entity(entity).despawn();
+    }
+}
 
-            let configured_cwd = config
-                .cwd
-                .as_deref()
-                .filter(|path| path.is_dir())
-                .unwrap_or(&cwd);
-            let message =
-                launch.catalog_message(request_id, &config.id, &config.name, configured_cwd);
-            if created.len() < CATALOG_CONCURRENCY {
-                requests.write(ServiceRequest(message));
-                commands.entity(operation).insert((
-                    vmux_ecs::OperationState::Running,
-                    CatalogStarted(Instant::now()),
-                ));
-                commands
-                    .entity(source_entity)
-                    .insert(CatalogCapability::Pending);
-            } else {
-                commands.entity(operation).insert(CatalogQueued(message));
-            }
-            created.push(operation);
-        }
-
+fn send_catalogs(
+    operations: Query<
+        (
+            Entity,
+            &ChildOf,
+            &CatalogRead,
+            &vmux_ecs::OperationState,
+            Option<&CatalogStarted>,
+            Option<&CatalogQueued>,
+            Option<&CatalogBinding>,
+        ),
+        With<AcpCatalogRead>,
+    >,
+    sources: Query<&EntityTarget<CatalogRead>, (With<CatalogSource>, Without<RetiringCatalog>)>,
+    witness: CatalogWitness,
+    connected: Query<(), With<ServiceConnected>>,
+    mut requests: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
+) {
+    if connected.is_empty() {
         return;
+    }
+    let mut running = 0;
+    let mut queued = Vec::new();
+    for (entity, _, read, state, started, _, _) in &operations {
+        if !matches!(
+            state,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            continue;
+        }
+        if started.is_some() {
+            running += 1;
+        } else {
+            queued.push((read.wire_id, entity));
+        }
     }
     queued.sort_by_key(|(order, _)| *order);
     for (_, operation) in queued {
         if running >= CATALOG_CONCURRENCY {
             break;
         }
-        let Ok((_, parent, _, _, _, Some(wire))) = operations.get(operation) else {
+        let Ok((_, parent, _, _, _, wire, binding)) = operations.get(operation) else {
             continue;
         };
-        if sources.get(parent.parent()).is_err() {
+        let Some(wire) = wire else {
+            break;
+        };
+        if binding.is_some_and(|binding| !witness.accepts(binding)) {
+            continue;
+        }
+        if !sources
+            .get(parent.parent())
+            .is_ok_and(|target| target.entity() == operation)
+        {
             continue;
         }
         requests.write(ServiceRequest(wire.0.clone()));
@@ -667,7 +827,13 @@ fn request_catalogs(
 fn receive_catalogs(
     mut received: MessageReader<AcpCatalogReceived>,
     operations: Query<
-        (Entity, &ChildOf, &CatalogRead, &vmux_ecs::OperationState),
+        (
+            Entity,
+            &ChildOf,
+            &CatalogRead,
+            &vmux_ecs::OperationState,
+            Option<&CatalogBinding>,
+        ),
         (Without<CatalogQueued>, With<CatalogStarted>),
     >,
     sources: Query<
@@ -677,17 +843,21 @@ fn receive_catalogs(
             &EntityTarget<CatalogRead>,
             &CatalogOrigin,
         ),
-        With<CatalogSource>,
+        (With<CatalogSource>, Without<RetiringCatalog>),
     >,
+    witness: CatalogWitness,
     mut canonical: MessageWriter<CatalogReceived>,
 ) {
     for received in received.read() {
-        let Some((operation, parent, read, status)) = operations
+        let Some((operation, parent, read, status, binding)) = operations
             .iter()
-            .find(|(_, _, read, _)| read.wire_id == received.request_id)
+            .find(|(_, _, read, _, _)| read.wire_id == received.request_id)
         else {
             continue;
         };
+        if binding.is_some_and(|binding| !witness.accepts(binding)) {
+            continue;
+        }
         let Ok((agent, generation, target, origin)) = sources.get(parent.parent()) else {
             continue;
         };
@@ -3001,16 +3171,13 @@ fn imported(
 struct AgentCatalog<'w, 's> {
     settings: Res<'w, AppSettings>,
     registry: Query<'w, 's, &'static RegistryAgent>,
+    installed: Query<'w, 's, &'static RegistryAgent, With<InstalledAgent>>,
 }
 
 impl AgentCatalog<'_, '_> {
     fn resolve(&self, source: &str) -> AgentId {
         let family = AgentFamily::of(source);
-        if let Some(agent) = self
-            .registry
-            .iter()
-            .find(|agent| agent.id == source && agent.is_installed())
-        {
+        if let Some(agent) = self.installed.iter().find(|agent| agent.id == source) {
             return AgentId(agent.id.clone());
         }
         if let Some(config) = self
@@ -3023,9 +3190,9 @@ impl AgentCatalog<'_, '_> {
             return AgentId(config.id.clone());
         }
         if let Some(agent) = self
-            .registry
+            .installed
             .iter()
-            .find(|agent| AgentFamily::of(&agent.id) == family && agent.is_installed())
+            .find(|agent| AgentFamily::of(&agent.id) == family)
         {
             return AgentId(agent.id.clone());
         }
@@ -3079,6 +3246,265 @@ mod tests {
     use bevy_ecs::system::RunSystemOnce;
     use std::io::Write;
     use vmux_ecs::PageMetadata;
+    use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
+
+    struct QueuedCatalogFixture {
+        app: App,
+        agent: Entity,
+        profile: Entity,
+        source: Entity,
+        read: Entity,
+        snapshot: Checked,
+        _directory: tempfile::TempDir,
+    }
+
+    impl QueuedCatalogFixture {
+        fn new(started: bool) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let paths = ProfilePaths::at(Profile::named("test"), directory.path().join("data"));
+            let mut settings = AppSettings::default();
+            settings.agent.acp = vec![vmux_setting::AcpAgentConfig {
+                id: "agent".into(),
+                name: "Agent".into(),
+                command: "configured-fallback".into(),
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+                version: None,
+            }];
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, CatalogPlugin))
+                .insert_resource(settings);
+            app.world_mut().spawn((SessionManagerView, PageReady));
+            app.world_mut().spawn(ServiceConnected);
+            let profile = app
+                .world_mut()
+                .spawn((
+                    Name::new("Test"),
+                    ActiveProfile(Profile::named("test")),
+                    ProfileDirectories(paths.clone()),
+                ))
+                .id();
+            let catalog = app.world_mut().spawn_empty().id();
+            let snapshot = Checked::new(profile, paths.agents(), catalog, 1);
+            for index in 0..CATALOG_CONCURRENCY {
+                let id = format!("blocker-{index}");
+                let agent = app
+                    .world_mut()
+                    .spawn((
+                        RegistryAgent::test(&id, &id, None),
+                        InstalledAgent,
+                        snapshot.clone(),
+                    ))
+                    .id();
+                let source = app
+                    .world_mut()
+                    .spawn((
+                        CatalogSource,
+                        CatalogOrigin::Acp,
+                        CatalogGeneration(1),
+                        CatalogCapability::Pending,
+                        AgentId(id),
+                        Name::new("Blocker"),
+                    ))
+                    .id();
+                let operation = app
+                    .world_mut()
+                    .spawn((
+                        AcpCatalogRead,
+                        CatalogBinding {
+                            agent,
+                            source: snapshot.clone(),
+                        },
+                        CatalogRead {
+                            generation: 1,
+                            wire_id: index as u64 + 1,
+                        },
+                        vmux_ecs::Operation::bundle("fixture.blocking.catalog")
+                            .unwrap()
+                            .running(),
+                        CatalogStarted(Instant::now()),
+                        ChildOf(source),
+                    ))
+                    .id();
+                app.world_mut()
+                    .entity_mut(source)
+                    .insert(EntityTarget::<CatalogRead>::new(operation));
+            }
+            let agent = app
+                .world_mut()
+                .spawn((
+                    RegistryAgent::test("agent", "Agent", None),
+                    InstalledAgent,
+                    snapshot.clone(),
+                ))
+                .id();
+            let source = app
+                .world_mut()
+                .spawn((
+                    CatalogSource,
+                    CatalogOrigin::Acp,
+                    CatalogGeneration(1),
+                    CatalogCapability::Pending,
+                    AgentId("agent".into()),
+                    Name::new("Agent"),
+                ))
+                .id();
+            let read = app
+                .world_mut()
+                .spawn((
+                    AcpCatalogRead,
+                    CatalogBinding {
+                        agent,
+                        source: snapshot.clone(),
+                    },
+                    CatalogRead {
+                        generation: 1,
+                        wire_id: 99,
+                    },
+                    vmux_ecs::Operation::bundle("fixture.queued.catalog").unwrap(),
+                    ChildOf(source),
+                ))
+                .id();
+            if started {
+                app.world_mut().entity_mut(read).insert((
+                    vmux_ecs::OperationState::Running,
+                    CatalogStarted(Instant::now()),
+                ));
+            } else {
+                app.world_mut().entity_mut(read).insert(CatalogQueued(
+                    vmux_api::protocol::ClientMessage::ListAcpSessions {
+                        request_id: 99,
+                        agent_id: "agent".into(),
+                        agent_name: "Agent".into(),
+                        command: "old-installed".into(),
+                        args: Vec::new(),
+                        env: Vec::new(),
+                        cwd: directory.path().to_string_lossy().into_owned(),
+                    },
+                ));
+            }
+            app.world_mut()
+                .entity_mut(source)
+                .insert(EntityTarget::<CatalogRead>::new(read));
+            Self {
+                app,
+                agent,
+                profile,
+                source,
+                read,
+                snapshot,
+                _directory: directory,
+            }
+        }
+
+        fn response(&mut self) {
+            self.app.world_mut().write_message(AcpCatalogReceived {
+                request_id: 99,
+                agent_id: "agent".into(),
+                agent_name: "Agent".into(),
+                supported: true,
+                sessions: Vec::new(),
+                error: None,
+            });
+        }
+    }
+
+    #[test]
+    fn queued_and_started_installed_catalogs_refuse_revoked_same_id_fallback_sources() {
+        for (started, replace_profile) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let mut fixture = QueuedCatalogFixture::new(started);
+            fixture.app.update();
+            if replace_profile {
+                let paths = ProfilePaths::at(
+                    Profile::named("other"),
+                    fixture._directory.path().join("other"),
+                );
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<ProfileDirectories>(fixture.profile)
+                    .unwrap()
+                    .0 = paths;
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.agent)
+                    .remove::<(Checked, InstalledAgent)>();
+            }
+            fixture.response();
+            fixture.app.update();
+            assert!(
+                fixture.app.world().get_entity(fixture.source).is_ok(),
+                "configured source identity must remain stable"
+            );
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_ecs::OperationState>(fixture.read),
+                Some(&vmux_ecs::OperationState::Canceled)
+            );
+            let requests = fixture.app.world().resource::<Messages<ServiceRequest>>();
+            let mut reader = requests.get_cursor();
+            let mut canceled = false;
+            for request in reader.read(requests) {
+                match &request.0 {
+                    vmux_api::protocol::ClientMessage::ListAcpSessions { command, .. } => {
+                        assert_ne!(command, "old-installed")
+                    }
+                    vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog {
+                        request_id: 99,
+                    } => canceled = true,
+                    _ => {}
+                }
+            }
+            assert_eq!(canceled, started);
+            let received = fixture.app.world().resource::<Messages<CatalogReceived>>();
+            let mut reader = received.get_cursor();
+            assert!(
+                reader
+                    .read(received)
+                    .all(|received| received.operation != fixture.read)
+            );
+        }
+    }
+
+    #[test]
+    fn pending_readiness_keeps_source_until_wire_cancellation_and_reuses_its_identity() {
+        let mut fixture = QueuedCatalogFixture::new(true);
+        fixture.app.update();
+        fixture
+            .app
+            .world_mut()
+            .resource_mut::<AppSettings>()
+            .agent
+            .acp
+            .clear();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.agent)
+            .remove::<(Checked, InstalledAgent)>();
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(fixture.source).is_ok());
+        let requests = fixture.app.world().resource::<Messages<ServiceRequest>>();
+        let mut reader = requests.get_cursor();
+        assert!(reader.read(requests).any(|request| matches!(
+            request.0,
+            vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog { request_id: 99 }
+        )));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.agent)
+            .insert((InstalledAgent, fixture.snapshot.clone()));
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(fixture.source).is_ok());
+    }
 
     struct ImportFixture {
         app: App,

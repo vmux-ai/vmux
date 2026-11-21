@@ -30,6 +30,17 @@ pub(crate) struct AcpWorkspacePolicy {
     pub(crate) repository_needs_worktree: String,
 }
 
+#[cfg(test)]
+impl AcpWorkspacePolicy {
+    pub(crate) fn bundled() -> Self {
+        FeatureManifest::of::<crate::Feature>()
+            .policies::<AgentPolicies>()
+            .unwrap()
+            .unwrap()
+            .acp_workspace
+    }
+}
+
 fn load(
     manifests: Query<
         (Entity, &FeatureManifest),

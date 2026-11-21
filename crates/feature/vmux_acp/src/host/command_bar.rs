@@ -8,26 +8,23 @@ use vmux_ecs::{Cwd, EntityTarget, LastActivatedAt};
 use vmux_session::SessionId;
 use vmux_session::{AgentId, Session};
 
-use super::acp::AcpPackageChanged;
+use super::acp::installed::{InstalledAgent, InstalledSet};
 use super::acp::registry::RegistryAgent;
 use vmux_session::Route as SessionRoute;
 
-pub(super) fn add(app: &mut App) {
-    app.add_message::<AcpPackageChanged>().add_systems(
-        Update,
-        (
-            sync_work_directories,
-            sync_installed,
-            ApplyDeferred,
-            publish,
-        )
-            .chain()
-            .in_set(WriteCommandBarSnapshots),
-    );
-}
+pub(super) struct CommandBarPlugin;
 
-#[derive(Component)]
-struct InstalledAgent;
+impl Plugin for CommandBarPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (sync_work_directories, retire, publish)
+                .chain()
+                .in_set(WriteCommandBarSnapshots)
+                .after(InstalledSet),
+        );
+    }
+}
 
 fn sync_work_directories(
     sessions: Query<Ref<Cwd>, With<Session>>,
@@ -55,27 +52,19 @@ fn sync_work_directories(
     }
 }
 
-fn sync_installed(
-    agents: Query<(Entity, Ref<RegistryAgent>, Has<InstalledAgent>)>,
-    mut packages: MessageReader<AcpPackageChanged>,
+fn retire(
+    agents: Query<
+        Entity,
+        (
+            With<RegistryAgent>,
+            With<ContributedPage>,
+            Without<InstalledAgent>,
+        ),
+    >,
     mut commands: Commands,
 ) {
-    let refresh = packages.read().count() > 0;
-    for (entity, agent, installed) in &agents {
-        if !refresh && !agent.is_added() && !agent.is_changed() {
-            continue;
-        }
-        match (agent.is_installed(), installed) {
-            (true, false) => {
-                commands.entity(entity).insert(InstalledAgent);
-            }
-            (false, true) => {
-                commands
-                    .entity(entity)
-                    .remove::<(InstalledAgent, ContributedPage)>();
-            }
-            _ => {}
-        }
+    for entity in &agents {
+        commands.entity(entity).remove::<ContributedPage>();
     }
 }
 

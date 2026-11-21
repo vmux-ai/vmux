@@ -17,9 +17,12 @@ impl bevy::prelude::Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(replace)
             .add_observer(remove)
-            .add_systems(Update, track.before(crate::host::ProjectionSet));
+            .add_systems(Update, track.before(ProjectionSet));
     }
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ProjectionSet;
 
 #[derive(Component, Default)]
 pub(crate) struct Catalog {
@@ -42,25 +45,25 @@ pub(crate) struct Received {
 pub(crate) struct Item;
 
 #[derive(Component)]
-pub(crate) struct Id(String);
+pub struct Id(pub String);
 
 #[derive(Component)]
-struct Version(Option<String>);
+pub struct Version(pub Option<String>);
 
 #[derive(Component)]
-struct Icon(Option<String>);
+pub struct Icon(pub Option<String>);
 
 #[derive(Component)]
-struct Detail(String);
+pub struct Detail(pub String);
 
 #[derive(Component)]
-struct Status(ToolStatus);
+pub struct Status(pub ToolStatus);
 
 #[derive(Component)]
 struct Managed;
 
 #[derive(Component)]
-struct Operations(Vec<ToolOperationKind>);
+pub struct Operations(pub Vec<ToolOperationKind>);
 
 type Items<'w, 's> = Query<
     'w,

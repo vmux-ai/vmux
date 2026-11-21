@@ -142,6 +142,16 @@ impl ProjectsDirectory {
 }
 
 impl ProfilePaths {
+    pub fn at(profile: Profile, data: PathBuf) -> Self {
+        assert!(data.is_absolute(), "profile data root must be absolute");
+        Self {
+            build: build_profile(),
+            profile,
+            data,
+            test: false,
+        }
+    }
+
     pub fn current() -> Self {
         #[cfg(target_os = "macos")]
         let base = home_dir().join("Library/Application Support");

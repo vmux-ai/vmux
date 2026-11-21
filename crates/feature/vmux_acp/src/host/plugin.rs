@@ -12,7 +12,7 @@ pub struct AcpPlugin;
 impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((super::acp::ConfigPlugin, super::runtime::RuntimePlugin));
-        super::command_bar::add(app);
+        app.add_plugins(super::command_bar::CommandBarPlugin);
         app.add_plugins(super::approval::ApprovalPlugin);
         app.add_plugins(super::attach::AttachPlugin);
         app.add_plugins(super::attention::AttentionPlugin);

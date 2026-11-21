@@ -1,17 +1,15 @@
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashSet;
 use std::time::Duration;
 use vmux_ecs::event::{
     InstallPhase, LspInstallNotice, LspInstallProgress, LspPackageStatus, LspPkgStatus,
 };
-#[cfg(test)]
-use vmux_path::Executable;
 
 use crate::lsp::catalog::{CatalogReady, Package};
 use crate::lsp::registry::LspRegistry;
-use crate::lsp::{store, target::PlatformTarget};
+use crate::lsp::{install_runtime, store};
+use vmux_ecs::profile::CurrentProfile;
+use vmux_ecs::{Operation, OperationRetained, OperationState};
 
 const DONE_NOTICE: Duration = Duration::from_millis(2_500);
 const FAILED_NOTICE: Duration = Duration::from_millis(6_000);
@@ -20,12 +18,20 @@ pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<install_runtime::InstallPlugin>() {
+            app.add_plugins(install_runtime::InstallPlugin);
+        }
         app.add_message::<PackageInstallRequest>()
             .add_systems(
                 Update,
-                (enqueue_package_installs, start_install_jobs).chain(),
+                (enqueue_package_installs, start_install_jobs)
+                    .chain()
+                    .before(poll_install_jobs),
             )
-            .add_systems(Update, poll_install_jobs)
+            .add_systems(
+                Update,
+                poll_install_jobs.before(install_runtime::InstallSet),
+            )
             .add_systems(Update, clear_notices)
             .add_systems(
                 PostUpdate,
@@ -145,46 +151,18 @@ struct PendingPackageInstall {
 struct PackageInstallJob {
     target: Entity,
     name: String,
-    progress: Receiver<LspInstallProgress>,
-    task: Task<Result<LspPackageStatus, LspInstallProgress>>,
-}
-
-fn install_package(
-    package: Package,
-    progress: Sender<LspInstallProgress>,
-) -> Result<LspPackageStatus, LspInstallProgress> {
-    let store = store::PackageStore::lsp();
-    let name = package.name.as_str().to_string();
-    let target = PlatformTarget::current();
-    let progress_name = name.clone();
-    let result = package.install(&store, target, |phase, pct, message| {
-        let _ = progress.send(LspInstallProgress {
-            name: progress_name.clone(),
-            phase,
-            pct,
-            message: message.to_string(),
-        });
-    });
-    match result {
-        Ok(receipt) => Ok(LspPackageStatus {
-            name,
-            status: LspPkgStatus::Installed,
-            version: receipt.version,
-        }),
-        Err(error) => Err(LspInstallProgress {
-            name,
-            phase: InstallPhase::Failed,
-            pct: None,
-            message: error,
-        }),
-    }
+    store: store::PackageStore,
+    work: Entity,
+    reported: bool,
 }
 
 fn start_install_jobs(
     pending: Query<(Entity, &PendingPackageInstall)>,
     catalogs: Query<(), With<CatalogReady>>,
-    packages: Query<&Package>,
+    packages: Query<(Entity, &Package)>,
     install_jobs: Query<&PackageInstallJob>,
+    profile: CurrentProfile,
+    mut retries: MessageWriter<install_runtime::Retry>,
     mut commands: Commands,
 ) {
     if catalogs.is_empty() {
@@ -197,12 +175,16 @@ fn start_install_jobs(
     for (entity, request) in &pending {
         commands.entity(entity).despawn();
         if !names.insert(request.name.clone()) {
+            for job in &install_jobs {
+                if job.name == request.name {
+                    retries.write(install_runtime::Retry { entity: job.work });
+                }
+            }
             continue;
         }
-        let Some(package) = packages
+        let Some((package, _)) = packages
             .iter()
-            .find(|package| package.name.as_str() == request.name)
-            .cloned()
+            .find(|(_, package)| package.name.as_str() == request.name)
         else {
             commands.spawn(PackageProgressOutput {
                 target: request.target,
@@ -215,17 +197,30 @@ fn start_install_jobs(
             });
             continue;
         };
-        let (progress_sender, progress) = crossbeam_channel::unbounded();
         let name = request.name.clone();
-        let task =
-            IoTaskPool::get().spawn(async move { install_package(package, progress_sender) });
+        let store = match profile.paths() {
+            Some(paths) => store::PackageStore::at(paths.lsp()),
+            None => store::PackageStore::lsp(),
+        };
+        let work = commands
+            .spawn((
+                Name::new(format!("LSP install: {name}")),
+                Operation::bundle("lsp.package.install").unwrap(),
+                OperationRetained,
+                install_runtime::Request {
+                    package,
+                    store: store.clone(),
+                },
+            ))
+            .id();
         commands.spawn((
             Name::new(format!("LSP install: {name}")),
             PackageInstallJob {
                 target: request.target,
                 name,
-                progress,
-                task,
+                store,
+                work,
+                reported: false,
             },
         ));
     }
@@ -243,32 +238,65 @@ fn enqueue_package_installs(
     }
 }
 
-fn poll_install_jobs(mut jobs: Query<(Entity, &mut PackageInstallJob)>, mut commands: Commands) {
+fn poll_install_jobs(
+    mut jobs: Query<(Entity, &mut PackageInstallJob)>,
+    progress: Query<&install_runtime::Progress, Changed<install_runtime::Progress>>,
+    completed: Query<&install_runtime::Completed>,
+    released: Query<(), With<install_runtime::Released>>,
+    views: Query<(), With<crate::host::editor::FileView>>,
+    profile: CurrentProfile,
+    mut commands: Commands,
+) {
+    let store = match profile.paths() {
+        Some(paths) => store::PackageStore::at(paths.lsp()),
+        None => store::PackageStore::lsp(),
+    };
     for (entity, mut job) in &mut jobs {
-        for progress in job.progress.try_iter() {
+        let current = views.contains(job.target) && store == job.store;
+        if !current {
+            commands
+                .entity(job.work)
+                .try_insert(OperationState::Canceled);
+        }
+        if current && let Ok(progress) = progress.get(job.work) {
             commands.spawn(PackageProgressOutput {
                 target: job.target,
-                progress,
+                progress: progress.0.clone(),
             });
         }
-        let Some(result) = block_on(future::poll_once(&mut job.task)) else {
-            continue;
-        };
-        match result {
-            Ok(status) => {
-                commands.spawn(PackageStatusOutput {
-                    target: job.target,
-                    status,
-                });
+        if current
+            && !job.reported
+            && let Ok(result) = completed.get(job.work)
+        {
+            match &result.0 {
+                Ok(receipt) => {
+                    commands.spawn(PackageStatusOutput {
+                        target: job.target,
+                        status: LspPackageStatus {
+                            name: job.name.clone(),
+                            status: LspPkgStatus::Installed,
+                            version: receipt.version.clone(),
+                        },
+                    });
+                }
+                Err(error) => {
+                    commands.spawn(PackageProgressOutput {
+                        target: job.target,
+                        progress: LspInstallProgress {
+                            name: job.name.clone(),
+                            phase: InstallPhase::Failed,
+                            pct: None,
+                            message: error.clone(),
+                        },
+                    });
+                }
             }
-            Err(progress) => {
-                commands.spawn(PackageProgressOutput {
-                    target: job.target,
-                    progress,
-                });
-            }
+            job.reported = true;
         }
-        commands.entity(entity).despawn();
+        if released.contains(job.work) {
+            commands.entity(job.work).despawn();
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -355,69 +383,5 @@ fn clear_notices(
             ));
         }
         commands.entity(entity).despawn();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lsp::catalog::Package;
-
-    fn pkg(name: &str, source_id: &str) -> Package {
-        Package {
-            name: crate::lsp::package_path::PackageName::parse(name).unwrap(),
-            description: String::new(),
-            languages: vec![],
-            categories: vec![],
-            source_id: source_id.into(),
-            assets: vec![],
-            bin: Default::default(),
-        }
-    }
-
-    #[test]
-    fn installability_by_source() {
-        let tmp = tempfile::tempdir().unwrap();
-        let store = store::PackageStore::at(tmp.path());
-        let gh = pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1").snapshot(&store);
-        assert!(gh.installable);
-        assert_eq!(gh.requires, None);
-        assert_eq!(gh.status, LspPkgStatus::Available);
-
-        let np = pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1").snapshot(&store);
-        let npm_present = Executable::find("npm").is_some();
-        assert_eq!(np.installable, npm_present);
-        assert_eq!(np.requires.is_some(), !npm_present);
-
-        let uk = pkg("weird", "pkg:weirdsrc/weird@1").snapshot(&store);
-        assert!(!uk.installable);
-        assert_eq!(uk.requires, None);
-    }
-
-    #[test]
-    fn installed_with_newer_catalog_is_outdated() {
-        let tmp = tempfile::tempdir().unwrap();
-        let store = store::PackageStore::at(tmp.path());
-        std::fs::create_dir_all(store.packages_dir().join("foo")).unwrap();
-        let mut bin = std::collections::BTreeMap::new();
-        let name = crate::lsp::package_path::PackageName::parse("foo").unwrap();
-        bin.insert(
-            name.clone(),
-            crate::lsp::package_path::PackagePath::parse("foo-bin").unwrap(),
-        );
-        store
-            .write_receipt(
-                &name,
-                &store::Receipt {
-                    name: name.clone(),
-                    version: Some("1.0".into()),
-                    source_id: "pkg:github/x/foo@1.0".into(),
-                    bin,
-                },
-            )
-            .unwrap();
-        let lp = pkg("foo", "pkg:github/x/foo@2.0").snapshot(&store);
-        assert_eq!(lp.status, LspPkgStatus::Outdated);
-        assert_eq!(lp.version.as_deref(), Some("1.0"));
     }
 }

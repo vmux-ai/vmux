@@ -14,7 +14,7 @@ pub struct PackageStore {
     root: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
     pub name: PackageName,
     pub version: Option<String>,
@@ -72,29 +72,6 @@ impl PackageStore {
         receipt.write_to(&directory)
     }
 
-    pub fn activate_package(&self, name: &PackageName, staged: &Path) -> io::Result<()> {
-        let packages = self.packages_dir();
-        std::fs::create_dir_all(&packages)?;
-        let target = self.package_dir(name);
-        let backup =
-            self.staging_dir()
-                .join(format!(".{}.{}.backup", name.as_str(), std::process::id()));
-        let _ = std::fs::remove_dir_all(&backup);
-        if target.exists() {
-            std::fs::rename(&target, &backup)?;
-        }
-        if let Err(error) = std::fs::rename(staged, &target) {
-            if backup.exists() {
-                let _ = std::fs::rename(&backup, &target);
-            }
-            return Err(error);
-        }
-        if backup.exists() {
-            std::fs::remove_dir_all(backup)?;
-        }
-        Ok(())
-    }
-
     pub fn read_receipt(&self, name: &PackageName) -> Option<Receipt> {
         let file = std::fs::File::open(self.receipt_path(name)).ok()?;
         let mut bytes = Vec::new();
@@ -106,21 +83,6 @@ impl PackageStore {
         }
         let receipt: Receipt = serde_json::from_slice(&bytes).ok()?;
         (receipt.name == *name).then_some(receipt)
-    }
-
-    pub fn installed(&self) -> BTreeMap<PackageName, Receipt> {
-        let mut receipts = BTreeMap::new();
-        if let Ok(entries) = std::fs::read_dir(self.packages_dir()) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str()
-                    && let Ok(name) = PackageName::parse(name)
-                    && let Some(receipt) = self.read_receipt(&name)
-                {
-                    receipts.insert(name, receipt);
-                }
-            }
-        }
-        receipts
     }
 
     pub fn is_installed(&self, name: &PackageName) -> bool {
@@ -168,12 +130,7 @@ impl PackageStore {
         path.exists().then_some(path)
     }
 
-    pub fn remove(&self, name: &PackageName) -> io::Result<()> {
-        if let Some(receipt) = self.read_receipt(name) {
-            for link_name in receipt.bin.keys() {
-                let _ = std::fs::remove_file(self.bin_dir().join(link_name.as_str()));
-            }
-        }
+    pub fn remove_package_dir(&self, name: &PackageName) -> io::Result<()> {
         let directory = self.package_dir(name);
         if directory.exists() {
             std::fs::remove_dir_all(directory)?;
@@ -240,7 +197,6 @@ mod tests {
         store.write_receipt(&name, &receipt("foo")).unwrap();
 
         assert!(store.is_installed(&name));
-        assert_eq!(store.installed().len(), 1);
         assert_eq!(
             store.read_receipt(&name).unwrap().version.as_deref(),
             Some("1.0")
@@ -248,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn link_and_remove() {
+    fn removing_a_package_directory_preserves_the_bin_namespace() {
         let tmp = tempfile::tempdir().unwrap();
         let store = PackageStore::at(tmp.path());
         let name = PackageName::parse("foo").unwrap();
@@ -261,9 +217,9 @@ mod tests {
         store.link_bin(&name, &package_binary, &bin_name).unwrap();
 
         assert!(store.bin_path(&name).is_some());
-        store.remove(&name).unwrap();
+        store.remove_package_dir(&name).unwrap();
         assert!(!store.is_installed(&name));
-        assert!(!store.bin_dir().join("foo").exists());
+        assert!(store.bin_dir().join("foo").is_symlink());
     }
 
     #[test]
@@ -287,20 +243,6 @@ mod tests {
             store.resolve_command("definitely-not-real-zzz"),
             Resolution::Missing
         );
-    }
-
-    #[test]
-    fn failed_activation_restores_previous_package() {
-        let tmp = tempfile::tempdir().unwrap();
-        let store = PackageStore::at(tmp.path());
-        let name = PackageName::parse("foo").unwrap();
-        let target = store.package_dir(&name);
-        std::fs::create_dir_all(&target).unwrap();
-        std::fs::write(target.join("old"), b"old").unwrap();
-
-        let missing = store.staging_dir().join("missing");
-        assert!(store.activate_package(&name, &missing).is_err());
-        assert_eq!(std::fs::read(target.join("old")).unwrap(), b"old");
     }
 
     #[test]

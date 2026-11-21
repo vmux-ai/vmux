@@ -15,7 +15,7 @@ impl Plugin for ReadPlugin {
         app.add_systems(
             Update,
             (
-                begin, lease, migrate, read, decode, brewfile, reconcile, write, finish,
+                cancel, begin, lease, migrate, read, decode, brewfile, reconcile, write, finish,
             )
                 .chain()
                 .in_set(ReadSet),
@@ -50,6 +50,33 @@ struct WriteBrewfile;
 struct Done;
 #[derive(Component)]
 struct Manifest(ToolsManifest);
+
+fn cancel(
+    requests: Query<
+        (Entity, &vmux_ecs::OperationState, Has<Active>),
+        (With<ReadRequest>, Without<Busy>, Without<MigrationRequest>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, state, active) in &requests {
+        if matches!(
+            state,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            continue;
+        }
+        let mut request = commands.entity(entity);
+        if active {
+            request
+                .remove::<(Acquire, Migrate, Read, ReadBrewfile, WriteBrewfile)>()
+                .insert((Failure("tool storage read canceled".into()), Done));
+        } else {
+            request
+                .remove::<ReadRequest>()
+                .insert(ReadResult(Err("tool storage read canceled".into())));
+        }
+    }
+}
 
 fn begin(
     requests: Query<
@@ -358,6 +385,7 @@ fn finish(
                 Paths,
                 Brewfile,
                 AcquiredLease,
+                MigrationResult,
                 Failure,
             )>();
         commands

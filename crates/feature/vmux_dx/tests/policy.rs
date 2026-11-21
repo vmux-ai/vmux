@@ -17,6 +17,69 @@ mod compiler_inputs;
 
 const FROZEN_REVISION: &str = "a59db6addc6195f4673b5aacd2d604a96b50272c";
 
+#[test]
+fn fixture_systems_prove_their_own_ecs_state_without_approving_production_state() {
+    for (production_owner, expected_system) in [(true, true), (false, false)] {
+        let production = if production_owner {
+            "fn read(state:Query<&State>){} struct ProducerPlugin; impl Plugin for ProducerPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}"
+        } else {
+            ""
+        };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::{{Component,Resource,Query,Res}}; #[derive(Component)] struct State; {production} #[cfg(test)] mod tests {{ use super::State; use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::{{Resource,Query,Res}}; #[derive(Resource)] struct NativeInput(u32); fn receive(input:Res<NativeInput>,state:Query<&State>){{}} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,receive);}}}} }}"
+        ));
+        let input = &inventory.entries[&inventory.key("struct:NativeInput")];
+        assert!(inventory.canonical(input, &Policy::default(), &mut BTreeSet::new()));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:receive")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            expected_system,
+        );
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("struct:State")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            production_owner,
+        );
+    }
+}
+
+#[test]
+fn fixture_registration_refuses_fake_framework_and_unowned_nested_state() {
+    for source in [
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Resource,Res}; #[cfg(test)] mod tests { use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Resource,Res}; struct Row { id:u32 } #[derive(Resource)] struct NativeInput(Vec<Row>); fn receive(input:Res<NativeInput>){} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,receive);}} }",
+        "use bevy_app::{App,Update}; use bevy_ecs::prelude::{Resource,Res}; #[cfg(test)] mod tests { use bevy_app::{App,Update}; use bevy_ecs::prelude::{Resource,Res}; mod fake {pub trait Plugin {}} use fake::Plugin; #[derive(Resource)] struct NativeInput(u32); fn receive(input:Res<NativeInput>){} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,receive);}} }",
+        "use bevy_app::{Plugin,Update}; use bevy_ecs::prelude::{Resource,Res}; #[cfg(test)] mod tests { use bevy_app::{Plugin,Update}; use bevy_ecs::prelude::{Resource,Res}; struct App; #[derive(Resource)] struct NativeInput(u32); fn receive(input:Res<NativeInput>){} struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,receive);}} }",
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Resource,Res}; #[cfg(test)] mod tests { use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Resource,Res}; #[derive(Resource)] struct NativeInput(u32); fn receive(input:Res<NativeInput>){} fn forgotten(app:&mut App){app.add_systems(Update,receive);} }",
+    ] {
+        let inventory = Inventory::fixture(source);
+        for name in ["struct:NativeInput", "fn:receive"] {
+            let entry = &inventory.entries[&inventory.key(name)];
+            assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+        }
+    }
+}
+
+#[test]
+fn fixture_boundary_edges_remain_scoped_to_the_test_world() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Component,Query}; #[derive(Component)] struct State; fn read(state:Query<&State>){} struct ProducerPlugin; impl Plugin for ProducerPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}} struct Adapter { input:tests::NativeInput } #[cfg(test)] mod tests { use super::State; use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Resource,Res,Query}; #[derive(Resource)] pub struct NativeInput(u32); fn receive(input:Res<NativeInput>,state:Query<&State>){} pub struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,receive);}} }",
+    );
+    let mut fixture = Boundary::fixture(&inventory, "struct:ReceiverPlugin");
+    fixture.input = format!("ECS: {}", inventory.key("struct:NativeInput"));
+    fixture.output = format!("ECS: {}", inventory.key("struct:State"));
+    assert!(fixture.references(&inventory));
+    let mut production = Boundary::fixture(&inventory, "struct:Adapter");
+    production.input = fixture.input;
+    production.output = "external: one native observation".into();
+    assert!(!production.references(&inventory));
+}
+
 const UPSTREAM_SETS: &[(&str, &str)] = &[
     ("bevy_cef", "cf3bf141760a42d3"),
     ("bevy_cef_core", "d551cf781692e304"),
@@ -7060,6 +7123,7 @@ impl Boundary {
         let Some(mut adapter) = inventory.entries.get(&self.key) else {
             return false;
         };
+        let production = adapter.production;
         if self.interface == "Rust compiler input data" {
             let path = Workspace::current()
                 .0
@@ -7126,6 +7190,7 @@ impl Boundary {
                         continue;
                     }
                     if !inventory.automatic_boundary(parent)
+                        && !inventory.fixture_bootstrap(parent)
                         && (!parent.ecs
                             || !inventory.used(parent)
                             || !inventory.canonical(parent, policy, &mut BTreeSet::new()))
@@ -7156,6 +7221,9 @@ impl Boundary {
                 let Some(entry) = inventory.entries.get(key) else {
                     return false;
                 };
+                if production && !entry.production {
+                    return false;
+                }
                 let owned_value = policy.values.iter().any(|value| {
                     value.key == entry.key
                         && !value.lifetime.trim().is_empty()
@@ -7486,9 +7554,11 @@ struct Inventory {
     imports: BTreeMap<String, Imports>,
     module_namespaces: BTreeMap<String, BTreeSet<String>>,
     used_keys: BTreeSet<String>,
+    fixture_used_keys: BTreeSet<String>,
     roots: BTreeSet<String>,
     functions: BTreeMap<String, Vec<String>>,
     registered_keys: BTreeSet<String>,
+    fixture_registered_keys: BTreeSet<String>,
     instantiated_systems: BTreeMap<String, BTreeSet<String>>,
     generic_usage: Instantiations,
     lookup_depth: Cell<usize>,
@@ -7875,7 +7945,7 @@ impl Inventory {
         if !visiting.insert(entry.key.clone()) {
             return false;
         }
-        if self.automatic_boundary(entry) {
+        if self.automatic_boundary(entry) || self.fixture_bootstrap(entry) {
             return true;
         }
         if policy.boundaries.iter().any(|boundary| {
@@ -7927,8 +7997,7 @@ impl Inventory {
         }
         let owned = match entry.kind {
             Kind::Function => {
-                self.registered_keys.contains(&entry.key)
-                    || self.helper_owner(entry, &mut BTreeSet::new())
+                self.registered(entry) || self.helper_owner(entry, &mut BTreeSet::new())
             }
             Kind::Struct | Kind::Enum => entry.ecs && self.used(entry),
             Kind::Alias => {
@@ -8191,6 +8260,76 @@ impl Inventory {
 
     fn framework_bootstrap(&self, entry: &Declaration) -> bool {
         self.framework_bootstrap_from(entry, &mut BTreeSet::new())
+    }
+
+    fn fixture_bootstrap(&self, entry: &Declaration) -> bool {
+        if entry.production || entry.local || entry.dynamic || entry.opaque || entry.projection {
+            return false;
+        }
+        let owner =
+            match entry.kind {
+                Kind::Struct => entry,
+                Kind::Impl => {
+                    let Some(owner) = entry.owner.as_ref().and_then(|path| {
+                        self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                    }) else {
+                        return false;
+                    };
+                    owner
+                }
+                _ => return false,
+            };
+        if owner.production || !matches!(owner.kind, Kind::Struct) || !self.plugin_markers(owner) {
+            return false;
+        }
+        for implementation in self.implementations(owner) {
+            if implementation.production
+                || matches!(entry.kind, Kind::Impl) && implementation.key != entry.key
+                || implementation
+                    .plugin_path
+                    .as_deref()
+                    .and_then(|path| {
+                        self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+                    })
+                    .as_deref()
+                    != Some("Plugin")
+                || implementation.bodies.is_empty()
+                || implementation.bodies.iter().any(|body| {
+                    body.name != "build"
+                        || !self.bootstrap_arguments(
+                            implementation,
+                            body,
+                            &BTreeSet::from([owner.key.clone()]),
+                        )
+                })
+                || implementation.registered_systems.is_empty()
+            {
+                continue;
+            }
+            if implementation
+                .registered_systems
+                .iter()
+                .all(|(app, callback)| {
+                    self.framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("App")
+                        && self
+                            .function_reference(
+                                &implementation.namespace,
+                                callback,
+                                &mut BTreeSet::new(),
+                            )
+                            .is_some_and(|function| {
+                                !function.production
+                                    && function.private
+                                    && self.fixture_registered_keys.contains(&function.key)
+                            })
+                })
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn framework_bootstrap_from(
@@ -9067,6 +9206,14 @@ impl Inventory {
 
     fn used(&self, entry: &Declaration) -> bool {
         self.used_keys.contains(&entry.key)
+            || !entry.production && self.fixture_used_keys.contains(&entry.key)
+    }
+
+    fn registered(&self, entry: &Declaration) -> bool {
+        if entry.production {
+            return self.registered_keys.contains(&entry.key);
+        }
+        self.fixture_registered_keys.contains(&entry.key)
     }
 
     fn required_component(&self, owner: &Declaration, value: &Declaration) -> bool {
@@ -9303,8 +9450,7 @@ impl Inventory {
         if self.generic_usage.references(&owner.key, &endpoint.key) {
             return true;
         }
-        if (owner.parameter
-            || matches!(owner.kind, Kind::Function) && self.registered_keys.contains(&owner.key))
+        if (owner.parameter || matches!(owner.kind, Kind::Function) && self.registered(owner))
             && self.borrowed_endpoint(owner, endpoint)
         {
             return true;
@@ -9345,9 +9491,9 @@ impl Inventory {
                     ) else {
                         continue;
                     };
-                    if function.production
+                    if (function.production || !owner.production)
                         && function.private
-                        && self.registered_keys.contains(&function.key)
+                        && self.registered(function)
                         && (self.owner_references(function, endpoint)
                             || self.direct_endpoint(function, endpoint))
                     {
@@ -10386,9 +10532,79 @@ impl Inventory {
         }
         self.used_keys = keys;
         self.registered_keys = registered;
+        self.resolve_fixture_usage();
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
         self.root_declarations.get_mut().clear();
+    }
+
+    fn resolve_fixture_usage(&mut self) {
+        let mut registered = BTreeSet::new();
+        let mut keys = BTreeSet::new();
+        for implementation in self.entries.values() {
+            if implementation.production
+                || !matches!(implementation.kind, Kind::Impl)
+                || implementation
+                    .plugin_path
+                    .as_deref()
+                    .and_then(|path| {
+                        self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+                    })
+                    .as_deref()
+                    != Some("Plugin")
+            {
+                continue;
+            }
+            for (app, callback) in &implementation.registered_systems {
+                if self
+                    .framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                    .as_deref()
+                    != Some("App")
+                {
+                    continue;
+                }
+                let Some(function) = self.function_reference(
+                    &implementation.namespace,
+                    callback,
+                    &mut BTreeSet::new(),
+                ) else {
+                    continue;
+                };
+                if function.production
+                    || !function.private
+                    || !function.generic_parameters.is_empty()
+                {
+                    continue;
+                }
+                registered.insert(function.key.clone());
+                for path in &function.field_paths {
+                    if let Some(field) =
+                        self.resolve(&function.namespace, path, &mut BTreeSet::new())
+                    {
+                        keys.insert(field.key.clone());
+                    }
+                }
+                for field in &function.field_types {
+                    keys.extend(self.job_output_components(&function.namespace, field));
+                }
+            }
+        }
+        let mut pending: Vec<_> = keys.iter().cloned().collect();
+        while let Some(key) = pending.pop() {
+            let entry = &self.entries[&key];
+            if entry.production || !entry.parameter && !matches!(entry.kind, Kind::Alias) {
+                continue;
+            }
+            for path in &entry.field_paths {
+                if let Some(field) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                    && keys.insert(field.key.clone())
+                {
+                    pending.push(field.key.clone());
+                }
+            }
+        }
+        self.fixture_registered_keys = registered;
+        self.fixture_used_keys = keys;
     }
 
     fn actual_plugin(&self, implementation: &Declaration) -> bool {

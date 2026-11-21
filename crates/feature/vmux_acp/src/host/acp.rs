@@ -1,161 +1,59 @@
-use std::collections::BTreeMap;
-#[cfg(test)]
 use std::path::PathBuf;
 
 use crate::AcpSessionId;
 use bevy::prelude::*;
-use crossbeam_channel::{Receiver, Sender};
 #[cfg(test)]
 use vmux_ecs::event::InstallPhase;
-use vmux_ecs::profile::CurrentProfile;
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
-use vmux_editor::lsp::store::PackageStore;
 use vmux_session::{AgentId, RunState, Session, SessionId};
 use vmux_setting::{AcpAgentConfig, AppSettings};
-use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
-use vmux_tool::{
-    ToolInventory, ToolInventoryItem, ToolOperator, ToolProviderBinding, ToolProviderSnapshot,
-    ToolScanner, ToolStore, ToolsManifest,
-};
+use vmux_tool::ToolProviderBinding;
 
 use self::environment_driver::AcpEnvironment;
-use self::installer_driver::AgentInstaller;
-use self::registry::Registry;
 pub(super) use config::ConfigPlugin;
-pub(super) use registry::add as add_registry;
 
 mod config;
 mod config_driver;
 mod environment_driver;
 mod install;
+pub(super) mod installed;
+pub(super) mod installed_launch;
 mod installer_driver;
+mod inventory;
+mod package;
+mod package_io;
 pub mod registry;
+mod registry_catalog;
 mod registry_driver;
+mod tool;
 
-pub(super) fn add(app: &mut App) {
-    install::add(app);
-    app.add_message::<ServiceRequest>()
+pub(super) struct AgentProviderPlugin;
+
+impl Plugin for AgentProviderPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            install::InstallPlugin,
+            installed::InstalledPlugin,
+            installed_launch::InstalledLaunchPlugin,
+            inventory::AcpInventoryPlugin,
+            tool::AcpToolPlugin,
+        ))
+        .add_message::<ServiceRequest>()
         .add_message::<vmux_ecs::agent::SwapStackSession>()
         .add_systems(Startup, spawn_tool_provider);
+    }
 }
 
 fn spawn_tool_provider(mut commands: Commands) {
-    commands.spawn((
-        ToolProviderBinding::new::<crate::Feature>(0),
-        ToolScanner::new(scan_tools),
-        ToolOperator::new(operate_tool),
+    let provider = commands
+        .spawn(ToolProviderBinding::new::<crate::Feature>(0))
+        .id();
+    commands.entity(provider).insert((
+        vmux_tool::observation::Handler,
+        vmux_tool::observation::PackageProvider,
     ));
-}
-
-fn scan_tools(
-    provider: &ToolProvider,
-    _store: &ToolStore,
-    manifest: &mut ToolsManifest,
-    refresh: bool,
-) -> Result<ToolProviderSnapshot, String> {
-    let catalog = if refresh {
-        let policy = crate::policy_driver::PolicyDriver::registry();
-        Registry::fetch_blocking(&policy.url)
-            .ok()
-            .or_else(Registry::cached)
-    } else {
-        Registry::cached()
-    };
-    let catalog = catalog
-        .map(|registry| {
-            registry
-                .agents
-                .into_iter()
-                .map(|agent| (agent.id.clone(), agent))
-                .collect::<BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
-    let package_store = PackageStore::at(vmux_ecs::profile::ProfilePaths::current().agents());
-    let receipts = package_store.installed();
-    let inventory = receipts
-        .into_values()
-        .filter(|receipt| receipt.source_id.starts_with("acp:"))
-        .map(|receipt| {
-            let agent = catalog.get(receipt.name.as_str());
-            let latest = agent.and_then(|agent| agent.version.clone());
-            ToolInventoryItem {
-                id: receipt.name.as_str().to_string(),
-                name: agent
-                    .map(|agent| agent.name.clone())
-                    .unwrap_or_else(|| receipt.name.as_str().to_string()),
-                icon: agent.and_then(|agent| agent.icon.clone()),
-                version: receipt.version.clone(),
-                detail: agent
-                    .and_then(|agent| agent.description.clone())
-                    .unwrap_or_else(|| "ACP agent".to_string()),
-                status: if receipt.version.is_some()
-                    && latest.is_some()
-                    && receipt.version != latest
-                {
-                    ToolStatus::Outdated
-                } else {
-                    ToolStatus::Installed
-                },
-                removable: true,
-            }
-        })
-        .collect();
-    Ok(ToolInventory::new(provider.clone(), inventory)
-        .reconcile(manifest)
-        .into())
-}
-
-fn operate_tool(
-    store: &ToolStore,
-    operation: &ToolOperationKey,
-    _value: &str,
-) -> Result<String, String> {
-    let id = operation.item_id.trim();
-    match operation.kind {
-        ToolOperationKind::Install | ToolOperationKind::Update => {
-            if id.is_empty() {
-                return Err("package name is required".to_string());
-            }
-            AgentInstaller::current().resolve(id, None, |_, _, _| {})?;
-            store.set_managed_package(&operation.provider, id, true)?;
-            let operation = if operation.kind == ToolOperationKind::Install {
-                "installed"
-            } else {
-                "updated"
-            };
-            Ok(format!("{id} {operation}"))
-        }
-        ToolOperationKind::Uninstall => {
-            if id.is_empty() {
-                return Err("package name is required".to_string());
-            }
-            AgentInstaller::current().uninstall(id)?;
-            store.set_managed_package(&operation.provider, id, false)?;
-            Ok(format!("{id} removed"))
-        }
-        ToolOperationKind::Forget => {
-            store.set_managed_package(&operation.provider, id, false)?;
-            Ok(format!("{id} removed from tools.toml"))
-        }
-        ToolOperationKind::Adopt => {
-            store.set_managed_package(&operation.provider, id, true)?;
-            Ok(format!("{id} is now managed"))
-        }
-        ToolOperationKind::Import => {
-            let mut manifest = store.load()?;
-            let before = manifest.managed_packages(operation.provider.id()).len();
-            let _ = scan_tools(&operation.provider, store, &mut manifest, false)?;
-            let imported = manifest
-                .managed_packages(operation.provider.id())
-                .len()
-                .saturating_sub(before);
-            store.save(&manifest)?;
-            Ok(format!("imported {imported} acp item(s)"))
-        }
-        _ => Err(format!("ACP does not support {:?}", operation.kind)),
-    }
 }
 
 #[derive(Component)]
@@ -171,14 +69,32 @@ pub(crate) struct AcpPackageChanged {
 
 #[derive(Component)]
 struct AcpInstallJob {
-    progress: Receiver<InstallState>,
-    task: Option<vmux_ecs::BlockingTask<AcpInstallOutcome>>,
+    package: Option<Entity>,
+    task: Option<vmux_ecs::BlockingTask<AcpInstallResult>>,
     outcome: Option<AcpInstallOutcome>,
-    package_reported: bool,
+}
+
+#[derive(Component)]
+struct PackageStarted;
+
+#[derive(Component)]
+struct Retiring;
+
+#[derive(Component)]
+struct AgentReady(Result<installer_driver::ResolvedAgent, String>);
+
+#[derive(Component)]
+struct AcpInstallResult {
+    agent: Result<installer_driver::ResolvedAgent, String>,
+    login_env: Vec<(String, String)>,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
 struct AcpInstallKey {
+    profile: Option<Entity>,
+    agents: PathBuf,
+    catalog: Option<Entity>,
+    catalog_revision: u64,
     agent_id: String,
     version: Option<String>,
     fallback_command: String,
@@ -200,7 +116,13 @@ struct AcpInstallWaiter {
 #[relationship_target(relationship = AcpInstallWaiter)]
 struct AcpInstallWaiters(Vec<Entity>);
 
+#[derive(Component, Clone)]
 struct AcpInstallRequest {
+    profile: Option<Entity>,
+    agents: PathBuf,
+    catalog: Option<Entity>,
+    catalog_revision: u64,
+    selected_agent: Option<registry::RegistryAgent>,
     agent_id: String,
     fallback: Option<AcpAgentConfig>,
     shell: String,
@@ -214,7 +136,6 @@ struct InstallState {
 
 #[derive(Clone)]
 struct AcpInstallOutcome {
-    package_added: bool,
     launch: Result<AcpLaunch, String>,
 }
 
@@ -241,13 +162,6 @@ impl CatalogCommand<'_> {
 }
 
 impl AcpLaunch {
-    pub(super) fn installed_catalog(
-        agent: &registry::RegistryAgent,
-        shell: &str,
-    ) -> Result<Self, String> {
-        installer_driver::resolve_installed_catalog_launch(agent, shell)
-    }
-
     pub(super) fn configured_catalog(config: &AcpAgentConfig, shell: &str) -> Result<Self, String> {
         if config.command.trim().is_empty() {
             return Err(format!("ACP command is unavailable: {}", config.id));
@@ -285,15 +199,10 @@ impl AcpLaunch {
     }
 }
 
-#[derive(Clone)]
-struct AcpInstallProgressSink {
-    pending: Sender<InstallState>,
-    wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::{App, Name};
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
 
     #[test]
@@ -303,39 +212,59 @@ mod tests {
         assert!(CatalogCommand("/usr/local/bin/custom-acp").allowed());
     }
 
-    fn install_test_app() -> App {
-        let mut app = App::new();
-        add(&mut app);
-        let profile = Profile::named("test");
-        let paths = ProfilePaths::current();
-        app.world_mut().spawn((
-            Name::new("Test"),
-            ActiveProfile(profile),
-            ProfileDirectories(paths),
-        ));
-        app
+    struct InstallFixture {
+        app: App,
     }
 
-    fn completed_job(message: &str) -> AcpInstallJob {
-        let (_progress_sender, progress) = crossbeam_channel::unbounded();
-        AcpInstallJob {
-            progress,
-            task: None,
-            outcome: Some(AcpInstallOutcome {
-                package_added: false,
-                launch: Err(message.to_string()),
-            }),
-            package_reported: false,
+    impl InstallFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(install::InstallPlugin)
+                .add_message::<ServiceRequest>()
+                .add_message::<vmux_ecs::agent::SwapStackSession>();
+            app.world_mut().spawn((
+                Name::new("Test"),
+                ActiveProfile(Profile::named("test")),
+                ProfileDirectories(ProfilePaths::current()),
+            ));
+            Self { app }
+        }
+
+        fn wake(&mut self) -> std::sync::Arc<RetirementWake> {
+            let wake =
+                std::sync::Arc::new(RetirementWake(std::sync::atomic::AtomicBool::new(false)));
+            self.app
+                .insert_resource(vmux_ecs::JobWake(std::task::Waker::from(wake.clone())));
+            wake
         }
     }
 
-    fn install_key(agent_id: &str) -> AcpInstallKey {
-        AcpInstallRequest {
-            agent_id: agent_id.to_string(),
-            fallback: None,
-            shell: String::new(),
+    impl AcpInstallJob {
+        fn completed(message: &str) -> Self {
+            Self {
+                package: None,
+                task: None,
+                outcome: Some(AcpInstallOutcome {
+                    launch: Err(message.to_string()),
+                }),
+            }
         }
-        .key()
+    }
+
+    impl AcpInstallKey {
+        fn fixture(agent_id: &str) -> Self {
+            AcpInstallRequest {
+                profile: None,
+                agents: PathBuf::new(),
+                catalog: None,
+                catalog_revision: 0,
+                selected_agent: None,
+                agent_id: agent_id.to_string(),
+                fallback: None,
+                shell: String::new(),
+            }
+            .key()
+        }
     }
 
     struct TestSession;
@@ -350,6 +279,55 @@ mod tests {
                 ProcessAnchor(vmux_ecs::ProcessId::new()),
             )
         }
+    }
+
+    struct RetirementWake(std::sync::atomic::AtomicBool);
+
+    impl std::task::Wake for RetirementWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn retiring_a_shared_install_wakes_the_pending_replacement() {
+        let mut fixture = InstallFixture::new();
+        let wake = fixture.wake();
+        let app = &mut fixture.app;
+        let job = app
+            .world_mut()
+            .spawn((
+                AcpInstallKey::fixture("agent"),
+                InstallState::preparing(),
+                AcpInstallJob::completed("canceled"),
+                Retiring,
+            ))
+            .id();
+        let session = app
+            .world_mut()
+            .spawn((
+                TestSession::bundle("agent", "next"),
+                RunState::Idle,
+                AcpInstallRequest {
+                    profile: None,
+                    agents: PathBuf::new(),
+                    catalog: None,
+                    catalog_revision: 0,
+                    selected_agent: None,
+                    agent_id: "agent".into(),
+                    fallback: None,
+                    shell: String::new(),
+                },
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get_entity(job).is_err());
+        assert!(app.world().get::<AcpInstallRequest>(session).is_some());
+        assert!(app.world().get::<AcpLaunchStarted>(session).is_none());
+        assert!(wake.0.load(std::sync::atomic::Ordering::Acquire));
     }
 
     #[test]
@@ -382,13 +360,14 @@ mod tests {
 
     #[test]
     fn replaced_acp_session_ignores_stale_install_outcome() {
-        let mut app = install_test_app();
+        let mut fixture = InstallFixture::new();
+        let app = &mut fixture.app;
         let job = app
             .world_mut()
             .spawn((
-                install_key("claude"),
+                AcpInstallKey::fixture("claude"),
                 InstallState::preparing(),
-                completed_job("stale failure"),
+                AcpInstallJob::completed("stale failure"),
             ))
             .id();
         let stack = app
@@ -418,13 +397,14 @@ mod tests {
 
     #[test]
     fn removing_process_anchor_clears_install_waiter() {
-        let mut app = install_test_app();
+        let mut fixture = InstallFixture::new();
+        let app = &mut fixture.app;
         let job = app
             .world_mut()
             .spawn((
-                install_key("claude"),
+                AcpInstallKey::fixture("claude"),
                 InstallState::preparing(),
-                completed_job("stale failure"),
+                AcpInstallJob::completed("stale failure"),
             ))
             .id();
         let stack = app

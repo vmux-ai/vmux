@@ -118,7 +118,7 @@ mod tests {
         .insert_non_send(Browsers::default())
         .insert_non_send(ClipboardHandle(None))
         .add_message::<crate::lsp::manager_page::PackageInstallRequest>();
-        crate::lsp::registry::add(&mut app);
+        app.add_plugins(crate::lsp::registry::RegistryPlugin);
         app.update();
 
         let sender = app

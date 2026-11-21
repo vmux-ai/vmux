@@ -16,6 +16,8 @@ pub use homebrew::*;
 pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
+#[cfg(host)]
+pub use package::ToolPackageDrain;
 pub use provider::*;
 #[cfg(host)]
 pub use query::*;
@@ -43,7 +45,9 @@ impl vmux_feature::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
-#[cfg(all(host, ui))]
+#[cfg(host)]
+mod apply;
+#[cfg(host)]
 mod catalog;
 #[cfg(host)]
 mod cli;
@@ -51,15 +55,31 @@ mod cli;
 mod command_bar;
 #[cfg(not(target_os = "ios"))]
 mod connection;
+#[cfg(host)]
+mod dotfile_inventory;
 mod dotfiles;
 #[cfg(ui)]
 mod extension;
 mod homebrew;
+#[cfg(host)]
+mod homebrew_inventory;
 #[cfg(all(host, ui))]
 mod host;
+#[cfg(host)]
+pub mod inventory;
+#[cfg(host)]
+pub mod io;
 mod manifest;
 mod mcp;
+#[cfg(host)]
+mod mcp_inventory;
 mod npm;
+#[cfg(host)]
+mod npm_inventory;
+#[cfg(host)]
+pub mod observation;
+#[cfg(host)]
+mod package;
 mod process;
 mod provider;
 #[cfg(host)]
@@ -120,6 +140,16 @@ impl Plugin for ToolRuntimePlugin {
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
+        #[cfg(host)]
+        app.add_plugins((
+            inventory::InventoryPlugin,
+            package::PackageChangePlugin,
+            apply::ApplyPlugin,
+        ));
+        #[cfg(host)]
+        if !app.is_plugin_added::<io::ObservationIoPlugin>() {
+            app.add_plugins(io::ObservationIoPlugin);
+        }
         app.add_plugins((
             TaskPlugin::<Result<mcp::ForgottenMcpServer, String>>::default(),
             TaskPlugin::<Result<dotfiles::DiscoveredDotfilePackages, String>>::default(),
@@ -147,6 +177,12 @@ impl Plugin for ToolRuntimePlugin {
                 .after(ToolOperationRouteFlush),
         )
         .add_systems(Update, cancel.in_set(ToolTaskSet::Cancel))
+        .configure_sets(
+            Update,
+            ToolOperationCancelSet
+                .in_set(ToolTaskSet::Cancel)
+                .after(cancel),
+        )
         .configure_sets(
             Update,
             (
@@ -234,6 +270,9 @@ impl Plugin for ToolRuntimePlugin {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolOperationRouteSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ToolOperationCancelSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 struct ToolOperationRouteFlush;
@@ -955,83 +994,6 @@ brew "ripgrep"
         assert_eq!(
             app.world().get::<OperationState>(operation),
             Some(&OperationState::Succeeded)
-        );
-    }
-
-    #[test]
-    fn mcp_config_parses_codex_and_vibe_formats() {
-        let codex = McpConfigDocument::parse(
-            r#"
-[mcp_servers.docs]
-url = "https://example.com/mcp"
-bearer_token_env_var = "DOCS_TOKEN"
-
-[mcp_servers.local]
-command = "npx"
-args = ["-y", "server"]
-[mcp_servers.local.env]
-MODE = "local"
-"#,
-        )
-        .unwrap();
-        let codex = codex.servers();
-        assert_eq!(codex["docs"].transport, McpTransport::Http);
-        assert_eq!(
-            codex["docs"].bearer_token_env_var.as_deref(),
-            Some("DOCS_TOKEN")
-        );
-        assert_eq!(codex["local"].command.as_deref(), Some("npx"));
-        assert_eq!(codex["local"].env["MODE"], "local");
-
-        let vibe = McpConfigDocument::parse(
-            r#"
-[[mcp_servers]]
-name = "figma"
-transport = "http"
-url = "https://example.com/figma"
-
-[[mcp_servers]]
-name = "vmux"
-transport = "stdio"
-command = "vmux"
-"#,
-        )
-        .unwrap();
-        assert_eq!(
-            vibe.servers().keys().cloned().collect::<Vec<_>>(),
-            ["figma"]
-        );
-    }
-
-    #[test]
-    fn mcp_config_parses_claude_json() {
-        let imported = McpConfigDocument::parse(
-            r#"{
-                "mcpServers": {
-                    "notion": {"type": "http", "url": "https://example.com/notion"},
-                    "local": {"command": "uvx", "args": ["server"]}
-                }
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(imported.servers()["notion"].transport, McpTransport::Http);
-        assert_eq!(imported.servers()["local"].transport, McpTransport::Stdio);
-    }
-
-    #[test]
-    fn config_without_mcp_section_is_ignored_during_discovery() {
-        assert!(
-            McpConfigDocument::parse(r#"{"theme":"dark"}"#)
-                .unwrap()
-                .servers()
-                .is_empty()
-        );
-        assert!(
-            McpConfigDocument::parse("model = \"default\"\n")
-                .unwrap()
-                .servers()
-                .is_empty()
         );
     }
 

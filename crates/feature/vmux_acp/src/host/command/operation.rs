@@ -10,6 +10,7 @@ use vmux_session::host::StartRequest;
 use vmux_session::{Created, SessionId};
 
 use super::CommandSet;
+use crate::host::acp::installed::InstalledAgent;
 use crate::host::acp::registry::RegistryAgent;
 use vmux_session::Route as SessionRoute;
 
@@ -29,6 +30,7 @@ impl bevy::prelude::Plugin for OperationPlugin {
                     list_agents,
                 )
                     .in_set(CommandSet::Commands)
+                    .after(crate::host::acp::installed::InstalledSet)
                     .after(vmux_ecs::agent::AgentRequestDispatchSet),
             );
     }
@@ -126,7 +128,7 @@ fn create_session(
 
 fn list_agents(
     mut requests: MessageReader<AgentRequestReady>,
-    catalog: Query<&RegistryAgent>,
+    catalog: Query<&RegistryAgent, With<InstalledAgent>>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -135,9 +137,6 @@ fn list_agents(
         };
         let mut agents = Vec::new();
         for agent in &catalog {
-            if !agent.is_installed() {
-                continue;
-            }
             agents.push(vmux_api::session::RemoteAgent {
                 id: agent.id.clone(),
                 name: agent.name.clone(),

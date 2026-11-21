@@ -2628,7 +2628,7 @@ mod tests {
             .insert_resource(settings)
             .insert_non_send(Browsers::default())
             .add_message::<crate::lsp::manager_page::PackageInstallRequest>();
-            registry::add(&mut app);
+            app.add_plugins(registry::RegistryPlugin);
             let roots = [directory.path().join("one"), directory.path().join("two")];
             let mut views = Vec::new();
             for root in &roots {

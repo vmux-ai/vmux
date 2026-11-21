@@ -8,7 +8,14 @@ pub(super) struct MigrationPlugin;
 
 impl Plugin for MigrationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (begin, probe, decide, rename, advance).chain());
+        app.add_systems(
+            Update,
+            (cancel, begin, probe, decide, rename, advance)
+                .chain()
+                .after(crate::ToolTaskSet::Start)
+                .before(super::read::ReadSet)
+                .before(super::write::WriteSet),
+        );
     }
 }
 
@@ -32,6 +39,38 @@ struct Rename;
 
 #[derive(Component)]
 struct Done;
+
+fn cancel(
+    requests: Query<(Entity, &vmux_ecs::OperationState), (With<MigrationRequest>, Without<Busy>)>,
+    mut commands: Commands,
+) {
+    for (entity, state) in &requests {
+        if matches!(
+            state,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .remove::<(
+                Active,
+                MigrationRequest,
+                Inspect,
+                Rename,
+                MovePaths,
+                Probe,
+                Moved,
+                Directory,
+                Done,
+                Failed<Moved>,
+                Failed<Probe>,
+            )>()
+            .insert(MigrationResult(Err(
+                "tool storage migration canceled".into()
+            )));
+    }
+}
 
 fn begin(
     requests: Query<(Entity, &Paths), (With<MigrationRequest>, With<StoreLease>, Without<Active>)>,

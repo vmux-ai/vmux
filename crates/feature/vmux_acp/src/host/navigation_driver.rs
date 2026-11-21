@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -16,6 +16,7 @@ use vmux_session::{AgentConversationTitle, AgentId, QueuedPrompts, Route, Sessio
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
+use super::acp::installed::{Checked, InstalledAgent};
 use super::acp::registry::RegistryAgent;
 use super::attach::AcpAgentAttachment;
 use super::attach_driver::{AcpResume, DeferredAttachmentPrompt};
@@ -24,6 +25,8 @@ use crate::AcpSessionId;
 #[derive(SystemParam)]
 pub(super) struct AcpCatalog<'w, 's> {
     agents: Query<'w, 's, &'static RegistryAgent>,
+    installed: Query<'w, 's, &'static RegistryAgent, With<InstalledAgent>>,
+    checked: Query<'w, 's, (), With<Checked>>,
 }
 
 #[derive(SystemParam)]
@@ -78,10 +81,11 @@ impl AcpCatalog<'_, '_> {
     }
 
     fn installed_id(&self) -> Option<String> {
-        self.agents
-            .iter()
-            .find(|agent| agent.is_installed())
-            .map(|agent| agent.id.clone())
+        self.installed.iter().next().map(|agent| agent.id.clone())
+    }
+
+    fn pending(&self) -> bool {
+        self.agents.iter().count() > self.checked.iter().count()
     }
 
     pub(super) fn icon(&self, id: &str) -> Option<String> {
@@ -120,6 +124,46 @@ impl AgentPageOpenWorkspace<'_, '_> {
 }
 
 impl PageOpener<'_, '_> {
+    pub(super) fn waiting_for_installed(&self, task: &PageOpenTask) -> bool {
+        if !self.settings.agent.acp.is_empty() || !self.catalog.pending() {
+            return false;
+        }
+        let Some(Route::Session(id)) = Route::parse(&task.url) else {
+            return false;
+        };
+        self.sessions
+            .iter()
+            .any(|(_, candidate, _, _, agent, ..)| candidate == &id && agent.is_none())
+    }
+
+    pub(super) fn default_cwd(
+        &self,
+        task: &PageOpenTask,
+        restoring: bool,
+        route: &Route,
+        workspace: &AgentPageOpenWorkspace,
+        launches: &Query<&vmux_ecs::terminal::TerminalLaunch>,
+        projects: &vmux_ecs::profile::Projects,
+    ) -> Result<PathBuf, String> {
+        if matches!(route, Route::Manager | Route::Provider { .. }) {
+            return Ok(PathBuf::new());
+        }
+        if restoring && let Ok(launch) = launches.get(task.stack) {
+            return Ok(PathBuf::from(&launch.cwd));
+        }
+        let tab = self.tab(task.stack);
+        let tab_dir = tab
+            .as_ref()
+            .and_then(|(_, startup_dir)| startup_dir.as_deref());
+        if let Some(path) = vmux_space::WorkspaceCwd::from_tab(tab_dir)? {
+            return Ok(path);
+        }
+        if let Some(startup) = workspace.startup_dir(task.stack, &self.settings) {
+            return Ok(startup.path);
+        }
+        projects.path().map(Path::to_path_buf)
+    }
+
     pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {
         let mut current = entity;
         loop {
