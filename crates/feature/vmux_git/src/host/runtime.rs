@@ -3,10 +3,8 @@ use bevy::winit::{EventLoopProxy, WinitUserEvent};
 use vmux_ecs::blocking::{BlockingCancellation, BlockingPool};
 
 pub use vmux_ecs::blocking::BlockingTask as GitTask;
-pub(super) use vmux_ecs::blocking::{
-    CancellationGroup as GitCancellationGroup,
-    CancellationParticipant as GitCancellationParticipant,
-};
+#[cfg(test)]
+use vmux_ecs::blocking::CancellationGroup as GitCancellationGroup;
 
 const INTERACTIVE_WORKER_COUNT: usize = 4;
 const INTERACTIVE_QUEUE_CAPACITY: usize = 64;

@@ -1,5 +1,5 @@
-use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -21,7 +21,8 @@ use crate::state::{
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
 use super::directory::GitDirectoryNavigation;
 use super::job::RepositoryJob;
-use super::job_runner::{GitJob, RepositoryLoads};
+use super::job_runner::GitJob;
+use super::read::{PageRepositorySource, Repositories, SourceIdentity};
 use super::watch::{GitWatch, GitWatchSubscription};
 
 type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
@@ -32,7 +33,7 @@ impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest,)>::default())
-            .init_resource::<GitPageCache>()
+            .add_systems(PostUpdate, evict_retained_pages)
             .add_observer(page_ready)
             .add_observer(repository_request)
             .add_observer(cache_removed_page)
@@ -87,6 +88,10 @@ impl GitCatalogRevision {
         generation
     }
 
+    pub(super) fn accepts(&self, catalog: GitCatalog, generation: u64) -> bool {
+        self.active[Self::index(catalog)] == generation
+    }
+
     pub(super) fn finish(&mut self, catalog: GitCatalog, generation: u64) -> bool {
         let active = &mut self.active[Self::index(catalog)];
         if *active != generation {
@@ -131,30 +136,46 @@ impl GitRepositoryRevision {
     }
 }
 
-const GIT_PAGE_CACHE_CAPACITY: usize = 4;
-
+#[derive(Component)]
 pub(super) struct CachedGitPage {
+    aliases: Vec<(PathBuf, SourceIdentity)>,
+    pub(super) source: Option<PageRepositorySource>,
     pub(super) snapshot: GitPageSnapshot,
     pub(super) controller: GitPageControllerState,
     pub(super) watch: Option<GitWatchSubscription>,
-    pub(super) diff: Option<super::diff::GitDiffQuery>,
-    pub(super) branch_files: Option<super::diff::GitBranchFilesQuery>,
 }
 
 impl CachedGitPage {
+    const CAPACITY: usize = 4;
+
     fn capture(
         state: &mut GitState,
         controller: &GitPageControllerState,
         watch: Option<GitWatchSubscription>,
-        diff: Option<&super::diff::GitDiffQuery>,
-        branch_files: Option<&super::diff::GitBranchFilesQuery>,
+        source: Option<&PageRepositorySource>,
     ) -> Option<Self> {
         if state.snapshot.loading || state.snapshot.repository.is_none() {
             return None;
         }
+        let repository = state.snapshot.repository.as_ref()?;
+        let mut aliases = Vec::new();
+        for path in [
+            &state.snapshot.workspace,
+            &repository.path,
+            &repository.repo_root,
+        ] {
+            if !path.is_empty() {
+                let identity = match source {
+                    Some(source) => source.source_at(path),
+                    None => SourceIdentity::capture(Path::new(path)),
+                };
+                aliases.push((PathIdentity::lexical(path).into_path_buf(), identity));
+            }
+        }
+        if let Some(source) = source {
+            aliases.push(source.request_alias());
+        }
         let mut snapshot = std::mem::take(&mut state.snapshot);
-        let cache_diff = !snapshot.diff_loading;
-        let cache_branch_files = !snapshot.branch_files_loading;
         snapshot.loading = false;
         snapshot.fetching = false;
         snapshot.diff_loading = false;
@@ -184,33 +205,31 @@ impl CachedGitPage {
         controller.commit_pending.clear();
         controller.operations = Default::default();
         Some(Self {
+            aliases,
+            source: source.cloned(),
             snapshot,
             controller,
             watch,
-            diff: cache_diff
-                .then(|| diff.map(super::diff::GitDiffQuery::parked))
-                .flatten(),
-            branch_files: cache_branch_files.then(|| branch_files.cloned()).flatten(),
         })
     }
 
     fn matches(&self, path: &str) -> bool {
-        let Some(repository) = self.snapshot.repository.as_ref() else {
-            return false;
-        };
-        let requested = PathIdentity::lexical(path);
-        let matches_alias = (!self.snapshot.workspace.is_empty()
-            && PathIdentity::lexical(&self.snapshot.workspace) == requested)
-            || (!repository.path.is_empty()
-                && PathIdentity::lexical(&repository.path) == requested)
-            || (!repository.repo_root.is_empty()
-                && PathIdentity::lexical(&repository.repo_root) == requested);
-        if !matches_alias {
+        let requested = PathIdentity::lexical(path).into_path_buf();
+        self.source
+            .as_ref()
+            .is_none_or(|source| source.matches(path))
+            && self
+                .aliases
+                .iter()
+                .any(|(alias, source)| *alias == requested && source.matches(Path::new(path)))
+    }
+
+    pub(super) fn apply_url(&mut self, url: &str) -> bool {
+        if !self.controller.apply_url(url) {
             return false;
         }
-        let resolved = PathIdentity::resolve(path);
-        PathIdentity::resolve(&repository.path) == resolved
-            || PathIdentity::resolve(&repository.repo_root) == resolved
+        self.snapshot.clear_diff();
+        true
     }
 
     fn restoring(mut self) -> Self {
@@ -222,96 +241,79 @@ impl CachedGitPage {
 
     fn retained(&self) -> Self {
         Self {
+            aliases: self.aliases.clone(),
+            source: self.source.clone(),
             snapshot: self.snapshot.clone(),
             controller: self.controller.clone(),
             watch: None,
-            diff: self.diff.as_ref().map(super::diff::GitDiffQuery::parked),
-            branch_files: self.branch_files.clone(),
         }
     }
 }
 
-#[derive(Resource, Default)]
-pub(super) struct GitPageCache {
-    entries: HashMap<String, CachedGitPage>,
-    aliases: HashMap<String, String>,
-    order: VecDeque<String>,
+#[derive(Component)]
+struct RetainedPageTouch(Instant);
+
+#[derive(SystemParam)]
+pub(super) struct RetainedPages<'w, 's> {
+    entries: Query<
+        'w,
+        's,
+        (
+            &'static mut CachedGitPage,
+            &'static mut RetainedPageTouch,
+            Option<&'static super::diff::GitDiffQuery>,
+            Option<&'static super::diff::GitBranchFilesQuery>,
+        ),
+    >,
 }
 
-impl GitPageCache {
-    fn key(path: &str) -> String {
-        PathIdentity::lexical(Path::new(path))
-            .into_path_buf()
-            .to_string_lossy()
-            .into_owned()
-    }
-
-    #[cfg(test)]
-    fn store(
+impl RetainedPages<'_, '_> {
+    pub(super) fn restore(
         &mut self,
-        state: &mut GitState,
-        controller: &GitPageControllerState,
-        watch: Option<GitWatchSubscription>,
-    ) {
-        self.store_with_queries(state, controller, watch, None, None);
-    }
-
-    fn store_with_queries(
-        &mut self,
-        state: &mut GitState,
-        controller: &GitPageControllerState,
-        watch: Option<GitWatchSubscription>,
-        diff: Option<&super::diff::GitDiffQuery>,
-        branch_files: Option<&super::diff::GitBranchFilesQuery>,
-    ) {
-        let Some(cached) = CachedGitPage::capture(state, controller, watch, diff, branch_files)
-        else {
-            return;
-        };
-        let repository = cached.snapshot.repository.as_ref().unwrap();
-        let root = Self::key(&repository.repo_root);
-        if root.is_empty() {
-            return;
-        }
-        let aliases = [
-            cached.snapshot.workspace.clone(),
-            repository.path.clone(),
-            repository.repo_root.clone(),
-        ];
-        self.remove_aliases(&root);
-        self.order.retain(|entry| entry != &root);
-        self.order.push_back(root.clone());
-        self.entries.insert(root.clone(), cached);
-        for alias in aliases {
-            if !alias.is_empty() {
-                self.aliases.insert(Self::key(&alias), root.clone());
+        path: &str,
+    ) -> Option<(
+        CachedGitPage,
+        Option<super::diff::GitDiffQuery>,
+        Option<super::diff::GitBranchFilesQuery>,
+    )> {
+        for (mut cached, mut touched, diff, branch_files) in &mut self.entries {
+            if !cached.matches(path) {
+                continue;
             }
+            let mut restored = cached.retained();
+            restored.watch = cached.watch.take();
+            touched.0 = Instant::now();
+            return Some((
+                restored.restoring(),
+                diff.map(super::diff::GitDiffQuery::parked),
+                branch_files.cloned(),
+            ));
         }
-        while self.order.len() > GIT_PAGE_CACHE_CAPACITY {
-            let Some(expired) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&expired);
-            self.aliases.retain(|_, root| root != &expired);
-        }
+        None
     }
+}
 
-    pub(super) fn restore(&mut self, path: &str) -> Option<CachedGitPage> {
-        let requested = Self::key(path);
-        let root = self.aliases.get(&requested).cloned().unwrap_or(requested);
-        if !self.entries.get(&root)?.matches(path) {
-            self.aliases.remove(&Self::key(path));
-            return None;
-        }
-        let cached = self.entries.remove(&root)?;
-        self.entries.insert(root.clone(), cached.retained());
-        self.order.retain(|entry| entry != &root);
-        self.order.push_back(root);
-        Some(cached.restoring())
+fn evict_retained_pages(
+    pages: Query<(Entity, &CachedGitPage, &RetainedPageTouch)>,
+    mut commands: Commands,
+) {
+    let mut retained = Vec::new();
+    for (entity, cached, touched) in &pages {
+        let Some(repository) = &cached.snapshot.repository else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        let root = PathIdentity::lexical(&repository.repo_root);
+        retained.push((touched.0, entity, root));
     }
-
-    fn remove_aliases(&mut self, root: &str) {
-        self.aliases.retain(|_, candidate| candidate != root);
+    retained.sort_by_key(|(touched, _, _)| std::cmp::Reverse(*touched));
+    let mut roots = Vec::new();
+    for (_, entity, root) in retained {
+        if roots.contains(&root) || roots.len() >= CachedGitPage::CAPACITY {
+            commands.entity(entity).despawn();
+        } else {
+            roots.push(root);
+        }
     }
 }
 
@@ -510,6 +512,7 @@ impl GitState {
 
 #[derive(SystemParam)]
 pub(super) struct GitStates<'w, 's> {
+    sources: Query<'w, 's, &'static PageRepositorySource>,
     states: Query<'w, 's, &'static mut GitState>,
     load_revisions: Query<'w, 's, &'static mut GitRepositoryLoadRevision>,
     repository_revisions: Query<'w, 's, &'static mut GitRepositoryRevision>,
@@ -529,17 +532,29 @@ impl GitStates<'_, '_> {
     }
 
     pub(super) fn repository_loaded_at(&self, entity: Entity, path: &str) -> bool {
-        self.states.get(entity).is_ok_and(|state| {
-            !state.snapshot.loading
-                && state.snapshot.repository.is_some()
-                && state.repository_matches(path)
-        })
+        let Ok(state) = self.states.get(entity) else {
+            return false;
+        };
+        match self.sources.get(entity) {
+            Ok(source) => {
+                !state.snapshot.loading && state.repository().is_some() && source.matches(path)
+            }
+            Err(_) => {
+                !state.snapshot.loading
+                    && state.repository().is_some()
+                    && state.repository_matches(path)
+            }
+        }
     }
 
     pub(super) fn repository_matches(&self, entity: Entity, path: &Path) -> bool {
-        self.states
-            .get(entity)
-            .is_ok_and(|state| state.repository_matches(&path.to_string_lossy()))
+        let Ok(state) = self.states.get(entity) else {
+            return false;
+        };
+        match self.sources.get(entity) {
+            Ok(source) => source.matches(&path.to_string_lossy()),
+            Err(_) => state.repository_matches(&path.to_string_lossy()),
+        }
     }
 
     pub(super) fn repository_loading_at(&self, entity: Entity, path: &str) -> bool {
@@ -571,6 +586,13 @@ impl GitStates<'_, '_> {
                 && PathIdentity::lexical(Path::new(&state.snapshot.workspace))
                     == PathIdentity::lexical(path)
         })
+    }
+
+    pub(super) fn repository_load_revision(&self, entity: Entity) -> Option<u64> {
+        self.load_revisions
+            .get(entity)
+            .ok()
+            .map(|revision| revision.0)
     }
 
     pub(super) fn reset(&mut self, entity: Entity, workspace: String) {
@@ -889,23 +911,45 @@ fn page_ready(
 
 fn cache_removed_page(
     trigger: On<Remove, GitState>,
-    mut pages: Query<(&mut GitState, &GitPageControllerState)>,
+    mut pages: Query<(
+        &mut GitState,
+        &GitPageControllerState,
+        Option<&PageRepositorySource>,
+    )>,
     queries: Query<(
         Option<&super::diff::GitDiffQuery>,
         Option<&super::diff::GitBranchFilesQuery>,
     )>,
-    jobs: Query<(Entity, &GitJob)>,
+    jobs: Query<(
+        Entity,
+        &GitJob,
+        Has<super::job_runner::GitJobRunning>,
+        Has<vmux_ecs::Operation>,
+    )>,
     mut watch: Option<NonSendMut<GitWatch>>,
-    mut cache: ResMut<GitPageCache>,
     mut commands: Commands,
 ) {
     let owner = trigger.event_target();
     let subscription = watch
         .as_deref_mut()
         .and_then(|watch| watch.take_page_subscription(owner));
-    if let Ok((mut state, controller)) = pages.get_mut(owner) {
+    if let Ok((mut state, controller, source)) = pages.get_mut(owner) {
         let (diff, branch_files) = queries.get(owner).unwrap_or_default();
-        cache.store_with_queries(&mut state, controller, subscription, diff, branch_files);
+        let retain_diff = !state.snapshot.diff_loading;
+        let retain_branch_files = !state.snapshot.branch_files_loading;
+        if let Some(cached) = CachedGitPage::capture(&mut state, controller, subscription, source) {
+            let mut retained = commands.spawn((
+                Name::new("git.retained.page"),
+                cached,
+                RetainedPageTouch(Instant::now()),
+            ));
+            if retain_diff && let Some(diff) = diff {
+                retained.insert(diff.parked());
+            }
+            if retain_branch_files && let Some(branch_files) = branch_files {
+                retained.insert(branch_files.clone());
+            }
+        }
     }
     commands.entity(owner).try_remove::<(
         super::diff::GitDiffQuery,
@@ -913,9 +957,22 @@ fn cache_removed_page(
         super::diff::PendingGitDiff,
         super::diff::PendingGitDiffSeek,
         GitDiffProjectionState,
+        GitPageControllerState,
+        GitDirectoryNavigation,
+        PendingBranchCheckout,
+        SelectionRevealRevision,
+        GitCommitResultSequence,
+        super::controller::LocationCursor,
+        GitDiffRevealRanges,
+        PageRepositorySource,
     )>();
-    for (entity, job) in &jobs {
-        if job.owner() == owner {
+    for (entity, job, running, operation) in &jobs {
+        if job.owner() != owner {
+            continue;
+        }
+        if running || operation {
+            commands.entity(entity).try_remove::<GitJob>();
+        } else {
             commands.entity(entity).try_despawn();
         }
     }
@@ -998,7 +1055,7 @@ fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
     mut views: RepositoryViews,
     watch: Option<NonSendMut<GitWatch>>,
-    loads: Res<RepositoryLoads>,
+    loads: Repositories,
     mut states: GitStates,
     queued_jobs: super::job_runner::QueuedGitJobs<GitJob>,
     mut commands: Commands,
@@ -1031,16 +1088,19 @@ fn repository_request(
     if let Ok(mut query) = views.branch_queries.get_mut(webview) {
         query.invalidate();
     }
-    commands
-        .entity(webview)
-        .remove::<(super::diff::PendingGitDiff, super::diff::PendingGitDiffSeek)>();
-    queued_jobs.despawn_for(webview, &mut commands);
+    commands.entity(webview).remove::<(
+        super::diff::PendingGitDiff,
+        super::diff::PendingGitDiffSeek,
+        PageRepositorySource,
+    )>();
+    queued_jobs.cancel_for(webview, &mut commands);
     if let Some(mut watch) = watch {
         watch.release_subscription(webview);
     }
     commands.spawn((
         GitJob::new(webview),
         super::job::GitForegroundRead,
+        super::read::RepositoryRequestIdentity::capture(&path),
         RepositoryJob {
             path,
             refresh_catalogs: true,
@@ -1102,131 +1162,152 @@ mod tests {
         }
     }
 
-    fn cached_state(path: &str) -> GitState {
-        let request = GitRepositoryRequest::at(path);
-        let mut repository = GitRepositorySnapshot::loading(&request);
-        repository.path = format!("{path}/client");
-        repository.repo_root = path.to_string();
-        repository.repo_name = "repo".to_string();
-        repository.branch = "feature".to_string();
-        GitState {
-            snapshot: GitPageSnapshot {
-                workspace: path.to_string(),
-                repository: Some(repository),
-                loading: false,
-                ..Default::default()
-            },
+    struct CachedPages(App);
+
+    impl CachedPages {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(StatePlugin);
+            Self(app)
+        }
+
+        fn state(path: &Path) -> GitState {
+            let repository = GitRepositorySnapshot::load_summary(path).unwrap().snapshot;
+            GitState {
+                snapshot: GitPageSnapshot {
+                    workspace: path.to_string_lossy().into_owned(),
+                    repository: Some(repository),
+                    loading: false,
+                    ..Default::default()
+                },
+            }
+        }
+
+        fn park(&mut self, state: GitState, controller: GitPageControllerState) -> Entity {
+            let page = self.0.world_mut().spawn((state, controller)).id();
+            self.0.world_mut().entity_mut(page).remove::<GitState>();
+            self.0.update();
+            page
+        }
+
+        fn restore(
+            &mut self,
+            path: &Path,
+        ) -> Option<(
+            CachedGitPage,
+            Option<super::super::diff::GitDiffQuery>,
+            Option<super::super::diff::GitBranchFilesQuery>,
+        )> {
+            self.0.world_mut().flush();
+            let mut context =
+                bevy::ecs::system::SystemState::<RetainedPages>::new(self.0.world_mut());
+            context
+                .get_mut(self.0.world_mut())
+                .unwrap()
+                .restore(&path.to_string_lossy())
         }
     }
 
     #[test]
     fn removed_git_page_is_restored_by_repository_alias() {
-        let mut app = App::new();
-        app.init_resource::<GitPageCache>()
-            .add_observer(cache_removed_page);
-        let page = app
-            .world_mut()
-            .spawn((
-                cached_state("/tmp/repo"),
-                GitPageControllerState {
-                    selected_branch: "feature".to_string(),
-                    ..Default::default()
-                },
-            ))
-            .id();
-
-        app.world_mut().entity_mut(page).remove::<GitState>();
-
-        let restored = app
-            .world_mut()
-            .resource_mut::<GitPageCache>()
-            .restore("/tmp/repo/client")
-            .unwrap();
-        assert_eq!(restored.snapshot.workspace, "/tmp/repo");
-        assert!(restored.snapshot.loading);
-        assert_eq!(restored.controller.selected_branch, "feature");
-        assert!(
-            app.world_mut()
-                .resource_mut::<GitPageCache>()
-                .restore("/tmp/repo/client")
-                .is_some()
+        let repo = test_repo::init();
+        let child = repo.path().join("client");
+        std::fs::create_dir(&child).unwrap();
+        let mut pages = CachedPages::new();
+        let mut state = CachedPages::state(repo.path());
+        state.snapshot.repository.as_mut().unwrap().path = child.to_string_lossy().into_owned();
+        pages.park(
+            state,
+            GitPageControllerState {
+                selected_branch: "main".into(),
+                ..Default::default()
+            },
         );
+
+        let restored = pages.restore(&child).unwrap().0;
+        assert_eq!(restored.snapshot.repository.unwrap().branch, "main");
+        assert!(restored.snapshot.loading);
+        assert_eq!(restored.controller.selected_branch, "main");
+        assert!(pages.restore(&child).is_some());
     }
 
     #[test]
-    fn removed_git_page_moves_its_watch_subscription_into_the_cache() {
+    fn removed_git_page_moves_its_watch_subscription_into_retention() {
         let repo = test_repo::init();
-        let mut app = App::new();
-        app.init_resource::<GitPageCache>()
-            .insert_non_send(GitWatch::test())
-            .add_observer(cache_removed_page);
-        let path = repo.path().to_string_lossy().into_owned();
-        let page = app
+        let mut pages = CachedPages::new();
+        pages.0.insert_non_send(GitWatch::test());
+        let page = pages
+            .0
             .world_mut()
-            .spawn((cached_state(&path), GitPageControllerState::default()))
+            .spawn(CachedPages::state(repo.path()))
             .id();
         let prepared = GitWatchSubscription::read(repo.path()).unwrap();
-        app.world_mut()
+        pages
+            .0
+            .world_mut()
             .non_send_mut::<GitWatch>()
             .subscribe_page(page, repo.path(), prepared)
             .unwrap();
+        pages.0.world_mut().entity_mut(page).remove::<GitState>();
 
-        app.world_mut().entity_mut(page).remove::<GitState>();
-
-        let restored = app
-            .world_mut()
-            .resource_mut::<GitPageCache>()
-            .restore(&path)
-            .unwrap();
+        let restored = pages.restore(repo.path()).unwrap().0;
         assert!(restored.watch.is_some());
-        assert!(!app.world().non_send::<GitWatch>().has_subscription(page));
+        assert!(
+            !pages
+                .0
+                .world()
+                .non_send::<GitWatch>()
+                .has_subscription(page)
+        );
+        assert!(pages.restore(repo.path()).unwrap().0.watch.is_none());
     }
 
     #[test]
-    fn removing_git_state_cancels_its_jobs_before_reuse() {
-        let mut app = App::new();
-        app.init_resource::<GitPageCache>()
-            .add_observer(cache_removed_page);
-        let page = app
+    fn removing_git_state_cancels_queued_jobs_before_reuse() {
+        let repo = test_repo::init();
+        let mut pages = CachedPages::new();
+        let page = pages
+            .0
             .world_mut()
-            .spawn((cached_state("/tmp/repo"), GitPageControllerState::default()))
+            .spawn(CachedPages::state(repo.path()))
             .id();
-        let job = app.world_mut().spawn(GitJob::new(page)).id();
-
-        app.world_mut().entity_mut(page).remove::<GitState>();
-        app.update();
-
-        assert!(app.world().get_entity(job).is_err());
+        let job = pages.0.world_mut().spawn(GitJob::new(page)).id();
+        pages.0.world_mut().entity_mut(page).remove::<GitState>();
+        pages.0.update();
+        assert!(pages.0.world().get_entity(job).is_err());
     }
 
     #[test]
-    fn git_page_cache_drops_transient_work() {
-        let mut state = cached_state("/tmp/repo");
+    fn retained_page_drops_transient_work_and_incomplete_queries() {
+        let repo = test_repo::init();
+        let mut pages = CachedPages::new();
+        let mut state = CachedPages::state(repo.path());
         state.snapshot.fetching = true;
         state.snapshot.diff_loading = true;
         state.snapshot.branch_files_loading = true;
         state.snapshot.local_branches.loading = true;
         state.snapshot.local_branches.failed = true;
-        state.snapshot.message = "stale error".to_string();
-        let controller = GitPageControllerState {
-            confirm_discard: b"src/lib.rs".to_vec(),
-            shortcut_help_visible: true,
-            branch_prompt: Some(crate::state::GitBranchPrompt::Create {
-                base: "main".to_string(),
-            }),
-            branch_draft: "feature".to_string(),
-            commit_pending: "pending".to_string(),
-            operations: crate::state::GitOperationEligibility {
-                push: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut cache = GitPageCache::default();
+        state.snapshot.message = "stale error".into();
+        let page = pages
+            .0
+            .world_mut()
+            .spawn((
+                state,
+                GitPageControllerState {
+                    confirm_discard: b"file.txt".to_vec(),
+                    branch_prompt: Some(crate::state::GitBranchPrompt::Create {
+                        base: "main".into(),
+                    }),
+                    commit_pending: "pending".into(),
+                    ..Default::default()
+                },
+                super::super::diff::GitDiffQuery::for_test(7),
+                super::super::diff::GitBranchFilesQuery::for_test(11),
+            ))
+            .id();
+        pages.0.world_mut().entity_mut(page).remove::<GitState>();
 
-        cache.store(&mut state, &controller, None);
-        let restored = cache.restore("/tmp/repo").unwrap();
-
+        let (restored, diff, branch_files) = pages.restore(repo.path()).unwrap();
         assert!(restored.snapshot.loading);
         assert!(!restored.snapshot.fetching);
         assert!(!restored.snapshot.diff_loading);
@@ -1235,40 +1316,18 @@ mod tests {
         assert!(!restored.snapshot.local_branches.failed);
         assert!(restored.snapshot.message.is_empty());
         assert!(restored.controller.confirm_discard.is_empty());
-        assert!(!restored.controller.shortcut_help_visible);
         assert!(restored.controller.branch_prompt.is_none());
-        assert!(restored.controller.branch_draft.is_empty());
         assert!(restored.controller.commit_pending.is_empty());
-        assert_eq!(
-            restored.controller.operations,
-            crate::state::GitOperationEligibility::default()
-        );
-    }
-
-    #[test]
-    fn git_page_cache_drops_incomplete_diff_queries() {
-        let mut state = cached_state("/tmp/repo");
-        state.snapshot.diff_loading = true;
-        state.snapshot.branch_files_loading = true;
-        let controller = GitPageControllerState::default();
-        let diff = super::super::diff::GitDiffQuery::for_test(7);
-        let branch = super::super::diff::GitBranchFilesQuery::for_test(11);
-        let mut cache = GitPageCache::default();
-
-        cache.store_with_queries(&mut state, &controller, None, Some(&diff), Some(&branch));
-        let restored = cache.restore("/tmp/repo").unwrap();
-
-        assert!(restored.diff.is_none());
-        assert!(restored.branch_files.is_none());
+        assert!(diff.is_none());
+        assert!(branch_files.is_none());
     }
 
     #[test]
     fn repeated_reopens_keep_the_cached_diff() {
-        let mut app = App::new();
-        app.init_resource::<GitPageCache>()
-            .add_observer(cache_removed_page);
-        let mut state = cached_state("/tmp/reopen-repo");
-        state.snapshot.diff_viewport = Some(crate::event::GitDiffViewport {
+        let repo = test_repo::init();
+        let mut pages = CachedPages::new();
+        let mut state = CachedPages::state(repo.path());
+        let viewport = crate::event::GitDiffViewport {
             generation: 7,
             revision: 2,
             first_line: 0,
@@ -1277,112 +1336,60 @@ mod tests {
             lines: vec![line(DiffKind::Add, 1)],
             markers: Vec::new(),
             error: String::new(),
-        });
-        let page = app
-            .world_mut()
-            .spawn((state, GitPageControllerState::default()))
-            .id();
-        app.world_mut().entity_mut(page).remove::<GitState>();
-        let mut cache = app.world_mut().resource_mut::<GitPageCache>();
-        let first = cache.restore("/tmp/reopen-repo").unwrap();
-        let reopened = cache.restore("/tmp/reopen-repo").unwrap();
-
-        assert!(first.snapshot.diff_viewport.is_some());
+        };
+        state.snapshot.diff_viewport = Some(viewport.clone());
+        pages.park(state, GitPageControllerState::default());
         assert_eq!(
-            reopened.snapshot.diff_viewport,
-            first.snapshot.diff_viewport
+            pages.restore(repo.path()).unwrap().0.snapshot.diff_viewport,
+            Some(viewport.clone())
         );
-    }
-
-    #[test]
-    fn git_page_cache_rejects_a_stale_alias() {
-        let mut cache = GitPageCache::default();
-        let mut state = cached_state("/tmp/repo");
-        let controller = GitPageControllerState::default();
-        cache.store(&mut state, &controller, None);
-        cache.aliases.insert(
-            GitPageCache::key("/tmp/other"),
-            GitPageCache::key("/tmp/repo"),
+        assert_eq!(
+            pages.restore(repo.path()).unwrap().0.snapshot.diff_viewport,
+            Some(viewport)
         );
-
-        assert!(cache.restore("/tmp/other").is_none());
     }
 
     #[cfg(unix)]
     #[test]
-    fn git_page_cache_rejects_a_retargeted_symlink() {
-        let temporary = tempfile::tempdir().unwrap();
-        let first = temporary.path().join("first");
-        let second = temporary.path().join("second");
-        let link = temporary.path().join("repository");
-        std::fs::create_dir_all(&first).unwrap();
-        std::fs::create_dir_all(&second).unwrap();
-        symlink(&first, &link).unwrap();
-        let first = first.to_string_lossy().into_owned();
-        let link_text = link.to_string_lossy().into_owned();
-        let mut state = cached_state(&first);
-        state.snapshot.workspace = link_text.clone();
-        let mut cache = GitPageCache::default();
-        cache.store(&mut state, &GitPageControllerState::default(), None);
-
-        std::fs::remove_file(&link).unwrap();
-        symlink(&second, &link).unwrap();
-
-        assert!(cache.restore(&link_text).is_none());
+    fn retained_page_rejects_a_retargeted_symlink() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let parent = tempfile::tempdir().unwrap();
+        let alias = parent.path().join("repository");
+        symlink(first.path(), &alias).unwrap();
+        let mut pages = CachedPages::new();
+        let mut state = CachedPages::state(&alias);
+        state.snapshot.workspace = alias.to_string_lossy().into_owned();
+        pages.park(state, GitPageControllerState::default());
+        std::fs::remove_file(&alias).unwrap();
+        symlink(second.path(), &alias).unwrap();
+        assert!(pages.restore(&alias).is_none());
     }
 
     #[test]
-    fn git_page_cache_keeps_aliases_for_parallel_pages() {
-        let mut cache = GitPageCache::default();
-        let mut state = cached_state("/tmp/repo");
-        state.snapshot.repository.as_mut().unwrap().path = "/tmp/repo/client".to_string();
-        let controller = GitPageControllerState::default();
-        cache.store(&mut state, &controller, None);
-
-        assert!(cache.restore("/tmp/repo/client").is_some());
-        assert!(cache.restore("/tmp/repo/client").is_some());
-        assert!(!cache.aliases.is_empty());
-    }
-
-    #[test]
-    fn git_page_cache_replaces_aliases_for_the_same_repository() {
-        let mut cache = GitPageCache::default();
-        let controller = GitPageControllerState::default();
-        let mut first = cached_state("/tmp/repo");
-        first.snapshot.workspace = "/tmp/repo/first".to_string();
-        cache.store(&mut first, &controller, None);
-
-        let mut second = cached_state("/tmp/repo");
-        second.snapshot.workspace = "/tmp/repo/second".to_string();
-        cache.store(&mut second, &controller, None);
-
-        assert!(
-            !cache
-                .aliases
-                .contains_key(&GitPageCache::key("/tmp/repo/first"))
-        );
-        assert!(
-            cache
-                .aliases
-                .contains_key(&GitPageCache::key("/tmp/repo/second"))
-        );
-    }
-
-    #[test]
-    fn git_page_cache_evicts_the_oldest_repository() {
-        let mut cache = GitPageCache::default();
-        for index in 0..=GIT_PAGE_CACHE_CAPACITY {
-            let mut state = cached_state(&format!("/tmp/repo-{index}"));
-            let controller = GitPageControllerState::default();
-            cache.store(&mut state, &controller, None);
+    fn retained_pages_evict_the_least_recently_used_repository() {
+        let repositories = [
+            test_repo::init(),
+            test_repo::init(),
+            test_repo::init(),
+            test_repo::init(),
+            test_repo::init(),
+        ];
+        let mut pages = CachedPages::new();
+        for repository in &repositories[..4] {
+            pages.park(
+                CachedPages::state(repository.path()),
+                GitPageControllerState::default(),
+            );
         }
-
-        assert!(cache.restore("/tmp/repo-0").is_none());
-        assert!(
-            cache
-                .restore(&format!("/tmp/repo-{GIT_PAGE_CACHE_CAPACITY}"))
-                .is_some()
+        assert!(pages.restore(repositories[0].path()).is_some());
+        pages.park(
+            CachedPages::state(repositories[4].path()),
+            GitPageControllerState::default(),
         );
+        assert!(pages.restore(repositories[1].path()).is_none());
+        assert!(pages.restore(repositories[0].path()).is_some());
+        assert!(pages.restore(repositories[4].path()).is_some());
     }
 
     #[test]
@@ -1463,8 +1470,7 @@ mod tests {
     #[test]
     fn repository_load_revision_is_not_reused_after_state_recreation() {
         let mut app = App::new();
-        app.init_resource::<RepositoryLoads>()
-            .add_observer(repository_request);
+        app.add_observer(repository_request);
         let page = app.world_mut().spawn(GitState::default()).id();
         let request = GitRepositoryRequest::at("/tmp/repository");
 
@@ -1685,8 +1691,7 @@ mod tests {
     fn repository_switch_keeps_invalidated_diff_epochs() {
         let commit = "a".repeat(40);
         let mut app = App::new();
-        app.init_resource::<RepositoryLoads>()
-            .add_observer(repository_request);
+        app.add_observer(repository_request);
         let page = app
             .world_mut()
             .spawn((
@@ -1720,8 +1725,7 @@ mod tests {
     #[test]
     fn repository_switch_cancels_read_and_mutation_jobs() {
         let mut app = App::new();
-        app.init_resource::<RepositoryLoads>()
-            .add_observer(repository_request);
+        app.add_observer(repository_request);
         let page = app.world_mut().spawn(GitState::default()).id();
         app.world_mut().spawn((
             GitJob::new(page),
@@ -1753,8 +1757,7 @@ mod tests {
     #[test]
     fn duplicate_repository_request_queues_one_load() {
         let mut app = App::new();
-        app.init_resource::<RepositoryLoads>()
-            .add_observer(repository_request);
+        app.add_observer(repository_request);
         let page = app.world_mut().spawn(GitState::default()).id();
         let request = GitRepositoryRequest {
             request_id: 7,
@@ -1778,8 +1781,7 @@ mod tests {
     #[test]
     fn stale_repository_request_is_rejected() {
         let mut app = App::new();
-        app.init_resource::<RepositoryLoads>()
-            .add_observer(repository_request);
+        app.add_observer(repository_request);
         let mut state = GitState::default();
         state.snapshot.repository_request_id = 7;
         state.snapshot.workspace = "/tmp/current".to_string();
@@ -1835,7 +1837,6 @@ mod tests {
         let repo = test_repo::init();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<RepositoryLoads>()
             .add_observer(repository_request);
         app.insert_non_send(GitWatch::test());
         let page = app

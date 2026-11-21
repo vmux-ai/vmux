@@ -37,6 +37,7 @@ mod diff;
 mod directory;
 mod job;
 mod job_runner;
+mod read;
 mod repository_picker;
 mod repository_provision;
 mod runtime;

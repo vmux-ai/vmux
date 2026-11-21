@@ -14,20 +14,21 @@ use crate::event::{
     GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitDraftRequest, GitCommitRequest,
     GitCommitSelectRequest, GitCommitSubmitRequest, GitCreateBranchRequest, GitDeleteBranchRequest,
     GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest, GitFileSelectRequest,
-    GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest, GitRepositoryRequest,
-    GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
-    GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
-    GitStashSelectRequest, GitUnstageRequest,
+    GitKeyRequest, GitMergeRequest, GitOperationError, GitPanelSelectRequest, GitRebaseRequest,
+    GitRepositoryRequest, GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest,
+    GitStageAllRequest, GitStageRequest, GitStashDropRequest, GitStashPopRequest,
+    GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest,
 };
 use crate::state::{
-    GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
-    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
-    GitWorkspaceChanged,
+    GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageControllerState,
+    GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState, GitWorkspaceChanged,
 };
 
 use super::directory::GitDirectoryNavigation;
+use super::read::{PageRepositorySource, SourceIdentity};
 use super::runtime::{GitRuntime, GitTask};
-use super::state::{CachedGitPage, GitDiffRevealRanges, GitPageCache, GitState};
+use super::state::GitRepositoryLoadRevision;
+use super::state::{CachedGitPage, GitDiffRevealRanges, GitState, RetainedPages};
 
 pub(super) struct ControllerPlugin;
 
@@ -48,6 +49,9 @@ impl Plugin for ControllerPlugin {
                 GitDiscardFileRequest,
             )>::default())
             .add_observer(ui_state_write)
+            .add_observer(repository_context)
+            .add_observer(workspace_changed)
+            .add_observer(directory_received)
             .add_observer(reset_location)
             .add_observer(key_request)
             .add_observer(panel_select_request)
@@ -79,6 +83,7 @@ impl Plugin for ControllerPlugin {
                         start_repository_probes,
                         bevy::ecs::schedule::ApplyDeferred,
                         poll_repository_probes,
+                        deliver_repository_probes,
                     )
                         .chain()
                         .before(ControllerSet::Reconcile),
@@ -210,13 +215,31 @@ fn reset_location(event: On<Add, GitState>, mut commands: Commands) {
 #[derive(Component)]
 struct PendingRepositoryProbe {
     path: String,
+    source: SourceIdentity,
+    revision: u64,
 }
 
 #[derive(Component)]
-struct RepositoryProbeTask {
+struct RepositoryProbe {
+    owner: Entity,
     path: String,
-    task: GitTask<bool>,
+    revision: u64,
+    source: SourceIdentity,
 }
+
+impl RepositoryProbe {
+    fn accepts(&self, state: &GitState, revision: &GitRepositoryLoadRevision) -> bool {
+        state.workspace() == self.path
+            && revision.matches(self.revision)
+            && self.source.matches(Path::new(&self.path))
+    }
+}
+
+#[derive(Component)]
+struct RepositoryProbeTask(GitTask<bool>);
+
+#[derive(Component)]
+struct RepositoryPresence(bool);
 
 impl GitCommitResultSequence {
     pub(super) fn reset(&mut self) {
@@ -225,7 +248,7 @@ impl GitCommitResultSequence {
 }
 
 impl GitPageControllerState {
-    fn apply_url(&mut self, value: &str) -> bool {
+    pub(super) fn apply_url(&mut self, value: &str) -> bool {
         let Some(panel) = crate::GitUrl::panel(value) else {
             return false;
         };
@@ -1056,8 +1079,42 @@ impl SelectionDirection {
     }
 }
 
-fn ui_state_write(
-    trigger: On<UiStateWrite<GitUiState>>,
+fn ui_state_write(trigger: On<UiStateWrite<GitUiState>>, mut commands: Commands) {
+    let webview = trigger.event().webview();
+    let patch = trigger.event().update();
+    if let Some(context) = &patch.context {
+        commands.trigger(RepositoryContextReceived {
+            webview,
+            working_directory: context.working_directory.clone(),
+            page_url: context.page_url.clone(),
+            source: SourceIdentity::capture(Path::new(&context.working_directory)),
+        });
+    }
+    if let Some(GitRepositoryPicked { path }) = &patch.repository_picked
+        && !path.is_empty()
+    {
+        commands.trigger(DirectoryReceived {
+            webview,
+            path: path.clone(),
+        });
+    }
+    if let Some(workspace) = &patch.workspace {
+        commands.trigger(WorkspaceReceived {
+            webview,
+            workspace: workspace.clone(),
+        });
+    }
+}
+
+#[derive(EntityEvent, Clone)]
+struct WorkspaceReceived {
+    #[event_target]
+    webview: Entity,
+    workspace: GitWorkspaceChanged,
+}
+
+fn workspace_changed(
+    trigger: On<WorkspaceReceived>,
     mut pages: Query<(
         &mut GitPageControllerState,
         &mut GitDirectoryNavigation,
@@ -1067,13 +1124,14 @@ fn ui_state_write(
         &mut GitDiffRevealRanges,
     )>,
     mut states: super::state::GitStates,
-    mut cache: Option<ResMut<GitPageCache>>,
-    mut watch: Option<NonSendMut<super::watch::GitWatch>>,
     mut commands: Commands,
 ) {
-    let webview = trigger.event().webview();
+    let webview = trigger.event().webview;
     if !states.contains(webview) {
-        commands.entity(webview).insert(GitState::default());
+        let Ok(mut entity) = commands.get_entity(webview) else {
+            return;
+        };
+        entity.try_insert(GitState::default());
         commands.trigger(trigger.event().clone());
         return;
     }
@@ -1088,107 +1146,11 @@ fn ui_state_write(
     else {
         return;
     };
-    let patch = trigger.event().update();
-    if let Some(GitPageContext {
-        working_directory,
-        page_url,
-    }) = &patch.context
-    {
-        let path = working_directory.clone();
-        if !states.repository_loaded_at(webview, &path)
-            && !states.repository_loading_at(webview, &path)
-        {
-            let mut restored = false;
-            if let Some(cached) = cache.as_deref_mut().and_then(|cache| cache.restore(&path)) {
-                let CachedGitPage {
-                    mut snapshot,
-                    controller: mut cached_controller,
-                    watch: cached_watch,
-                    diff,
-                    branch_files,
-                } = cached;
-                let changed_selection = cached_controller.apply_url(page_url);
-                if changed_selection {
-                    snapshot.clear_diff();
-                }
-                if states.restore(webview, snapshot) {
-                    *controller = cached_controller;
-                    if let Some(diff) = diff.filter(|_| !changed_selection) {
-                        commands.entity(webview).insert(diff);
-                    }
-                    if let Some(branch_files) = branch_files.filter(|_| !changed_selection) {
-                        commands.entity(webview).insert(branch_files);
-                    }
-                    if let Some((workspace, refresh_revision)) = states.refresh_repository(webview)
-                    {
-                        if let (Some(watch), Some(subscription)) =
-                            (watch.as_deref_mut(), cached_watch)
-                        {
-                            let _ =
-                                watch.subscribe_page(webview, Path::new(&workspace), subscription);
-                        }
-                        commands.spawn((
-                            super::job_runner::GitJob::new(webview),
-                            super::job::GitForegroundRead,
-                            super::job::RepositoryJob {
-                                path: workspace.into(),
-                                refresh_catalogs: true,
-                                revision: refresh_revision,
-                            },
-                        ));
-                    }
-                    restored = true;
-                }
-            }
-            if restored {
-                commands
-                    .entity(webview)
-                    .remove::<(PendingRepositoryProbe, RepositoryProbeTask)>();
-                controller.apply_url(page_url);
-                pending.0.clear();
-                revision.0 = 0;
-                commit_result.0 = 0;
-                revealed.0.clear();
-                *directory = GitDirectoryNavigation::default();
-            }
-            if !restored {
-                states.reset(webview, path.clone());
-                controller.reset_for_repository(String::new());
-                controller.apply_url(page_url);
-                pending.0.clear();
-                revision.0 = 0;
-                commit_result.0 = 0;
-                revealed.0.clear();
-                *directory = GitDirectoryNavigation::default();
-                commands
-                    .entity(webview)
-                    .remove::<RepositoryProbeTask>()
-                    .insert(PendingRepositoryProbe { path });
-            }
-        } else if controller.apply_url(page_url) {
-            states.clear_diff(webview);
-            commands
-                .entity(webview)
-                .remove::<(super::diff::GitDiffQuery, super::diff::GitBranchFilesQuery)>();
-        }
-    }
-    if let Some(GitRepositoryPicked { path }) = &patch.repository_picked
-        && !path.is_empty()
-    {
-        *directory = GitDirectoryNavigation::default();
-        commands.trigger(UiInput {
-            webview,
-            payload: crate::event::GitDirectoryOpenRequest { path: path.clone() },
-        });
-    }
-    let Some(GitWorkspaceChanged {
+    let GitWorkspaceChanged {
         path,
         branch,
         error,
-    }) = &patch.workspace
-    else {
-        return;
-    };
+    } = &trigger.event().workspace;
     if !error.is_empty() {
         states.apply_workspace_error(webview, error.clone());
         return;
@@ -1200,6 +1162,7 @@ fn ui_state_write(
         return;
     }
     states.reset(webview, path.clone());
+    commands.entity(webview).remove::<PageRepositorySource>();
     controller.reset_for_repository(branch.clone());
     pending.0.clear();
     revision.0 = 0;
@@ -1212,58 +1175,278 @@ fn ui_state_write(
     });
 }
 
+#[derive(EntityEvent, Clone)]
+struct RepositoryContextReceived {
+    #[event_target]
+    webview: Entity,
+    working_directory: String,
+    page_url: String,
+    source: SourceIdentity,
+}
+
+fn repository_context(
+    trigger: On<RepositoryContextReceived>,
+    mut pages: Query<(
+        &mut GitPageControllerState,
+        &mut GitDirectoryNavigation,
+        &mut PendingBranchCheckout,
+        &mut SelectionRevealRevision,
+        &mut GitCommitResultSequence,
+        &mut GitDiffRevealRanges,
+    )>,
+    mut states: super::state::GitStates,
+    mut cache: RetainedPages,
+    mut watch: Option<NonSendMut<super::watch::GitWatch>>,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    let webview = request.webview;
+    if !states.contains(webview) {
+        let Ok(mut entity) = commands.get_entity(webview) else {
+            return;
+        };
+        entity.try_insert(GitState::default());
+        commands.trigger(request.clone());
+        return;
+    }
+    let Ok((
+        mut controller,
+        mut directory,
+        mut pending,
+        mut revision,
+        mut commit_result,
+        mut revealed,
+    )) = pages.get_mut(webview)
+    else {
+        return;
+    };
+    let path = &request.working_directory;
+    let page_url = &request.page_url;
+    if states.repository_loaded_at(webview, path) || states.repository_loading_at(webview, path) {
+        if controller.apply_url(page_url) {
+            states.clear_diff(webview);
+            commands
+                .entity(webview)
+                .remove::<(super::diff::GitDiffQuery, super::diff::GitBranchFilesQuery)>();
+        }
+        return;
+    }
+    match cache.restore(path) {
+        Some((mut cached, diff, branch_files)) => {
+            let changed_selection = cached.apply_url(page_url);
+            let CachedGitPage {
+                snapshot,
+                controller: cached_controller,
+                watch: cached_watch,
+                source,
+                ..
+            } = cached;
+            if !states.restore(webview, snapshot) {
+                return;
+            }
+            *controller = cached_controller;
+            if let Some(source) = source {
+                commands.entity(webview).insert(source);
+            }
+            if !changed_selection && let Some(diff) = diff {
+                commands.entity(webview).insert(diff);
+            }
+            if !changed_selection && let Some(branch_files) = branch_files {
+                commands.entity(webview).insert(branch_files);
+            }
+            if let Some((workspace, refresh_revision)) = states.refresh_repository(webview) {
+                if let (Some(watch), Some(subscription)) = (watch.as_deref_mut(), cached_watch) {
+                    let _ = watch.subscribe_page(webview, Path::new(&workspace), subscription);
+                }
+                commands.spawn((
+                    super::job_runner::GitJob::new(webview),
+                    super::job::GitForegroundRead,
+                    super::read::RepositoryRequestIdentity::capture(Path::new(&workspace)),
+                    super::job::RepositoryJob {
+                        path: workspace.into(),
+                        refresh_catalogs: true,
+                        revision: refresh_revision,
+                    },
+                ));
+            }
+            commands.entity(webview).remove::<PendingRepositoryProbe>();
+        }
+        None => {
+            states.reset(webview, path.clone());
+            let Some(accepted_revision) = states.repository_load_revision(webview) else {
+                return;
+            };
+            commands.entity(webview).remove::<PageRepositorySource>();
+            controller.reset_for_repository(String::new());
+            controller.apply_url(page_url);
+            commands.entity(webview).insert(PendingRepositoryProbe {
+                path: path.clone(),
+                source: request.source.clone(),
+                revision: accepted_revision,
+            });
+        }
+    }
+    pending.0.clear();
+    revision.0 = 0;
+    commit_result.0 = 0;
+    revealed.0.clear();
+    *directory = GitDirectoryNavigation::default();
+}
+
+#[derive(EntityEvent, Clone)]
+struct DirectoryReceived {
+    #[event_target]
+    webview: Entity,
+    path: String,
+}
+
+fn directory_received(
+    trigger: On<DirectoryReceived>,
+    states: super::state::GitStates,
+    mut directories: Query<&mut GitDirectoryNavigation>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if !states.contains(event.webview) {
+        let Ok(mut entity) = commands.get_entity(event.webview) else {
+            return;
+        };
+        entity.try_insert(GitState::default());
+        commands.trigger(event.clone());
+        return;
+    }
+    let Ok(mut directory) = directories.get_mut(event.webview) else {
+        return;
+    };
+    *directory = GitDirectoryNavigation::default();
+    commands.trigger(UiInput {
+        webview: event.webview,
+        payload: crate::event::GitDirectoryOpenRequest {
+            path: event.path.clone(),
+        },
+    });
+}
+
 fn start_repository_probes(
-    pending: Query<(Entity, &PendingRepositoryProbe), Without<RepositoryProbeTask>>,
+    pending: Query<(Entity, &PendingRepositoryProbe)>,
+    mut states: super::state::GitStates,
     runtime: Res<GitRuntime>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let wake = wake.as_deref().map(|wake| (**wake).clone());
-    for (entity, pending) in &pending {
+    for (owner, pending) in &pending {
+        if !states.repository_requested_at(owner, Path::new(&pending.path), pending.revision) {
+            commands.entity(owner).remove::<PendingRepositoryProbe>();
+            continue;
+        }
         let path = pending.path.clone();
+        let source = pending.source.clone();
+        if !source.matches(Path::new(&path)) {
+            states.fail_repository(
+                owner,
+                &GitOperationError {
+                    message: "Git repository source changed".into(),
+                },
+            );
+            commands.entity(owner).remove::<PendingRepositoryProbe>();
+            continue;
+        }
         let probe_path = path.clone();
         let Some(task) = runtime.spawn(wake.clone(), move || {
             super::repository::GitRepository::has_repository(Path::new(&probe_path))
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<PendingRepositoryProbe>()
-            .insert(RepositoryProbeTask { path, task });
+        commands.entity(owner).remove::<PendingRepositoryProbe>();
+        commands.spawn((
+            Name::new("git.repository.probe"),
+            RepositoryProbe {
+                owner,
+                path,
+                revision: pending.revision,
+                source,
+            },
+            RepositoryProbeTask(task),
+        ));
     }
 }
 
 fn poll_repository_probes(
-    mut probes: Query<(Entity, &mut RepositoryProbeTask, &GitPageControllerState)>,
-    states: Query<&GitState>,
+    mut probes: Query<(Entity, &RepositoryProbe, &mut RepositoryProbeTask)>,
+    mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
-    for (entity, mut probe, controller) in &mut probes {
-        let Some(result) = probe.task.poll() else {
-            continue;
-        };
-        commands.entity(entity).remove::<RepositoryProbeTask>();
-        let Ok(has_repository) = result else {
-            continue;
-        };
-        let Ok(state) = states.get(entity) else {
-            continue;
-        };
-        if state.workspace() != probe.path {
+    for (entity, probe, mut task) in &mut probes {
+        let current =
+            states.repository_requested_at(probe.owner, Path::new(&probe.path), probe.revision);
+        let valid = current && probe.source.matches(Path::new(&probe.path));
+        if !valid {
+            task.0.cancel();
+        }
+        if !task.0.is_finished() {
             continue;
         }
-        if has_repository {
+        if !valid {
+            if current {
+                states.fail_repository(
+                    probe.owner,
+                    &GitOperationError {
+                        message: "Git repository source changed".into(),
+                    },
+                );
+            }
+            commands.entity(entity).despawn();
+            continue;
+        }
+        match task.0.poll() {
+            Some(Ok(present)) => {
+                commands
+                    .entity(entity)
+                    .remove::<RepositoryProbeTask>()
+                    .insert(RepositoryPresence(present));
+            }
+            _ => {
+                states.fail_repository(
+                    probe.owner,
+                    &GitOperationError {
+                        message: "Git repository probe worker failed".into(),
+                    },
+                );
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn deliver_repository_probes(
+    probes: Query<(Entity, &RepositoryProbe, &RepositoryPresence)>,
+    states: Query<(
+        &GitState,
+        &GitPageControllerState,
+        &GitRepositoryLoadRevision,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, probe, present) in &probes {
+        commands.entity(entity).despawn();
+        let Ok((state, controller, revision)) = states.get(probe.owner) else {
+            continue;
+        };
+        if !probe.accepts(state, revision) {
+            continue;
+        }
+        if present.0 {
             let selected_commit = controller
                 .selected_commit_is_object_id()
                 .then(|| controller.selected_commit.clone());
             commands.trigger(UiInput {
-                webview: entity,
+                webview: probe.owner,
                 payload: GitRepositoryRequest::at(probe.path.clone()).with_commit(selected_commit),
             });
         } else {
             commands.trigger(UiInput {
-                webview: entity,
+                webview: probe.owner,
                 payload: crate::event::GitDirectoryOpenRequest {
                     path: probe.path.clone(),
                 },
@@ -1538,6 +1721,7 @@ fn submit_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::GitPageContext;
 
     #[test]
     fn a_location_waits_for_the_catalog_and_applies_only_once() {
@@ -1595,6 +1779,71 @@ mod tests {
                 .directories
                 .push(trigger.event().payload.path.clone());
         }
+    }
+
+    #[test]
+    fn retiring_a_repository_presence_probe_retains_its_native_drain() {
+        let repo = super::super::repository::test_repo::init();
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            super::super::state::StatePlugin,
+            ControllerPlugin,
+        ))
+        .init_resource::<InitialRequests>()
+        .add_observer(InitialRequests::repository)
+        .add_observer(InitialRequests::directory);
+        let path = repo.path().to_string_lossy().into_owned();
+        let page = app
+            .world_mut()
+            .spawn(GitState {
+                snapshot: crate::state::GitPageSnapshot {
+                    workspace: path.clone(),
+                    loading: true,
+                    ..Default::default()
+                },
+            })
+            .id();
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let input = path.clone();
+        let task = app
+            .world()
+            .resource::<GitRuntime>()
+            .spawn(None, move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                super::super::repository::GitRepository::has_repository(Path::new(&input))
+            })
+            .unwrap();
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let probe = app
+            .world_mut()
+            .spawn((
+                RepositoryProbe {
+                    owner: page,
+                    path,
+                    revision: 0,
+                    source: SourceIdentity::capture(repo.path()),
+                },
+                RepositoryProbeTask(task),
+            ))
+            .id();
+        app.world_mut().entity_mut(page).remove::<GitState>();
+        app.update();
+        assert!(app.world().get_entity(probe).is_ok());
+        release_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.world().get_entity(probe).is_ok() {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let requests = app.world().resource::<InitialRequests>();
+        assert!(requests.repositories.is_empty());
+        assert!(requests.directories.is_empty());
     }
 
     struct CommitSelectionFixture {
@@ -2085,8 +2334,7 @@ mod tests {
             MinimalPlugins,
             super::super::state::StatePlugin,
             ControllerPlugin,
-        ))
-        .init_resource::<super::super::job_runner::RepositoryLoads>();
+        ));
         let request = GitRepositoryRequest::at("/tmp/cached");
         let source = app
             .world_mut()
@@ -2149,8 +2397,7 @@ mod tests {
                 MinimalPlugins,
                 super::super::state::StatePlugin,
                 ControllerPlugin,
-            ))
-            .init_resource::<super::super::job_runner::RepositoryLoads>();
+            ));
             let path = "/tmp/cached";
             let request = GitRepositoryRequest::at(path);
             let mut controller = GitPageControllerState::for_repository("main".into());
@@ -2177,6 +2424,7 @@ mod tests {
                 ))
                 .id();
             app.world_mut().entity_mut(source).remove::<GitState>();
+            app.world_mut().flush();
             let target = app.world_mut().spawn(GitState::default()).id();
             let mut url = url::Url::parse("vmux://git/").unwrap();
             url.path_segments_mut().unwrap().clear().extend([
@@ -2193,6 +2441,7 @@ mod tests {
                     },
                 ));
 
+            app.world_mut().flush();
             let restored = app.world().get::<GitPageControllerState>(target).unwrap();
             assert_eq!(restored.focused_panel, GitPanel::Branches);
             assert_eq!(restored.selected_branch, "main");
@@ -2279,7 +2528,6 @@ mod tests {
             super::super::state::StatePlugin,
             ControllerPlugin,
         ))
-        .init_resource::<super::super::job_runner::RepositoryLoads>()
         .insert_non_send(super::super::watch::GitWatch::test());
         let request = GitRepositoryRequest::at(path.clone());
         let source = app

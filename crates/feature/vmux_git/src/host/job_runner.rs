@@ -1,8 +1,6 @@
-use std::collections::{HashMap, VecDeque};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::Instant;
 
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy::{ecs::system::SystemParam, prelude::*};
@@ -14,24 +12,28 @@ use super::job::{
     HunkJob, MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob,
     StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
+use super::read::{
+    PageRepositorySource, ReadPlugin, ReadSet, RepositoryReadRequest, RepositoryRequestIdentity,
+    SourceIdentity,
+};
 use super::repository::{
     BranchFilesCatalog, DiffSource, GitCatalogPage, GitCatalogSnapshot, GitError, GitRepository,
     RepositorySummary,
 };
-use super::runtime::{GitCancellationGroup, GitCancellationParticipant, GitRuntime, GitTask};
+use super::runtime::{GitRuntime, GitTask};
+#[cfg(test)]
+use crate::event::GitRepositorySnapshot;
 use crate::event::{
     GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
-    GitRepositorySnapshot,
 };
 use crate::state::{
     GitBranchFilesPagePatch, GitBranchFilesPatch, GitCatalogEntries, GitCatalogPatch, GitUiState,
 };
-use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
+use vmux_ecs::{
+    Operation, OperationCompleted, OperationPlugin, OperationRetained, OperationState,
+    OperationTarget,
+};
 use vmux_path::PathIdentity;
-
-const REPOSITORY_LOAD_CACHE_CAPACITY: usize = 128;
-const REPOSITORY_LOAD_ALIAS_CAPACITY: usize = REPOSITORY_LOAD_CACHE_CAPACITY * 4;
-const CATALOG_SNAPSHOT_CAPACITY: usize = 128;
 
 pub(super) struct JobPlugin;
 
@@ -44,24 +46,25 @@ impl Plugin for JobPlugin {
             .add_observer(running)
             .add_observer(cancel)
             .init_resource::<GitRuntime>()
-            .init_resource::<RepositoryLoads>()
-            .init_resource::<RepositoryLoadEpoch>()
-            .init_resource::<CatalogSnapshots>()
+            .add_plugins(ReadPlugin)
+            .add_systems(PostUpdate, (finish_retired_jobs, evict_catalog_snapshots))
             .add_systems(
                 Update,
                 (
-                    cancel_orphaned_jobs,
+                    cancel_orphaned_jobs.in_set(RetirementSet),
                     bevy::ecs::schedule::ApplyDeferred,
                     (
                         poll_jobs::<RepositoryOutput>,
                         poll_jobs::<CatalogOutput>,
+                        poll_jobs::<CatalogSnapshotOutput>,
                         poll_jobs::<BranchFilesOutput>,
                         poll_jobs::<DiffOutput>,
                         poll_jobs::<OperationOutput>,
-                    ),
+                    )
+                        .after(ReadSet),
                     (
                         deliver_repository_outputs,
-                        deliver_catalog_outputs,
+                        (materialize_catalog_snapshots, deliver_catalog_outputs).chain(),
                         deliver_branch_files_outputs,
                         deliver_diff_outputs,
                         deliver_operation_outputs,
@@ -126,18 +129,36 @@ impl GitJob {
 pub(super) struct GitJobs(Vec<Entity>);
 
 #[derive(Component)]
-struct GitJobRunning;
+pub(super) struct GitJobRunning;
 
-fn accept(
-    trigger: On<Add, GitJob>,
-    jobs: Query<(&GitJob, Has<super::job::GitReadJob>)>,
-    mut commands: Commands,
-) {
+#[derive(Component)]
+struct GitJobRetired;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct RetirementSet;
+
+type AcceptedJobs<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static GitJob,
+        Has<super::job::GitReadJob>,
+        Option<&'static RepositoryJob>,
+        Has<RepositoryRequestIdentity>,
+    ),
+>;
+
+fn accept(trigger: On<Add, GitJob>, jobs: AcceptedJobs, mut commands: Commands) {
     let entity = trigger.event_target();
-    let Ok((job, read)) = jobs.get(entity) else {
+    let Ok((job, read, repository, identified)) = jobs.get(entity) else {
         return;
     };
     if read {
+        if !identified && let Some(repository) = repository {
+            commands
+                .entity(entity)
+                .insert(RepositoryRequestIdentity::capture(&repository.path));
+        }
         return;
     }
     commands.entity(entity).insert((
@@ -153,41 +174,53 @@ fn running(
 ) {
     let entity = trigger.event_target();
     if operations.contains(entity) {
-        commands.entity(entity).insert(OperationState::Running);
+        commands
+            .entity(entity)
+            .insert((OperationState::Running, OperationRetained));
     }
 }
 
 fn cancel(
     trigger: On<Remove, GitJob>,
-    operations: Query<&OperationState, With<Operation>>,
+    jobs: Query<(Option<&OperationState>, Has<GitJobRunning>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let Ok(state) = operations.get(entity) else {
+    let Ok((state, running)) = jobs.get(entity) else {
         return;
     };
-    if !matches!(state, OperationState::Pending | OperationState::Running) {
+    if state
+        .is_some_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+    {
         return;
     }
-    commands
-        .entity(entity)
-        .try_remove::<(GitJobRunning, GitJobTask<OperationOutput>, GitRepository)>()
-        .try_insert(OperationState::Canceled);
+    let mut entity = commands.entity(entity);
+    if running {
+        entity.try_insert(GitJobRetired);
+    }
+    if state.is_some() {
+        entity.try_insert(OperationState::Canceled);
+    }
 }
 
 #[derive(SystemParam)]
 pub(super) struct QueuedGitJobs<'w, 's, J: Component> {
     queues: Query<'w, 's, &'static GitJobs>,
-    matching: Query<'w, 's, (), With<J>>,
+    matching: Query<'w, 's, (Has<GitJobRunning>, Has<Operation>), With<J>>,
 }
 
 impl<J: Component> QueuedGitJobs<'_, '_, J> {
-    pub(super) fn despawn_for(&self, webview: Entity, commands: &mut Commands) {
+    pub(super) fn cancel_for(&self, webview: Entity, commands: &mut Commands) {
         let Ok(queue) = self.queues.get(webview) else {
             return;
         };
         for entity in queue.iter() {
-            if self.matching.contains(entity) {
+            let Ok((running, operation)) = self.matching.get(entity) else {
+                continue;
+            };
+            if running || operation {
+                commands.entity(entity).remove::<GitJob>();
+            } else {
                 commands.entity(entity).despawn();
             }
         }
@@ -210,328 +243,36 @@ impl<T: Send + Sync + 'static> GitJobTask<T> {
 }
 
 #[derive(Component, Clone)]
-struct RepositoryOutput(Result<Arc<RepositorySummary>, GitOperationError>);
+pub(super) struct RepositoryOutput(pub(super) Result<Arc<RepositorySummary>, GitOperationError>);
 
-#[derive(Resource, Clone, Default)]
-pub(super) struct RepositoryLoads(Arc<Mutex<RepositoryLoadCache>>);
-
-#[derive(Default)]
-struct RepositoryLoadCache {
-    loads: HashMap<PathBuf, Arc<RepositoryLoad>>,
-    aliases: HashMap<PathIdentity, RepositoryLoadAlias>,
-    alias_order: VecDeque<PathIdentity>,
-}
-
-struct RepositoryLoadAlias {
-    requested_resolved: PathIdentity,
-    root: PathBuf,
-}
-
-impl RepositoryLoadCache {
-    fn remember_alias(
-        &mut self,
-        requested: PathIdentity,
-        requested_resolved: PathIdentity,
-        root: PathBuf,
-    ) {
-        self.alias_order.retain(|alias| alias != &requested);
-        self.alias_order.push_back(requested.clone());
-        self.aliases.insert(
-            requested,
-            RepositoryLoadAlias {
-                requested_resolved,
-                root,
-            },
-        );
-        while self.alias_order.len() > REPOSITORY_LOAD_ALIAS_CAPACITY {
-            let Some(expired) = self.alias_order.pop_front() else {
-                break;
-            };
-            self.aliases.remove(&expired);
-        }
-    }
-
-    fn retain_loading(&mut self) {
-        self.loads.retain(|_, load| load.loading());
-        self.aliases
-            .retain(|_, alias| self.loads.contains_key(&alias.root));
-        self.alias_order
-            .retain(|alias| self.aliases.contains_key(alias));
-    }
-}
-
-struct RepositoryLoad {
-    state: Mutex<RepositoryLoadState>,
-    ready: Condvar,
-    cancellation: GitCancellationGroup,
-}
-
-struct RepositoryLoadState {
-    epoch: u64,
-    loading: bool,
-    result: Option<Result<Arc<RepositorySummary>, GitOperationError>>,
-}
-
-impl RepositoryLoadState {
-    fn canceled(&self) -> bool {
-        self.result.as_ref().is_some_and(|result| {
-            result
-                .as_ref()
-                .is_err_and(|error| error.message == "git command canceled")
-        })
-    }
-}
-
-impl RepositoryLoad {
-    fn new(epoch: u64) -> Self {
-        Self {
-            state: Mutex::new(RepositoryLoadState {
-                epoch,
-                loading: true,
-                result: None,
-            }),
-            ready: Condvar::new(),
-            cancellation: GitCancellationGroup::default(),
-        }
-    }
-
-    fn loading(&self) -> bool {
-        self.state.lock().is_ok_and(|state| state.loading)
-    }
-
-    fn read(
-        &self,
-        repository: &GitRepository,
-        is_worktree: bool,
-        epoch: u64,
-        leader: bool,
-    ) -> Result<Arc<RepositorySummary>, GitOperationError> {
-        let participant = self.cancellation.join();
-        if leader {
-            return self.finish(repository, is_worktree, participant);
-        }
-        let mut state = self.state.lock().map_err(|_| Self::coordinator_error())?;
-        loop {
-            if !state.loading {
-                if epoch <= state.epoch && !state.canceled() {
-                    return state
-                        .result
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| Err(Self::coordinator_error()));
-                }
-                state.epoch = state.epoch.max(epoch);
-                state.loading = true;
-                state.result = None;
-                drop(state);
-                return self.finish(repository, is_worktree, participant);
-            }
-            if GitRuntime::canceled() {
-                return Err(GitOperationError {
-                    message: "git command canceled".to_string(),
-                });
-            }
-            let waited = self
-                .ready
-                .wait_timeout(state, Duration::from_millis(20))
-                .map_err(|_| Self::coordinator_error())?;
-            state = waited.0;
-        }
-    }
-
-    fn finish(
-        &self,
-        repository: &GitRepository,
-        is_worktree: bool,
-        participant: GitCancellationParticipant,
-    ) -> Result<Arc<RepositorySummary>, GitOperationError> {
-        let result = participant
-            .run(|| {
-                catch_unwind(AssertUnwindSafe(|| {
-                    GitRepositorySnapshot::load_discovered_summary(
-                        repository.path(),
-                        repository,
-                        is_worktree,
-                    )
-                    .map(Arc::new)
-                    .map_err(|error| GitOperationError { message: error.0 })
-                }))
-            })
-            .unwrap_or_else(|_| {
-                Err(GitOperationError {
-                    message: "Git repository load worker panicked".to_string(),
-                })
-            });
-        let mut state = self.state.lock().map_err(|_| Self::coordinator_error())?;
-        state.loading = false;
-        state.result = Some(result.clone());
-        self.ready.notify_all();
-        result
-    }
-
-    fn coordinator_error() -> GitOperationError {
-        GitOperationError {
-            message: "Git repository load coordinator failed".to_string(),
-        }
-    }
-
-    fn cached(&self) -> Option<Arc<RepositorySummary>> {
-        self.state
-            .lock()
-            .ok()?
-            .result
-            .as_ref()?
-            .as_ref()
-            .ok()
-            .cloned()
-    }
-}
-
-impl RepositoryLoads {
-    pub(super) fn cached(&self, path: &Path) -> Option<GitRepositorySnapshot> {
-        let requested = PathIdentity::lexical(path);
-        let requested_resolved = PathIdentity::resolve(path);
-        let load = {
-            let cache = self.0.lock().ok()?;
-            let root = match cache.aliases.get(&requested) {
-                Some(alias) if alias.requested_resolved == requested_resolved => alias.root.clone(),
-                Some(_) => return None,
-                None => requested.clone().into_path_buf(),
-            };
-            Arc::clone(cache.loads.get(&root)?)
-        };
-        let summary = load.cached()?;
-        let mut snapshot = summary.snapshot.clone();
-        snapshot.path = path.to_string_lossy().into_owned();
-        Some(snapshot)
-    }
-
-    fn read(&self, path: &Path, epoch: u64) -> Result<Arc<RepositorySummary>, GitOperationError> {
-        let (repository, is_worktree) = GitRepository::discover_with_worktree(path)
-            .map_err(|error| GitOperationError { message: error.0 })?;
-        let root = PathIdentity::resolve(repository.path()).into_path_buf();
-        let requested = PathIdentity::lexical(path);
-        let requested_resolved = PathIdentity::resolve(path);
-        let (load, leader) = {
-            let mut cache = self
-                .0
-                .lock()
-                .map_err(|_| RepositoryLoad::coordinator_error())?;
-            cache.remember_alias(requested, requested_resolved, root.clone());
-            match cache.loads.get(&root) {
-                Some(load) => (Arc::clone(load), false),
-                None => {
-                    if cache.loads.len() >= REPOSITORY_LOAD_CACHE_CAPACITY {
-                        cache.retain_loading();
-                    }
-                    let load = Arc::new(RepositoryLoad::new(epoch));
-                    cache.loads.insert(root.clone(), Arc::clone(&load));
-                    (load, true)
-                }
-            }
-        };
-        load.read(&repository, is_worktree, epoch, leader)
-    }
-}
-
-#[derive(Resource, Default)]
-struct RepositoryLoadEpoch(u64);
-
-#[derive(Resource, Clone, Default)]
-struct CatalogSnapshots(Arc<Mutex<CatalogSnapshotCache>>);
-
-#[derive(Default)]
-struct CatalogSnapshotCache {
-    snapshots: HashMap<CatalogSnapshotKey, Arc<GitCatalogSnapshot>>,
-    order: VecDeque<CatalogSnapshotKey>,
-}
-
-impl CatalogSnapshotCache {
-    fn insert(&mut self, key: CatalogSnapshotKey, snapshot: Arc<GitCatalogSnapshot>) {
-        self.order.retain(|candidate| !candidate.same_catalog(&key));
-        self.snapshots
-            .retain(|candidate, _| !candidate.same_catalog(&key));
-        self.order.push_back(key.clone());
-        self.snapshots.insert(key, snapshot);
-        while self.order.len() > CATALOG_SNAPSHOT_CAPACITY {
-            if let Some(expired) = self.order.pop_front() {
-                self.snapshots.remove(&expired);
-            }
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct CatalogSnapshotKey {
+#[derive(Component)]
+struct CatalogSnapshot {
     owner: Entity,
-    repository: PathBuf,
-    catalog: u8,
+    source: SourceIdentity,
+    catalog: GitCatalog,
     branch: String,
     revision: u32,
+    snapshot: Arc<GitCatalogSnapshot>,
+    touched: Instant,
 }
 
-impl CatalogSnapshotKey {
-    fn same_catalog(&self, other: &Self) -> bool {
-        self.owner == other.owner
-            && self.repository == other.repository
-            && self.catalog == other.catalog
-            && self.branch == other.branch
+impl CatalogSnapshot {
+    const CAPACITY: usize = 128;
+
+    fn matches(&self, owner: Entity, repository: &GitRepository, job: &CatalogJob) -> bool {
+        self.owner == owner
+            && self.source.matches(repository.path())
+            && self.catalog == job.catalog
+            && self.branch == job.current_branch
+            && self.revision == job.revision
     }
 }
 
-impl CatalogSnapshots {
-    fn page(
-        &self,
-        owner: Entity,
-        repository: &GitRepository,
-        job: &CatalogJob,
-    ) -> Result<GitCatalogPage, GitOperationError> {
-        if job.catalog == GitCatalog::Commits {
-            return repository
-                .catalog_page(job.catalog, &job.current_branch, job.offset, job.limit)
-                .map_err(|error| GitOperationError { message: error.0 });
-        }
-        let key = CatalogSnapshotKey {
-            owner,
-            repository: repository.path().to_path_buf(),
-            catalog: match job.catalog {
-                GitCatalog::LocalBranches => 0,
-                GitCatalog::RemoteBranches => 1,
-                GitCatalog::Tags => 2,
-                GitCatalog::Commits => 3,
-                GitCatalog::Stashes => 4,
-            },
-            branch: if job.catalog == GitCatalog::LocalBranches {
-                job.current_branch.clone()
-            } else {
-                String::new()
-            },
-            revision: job.revision,
-        };
-        let cached = self
-            .0
-            .lock()
-            .ok()
-            .and_then(|cache| cache.snapshots.get(&key).cloned());
-        let snapshot = match cached {
-            Some(snapshot) => snapshot,
-            None => {
-                let snapshot = repository
-                    .catalog_snapshot(job.catalog, &job.current_branch)
-                    .map_err(|error| GitOperationError { message: error.0 })?
-                    .ok_or_else(|| GitOperationError {
-                        message: "catalog does not support snapshots".to_string(),
-                    })?;
-                let snapshot = Arc::new(snapshot);
-                if let Ok(mut cache) = self.0.lock() {
-                    cache.insert(key, Arc::clone(&snapshot));
-                }
-                snapshot
-            }
-        };
-        Ok(snapshot.page(job.offset, job.limit))
-    }
-}
+#[derive(Component)]
+struct CatalogReadSource(SourceIdentity);
+
+#[derive(Component)]
+struct CatalogSnapshotOutput(Result<Arc<GitCatalogSnapshot>, GitOperationError>);
 
 #[derive(Component)]
 struct CatalogOutput {
@@ -660,18 +401,47 @@ impl OperationOutput {
 #[derive(Component)]
 struct FailureOutput(GitOperationError);
 
-fn poll_jobs<T: Component>(mut jobs: Query<(Entity, &mut GitJobTask<T>)>, mut commands: Commands) {
-    for (entity, mut task) in &mut jobs {
-        let Some(output) = task.task.poll() else {
+type PollingJobs<'w, 's, T> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut GitJobTask<T>,
+        Has<GitJobRetired>,
+        Has<Operation>,
+    ),
+>;
+
+fn poll_jobs<T: Component>(mut jobs: PollingJobs<T>, mut commands: Commands) {
+    for (entity, mut task, retired, operation) in &mut jobs {
+        if retired {
+            task.task.cancel();
+        }
+        if !task.task.is_finished() {
             continue;
-        };
+        }
+        if retired {
+            if operation {
+                commands.entity(entity).remove::<(
+                    GitJobRunning,
+                    GitJobTask<T>,
+                    GitJobRetired,
+                    GitRepository,
+                    OperationRetained,
+                )>();
+            } else {
+                commands.entity(entity).despawn();
+            }
+            continue;
+        }
+        let output = task.task.poll();
         let mut entity = commands.entity(entity);
-        entity.remove::<(GitJobRunning, GitJobTask<T>)>();
+        entity.remove::<(GitJobRunning, GitJobTask<T>, OperationRetained)>();
         match output {
-            Ok(output) => {
+            Some(Ok(output)) => {
                 entity.insert(output);
             }
-            Err(_) => {
+            _ => {
                 entity.insert(FailureOutput(GitOperationError {
                     message: "Git job worker panicked".to_string(),
                 }));
@@ -680,8 +450,25 @@ fn poll_jobs<T: Component>(mut jobs: Query<(Entity, &mut GitJobTask<T>)>, mut co
     }
 }
 
+type DrainedJobs<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        With<GitJobRetired>,
+        Without<GitJobRunning>,
+        Without<Operation>,
+    ),
+>;
+
+fn finish_retired_jobs(jobs: DrainedJobs, mut commands: Commands) {
+    for entity in &jobs {
+        commands.entity(entity).despawn();
+    }
+}
+
 fn cancel_orphaned_jobs(
-    jobs: Query<(Entity, &GitJob, Option<&RepositoryJob>)>,
+    jobs: Query<(Entity, &GitJob, Option<&RepositoryJob>, Has<GitJobRunning>)>,
     owners: Query<(
         Option<&super::state::GitState>,
         Option<&super::status::FileGit>,
@@ -690,9 +477,9 @@ fn cancel_orphaned_jobs(
     operations: Query<(), With<Operation>>,
     mut commands: Commands,
 ) {
-    for (entity, job, repository) in &jobs {
+    for (entity, job, repository, running) in &jobs {
         let Ok((state, file)) = owners.get(job.webview) else {
-            if operations.contains(entity) {
+            if running || operations.contains(entity) {
                 commands.entity(entity).remove::<GitJob>();
             } else {
                 commands.entity(entity).despawn();
@@ -700,7 +487,7 @@ fn cancel_orphaned_jobs(
             continue;
         };
         if state.is_none() && file.is_none() {
-            if operations.contains(entity) {
+            if running || operations.contains(entity) {
                 commands.entity(entity).remove::<GitJob>();
             } else {
                 commands.entity(entity).despawn();
@@ -716,20 +503,31 @@ fn cancel_orphaned_jobs(
             || PathIdentity::lexical(Path::new(&state.snapshot.workspace))
                 != PathIdentity::lexical(&repository.path)
         {
-            commands.entity(entity).despawn();
+            if running {
+                commands.entity(entity).remove::<GitJob>();
+            } else {
+                commands.entity(entity).despawn();
+            }
         }
     }
 }
 
 fn deliver_repository_outputs(
-    outputs: Query<(Entity, &GitJob, &RepositoryJob, &RepositoryOutput)>,
+    outputs: Query<(
+        Entity,
+        &GitJob,
+        &RepositoryJob,
+        &RepositoryOutput,
+        Option<&PageRepositorySource>,
+    )>,
+    sources: Query<&PageRepositorySource>,
     presented: Query<(), With<vmux_ecs::PagePresented>>,
     mut watch: Option<NonSendMut<super::watch::GitWatch>>,
     mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
-    for (entity, owner, request, output) in &outputs {
+    for (entity, owner, request, output, source) in &outputs {
         let webview = owner.webview;
         if !states.repository_requested_at(webview, &request.path, request.revision) {
             commands.entity(entity).despawn();
@@ -737,6 +535,13 @@ fn deliver_repository_outputs(
         }
         match &output.0 {
             Ok(event) => {
+                if let Some(source) = source {
+                    let mut source = source.clone();
+                    if let Ok(previous) = sources.get(webview) {
+                        source.preserve_request(previous);
+                    }
+                    commands.entity(webview).insert(source);
+                }
                 let mut snapshot = event.snapshot.clone();
                 snapshot.path = request.path.to_string_lossy().into_owned();
                 if presented.contains(webview)
@@ -1094,6 +899,7 @@ fn deliver_operation_outputs(
             if !workspace.is_empty() {
                 commands.spawn((
                     GitJob::new(webview),
+                    RepositoryRequestIdentity::capture(Path::new(&workspace)),
                     RepositoryJob {
                         path: workspace.into(),
                         refresh_catalogs: true,
@@ -1316,33 +1122,15 @@ impl<J: Component + Clone> PendingGitJobs<'_, '_, J> {
     }
 }
 
-fn start_repository_jobs(
-    jobs: PendingGitJobs<RepositoryJob>,
-    loads: Res<RepositoryLoads>,
-    mut epoch: ResMut<RepositoryLoadEpoch>,
-    mut commands: Commands,
-) {
-    let ready = jobs.ready();
-    if ready.is_empty() {
-        return;
-    }
-    epoch.0 = epoch.0.wrapping_add(1).max(1);
-    let epoch = epoch.0;
-    for (entity, job, wake) in ready {
-        let loads = loads.clone();
-        let Some(task) = jobs.spawn(wake, move || {
-            let result = loads.read(&job.path, epoch);
-            RepositoryOutput(result)
-        }) else {
-            continue;
-        };
-        commands.entity(entity).insert((GitJobRunning, task));
+fn start_repository_jobs(jobs: PendingGitJobs<RepositoryJob>, mut commands: Commands) {
+    for (entity, _, _) in jobs.ready() {
+        commands.trigger(RepositoryReadRequest { entity });
     }
 }
 
 fn start_catalog_jobs(
     jobs: PendingGitJobs<CatalogJob>,
-    snapshots: Res<CatalogSnapshots>,
+    snapshots: Query<&CatalogSnapshot>,
     mut commands: Commands,
 ) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
@@ -1350,18 +1138,145 @@ fn start_catalog_jobs(
             continue;
         };
         let repo_root = repository.path().to_string_lossy().into_owned();
-        let snapshots = snapshots.as_ref().clone();
-        let Some(task) = jobs.spawn(wake, move || CatalogOutput {
-            catalog: job.catalog,
-            repo_root,
-            offset: job.offset,
-            revision: job.revision,
-            generation: job.generation,
-            result: snapshots.page(owner, &repository, &job),
+        let mut cached = None;
+        for snapshot in &snapshots {
+            if snapshot.matches(owner, &repository, &job) {
+                cached = Some(Arc::clone(&snapshot.snapshot));
+                break;
+            }
+        }
+        if let Some(snapshot) = cached {
+            commands.entity(entity).insert((
+                GitJobRunning,
+                CatalogOutput {
+                    catalog: job.catalog,
+                    repo_root,
+                    offset: job.offset,
+                    revision: job.revision,
+                    generation: job.generation,
+                    result: Ok(snapshot.page(job.offset, job.limit)),
+                },
+            ));
+            continue;
+        }
+        if job.catalog == GitCatalog::Commits {
+            let Some(task) = jobs.spawn(wake, move || CatalogOutput {
+                catalog: job.catalog,
+                repo_root,
+                offset: job.offset,
+                revision: job.revision,
+                generation: job.generation,
+                result: repository
+                    .catalog_page(job.catalog, &job.current_branch, job.offset, job.limit)
+                    .map_err(|error| GitOperationError { message: error.0 }),
+            }) else {
+                continue;
+            };
+            commands.entity(entity).insert((GitJobRunning, task));
+            continue;
+        }
+        let source = SourceIdentity::capture(repository.path());
+        let Some(task) = jobs.spawn(wake, move || {
+            let result = repository
+                .catalog_snapshot(job.catalog, &job.current_branch)
+                .map_err(|error| GitOperationError { message: error.0 })
+                .and_then(|snapshot| {
+                    snapshot.ok_or_else(|| GitOperationError {
+                        message: "catalog does not support snapshots".into(),
+                    })
+                });
+            CatalogSnapshotOutput(result.map(Arc::new))
         }) else {
             continue;
         };
-        commands.entity(entity).insert((GitJobRunning, task));
+        commands
+            .entity(entity)
+            .insert((GitJobRunning, CatalogReadSource(source), task));
+    }
+}
+
+fn materialize_catalog_snapshots(
+    outputs: Query<(
+        Entity,
+        &GitJob,
+        &CatalogJob,
+        &GitRepository,
+        &CatalogReadSource,
+        &CatalogSnapshotOutput,
+    )>,
+    states: Query<(&super::state::GitState, &super::state::GitCatalogRevision)>,
+    snapshots: Query<(Entity, &CatalogSnapshot)>,
+    mut commands: Commands,
+) {
+    for (entity, owner, job, repository, source, output) in &outputs {
+        let valid = source.0.matches(repository.path());
+        let result = match &output.0 {
+            Ok(snapshot) if valid => {
+                if states.get(owner.webview).is_ok_and(|(state, revision)| {
+                    state.snapshot.nonce == job.revision
+                        && PathIdentity::resolve(&state.snapshot.workspace)
+                            == PathIdentity::resolve(repository.path())
+                        && revision.accepts(job.catalog, job.generation)
+                }) {
+                    for (previous, snapshot) in &snapshots {
+                        if snapshot.owner == owner.webview && snapshot.catalog == job.catalog {
+                            commands.entity(previous).despawn();
+                        }
+                    }
+                    commands.spawn((
+                        Name::new("git.catalog.snapshot"),
+                        CatalogSnapshot {
+                            owner: owner.webview,
+                            source: source.0.clone(),
+                            catalog: job.catalog,
+                            branch: job.current_branch.clone(),
+                            revision: job.revision,
+                            snapshot: Arc::clone(snapshot),
+                            touched: Instant::now(),
+                        },
+                    ));
+                }
+                Ok(snapshot.page(job.offset, job.limit))
+            }
+            Ok(_) => Err(GitOperationError {
+                message: "Git repository source changed".into(),
+            }),
+            Err(error) => Err(error.clone()),
+        };
+        commands
+            .entity(entity)
+            .remove::<CatalogSnapshotOutput>()
+            .insert(CatalogOutput {
+                catalog: job.catalog,
+                repo_root: repository.path().to_string_lossy().into_owned(),
+                offset: job.offset,
+                revision: job.revision,
+                generation: job.generation,
+                result,
+            });
+    }
+}
+
+fn evict_catalog_snapshots(
+    snapshots: Query<(Entity, &CatalogSnapshot)>,
+    pages: Query<&super::state::GitState>,
+    mut commands: Commands,
+) {
+    let mut retained = Vec::new();
+    for (entity, snapshot) in &snapshots {
+        if !pages
+            .get(snapshot.owner)
+            .is_ok_and(|page| page.snapshot.nonce == snapshot.revision)
+        {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        retained.push((snapshot.touched, entity));
+    }
+    retained.sort_by_key(|(touched, _)| *touched);
+    let excess = retained.len().saturating_sub(CatalogSnapshot::CAPACITY);
+    for (_, entity) in retained.into_iter().take(excess) {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -1818,8 +1733,6 @@ fn start_stash_push_jobs(jobs: PendingGitJobs<StashPushJob>, mut commands: Comma
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
-    use std::os::unix::fs::symlink;
 
     use super::*;
     use crate::event::{FileStatus, GitDiffViewport};
@@ -1889,30 +1802,6 @@ mod tests {
                 vmux_ecs::PagePresented,
             ))
             .id()
-    }
-
-    #[test]
-    fn catalog_snapshots_are_scoped_by_owner_and_replace_old_revisions() {
-        let first = Entity::from_bits(1);
-        let second = Entity::from_bits(2);
-        let key = |owner, revision| CatalogSnapshotKey {
-            owner,
-            repository: PathBuf::from("/repo"),
-            catalog: 2,
-            branch: String::new(),
-            revision,
-        };
-        let snapshot = || Arc::new(GitCatalogSnapshot::Tags(Vec::new()));
-        let mut cache = CatalogSnapshotCache::default();
-
-        cache.insert(key(first, 1), snapshot());
-        cache.insert(key(second, 1), snapshot());
-        cache.insert(key(first, 2), snapshot());
-
-        assert_eq!(cache.snapshots.len(), 2);
-        assert!(!cache.snapshots.contains_key(&key(first, 1)));
-        assert!(cache.snapshots.contains_key(&key(first, 2)));
-        assert!(cache.snapshots.contains_key(&key(second, 1)));
     }
 
     #[test]
@@ -2168,66 +2057,6 @@ mod tests {
             .world_mut()
             .query_filtered::<&RepositoryJob, Without<GitJobRunning>>();
         assert_eq!(pending.iter(app.world()).count(), 0);
-    }
-
-    #[test]
-    fn repository_loads_share_root_and_subdirectory_work_per_epoch() {
-        let repo = test_repo::init();
-        let nested = repo.path().join("nested");
-        std::fs::create_dir_all(&nested).unwrap();
-        let loads = RepositoryLoads::default();
-
-        let root = loads.read(repo.path(), 7).unwrap();
-        let child = loads.read(&nested, 7).unwrap();
-        let refreshed = loads.read(repo.path(), 8).unwrap();
-
-        assert!(Arc::ptr_eq(&root, &child));
-        assert!(!Arc::ptr_eq(&root, &refreshed));
-        let cached = loads.cached(&nested).unwrap();
-        assert_eq!(cached.path, nested.to_string_lossy());
-        assert_eq!(
-            PathIdentity::resolve(&cached.repo_root),
-            PathIdentity::resolve(repo.path())
-        );
-    }
-
-    #[test]
-    fn repository_load_aliases_are_bounded() {
-        let mut cache = RepositoryLoadCache::default();
-        let root = PathBuf::from("/tmp/repository");
-        for index in 0..=REPOSITORY_LOAD_ALIAS_CAPACITY {
-            cache.remember_alias(
-                PathIdentity::lexical(format!("/tmp/repository/{index}")),
-                PathIdentity::resolve(format!("/tmp/repository/{index}")),
-                root.clone(),
-            );
-        }
-
-        assert_eq!(cache.aliases.len(), REPOSITORY_LOAD_ALIAS_CAPACITY);
-        assert!(
-            !cache
-                .aliases
-                .contains_key(&PathIdentity::lexical("/tmp/repository/0"))
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn repository_load_cache_rejects_a_retargeted_symlink_alias() {
-        let first = test_repo::init();
-        let second = test_repo::init();
-        let parent = tempfile::tempdir().unwrap();
-        let alias = parent.path().join("repository");
-        symlink(first.path(), &alias).unwrap();
-        let loads = RepositoryLoads::default();
-
-        loads.read(&alias, 1).unwrap();
-        assert!(loads.cached(&alias).is_some());
-
-        std::fs::remove_file(&alias).unwrap();
-        symlink(second.path(), &alias).unwrap();
-
-        assert!(loads.cached(&alias).is_none());
     }
 
     #[test]
