@@ -28,7 +28,10 @@ struct DotfileProvider;
 impl Plugin for DotfileToolPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(host)]
-        app.add_plugins(crate::dotfile_inventory::DotfileInventoryPlugin);
+        app.add_plugins((
+            crate::dotfile_inventory::DotfileInventoryPlugin,
+            crate::dotfile_ops::DotfileOperationsPlugin,
+        ));
         app.add_systems(Startup, spawn_provider)
             .add_systems(
                 Update,
@@ -46,8 +49,6 @@ impl Plugin for DotfileToolPlugin {
             .add_systems(
                 Update,
                 (
-                    discover_packages,
-                    plan_package,
                     import,
                     import_available,
                     link_package,
@@ -351,57 +352,12 @@ pub struct DiscoverDotfilePackages;
 
 #[derive(EcsComponent, Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct DiscoveredDotfilePackages {
-    packages: Vec<String>,
-}
-
-fn discover_packages(
-    operations: Query<
-        (Entity, &ToolStoreTarget),
-        (
-            With<DiscoverDotfilePackages>,
-            Without<ToolOperationTask<DiscoveredDotfilePackages>>,
-            Without<DiscoveredDotfilePackages>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    store.migrate_legacy_storage()?;
-                    Ok(DiscoveredDotfilePackages {
-                        packages: store.dotfile_packages()?,
-                    })
-                },
-            )));
-    }
+    pub(crate) packages: Vec<String>,
 }
 
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct PlanDotfilePackage {
-    package: String,
+    pub(crate) package: String,
 }
 
 impl PlanDotfilePackage {
@@ -409,49 +365,6 @@ impl PlanDotfilePackage {
         Self {
             package: package.into(),
         }
-    }
-}
-
-fn plan_package(
-    operations: Query<
-        (Entity, &PlanDotfilePackage, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<DotfilePlan>>,
-            Without<DotfilePlan>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, operation, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let package = operation.package.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    store.migrate_legacy_storage()?;
-                    store.plan_dotfile_package(&package)
-                },
-            )));
     }
 }
 

@@ -57,6 +57,8 @@ mod command_bar;
 mod connection;
 #[cfg(host)]
 mod dotfile_inventory;
+#[cfg(host)]
+mod dotfile_ops;
 mod dotfiles;
 #[cfg(ui)]
 mod extension;
@@ -151,8 +153,6 @@ impl Plugin for ToolRuntimePlugin {
             app.add_plugins(io::ObservationIoPlugin);
         }
         app.add_plugins((
-            TaskPlugin::<Result<dotfiles::DiscoveredDotfilePackages, String>>::default(),
-            TaskPlugin::<Result<dotfiles::DotfilePlan, String>>::default(),
             TaskPlugin::<Result<dotfiles::ImportedDotfiles, String>>::default(),
             TaskPlugin::<Result<dotfiles::ImportedAvailableDotfiles, String>>::default(),
             TaskPlugin::<Result<dotfiles::LinkedDotfilePackage, String>>::default(),
@@ -185,8 +185,6 @@ impl Plugin for ToolRuntimePlugin {
         .configure_sets(
             Update,
             (
-                TaskSet::of::<Result<dotfiles::DiscoveredDotfilePackages, String>>(),
-                TaskSet::of::<Result<dotfiles::DotfilePlan, String>>(),
                 TaskSet::of::<Result<dotfiles::ImportedDotfiles, String>>(),
                 TaskSet::of::<Result<dotfiles::ImportedAvailableDotfiles, String>>(),
                 TaskSet::of::<Result<dotfiles::LinkedDotfilePackage, String>>(),
@@ -209,8 +207,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_observer(accept::<ToolApplyRequest>)
         .add_observer(accept::<ToolImportRequest>)
         .add_observer(completed)
-        .add_observer(store::<dotfiles::DiscoveredDotfilePackages>)
-        .add_observer(store::<dotfiles::DotfilePlan>)
         .add_observer(store::<dotfiles::ImportedDotfiles>)
         .add_observer(store::<dotfiles::ImportedAvailableDotfiles>)
         .add_observer(store::<dotfiles::LinkedDotfilePackage>)
@@ -247,8 +243,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                finish_operation::<dotfiles::DiscoveredDotfilePackages>,
-                finish_operation::<dotfiles::DotfilePlan>,
                 finish_operation::<dotfiles::ImportedDotfiles>,
                 finish_operation::<dotfiles::ImportedAvailableDotfiles>,
                 finish_operation::<dotfiles::LinkedDotfilePackage>,
