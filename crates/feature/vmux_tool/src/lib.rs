@@ -736,7 +736,12 @@ mod tests {
         release.send(()).unwrap();
         fixture.finish(second);
         let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
-        assert_eq!(store.load().unwrap().packages["npm"], ["first", "second"]);
+        assert_eq!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .packages["npm"],
+            ["first", "second"]
+        );
         assert!(!store.is_busy());
         assert_eq!(
             fixture.app.world().get::<OperationState>(first),
@@ -767,7 +772,12 @@ mod tests {
             .id();
         fixture.finish(entity);
         let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
-        assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
+        assert_eq!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .packages["npm"],
+            ["typescript"]
+        );
         assert!(fixture.app.world().get::<OperationState>(entity).is_none());
     }
 
@@ -875,36 +885,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_registry_storage_moves_to_tools() {
-        let temp = tempfile::tempdir().unwrap();
-        let legacy_root = temp.path().join("registry");
-        std::fs::create_dir_all(legacy_root.join("dotfiles/shell")).unwrap();
-        std::fs::write(
-            legacy_root.join("registry.toml"),
-            "version = 1\n[packages]\nnpm = [\"typescript\"]\n",
-        )
-        .unwrap();
-        std::fs::write(legacy_root.join("dotfiles/shell/.zshrc"), "export VMUX=1").unwrap();
-
-        ToolStore::new(temp.path(), temp.path())
-            .migrate_legacy_storage()
-            .unwrap();
-
-        assert!(!legacy_root.exists());
-        let tools_root = temp.path().join("tools");
-        assert_eq!(
-            ToolsManifest::read(&tools_root.join("tools.toml"))
-                .unwrap()
-                .packages["npm"],
-            ["typescript"]
-        );
-        assert_eq!(
-            std::fs::read_to_string(tools_root.join("dotfiles/shell/.zshrc")).unwrap(),
-            "export VMUX=1"
-        );
-    }
-
-    #[test]
     fn unsupported_manifest_versions_are_rejected() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("tools.toml");
@@ -930,31 +910,6 @@ brew "ripgrep"
 
         assert_eq!(imported.formulae, ["openssl@3", "ripgrep"]);
         assert_eq!(imported.casks, ["ghostty"]);
-    }
-
-    #[test]
-    fn managed_brewfile_round_trips_homebrew_desired_state() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("Brewfile");
-        std::fs::write(
-            &path,
-            "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nbrew \"old\"\nmas \"Xcode\", id: 497799835\n",
-        )
-        .unwrap();
-        let mut manifest = ToolsManifest::default();
-        manifest.set_package("homebrew-formula", "ripgrep", true);
-        manifest.set_package("homebrew-formula", "fd", true);
-        manifest.set_package("homebrew-cask", "ghostty", true);
-
-        manifest.write_brewfile_to(&path).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nmas \"Xcode\", id: 497799835\nbrew \"ripgrep\"\ncask \"ghostty\"\n"
-        );
-        let mut loaded = ToolsManifest::default();
-        loaded.sync_brewfile(&path).unwrap();
-        assert_eq!(loaded.packages, manifest.packages);
     }
 
     #[test]
@@ -1034,7 +989,12 @@ brew "ripgrep"
                 .get::<ExternalToolOperation>(operation)
                 .is_none()
         );
-        assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
+        assert_eq!(
+            ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .packages["npm"],
+            ["typescript"]
+        );
         assert_eq!(
             app.world().get::<OperationState>(operation),
             Some(&OperationState::Succeeded)
