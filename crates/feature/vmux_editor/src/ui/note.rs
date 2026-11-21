@@ -1354,6 +1354,7 @@ mod tests {
     use dioxus::html::{EventData, SerializedMouseData, SerializedPointerData};
     use std::{cell::RefCell, future::Future, rc::Rc};
     use vmux_api::BinEvent;
+    use vmux_ecs::event::NoteBlock;
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
 

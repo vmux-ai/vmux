@@ -1320,6 +1320,30 @@ impl Fixture {
         Self { world, entity }
     }
 
+    fn mapped(specs: &[(&str, &str, &str)]) -> Self {
+        let mut mappings = Vec::with_capacity(specs.len());
+        for (mode, lhs, rhs) in specs {
+            mappings.push(vmux_api::editor::KeyMapping {
+                mode: (*mode).into(),
+                lhs: (*lhs).into(),
+                rhs: (*rhs).into(),
+            });
+        }
+        Self::with_mappings(&mappings, " ")
+    }
+
+    fn run(&mut self, sequence: &[&str]) -> Vec<EditCommand> {
+        let mut output = Vec::new();
+        for key in sequence {
+            output.extend(self.handle(&KeyInput {
+                key: (*key).into(),
+                mods: crate::keymap::Mods::default(),
+                repeat: false,
+            }));
+        }
+        output
+    }
+
     pub(crate) fn mode(&self) -> EditMode {
         self.world
             .get::<crate::edit::document::Mode>(self.entity)
@@ -1378,14 +1402,6 @@ mod tests {
     use super::*;
     use crate::keymap::Mods;
 
-    fn k(key: &str) -> KeyInput {
-        KeyInput {
-            key: key.into(),
-            mods: Mods::default(),
-            repeat: false,
-        }
-    }
-
     fn chord(key: &str, mods: Mods) -> KeyInput {
         KeyInput {
             key: key.into(),
@@ -1401,14 +1417,6 @@ mod tests {
         }
     }
 
-    fn run(km: &mut Fixture, seq: &[&str]) -> Vec<EditCommand> {
-        let mut out = Vec::new();
-        for s in seq {
-            out.extend(km.handle(&k(s)));
-        }
-        out
-    }
-
     fn op(operator: Operator, target: Target) -> EditCommand {
         EditCommand::Op {
             operator,
@@ -1421,19 +1429,19 @@ mod tests {
     fn operators_pair_with_motions_and_doubled_keys() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "w"]),
+            km.run(&["d", "w"]),
             vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
         );
         assert_eq!(
-            run(&mut km, &["d", "d"]),
+            km.run(&["d", "d"]),
             vec![op(Operator::Delete, Target::Line(1))]
         );
         assert_eq!(
-            run(&mut km, &["y", "y"]),
+            km.run(&["y", "y"]),
             vec![op(Operator::Yank, Target::Line(1))]
         );
         assert_eq!(
-            run(&mut km, &["c", "c"]),
+            km.run(&["c", "c"]),
             vec![op(Operator::Change, Target::Line(1))]
         );
         assert_eq!(km.mode(), EditMode::Insert);
@@ -1443,15 +1451,15 @@ mod tests {
     fn counts_multiply_across_operator_and_motion() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "3", "w"]),
+            km.run(&["d", "3", "w"]),
             vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 3))]
         );
         assert_eq!(
-            run(&mut km, &["2", "d", "3", "w"]),
+            km.run(&["2", "d", "3", "w"]),
             vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 6))]
         );
         assert_eq!(
-            run(&mut km, &["2", "d", "d"]),
+            km.run(&["2", "d", "d"]),
             vec![op(Operator::Delete, Target::Line(2))]
         );
     }
@@ -1468,11 +1476,11 @@ mod tests {
     fn operators_take_text_objects() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "i", "w"]),
+            km.run(&["d", "i", "w"]),
             vec![op(Operator::Delete, object(TextObjectKind::Word, false, 1))]
         );
         assert_eq!(
-            run(&mut km, &["c", "a", "\""]),
+            km.run(&["c", "a", "\""]),
             vec![op(
                 Operator::Change,
                 object(TextObjectKind::DoubleQuote, true, 1)
@@ -1485,7 +1493,7 @@ mod tests {
     fn text_object_counts_come_from_the_operator() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["2", "d", "i", "("]),
+            km.run(&["2", "d", "i", "("]),
             vec![op(
                 Operator::Delete,
                 object(TextObjectKind::Paren, false, 2)
@@ -1496,9 +1504,9 @@ mod tests {
     #[test]
     fn visual_mode_selects_text_objects() {
         let mut km = Fixture::default();
-        run(&mut km, &["v"]);
+        km.run(&["v"]);
         assert_eq!(
-            run(&mut km, &["i", "p"]),
+            km.run(&["i", "p"]),
             vec![EditCommand::SelectTextObject(TextObject {
                 kind: TextObjectKind::Paragraph,
                 around: false,
@@ -1510,9 +1518,9 @@ mod tests {
     #[test]
     fn an_unknown_object_key_abandons_the_operator() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &["d", "i", "z"]), vec![]);
+        assert_eq!(km.run(&["d", "i", "z"]), vec![]);
         assert_eq!(
-            run(&mut km, &["d", "w"]),
+            km.run(&["d", "w"]),
             vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
         );
     }
@@ -1525,11 +1533,11 @@ mod tests {
     fn find_char_prefixes_consume_the_next_key() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["f", ","]),
+            km.run(&["f", ","]),
             vec![EditCommand::Move(find(',', true, false))]
         );
         assert_eq!(
-            run(&mut km, &["T", "x"]),
+            km.run(&["T", "x"]),
             vec![EditCommand::Move(find('x', false, true))]
         );
     }
@@ -1537,13 +1545,13 @@ mod tests {
     #[test]
     fn semicolon_repeats_and_comma_reverses_the_last_find() {
         let mut km = Fixture::default();
-        run(&mut km, &["f", "x"]);
+        km.run(&["f", "x"]);
         assert_eq!(
-            run(&mut km, &[";"]),
+            km.run(&[";"]),
             vec![EditCommand::Move(find('x', true, false))]
         );
         assert_eq!(
-            run(&mut km, &[","]),
+            km.run(&[","]),
             vec![EditCommand::Move(find('x', false, false))]
         );
     }
@@ -1551,21 +1559,21 @@ mod tests {
     #[test]
     fn repeat_find_without_a_previous_find_does_nothing() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &[";"]), vec![]);
+        assert_eq!(km.run(&[";"]), vec![]);
     }
 
     #[test]
     fn operators_compose_with_find_char() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "t", ","]),
+            km.run(&["d", "t", ","]),
             vec![op(
                 Operator::Delete,
                 Target::Motion(find(',', true, true), 1)
             )]
         );
         assert_eq!(
-            run(&mut km, &["2", "d", "f", "x"]),
+            km.run(&["2", "d", "f", "x"]),
             vec![op(
                 Operator::Delete,
                 Target::Motion(find('x', true, false), 2)
@@ -1577,7 +1585,7 @@ mod tests {
     fn the_tag_object_is_not_shadowed_by_the_till_prefix() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "i", "t"]),
+            km.run(&["d", "i", "t"]),
             vec![op(Operator::Delete, object(TextObjectKind::Tag, false, 1))]
         );
     }
@@ -1585,24 +1593,15 @@ mod tests {
     #[test]
     fn word_and_screen_motions_are_bound() {
         let mut km = Fixture::default();
+        assert_eq!(km.run(&["W"]), vec![EditCommand::Move(Motion::BigWordNext)]);
         assert_eq!(
-            run(&mut km, &["W"]),
-            vec![EditCommand::Move(Motion::BigWordNext)]
-        );
-        assert_eq!(
-            run(&mut km, &["g", "e"]),
+            km.run(&["g", "e"]),
             vec![EditCommand::Move(Motion::WordEndPrev)]
         );
+        assert_eq!(km.run(&["%"]), vec![EditCommand::Move(Motion::MatchPair)]);
+        assert_eq!(km.run(&["H"]), vec![EditCommand::Move(Motion::ScreenTop)]);
         assert_eq!(
-            run(&mut km, &["%"]),
-            vec![EditCommand::Move(Motion::MatchPair)]
-        );
-        assert_eq!(
-            run(&mut km, &["H"]),
-            vec![EditCommand::Move(Motion::ScreenTop)]
-        );
-        assert_eq!(
-            run(&mut km, &["8", "|"]),
+            km.run(&["8", "|"]),
             vec![EditCommand::Move(Motion::Column(8))]
         );
     }
@@ -1610,25 +1609,22 @@ mod tests {
     #[test]
     fn visual_g_prefixed_motions_are_not_shadowed() {
         let mut km = Fixture::default();
-        run(&mut km, &["v"]);
+        km.run(&["v"]);
         assert_eq!(km.mode(), EditMode::Visual);
 
         assert_eq!(
-            run(&mut km, &["g", "e"]),
+            km.run(&["g", "e"]),
             vec![EditCommand::Select(Motion::WordEndPrev)]
         );
         assert_eq!(
-            run(&mut km, &["g", "E"]),
+            km.run(&["g", "E"]),
             vec![EditCommand::Select(Motion::BigWordEndPrev)]
         );
         assert_eq!(
-            run(&mut km, &["g", "_"]),
+            km.run(&["g", "_"]),
             vec![EditCommand::Select(Motion::LastNonBlank)]
         );
-        assert_eq!(
-            run(&mut km, &["e"]),
-            vec![EditCommand::Select(Motion::WordEnd)]
-        );
+        assert_eq!(km.run(&["e"]), vec![EditCommand::Select(Motion::WordEnd)]);
     }
 
     #[test]
@@ -1647,13 +1643,13 @@ mod tests {
     #[test]
     fn z_prefix_serves_both_folds_and_scroll_placement() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &["z", "a"]), vec![EditCommand::FoldToggle]);
+        assert_eq!(km.run(&["z", "a"]), vec![EditCommand::FoldToggle]);
         assert_eq!(
-            run(&mut km, &["z", "z"]),
+            km.run(&["z", "z"]),
             vec![EditCommand::ScrollCursorTo(ScrollPlacement::Center)]
         );
         assert_eq!(
-            run(&mut km, &["z", "b"]),
+            km.run(&["z", "b"]),
             vec![EditCommand::ScrollCursorTo(ScrollPlacement::Bottom)]
         );
     }
@@ -1661,10 +1657,10 @@ mod tests {
     #[test]
     fn dot_repeats_the_last_change_not_the_last_motion() {
         let mut km = Fixture::default();
-        run(&mut km, &["d", "w"]);
-        run(&mut km, &["j", "l"]);
+        km.run(&["d", "w"]);
+        km.run(&["j", "l"]);
         assert_eq!(
-            run(&mut km, &["."]),
+            km.run(&["."]),
             vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
         );
     }
@@ -1672,23 +1668,23 @@ mod tests {
     #[test]
     fn dot_takes_a_count_and_survives_reuse() {
         let mut km = Fixture::default();
-        run(&mut km, &["x"]);
+        km.run(&["x"]);
         let expected = op(Operator::Delete, Target::Motion(Motion::Right, 1));
         assert_eq!(
-            run(&mut km, &["2", "."]),
+            km.run(&["2", "."]),
             vec![expected.clone(), expected.clone()]
         );
-        assert_eq!(run(&mut km, &["."]), vec![expected]);
+        assert_eq!(km.run(&["."]), vec![expected]);
     }
 
     #[test]
     fn dot_repeats_an_insert_session_including_typed_text() {
         let mut km = Fixture::default();
-        run(&mut km, &["i"]);
+        km.run(&["i"]);
         km.record_text("hi");
-        run(&mut km, &["Escape"]);
+        km.run(&["Escape"]);
         assert_eq!(
-            run(&mut km, &["."]),
+            km.run(&["."]),
             vec![
                 EditCommand::SetMode(EditMode::Insert),
                 EditCommand::InsertText("hi".into()),
@@ -1701,10 +1697,10 @@ mod tests {
     #[test]
     fn a_yank_is_not_a_change() {
         let mut km = Fixture::default();
-        run(&mut km, &["x"]);
-        run(&mut km, &["y", "y"]);
+        km.run(&["x"]);
+        km.run(&["y", "y"]);
         assert_eq!(
-            run(&mut km, &["."]),
+            km.run(&["."]),
             vec![op(Operator::Delete, Target::Motion(Motion::Right, 1))]
         );
     }
@@ -1712,16 +1708,16 @@ mod tests {
     #[test]
     fn macros_record_and_replay_through_a_register() {
         let mut km = Fixture::default();
-        run(&mut km, &["q", "a", "x", "j", "q"]);
+        km.run(&["q", "a", "x", "j", "q"]);
         assert_eq!(
-            run(&mut km, &["@", "a"]),
+            km.run(&["@", "a"]),
             vec![
                 op(Operator::Delete, Target::Motion(Motion::Right, 1)),
                 EditCommand::Move(Motion::Down),
             ]
         );
         assert_eq!(
-            run(&mut km, &["@", "@"]),
+            km.run(&["@", "@"]),
             vec![
                 op(Operator::Delete, Target::Motion(Motion::Right, 1)),
                 EditCommand::Move(Motion::Down),
@@ -1732,10 +1728,10 @@ mod tests {
     #[test]
     fn a_counted_macro_replays_repeatedly() {
         let mut km = Fixture::default();
-        run(&mut km, &["q", "b", "x", "q"]);
+        km.run(&["q", "b", "x", "q"]);
         let once = op(Operator::Delete, Target::Motion(Motion::Right, 1));
         assert_eq!(
-            run(&mut km, &["3", "@", "b"]),
+            km.run(&["3", "@", "b"]),
             vec![once.clone(), once.clone(), once]
         );
     }
@@ -1743,13 +1739,13 @@ mod tests {
     #[test]
     fn replaying_an_empty_register_is_inert() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &["@", "z"]), vec![]);
+        assert_eq!(km.run(&["@", "z"]), vec![]);
     }
 
     #[test]
     fn insert_mode_editing_chords() {
         let mut km = Fixture::default();
-        run(&mut km, &["i"]);
+        km.run(&["i"]);
         assert_eq!(
             km.handle(&chord("w", ctrl())),
             vec![EditCommand::DeleteWordBack]
@@ -1768,10 +1764,10 @@ mod tests {
     #[test]
     fn ctrl_r_pastes_a_register_while_inserting() {
         let mut km = Fixture::default();
-        run(&mut km, &["i"]);
+        km.run(&["i"]);
         assert_eq!(km.handle(&chord("r", ctrl())), vec![]);
         assert_eq!(
-            run(&mut km, &["a"]),
+            km.run(&["a"]),
             vec![EditCommand::Put {
                 before: true,
                 count: 1,
@@ -1780,25 +1776,13 @@ mod tests {
         );
     }
 
-    fn mapped(specs: &[(&str, &str, &str)]) -> Fixture {
-        let specs: Vec<_> = specs
-            .iter()
-            .map(|(mode, lhs, rhs)| vmux_api::editor::KeyMapping {
-                mode: (*mode).into(),
-                lhs: (*lhs).into(),
-                rhs: (*rhs).into(),
-            })
-            .collect();
-        Fixture::with_mappings(&specs, " ")
-    }
-
     #[test]
     fn jk_maps_to_escape_in_insert_mode() {
-        let mut km = mapped(&[("i", "jk", "<Esc>")]);
-        run(&mut km, &["i"]);
-        assert_eq!(run(&mut km, &["j"]), vec![]);
+        let mut km = Fixture::mapped(&[("i", "jk", "<Esc>")]);
+        km.run(&["i"]);
+        assert_eq!(km.run(&["j"]), vec![]);
         assert_eq!(
-            run(&mut km, &["k"]),
+            km.run(&["k"]),
             vec![
                 EditCommand::Move(Motion::LeftBounded),
                 EditCommand::SetMode(EditMode::Normal),
@@ -1809,10 +1793,10 @@ mod tests {
 
     #[test]
     fn an_abandoned_mapping_prefix_replays_as_typed() {
-        let mut km = mapped(&[("n", "gs", "0")]);
-        assert_eq!(run(&mut km, &["g"]), vec![]);
+        let mut km = Fixture::mapped(&[("n", "gs", "0")]);
+        assert_eq!(km.run(&["g"]), vec![]);
         assert_eq!(
-            run(&mut km, &["d"]),
+            km.run(&["d"]),
             vec![EditCommand::GotoDefinition],
             "the buffered g and the new d still form gd"
         );
@@ -1820,16 +1804,16 @@ mod tests {
 
     #[test]
     fn leader_mappings_expand_through_the_configured_leader() {
-        let mut km = mapped(&[("n", "<leader>s", ":w<CR>")]);
-        assert_eq!(run(&mut km, &[" "]), vec![]);
-        assert_eq!(run(&mut km, &["s"]), vec![EditCommand::Save]);
+        let mut km = Fixture::mapped(&[("n", "<leader>s", ":w<CR>")]);
+        assert_eq!(km.run(&[" "]), vec![]);
+        assert_eq!(km.run(&["s"]), vec![EditCommand::Save]);
     }
 
     #[test]
     fn an_unmapped_key_is_untouched_by_the_mapping_layer() {
-        let mut km = mapped(&[("i", "jk", "<Esc>")]);
+        let mut km = Fixture::mapped(&[("i", "jk", "<Esc>")]);
         assert_eq!(
-            run(&mut km, &["x"]),
+            km.run(&["x"]),
             vec![op(Operator::Delete, Target::Motion(Motion::Right, 1))]
         );
     }
@@ -1853,13 +1837,13 @@ mod tests {
         let mut km = Fixture::default();
         km.handle(&chord("v", ctrl()));
         assert_eq!(
-            run(&mut km, &["I"]),
+            km.run(&["I"]),
             vec![EditCommand::BeginBlockInsert { after: false }]
         );
         assert_eq!(km.mode(), EditMode::Insert);
         km.record_text("xy");
         assert_eq!(
-            run(&mut km, &["Escape"]),
+            km.run(&["Escape"]),
             vec![
                 EditCommand::FinishBlockInsert { text: "xy".into() },
                 EditCommand::Move(Motion::LeftBounded),
@@ -1873,7 +1857,7 @@ mod tests {
         let mut km = Fixture::default();
         km.handle(&chord("v", ctrl()));
         assert_eq!(
-            run(&mut km, &["d"]),
+            km.run(&["d"]),
             vec![
                 op(Operator::Delete, Target::Selection),
                 EditCommand::SetMode(EditMode::Normal)
@@ -1884,14 +1868,14 @@ mod tests {
     #[test]
     fn ctrl_o_runs_one_normal_command_then_returns_to_insert() {
         let mut km = Fixture::default();
-        run(&mut km, &["i"]);
+        km.run(&["i"]);
         assert_eq!(
             km.handle(&chord("o", ctrl())),
             vec![EditCommand::SetMode(EditMode::Normal)]
         );
         assert_eq!(km.mode(), EditMode::Normal);
         assert_eq!(
-            run(&mut km, &["$"]),
+            km.run(&["$"]),
             vec![
                 EditCommand::Move(Motion::LineEnd),
                 EditCommand::SetMode(EditMode::Insert),
@@ -1904,10 +1888,10 @@ mod tests {
     fn ctrl_o_then_a_search_key_leaves_the_find_bar_owning_the_keys() {
         for (key, forward) in [("/", true), ("?", false)] {
             let mut km = Fixture::default();
-            run(&mut km, &["i"]);
+            km.run(&["i"]);
             km.handle(&chord("o", ctrl()));
             assert_eq!(
-                run(&mut km, &[key]),
+                km.run(&[key]),
                 vec![EditCommand::OpenFind { forward }],
                 "{key} must not also hand the editor back to insert mode"
             );
@@ -1918,7 +1902,7 @@ mod tests {
     #[test]
     fn scroll_chords_do_not_fire_while_inserting() {
         let mut km = Fixture::default();
-        run(&mut km, &["i"]);
+        km.run(&["i"]);
         assert_eq!(km.handle(&chord("e", ctrl())), vec![]);
     }
 
@@ -1926,19 +1910,19 @@ mod tests {
     fn search_repeat_and_word_search_bindings() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["n"]),
+            km.run(&["n"]),
             vec![EditCommand::Move(Motion::SearchNext { reverse: false })]
         );
         assert_eq!(
-            run(&mut km, &["N"]),
+            km.run(&["N"]),
             vec![EditCommand::Move(Motion::SearchNext { reverse: true })]
         );
         assert_eq!(
-            run(&mut km, &["*"]),
+            km.run(&["*"]),
             vec![EditCommand::SearchWord { forward: true }]
         );
         assert_eq!(
-            run(&mut km, &["#"]),
+            km.run(&["#"]),
             vec![EditCommand::SearchWord { forward: false }]
         );
     }
@@ -1947,7 +1931,7 @@ mod tests {
     fn an_operator_can_target_the_next_match() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "n"]),
+            km.run(&["d", "n"]),
             vec![op(
                 Operator::Delete,
                 Target::Motion(Motion::SearchNext { reverse: false }, 1)
@@ -1958,16 +1942,16 @@ mod tests {
     #[test]
     fn mark_bindings_set_and_recall() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &["m", "a"]), vec![EditCommand::SetMark('a')]);
+        assert_eq!(km.run(&["m", "a"]), vec![EditCommand::SetMark('a')]);
         assert_eq!(
-            run(&mut km, &["`", "a"]),
+            km.run(&["`", "a"]),
             vec![EditCommand::GotoMark {
                 name: 'a',
                 linewise: false
             }]
         );
         assert_eq!(
-            run(&mut km, &["'", "a"]),
+            km.run(&["'", "a"]),
             vec![EditCommand::GotoMark {
                 name: 'a',
                 linewise: true
@@ -1993,7 +1977,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            run(&mut km, &["g", ";"]),
+            km.run(&["g", ";"]),
             vec![EditCommand::ChangeList {
                 back: true,
                 count: 1
@@ -2005,7 +1989,7 @@ mod tests {
     fn a_mark_key_is_not_read_as_a_quote_object() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["d", "i", "'"]),
+            km.run(&["d", "i", "'"]),
             vec![op(
                 Operator::Delete,
                 object(TextObjectKind::SingleQuote, false, 1)
@@ -2017,7 +2001,7 @@ mod tests {
     fn count_repeats_motion() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["3", "j"]),
+            km.run(&["3", "j"]),
             vec![
                 EditCommand::Move(Motion::Down),
                 EditCommand::Move(Motion::Down),
@@ -2030,7 +2014,7 @@ mod tests {
     fn register_prefix_routes_yank_and_put() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["\"", "a", "y", "y"]),
+            km.run(&["\"", "a", "y", "y"]),
             vec![EditCommand::Op {
                 operator: Operator::Yank,
                 target: Target::Line(1),
@@ -2038,7 +2022,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            run(&mut km, &["\"", "a", "p"]),
+            km.run(&["\"", "a", "p"]),
             vec![EditCommand::Put {
                 before: false,
                 count: 1,
@@ -2051,11 +2035,11 @@ mod tests {
     fn indent_operators_use_doubled_keys() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &[">", ">"]),
+            km.run(&[">", ">"]),
             vec![op(Operator::Indent, Target::Line(1))]
         );
         assert_eq!(
-            run(&mut km, &["3", "<", "<"]),
+            km.run(&["3", "<", "<"]),
             vec![op(Operator::Outdent, Target::Line(3))]
         );
     }
@@ -2064,11 +2048,11 @@ mod tests {
     fn g_prefixed_case_operators() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["g", "u", "w"]),
+            km.run(&["g", "u", "w"]),
             vec![op(Operator::Lower, Target::Motion(Motion::WordNext, 1))]
         );
         assert_eq!(
-            run(&mut km, &["g", "U", "U"]),
+            km.run(&["g", "U", "U"]),
             vec![op(Operator::Upper, Target::Line(1))]
         );
     }
@@ -2077,25 +2061,25 @@ mod tests {
     fn join_replace_and_toggle_case() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["3", "J"]),
+            km.run(&["3", "J"]),
             vec![EditCommand::JoinLines {
                 count: 3,
                 spaces: true
             }]
         );
         assert_eq!(
-            run(&mut km, &["g", "J"]),
+            km.run(&["g", "J"]),
             vec![EditCommand::JoinLines {
                 count: 1,
                 spaces: false
             }]
         );
         assert_eq!(
-            run(&mut km, &["2", "r", "x"]),
+            km.run(&["2", "r", "x"]),
             vec![EditCommand::ReplaceChar { ch: 'x', count: 2 }]
         );
         assert_eq!(
-            run(&mut km, &["~"]),
+            km.run(&["~"]),
             vec![
                 op(Operator::ToggleCase, Target::Motion(Motion::Right, 1)),
                 EditCommand::Move(Motion::RightBounded)
@@ -2107,25 +2091,22 @@ mod tests {
     fn shift_d_c_s_and_y_bindings() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["D"]),
+            km.run(&["D"]),
             vec![op(Operator::Delete, Target::Motion(Motion::LineEnd, 1))]
         );
         assert_eq!(
-            run(&mut km, &["C"]),
+            km.run(&["C"]),
             vec![op(Operator::Change, Target::Motion(Motion::LineEnd, 1))]
         );
         let mut km = Fixture::default();
-        assert_eq!(
-            run(&mut km, &["S"]),
-            vec![op(Operator::Change, Target::Line(1))]
-        );
+        assert_eq!(km.run(&["S"]), vec![op(Operator::Change, Target::Line(1))]);
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["2", "Y"]),
+            km.run(&["2", "Y"]),
             vec![op(Operator::Yank, Target::Line(2))]
         );
         assert_eq!(
-            run(&mut km, &["3", "x"]),
+            km.run(&["3", "x"]),
             vec![op(Operator::Delete, Target::Motion(Motion::Right, 3))]
         );
     }
@@ -2134,7 +2115,7 @@ mod tests {
     fn put_carries_a_count_and_direction() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["2", "p"]),
+            km.run(&["2", "p"]),
             vec![EditCommand::Put {
                 before: false,
                 count: 2,
@@ -2142,7 +2123,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            run(&mut km, &["P"]),
+            km.run(&["P"]),
             vec![EditCommand::Put {
                 before: true,
                 count: 1,
@@ -2154,31 +2135,22 @@ mod tests {
     #[test]
     fn open_line_replaces_the_newline_dance() {
         let mut km = Fixture::default();
-        assert_eq!(
-            run(&mut km, &["o"]),
-            vec![EditCommand::OpenLine { above: false }]
-        );
+        assert_eq!(km.run(&["o"]), vec![EditCommand::OpenLine { above: false }]);
         assert_eq!(km.mode(), EditMode::Insert);
         let mut km = Fixture::default();
-        assert_eq!(
-            run(&mut km, &["O"]),
-            vec![EditCommand::OpenLine { above: true }]
-        );
+        assert_eq!(km.run(&["O"]), vec![EditCommand::OpenLine { above: true }]);
     }
 
     #[test]
     fn visual_operators_act_on_the_selection() {
         let mut km = Fixture::default();
+        assert_eq!(km.run(&["v"]), vec![EditCommand::SetMode(EditMode::Visual)]);
         assert_eq!(
-            run(&mut km, &["v"]),
-            vec![EditCommand::SetMode(EditMode::Visual)]
-        );
-        assert_eq!(
-            run(&mut km, &["l"]),
+            km.run(&["l"]),
             vec![EditCommand::Select(Motion::RightBounded)]
         );
         assert_eq!(
-            run(&mut km, &["y"]),
+            km.run(&["y"]),
             vec![
                 op(Operator::Yank, Target::Selection),
                 EditCommand::SetMode(EditMode::Normal)
@@ -2190,9 +2162,9 @@ mod tests {
     #[test]
     fn visual_motions_take_counts() {
         let mut km = Fixture::default();
-        run(&mut km, &["v"]);
+        km.run(&["v"]);
         assert_eq!(
-            run(&mut km, &["3", "j"]),
+            km.run(&["3", "j"]),
             vec![
                 EditCommand::Select(Motion::Down),
                 EditCommand::Select(Motion::Down),
@@ -2204,10 +2176,10 @@ mod tests {
     #[test]
     fn visual_indent_and_swap_ends() {
         let mut km = Fixture::default();
-        run(&mut km, &["v"]);
-        assert_eq!(run(&mut km, &["o"]), vec![EditCommand::SwapSelectionEnds]);
+        km.run(&["v"]);
+        assert_eq!(km.run(&["o"]), vec![EditCommand::SwapSelectionEnds]);
         assert_eq!(
-            run(&mut km, &[">"]),
+            km.run(&[">"]),
             vec![
                 op(Operator::Indent, Target::Selection),
                 EditCommand::SetMode(EditMode::Normal)
@@ -2219,19 +2191,16 @@ mod tests {
     fn document_jump_bindings() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["g", "g"]),
+            km.run(&["g", "g"]),
             vec![EditCommand::Move(Motion::DocStart)]
         );
+        assert_eq!(km.run(&["G"]), vec![EditCommand::Move(Motion::DocEnd)]);
         assert_eq!(
-            run(&mut km, &["G"]),
-            vec![EditCommand::Move(Motion::DocEnd)]
-        );
-        assert_eq!(
-            run(&mut km, &["5", "G"]),
+            km.run(&["5", "G"]),
             vec![EditCommand::Move(Motion::GotoLine(4))]
         );
         assert_eq!(
-            run(&mut km, &["5", "g", "g"]),
+            km.run(&["5", "g", "g"]),
             vec![EditCommand::Move(Motion::GotoLine(4))]
         );
     }
@@ -2240,11 +2209,11 @@ mod tests {
     fn braces_move_by_paragraph() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["{"]),
+            km.run(&["{"]),
             vec![EditCommand::Move(Motion::ParagraphPrev)]
         );
         assert_eq!(
-            run(&mut km, &["}"]),
+            km.run(&["}"]),
             vec![EditCommand::Move(Motion::ParagraphNext)]
         );
     }
@@ -2252,11 +2221,11 @@ mod tests {
     #[test]
     fn fold_and_lsp_bindings() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &["z", "a"]), vec![EditCommand::FoldToggle]);
-        assert_eq!(run(&mut km, &["z", "R"]), vec![EditCommand::UnfoldAll]);
-        assert_eq!(run(&mut km, &["g", "d"]), vec![EditCommand::GotoDefinition]);
-        assert_eq!(run(&mut km, &["g", "r"]), vec![EditCommand::FindReferences]);
-        assert_eq!(run(&mut km, &["K"]), vec![EditCommand::Hover]);
+        assert_eq!(km.run(&["z", "a"]), vec![EditCommand::FoldToggle]);
+        assert_eq!(km.run(&["z", "R"]), vec![EditCommand::UnfoldAll]);
+        assert_eq!(km.run(&["g", "d"]), vec![EditCommand::GotoDefinition]);
+        assert_eq!(km.run(&["g", "r"]), vec![EditCommand::FindReferences]);
+        assert_eq!(km.run(&["K"]), vec![EditCommand::Hover]);
     }
 
     #[test]
@@ -2288,13 +2257,10 @@ mod tests {
     #[test]
     fn insert_mode_entry_and_escape() {
         let mut km = Fixture::default();
-        assert_eq!(
-            run(&mut km, &["i"]),
-            vec![EditCommand::SetMode(EditMode::Insert)]
-        );
+        assert_eq!(km.run(&["i"]), vec![EditCommand::SetMode(EditMode::Insert)]);
         assert_eq!(km.mode(), EditMode::Insert);
         assert_eq!(
-            run(&mut km, &["Escape"]),
+            km.run(&["Escape"]),
             vec![
                 EditCommand::Move(Motion::LeftBounded),
                 EditCommand::SetMode(EditMode::Normal)
@@ -2307,7 +2273,7 @@ mod tests {
     fn arrow_keys_navigate_in_normal_mode() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["ArrowDown"]),
+            km.run(&["ArrowDown"]),
             vec![EditCommand::Move(Motion::Down)]
         );
     }
@@ -2329,7 +2295,7 @@ mod tests {
     #[test]
     fn ctrl_e_y_scroll_the_viewport_with_counts() {
         let mut km = Fixture::default();
-        run(&mut km, &["3"]);
+        km.run(&["3"]);
         assert_eq!(
             km.handle(&chord("e", ctrl())),
             vec![EditCommand::ScrollViewport(3)]
@@ -2349,7 +2315,7 @@ mod tests {
     #[test]
     fn ctrl_c_escapes_insert_and_visual() {
         let mut km = Fixture::default();
-        run(&mut km, &["i"]);
+        km.run(&["i"]);
         assert_eq!(
             km.handle(&chord("c", ctrl())),
             vec![
@@ -2357,7 +2323,7 @@ mod tests {
                 EditCommand::SetMode(EditMode::Normal)
             ]
         );
-        run(&mut km, &["v"]);
+        km.run(&["v"]);
         assert_eq!(
             km.handle(&chord("c", ctrl())),
             vec![EditCommand::SetMode(EditMode::Normal)]
@@ -2368,14 +2334,14 @@ mod tests {
     #[test]
     fn colon_hands_the_line_to_the_command_bar() {
         let mut km = Fixture::default();
-        assert_eq!(run(&mut km, &[":"]), vec![EditCommand::OpenCommandLine]);
+        assert_eq!(km.run(&[":"]), vec![EditCommand::OpenCommandLine]);
         assert_eq!(
             km.mode(),
             EditMode::Normal,
             "the bar owns the text, so the keymap must not swallow the keys that follow"
         );
         assert_eq!(
-            run(&mut km, &["w"]),
+            km.run(&["w"]),
             vec![EditCommand::Move(Motion::WordNext)],
             "a key typed after the hand-off is an ordinary normal-mode key again"
         );
@@ -2385,7 +2351,7 @@ mod tests {
     fn slash_and_question_hand_the_search_to_the_find_bar() {
         let mut km = Fixture::default();
         assert_eq!(
-            run(&mut km, &["/"]),
+            km.run(&["/"]),
             vec![EditCommand::OpenFind { forward: true }]
         );
         assert_eq!(
@@ -2394,7 +2360,7 @@ mod tests {
             "the bar owns the text, so the keymap must not swallow the keys that follow"
         );
         assert_eq!(
-            run(&mut km, &["?"]),
+            km.run(&["?"]),
             vec![EditCommand::OpenFind { forward: false }]
         );
     }

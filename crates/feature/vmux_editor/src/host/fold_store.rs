@@ -220,6 +220,7 @@ mod tests {
     use crate::host::fold::{FoldRegion, FoldState};
     use crate::host::fold_io::FileStore;
     use crate::host::fold_preferences::{LoadRequest, Snapshot};
+    use bevy::prelude::{App, Commands, Component, Entity, Query, World};
 
     struct Fixture {
         app: App,
