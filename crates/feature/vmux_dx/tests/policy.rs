@@ -473,6 +473,16 @@ fn compiler_inputs_require_actual_cargo_data_flow_and_cannot_be_product_modules(
             "valid" => {}
             _ => unreachable!(),
         }
+        if !matches!(
+            change,
+            "valid" | "content" | "unconsumed" | "module" | "inline_module" | "target"
+        ) {
+            assert_ne!(
+                std::fs::read_to_string(&source).unwrap(),
+                original,
+                "compiler fixture mutation must change its input: {change}"
+            );
+        }
         let result = CompilerInputs::read(fixture.0.path());
         if !matches!(
             change,
@@ -530,21 +540,71 @@ struct CompilerInputFixture(tempfile::TempDir);
 
 impl CompilerInputFixture {
     fn new() -> Self {
-        let workspace = Workspace::current().0;
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("crates/feature/vmux_dx/lints");
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::create_dir_all(root.join("ui")).unwrap();
-        let original = workspace.join("crates/feature/vmux_dx/lints");
-        std::fs::copy(
-            original.join("src/registrations.rs"),
-            root.join("src/registrations.rs"),
-        )
-        .unwrap();
-        for entry in std::fs::read_dir(original.join("ui")).unwrap() {
-            let entry = entry.unwrap();
-            std::fs::copy(entry.path(), root.join("ui").join(entry.file_name())).unwrap();
+        let mut source = String::from(
+            r#"use std::process::Command;
+use std::path::PathBuf;
+
+#[cfg(test)]
+struct Fixture {
+    directory: tempfile::TempDir,
+    library: PathBuf,
+}
+
+#[cfg(test)]
+impl Fixture {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("src")).unwrap();
+        std::fs::write(directory.path().join("Cargo.toml"), "[package]\nname=\"compiler-fixture\"\nversion=\"0.0.0\"\n").unwrap();
+        std::fs::create_dir(directory.path().join("examples")).unwrap();
+        std::fs::write(directory.path().join("src/lib.rs"), "").unwrap();
+        let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lints");
+        Self { directory, library }
+    }
+
+    fn check(&self, name: &str, source: &str, expected: &[&str]) {
+        std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), source).unwrap();
+        let output = Command::new("cargo")
+            .current_dir(self.directory.path())
+            .args(["dylint", "--path", self.library.to_str().unwrap(), "--", "--example", name])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), expected.is_empty());
+    }
+}
+
+#[test]
+fn compiled_inputs() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+"#,
+        );
+        for name in [
+            "adapters",
+            "aliases",
+            "block_results",
+            "branch_join",
+            "exported",
+            "inside_branch",
+            "loops",
+            "overwritten",
+            "private",
+            "qualified",
+            "reassigned",
+            "uninitialized",
+            "unrelated",
+        ] {
+            std::fs::write(root.join("ui").join(format!("{name}.rs")), "fn main() {}\n").unwrap();
+            source.push_str(&format!(
+                "(\"{name}\", include_str!(\"../ui/{name}.rs\"), &[][..]),\n"
+            ));
         }
+        source.push_str("] { fixture.check(name, source, expected); }\n}\n");
+        std::fs::write(root.join("src/registrations.rs"), source).unwrap();
         Self(directory)
     }
 
