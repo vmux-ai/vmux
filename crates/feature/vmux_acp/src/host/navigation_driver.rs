@@ -161,7 +161,7 @@ impl PageOpener<'_, '_> {
         if let Some(startup) = workspace.startup_dir(task.stack, &self.settings) {
             return Ok(startup.path);
         }
-        projects.path().map(std::path::Path::to_path_buf)
+        projects.path().map(Path::to_path_buf)
     }
 
     pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {

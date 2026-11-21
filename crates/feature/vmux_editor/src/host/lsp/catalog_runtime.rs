@@ -490,6 +490,9 @@ mod tests {
 
     impl Plugin for OfflineFixturePlugin {
         fn build(&self, app: &mut App) {
+            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Get>>() {
+                app.add_plugins(vmux_ecs::JobPlugin::<Get>::default());
+            }
             app.add_observer(refuse_network);
         }
     }

@@ -210,6 +210,9 @@ mod tests {
 
     impl Plugin for ProcessFixturePlugin {
         fn build(&self, app: &mut App) {
+            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Execute>>() {
+                app.add_plugins(vmux_ecs::JobPlugin::<Execute>::default());
+            }
             app.add_systems(
                 Update,
                 output

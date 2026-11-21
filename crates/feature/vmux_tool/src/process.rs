@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 #[derive(Clone)]
 pub struct Execute {
@@ -84,7 +86,6 @@ impl vmux_ecs::Job for Execute {
             .stderr(std::process::Stdio::piped());
         #[cfg(unix)]
         {
-            use std::os::unix::process::CommandExt;
             command.process_group(0);
         }
         let child = command.spawn().map_err(|error| error.to_string())?;

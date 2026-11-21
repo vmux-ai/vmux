@@ -214,7 +214,7 @@ impl ToolStore {
         }
     }
 
-    #[cfg(any(all(host, ui), test))]
+    #[cfg(any(host, test))]
     pub(crate) fn is_busy(&self) -> bool {
         self.execution.permit.try_acquire().is_none()
     }

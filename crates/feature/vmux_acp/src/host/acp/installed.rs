@@ -646,8 +646,9 @@ mod tests {
     use vmux_ecs::JobWake;
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
 
-    use super::super::registry::{Distribution, PackageDist};
+    use super::super::registry::{BinaryTarget, Distribution, PackageDist};
     use super::*;
+    use vmux_editor::lsp::package_path::Sha256Digest;
 
     struct WakeChannel(std::sync::mpsc::Sender<()>);
 
@@ -1231,8 +1232,6 @@ mod tests {
 
     #[test]
     fn cached_binary_source_and_digest_changes_refuse_old_launch_without_changing_bytes() {
-        use super::super::registry::BinaryTarget;
-        use vmux_editor::lsp::package_path::Sha256Digest;
         for change_url in [true, false] {
             let mut fixture = Fixture::new();
             let target = RegistryAgent::host_target().unwrap().to_string();

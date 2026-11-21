@@ -1,10 +1,17 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use bevy::prelude::Component;
 use vmux_ecs::{BlockingCancellation, Job};
 use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::{self, RemoteArtifact};
+pub(super) use vmux_editor::lsp::install_io::{Remove, Unlink};
 use vmux_editor::lsp::store::Receipt;
+pub(super) use vmux_tool::io::{
+    CloseTemporary as CloseStaging, CreateTemporary as CreateStaging,
+    TemporaryDirectory as Staging, TemporaryTransfer as StagingTransfer,
+};
 
 #[derive(Clone)]
 pub(super) struct Exists {
@@ -28,13 +35,6 @@ impl Job for Exists {
 
 #[derive(Component)]
 pub(super) struct FileExists(pub(super) bool);
-
-pub(super) use vmux_editor::lsp::install_io::{Remove, Unlink};
-
-pub(super) use vmux_tool::io::{
-    CloseTemporary as CloseStaging, CreateTemporary as CreateStaging,
-    TemporaryDirectory as Staging, TemporaryTransfer as StagingTransfer,
-};
 
 #[derive(Clone)]
 pub(super) struct Download {
@@ -134,7 +134,6 @@ impl Job for MakeExecutable {
         }
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let mut permissions = metadata.permissions();
             permissions.set_mode(0o755);
             std::fs::set_permissions(path, permissions).map_err(|error| error.to_string())?;

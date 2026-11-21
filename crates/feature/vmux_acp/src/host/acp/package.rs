@@ -2045,6 +2045,9 @@ mod tests {
 
     impl Plugin for RestoreFaultPlugin {
         fn build(&self, app: &mut App) {
+            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Restore>>() {
+                app.add_plugins(vmux_ecs::JobPlugin::<Restore>::default());
+            }
             app.add_observer(obstruct_restore);
         }
     }
@@ -2131,6 +2134,9 @@ mod tests {
 
     impl Plugin for ChecksumFixturePlugin {
         fn build(&self, app: &mut App) {
+            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Get>>() {
+                app.add_plugins(vmux_ecs::JobPlugin::<Get>::default());
+            }
             app.add_observer(unexpected_checksum);
         }
     }

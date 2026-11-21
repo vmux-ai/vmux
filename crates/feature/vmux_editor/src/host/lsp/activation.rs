@@ -24,13 +24,7 @@ impl Plugin for PackageActivationPlugin {
         .add_systems(
             Update,
             (
-                cancel_activation,
-                prepared_activation,
-                backed_up,
-                committed,
-                restored,
-                retry,
-                orphan,
+                cancel, prepared, backed_up, committed, restored, retry, orphan,
             )
                 .chain()
                 .in_set(ActivationSet)
@@ -91,7 +85,7 @@ pub struct RestoreFailed;
 
 #[derive(Component)]
 pub struct Completed(pub Result<(), String>);
-fn cancel_activation(
+fn cancel(
     activations: Query<(Entity, &Request), Without<ActivationCanceled>>,
     owners: Query<&OperationState>,
     mut commands: Commands,
@@ -119,7 +113,7 @@ type PreparedActivationActivations<'w, 's> = Query<
     With<PreparingActivation>,
 >;
 
-fn prepared_activation(activations: PreparedActivationActivations<'_, '_>, mut commands: Commands) {
+fn prepared(activations: PreparedActivationActivations<'_, '_>, mut commands: Commands) {
     for (entity, activation, staging, result, canceled) in &activations {
         commands
             .entity(entity)

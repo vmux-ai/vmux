@@ -1340,6 +1340,8 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::{Arc, Mutex, mpsc};
     use std::time::{Duration, Instant};
 
@@ -1361,6 +1363,9 @@ mod tests {
 
     impl Plugin for MetadataFixturePlugin {
         fn build(&self, app: &mut App) {
+            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Get>>() {
+                app.add_plugins(vmux_ecs::JobPlugin::<Get>::default());
+            }
             app.add_observer(metadata_endpoint);
         }
     }
@@ -1767,6 +1772,9 @@ mod tests {
 
     impl Plugin for ToolchainFixturePlugin {
         fn build(&self, app: &mut App) {
+            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Execute>>() {
+                app.add_plugins(vmux_ecs::JobPlugin::<Execute>::default());
+            }
             app.add_observer(toolchain_endpoint);
         }
     }
@@ -1843,7 +1851,6 @@ root.mkdir(parents=True, exist_ok=True)
             .unwrap();
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             }
             fixture

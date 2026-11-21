@@ -1288,6 +1288,7 @@ mod tests {
         App, Commands, Component, Entity, Name, On, Plugin, Query, Res, Resource, Update, With,
     };
     use bevy::tasks::IoTaskPool;
+    use std::os::unix::process::ExitStatusExt;
 
     #[derive(Resource, Clone)]
     struct ImportProcess {
@@ -1298,7 +1299,6 @@ mod tests {
         type Output = Result<Option<crate::process::ProcessOutput>, String>;
 
         fn run(self) -> Self::Output {
-            use std::os::unix::process::ExitStatusExt;
             std::fs::write(self.root.join("started"), "").unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while self.root.join("hold").exists() {

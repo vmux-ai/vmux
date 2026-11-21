@@ -241,13 +241,16 @@ struct CatalogBinding {
     source: Checked,
 }
 
-impl CatalogBinding {
-    fn accepts(
-        &self,
-        installed: &Query<&Checked, With<InstalledAgent>>,
-        profile: &CurrentProfile,
-    ) -> bool {
-        self.source.profile_matches(profile) && installed.get(self.agent).ok() == Some(&self.source)
+#[derive(SystemParam)]
+struct CatalogWitness<'w, 's> {
+    installed: Query<'w, 's, &'static Checked, With<InstalledAgent>>,
+    profile: CurrentProfile<'w, 's>,
+}
+
+impl CatalogWitness<'_, '_> {
+    fn accepts(&self, binding: &CatalogBinding) -> bool {
+        binding.source.profile_matches(&self.profile)
+            && self.installed.get(binding.agent).ok() == Some(&binding.source)
     }
 }
 
@@ -397,8 +400,7 @@ fn refresh_catalogs(
 }
 
 fn cancel_catalogs(
-    installed: Query<&Checked, With<InstalledAgent>>,
-    profile: CurrentProfile,
+    witness: CatalogWitness,
     connected: Query<(), With<ServiceConnected>>,
     unavailable: Query<(), With<vmux_ecs::service::ServiceUnavailable>>,
     mut state: Single<&mut CatalogControl>,
@@ -446,7 +448,7 @@ fn cancel_catalogs(
         let retiring = sources
             .get(parent.parent())
             .is_ok_and(|(_, _, _, _, retiring)| retiring);
-        let revoked = binding.is_some_and(|binding| !binding.accepts(&installed, &profile));
+        let revoked = binding.is_some_and(|binding| !witness.accepts(binding));
         if state.active && online && !timeout && !retiring && !revoked {
             continue;
         }
@@ -764,8 +766,7 @@ fn send_catalogs(
         With<AcpCatalogRead>,
     >,
     sources: Query<&EntityTarget<CatalogRead>, (With<CatalogSource>, Without<RetiringCatalog>)>,
-    installed: Query<&Checked, With<InstalledAgent>>,
-    profile: CurrentProfile,
+    witness: CatalogWitness,
     connected: Query<(), With<ServiceConnected>>,
     mut requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
@@ -799,7 +800,7 @@ fn send_catalogs(
         let Some(wire) = wire else {
             break;
         };
-        if binding.is_some_and(|binding| !binding.accepts(&installed, &profile)) {
+        if binding.is_some_and(|binding| !witness.accepts(binding)) {
             continue;
         }
         if !sources
@@ -844,8 +845,7 @@ fn receive_catalogs(
         ),
         (With<CatalogSource>, Without<RetiringCatalog>),
     >,
-    installed: Query<&Checked, With<InstalledAgent>>,
-    profile: CurrentProfile,
+    witness: CatalogWitness,
     mut canonical: MessageWriter<CatalogReceived>,
 ) {
     for received in received.read() {
@@ -855,7 +855,7 @@ fn receive_catalogs(
         else {
             continue;
         };
-        if binding.is_some_and(|binding| !binding.accepts(&installed, &profile)) {
+        if binding.is_some_and(|binding| !witness.accepts(binding)) {
             continue;
         }
         let Ok((agent, generation, target, origin)) = sources.get(parent.parent()) else {
@@ -3246,6 +3246,7 @@ mod tests {
     use bevy_ecs::system::RunSystemOnce;
     use std::io::Write;
     use vmux_ecs::PageMetadata;
+    use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
 
     struct QueuedCatalogFixture {
         app: App,
@@ -3259,7 +3260,6 @@ mod tests {
 
     impl QueuedCatalogFixture {
         fn new(started: bool) -> Self {
-            use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
             let directory = tempfile::tempdir().unwrap();
             let paths = ProfilePaths::at(Profile::named("test"), directory.path().join("data"));
             let mut settings = AppSettings::default();
@@ -3418,7 +3418,6 @@ mod tests {
             let mut fixture = QueuedCatalogFixture::new(started);
             fixture.app.update();
             if replace_profile {
-                use vmux_ecs::profile::{Profile, ProfileDirectories, ProfilePaths};
                 let paths = ProfilePaths::at(
                     Profile::named("other"),
                     fixture._directory.path().join("other"),

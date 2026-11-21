@@ -1,5 +1,9 @@
 use std::collections::HashSet;
 use std::io::Read;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 #[cfg(not(unix))]
@@ -266,8 +270,6 @@ impl LoginShellEnvironment {
 
     #[cfg(unix)]
     fn nu_config_paths(shell: &str) -> Option<(String, String)> {
-        use std::os::fd::AsRawFd;
-        use std::os::unix::process::CommandExt;
         if vmux_ecs::BlockingCancellation::canceled() {
             return None;
         }
@@ -405,6 +407,8 @@ impl LoginShellEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[cfg(unix)]
     struct CaptureFixture {
@@ -463,7 +467,6 @@ mod tests {
     #[cfg(unix)]
     impl CapturePaths {
         fn new(name: &str, body: &str) -> Self {
-            use std::os::unix::fs::PermissionsExt;
             let directory = tempfile::tempdir().unwrap();
             let shell = directory.path().join(name);
             let pid = directory.path().join("pid");

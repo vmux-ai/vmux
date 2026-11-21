@@ -2,6 +2,8 @@ use super::archive::ArchiveKind;
 use super::download::{self, RemoteArtifact};
 use super::package_path::{PackageName, PackagePath};
 use super::store::{PackageStore, Receipt};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use vmux_ecs::{BlockingCancellation, Job};
 use vmux_tool::io::TemporaryDirectory;
@@ -125,7 +127,6 @@ impl Job for MakeExecutable {
         }
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let mut permissions = metadata.permissions();
             permissions.set_mode(0o755);
             std::fs::set_permissions(path, permissions).map_err(|error| error.to_string())?;

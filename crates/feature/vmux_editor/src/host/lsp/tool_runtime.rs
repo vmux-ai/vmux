@@ -715,6 +715,8 @@ mod tests {
     use bevy::prelude::{
         Add, App, Commands, Entity, Name, On, Plugin, Query, Res, ResMut, Resource, With,
     };
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
     use vmux_ecs::{JobRequest, OperationState};
@@ -809,7 +811,6 @@ binary.write_text("#!/bin/sh\nprintf language-ready")
 "##,
             )
             .unwrap();
-            use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             bevy::tasks::IoTaskPool::get_or_init(|| {
                 bevy::tasks::TaskPoolBuilder::new().num_threads(2).build()

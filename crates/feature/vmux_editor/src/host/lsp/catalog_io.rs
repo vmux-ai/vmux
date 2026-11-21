@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::io::{Cursor, Read};
 
 use bevy::prelude::Component;
@@ -24,7 +25,6 @@ impl Job for DecodeArchive {
         }
         let digest = Sha256::digest(&self.bytes);
         let mut hex = String::with_capacity(64);
-        use std::fmt::Write;
         for byte in digest {
             write!(&mut hex, "{byte:02x}").unwrap();
         }

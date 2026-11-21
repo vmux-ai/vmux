@@ -16,6 +16,8 @@ pub use homebrew::*;
 pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
+#[cfg(host)]
+pub use package::ToolPackageDrain;
 pub use provider::*;
 #[cfg(host)]
 pub use query::*;
@@ -78,8 +80,6 @@ mod npm_inventory;
 pub mod observation;
 #[cfg(host)]
 mod package;
-#[cfg(host)]
-pub use package::ToolPackageDrain;
 mod process;
 mod provider;
 #[cfg(host)]

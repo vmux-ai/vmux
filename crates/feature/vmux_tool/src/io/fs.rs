@@ -1,6 +1,8 @@
 use std::ffi::OsString;
 use std::fs::{FileType, OpenOptions};
 use std::io::{ErrorKind, Read};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use bevy_ecs::prelude::Component;
@@ -23,7 +25,6 @@ impl Job for ReadFile {
         options.read(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
             options.custom_flags(libc::O_NONBLOCK);
         }
         let mut file = match options.open(&self.path) {
