@@ -646,7 +646,11 @@ jobs:
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests
       - name: ECS composition
         if: matrix.reuse == '' && matrix.key == 'test-ecs'
-        run: cargo test --locked -p vmux_dx --test policy --test conventions
+        env:
+          VMUX_POLICY_BASE: ${{ needs.plan.outputs.base || needs.plan.outputs.head }}
+        run: |
+          git update-ref refs/remotes/origin/main "$VMUX_POLICY_BASE"
+          cargo test --locked -p vmux_dx --test policy --test conventions
       - name: Save validated compiler artifacts
         if: matrix.reuse == ''
         uses: ./.github/actions/save-workspace
