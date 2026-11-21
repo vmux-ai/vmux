@@ -1,11 +1,8 @@
+use crate::host::editor::Edit;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use ropey::Rope;
 use vmux_ecs::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
-
-use crate::edit::EditCommand;
-use crate::host::editing::EditRequest;
-use crate::host::editor::Editor;
 
 pub(super) struct ShapePlugin;
 
@@ -144,7 +141,7 @@ impl Reindent {
 
 fn file_set(
     trigger: On<UiInput<FileShapeSet>>,
-    mut views: Query<&mut Editor>,
+    mut views: Query<Edit>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -158,7 +155,11 @@ fn file_set(
         line_ending: wanted.line_ending,
     };
     edit.set_shape(shape);
-    commands.trigger(EditRequest::new(entity, vec![EditCommand::Reshape(shape)]));
+    commands.trigger(crate::host::editing::document::ReshapeRequest {
+        entity,
+        document: Some(edit.core.revision.identity),
+        shape,
+    });
     if !browsers.can_emit_to(&entity) {
         return;
     }

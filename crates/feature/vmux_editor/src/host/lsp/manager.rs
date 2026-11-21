@@ -1,3 +1,4 @@
+use crate::host::editor::{Edit, EditReadOnly};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -24,7 +25,7 @@ use vmux_lsp::{
 use vmux_path::PathIdentity;
 use vmux_setting::AppSettings;
 
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::FileView;
 use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
 use crate::host::language::LspEditDirty;
 use crate::host::markdown::ParsedNote;
@@ -380,7 +381,7 @@ pub struct LspManager<'w, 's> {
     >,
     lookup: vmux_lsp::Lookup<'w, 's>,
     bindings: Query<'w, 's, &'static DocumentBinding>,
-    editors: Query<'w, 's, (Entity, &'static Editor)>,
+    editors: Query<'w, 's, (Entity, EditReadOnly)>,
     snapshots: Query<'w, 's, &'static BufferSnapshot>,
     synced: Query<'w, 's, &'static LspSynced>,
     views: Query<'w, 's, &'static FileView>,
@@ -463,7 +464,7 @@ impl LspManager<'_, '_> {
                 .get(owner)
                 .ok()
                 .map(|binding| binding.document());
-            let mut source_known = !editor.core.dirty;
+            let mut source_known = !editor.core.revision.dirty;
             if let Some(document) = document
                 && let Ok((_, _, document_state, parent)) = self.documents.get(document)
                 && parent.parent() == source
@@ -1367,7 +1368,7 @@ type UnavailableServers<'w, 's> =
     Query<'w, 's, (&'static ServerKey, Has<Stopped>), Or<(With<ServerFailure>, With<Stopped>)>>;
 
 fn open_documents(
-    q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
+    q: Query<(Entity, &FileView, EditReadOnly), Without<LspOpened>>,
     unavailable: UnavailableServers,
     registry: Single<&LspRegistry>,
     settings: Res<AppSettings>,
@@ -1497,7 +1498,7 @@ fn open_documents(
 }
 
 fn acknowledge_documents(
-    views: Query<(Entity, &FileView, &Editor, &vmux_lsp::DocumentApplied)>,
+    views: Query<(Entity, &FileView, EditReadOnly, &vmux_lsp::DocumentApplied)>,
     lookup: vmux_lsp::Lookup,
     mut commands: Commands,
 ) {
@@ -1550,12 +1551,7 @@ type UninitializedViews = (
 type SyncReadyViews<'w, 's> = Query<
     'w,
     's,
-    (
-        Entity,
-        &'static FileView,
-        &'static Editor,
-        &'static LspSynced,
-    ),
+    (Entity, &'static FileView, EditReadOnly, &'static LspSynced),
     (With<DocumentBinding>, Without<LspEditDirty>),
 >;
 
@@ -1584,7 +1580,7 @@ fn sync_ready_buffers(
 }
 
 fn initialize_views(
-    views: Query<(Entity, &FileView, &Editor, &LspSynced), UninitializedViews>,
+    views: Query<(Entity, &FileView, EditReadOnly, &LspSynced), UninitializedViews>,
     manager: LspManager,
     mut commands: Commands,
 ) {
@@ -1627,7 +1623,8 @@ impl Plugin for RequestsPlugin {
             .add_observer(respond::<crate::host::feedback::EditFailure>)
             .add_observer(respond::<crate::host::panel::ReferencesResult>)
             .add_observer(respond::<crate::host::panel::CompletionResult>)
-            .add_observer(respond::<crate::host::editing::EditRequest>)
+            .add_observer(respond::<crate::host::editing::document::CompletionInsertRequest>)
+            .add_observer(respond::<crate::host::editing::document::InsertTextRequest>)
             .add_message::<LspGoto>()
             .add_message::<LspCodeActionRequest>()
             .add_message::<LspFolds>()
@@ -1907,7 +1904,7 @@ pub struct LspSemantic {
 
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
-    mut view_params: ParamSet<(LspManager, Query<(&mut Editor, &FileView)>)>,
+    mut view_params: ParamSet<(LspManager, Query<(Edit, &FileView)>)>,
     mut commands: Commands,
 ) {
     for message in reader.read() {
@@ -2088,7 +2085,7 @@ fn move_code_action(
 
 fn file_code_action_pick(
     trigger: On<UiInput<FileCodeActionPick>>,
-    views: Query<(&Editor, &OfferedCodeActions)>,
+    views: Query<(EditReadOnly, &OfferedCodeActions)>,
     manager: LspManager,
     mut edits: MessageWriter<LspRequestedEdit>,
     mut commands: Commands,
@@ -2255,7 +2252,7 @@ fn prune_diagnostics(
 }
 
 fn drain_diagnostics(
-    views: Query<(Entity, &FileView, &Editor, Option<&LspDiagnostics>)>,
+    views: Query<(Entity, &FileView, EditReadOnly, Option<&LspDiagnostics>)>,
     bindings: Query<&DocumentBinding>,
     diagnostics: Query<Ref<vmux_lsp::Diagnostics>>,
     synced: Query<&LspSynced>,
@@ -2350,7 +2347,7 @@ fn request_code_actions(
 pub struct LintRan;
 
 fn lint_on_open(
-    q: Query<(Entity, &FileView, &Editor), Without<LintRan>>,
+    q: Query<(Entity, &FileView, EditReadOnly), Without<LintRan>>,
     outbox: Single<&LintDiagnosticsSender>,
     registry: Single<&LspRegistry>,
     mut commands: Commands,
@@ -2448,11 +2445,10 @@ mod tests {
     use super::*;
     use vmux_ecs::event::StyledSpan;
 
+    use crate::edit::EditMode;
     use crate::edit::highlight_cache::HighlightCache;
-    use crate::edit::{EditCore, EditMode};
     use crate::host::editor::{Editor, FileView};
     use crate::host::keymap::EditorKeymap;
-    use crate::keymap::KeymapKindExt;
     use crate::lsp::registry;
     use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
     use std::path::PathBuf;
@@ -2482,7 +2478,7 @@ mod tests {
                     version: protocol_version,
                 },
             ));
-            let version = world.get::<Editor>(owner).unwrap().core.content_version();
+            let version = Editor::read(world, owner).unwrap().core.content_version();
             world.entity_mut(owner).insert((
                 ServerBinding::new(source.server),
                 LspSynced(version, protocol_version),
@@ -2640,8 +2636,8 @@ mod tests {
                     app.world_mut()
                         .spawn((
                             FileView { path: path.clone() },
-                            Editor::new(
-                                EditCore::new(
+                            crate::host::editor::EditorBundle::new(
+                                crate::edit::Document::new(
                                     path.clone(),
                                     "Rust".into(),
                                     "disk text\n",
@@ -2703,8 +2699,8 @@ mod tests {
             FileView {
                 path: alias.clone(),
             },
-            Editor::new(
-                EditCore::new(
+            crate::host::editor::EditorBundle::new(
+                crate::edit::Document::new(
                     alias.clone(),
                     "Rust".into(),
                     "disk text\n",
@@ -2788,8 +2784,8 @@ mod tests {
             .version;
         let path = fixture.roots[0].join("main.rs");
         fixture.app.world_mut().entity_mut(owner).insert((
-            Editor::new(
-                EditCore::new(
+            crate::host::editor::EditorBundle::new(
+                crate::edit::Document::new(
                     path.clone(),
                     "Rust".into(),
                     "edited buffer\n",
@@ -2841,7 +2837,11 @@ mod tests {
                 bytes.extend_from_slice(text.as_bytes());
             }
             std::fs::write(&path, bytes).unwrap();
-            fixture.app.world_mut().entity_mut(owner).remove::<Editor>();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(owner)
+                .remove::<crate::host::editor::EditorBundle>();
             fixture
                 .app
                 .world_mut()
@@ -2851,15 +2851,18 @@ mod tests {
                 });
             fixture.app.update();
             let decoded = crate::host::encoding::DecodedText::read(&path).unwrap();
-            fixture
-                .app
-                .world_mut()
-                .entity_mut(owner)
-                .insert(Editor::new(
-                    EditCore::new(path.clone(), "Rust".into(), &decoded.text, EditMode::Normal),
+            fixture.app.world_mut().entity_mut(owner).insert(
+                crate::host::editor::EditorBundle::new(
+                    crate::edit::Document::new(
+                        path.clone(),
+                        "Rust".into(),
+                        &decoded.text,
+                        EditMode::Normal,
+                    ),
                     HighlightCache::plain(&path),
                     crate::fold::FoldState::default(),
-                ));
+                ),
+            );
             assert_eq!(
                 fixture.message(0, "textDocument/didOpen", 2)["params"]["textDocument"]["text"],
                 text
@@ -2899,17 +2902,11 @@ mod tests {
             .unwrap()
             .server();
         let text = "unsaved text after transport replacement\n";
-        fixture
-            .app
-            .world_mut()
-            .get_mut::<Editor>(owner)
+        Editor::get_mut(fixture.app.world_mut(), owner)
             .unwrap()
             .core
             .apply(crate::edit::EditCommand::ReplaceText(text.into()));
-        let revision = fixture
-            .app
-            .world()
-            .get::<Editor>(owner)
+        let revision = Editor::read(fixture.app.world(), owner)
             .unwrap()
             .core
             .content_version();
@@ -2925,10 +2922,7 @@ mod tests {
         fixture.message(0, "textDocument/didChange", 1);
         assert_eq!(
             fixture.app.world().get::<LspSynced>(owner).unwrap().0,
-            fixture
-                .app
-                .world()
-                .get::<Editor>(owner)
+            Editor::read(fixture.app.world(), owner)
                 .unwrap()
                 .core
                 .content_version(),
@@ -3010,19 +3004,13 @@ mod tests {
             .get::<ServerBinding>(other)
             .unwrap()
             .server();
-        fixture
-            .app
-            .world_mut()
-            .get_mut::<Editor>(first)
+        Editor::get_mut(fixture.app.world_mut(), first)
             .unwrap()
             .core
             .apply(crate::edit::EditCommand::ReplaceText(
                 "unsaved text\n".into(),
             ));
-        let revision = fixture
-            .app
-            .world()
-            .get::<Editor>(first)
+        let revision = Editor::read(fixture.app.world(), first)
             .unwrap()
             .core
             .content_version();
@@ -3153,13 +3141,17 @@ mod tests {
                         ChildOf(server),
                     ))
                     .id();
-                let core =
-                    EditCore::new(path.clone(), "Rust".into(), "fn x() {}\n", EditMode::Normal);
+                let core = crate::edit::Document::new(
+                    path.clone(),
+                    "Rust".into(),
+                    "fn x() {}\n",
+                    EditMode::Normal,
+                );
                 let view = app
                     .world_mut()
                     .spawn((
                         FileView { path: path.clone() },
-                        Editor::new(
+                        crate::host::editor::EditorBundle::new(
                             core,
                             HighlightCache::plain(&path),
                             crate::fold::FoldState::default(),
@@ -3242,10 +3234,7 @@ mod tests {
             .unwrap()
             .path
             .clone();
-        let text = fixture
-            .app
-            .world()
-            .get::<Editor>(owner)
+        let text = Editor::read(fixture.app.world(), owner)
             .unwrap()
             .core
             .buffer
@@ -3349,8 +3338,8 @@ mod tests {
                     FileView {
                         path: "/workspace/file.rs".into(),
                     },
-                    Editor::new(
-                        EditCore::new(
+                    crate::host::editor::EditorBundle::new(
+                        crate::edit::Document::new(
                             "/workspace/file.rs".into(),
                             "Rust".into(),
                             "fn x() {}\n",
@@ -3372,10 +3361,7 @@ mod tests {
         }
 
         fn pending(&mut self) -> (Entity, crossbeam_channel::Sender<serde_json::Value>) {
-            let buffer = self
-                .app
-                .world()
-                .get::<Editor>(self.view)
+            let buffer = Editor::read(self.app.world(), self.view)
                 .unwrap()
                 .core
                 .content_version();
@@ -3453,7 +3439,7 @@ mod tests {
             );
             let settings = AppSettings::default();
             fixture.app.world_mut().entity_mut(fixture.view).insert((
-                EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
+                EditorKeymap(vmux_api::editor::KeymapKind::Vscode),
                 crate::host::viewport::FileViewport {
                     top_row: 0,
                     rows: 20,
@@ -3471,10 +3457,7 @@ mod tests {
             match change {
                 0 => {}
                 1 => {
-                    fixture
-                        .app
-                        .world_mut()
-                        .get_mut::<Editor>(fixture.view)
+                    Editor::get_mut(fixture.app.world_mut(), fixture.view)
                         .unwrap()
                         .core
                         .apply(crate::edit::EditCommand::InsertText("mine".into()));
@@ -3516,10 +3499,7 @@ mod tests {
                 Vec::new()
             };
             assert_eq!(
-                fixture
-                    .app
-                    .world()
-                    .get::<Editor>(fixture.view)
+                Editor::read(fixture.app.world(), fixture.view)
                     .unwrap()
                     .folds
                     .regions,
@@ -3565,19 +3545,23 @@ mod tests {
                 .add_plugins(crate::host::editing::EditExecutionPlugin)
                 .insert_non_send(crate::host::editing::ClipboardHandle(None));
 
+            let document = fixture
+                .app
+                .world()
+                .get::<crate::edit::document::Revision>(fixture.view)
+                .unwrap()
+                .identity;
             fixture.app.world_mut().commands().queue(GuardedResponse {
                 origin,
-                event: crate::host::editing::EditRequest::new(
-                    fixture.view,
-                    vec![crate::edit::EditCommand::InsertText("delivered".into())],
-                ),
+                event: crate::host::editing::document::InsertTextRequest {
+                    entity: fixture.view,
+                    document: Some(document),
+                    text: "delivered".into(),
+                },
             });
             match changed {
                 1 => {
-                    fixture
-                        .app
-                        .world_mut()
-                        .get_mut::<Editor>(fixture.view)
+                    Editor::get_mut(fixture.app.world_mut(), fixture.view)
                         .unwrap()
                         .core
                         .apply(crate::edit::EditCommand::InsertText("mine".into()));
@@ -3596,10 +3580,7 @@ mod tests {
                 _ => {}
             }
             fixture.app.world_mut().flush();
-            let text = fixture
-                .app
-                .world()
-                .get::<Editor>(fixture.view)
+            let text = Editor::read(fixture.app.world(), fixture.view)
                 .unwrap()
                 .core
                 .buffer
@@ -3652,10 +3633,7 @@ mod tests {
             match change {
                 0 => {}
                 1 => {
-                    fixture
-                        .app
-                        .world_mut()
-                        .get_mut::<Editor>(owner)
+                    Editor::get_mut(fixture.app.world_mut(), owner)
                         .unwrap()
                         .core
                         .apply(crate::edit::EditCommand::InsertText("mine".into()));
@@ -3717,10 +3695,7 @@ mod tests {
             match change {
                 0 => {}
                 1 => {
-                    fixture
-                        .app
-                        .world_mut()
-                        .get_mut::<Editor>(fixture.view)
+                    Editor::get_mut(fixture.app.world_mut(), fixture.view)
                         .unwrap()
                         .core
                         .apply(crate::edit::EditCommand::InsertText("mine".into()));
@@ -4086,10 +4061,7 @@ mod tests {
                     fixture.app.world_mut().spawn((Server, fixture.key.clone()));
                 }
                 5 => {
-                    fixture
-                        .app
-                        .world_mut()
-                        .get_mut::<Editor>(fixture.view)
+                    Editor::get_mut(fixture.app.world_mut(), fixture.view)
                         .unwrap()
                         .core
                         .apply(crate::edit::EditCommand::InsertText("unsent".into()));
@@ -4310,7 +4282,7 @@ mod tests {
             ))
             .id();
 
-        let core = EditCore::new(
+        let core = crate::edit::Document::new(
             path.clone(),
             "Rust".into(),
             "fn a() {}\nlet x = 1;\n",
@@ -4321,7 +4293,7 @@ mod tests {
             .world_mut()
             .spawn((
                 FileView { path: path.clone() },
-                Editor::new(core, hl, crate::fold::FoldState::default()),
+                crate::host::editor::EditorBundle::new(core, hl, crate::fold::FoldState::default()),
                 DocumentBinding::new(document),
                 ServerBinding::new(server),
             ))

@@ -1,3 +1,4 @@
+use crate::host::editor::{Edit, EditReadOnly, EditReadOnlyItem};
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -7,8 +8,6 @@ use vmux_ecs::event::{
     FilePanelState, RefItem,
 };
 
-use crate::edit::{EditCommand, Selection};
-use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
 use crate::lsp::manager::{GuardedResponse, LspLine, LspOrigin};
 
@@ -36,7 +35,7 @@ struct CompletionSource {
 }
 
 impl CompletionSource {
-    fn content(&self, edit: &Editor) -> Option<FilePanelContent> {
+    fn content(&self, edit: &EditReadOnlyItem<'_, '_>) -> Option<FilePanelContent> {
         let head = edit.core.primary().head;
         let (line, caret) = edit.core.buffer.char_to_coords(head);
         if line as u32 != self.line {
@@ -109,7 +108,7 @@ impl FilePanel {
         items: Vec<CompletionItem>,
         replace_from_col: u32,
         line: u32,
-        edit: &Editor,
+        edit: &EditReadOnlyItem<'_, '_>,
     ) {
         let returning_focus =
             matches!(&self.source, FilePanelSource::References) && self.state.content.is_some();
@@ -125,7 +124,7 @@ impl FilePanel {
         }
     }
 
-    fn refresh(&mut self, edit: &Editor) -> bool {
+    fn refresh(&mut self, edit: &EditReadOnlyItem<'_, '_>) -> bool {
         let FilePanelSource::Completion(source) = &self.source else {
             return false;
         };
@@ -288,6 +287,24 @@ pub(super) struct CompletionResult {
 }
 
 impl CompletionResult {
+    pub(super) fn from_knowledge(
+        entity: Entity,
+        entries: Vec<(String, String)>,
+        replace_from_col: u32,
+        line: u32,
+    ) -> Self {
+        let mut items = Vec::new();
+        for (title, relative) in entries {
+            items.push(CompletionItem {
+                label: title.clone(),
+                insert_text: format!("{title}]]"),
+                detail: relative,
+                kind: "knowledge".to_string(),
+            });
+        }
+        Self::new(entity, items, replace_from_col, line)
+    }
+
     pub(super) fn new(
         entity: Entity,
         items: Vec<CompletionItem>,
@@ -334,7 +351,7 @@ impl ReferencesResult {
 
 fn receive_completion(
     trigger: On<CompletionResult>,
-    mut panels: Query<(&Editor, &mut FilePanel)>,
+    mut panels: Query<(EditReadOnly, &mut FilePanel)>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -345,7 +362,7 @@ fn receive_completion(
         event.items.clone(),
         event.replace_from_col,
         event.line,
-        edit,
+        &edit,
     );
     panel.origin = event.origin;
     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
@@ -370,12 +387,18 @@ fn receive_references(
     ));
 }
 
+type PanelChanges = Or<(
+    Changed<crate::edit::buffer::TextBuffer>,
+    Changed<crate::edit::document::Carets>,
+    Changed<Editor>,
+)>;
+
 fn refresh_changed_panels(
-    mut panels: Query<(Entity, &Editor, &mut FilePanel), Changed<Editor>>,
+    mut panels: Query<(Entity, EditReadOnly, &mut FilePanel), PanelChanges>,
     mut commands: Commands,
 ) {
     for (entity, edit, mut panel) in &mut panels {
-        if !panel.refresh(edit) {
+        if !panel.refresh(&edit) {
             continue;
         }
         commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
@@ -447,7 +470,7 @@ fn choose_item(
     trigger: On<FilePanelChooseRequest>,
     mut panel_params: ParamSet<(
         crate::lsp::manager::LspManager,
-        Query<(&mut FilePanel, &mut Editor)>,
+        Query<(&mut FilePanel, Edit)>,
     )>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
     mut commands: Commands,
@@ -462,7 +485,7 @@ fn choose_item(
     };
     let stale = origin.is_some_and(|origin| !origin.current(&panel_params.p0()));
     let mut panels = panel_params.p1();
-    let Ok((mut panel, mut edit)) = panels.get_mut(entity) else {
+    let Ok((mut panel, edit)) = panels.get_mut(entity) else {
         return;
     };
     if stale {
@@ -493,16 +516,13 @@ fn choose_item(
             replace_from_col,
             line,
         }) => {
-            let start = edit
-                .core
-                .buffer
-                .coords_to_char(line as usize, replace_from_col as usize);
-            let head = edit.core.primary().head;
-            edit.core.selections = vec![Selection {
-                anchor: start.min(head),
-                head: start.max(head),
-            }];
-            let request = EditRequest::new(entity, vec![EditCommand::InsertText(item.insert_text)]);
+            let request = crate::host::editing::document::CompletionInsertRequest {
+                entity,
+                document: Some(edit.core.revision.identity),
+                text: item.insert_text,
+                line,
+                replace_from_col,
+            };
             if let Some(origin) = origin {
                 commands.queue(GuardedResponse {
                     origin,
@@ -540,25 +560,32 @@ fn dismiss(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit::{EditCore, EditMode};
+    use crate::edit::EditMode;
     use crate::host::edit::highlight_cache::HighlightCache;
 
     struct CompletionFixture {
-        edit: Editor,
+        world: World,
+        entity: Entity,
         panel: FilePanel,
     }
 
     impl CompletionFixture {
         fn new(text: &str, caret: usize) -> Self {
             let path = PathBuf::from("completion.rs");
-            let mut core = EditCore::new(path.clone(), "Rust".into(), text, EditMode::Insert);
-            core.set_caret(caret);
-            Self {
-                edit: Editor::new(
+            let mut core =
+                crate::edit::Document::new(path.clone(), "Rust".into(), text, EditMode::Insert);
+            core.carets.place(caret);
+            let mut world = World::new();
+            let entity = world
+                .spawn(crate::host::editor::EditorBundle::new(
                     core,
                     HighlightCache::new(&path),
                     crate::fold::FoldState::default(),
-                ),
+                ))
+                .id();
+            Self {
+                world,
+                entity,
                 panel: FilePanel::default(),
             }
         }
@@ -587,7 +614,7 @@ mod tests {
                 ],
                 0,
                 0,
-                &self.edit,
+                &Editor::read(&self.world, self.entity).unwrap(),
             );
         }
     }
@@ -608,8 +635,15 @@ mod tests {
             ["print", "println"]
         );
 
-        fixture.edit.core.set_caret(1);
-        assert!(fixture.panel.refresh(&fixture.edit));
+        Editor::get_mut(&mut fixture.world, fixture.entity)
+            .unwrap()
+            .core
+            .set_caret(1);
+        assert!(
+            fixture
+                .panel
+                .refresh(&Editor::read(&fixture.world, fixture.entity).unwrap())
+        );
         let Some(FilePanelContent::Completion { items, .. }) = &fixture.panel.state.content else {
             panic!("completion panel is closed");
         };

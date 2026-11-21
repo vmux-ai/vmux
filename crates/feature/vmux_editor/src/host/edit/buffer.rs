@@ -4,6 +4,7 @@ use ropey::Rope;
 use unicode_segmentation::UnicodeSegmentation;
 use vmux_ecs::event::FileEncoding;
 
+#[derive(bevy::prelude::Component)]
 pub struct TextBuffer {
     pub rope: Rope,
     pub path: PathBuf,
@@ -27,6 +28,19 @@ impl std::fmt::Display for LspEditError {
 }
 
 impl TextBuffer {
+    pub(crate) fn wiki_prefix(&self, caret: usize) -> Option<(u32, u32, String)> {
+        let (line, col) = self.char_to_coords(caret);
+        let text = self.rope.line(line).chars().collect::<Vec<_>>();
+        let open = (0..col.saturating_sub(1))
+            .rev()
+            .find(|offset| text[*offset] == '[' && text[*offset + 1] == '[')?;
+        let prefix = text[open + 2..col].iter().collect::<String>();
+        if prefix.contains("]]") || prefix.contains('|') || prefix.contains('#') {
+            return None;
+        }
+        Some((line as u32, open as u32 + 2, prefix))
+    }
+
     pub fn from_text(path: PathBuf, language: String, text: &str) -> Self {
         Self {
             rope: Rope::from_str(text),

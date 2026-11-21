@@ -1,9 +1,10 @@
+use crate::event::DocumentPointerInput;
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{
     DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHoverDismissRequest,
-    FileHoverRequest, FileLine, FileLineLayout, FilePointerEvent, FoldGutter,
+    FileHoverRequest, FileLine, FileLineLayout, FoldGutter,
 };
 use vmux_git::event::GitLineStatus;
 use vmux_ui::hooks::send;
@@ -168,6 +169,8 @@ fn EditorLineRow(
     hover_pos: Signal<Option<(u32, u32)>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
+    let document_revision = super::state::FileUi::current().use_revision();
+    let document_revision = document_revision();
     let mut ctx_menu = ctx_menu;
     let mut editor_dragging = editor_dragging;
     let mut editor_drag_origin = editor_drag_origin;
@@ -220,7 +223,8 @@ fn EditorLineRow(
                     let _ = send(&FileDefinitionRequest { line: ln, col });
                 } else {
                     editor_drag_origin.set(Some((at.x as i32, at.y as i32)));
-                    let _ = send(&FilePointerEvent {
+                    let _ = send(&DocumentPointerInput {
+                        revision: document_revision,
                         line: ln,
                         col,
                         extend: e.modifiers().shift(),
@@ -255,7 +259,8 @@ fn EditorLineRow(
                 );
                 if editor_dragging() {
                     e.prevent_default();
-                    let _ = send(&FilePointerEvent {
+                    let _ = send(&DocumentPointerInput {
+                        revision: document_revision,
                         line: ln,
                         col,
                         extend: true,
