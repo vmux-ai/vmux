@@ -1,5 +1,11 @@
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+use std::ffi::CString;
 use std::fs::{Metadata, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -57,7 +63,6 @@ pub struct FileIdentity {
 impl FileIdentity {
     #[cfg(unix)]
     pub fn from_metadata(metadata: &Metadata) -> Result<Self, String> {
-        use std::os::unix::fs::MetadataExt;
         let revision = if metadata.is_file() {
             Some((
                 metadata.len(),
@@ -122,8 +127,6 @@ impl Job for MovePath {
 impl MovePath {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
     fn exclusive(&self) -> Result<(), String> {
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
         let source =
             CString::new(self.source.as_os_str().as_bytes()).map_err(|error| error.to_string())?;
         let target =
@@ -178,7 +181,6 @@ impl Job for CopyFile {
         options.read(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
             options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
         }
         let mut source = options
