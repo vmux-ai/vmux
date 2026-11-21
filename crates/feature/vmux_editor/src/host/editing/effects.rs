@@ -1,5 +1,6 @@
 use super::document::Edited;
 use super::*;
+use bevy::prelude::{App, Commands, Entity, EntityEvent, NonSend, NonSendMut, On, Plugin, Query};
 
 pub(super) struct EffectsPlugin;
 

@@ -12,6 +12,7 @@ use crate::host::markdown::ParsedNote;
 use crate::host::status::SharedFileViewMode;
 use crate::keymap::{KeyInput, Keymap as _};
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Entity, EntityEvent, On, Plugin, Query};
 use vmux_api::editor::KeymapKind;
 use vmux_command::CommandInvocation;
 use vmux_ecs::event::{FileViewMode, NoteBlock};

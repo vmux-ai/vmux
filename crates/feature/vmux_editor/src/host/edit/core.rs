@@ -2529,9 +2529,16 @@ mod tests {
     }
 
     impl Fixture {
-        fn new(path: PathBuf, language: String, text: &str, mode: EditMode) -> Self {
+        fn new(text: &str) -> Self {
             let mut world = World::new();
-            let entity = world.spawn(Document::new(path, language, text, mode)).id();
+            let entity = world
+                .spawn(Document::new(
+                    PathBuf::from("a.txt"),
+                    "Plain Text".into(),
+                    text,
+                    EditMode::Insert,
+                ))
+                .id();
             Self { world, entity }
         }
 
@@ -2541,54 +2548,79 @@ mod tests {
                 .into_components_mut::<EditCore>()
                 .unwrap()
         }
-    }
 
-    fn core(text: &str) -> Fixture {
-        Fixture::new(
-            PathBuf::from("a.txt"),
-            "Plain Text".into(),
-            text,
-            EditMode::Insert,
-        )
-    }
-
-    fn text_of(c: &EditCoreItem<'_, '_>) -> String {
-        c.buffer.text()
-    }
-
-    fn typed_after_vim_keys(text: &str, caret: usize, keys: &[&str], typed: &str) -> String {
-        let mut c_fixture = core(text);
-        let mut c = c_fixture.core();
-        c.mode.value = EditMode::Normal;
-        c.set_caret(caret);
-        let mut keymap = crate::keymap::vim::Fixture::default();
-        for key in keys {
-            let stroke = KeyInput {
-                key: (*key).into(),
-                mods: Mods::default(),
-                repeat: false,
-            };
-            for cmd in keymap.handle(&stroke) {
-                c.apply(cmd);
+        fn multi_caret(text: &str, at: &[usize]) -> Self {
+            let mut c_fixture = Fixture::new(text);
+            let mut c = c_fixture.core();
+            c.set_caret(at[0]);
+            for &offset in &at[1..] {
+                c.toggle_caret(offset);
             }
+            assert_eq!(c.caret_count(), at.len(), "fixture placed every caret");
+            c_fixture
         }
-        c.apply(EditCommand::InsertText(typed.into()));
-        text_of(&c)
+
+        fn block(text: &str, from: (usize, usize), to: (usize, usize)) -> Self {
+            let mut c_fixture = Fixture::new(text);
+            let mut c = c_fixture.core();
+            c.mode.value = EditMode::VisualBlock;
+            c.carets.selections = vec![Selection {
+                anchor: c.buffer.coords_to_char(from.0, from.1),
+                head: c.buffer.coords_to_char(to.0, to.1),
+            }];
+            c_fixture
+        }
+
+        fn typed_after_vim_keys(text: &str, caret: usize, keys: &[&str], typed: &str) -> String {
+            let mut c_fixture = Fixture::new(text);
+            let mut c = c_fixture.core();
+            c.mode.value = EditMode::Normal;
+            c.set_caret(caret);
+            let mut keymap = crate::keymap::vim::Fixture::default();
+            for key in keys {
+                let stroke = KeyInput {
+                    key: (*key).into(),
+                    mods: Mods::default(),
+                    repeat: false,
+                };
+                for cmd in keymap.handle(&stroke) {
+                    c.apply(cmd);
+                }
+            }
+            c.apply(EditCommand::InsertText(typed.into()));
+            Fixture::text_of(&c)
+        }
+
+        fn text_of(c: &EditCoreItem<'_, '_>) -> String {
+            c.buffer.text()
+        }
+
+        fn heads(c: &EditCoreItem<'_, '_>) -> Vec<usize> {
+            let mut heads: Vec<usize> = c.carets.selections.iter().map(|s| s.head).collect();
+            heads.sort_unstable();
+            heads
+        }
     }
 
     #[test]
     fn append_at_line_end_types_past_the_last_character() {
-        assert_eq!(typed_after_vim_keys("ab\n", 0, &["A"], "X"), "abX\n");
+        assert_eq!(
+            Fixture::typed_after_vim_keys("ab\n", 0, &["A"], "X"),
+            "abX\n"
+        );
     }
 
     #[test]
     fn append_on_the_last_character_types_past_it() {
-        assert_eq!(typed_after_vim_keys("ab\n", 1, &["a"], "X"), "abX\n");
+        assert_eq!(
+            Fixture::typed_after_vim_keys("ab\n", 1, &["a"], "X"),
+            "abX\n"
+        );
     }
 
     #[test]
     fn cached_search_matches_follow_an_edit_and_a_new_pattern() {
-        let mut c_fixture = core("foo bar foo\n");
+        let mut c_fixture = Fixture::new("foo bar foo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         let count = |c: &mut EditCoreItem<'_, '_>| {
@@ -2620,7 +2652,7 @@ mod tests {
 
     #[test]
     fn cached_search_matches_survive_an_undo_onto_a_different_edit() {
-        let mut c_fixture = core("foo\n");
+        let mut c_fixture = Fixture::new("foo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Insert;
         c.apply(EditCommand::SetSearch {
@@ -2646,7 +2678,7 @@ mod tests {
 
     #[test]
     fn only_a_selection_highlights_its_other_occurrences() {
-        let mut c_fixture = core("id\nid_x\nother\nid\nid\n");
+        let mut c_fixture = Fixture::new("id\nid_x\nother\nid\nid\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -2673,30 +2705,30 @@ mod tests {
 
     #[test]
     fn pasting_types_after_the_pasted_text() {
-        let mut c_fixture = core("ab\n");
+        let mut c_fixture = Fixture::new("ab\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Insert;
         c.set_caret(2);
         c.paste("XY");
         c.apply(EditCommand::InsertText("Z".into()));
 
-        assert_eq!(text_of(&c), "abXYZ\n");
+        assert_eq!(Fixture::text_of(&c), "abXYZ\n");
     }
 
     #[test]
     fn pasting_replaces_the_selection() {
-        let mut c_fixture = core("abcd\n");
+        let mut c_fixture = Fixture::new("abcd\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Insert;
         c.carets.selections = vec![Selection { anchor: 1, head: 3 }];
         c.paste("X");
 
-        assert_eq!(text_of(&c), "aXd\n");
+        assert_eq!(Fixture::text_of(&c), "aXd\n");
     }
 
     #[test]
     fn undo_takes_a_paste_back_on_its_own() {
-        let mut c_fixture = core("");
+        let mut c_fixture = Fixture::new("");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Insert;
         c.apply(EditCommand::InsertText("a".into()));
@@ -2704,27 +2736,27 @@ mod tests {
         c.apply(EditCommand::InsertText("b".into()));
 
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "aXY");
+        assert_eq!(Fixture::text_of(&c), "aXY");
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "a");
+        assert_eq!(Fixture::text_of(&c), "a");
     }
 
     #[test]
     fn putting_in_normal_mode_lands_on_the_last_pasted_character() {
-        let mut c_fixture = core("ab\n");
+        let mut c_fixture = Fixture::new("ab\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue::charwise("XY"));
         c.set_caret(0);
         c.apply(put(false));
 
-        assert_eq!(text_of(&c), "aXYb\n");
+        assert_eq!(Fixture::text_of(&c), "aXYb\n");
         assert_eq!(c.primary().head, 2);
     }
 
     #[test]
     fn selecting_all_occurrences_skips_the_ones_inside_longer_words() {
-        let mut c_fixture = core("id width id_x\nid\n");
+        let mut c_fixture = Fixture::new("id width id_x\nid\n");
         let mut c = c_fixture.core();
         c.apply(EditCommand::SelectAllOccurrences);
 
@@ -2745,7 +2777,7 @@ mod tests {
 
     #[test]
     fn selecting_all_occurrences_off_a_word_leaves_the_carets_alone() {
-        let mut c_fixture = core("id  id\n");
+        let mut c_fixture = Fixture::new("id  id\n");
         let mut c = c_fixture.core();
         c.carets.selections = vec![Selection { anchor: 3, head: 3 }];
         c.apply(EditCommand::SelectAllOccurrences);
@@ -2754,27 +2786,10 @@ mod tests {
         assert_eq!(c.primary().head, 3);
     }
 
-    fn multi_caret(text: &str, at: &[usize]) -> Fixture {
-        let mut c_fixture = core(text);
-        let mut c = c_fixture.core();
-        c.set_caret(at[0]);
-        for &offset in &at[1..] {
-            c.toggle_caret(offset);
-        }
-        assert_eq!(c.caret_count(), at.len(), "fixture placed every caret");
-        c_fixture
-    }
-
-    fn heads(c: &EditCoreItem<'_, '_>) -> Vec<usize> {
-        let mut heads: Vec<usize> = c.carets.selections.iter().map(|s| s.head).collect();
-        heads.sort_unstable();
-        heads
-    }
-
     #[test]
     fn each_caret_keeps_its_own_column_through_a_short_line() {
         let mut c_fixture =
-            multi_caret("abcdefgh\nij\nklmnopqr\nABCDEFGH\nkl\nMNOPQRST\n", &[6, 25]);
+            Fixture::multi_caret("abcdefgh\nij\nklmnopqr\nABCDEFGH\nkl\nMNOPQRST\n", &[6, 25]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::Move(Motion::Down));
         c.apply(EditCommand::Move(Motion::Down));
@@ -2789,38 +2804,38 @@ mod tests {
 
     #[test]
     fn backspace_restores_what_this_caret_overtyped() {
-        let mut c_fixture = multi_caret("abc\nxyz\n", &[0, 4]);
+        let mut c_fixture = Fixture::multi_caret("abc\nxyz\n", &[0, 4]);
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Replace;
         c.apply(EditCommand::OvertypeText("Q".into()));
-        assert_eq!(text_of(&c), "Qbc\nQyz\n");
+        assert_eq!(Fixture::text_of(&c), "Qbc\nQyz\n");
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "abc\nxyz\n");
+        assert_eq!(Fixture::text_of(&c), "abc\nxyz\n");
     }
 
     #[test]
     fn collapsing_keeps_the_caret_placed_last_even_when_it_sorts_first() {
-        let mut c_fixture = multi_caret("abcdef\n", &[4, 1]);
+        let mut c_fixture = Fixture::multi_caret("abcdef\n", &[4, 1]);
         let mut c = c_fixture.core();
         c.collapse_carets();
-        assert_eq!(heads(&c), vec![1]);
+        assert_eq!(Fixture::heads(&c), vec![1]);
     }
 
     #[test]
     fn adding_a_caret_below_twice_types_on_three_rows() {
-        let mut c_fixture = core("ab\ncd\nef\ngh\n");
+        let mut c_fixture = Fixture::new("ab\ncd\nef\ngh\n");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
         c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
         assert_eq!(c.caret_count(), 3, "the second one grew from the new caret");
         c.apply(EditCommand::InsertText(">".into()));
-        assert_eq!(text_of(&c), ">ab\n>cd\n>ef\ngh\n");
+        assert_eq!(Fixture::text_of(&c), ">ab\n>cd\n>ef\ngh\n");
     }
 
     #[test]
     fn a_sweep_leaves_the_active_caret_where_it_was() {
-        let mut c_fixture = core("ab\ncd\nef\n");
+        let mut c_fixture = Fixture::new("ab\ncd\nef\n");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
@@ -2833,7 +2848,7 @@ mod tests {
 
     #[test]
     fn adding_a_caret_past_the_last_row_adds_nothing() {
-        let mut c_fixture = core("ab\ncd\n");
+        let mut c_fixture = Fixture::new("ab\ncd\n");
         let mut c = c_fixture.core();
         c.set_caret(c.buffer.coords_to_char(2, 0));
         c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
@@ -2842,22 +2857,26 @@ mod tests {
 
     #[test]
     fn untoggling_an_earlier_caret_does_not_move_which_one_is_active() {
-        let mut c_fixture = multi_caret("abcdef\n", &[1, 5, 3]);
+        let mut c_fixture = Fixture::multi_caret("abcdef\n", &[1, 5, 3]);
         let mut c = c_fixture.core();
         c.toggle_caret(1);
-        assert_eq!(heads(&c), vec![3, 5]);
+        assert_eq!(Fixture::heads(&c), vec![3, 5]);
         c.collapse_carets();
-        assert_eq!(heads(&c), vec![3], "still the caret the user placed last");
+        assert_eq!(
+            Fixture::heads(&c),
+            vec![3],
+            "still the caret the user placed last"
+        );
     }
 
     #[test]
     fn typing_reaches_every_caret() {
-        let mut c_fixture = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        let mut c_fixture = Fixture::multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("X".into()));
-        assert_eq!(text_of(&c), "Xaa\nXbb\nXcc\n");
+        assert_eq!(Fixture::text_of(&c), "Xaa\nXbb\nXcc\n");
         assert_eq!(
-            heads(&c),
+            Fixture::heads(&c),
             vec![1, 5, 9],
             "each caret sits after its own insert"
         );
@@ -2865,43 +2884,43 @@ mod tests {
 
     #[test]
     fn a_multi_caret_edit_undoes_in_one_step() {
-        let mut c_fixture = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        let mut c_fixture = Fixture::multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("X".into()));
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "aa\nbb\ncc\n");
+        assert_eq!(Fixture::text_of(&c), "aa\nbb\ncc\n");
     }
 
     #[test]
     fn deleting_reaches_every_caret() {
-        let mut c_fixture = multi_caret("aXa\nbXb\ncXc\n", &[2, 6, 10]);
+        let mut c_fixture = Fixture::multi_caret("aXa\nbXb\ncXc\n", &[2, 6, 10]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "aa\nbb\ncc\n");
-        assert_eq!(heads(&c), vec![1, 4, 7]);
+        assert_eq!(Fixture::text_of(&c), "aa\nbb\ncc\n");
+        assert_eq!(Fixture::heads(&c), vec![1, 4, 7]);
     }
 
     #[test]
     fn a_caret_that_runs_into_another_is_merged_away() {
-        let mut c_fixture = multi_caret("ab\n", &[1, 2]);
+        let mut c_fixture = Fixture::multi_caret("ab\n", &[1, 2]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "\n");
+        assert_eq!(Fixture::text_of(&c), "\n");
         assert_eq!(c.caret_count(), 1, "two carets collapsed onto one offset");
     }
 
     #[test]
     fn toggling_an_existing_caret_takes_it_away() {
-        let mut c_fixture = multi_caret("abcdef\n", &[1, 3]);
+        let mut c_fixture = Fixture::multi_caret("abcdef\n", &[1, 3]);
         let mut c = c_fixture.core();
         c.toggle_caret(3);
         assert_eq!(c.caret_count(), 1);
-        assert_eq!(heads(&c), vec![1]);
+        assert_eq!(Fixture::heads(&c), vec![1]);
     }
 
     #[test]
     fn the_last_caret_cannot_be_removed() {
-        let mut c_fixture = core("abc\n");
+        let mut c_fixture = Fixture::new("abc\n");
         let mut c = c_fixture.core();
         c.set_caret(1);
         c.toggle_caret(1);
@@ -2910,7 +2929,7 @@ mod tests {
 
     #[test]
     fn collapsing_leaves_the_caret_the_user_last_placed() {
-        let mut c_fixture = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        let mut c_fixture = Fixture::multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
         let mut c = c_fixture.core();
         c.collapse_carets();
         assert_eq!(c.caret_count(), 1);
@@ -2918,20 +2937,24 @@ mod tests {
 
     #[test]
     fn a_buffer_wide_command_runs_once_however_many_carets() {
-        let mut c_fixture = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        let mut c_fixture = Fixture::multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("X".into()));
         c.apply(EditCommand::Move(Motion::Right));
         c.apply(EditCommand::InsertText("Y".into()));
-        assert_eq!(text_of(&c), "XaYa\nXbYb\nXcYc\n");
+        assert_eq!(Fixture::text_of(&c), "XaYa\nXbYb\nXcYc\n");
 
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "Xaa\nXbb\nXcc\n", "one step back, not three");
+        assert_eq!(
+            Fixture::text_of(&c),
+            "Xaa\nXbb\nXcc\n",
+            "one step back, not three"
+        );
     }
 
     #[test]
     fn every_caret_is_drawn_not_just_the_first() {
-        let mut c_fixture = multi_caret("aaaa\nbbbb\n", &[0, 5]);
+        let mut c_fixture = Fixture::multi_caret("aaaa\nbbbb\n", &[0, 5]);
         let mut c = c_fixture.core();
         c.apply(EditCommand::Select(Motion::Right));
         let spans = c.sel_spans(0, 10);
@@ -2956,26 +2979,26 @@ mod tests {
 
     #[test]
     fn insert_text_moves_caret() {
-        let mut c_fixture = core("");
+        let mut c_fixture = Fixture::new("");
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("hi".into()));
-        assert_eq!(text_of(&c), "hi");
+        assert_eq!(Fixture::text_of(&c), "hi");
         assert_eq!(c.primary().head, 2);
         assert!(c.revision.dirty);
     }
 
     #[test]
     fn backspace_deletes_prev_char() {
-        let mut c_fixture = core("ab");
+        let mut c_fixture = Fixture::new("ab");
         let mut c = c_fixture.core();
         c.set_caret(2);
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "a");
+        assert_eq!(Fixture::text_of(&c), "a");
     }
 
     #[test]
     fn word_next_motion() {
-        let mut c_fixture = core("foo bar");
+        let mut c_fixture = Fixture::new("foo bar");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::WordNext));
@@ -2984,7 +3007,7 @@ mod tests {
 
     #[test]
     fn bounded_horizontal_motion_stays_on_the_current_line() {
-        let mut c_fixture = core("ab\ncd");
+        let mut c_fixture = Fixture::new("ab\ncd");
         let mut c = c_fixture.core();
         c.set_caret(c.buffer.coords_to_char(1, 0));
         c.apply(EditCommand::Move(Motion::LeftBounded));
@@ -2997,7 +3020,7 @@ mod tests {
 
     #[test]
     fn normal_mode_clamps_every_cursor_target_to_a_line_cell() {
-        let mut c_fixture = core("ab\ncd");
+        let mut c_fixture = Fixture::new("ab\ncd");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
 
@@ -3019,7 +3042,7 @@ mod tests {
 
     #[test]
     fn paragraph_motion_moves_between_visible_paragraph_starts() {
-        let mut c_fixture = core("one\ntwo\n\nthree\nfour\n\nfive\n");
+        let mut c_fixture = Fixture::new("one\ntwo\n\nthree\nfour\n\nfive\n");
         let mut c = c_fixture.core();
         c.set_caret(c.buffer.coords_to_char(1, 2));
         c.apply(EditCommand::Move(Motion::ParagraphNext));
@@ -3037,28 +3060,28 @@ mod tests {
 
     #[test]
     fn visual_delete_covers_the_character_under_the_cursor() {
-        let mut c_fixture = core("abcdef");
+        let mut c_fixture = Fixture::new("abcdef");
         let mut c = c_fixture.core();
         c.set_caret(1);
         c.mode.value = EditMode::Visual;
         c.apply(EditCommand::Select(Motion::Right));
         c.apply(EditCommand::Select(Motion::Right));
         c.apply(op(Operator::Delete, Target::Selection));
-        assert_eq!(text_of(&c), "aef");
+        assert_eq!(Fixture::text_of(&c), "aef");
     }
 
     #[test]
     fn delete_range_word() {
-        let mut c_fixture = core("foo bar");
+        let mut c_fixture = Fixture::new("foo bar");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
-        assert_eq!(text_of(&c), "bar");
+        assert_eq!(Fixture::text_of(&c), "bar");
     }
 
     #[test]
     fn find_char_lands_on_or_before_the_target() {
-        let mut c_fixture = core("alpha, beta, gamma");
+        let mut c_fixture = Fixture::new("alpha, beta, gamma");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3079,7 +3102,7 @@ mod tests {
 
     #[test]
     fn find_char_stays_on_the_cursor_line() {
-        let mut c_fixture = core("abc\nx,y\n");
+        let mut c_fixture = Fixture::new("abc\nx,y\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3093,7 +3116,7 @@ mod tests {
 
     #[test]
     fn forward_find_is_inclusive_as_an_operator_target() {
-        let mut c_fixture = core("alpha, beta");
+        let mut c_fixture = Fixture::new("alpha, beta");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3108,12 +3131,12 @@ mod tests {
                 1,
             ),
         ));
-        assert_eq!(text_of(&c), ", beta");
+        assert_eq!(Fixture::text_of(&c), ", beta");
     }
 
     #[test]
     fn counted_find_reaches_the_nth_match() {
-        let mut c_fixture = core("a,b,c,d");
+        let mut c_fixture = Fixture::new("a,b,c,d");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3128,12 +3151,12 @@ mod tests {
                 2,
             ),
         ));
-        assert_eq!(text_of(&c), "c,d");
+        assert_eq!(Fixture::text_of(&c), "c,d");
     }
 
     #[test]
     fn match_pair_jumps_both_directions() {
-        let mut c_fixture = core("foo(bar[baz])");
+        let mut c_fixture = Fixture::new("foo(bar[baz])");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3145,7 +3168,7 @@ mod tests {
 
     #[test]
     fn big_word_motions_span_punctuation() {
-        let mut c_fixture = core("foo.bar baz");
+        let mut c_fixture = Fixture::new("foo.bar baz");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3159,7 +3182,7 @@ mod tests {
 
     #[test]
     fn word_end_prev_walks_back_to_the_previous_word() {
-        let mut c_fixture = core("one two three");
+        let mut c_fixture = Fixture::new("one two three");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(8);
@@ -3169,7 +3192,7 @@ mod tests {
 
     #[test]
     fn screen_motions_use_the_viewport_top() {
-        let mut c_fixture = core("a\nb\nc\nd\ne\nf\ng\n");
+        let mut c_fixture = Fixture::new("a\nb\nc\nd\ne\nf\ng\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.viewport.rows = 4;
@@ -3184,7 +3207,7 @@ mod tests {
 
     #[test]
     fn column_motion_is_one_based() {
-        let mut c_fixture = core("abcdef");
+        let mut c_fixture = Fixture::new("abcdef");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3192,42 +3215,35 @@ mod tests {
         assert_eq!(c.primary().head, 3);
     }
 
-    fn block(text: &str, from: (usize, usize), to: (usize, usize)) -> Fixture {
-        let mut c_fixture = core(text);
-        let mut c = c_fixture.core();
-        c.mode.value = EditMode::VisualBlock;
-        c.carets.selections = vec![Selection {
-            anchor: c.buffer.coords_to_char(from.0, from.1),
-            head: c.buffer.coords_to_char(to.0, to.1),
-        }];
-        c_fixture
-    }
-
     #[test]
     fn a_new_edit_after_undo_branches_and_time_travel_reaches_the_old_one() {
-        let mut c_fixture = core("");
+        let mut c_fixture = Fixture::new("");
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("first".into()));
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "");
+        assert_eq!(Fixture::text_of(&c), "");
         c.apply(EditCommand::InsertText("second".into()));
-        assert_eq!(text_of(&c), "second");
+        assert_eq!(Fixture::text_of(&c), "second");
 
         c.apply(EditCommand::UndoTime {
             forward: false,
             count: 1,
         });
-        assert_eq!(text_of(&c), "first", "g- reaches the abandoned branch");
+        assert_eq!(
+            Fixture::text_of(&c),
+            "first",
+            "g- reaches the abandoned branch"
+        );
         c.apply(EditCommand::UndoTime {
             forward: true,
             count: 1,
         });
-        assert_eq!(text_of(&c), "second");
+        assert_eq!(Fixture::text_of(&c), "second");
     }
 
     #[test]
     fn bounded_horizontal_motion_stops_at_a_hard_wrap() {
-        let mut c_fixture = core("alpha\nbeta\n");
+        let mut c_fixture = Fixture::new("alpha\nbeta\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(0, 4));
@@ -3240,56 +3256,56 @@ mod tests {
 
     #[test]
     fn increment_finds_the_number_at_or_after_the_caret() {
-        let mut c_fixture = core("item 41 done");
+        let mut c_fixture = Fixture::new("item 41 done");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(EditCommand::Increment(1));
-        assert_eq!(text_of(&c), "item 42 done");
+        assert_eq!(Fixture::text_of(&c), "item 42 done");
     }
 
     #[test]
     fn increment_crosses_zero_on_a_negative_number() {
-        let mut c_fixture = core("x -1 y");
+        let mut c_fixture = Fixture::new("x -1 y");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(EditCommand::Increment(2));
-        assert_eq!(text_of(&c), "x 1 y");
+        assert_eq!(Fixture::text_of(&c), "x 1 y");
     }
 
     #[test]
     fn increment_preserves_zero_padding() {
-        let mut c_fixture = core("v007");
+        let mut c_fixture = Fixture::new("v007");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(EditCommand::Increment(1));
-        assert_eq!(text_of(&c), "v008");
+        assert_eq!(Fixture::text_of(&c), "v008");
     }
 
     #[test]
     fn increment_without_a_number_is_inert() {
-        let mut c_fixture = core("no digits");
+        let mut c_fixture = Fixture::new("no digits");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(EditCommand::Increment(1));
-        assert_eq!(text_of(&c), "no digits");
+        assert_eq!(Fixture::text_of(&c), "no digits");
     }
 
     #[test]
     fn block_delete_removes_a_rectangle() {
-        let mut c_fixture = block("abcd\nefgh\nijkl\n", (0, 1), (2, 2));
+        let mut c_fixture = Fixture::block("abcd\nefgh\nijkl\n", (0, 1), (2, 2));
         let mut c = c_fixture.core();
         c.apply(op(Operator::Delete, Target::Selection));
-        assert_eq!(text_of(&c), "ad\neh\nil\n");
+        assert_eq!(Fixture::text_of(&c), "ad\neh\nil\n");
         assert_eq!(c.mode.value, EditMode::Normal);
     }
 
     #[test]
     fn block_yank_joins_rows_with_newlines() {
-        let mut c_fixture = block("abcd\nefgh\n", (0, 1), (1, 2));
+        let mut c_fixture = Fixture::block("abcd\nefgh\n", (0, 1), (1, 2));
         let mut c = c_fixture.core();
         let out = c.apply(op(Operator::Yank, Target::Selection));
         assert_eq!(
@@ -3303,7 +3319,7 @@ mod tests {
 
     #[test]
     fn block_rows_clamp_to_short_lines() {
-        let mut c_fixture = block("abcd\nx\nijkl\n", (0, 1), (2, 2));
+        let mut c_fixture = Fixture::block("abcd\nx\nijkl\n", (0, 1), (2, 2));
         let c = c_fixture.core();
         let rows = c.block_rows();
         assert_eq!(rows.len(), 3);
@@ -3312,7 +3328,7 @@ mod tests {
 
     #[test]
     fn block_put_inserts_a_column_on_each_line() {
-        let mut c_fixture = core("ab\ncd\n");
+        let mut c_fixture = Fixture::new("ab\ncd\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue {
@@ -3321,12 +3337,12 @@ mod tests {
         });
         c.set_caret(0);
         c.apply(put(true));
-        assert_eq!(text_of(&c), "Xab\nYcd\n");
+        assert_eq!(Fixture::text_of(&c), "Xab\nYcd\n");
     }
 
     #[test]
     fn block_put_pads_short_lines_out_to_the_column() {
-        let mut c_fixture = core("abcd\nx\n");
+        let mut c_fixture = Fixture::new("abcd\nx\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue {
@@ -3335,41 +3351,41 @@ mod tests {
         });
         c.set_caret(c.buffer.coords_to_char(0, 3));
         c.apply(put(true));
-        assert_eq!(text_of(&c), "abc1d\nx  2\n");
+        assert_eq!(Fixture::text_of(&c), "abc1d\nx  2\n");
     }
 
     #[test]
     fn block_case_operator_covers_every_row() {
-        let mut c_fixture = block("abcd\nefgh\n", (0, 0), (1, 1));
+        let mut c_fixture = Fixture::block("abcd\nefgh\n", (0, 0), (1, 1));
         let mut c = c_fixture.core();
         c.apply(op(Operator::Upper, Target::Selection));
-        assert_eq!(text_of(&c), "ABcd\nEFgh\n");
+        assert_eq!(Fixture::text_of(&c), "ABcd\nEFgh\n");
     }
 
     #[test]
     fn block_insert_replicates_typed_text_down_the_column() {
-        let mut c_fixture = block("abc\ndef\nghi\n", (0, 1), (2, 1));
+        let mut c_fixture = Fixture::block("abc\ndef\nghi\n", (0, 1), (2, 1));
         let mut c = c_fixture.core();
         c.apply(EditCommand::BeginBlockInsert { after: false });
         assert_eq!(c.mode.value, EditMode::Insert);
         c.apply(EditCommand::InsertText("-".into()));
         c.apply(EditCommand::FinishBlockInsert { text: "-".into() });
-        assert_eq!(text_of(&c), "a-bc\nd-ef\ng-hi\n");
+        assert_eq!(Fixture::text_of(&c), "a-bc\nd-ef\ng-hi\n");
     }
 
     #[test]
     fn block_append_inserts_after_the_right_edge() {
-        let mut c_fixture = block("abc\ndef\n", (0, 0), (1, 0));
+        let mut c_fixture = Fixture::block("abc\ndef\n", (0, 0), (1, 0));
         let mut c = c_fixture.core();
         c.apply(EditCommand::BeginBlockInsert { after: true });
         c.apply(EditCommand::InsertText("!".into()));
         c.apply(EditCommand::FinishBlockInsert { text: "!".into() });
-        assert_eq!(text_of(&c), "a!bc\nd!ef\n");
+        assert_eq!(Fixture::text_of(&c), "a!bc\nd!ef\n");
     }
 
     #[test]
     fn block_selection_renders_one_span_per_row() {
-        let mut c_fixture = block("abcd\nefgh\n", (0, 1), (1, 2));
+        let mut c_fixture = Fixture::block("abcd\nefgh\n", (0, 1), (1, 2));
         let c = c_fixture.core();
         let spans = c.sel_spans(0, 4);
         assert_eq!(spans.len(), 2);
@@ -3378,31 +3394,31 @@ mod tests {
 
     #[test]
     fn overtype_replaces_characters_and_backspace_restores_them() {
-        let mut c_fixture = core("abcd");
+        let mut c_fixture = Fixture::new("abcd");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Replace;
         c.set_caret(0);
         c.apply(EditCommand::OvertypeText("XY".into()));
-        assert_eq!(text_of(&c), "XYcd");
+        assert_eq!(Fixture::text_of(&c), "XYcd");
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "Xbcd");
+        assert_eq!(Fixture::text_of(&c), "Xbcd");
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "abcd");
+        assert_eq!(Fixture::text_of(&c), "abcd");
     }
 
     #[test]
     fn overtype_past_the_line_end_appends() {
-        let mut c_fixture = core("ab\ncd\n");
+        let mut c_fixture = Fixture::new("ab\ncd\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Replace;
         c.set_caret(2);
         c.apply(EditCommand::OvertypeText("XY".into()));
-        assert_eq!(text_of(&c), "abXY\ncd\n");
+        assert_eq!(Fixture::text_of(&c), "abXY\ncd\n");
     }
 
     #[test]
     fn substitute_replaces_the_first_match_per_line_without_g() {
-        let mut c_fixture = core("aa bb aa\naa cc\n");
+        let mut c_fixture = Fixture::new("aa bb aa\naa cc\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.apply(EditCommand::Substitute {
@@ -3411,12 +3427,12 @@ mod tests {
             replacement: "X".into(),
             all: false,
         });
-        assert_eq!(text_of(&c), "X bb aa\nX cc\n");
+        assert_eq!(Fixture::text_of(&c), "X bb aa\nX cc\n");
     }
 
     #[test]
     fn substitute_with_g_replaces_every_match() {
-        let mut c_fixture = core("aa bb aa\n");
+        let mut c_fixture = Fixture::new("aa bb aa\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.apply(EditCommand::Substitute {
@@ -3425,12 +3441,12 @@ mod tests {
             replacement: "X".into(),
             all: true,
         });
-        assert_eq!(text_of(&c), "X bb X\n");
+        assert_eq!(Fixture::text_of(&c), "X bb X\n");
     }
 
     #[test]
     fn substitute_honours_a_line_range() {
-        let mut c_fixture = core("a\na\na\n");
+        let mut c_fixture = Fixture::new("a\na\na\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.apply(EditCommand::Substitute {
@@ -3439,12 +3455,12 @@ mod tests {
             replacement: "b".into(),
             all: false,
         });
-        assert_eq!(text_of(&c), "a\nb\na\n");
+        assert_eq!(Fixture::text_of(&c), "a\nb\na\n");
     }
 
     #[test]
     fn substitute_expands_ampersand_to_the_match() {
-        let mut c_fixture = core("cat\n");
+        let mut c_fixture = Fixture::new("cat\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.apply(EditCommand::Substitute {
@@ -3453,12 +3469,12 @@ mod tests {
             replacement: "[&]".into(),
             all: false,
         });
-        assert_eq!(text_of(&c), "[cat]\n");
+        assert_eq!(Fixture::text_of(&c), "[cat]\n");
     }
 
     #[test]
     fn reshape_rewrites_the_indentation_as_one_undoable_edit() {
-        let mut c_fixture = core("fn a() {\n\tb();\n\t\tc();\n}\n");
+        let mut c_fixture = Fixture::new("fn a() {\n\tb();\n\t\tc();\n}\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
 
@@ -3470,15 +3486,15 @@ mod tests {
             line_ending: vmux_ecs::event::FileLineEnding::Lf,
         }));
 
-        assert_eq!(text_of(&c), "fn a() {\n  b();\n    c();\n}\n");
+        assert_eq!(Fixture::text_of(&c), "fn a() {\n  b();\n    c();\n}\n");
         assert!(c.revision.dirty);
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "fn a() {\n\tb();\n\t\tc();\n}\n");
+        assert_eq!(Fixture::text_of(&c), "fn a() {\n\tb();\n\t\tc();\n}\n");
     }
 
     #[test]
     fn reshaping_to_the_current_shape_leaves_the_buffer_unchanged() {
-        let mut c_fixture = core("a\n  b\n");
+        let mut c_fixture = Fixture::new("a\n  b\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
 
@@ -3490,17 +3506,17 @@ mod tests {
             line_ending: vmux_ecs::event::FileLineEnding::Lf,
         }));
 
-        assert_eq!(text_of(&c), "a\n  b\n");
+        assert_eq!(Fixture::text_of(&c), "a\n  b\n");
         assert!(!c.revision.dirty);
     }
 
     #[test]
     fn ex_delete_removes_lines_and_yanks_them_linewise() {
-        let mut c_fixture = core("one\ntwo\nthree\n");
+        let mut c_fixture = Fixture::new("one\ntwo\nthree\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.apply(EditCommand::ExDelete(ExRange::Lines(0, 1)));
-        assert_eq!(text_of(&c), "three\n");
+        assert_eq!(Fixture::text_of(&c), "three\n");
         assert_eq!(
             c.registers.read(None),
             Some(&RegisterValue::linewise("one\ntwo\n"))
@@ -3509,7 +3525,7 @@ mod tests {
 
     #[test]
     fn search_jumps_to_the_next_match_and_wraps() {
-        let mut c_fixture = core("alpha beta alpha gamma");
+        let mut c_fixture = Fixture::new("alpha beta alpha gamma");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3526,7 +3542,7 @@ mod tests {
 
     #[test]
     fn a_backward_search_reverses_what_n_means() {
-        let mut c_fixture = core("x a x a x");
+        let mut c_fixture = Fixture::new("x a x a x");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(4);
@@ -3541,7 +3557,7 @@ mod tests {
 
     #[test]
     fn star_searches_the_whole_word_under_the_cursor() {
-        let mut c_fixture = core("cat category cat");
+        let mut c_fixture = Fixture::new("cat category cat");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3551,7 +3567,7 @@ mod tests {
 
     #[test]
     fn search_composes_with_an_operator() {
-        let mut c_fixture = core("one two three");
+        let mut c_fixture = Fixture::new("one two three");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3564,12 +3580,12 @@ mod tests {
             Operator::Delete,
             Target::Motion(Motion::SearchNext { reverse: false }, 1),
         ));
-        assert_eq!(text_of(&c), "three");
+        assert_eq!(Fixture::text_of(&c), "three");
     }
 
     #[test]
     fn an_invalid_pattern_leaves_the_caret_alone() {
-        let mut c_fixture = core("abc");
+        let mut c_fixture = Fixture::new("abc");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(1);
@@ -3583,7 +3599,7 @@ mod tests {
 
     #[test]
     fn highlight_spans_appear_only_while_highlighting_is_on() {
-        let mut c_fixture = core("foo bar foo\n");
+        let mut c_fixture = Fixture::new("foo bar foo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.apply(EditCommand::SetSearch {
@@ -3597,7 +3613,7 @@ mod tests {
 
     #[test]
     fn marks_return_to_a_saved_position() {
-        let mut c_fixture = core("one\ntwo\nthree\n");
+        let mut c_fixture = Fixture::new("one\ntwo\nthree\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(1, 1));
@@ -3612,7 +3628,7 @@ mod tests {
 
     #[test]
     fn a_linewise_mark_lands_on_the_first_non_blank() {
-        let mut c_fixture = core("one\n    two\n");
+        let mut c_fixture = Fixture::new("one\n    two\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(1, 7));
@@ -3627,7 +3643,7 @@ mod tests {
 
     #[test]
     fn marks_slide_when_text_is_inserted_before_them() {
-        let mut c_fixture = core("one\ntwo\n");
+        let mut c_fixture = Fixture::new("one\ntwo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(1, 0));
@@ -3645,7 +3661,7 @@ mod tests {
 
     #[test]
     fn an_unset_mark_does_not_move_the_caret() {
-        let mut c_fixture = core("one\ntwo\n");
+        let mut c_fixture = Fixture::new("one\ntwo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(1);
@@ -3658,7 +3674,7 @@ mod tests {
 
     #[test]
     fn the_jump_list_walks_back_and_forward() {
-        let mut c_fixture = core("a\nb\nc\nd\ne\n");
+        let mut c_fixture = Fixture::new("a\nb\nc\nd\ne\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3678,7 +3694,7 @@ mod tests {
 
     #[test]
     fn plain_motions_do_not_record_jumps() {
-        let mut c_fixture = core("a\nb\nc\n");
+        let mut c_fixture = Fixture::new("a\nb\nc\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3692,7 +3708,7 @@ mod tests {
 
     #[test]
     fn the_change_list_revisits_edit_positions() {
-        let mut c_fixture = core("one\ntwo\nthree\n");
+        let mut c_fixture = Fixture::new("one\ntwo\nthree\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3709,138 +3725,138 @@ mod tests {
 
     #[test]
     fn operator_counts_multiply_the_motion() {
-        let mut c_fixture = core("one two three four");
+        let mut c_fixture = Fixture::new("one two three four");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 3)));
-        assert_eq!(text_of(&c), "four");
+        assert_eq!(Fixture::text_of(&c), "four");
     }
 
     #[test]
     fn inclusive_motion_covers_its_last_character() {
-        let mut c_fixture = core("foo bar");
+        let mut c_fixture = Fixture::new("foo bar");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.apply(op(Operator::Delete, Target::Motion(Motion::WordEnd, 1)));
-        assert_eq!(text_of(&c), " bar");
+        assert_eq!(Fixture::text_of(&c), " bar");
     }
 
     #[test]
     fn linewise_motion_deletes_whole_lines() {
-        let mut c_fixture = core("one\ntwo\nthree\n");
+        let mut c_fixture = Fixture::new("one\ntwo\nthree\n");
         let mut c = c_fixture.core();
         c.set_caret(c.buffer.coords_to_char(0, 1));
         c.apply(op(Operator::Delete, Target::Motion(Motion::Down, 1)));
-        assert_eq!(text_of(&c), "three\n");
+        assert_eq!(Fixture::text_of(&c), "three\n");
     }
 
     #[test]
     fn exclusive_motion_ending_in_column_one_stops_at_the_previous_line() {
-        let mut c_fixture = core("foo\nbar\n");
+        let mut c_fixture = Fixture::new("foo\nbar\n");
         let mut c = c_fixture.core();
         c.set_caret(1);
         c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
-        assert_eq!(text_of(&c), "f\nbar\n");
+        assert_eq!(Fixture::text_of(&c), "f\nbar\n");
     }
 
     #[test]
     fn delete_line_yanks_linewise_and_put_opens_a_new_line() {
-        let mut c_fixture = core("one\ntwo\nthree\n");
+        let mut c_fixture = Fixture::new("one\ntwo\nthree\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(1, 0));
         c.apply(op(Operator::Delete, Target::Line(1)));
-        assert_eq!(text_of(&c), "one\nthree\n");
+        assert_eq!(Fixture::text_of(&c), "one\nthree\n");
         assert_eq!(
             c.registers.read(None),
             Some(&RegisterValue::linewise("two\n"))
         );
         c.apply(put(false));
-        assert_eq!(text_of(&c), "one\nthree\ntwo\n");
+        assert_eq!(Fixture::text_of(&c), "one\nthree\ntwo\n");
     }
 
     #[test]
     fn count_deletes_multiple_lines() {
-        let mut c_fixture = core("a\nb\nc\nd\n");
+        let mut c_fixture = Fixture::new("a\nb\nc\nd\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(op(Operator::Delete, Target::Line(3)));
-        assert_eq!(text_of(&c), "d\n");
+        assert_eq!(Fixture::text_of(&c), "d\n");
     }
 
     #[test]
     fn change_line_keeps_indentation() {
-        let mut c_fixture = core("    foo\nbar\n");
+        let mut c_fixture = Fixture::new("    foo\nbar\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(0, 4));
         c.apply(op(Operator::Change, Target::Line(1)));
-        assert_eq!(text_of(&c), "    \nbar\n");
+        assert_eq!(Fixture::text_of(&c), "    \nbar\n");
         assert_eq!(c.primary().head, 4);
         assert_eq!(c.mode.value, EditMode::Insert);
     }
 
     #[test]
     fn indent_and_outdent_shift_whole_lines() {
-        let mut c_fixture = core("a\nb\n");
+        let mut c_fixture = Fixture::new("a\nb\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(op(Operator::Indent, Target::Line(2)));
-        assert_eq!(text_of(&c), "\ta\n\tb\n");
+        assert_eq!(Fixture::text_of(&c), "\ta\n\tb\n");
         c.apply(op(Operator::Outdent, Target::Line(2)));
-        assert_eq!(text_of(&c), "a\nb\n");
+        assert_eq!(Fixture::text_of(&c), "a\nb\n");
     }
 
     #[test]
     fn case_operators_transform_a_range() {
-        let mut c_fixture = core("hello");
+        let mut c_fixture = Fixture::new("hello");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(op(Operator::Upper, Target::Motion(Motion::LineEnd, 1)));
-        assert_eq!(text_of(&c), "HELLO");
+        assert_eq!(Fixture::text_of(&c), "HELLO");
         c.apply(op(Operator::ToggleCase, Target::Motion(Motion::LineEnd, 1)));
-        assert_eq!(text_of(&c), "hello");
+        assert_eq!(Fixture::text_of(&c), "hello");
     }
 
     #[test]
     fn line_end_operator_stops_before_the_newline() {
-        let mut c_fixture = core("abc\ndef\n");
+        let mut c_fixture = Fixture::new("abc\ndef\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(2);
 
         c.apply(op(Operator::Delete, Target::Motion(Motion::LineEnd, 1)));
 
-        assert_eq!(text_of(&c), "ab\ndef\n");
+        assert_eq!(Fixture::text_of(&c), "ab\ndef\n");
     }
 
     #[test]
     fn replace_char_overwrites_without_entering_insert() {
-        let mut c_fixture = core("abcd");
+        let mut c_fixture = Fixture::new("abcd");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(1);
         c.apply(EditCommand::ReplaceChar { ch: 'X', count: 2 });
-        assert_eq!(text_of(&c), "aXXd");
+        assert_eq!(Fixture::text_of(&c), "aXXd");
         assert_eq!(c.primary().head, 2);
     }
 
     #[test]
     fn replace_char_past_the_line_end_is_rejected() {
-        let mut c_fixture = core("ab\ncd\n");
+        let mut c_fixture = Fixture::new("ab\ncd\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(1);
         c.apply(EditCommand::ReplaceChar { ch: 'X', count: 4 });
-        assert_eq!(text_of(&c), "ab\ncd\n");
+        assert_eq!(Fixture::text_of(&c), "ab\ncd\n");
     }
 
     #[test]
     fn join_lines_collapses_indentation_to_one_space() {
-        let mut c_fixture = core("foo\n    bar\nbaz\n");
+        let mut c_fixture = Fixture::new("foo\n    bar\nbaz\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3848,12 +3864,12 @@ mod tests {
             count: 2,
             spaces: true,
         });
-        assert_eq!(text_of(&c), "foo bar\nbaz\n");
+        assert_eq!(Fixture::text_of(&c), "foo bar\nbaz\n");
     }
 
     #[test]
     fn join_without_spaces_keeps_text_adjacent() {
-        let mut c_fixture = core("foo\n  bar\n");
+        let mut c_fixture = Fixture::new("foo\n  bar\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3861,41 +3877,41 @@ mod tests {
             count: 2,
             spaces: false,
         });
-        assert_eq!(text_of(&c), "foobar\n");
+        assert_eq!(Fixture::text_of(&c), "foobar\n");
     }
 
     #[test]
     fn open_line_inherits_indentation() {
-        let mut c_fixture = core("    foo\n");
+        let mut c_fixture = Fixture::new("    foo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(4);
         c.apply(EditCommand::OpenLine { above: false });
-        assert_eq!(text_of(&c), "    foo\n    \n");
+        assert_eq!(Fixture::text_of(&c), "    foo\n    \n");
         assert_eq!(c.mode.value, EditMode::Insert);
 
-        let mut c_fixture = core("    foo\n");
+        let mut c_fixture = Fixture::new("    foo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(4);
         c.apply(EditCommand::OpenLine { above: true });
-        assert_eq!(text_of(&c), "    \n    foo\n");
+        assert_eq!(Fixture::text_of(&c), "    \n    foo\n");
     }
 
     #[test]
     fn linewise_put_before_inserts_above_the_current_line() {
-        let mut c_fixture = core("one\ntwo\n");
+        let mut c_fixture = Fixture::new("one\ntwo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue::linewise("new\n"));
         c.set_caret(c.buffer.coords_to_char(1, 0));
         c.apply(put(true));
-        assert_eq!(text_of(&c), "one\nnew\ntwo\n");
+        assert_eq!(Fixture::text_of(&c), "one\nnew\ntwo\n");
     }
 
     #[test]
     fn put_repeats_with_a_count() {
-        let mut c_fixture = core("a");
+        let mut c_fixture = Fixture::new("a");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue::charwise("X"));
@@ -3905,12 +3921,12 @@ mod tests {
             count: 3,
             register: None,
         });
-        assert_eq!(text_of(&c), "aXXX");
+        assert_eq!(Fixture::text_of(&c), "aXXX");
     }
 
     #[test]
     fn named_register_round_trips_through_an_operator() {
-        let mut c_fixture = core("one\ntwo\n");
+        let mut c_fixture = Fixture::new("one\ntwo\n");
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
@@ -3925,12 +3941,12 @@ mod tests {
             count: 1,
             register: Some('a'),
         });
-        assert_eq!(text_of(&c), "one\ntwo\none\n");
+        assert_eq!(Fixture::text_of(&c), "one\ntwo\none\n");
     }
 
     #[test]
     fn cursor_pos_visual_col_for_wide_chars() {
-        let mut c_fixture = core("あb");
+        let mut c_fixture = Fixture::new("あb");
         let mut c = c_fixture.core();
         c.set_caret(1);
         assert_eq!(
@@ -3946,7 +3962,7 @@ mod tests {
 
     #[test]
     fn a_cell_column_resolves_to_the_character_the_pointer_landed_on() {
-        let mut c_fixture = core("今日の予定は？");
+        let mut c_fixture = Fixture::new("今日の予定は？");
         let c = c_fixture.core();
 
         assert_eq!(c.char_at_cell(0, 0), 0);
@@ -3957,55 +3973,55 @@ mod tests {
 
     #[test]
     fn typing_over_selection_replaces() {
-        let mut c_fixture = core("abcdef");
+        let mut c_fixture = Fixture::new("abcdef");
         let mut c = c_fixture.core();
         c.carets.selections = vec![Selection { anchor: 1, head: 4 }];
         c.apply(EditCommand::InsertText("X".into()));
-        assert_eq!(text_of(&c), "aXef");
+        assert_eq!(Fixture::text_of(&c), "aXef");
     }
 
     #[test]
     fn undo_redo_roundtrip() {
-        let mut c_fixture = core("");
+        let mut c_fixture = Fixture::new("");
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("abc".into()));
         c.apply(EditCommand::SetMode(EditMode::Normal));
         c.apply(EditCommand::InsertText("X".into()));
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "abc");
+        assert_eq!(Fixture::text_of(&c), "abc");
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "");
+        assert_eq!(Fixture::text_of(&c), "");
         c.apply(EditCommand::Redo);
-        assert_eq!(text_of(&c), "abc");
+        assert_eq!(Fixture::text_of(&c), "abc");
     }
 
     #[test]
     fn typing_run_is_one_undo() {
-        let mut c_fixture = core("");
+        let mut c_fixture = Fixture::new("");
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("h".into()));
         c.apply(EditCommand::InsertText("i".into()));
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "");
+        assert_eq!(Fixture::text_of(&c), "");
     }
 
     #[test]
     fn replace_text_is_one_undoable_edit() {
-        let mut c_fixture = core("old");
+        let mut c_fixture = Fixture::new("old");
         let mut c = c_fixture.core();
         c.set_caret(2);
         c.apply(EditCommand::ReplaceText("new text".into()));
-        assert_eq!(text_of(&c), "new text");
+        assert_eq!(Fixture::text_of(&c), "new text");
         assert_eq!(c.primary().head, 2);
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "old");
+        assert_eq!(Fixture::text_of(&c), "old");
     }
 
     #[test]
     fn replace_text_preserves_caret_in_an_unchanged_body() {
         let old = "---\ntitle: Old\n---\nBody text";
         let new = "---\ntitle: Old\ntags:\n  - note\n---\nBody text";
-        let mut c_fixture = core(old);
+        let mut c_fixture = Fixture::new(old);
         let mut c = c_fixture.core();
         c.set_caret(old.find("text").unwrap());
         c.apply(EditCommand::ReplaceText(new.into()));
@@ -4014,7 +4030,7 @@ mod tests {
 
     #[test]
     fn yank_and_paste() {
-        let mut c_fixture = core("abcdef");
+        let mut c_fixture = Fixture::new("abcdef");
         let mut c = c_fixture.core();
         c.set_caret(0);
         c.mode.value = EditMode::Visual;
@@ -4025,21 +4041,21 @@ mod tests {
         c.mode.value = EditMode::Insert;
         c.set_caret(6);
         c.apply(put(true));
-        assert_eq!(text_of(&c), "abcdefabc");
+        assert_eq!(Fixture::text_of(&c), "abcdefabc");
     }
 
     #[test]
     fn delete_forward_removes_selection() {
-        let mut c_fixture = core("abcdef");
+        let mut c_fixture = Fixture::new("abcdef");
         let mut c = c_fixture.core();
         c.carets.selections = vec![Selection { anchor: 1, head: 4 }];
         c.apply(EditCommand::DeleteForward);
-        assert_eq!(text_of(&c), "aef");
+        assert_eq!(Fixture::text_of(&c), "aef");
     }
 
     #[test]
     fn undo_back_to_saved_is_clean() {
-        let mut c_fixture = core("");
+        let mut c_fixture = Fixture::new("");
         let mut c = c_fixture.core();
         c.apply(EditCommand::InsertText("ab".into()));
         c.mark_saved();
@@ -4047,56 +4063,56 @@ mod tests {
         c.apply(EditCommand::InsertText("c".into()));
         assert!(c.revision.dirty);
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "ab");
+        assert_eq!(Fixture::text_of(&c), "ab");
         assert!(!c.revision.dirty, "undo to saved revision clears dirty");
     }
 
     #[test]
     fn delete_back_is_grapheme_aware() {
-        let mut c_fixture = core("ae\u{0301}");
+        let mut c_fixture = Fixture::new("ae\u{0301}");
         let mut c = c_fixture.core();
         c.set_caret(c.buffer.len_chars());
         c.apply(EditCommand::DeleteBack);
-        assert_eq!(text_of(&c), "a");
+        assert_eq!(Fixture::text_of(&c), "a");
     }
 
     #[test]
     fn paste_after_vs_before_in_normal() {
-        let mut c_fixture = core("ac");
+        let mut c_fixture = Fixture::new("ac");
         let mut c = c_fixture.core();
         c.registers.set_unnamed(RegisterValue::charwise("X"));
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(put(false));
-        assert_eq!(text_of(&c), "aXc");
-        let mut c2_fixture = core("ac");
+        assert_eq!(Fixture::text_of(&c), "aXc");
+        let mut c2_fixture = Fixture::new("ac");
         let mut c2 = c2_fixture.core();
         c2.registers.set_unnamed(RegisterValue::charwise("X"));
         c2.mode.value = EditMode::Normal;
         c2.set_caret(0);
         c2.apply(put(true));
-        assert_eq!(text_of(&c2), "Xac");
+        assert_eq!(Fixture::text_of(&c2), "Xac");
     }
 
     #[test]
     fn repeated_pastes_undo_one_at_a_time() {
-        let mut c_fixture = core("a");
+        let mut c_fixture = Fixture::new("a");
         let mut c = c_fixture.core();
         c.registers.set_unnamed(RegisterValue::charwise("X"));
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
         c.apply(put(false));
         c.apply(put(false));
-        assert_eq!(text_of(&c), "aXX");
+        assert_eq!(Fixture::text_of(&c), "aXX");
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "aX");
+        assert_eq!(Fixture::text_of(&c), "aX");
         c.apply(EditCommand::Undo);
-        assert_eq!(text_of(&c), "a");
+        assert_eq!(Fixture::text_of(&c), "a");
     }
 
     #[test]
     fn autoscroll_follows_caret_down() {
-        let mut c_fixture = core("a\nb\nc\nd\ne\nf\n");
+        let mut c_fixture = Fixture::new("a\nb\nc\nd\ne\nf\n");
         let mut c = c_fixture.core();
         c.viewport.rows = 3;
         c.set_caret(c.buffer.coords_to_char(5, 0));
@@ -4105,7 +4121,7 @@ mod tests {
 
     #[test]
     fn down_skips_collapsed_body() {
-        let mut c_fixture = core("a\nb\nc\nd\ne\n");
+        let mut c_fixture = Fixture::new("a\nb\nc\nd\ne\n");
         let mut c = c_fixture.core();
         let mut fs = crate::fold::FoldState::default();
         fs.set_regions(vec![crate::fold::FoldRegion { start: 0, end: 2 }]);
@@ -4119,7 +4135,7 @@ mod tests {
 
     #[test]
     fn vertical_motion_collapses_selection_before_moving() {
-        let mut c_fixture = core("first\nsecond\nthird\n");
+        let mut c_fixture = Fixture::new("first\nsecond\nthird\n");
         let mut c = c_fixture.core();
         let start = c.buffer.coords_to_char(1, 1);
         let end = c.buffer.coords_to_char(2, 3);
@@ -4136,7 +4152,7 @@ mod tests {
     #[test]
     fn vertical_motion_preserves_column_across_empty_lines() {
         for mode in [EditMode::Insert, EditMode::Normal] {
-            let mut c_fixture = core("abcdefghij\n\nabcdefghij\n");
+            let mut c_fixture = Fixture::new("abcdefghij\n\nabcdefghij\n");
             let mut c = c_fixture.core();
             c.viewport.fold_view =
                 crate::fold::FoldState::default().view(c.buffer.len_lines() as u32);

@@ -5,6 +5,10 @@ use crate::event::{
 use crate::host::editor::Editor;
 use crate::host::editor::{Edit, EditReadOnly};
 use bevy::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, Entity, EntityEvent, Message, MessageReader, MessageWriter, On,
+    Plugin, Query, Res, With,
+};
 use bevy_cef::prelude::*;
 use vmux_api::command_bar::ExRequest;
 use vmux_api::editor::KeymapKind;

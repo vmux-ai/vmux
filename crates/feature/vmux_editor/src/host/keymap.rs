@@ -57,19 +57,6 @@ pub trait Keymap: Send + Sync {
     }
 }
 
-pub trait KeymapKindExt {
-    fn initial_mode(self) -> EditMode;
-}
-
-impl KeymapKindExt for KeymapKind {
-    fn initial_mode(self) -> EditMode {
-        match self {
-            KeymapKind::Vscode => EditMode::Insert,
-            KeymapKind::Vim => EditMode::Normal,
-        }
-    }
-}
-
 #[derive(Component)]
 pub struct EditorKeymap(pub KeymapKind);
 
@@ -107,7 +94,10 @@ impl KeymapConfig {
     }
 
     pub(super) fn initial_mode(&self) -> vmux_api::editor::EditMode {
-        self.kind.initial_mode()
+        match self.kind {
+            KeymapKind::Vscode => EditMode::Insert,
+            KeymapKind::Vim => EditMode::Normal,
+        }
     }
 
     pub(super) fn kind(&self) -> KeymapKind {
