@@ -7,6 +7,7 @@ use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_feature::manifest::FeaturePlugin;
 
 use crate::dotfiles::{
+    AppliedEnabledDotfiles, ApplyEnabledDotfiles, DisableDotfilePackage, DisabledDotfilePackage,
     DiscoverDotfilePackages, DiscoveredDotfilePackages, DotfilePlan, PlanDotfilePackage,
 };
 use crate::homebrew::ImportedBrewfile;
@@ -51,6 +52,7 @@ impl Plugin for ToolCliPlugin {
                     execute_dotfile_import,
                     execute_adopt,
                     execute_unlink,
+                    complete_dotfiles,
                     complete_imports,
                 )
                     .chain(),
@@ -81,6 +83,9 @@ struct StatusCancelled;
 
 #[derive(Component)]
 struct ToolApplyRequest;
+
+#[derive(Component)]
+struct WaitingDotfiles;
 
 #[derive(Component)]
 struct HomebrewImportRequest(PathBuf);
@@ -122,11 +127,7 @@ fn route(
                 ));
             }
             "tool.apply" => {
-                entity.insert((
-                    ToolApplyRequest,
-                    store.clone(),
-                    ReadRequest { retain_lease: true },
-                ));
+                entity.insert((ToolApplyRequest, store.clone()));
             }
             "tool.import.homebrew" => {
                 if let Some(path) = invocation.value_os("path") {
@@ -159,7 +160,9 @@ fn route(
             }
             "tool.unlink" => {
                 if let Some(package) = invocation.value("package") {
-                    entity.insert(DotfileUnlinkRequest(package.to_string()));
+                    entity.insert((DotfileUnlinkRequest(package.to_string()), store.clone()));
+                } else {
+                    entity.insert(CliResult(Err("dotfile package is required".into())));
                 }
             }
             _ => {}
@@ -407,31 +410,12 @@ fn status_cancelled(
     }
 }
 
-fn execute_apply(
-    requests: Query<(Entity, &ToolStore, &ReadResult), With<ToolApplyRequest>>,
-    mut commands: Commands,
-) {
-    for (entity, store, loaded) in &requests {
-        let result = match &loaded.0 {
-            Ok(manifest) => store
-                .apply_enabled_dotfiles(manifest)
-                .map_err(io::Error::other),
-            Err(error) => Err(io::Error::other(error.clone())),
-        };
+fn execute_apply(requests: Query<Entity, Added<ToolApplyRequest>>, mut commands: Commands) {
+    for entity in &requests {
         commands
             .entity(entity)
-            .remove::<(ToolApplyRequest, ReadResult, StoreLease, ToolStore)>();
-        match result {
-            Ok(linked) => {
-                println!("linked {linked} file(s)");
-                commands.entity(entity).insert(CliResult::default());
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-            }
-        }
+            .remove::<ToolApplyRequest>()
+            .insert((WaitingDotfiles, ApplyEnabledDotfiles));
     }
 }
 
@@ -564,22 +548,47 @@ fn execute_unlink(
     requests: Query<(Entity, &DotfileUnlinkRequest), Added<DotfileUnlinkRequest>>,
     mut commands: Commands,
 ) {
-    let store = ToolStore::current();
     for (entity, request) in &requests {
-        match store
-            .disable_and_unlink_dotfile_package(&request.0)
-            .map_err(io::Error::other)
-        {
-            Ok(removed) => {
-                println!("unlinked {removed} file(s)");
-                commands.entity(entity).insert(CliResult::default());
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-            }
-        }
+        commands
+            .entity(entity)
+            .remove::<DotfileUnlinkRequest>()
+            .insert((
+                WaitingDotfiles,
+                DisableDotfilePackage::new(request.0.clone()),
+            ));
+    }
+}
+
+fn complete_dotfiles(
+    requests: Query<
+        (
+            Entity,
+            Option<&AppliedEnabledDotfiles>,
+            Option<&DisabledDotfilePackage>,
+            Option<&ToolOperationFailed>,
+        ),
+        (With<WaitingDotfiles>, With<crate::ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, applied, disabled, failure) in &requests {
+        let result = if let Some(failure) = failure {
+            CliResult(Err(failure.0.clone()))
+        } else if let Some(applied) = applied {
+            println!("linked {} file(s)", applied.files);
+            CliResult::default()
+        } else if let Some(disabled) = disabled {
+            println!("unlinked {} file(s)", disabled.files);
+            CliResult::default()
+        } else {
+            continue;
+        };
+        commands.entity(entity).insert(result).remove::<(
+            WaitingDotfiles,
+            ApplyEnabledDotfiles,
+            DisableDotfilePackage,
+            ToolStore,
+        )>();
     }
 }
 
@@ -601,6 +610,61 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn cli_apply_and_unlink_share_dotfile_operations_for_the_selected_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let mut manifest = ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.write_to(&store.manifest_path()).unwrap();
+        let source = store.dotfiles_dir().join("shell/.zshrc");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, b"shell").unwrap();
+        let target = store.home().join(".zshrc");
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        for command in ["tool.apply", "tool.unlink"] {
+            let request = app
+                .world_mut()
+                .spawn((
+                    store.clone(),
+                    CliInvocation {
+                        command: command.into(),
+                        arguments: BTreeMap::from([("package".into(), vec!["shell".into()])]),
+                    },
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.world().get::<CliResult>(request).is_none() {
+                app.update();
+                assert!(Instant::now() < deadline, "{command} did not drain");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
+            if command == "tool.apply" {
+                assert_eq!(std::fs::read(&target).unwrap(), b"shell");
+                assert_eq!(
+                    vmux_path::PathIdentity::resolve(&target),
+                    vmux_path::PathIdentity::resolve(&source)
+                );
+            } else {
+                assert!(target.symlink_metadata().is_err());
+                assert!(
+                    ToolsManifest::read(&store.manifest_path())
+                        .unwrap()
+                        .dotfiles
+                        .packages
+                        .is_empty()
+                );
+            }
+            assert!(store.lease().is_some(), "{command}");
+            app.world_mut().despawn(request);
+        }
+    }
 
     #[test]
     fn cli_status_uses_canonical_dotfile_plans_for_the_selected_store() {

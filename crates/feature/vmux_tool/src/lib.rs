@@ -155,10 +155,6 @@ impl Plugin for ToolRuntimePlugin {
         app.add_plugins((
             TaskPlugin::<Result<dotfiles::ImportedDotfiles, String>>::default(),
             TaskPlugin::<Result<dotfiles::ImportedAvailableDotfiles, String>>::default(),
-            TaskPlugin::<Result<dotfiles::LinkedDotfilePackage, String>>::default(),
-            TaskPlugin::<Result<dotfiles::DisabledDotfilePackage, String>>::default(),
-            TaskPlugin::<Result<dotfiles::UnlinkedDotfilePackage, String>>::default(),
-            TaskPlugin::<Result<dotfiles::AppliedEnabledDotfiles, String>>::default(),
             TaskPlugin::<Result<dotfiles::AdoptedDotfile, String>>::default(),
             TaskPlugin::<Result<homebrew::ImportedBrewfile, String>>::default(),
             TaskPlugin::<Result<npm::ImportedNpmManifest, String>>::default(),
@@ -187,10 +183,6 @@ impl Plugin for ToolRuntimePlugin {
             (
                 TaskSet::of::<Result<dotfiles::ImportedDotfiles, String>>(),
                 TaskSet::of::<Result<dotfiles::ImportedAvailableDotfiles, String>>(),
-                TaskSet::of::<Result<dotfiles::LinkedDotfilePackage, String>>(),
-                TaskSet::of::<Result<dotfiles::DisabledDotfilePackage, String>>(),
-                TaskSet::of::<Result<dotfiles::UnlinkedDotfilePackage, String>>(),
-                TaskSet::of::<Result<dotfiles::AppliedEnabledDotfiles, String>>(),
                 TaskSet::of::<Result<dotfiles::AdoptedDotfile, String>>(),
                 TaskSet::of::<Result<homebrew::ImportedBrewfile, String>>(),
                 TaskSet::of::<Result<npm::ImportedNpmManifest, String>>(),
@@ -209,10 +201,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_observer(completed)
         .add_observer(store::<dotfiles::ImportedDotfiles>)
         .add_observer(store::<dotfiles::ImportedAvailableDotfiles>)
-        .add_observer(store::<dotfiles::LinkedDotfilePackage>)
-        .add_observer(store::<dotfiles::DisabledDotfilePackage>)
-        .add_observer(store::<dotfiles::UnlinkedDotfilePackage>)
-        .add_observer(store::<dotfiles::AppliedEnabledDotfiles>)
         .add_observer(store::<dotfiles::AdoptedDotfile>)
         .add_observer(store::<homebrew::ImportedBrewfile>)
         .add_observer(store::<npm::ImportedNpmManifest>)
@@ -245,10 +233,6 @@ impl Plugin for ToolRuntimePlugin {
             (
                 finish_operation::<dotfiles::ImportedDotfiles>,
                 finish_operation::<dotfiles::ImportedAvailableDotfiles>,
-                finish_operation::<dotfiles::LinkedDotfilePackage>,
-                finish_operation::<dotfiles::DisabledDotfilePackage>,
-                finish_operation::<dotfiles::UnlinkedDotfilePackage>,
-                finish_operation::<dotfiles::AppliedEnabledDotfiles>,
                 finish_operation::<dotfiles::AdoptedDotfile>,
                 finish_operation::<homebrew::ImportedBrewfile>,
                 finish_operation::<npm::ImportedNpmManifest>,

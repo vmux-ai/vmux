@@ -48,16 +48,7 @@ impl Plugin for DotfileToolPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    import,
-                    import_available,
-                    link_package,
-                    disable_package,
-                    unlink_package,
-                    apply_enabled,
-                    adopt,
-                )
-                    .in_set(ToolTaskSet::Start),
+                (import, import_available, adopt).in_set(ToolTaskSet::Start),
             )
             .add_systems(
                 Update,
@@ -490,7 +481,7 @@ fn import_available(
 
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct LinkDotfilePackage {
-    package: String,
+    pub(crate) package: String,
 }
 
 impl LinkDotfilePackage {
@@ -503,58 +494,12 @@ impl LinkDotfilePackage {
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LinkedDotfilePackage {
-    files: usize,
-}
-
-fn link_package(
-    operations: Query<
-        (Entity, &LinkDotfilePackage, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<LinkedDotfilePackage>>,
-            Without<LinkedDotfilePackage>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, operation, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let package = operation.package.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    let mut manifest = store.load()?;
-                    manifest.set_dotfile_package(&package, true);
-                    store.save(&manifest)?;
-                    let files = store.apply_dotfile_package(&package)?;
-                    Ok(LinkedDotfilePackage { files })
-                },
-            )));
-    }
+    pub(crate) files: usize,
 }
 
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct DisableDotfilePackage {
-    package: String,
+    pub(crate) package: String,
 }
 
 impl DisableDotfilePackage {
@@ -567,56 +512,12 @@ impl DisableDotfilePackage {
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DisabledDotfilePackage {
-    files: usize,
-}
-
-fn disable_package(
-    operations: Query<
-        (Entity, &DisableDotfilePackage, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<DisabledDotfilePackage>>,
-            Without<DisabledDotfilePackage>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, operation, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let package = operation.package.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    store.migrate_legacy_storage()?;
-                    let files = store.disable_and_unlink_dotfile_package(&package)?;
-                    Ok(DisabledDotfilePackage { files })
-                },
-            )));
-    }
+    pub(crate) files: usize,
 }
 
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct UnlinkDotfilePackage {
-    package: String,
+    pub(crate) package: String,
 }
 
 impl UnlinkDotfilePackage {
@@ -629,51 +530,7 @@ impl UnlinkDotfilePackage {
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct UnlinkedDotfilePackage {
-    files: usize,
-}
-
-fn unlink_package(
-    operations: Query<
-        (Entity, &UnlinkDotfilePackage, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<UnlinkedDotfilePackage>>,
-            Without<UnlinkedDotfilePackage>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, operation, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let package = operation.package.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    store.migrate_legacy_storage()?;
-                    let files = store.unlink_dotfile_package(&package)?;
-                    Ok(UnlinkedDotfilePackage { files })
-                },
-            )));
-    }
+    pub(crate) files: usize,
 }
 
 #[derive(EcsComponent, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -682,50 +539,6 @@ pub struct ApplyEnabledDotfiles;
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct AppliedEnabledDotfiles {
     pub(crate) files: usize,
-}
-
-fn apply_enabled(
-    operations: Query<
-        (Entity, &ToolStoreTarget),
-        (
-            With<ApplyEnabledDotfiles>,
-            Without<ToolOperationTask<AppliedEnabledDotfiles>>,
-            Without<AppliedEnabledDotfiles>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    states: Query<&OperationState>,
-    mut commands: Commands,
-) {
-    for (entity, target) in &operations {
-        if states
-            .get(entity)
-            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
-        {
-            continue;
-        }
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
-                async move {
-                    let _lease = lease;
-                    let manifest = store.load()?;
-                    let files = store.apply_enabled_dotfiles(&manifest)?;
-                    Ok(AppliedEnabledDotfiles { files })
-                },
-            )));
-    }
 }
 
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]

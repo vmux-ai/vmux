@@ -8,10 +8,12 @@ pub use fs::{
     LinkFacts, ReadDirectory, ReadFile, WriteFile,
 };
 pub use http::{Authorization, Get};
+pub use links::{LinkPath, PathChanged, PathReceipt, UnlinkPath};
 pub use temporary::{CloseTemporary, CreateTemporary, TemporaryDirectory, TemporaryTransfer};
 
 mod fs;
 mod http;
+mod links;
 mod temporary;
 
 pub struct ObservationIoPlugin;
@@ -26,6 +28,8 @@ impl Plugin for ObservationIoPlugin {
             JobPlugin::<Execute>::default(),
             JobPlugin::<InspectLink>::default(),
             JobPlugin::<FindExecutable>::default(),
+            JobPlugin::<LinkPath>::default(),
+            JobPlugin::<UnlinkPath>::default(),
         ))
         .configure_sets(
             Update,
