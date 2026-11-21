@@ -3,10 +3,6 @@ use crate::event::{
     DocumentTextInput,
 };
 use crate::host::editor::Editor;
-pub(crate) mod document;
-mod effects;
-mod projection;
-
 use crate::host::editor::{Edit, EditReadOnly};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
@@ -24,16 +20,19 @@ use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 use crate::host::file_lifecycle::SelfWrites;
 use crate::host::fold::FoldState;
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
-use crate::host::language::{
-    EditorCompletionRequest, EditorDefinitionRequest, EditorHoverRequest, EditorReferencesRequest,
-    EditorRenameRequest, LspEditDirty, WikiCompletionRequest,
-};
+use crate::host::language::{LspEditDirty, WikiCompletionRequest};
 use crate::host::markdown::ParsedNote;
 use crate::host::note::NoteSent;
+#[cfg(test)]
 use crate::host::status::SharedFileViewMode;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, FoldsDirty, ViewportRenderRequest};
-use crate::keymap::{KeyInput, Keymap as _, Mods};
+use crate::keymap::{KeyInput, Mods};
 use vmux_ecs::scroll::ScrollWindow;
+
+pub(crate) mod document;
+pub(crate) mod effects;
+pub(crate) mod input;
+mod projection;
 
 pub(super) struct EditorPlugin;
 
@@ -222,7 +221,7 @@ pub(super) struct EditExecutionPlugin;
 
 impl Plugin for EditExecutionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(document::DocumentPlugin)
+        app.add_plugins((document::DocumentPlugin, input::InputPlugin))
             .insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
             .add_plugins((projection::ProjectionPlugin, effects::EffectsPlugin));
     }
@@ -230,19 +229,21 @@ impl Plugin for EditExecutionPlugin {
 
 pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
 
+#[cfg(test)]
 pub(super) struct EditRequest {
     entity: Entity,
     commands: Vec<EditCommand>,
 }
 
+#[cfg(test)]
 impl EditRequest {
+    #[cfg(test)]
     pub(super) fn emit(self, document: uuid::Uuid, commands: &mut Commands) {
-        let document = Some(document);
-        for command in self.commands {
-            if let Some(effect) = command.emit_document(self.entity, document, commands) {
-                effect.emit_effect(self.entity, document, commands);
-            }
-        }
+        commands.trigger(input::ParsedFixtureRequest {
+            entity: self.entity,
+            document,
+            commands: self.commands,
+        });
     }
 
     #[cfg(test)]
@@ -260,88 +261,31 @@ impl EditRequest {
     }
 
     fn accelerated_navigation(mut self, repeat: bool) -> Self {
-        if !repeat {
-            return self;
-        }
-        let mut commands = Vec::with_capacity(self.commands.len() * 2);
-        for command in self.commands {
-            if let EditCommand::ScrollViewport(lines) = command {
-                commands.push(EditCommand::ScrollViewport(lines.saturating_mul(2)));
-                continue;
-            }
-            let accelerate = matches!(
-                &command,
-                EditCommand::Move(
-                    Motion::Left
-                        | Motion::Right
-                        | Motion::LeftBounded
-                        | Motion::RightBounded
-                        | Motion::Up
-                        | Motion::Down,
-                ) | EditCommand::Select(
-                    Motion::Left
-                        | Motion::Right
-                        | Motion::LeftBounded
-                        | Motion::RightBounded
-                        | Motion::Up
-                        | Motion::Down,
-                )
-            );
-            if accelerate {
-                commands.push(command.clone());
-            }
-            commands.push(command);
-        }
-        self.commands = commands;
+        let input = input::KeyInputRequest {
+            entity: self.entity,
+            document: uuid::Uuid::nil(),
+            input: KeyInput {
+                key: String::new(),
+                mods: Mods::default(),
+                repeat,
+            },
+        };
+        self.commands = input::SyntaxInput::accelerated(&input, self.commands);
         self
     }
 
     fn remapped_for_note(mut self, blocks: &[NoteBlock], start_line: u32) -> Self {
-        let mut line = start_line;
-        let mut commands = Vec::new();
-        for command in self.commands {
-            let (direction, select) = match &command {
-                EditCommand::Move(Motion::Down) => (1, false),
-                EditCommand::Move(Motion::Up) => (-1, false),
-                EditCommand::Select(Motion::Down) => (1, true),
-                EditCommand::Select(Motion::Up) => (-1, true),
-                _ => {
-                    commands.push(command);
-                    continue;
-                }
-            };
-            let Some(target) = ParsedNote::vertical_target(blocks, line, direction) else {
-                line = if direction > 0 {
-                    line.saturating_add(1)
-                } else {
-                    line.saturating_sub(1)
-                };
-                commands.push(command);
-                continue;
-            };
-            if target == line {
-                continue;
-            }
-            let steps = target.abs_diff(line) as usize;
-            line = target;
-            let motion = if direction > 0 {
-                Motion::Down
-            } else {
-                Motion::Up
-            };
-            let command = if select {
-                EditCommand::Select(motion)
-            } else {
-                EditCommand::Move(motion)
-            };
-            commands.extend(std::iter::repeat_n(command, steps));
-        }
-        self.commands = commands;
+        let input = input::KeyInputRequest {
+            entity: self.entity,
+            document: uuid::Uuid::nil(),
+            input: KeyInput {
+                key: String::new(),
+                mods: Mods::default(),
+                repeat: false,
+            },
+        };
+        self.commands = input::SyntaxInput::remapped(&input, self.commands, blocks, start_line);
         self
-    }
-
-    fn is_empty(&self) -> bool {
-        self.commands.is_empty()
     }
 }
 
@@ -389,15 +333,9 @@ impl PreviewAccess<'_, '_> {
 
 fn file_key(
     trigger: On<UiInput<KeyStroke>>,
-    mut q: Query<(
-        EditReadOnly,
-        &EditorKeymap,
-        &mut crate::keymap::vim::VimKeymap,
-    )>,
+    documents: Query<&crate::edit::document::Revision, (With<Editor>, With<EditorKeymap>)>,
     app_keymaps: Query<&Keymap>,
     app_contexts: Query<&KeyContext>,
-    view_mode: Single<&SharedFileViewMode>,
-    preview: PreviewAccess,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -410,70 +348,23 @@ fn file_key(
     {
         return;
     }
-    let Ok((edit, keymap, mut parser)) = q.get_mut(entity) else {
+    let Ok(revision) = documents.get(entity) else {
         return;
     };
-    let input = KeyInput {
-        key: evt.key.clone(),
-        mods: Mods {
-            ctrl: evt.mods.ctrl,
-            alt: evt.mods.alt,
-            shift: evt.mods.shift,
-            meta: evt.mods.super_key,
+    commands.trigger(input::KeyInputRequest {
+        entity,
+        document: revision.identity,
+        input: KeyInput {
+            key: evt.key.clone(),
+            mods: Mods {
+                ctrl: evt.mods.ctrl,
+                alt: evt.mods.alt,
+                shift: evt.mods.shift,
+                meta: evt.mods.super_key,
+            },
+            repeat: evt.repeat,
         },
-        repeat: evt.repeat,
-    };
-    let read_only = preview.previews.contains(entity)
-        || preview
-            .checkout
-            .preview(entity, &edit.core.buffer.path)
-            .is_some();
-    let mut candidate = if read_only && keymap.0 == KeymapKind::Vim {
-        Some(parser.clone())
-    } else {
-        None
-    };
-    let (decoded, mode) = match keymap.0 {
-        KeymapKind::Vscode => (
-            crate::keymap::vscode::VscodeKeymap.handle(&input),
-            edit.core.mode.value,
-        ),
-        KeymapKind::Vim => match candidate.as_mut() {
-            Some(candidate) => candidate.decode(edit.core.mode.value, &input),
-            None => parser.decode(edit.core.mode.value, &input),
-        },
-    };
-    let mut request = EditRequest::new(entity, decoded).accelerated_navigation(evt.repeat);
-    if view_mode.0 == FileViewMode::Note
-        && let Some(blocks) = edit.note_blocks()
-    {
-        let line = edit.core.cursor_pos().line;
-        request = request.remapped_for_note(blocks, line);
-    }
-    if read_only
-        && request
-            .commands
-            .iter()
-            .any(|command| !command.allowed_in_preview())
-    {
-        parser.reject(edit.core.mode.value);
-        return;
-    }
-    if let Some(candidate) = candidate {
-        *parser = candidate;
-    }
-    if mode != edit.core.mode.value
-        && !request
-            .commands
-            .iter()
-            .any(|command| matches!(command, EditCommand::SetMode(value) if *value == mode))
-    {
-        request.commands.push(EditCommand::SetMode(mode));
-    }
-    if request.is_empty() {
-        return;
-    }
-    request.emit(edit.core.revision.identity, &mut commands);
+    });
 }
 
 fn file_text_input(
@@ -536,8 +427,11 @@ fn file_property_edit(
     if updated == text {
         return;
     }
-    EditRequest::new(entity, vec![EditCommand::ReplaceText(updated)])
-        .emit(edit.core.revision.identity, &mut commands);
+    commands.trigger(document::ReplaceTextRequest {
+        entity,
+        document: Some(edit.core.revision.identity),
+        text: updated,
+    });
 }
 
 fn run_submitted_ex_lines(
@@ -547,10 +441,6 @@ fn run_submitted_ex_lines(
     mut commands: Commands,
 ) {
     for message in submitted.read() {
-        let cmds = crate::edit::ex::ExLine::edits(&message.line);
-        if cmds.is_empty() {
-            continue;
-        }
         let Some(stack) = message.stack else {
             continue;
         };
@@ -563,7 +453,11 @@ fn run_submitted_ex_lines(
         let Ok(revision) = q.get(entity) else {
             continue;
         };
-        EditRequest::new(entity, cmds).emit(revision.identity, &mut commands);
+        commands.trigger(input::ExInputRequest {
+            entity,
+            document: revision.identity,
+            line: message.line.clone(),
+        });
     }
 }
 
@@ -710,7 +604,7 @@ mod edit_flow_tests {
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {
         let mut app = App::new();
-        app.add_plugins(document::DocumentPlugin);
+        app.add_plugins((document::DocumentPlugin, input::InputPlugin));
         let entity = app
             .world_mut()
             .spawn(crate::edit::Document::new(
@@ -753,7 +647,7 @@ mod edit_flow_tests {
     #[test]
     fn vscode_typing_inserts_and_marks_dirty() {
         let mut app = App::new();
-        app.add_plugins(document::DocumentPlugin);
+        app.add_plugins((document::DocumentPlugin, input::InputPlugin));
         let entity = app
             .world_mut()
             .spawn(crate::edit::Document::new(

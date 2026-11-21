@@ -4,9 +4,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::*;
 
-use crate::edit::EditCommand;
 use crate::event::*;
-use crate::host::editing::EditRequest;
 use crate::host::editor::FileView;
 use crate::host::markdown::ParsedNote;
 use crate::lsp::manager::LspLine;
@@ -637,15 +635,13 @@ fn copy_selection(
     let Ok(revision) = documents.get(trigger.event().webview) else {
         return;
     };
-    EditRequest::new(
-        trigger.event().webview,
-        vec![EditCommand::Op {
-            operator: crate::edit::command::Operator::Yank,
-            target: crate::edit::command::Target::Selection,
-            register: None,
-        }],
-    )
-    .emit(revision.identity, &mut commands);
+    commands.trigger(crate::host::editing::document::OperatorRequest {
+        entity: trigger.event().webview,
+        document: Some(revision.identity),
+        operator: crate::edit::command::Operator::Yank,
+        target: crate::edit::command::Target::Selection,
+        register: None,
+    });
 }
 
 fn cut_selection(
@@ -656,15 +652,13 @@ fn cut_selection(
     let Ok(revision) = documents.get(trigger.event().webview) else {
         return;
     };
-    EditRequest::new(
-        trigger.event().webview,
-        vec![EditCommand::Op {
-            operator: crate::edit::command::Operator::Delete,
-            target: crate::edit::command::Target::Selection,
-            register: None,
-        }],
-    )
-    .emit(revision.identity, &mut commands);
+    commands.trigger(crate::host::editing::document::OperatorRequest {
+        entity: trigger.event().webview,
+        document: Some(revision.identity),
+        operator: crate::edit::command::Operator::Delete,
+        target: crate::edit::command::Target::Selection,
+        register: None,
+    });
 }
 
 fn paste(
@@ -675,8 +669,10 @@ fn paste(
     let Ok(revision) = documents.get(trigger.event().webview) else {
         return;
     };
-    EditRequest::new(trigger.event().webview, vec![EditCommand::Paste])
-        .emit(revision.identity, &mut commands);
+    commands.trigger(crate::host::editing::effects::PasteRequest {
+        entity: trigger.event().webview,
+        document: Some(revision.identity),
+    });
 }
 
 fn select_occurrences(
@@ -687,11 +683,10 @@ fn select_occurrences(
     let Ok(revision) = documents.get(trigger.event().webview) else {
         return;
     };
-    EditRequest::new(
-        trigger.event().webview,
-        vec![EditCommand::SelectAllOccurrences],
-    )
-    .emit(revision.identity, &mut commands);
+    commands.trigger(crate::host::editing::document::SelectOccurrencesRequest {
+        entity: trigger.event().webview,
+        document: Some(revision.identity),
+    });
 }
 
 fn request_rename(

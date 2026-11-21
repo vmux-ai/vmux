@@ -1,7 +1,7 @@
 use super::PreviewAccess;
 use crate::edit::core::EditCoreItem;
 use crate::edit::ex::ExRange;
-use crate::edit::{EditCommand, EditCore, EditMode, EditOutcome, Motion, Operator, Target};
+use crate::edit::{EditCore, EditMode, EditOutcome, Motion, Operator, Target};
 use bevy::prelude::*;
 
 pub(crate) struct DocumentPlugin;
@@ -273,11 +273,11 @@ impl Intent for OvertypeTextRequest {
 }
 
 #[derive(EntityEvent, Clone)]
-pub(super) struct ReplaceTextRequest {
+pub(crate) struct ReplaceTextRequest {
     #[event_target]
-    pub(super) entity: Entity,
-    pub(super) document: Option<uuid::Uuid>,
-    pub(super) text: String,
+    pub(crate) entity: Entity,
+    pub(crate) document: Option<uuid::Uuid>,
+    pub(crate) text: String,
 }
 
 impl Intent for ReplaceTextRequest {
@@ -400,13 +400,13 @@ impl Intent for DeleteWordBackRequest {
 }
 
 #[derive(EntityEvent, Clone)]
-pub(super) struct OperatorRequest {
+pub(crate) struct OperatorRequest {
     #[event_target]
-    pub(super) entity: Entity,
-    pub(super) document: Option<uuid::Uuid>,
-    pub(super) operator: Operator,
-    pub(super) target: Target,
-    pub(super) register: Option<char>,
+    pub(crate) entity: Entity,
+    pub(crate) document: Option<uuid::Uuid>,
+    pub(crate) operator: Operator,
+    pub(crate) target: Target,
+    pub(crate) register: Option<char>,
 }
 
 impl Intent for OperatorRequest {
@@ -748,11 +748,11 @@ impl Intent for YankLinesRequest {
 }
 
 #[derive(EntityEvent, Clone)]
-pub(super) struct ReshapeRequest {
+pub(crate) struct ReshapeRequest {
     #[event_target]
-    pub(super) entity: Entity,
-    pub(super) document: Option<uuid::Uuid>,
-    pub(super) shape: crate::shape::BufferShape,
+    pub(crate) entity: Entity,
+    pub(crate) document: Option<uuid::Uuid>,
+    pub(crate) shape: crate::shape::BufferShape,
 }
 
 impl Intent for ReshapeRequest {
@@ -970,10 +970,10 @@ impl Intent for SelectObjectRequest {
 }
 
 #[derive(EntityEvent, Clone)]
-pub(super) struct SelectOccurrencesRequest {
+pub(crate) struct SelectOccurrencesRequest {
     #[event_target]
-    pub(super) entity: Entity,
-    pub(super) document: Option<uuid::Uuid>,
+    pub(crate) entity: Entity,
+    pub(crate) document: Option<uuid::Uuid>,
 }
 
 impl Intent for SelectOccurrencesRequest {
@@ -1113,316 +1113,5 @@ impl Intent for CompletionInsertRequest {
             head: start.max(head),
         }];
         core.insert(self.text.clone())
-    }
-}
-
-impl EditCommand {
-    pub(super) fn emit_document(
-        self,
-        entity: Entity,
-        document: Option<uuid::Uuid>,
-        commands: &mut Commands,
-    ) -> Option<Self> {
-        let command = self.encode_text(entity, document, commands)?;
-        let command = command.encode_selection(entity, document, commands)?;
-        let command = command.encode_history(entity, document, commands)?;
-        command.encode_operator(entity, document, commands)
-    }
-
-    fn encode_text(
-        self,
-        entity: Entity,
-        document: Option<uuid::Uuid>,
-        commands: &mut Commands,
-    ) -> Option<Self> {
-        match self {
-            EditCommand::InsertText(t) => {
-                commands.trigger(InsertTextRequest {
-                    entity,
-                    document,
-                    text: t,
-                });
-            }
-            EditCommand::OvertypeText(t) => {
-                commands.trigger(OvertypeTextRequest {
-                    entity,
-                    document,
-                    text: t,
-                });
-            }
-            EditCommand::ReplaceText(t) => {
-                commands.trigger(ReplaceTextRequest {
-                    entity,
-                    document,
-                    text: t,
-                });
-            }
-            EditCommand::InsertNewline => {
-                commands.trigger(InsertNewlineRequest { entity, document });
-            }
-            EditCommand::InsertTab => {
-                commands.trigger(InsertTabRequest { entity, document });
-            }
-            EditCommand::DeleteBack => {
-                commands.trigger(DeleteBackRequest { entity, document });
-            }
-            EditCommand::DeleteForward => {
-                commands.trigger(DeleteForwardRequest { entity, document });
-            }
-            EditCommand::DeleteWordBack => {
-                commands.trigger(DeleteWordBackRequest { entity, document });
-            }
-            EditCommand::ReplaceChar { ch, count } => {
-                commands.trigger(ReplaceCharRequest {
-                    entity,
-                    document,
-                    ch,
-                    count,
-                });
-            }
-            effect => return Some(effect),
-        }
-        None
-    }
-
-    fn encode_selection(
-        self,
-        entity: Entity,
-        document: Option<uuid::Uuid>,
-        commands: &mut Commands,
-    ) -> Option<Self> {
-        match self {
-            EditCommand::Move(m) => {
-                commands.trigger(MoveRequest {
-                    entity,
-                    document,
-                    motion: m,
-                });
-            }
-            EditCommand::Select(m) => {
-                commands.trigger(SelectRequest {
-                    entity,
-                    document,
-                    motion: m,
-                });
-            }
-            EditCommand::SetMode(m) => {
-                commands.trigger(ModeRequest {
-                    entity,
-                    document,
-                    mode: m,
-                });
-            }
-            EditCommand::BeginBlockInsert { after } => {
-                commands.trigger(BeginBlockInsertRequest {
-                    entity,
-                    document,
-                    after,
-                });
-            }
-            EditCommand::FinishBlockInsert { text } => {
-                commands.trigger(FinishBlockInsertRequest {
-                    entity,
-                    document,
-                    text,
-                });
-            }
-            EditCommand::SwapSelectionEnds => {
-                commands.trigger(SwapSelectionRequest { entity, document });
-            }
-            EditCommand::SelectTextObject(obj) => {
-                commands.trigger(SelectObjectRequest {
-                    entity,
-                    document,
-                    object: obj,
-                });
-            }
-            EditCommand::SelectAllOccurrences => {
-                commands.trigger(SelectOccurrencesRequest { entity, document });
-            }
-            EditCommand::CollapseCarets => {
-                commands.trigger(CollapseCaretsRequest { entity, document });
-            }
-            EditCommand::AddCaretVertically(direction) => {
-                commands.trigger(AddCaretRequest {
-                    entity,
-                    document,
-                    direction,
-                });
-            }
-            effect => return Some(effect),
-        }
-        None
-    }
-
-    fn encode_history(
-        self,
-        entity: Entity,
-        document: Option<uuid::Uuid>,
-        commands: &mut Commands,
-    ) -> Option<Self> {
-        match self {
-            EditCommand::Undo => {
-                commands.trigger(UndoRequest { entity, document });
-            }
-            EditCommand::Redo => {
-                commands.trigger(RedoRequest { entity, document });
-            }
-            EditCommand::UndoTime { forward, count } => {
-                commands.trigger(UndoTimeRequest {
-                    entity,
-                    document,
-                    forward,
-                    count,
-                });
-            }
-            EditCommand::SetSearch { pattern, forward } => {
-                commands.trigger(SearchRequest {
-                    entity,
-                    document,
-                    pattern,
-                    forward,
-                });
-            }
-            EditCommand::SearchWord { forward } => {
-                commands.trigger(SearchWordRequest {
-                    entity,
-                    document,
-                    forward,
-                });
-            }
-            EditCommand::ClearSearchHighlight => {
-                commands.trigger(ClearSearchHighlightRequest { entity, document });
-            }
-            EditCommand::SetMark(name) => {
-                commands.trigger(MarkRequest {
-                    entity,
-                    document,
-                    name,
-                });
-            }
-            EditCommand::GotoMark { name, linewise } => {
-                commands.trigger(GotoMarkRequest {
-                    entity,
-                    document,
-                    name,
-                    linewise,
-                });
-            }
-            EditCommand::JumpList { back, count } => {
-                commands.trigger(JumpRequest {
-                    entity,
-                    document,
-                    back,
-                    count,
-                });
-            }
-            EditCommand::ChangeList { back, count } => {
-                commands.trigger(ChangeRequest {
-                    entity,
-                    document,
-                    back,
-                    count,
-                });
-            }
-            effect => return Some(effect),
-        }
-        None
-    }
-
-    fn encode_operator(
-        self,
-        entity: Entity,
-        document: Option<uuid::Uuid>,
-        commands: &mut Commands,
-    ) -> Option<Self> {
-        match self {
-            EditCommand::Op {
-                operator,
-                target,
-                register,
-            } => {
-                commands.trigger(OperatorRequest {
-                    entity,
-                    document,
-                    operator,
-                    target,
-                    register,
-                });
-            }
-            EditCommand::Put {
-                before,
-                count,
-                register,
-            } => {
-                commands.trigger(PutRequest {
-                    entity,
-                    document,
-                    before,
-                    count,
-                    register,
-                });
-            }
-            EditCommand::JoinLines { count, spaces } => {
-                commands.trigger(JoinLinesRequest {
-                    entity,
-                    document,
-                    count,
-                    spaces,
-                });
-            }
-            EditCommand::OpenLine { above } => {
-                commands.trigger(OpenLineRequest {
-                    entity,
-                    document,
-                    above,
-                });
-            }
-            EditCommand::Substitute {
-                range,
-                pattern,
-                replacement,
-                all,
-            } => {
-                commands.trigger(SubstituteRequest {
-                    entity,
-                    document,
-                    range,
-                    pattern,
-                    replacement,
-                    all,
-                });
-            }
-            EditCommand::ExDelete(range) => {
-                commands.trigger(DeleteLinesRequest {
-                    entity,
-                    document,
-                    range,
-                });
-            }
-            EditCommand::ExYank(range) => {
-                commands.trigger(YankLinesRequest {
-                    entity,
-                    document,
-                    range,
-                });
-            }
-            EditCommand::Reshape(shape) => {
-                commands.trigger(ReshapeRequest {
-                    entity,
-                    document,
-                    shape,
-                });
-            }
-            EditCommand::Increment(delta) => {
-                commands.trigger(IncrementRequest {
-                    entity,
-                    document,
-                    delta,
-                });
-            }
-            effect => return Some(effect),
-        }
-        None
     }
 }

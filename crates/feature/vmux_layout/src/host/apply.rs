@@ -6,7 +6,9 @@ use vmux_ecs::{OperationTarget, OperationTargetRevision};
 use vmux_ecs::{Order, PageOpenRequest};
 
 use crate::TerminalLayoutSpawnRequest;
-use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind};
+#[cfg(test)]
+use crate::protocol::LayoutNode;
+use crate::protocol::{LayoutSnapshot, NodeKind};
 use crate::snapshot::LayoutSnapshotQuery;
 
 use super::archive::TabArchiveLayout;

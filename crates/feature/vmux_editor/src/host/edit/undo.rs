@@ -139,7 +139,10 @@ mod tests {
     impl Doc {
         fn new(text: &str) -> Self {
             let mut app = App::new();
-            app.add_plugins(crate::host::editing::document::DocumentPlugin);
+            app.add_plugins((
+                crate::host::editing::document::DocumentPlugin,
+                crate::host::editing::input::InputPlugin,
+            ));
             let entity = app
                 .world_mut()
                 .spawn(Document::new(
