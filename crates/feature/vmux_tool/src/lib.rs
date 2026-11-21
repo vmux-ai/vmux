@@ -913,31 +913,6 @@ brew "ripgrep"
     }
 
     #[test]
-    fn managed_brewfile_round_trips_homebrew_desired_state() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("Brewfile");
-        std::fs::write(
-            &path,
-            "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nbrew \"old\"\nmas \"Xcode\", id: 497799835\n",
-        )
-        .unwrap();
-        let mut manifest = ToolsManifest::default();
-        manifest.set_package("homebrew-formula", "ripgrep", true);
-        manifest.set_package("homebrew-formula", "fd", true);
-        manifest.set_package("homebrew-cask", "ghostty", true);
-
-        manifest.write_brewfile_to(&path).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nmas \"Xcode\", id: 497799835\nbrew \"ripgrep\"\ncask \"ghostty\"\n"
-        );
-        let mut loaded = ToolsManifest::default();
-        loaded.sync_brewfile(&path).unwrap();
-        assert_eq!(loaded.packages, manifest.packages);
-    }
-
-    #[test]
     fn npm_import_combines_runtime_development_and_optional_dependencies() {
         let imported = NpmManifest::parse(
             r#"{

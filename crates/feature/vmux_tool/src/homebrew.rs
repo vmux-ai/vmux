@@ -1,5 +1,4 @@
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::state::ToolImportRequest;
 use bevy_app::{App, Plugin, Startup, Update};
@@ -363,81 +362,5 @@ impl BrewfileImport {
             }
         }
         None
-    }
-}
-
-impl ToolsManifest {
-    fn set_packages(&mut self, provider: &str, packages: Vec<String>) {
-        if packages.is_empty() {
-            self.packages.remove(provider);
-        } else {
-            self.packages.insert(provider.to_string(), packages);
-        }
-        self.normalize();
-    }
-
-    pub(crate) fn sync_brewfile(&mut self, path: &Path) -> Result<(), String> {
-        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-        let imported = BrewfileImport::parse(&source);
-        self.set_packages("homebrew-formula", imported.formulae);
-        self.set_packages("homebrew-cask", imported.casks);
-        Ok(())
-    }
-
-    pub(crate) fn write_brewfile_to(&self, path: &Path) -> Result<(), String> {
-        let formulae = self
-            .packages
-            .get("homebrew-formula")
-            .cloned()
-            .unwrap_or_default();
-        let casks = self
-            .packages
-            .get("homebrew-cask")
-            .cloned()
-            .unwrap_or_default();
-        if formulae.is_empty() && casks.is_empty() && !path.exists() {
-            return Ok(());
-        }
-        let existing = std::fs::read_to_string(path).unwrap_or_default();
-        let source = Self::merged_brewfile(&existing, &formulae, &casks);
-        vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
-    }
-
-    fn merged_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String {
-        let desired_formulae = formulae.iter().map(String::as_str).collect::<BTreeSet<_>>();
-        let desired_casks = casks.iter().map(String::as_str).collect::<BTreeSet<_>>();
-        let mut seen_formulae = BTreeSet::new();
-        let mut seen_casks = BTreeSet::new();
-        let mut lines = Vec::new();
-        for line in source.lines() {
-            if let Some(name) = BrewfileImport::quoted_call(line, "brew") {
-                if desired_formulae.contains(name.as_str()) {
-                    seen_formulae.insert(name);
-                    lines.push(line.to_string());
-                }
-            } else if let Some(name) = BrewfileImport::quoted_call(line, "cask") {
-                if desired_casks.contains(name.as_str()) {
-                    seen_casks.insert(name);
-                    lines.push(line.to_string());
-                }
-            } else {
-                lines.push(line.to_string());
-            }
-        }
-        for package in formulae {
-            if !seen_formulae.contains(package) {
-                lines.push(format!("brew {:?}", package));
-            }
-        }
-        for package in casks {
-            if !seen_casks.contains(package) {
-                lines.push(format!("cask {:?}", package));
-            }
-        }
-        if lines.is_empty() {
-            String::new()
-        } else {
-            format!("{}\n", lines.join("\n"))
-        }
     }
 }

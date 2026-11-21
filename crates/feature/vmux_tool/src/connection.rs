@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use snapshot::SnapshotContext;
+
 use crate::{McpServerManifest, McpTransport};
 use bevy::app::{App, Plugin};
 use bevy::ecs::system::SystemParam;
@@ -19,8 +21,6 @@ mod auth;
 mod remove;
 mod snapshot;
 mod transport;
-
-use snapshot::SnapshotContext;
 
 pub struct McpConnectionPlugin;
 

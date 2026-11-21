@@ -625,5 +625,6 @@ mod tests {
             .unwrap();
         assert_eq!(persisted.packages["homebrew-formula"], ["fd", "ripgrep"]);
         assert_eq!(persisted.packages["homebrew-cask"], ["ghostty"]);
+        assert_eq!(persisted.packages.len(), 2);
     }
 }
