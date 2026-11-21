@@ -98,6 +98,7 @@ fn observe(
         Paths(path.clone()),
         JobRequest(ReadDirectory {
             path: path.join("packages"),
+            limit: 4096,
         }),
     ));
     if request.refresh_catalogs {
@@ -127,6 +128,12 @@ fn directories(
                 continue;
             }
         };
+        if entries.exists && !entries.is_directory {
+            commands.entity(entity).insert(Finished {
+                error: Some("LSP package root is not a directory".into()),
+            });
+            continue;
+        }
         for entry in &entries.entries {
             if !entry.file_type.is_dir() {
                 continue;
@@ -545,6 +552,7 @@ mod tests {
                 .remove::<JobRequest<ReadDirectory>>()
                 .insert(JobResult::<ReadDirectory>(Ok(Ok(DirectoryEntries {
                     exists: true,
+                    is_directory: inputs.directory.path().is_dir(),
                     entries: vec![entry],
                 }))));
         }
@@ -681,6 +689,37 @@ mod tests {
                 (ToolStatus::Outdated, Some("1".into()))
             );
         }
+    }
+
+    #[test]
+    fn a_non_directory_package_root_refuses_inventory_instead_of_publishing_an_empty_success() {
+        let mut fixture = Fixture::new(true);
+        fixture.app.update();
+        let path = fixture
+            .app
+            .world()
+            .resource::<NativeInputs>()
+            .directory
+            .path()
+            .to_path_buf();
+        let retained = tempfile::tempdir().unwrap();
+        let original = retained.path().join("original");
+        std::fs::rename(&path, &original).unwrap();
+        std::fs::write(&path, b"foreign file").unwrap();
+        let observation = fixture.observe();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Finished>(observation)
+                .unwrap()
+                .error
+                .is_some()
+        );
+        assert!(fixture.items(observation).is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), b"foreign file");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::rename(original, path).unwrap();
     }
 
     #[test]

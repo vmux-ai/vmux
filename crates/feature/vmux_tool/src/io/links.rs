@@ -139,6 +139,7 @@ impl Job for CleanupPath {
 #[derive(Clone)]
 pub struct LinkPath {
     pub source: PathBuf,
+    pub source_may_be_missing: bool,
     pub target: PathBuf,
     pub boundary: Option<PathBuf>,
     pub receipt: PathReceipt,
@@ -151,7 +152,14 @@ impl Job for LinkPath {
         if BlockingCancellation::canceled() {
             return Err("link creation canceled".into());
         }
-        let pair = LinkPaths::new(self.source, self.target, self.boundary)?;
+        let source = if self.boundary.is_some() && !self.source_may_be_missing {
+            self.source
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+        } else {
+            self.source
+        };
+        let pair = LinkPaths::new(source, self.target, self.boundary)?;
         let parent = pair
             .parent(true, &self.receipt)
             .map_err(|error| error.to_string())?;
@@ -319,11 +327,41 @@ impl LinkPaths {
         if !source.is_absolute() || !target.is_absolute() {
             return Err("link paths must be absolute".into());
         }
+        let source = if boundary.is_some() {
+            Self::scoped_source(&source)?
+        } else {
+            vmux_path::PathIdentity::resolve(source).into_path_buf()
+        };
+        if let Some(root) = &boundary {
+            let root = root.canonicalize().map_err(|error| error.to_string())?;
+            if !source.starts_with(&root) {
+                return Err("link source resolves outside the isolated data root".into());
+            }
+        }
         Ok(Self {
-            source: vmux_path::PathIdentity::resolve(source).into_path_buf(),
+            source,
             target: vmux_path::PathIdentity::lexical(target).into_path_buf(),
             boundary,
         })
+    }
+
+    fn scoped_source(source: &Path) -> Result<PathBuf, String> {
+        for ancestor in source.ancestors() {
+            match ancestor.canonicalize() {
+                Ok(resolved) => {
+                    let suffix = source
+                        .strip_prefix(ancestor)
+                        .map_err(|error| error.to_string())?;
+                    return Ok(
+                        vmux_path::PathIdentity::lexical(resolved.join(suffix)).into_path_buf()
+                    );
+                }
+                Err(error)
+                    if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Err("link source has no resolvable ancestor".into())
     }
 
     fn name(&self) -> Result<std::ffi::OsString, String> {
@@ -806,6 +844,141 @@ mod tests {
     use super::*;
 
     #[test]
+    fn isolated_link_sources_refuse_package_and_ancestor_symlinks_and_late_replacement() {
+        for kind in ["package", "ancestor", "late", "missing"] {
+            let directory = tempfile::tempdir().unwrap();
+            let copied = directory.path().join("copied");
+            let packages = copied.join("config/tools/dotfiles");
+            let package = packages.join("shell");
+            let live = directory.path().join("live/shell");
+            std::fs::create_dir_all(&live).unwrap();
+            std::fs::create_dir_all(copied.join("home")).unwrap();
+            std::fs::write(live.join(".shell"), b"live content").unwrap();
+            if kind == "ancestor" {
+                std::fs::create_dir_all(packages.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(live.parent().unwrap(), &packages).unwrap();
+            } else if kind == "package" {
+                std::fs::create_dir_all(&packages).unwrap();
+                std::os::unix::fs::symlink(&live, &package).unwrap();
+            } else {
+                std::fs::create_dir_all(&package).unwrap();
+                std::fs::write(package.join(".shell"), b"copied content").unwrap();
+            }
+            let source = package.join(".shell");
+            let target = copied.join("home/.shell");
+            let request = LinkPath {
+                source: source.clone(),
+                source_may_be_missing: false,
+                target: target.clone(),
+                boundary: Some(copied),
+                receipt: PathReceipt::default(),
+            };
+            if kind == "late" {
+                std::fs::rename(&package, packages.join("retained-shell")).unwrap();
+                std::os::unix::fs::symlink(&live, &package).unwrap();
+            } else if kind == "missing" {
+                let retained = directory.path().join("retained-packages");
+                std::fs::rename(&packages, retained).unwrap();
+                let empty = directory.path().join("empty-live");
+                std::fs::create_dir(&empty).unwrap();
+                std::os::unix::fs::symlink(empty, &packages).unwrap();
+            }
+            assert!(request.run().is_err(), "{kind}");
+            assert!(target.symlink_metadata().is_err());
+            assert_eq!(std::fs::read(live.join(".shell")).unwrap(), b"live content");
+            let ordinary = directory.path().join("ordinary/.shell");
+            LinkPath {
+                source,
+                source_may_be_missing: false,
+                target: ordinary.clone(),
+                boundary: None,
+                receipt: PathReceipt::default(),
+            }
+            .run()
+            .unwrap();
+            if kind == "missing" {
+                assert!(
+                    ordinary
+                        .symlink_metadata()
+                        .unwrap()
+                        .file_type()
+                        .is_symlink()
+                );
+            } else {
+                assert_eq!(std::fs::read(ordinary).unwrap(), b"live content");
+            }
+        }
+    }
+
+    #[test]
+    fn isolated_unlink_and_restoration_keep_the_owned_link_when_its_source_vanished() {
+        let directory = tempfile::tempdir().unwrap();
+        let copied = directory.path().join("copied");
+        let package = copied.join("packages/shell");
+        let source = package.join("file");
+        let target = copied.join("home/file");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(&source, b"copied").unwrap();
+        let receipt = PathReceipt::default();
+        LinkPath {
+            source: source.clone(),
+            source_may_be_missing: false,
+            target: target.clone(),
+            boundary: Some(copied.clone()),
+            receipt: receipt.clone(),
+        }
+        .run()
+        .unwrap();
+        std::fs::remove_file(&source).unwrap();
+        std::fs::remove_dir(&package).unwrap();
+        let removal = PathReceipt::default();
+        assert!(
+            UnlinkPath {
+                source: source.clone(),
+                target: target.clone(),
+                boundary: Some(copied.clone()),
+                receipt: removal.clone()
+            }
+            .run()
+            .unwrap()
+            .0
+        );
+        CleanupPath { receipt: removal }.run().unwrap();
+        let restore = PathReceipt::default();
+        LinkPath {
+            source: source.clone(),
+            source_may_be_missing: true,
+            target: target.clone(),
+            boundary: Some(copied.clone()),
+            receipt: restore.clone(),
+        }
+        .run()
+        .unwrap();
+        let relative = std::fs::read_link(&target).unwrap();
+        assert_eq!(
+            vmux_path::PathIdentity::lexical(target.parent().unwrap().join(relative)),
+            vmux_path::PathIdentity::lexical(&source)
+        );
+        let empty = directory.path().join("foreign-empty");
+        std::fs::create_dir(&empty).unwrap();
+        std::fs::remove_file(&target).unwrap();
+        std::fs::remove_dir(copied.join("packages")).unwrap();
+        std::os::unix::fs::symlink(empty, copied.join("packages")).unwrap();
+        assert!(
+            LinkPath {
+                source,
+                source_may_be_missing: true,
+                target: target.clone(),
+                boundary: Some(copied),
+                receipt: PathReceipt::default()
+            }
+            .run()
+            .is_err()
+        );
+        assert!(target.symlink_metadata().is_err());
+    }
+
+    #[test]
     fn private_directory_drop_defers_native_removal_until_cleanup_acknowledges_it() {
         let directory = tempfile::tempdir().unwrap();
         let parent = NativeDirectory::open(directory.path()).unwrap();
@@ -961,6 +1134,7 @@ mod tests {
 
         fn link(&self) -> LinkPath {
             LinkPath {
+                source_may_be_missing: false,
                 source: self.source.clone(),
                 target: self.target.clone(),
                 boundary: Some(self.directory.path().to_path_buf()),

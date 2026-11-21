@@ -68,7 +68,11 @@ fn observe(
         .unwrap_or_else(|| ProfilePaths::current().agents())
         .join("packages");
     let mut observation = commands.entity(request.observation);
-    observation.insert((Accepted, Listing, JobRequest(ReadDirectory { path })));
+    observation.insert((
+        Accepted,
+        Listing,
+        JobRequest(ReadDirectory { path, limit: 4096 }),
+    ));
     if request.refresh_catalogs {
         observation.insert(WaitingCatalog(catalog.revision));
         refresh.write(RefreshRequest);
@@ -96,6 +100,12 @@ fn directories(
                 continue;
             }
         };
+        if entries.exists && !entries.is_directory {
+            commands.entity(entity).insert(Finished {
+                error: Some("ACP package root is not a directory".into()),
+            });
+            continue;
+        }
         for entry in &entries.entries {
             if !entry.file_type.is_dir() {
                 continue;

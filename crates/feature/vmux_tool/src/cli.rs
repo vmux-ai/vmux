@@ -1366,6 +1366,26 @@ mod tests {
         }
         assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
         assert!(store.lease().is_some());
+        let before = std::fs::read(store.manifest_path()).unwrap();
+        let import = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.import.dotfiles".into(),
+                    arguments: BTreeMap::new(),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(import).is_none() {
+            app.update();
+            assert!(Instant::now() < deadline, "oversized import did not refuse");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(app.world().get::<CliResult>(import).unwrap().0.is_err());
+        assert_eq!(std::fs::read(store.manifest_path()).unwrap(), before);
+        assert!(store.lease().is_some());
     }
 
     #[test]

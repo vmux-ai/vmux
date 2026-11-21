@@ -19,15 +19,17 @@ pub(super) struct CompilerInputs {
     harness: String,
     constructors: BTreeSet<String>,
     mutexes: BTreeSet<String>,
-    methods: BTreeMap<String, BTreeMap<usize, BTreeSet<usize>>>,
+    methods: BTreeMap<String, Vec<Compilation>>,
     parameters: BTreeMap<String, usize>,
     temporaries: BTreeSet<String>,
-    written: BTreeMap<(String, Vec<String>), Option<usize>>,
+    written: Vec<(String, Vec<String>, Option<usize>)>,
     projects: BTreeMap<String, toml::Value>,
+    project_writes: BTreeMap<String, Vec<SourceWrite>>,
     local_paths: BTreeMap<String, (String, Vec<String>)>,
     fixed_paths: BTreeMap<String, PathBuf>,
     source_paths: BTreeMap<String, PathBuf>,
-    local_temporaries: BTreeSet<String>,
+    local_temporaries: BTreeMap<String, String>,
+    next_temporary: usize,
     source_directory: PathBuf,
     method: String,
     constructor: bool,
@@ -300,6 +302,7 @@ impl CompilerInputs {
         for item in &file.items {
             if let Item::Static(item) = item
                 && Self::testing(&item.attrs)
+                && Self::enabled(&item.attrs, false)
                 && self.unit_mutex(item)
             {
                 self.mutexes.insert(item.ident.to_string());
@@ -527,10 +530,21 @@ impl CompilerInputs {
         self.local_paths.clear();
         self.fixed_paths.clear();
         self.local_temporaries.clear();
+        self.written.clear();
+        for input in &function.sig.inputs {
+            if let syn::FnArg::Typed(input) = input
+                && let Pat::Ident(binding) = input.pat.as_ref()
+            {
+                self.mutexes.remove(&binding.ident.to_string());
+            }
+        }
+        self.scope_items(&function.block);
         for statement in &function.block.stmts {
             if let Stmt::Local(local) = statement
                 && let Some(init) = &local.init
                 && init.diverge.is_none()
+                && self.effect_enabled(&local.attrs)
+                && self.effect_enabled(Self::expression_attributes(&init.expr))
                 && self.synchronized(&init.expr)
             {
                 if let Pat::Ident(binding) = &local.pat {
@@ -580,14 +594,32 @@ impl CompilerInputs {
                 .path
                 .get_ident()
                 .ok_or("Compiler project field is unresolved")?;
+            let identity = self
+                .local_temporaries
+                .get(&local.to_string())
+                .ok_or("Compiler project temporary is unresolved")?;
             let manifest = self
                 .projects
-                .get(&local.to_string())
+                .get(identity)
                 .ok_or("Compiler project has no proven manifest")?;
             if let Some(previous) = projects.insert(name.to_string(), manifest.clone())
                 && previous != *manifest
             {
                 return Err("Compiler project constructors use different targets".into());
+            }
+            let writes: Vec<_> = self
+                .written
+                .iter()
+                .filter(|(root, _, _)| root == identity)
+                .map(|(_, path, source)| SourceWrite {
+                    path: path.clone(),
+                    source: *source,
+                })
+                .collect();
+            if let Some(previous) = self.project_writes.insert(name.to_string(), writes.clone())
+                && previous != writes
+            {
+                return Err("Compiler project constructors create different source paths".into());
             }
             owned = true;
         }
@@ -705,7 +737,7 @@ impl CompilerInputs {
                     }
                     Expr::Path(path) => {
                         let name = path.path.get_ident()?.to_string();
-                        self.local_temporaries.contains(&name).then_some(name)?
+                        self.local_temporaries.get(&name)?.clone()
                     }
                     _ => return None,
                 };
@@ -843,29 +875,31 @@ impl CompilerInputs {
         let Some((kind, name)) = selected else {
             return;
         };
-        for path in self.target_paths(&directory, &kind, &name) {
-            let key = (directory.clone(), path.clone());
-            let Some(Some(position)) = self.written.get(&key) else {
-                continue;
-            };
-            let mut parameters = BTreeSet::new();
-            for part in &path {
-                for (index, value) in part.split('\0').enumerate() {
-                    if index % 2 == 1 {
-                        let Ok(position) = value.parse::<usize>() else {
-                            return;
-                        };
-                        parameters.insert(position);
-                    }
-                }
+        let Some(manifest) = self.projects.get(&directory) else {
+            return;
+        };
+        let mut writes = self
+            .project_writes
+            .get(&directory)
+            .cloned()
+            .unwrap_or_default();
+        for (root, path, source) in &self.written {
+            if root == &directory {
+                writes.push(SourceWrite {
+                    path: path.clone(),
+                    source: *source,
+                });
             }
-            self.methods
-                .entry(self.method.clone())
-                .or_default()
-                .entry(*position)
-                .or_default()
-                .extend(parameters);
         }
+        self.methods
+            .entry(self.method.clone())
+            .or_default()
+            .push(Compilation {
+                kind,
+                name,
+                manifest: manifest.clone(),
+                writes,
+            });
     }
 
     fn dylint_arguments(&self, arguments: &[&Expr]) -> bool {
@@ -896,67 +930,6 @@ impl CompilerInputs {
             index += 1;
         }
         library
-    }
-
-    fn target_paths(&self, directory: &str, kind: &str, name: &str) -> Vec<Vec<String>> {
-        let Some(manifest) = self.projects.get(directory) else {
-            return Vec::new();
-        };
-        let group = match kind {
-            "--example" => "example",
-            "--bin" => "bin",
-            "--lib" => "lib",
-            _ => return Vec::new(),
-        };
-        if group == "lib" {
-            let path = manifest
-                .get("lib")
-                .and_then(|value| value.get("path"))
-                .and_then(toml::Value::as_str)
-                .unwrap_or("src/lib.rs");
-            return Self::relative(path).into_iter().collect();
-        }
-        if let Some(targets) = manifest.get(group).and_then(toml::Value::as_array) {
-            if name.contains('\0') && !targets.is_empty() {
-                return Vec::new();
-            }
-            for target in targets {
-                if target.get("name").and_then(toml::Value::as_str) != Some(name) {
-                    continue;
-                }
-                if let Some(path) = target.get("path").and_then(toml::Value::as_str) {
-                    return Self::relative(path).into_iter().collect();
-                }
-            }
-        }
-        let automatic = if group == "example" {
-            "autoexamples"
-        } else {
-            "autobins"
-        };
-        if manifest
-            .get("package")
-            .and_then(|value| value.get(automatic))
-            .and_then(toml::Value::as_bool)
-            == Some(false)
-        {
-            return Vec::new();
-        }
-        let parts = match Self::relative(name) {
-            Some(parts) if parts.len() == 1 => parts,
-            _ => return Vec::new(),
-        };
-        let prefix = if group == "example" {
-            vec!["examples".into()]
-        } else {
-            vec!["src".into(), "bin".into()]
-        };
-        let mut file = prefix.clone();
-        file.push(format!("{}.rs", parts[0]));
-        let mut main = prefix;
-        main.push(parts[0].clone());
-        main.push("main.rs".into());
-        vec![file, main]
     }
 
     fn filesystem(&mut self, call: &syn::ExprCall, successful: bool) -> bool {
@@ -1004,9 +977,6 @@ impl CompilerInputs {
             }
             return true;
         }
-        if self.constructor {
-            return true;
-        }
         let position = if successful && operation == "std::fs::write" {
             call.args.iter().nth(1).and_then(|value| match value {
                 Expr::Path(path) => self
@@ -1018,7 +988,7 @@ impl CompilerInputs {
         } else {
             None
         };
-        self.written.insert(destination, position);
+        self.written.push((destination.0, destination.1, position));
         true
     }
 
@@ -1039,10 +1009,99 @@ impl CompilerInputs {
         self.uncertain = true;
     }
 
+    fn scope_items(&mut self, block: &syn::Block) {
+        for statement in &block.stmts {
+            let Stmt::Item(item) = statement else {
+                continue;
+            };
+            let (name, attributes) = match item {
+                Item::Static(value) => (&value.ident, &value.attrs),
+                Item::Const(value) => (&value.ident, &value.attrs),
+                _ => continue,
+            };
+            if !self.effect_enabled(attributes) {
+                continue;
+            }
+            self.mutexes.remove(&name.to_string());
+            if let Item::Static(value) = item
+                && self.unit_mutex(value)
+            {
+                self.mutexes.insert(name.to_string());
+            }
+        }
+    }
+
+    fn effect_enabled(&mut self, attributes: &[syn::Attribute]) -> bool {
+        if Self::enabled(attributes, false) {
+            return true;
+        }
+        if !self.harness.is_empty() && Self::enabled(attributes, true) {
+            self.unknown();
+        }
+        false
+    }
+
+    fn expression_attributes(expression: &Expr) -> &[syn::Attribute] {
+        match expression {
+            Expr::Array(value) => &value.attrs,
+            Expr::Assign(value) => &value.attrs,
+            Expr::Async(value) => &value.attrs,
+            Expr::Await(value) => &value.attrs,
+            Expr::Binary(value) => &value.attrs,
+            Expr::Block(value) => &value.attrs,
+            Expr::Break(value) => &value.attrs,
+            Expr::Call(value) => &value.attrs,
+            Expr::Cast(value) => &value.attrs,
+            Expr::Closure(value) => &value.attrs,
+            Expr::Const(value) => &value.attrs,
+            Expr::Continue(value) => &value.attrs,
+            Expr::Field(value) => &value.attrs,
+            Expr::ForLoop(value) => &value.attrs,
+            Expr::Group(value) => &value.attrs,
+            Expr::If(value) => &value.attrs,
+            Expr::Index(value) => &value.attrs,
+            Expr::Infer(value) => &value.attrs,
+            Expr::Let(value) => &value.attrs,
+            Expr::Lit(value) => &value.attrs,
+            Expr::Loop(value) => &value.attrs,
+            Expr::Macro(value) => &value.attrs,
+            Expr::Match(value) => &value.attrs,
+            Expr::MethodCall(value) => &value.attrs,
+            Expr::Paren(value) => &value.attrs,
+            Expr::Path(value) => &value.attrs,
+            Expr::Range(value) => &value.attrs,
+            Expr::RawAddr(value) => &value.attrs,
+            Expr::Reference(value) => &value.attrs,
+            Expr::Repeat(value) => &value.attrs,
+            Expr::Return(value) => &value.attrs,
+            Expr::Struct(value) => &value.attrs,
+            Expr::Try(value) => &value.attrs,
+            Expr::TryBlock(value) => &value.attrs,
+            Expr::Tuple(value) => &value.attrs,
+            Expr::Unary(value) => &value.attrs,
+            Expr::Unsafe(value) => &value.attrs,
+            Expr::While(value) => &value.attrs,
+            Expr::Yield(value) => &value.attrs,
+            _ => &[],
+        }
+    }
+
     fn local_origin(&mut self, name: &str, expression: &Expr) {
+        let temporary = match expression {
+            Expr::Path(path) => path
+                .path
+                .get_ident()
+                .and_then(|name| self.local_temporaries.get(&name.to_string()))
+                .cloned(),
+            _ => None,
+        };
         self.local_paths.remove(name);
         self.fixed_paths.remove(name);
         self.local_temporaries.remove(name);
+        if let Some(temporary) = temporary {
+            self.local_temporaries.insert(name.to_owned(), temporary);
+            return;
+        }
         let origin = match expression {
             Expr::MethodCall(call) if Self::guarded(call) => call.receiver.as_ref(),
             _ => expression,
@@ -1053,7 +1112,9 @@ impl CompilerInputs {
         {
             match self.external(&function.path).as_str() {
                 "tempfile::tempdir" if !std::ptr::eq(origin, expression) => {
-                    self.local_temporaries.insert(name.to_owned());
+                    let identity = format!("temporary:{}", self.next_temporary);
+                    self.next_temporary += 1;
+                    self.local_temporaries.insert(name.to_owned(), identity);
                     return;
                 }
                 "std::path::PathBuf::from" => {
@@ -1082,6 +1143,35 @@ impl CompilerInputs {
         for attribute in attributes {
             if attribute.path().is_ident("ignore") {
                 return false;
+            }
+            if attribute.path().is_ident("cfg_attr")
+                && let syn::Meta::List(list) = &attribute.meta
+            {
+                let Ok(values) =
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+                        .parse2(list.tokens.clone())
+                else {
+                    return false;
+                };
+                let Some(condition) = values
+                    .first()
+                    .and_then(|value| syn::parse2::<Expr>(value.to_token_stream()).ok())
+                else {
+                    return false;
+                };
+                match Self::condition(&condition) {
+                    Some(false) => continue,
+                    None => return unknown,
+                    Some(true) => {
+                        let mut nested = Vec::new();
+                        for value in values.iter().skip(1) {
+                            nested.push(syn::parse_quote!(#[#value]));
+                        }
+                        if !Self::enabled(&nested, unknown) {
+                            return false;
+                        }
+                    }
+                }
             }
             if attribute.path().is_ident("cfg")
                 && let syn::Meta::List(list) = &attribute.meta
@@ -1125,6 +1215,22 @@ impl CompilerInputs {
         }
     }
 
+    fn boolean(expression: &Expr) -> Option<bool> {
+        match expression {
+            Expr::Lit(value) => match &value.lit {
+                syn::Lit::Bool(value) => Some(value.value),
+                _ => None,
+            },
+            Expr::Paren(value) => Self::boolean(&value.expr),
+            Expr::Group(value) => Self::boolean(&value.expr),
+            Expr::Block(value) => match value.block.stmts.last() {
+                Some(Stmt::Expr(value, None)) => Self::boolean(value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn refuse_targets(&self, manifest: &Path) -> Result<(), String> {
         let source = Self::regular(manifest)?;
         let metadata: toml::Value = toml::from_str(&source).map_err(|error| error.to_string())?;
@@ -1150,7 +1256,129 @@ impl CompilerInputs {
     }
 }
 
+struct Compilation {
+    kind: String,
+    name: String,
+    manifest: toml::Value,
+    writes: Vec<SourceWrite>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct SourceWrite {
+    path: Vec<String>,
+    source: Option<usize>,
+}
+
+impl Compilation {
+    fn source(&self, arguments: &[Option<String>]) -> Option<usize> {
+        let name = Self::concrete(&self.name, arguments)?;
+        let targets = self.target_paths(&name);
+        let mut written = BTreeMap::new();
+        for write in &self.writes {
+            let mut resolved = Vec::new();
+            for part in &write.path {
+                let part = Self::concrete(part, arguments)?;
+                resolved.extend(CompilerInputs::relative(&part)?);
+            }
+            written.insert(resolved, write.source);
+        }
+        let mut selected = None;
+        for target in targets {
+            let Some(source) = written.get(&target) else {
+                continue;
+            };
+            if selected.is_some() {
+                return None;
+            }
+            selected = Some(*source);
+        }
+        selected.flatten()
+    }
+
+    fn concrete(value: &str, arguments: &[Option<String>]) -> Option<String> {
+        let mut resolved = String::new();
+        for (index, part) in value.split('\0').enumerate() {
+            if index % 2 == 0 {
+                resolved.push_str(part);
+            } else {
+                let position = part.parse::<usize>().ok()?;
+                resolved.push_str(arguments.get(position)?.as_deref()?);
+            }
+        }
+        Some(resolved)
+    }
+
+    fn target_paths(&self, name: &str) -> Vec<Vec<String>> {
+        let manifest = &self.manifest;
+        let kind = self.kind.as_str();
+        let group = match kind {
+            "--example" => "example",
+            "--bin" => "bin",
+            "--lib" => "lib",
+            _ => return Vec::new(),
+        };
+        if group == "lib" {
+            let path = manifest
+                .get("lib")
+                .and_then(|value| value.get("path"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("src/lib.rs");
+            return CompilerInputs::relative(path).into_iter().collect();
+        }
+        if let Some(targets) = manifest.get(group).and_then(toml::Value::as_array) {
+            for target in targets {
+                if target.get("name").and_then(toml::Value::as_str) != Some(name) {
+                    continue;
+                }
+                if let Some(path) = target.get("path").and_then(toml::Value::as_str) {
+                    return CompilerInputs::relative(path).into_iter().collect();
+                }
+            }
+        }
+        let automatic = if group == "example" {
+            "autoexamples"
+        } else {
+            "autobins"
+        };
+        if manifest
+            .get("package")
+            .and_then(|value| value.get(automatic))
+            .and_then(toml::Value::as_bool)
+            == Some(false)
+        {
+            return Vec::new();
+        }
+        let parts = match CompilerInputs::relative(name) {
+            Some(parts) if parts.len() == 1 => parts,
+            _ => return Vec::new(),
+        };
+        let prefix = if group == "example" {
+            vec!["examples".into()]
+        } else {
+            vec!["src".into(), "bin".into()]
+        };
+        let mut file = prefix.clone();
+        file.push(format!("{}.rs", parts[0]));
+        let mut main = prefix;
+        main.push(parts[0].clone());
+        main.push("main.rs".into());
+        vec![file, main]
+    }
+}
+
 impl<'ast> Visit<'ast> for CompilerInputs {
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        let attributes = Self::expression_attributes(expression);
+        let enabled = if self.harness.is_empty() {
+            Self::enabled(attributes, true)
+        } else {
+            self.effect_enabled(attributes)
+        };
+        if enabled {
+            visit::visit_expr(self, expression);
+        }
+    }
+
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
         self.unknown();
         if !self.method.is_empty() || self.constructor {
@@ -1160,7 +1388,10 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_impl_item_fn(&mut self, function: &'ast syn::ImplItemFn) {
-        if Self::constructor(function, &self.harness) || !Self::enabled(&function.attrs, false) {
+        if Self::constructor(function, &self.harness)
+            || function.sig.asyncness.is_some()
+            || !Self::enabled(&function.attrs, false)
+        {
             return;
         }
         let projects = self.projects.clone();
@@ -1233,9 +1464,42 @@ impl<'ast> Visit<'ast> for CompilerInputs {
         visit::visit_expr_try(self, expression);
     }
 
-    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    fn visit_expr_closure(&mut self, expression: &'ast syn::ExprClosure) {
+        if self.harness.is_empty() {
+            visit::visit_expr_closure(self, expression);
+        }
+    }
 
-    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+    fn visit_expr_async(&mut self, expression: &'ast syn::ExprAsync) {
+        if self.harness.is_empty() {
+            visit::visit_expr_async(self, expression);
+        }
+    }
+
+    fn visit_expr_await(&mut self, expression: &'ast syn::ExprAwait) {
+        if self.harness.is_empty() {
+            visit::visit_expr_await(self, expression);
+        } else {
+            self.unknown();
+        }
+    }
+
+    fn visit_expr_binary(&mut self, expression: &'ast syn::ExprBinary) {
+        if self.harness.is_empty()
+            || !matches!(expression.op, syn::BinOp::And(_) | syn::BinOp::Or(_))
+        {
+            visit::visit_expr_binary(self, expression);
+            return;
+        }
+        self.visit_expr(&expression.left);
+        let Some(value) = Self::boolean(&expression.left) else {
+            self.unknown();
+            return;
+        };
+        if value == matches!(expression.op, syn::BinOp::And(_)) {
+            self.visit_expr(&expression.right);
+        }
+    }
 
     fn visit_expr_while(&mut self, expression: &'ast syn::ExprWhile) {
         if self.harness.is_empty() {
@@ -1254,6 +1518,9 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_local(&mut self, local: &'ast syn::Local) {
+        if !self.harness.is_empty() && !self.effect_enabled(&local.attrs) {
+            return;
+        }
         if let Pat::Ident(binding) = &local.pat {
             self.mutexes.remove(&binding.ident.to_string());
             let name = binding.ident.to_string();
@@ -1285,6 +1552,9 @@ impl<'ast> Visit<'ast> for CompilerInputs {
         let fixed_paths = self.fixed_paths.clone();
         let local_temporaries = self.local_temporaries.clone();
         let mutexes = self.mutexes.clone();
+        if !self.harness.is_empty() {
+            self.scope_items(block);
+        }
         for statement in &block.stmts {
             self.visit_stmt(statement);
             if matches!(
@@ -1367,6 +1637,12 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                 }
                 Stmt::Expr(Expr::Return(_) | Expr::Break(_) | Expr::Continue(_), _) => break,
                 Stmt::Expr(Expr::MethodCall(call), _) => {
+                    if !self.effect_enabled(&call.attrs) {
+                        if self.uncertain {
+                            self.bindings.clear();
+                        }
+                        continue;
+                    }
                     let Expr::Path(receiver) = call.receiver.as_ref() else {
                         continue;
                     };
@@ -1378,32 +1654,56 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                     {
                         continue;
                     }
-                    let Some(positions) = self.methods.get(&call.method.to_string()) else {
+                    let Some(compilations) = self.methods.get(&call.method.to_string()) else {
                         continue;
                     };
-                    for (position, dependencies) in positions {
-                        let Some(Expr::Path(argument)) = call.args.iter().nth(*position) else {
+                    for input in &inputs.elems {
+                        let Expr::Tuple(tuple) = input else {
                             continue;
                         };
-                        let Some(argument) = argument.path.get_ident() else {
-                            continue;
-                        };
-                        if invalid.contains(&argument.to_string()) {
-                            continue;
+                        let mut arguments = Vec::new();
+                        for argument in &call.args {
+                            let value = match argument {
+                                Expr::Path(value) => {
+                                    let Some(name) = value.path.get_ident() else {
+                                        arguments.push(None);
+                                        continue;
+                                    };
+                                    if invalid.contains(&name.to_string()) {
+                                        arguments.push(None);
+                                        continue;
+                                    }
+                                    let position = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *name));
+                                    position.and_then(|position| tuple.elems.iter().nth(position))
+                                }
+                                value => Some(value),
+                            };
+                            let literal = match value {
+                                Some(Expr::Lit(value)) => match &value.lit {
+                                    syn::Lit::Str(value) if !value.value().contains('\0') => {
+                                        Some(value.value())
+                                    }
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+                            arguments.push(literal);
                         }
-                        let Some(index) = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *argument)) else { continue; };
-                        for input in &inputs.elems {
-                            if let Expr::Tuple(tuple) = input
-                                && dependencies.iter().all(|position| {
-                                    let Some(Expr::Path(argument)) = call.args.iter().nth(*position) else { return false; };
-                                    let Some(argument) = argument.path.get_ident() else { return false; };
-                                    if invalid.contains(&argument.to_string()) { return false; }
-                                    let Some(index) = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *argument)) else { return false; };
-                                    let Some(Expr::Lit(value)) = tuple.elems.iter().nth(index) else { return false; };
-                                    let syn::Lit::Str(value) = &value.lit else { return false; };
-                                    matches!(Self::relative(&value.value()), Some(parts) if parts.len() == 1 && !parts[0].contains('\0'))
-                                })
-                                && let Some(Expr::Macro(value)) = tuple.elems.iter().nth(index)
+                        for compilation in compilations {
+                            let Some(position) = compilation.source(&arguments) else {
+                                continue;
+                            };
+                            let Some(Expr::Path(argument)) = call.args.iter().nth(position) else {
+                                continue;
+                            };
+                            let Some(argument) = argument.path.get_ident() else {
+                                continue;
+                            };
+                            if invalid.contains(&argument.to_string()) {
+                                continue;
+                            }
+                            let Some(index) = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *argument)) else { continue; };
+                            if let Some(Expr::Macro(value)) = tuple.elems.iter().nth(index)
                                 && value.mac.path.is_ident("include_str")
                                 && let Ok(path) =
                                     syn::parse2::<syn::LitStr>(value.mac.tokens.clone())

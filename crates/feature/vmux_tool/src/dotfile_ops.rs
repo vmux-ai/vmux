@@ -972,7 +972,12 @@ impl Package {
 
 fn discover(
     work: Query<
-        (Entity, &NativePaths, &OperationState),
+        (
+            Entity,
+            &NativePaths,
+            &OperationState,
+            Has<Captured<ImportAvailableDotfiles>>,
+        ),
         (
             Or<(
                 With<Captured<DiscoverDotfilePackages>>,
@@ -985,14 +990,14 @@ fn discover(
     >,
     mut commands: Commands,
 ) {
-    for (entity, paths, state) in &work {
+    for (entity, paths, state, importing) in &work {
         if *state == OperationState::Running {
             commands.entity(entity).insert((
                 Selected,
                 Discovery,
                 JobRequest(ReadDirectory {
                     path: paths.packages.clone(),
-                    limit: 100_000,
+                    limit: if importing { 4096 } else { 100_000 },
                 }),
             ));
         }
@@ -1357,6 +1362,7 @@ fn cancel_files(
                 With<AdoptRoot>,
             )>,
             Without<Work>,
+            Without<CleaningPaths>,
         ),
     >,
 ) {
@@ -1455,6 +1461,7 @@ fn mutate(
                 Linking,
                 JobRequest(LinkPath {
                     source: source.0.clone(),
+                    source_may_be_missing: false,
                     target: target.0.clone(),
                     boundary: paths.boundary.clone(),
                     receipt,
@@ -1682,6 +1689,7 @@ fn rollback(
                 Linking,
                 JobRequest(LinkPath {
                     source: source.0.clone(),
+                    source_may_be_missing: true,
                     target: target.0.clone(),
                     boundary: paths.boundary.clone(),
                     receipt,
@@ -1811,17 +1819,25 @@ fn recovered_paths(
         (
             Entity,
             &ChildOf,
-            &JobResult<CleanupPath>,
+            Option<&JobResult<CleanupPath>>,
+            Has<JobRequest<CleanupPath>>,
             Has<CleaningReversePaths>,
         ),
         With<CleaningPaths>,
     >,
+    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
     mut commands: Commands,
 ) {
-    for (file, parent, result, reverse) in &files {
+    for (file, parent, result, requested, reverse) in &files {
+        if requested || captures.iter().any(|capture| capture.entity() == file) {
+            continue;
+        }
         commands
             .entity(file)
             .remove::<(CleaningPaths, CleaningReversePaths, JobResult<CleanupPath>)>();
+        let Some(result) = result else {
+            continue;
+        };
         if let Ok(Ok(_)) = &result.0 {
             if reverse {
                 commands.entity(file).remove::<ReverseReceipt>();
@@ -3182,6 +3198,131 @@ mod tests {
             );
         }
         assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn queued_path_cleanup_survives_cancellation_and_suppressed_native_results() {
+        for suppress in [false, true] {
+            let mut fixture = Fixture::new();
+            let root = fixture.package("shell");
+            let link = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.cleanup.setup").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    LinkDotfilePackage::new("shell"),
+                ))
+                .id();
+            fixture.finish(link);
+            let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+            let sentinel = fixture.store.home().join("unrelated");
+            std::fs::write(&sentinel, b"foreign content").unwrap();
+            fixture.app.insert_resource(vmux_ecs::BlockingRuntime::new(
+                vmux_ecs::blocking::BlockingPool::new("cleanup-pressure", 1, 8),
+                vmux_ecs::blocking::BlockingPool::new("unused", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("unused", 0, 0),
+            ));
+            let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+            let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+            let receiver = std::sync::Mutex::new(Some(release_rx));
+            let held = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let captured = held.clone();
+            fixture.app.add_observer(
+                move |_: On<Add, JobRequest<CleanupPath>>,
+                      runtime: Res<vmux_ecs::BlockingRuntime>| {
+                    let Some(receiver) = receiver.lock().unwrap().take() else {
+                        return;
+                    };
+                    let started = started_tx.clone();
+                    *captured.lock().unwrap() = Some(
+                        runtime
+                            .spawn(None, move || {
+                                started.send(()).unwrap();
+                                receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+                            })
+                            .unwrap(),
+                    );
+                },
+            );
+            let disable = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    fixture.store.clone(),
+                    CliInvocation {
+                        command: "tool.unlink".into(),
+                        arguments: std::collections::BTreeMap::from([(
+                            "package".into(),
+                            vec![std::ffi::OsString::from("shell")],
+                        )]),
+                    },
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let file = loop {
+                fixture.app.update();
+                let found = fixture
+                    .app
+                    .world_mut()
+                    .query_filtered::<(Entity, &ForwardReceipt), With<CleaningPaths>>()
+                    .iter(fixture.app.world())
+                    .find(|(_, receipt)| receipt.0.pending())
+                    .map(|(entity, _)| entity);
+                if let Some(file) = found {
+                    break file;
+                }
+                assert!(Instant::now() < deadline, "native cleanup was not queued");
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(disable)
+                .insert(OperationState::Canceled);
+            if suppress {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(file)
+                    .insert(OperationState::Canceled);
+            }
+            for _ in 0..3 {
+                fixture.app.update();
+            }
+            assert!(fixture.store.lease().is_none());
+            assert!(fixture.app.world().get::<CliResult>(disable).is_none());
+            release_tx.send(()).unwrap();
+            fixture.finish(disable);
+            assert_eq!(
+                std::fs::read(fixture.store.manifest_path()).unwrap(),
+                before
+            );
+            assert_eq!(std::fs::read(&sentinel).unwrap(), b"foreign content");
+            for path in [".zshrc", ".config/editor"] {
+                assert_eq!(
+                    vmux_path::PathIdentity::resolve(fixture.store.home().join(path)),
+                    vmux_path::PathIdentity::resolve(root.join(path))
+                );
+            }
+            for path in [
+                fixture.store.home().to_path_buf(),
+                fixture.store.home().join(".config"),
+            ] {
+                for entry in std::fs::read_dir(path).unwrap() {
+                    assert!(
+                        !entry
+                            .unwrap()
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".vmux-link-")
+                    );
+                }
+            }
+            assert!(fixture.store.lease().is_some());
+            drop(held);
+        }
     }
 
     #[test]
