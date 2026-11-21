@@ -11,6 +11,7 @@ use crate::snapshot::LayoutSnapshotQuery;
 
 use super::archive::TabArchiveLayout;
 use current::CurrentLayout;
+use mutation::Topology;
 
 mod current;
 mod intent;
@@ -137,7 +138,7 @@ fn cancel(
 fn commit(
     world: &mut World,
     operations: &mut QueryState<(Entity, &Order), (With<Reconcile>, Without<Completed>)>,
-    params: &mut SystemState<(CurrentLayout, TabArchiveLayout, Commands)>,
+    params: &mut SystemState<(CurrentLayout, TabArchiveLayout, Topology)>,
 ) {
     let mut pending = Vec::new();
     for (entity, order) in operations.iter(world) {
@@ -165,10 +166,10 @@ fn commit(
             }
         };
         {
-            let (layout, archive, mut commands) = params.get_mut(world).unwrap();
+            let (layout, archive, mut topology) = params.get_mut(world).unwrap();
             for &target in &previous {
                 if !retained.contains(&target) && layout.is_stack(target) {
-                    archive.capture_stack(target, &mut commands);
+                    archive.capture_stack(target, &mut topology.commands);
                 }
             }
         }
@@ -177,21 +178,28 @@ fn commit(
         for &target in &retained {
             world.entity_mut(target).remove::<ChildOf>();
         }
-        let mut tabs = Vec::new();
         let mut active = None;
-        for tab in &intent.snapshot.tabs {
-            let target = intent.tab(world, tab, scope);
-            let (root, zoomed) = intent.node(world, &tab.root, target, roots.get(&target).copied());
-            intent.children(world, target, &[root]);
-            intent.zoom(world, target, zoomed);
-            tabs.push(target);
-            if tab.is_active {
-                active = Some(target);
+        {
+            let (_, _, mut topology) = params.get_mut(world).unwrap();
+            let window = topology.window(scope);
+            let mut tabs = Vec::new();
+            for tab in &intent.snapshot.tabs {
+                let target = topology.tab(tab, scope);
+                let (root, zoomed, hidden) =
+                    topology.node(&tab.root, target, roots.get(&target).copied(), true, window);
+                topology.children(target, &[root]);
+                topology.zoom(target, zoomed, hidden);
+                tabs.push(target);
+                if tab.is_active {
+                    active = Some(target);
+                }
+            }
+            if let Some(scope) = scope {
+                topology.children(scope, &tabs);
             }
         }
-        if let Some(scope) = scope {
-            intent.children(world, scope, &tabs);
-        }
+        params.apply(world);
+        world.flush();
         for target in previous.into_iter().rev() {
             if !retained.contains(&target) && world.get_entity(target).is_ok() {
                 world.despawn(target);
@@ -200,7 +208,11 @@ fn commit(
         if let Some(active) = active {
             world.trigger(vmux_ecs::ActivateRequest { entity: active });
         }
-        intent.focus(world);
+        {
+            let (_, _, mut topology) = params.get_mut(world).unwrap();
+            topology.focus(&intent.snapshot.focused);
+        }
+        params.apply(world);
         world.flush();
         world.entity_mut(entity).insert(Completed(Ok(())));
     }
@@ -1920,14 +1932,6 @@ mod tests {
     #[derive(Component)]
     struct UnsavedText(String);
 
-    struct TransferFixturePlugin;
-
-    impl Plugin for TransferFixturePlugin {
-        fn build(&self, app: &mut App) {
-            app.add_observer(transfer_text);
-        }
-    }
-
     fn transfer_text(
         request: On<vmux_ecs::page::ArchiveCaptureRequest>,
         children: Query<&Children>,
@@ -2167,7 +2171,7 @@ mod tests {
     #[test]
     fn deleting_an_omitted_page_flushes_archive_transfer_before_despawn() {
         let mut fixture = ApplyHarness::new();
-        fixture.app.add_plugins(TransferFixturePlugin);
+        fixture.app.add_plugins(ReconciliationFixturePlugin);
         let metadata = vmux_ecs::PageMetadata {
             url: "file:///work.txt".into(),
             title: "Work".into(),
@@ -2362,11 +2366,11 @@ mod tests {
     #[derive(Component)]
     struct RebindWindowAfterAccept(Entity);
 
-    struct InterferenceFixturePlugin;
+    struct ReconciliationFixturePlugin;
 
-    impl Plugin for InterferenceFixturePlugin {
+    impl Plugin for ReconciliationFixturePlugin {
         fn build(&self, app: &mut App) {
-            app.add_systems(
+            app.add_observer(transfer_text).add_systems(
                 Update,
                 (reparent_after_accept, rebind_window_after_accept)
                     .after(Accept)
@@ -2403,7 +2407,7 @@ mod tests {
     #[test]
     fn topology_changed_after_acceptance_refuses_before_any_other_effect() {
         let mut fixture = ApplyHarness::new();
-        fixture.app.add_plugins(InterferenceFixturePlugin);
+        fixture.app.add_plugins(ReconciliationFixturePlugin);
         let foreign = fixture.app.world_mut().spawn(crate::space::Space).id();
         fixture
             .app
@@ -2718,7 +2722,7 @@ mod tests {
     #[test]
     fn window_binding_changed_after_acceptance_refuses_before_mutation() {
         let mut fixture = ApplyHarness::new();
-        fixture.app.add_plugins(InterferenceFixturePlugin);
+        fixture.app.add_plugins(ReconciliationFixturePlugin);
         let first = fixture.app.world_mut().spawn_empty().id();
         let second = fixture.app.world_mut().spawn_empty().id();
         let host = fixture
@@ -2822,6 +2826,55 @@ mod tests {
                 .name,
             "Work"
         );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(fixture.stack)
+                .unwrap()
+                .parent(),
+            fixture.pane
+        );
+    }
+    #[test]
+    fn coupled_split_direction_and_weight_commit_to_the_same_render_node() {
+        let mut fixture = ApplyHarness::new();
+        let nested = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(PaneSplitDirection::Row),
+                ChildOf(fixture.tab),
+            ))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.pane)
+            .insert(ChildOf(nested));
+        let mut snapshot = fixture.intent();
+        snapshot.tabs[0].root = ApplyHarness::split(
+            None,
+            vec![LayoutNode::Split {
+                id: Some(NodeKind::Split.id(nested.to_bits())),
+                direction: SplitDirection::Column,
+                flex_weights: vec![1.0],
+                children: vec![ApplyHarness::pane(
+                    Some(&NodeKind::Pane.id(fixture.pane.to_bits())),
+                    vec![StackDto {
+                        id: Some(NodeKind::Stack.id(fixture.stack.to_bits())),
+                        ..default()
+                    }],
+                )],
+            }],
+            vec![3.0],
+        );
+        fixture.submit([1; 16], snapshot);
+        fixture.app.update();
+        assert!(fixture.response([1; 16]).is_ok());
+        let render = fixture.app.world().get::<Node>(nested).unwrap();
+        assert_eq!(render.flex_direction, FlexDirection::Column);
+        assert_eq!(render.flex_grow, 3.0);
         assert_eq!(
             fixture
                 .app
