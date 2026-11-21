@@ -14,10 +14,16 @@ inputs:
   tree:
     required: false
     description: Expected merged Git tree
+  runtime-sha256:
+    required: false
+    default: ""
+    description: Checksum of this run's verified Linux CI runtime
 runs:
   using: composite
   steps:
     - uses: ./.github/actions/setup-ci
+      with:
+        runtime-sha256: ${{ inputs.runtime-sha256 }}
     - id: checkout
       shell: bash
       env:

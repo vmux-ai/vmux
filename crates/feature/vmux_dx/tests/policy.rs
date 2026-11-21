@@ -3,6 +3,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::rc::Rc;
 
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
@@ -224,17 +225,6 @@ fn cached_declaration_lookup_keeps_the_callers_cycle_refusal() {
 }
 
 #[test]
-fn bevy_plugins_use_descriptive_names_with_plugin_suffix() {
-    let inventory = Inventory::workspace(&Workspace::current().0);
-    let violations = inventory.plugin_names();
-    assert!(
-        violations.is_empty(),
-        "Bevy plugin types and aliases must have descriptive names ending in Plugin:\n{}",
-        violations.join("\n")
-    );
-}
-
-#[test]
 fn plugin_names_follow_framework_and_type_aliases() {
     for (source, expected) in [
         (
@@ -277,6 +267,33 @@ fn plugin_names_follow_framework_and_type_aliases() {
             .map(|violation| violation.rsplit_once(": ").unwrap().1)
             .collect();
         assert_eq!(names, expected, "{source}");
+    }
+}
+
+#[test]
+fn changed_sources_revoke_removed_component_ownership() {
+    let source = "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Component,Query}; #[derive(Component)] struct State(u32); fn read(state:Query<&State>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}";
+    for changed in [
+        source.replace("struct State(u32)", "struct State(Foreign); struct Foreign"),
+        source.replace(
+            "use bevy_ecs::prelude::{Component,Query};",
+            "use bevy_ecs::prelude::Query; struct Component;",
+        ),
+    ] {
+        let mut inventory = Inventory::fixture(source);
+        let key = inventory.key("struct:State");
+        assert!(inventory.canonical(
+            &inventory.entries[&key],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+        inventory.source("fixture.rs", &changed);
+        inventory.resolve_usage();
+        assert!(!inventory.canonical(
+            &inventory.entries[&key],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
     }
 }
 
@@ -1191,6 +1208,12 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
         errors.is_empty(),
         "ECS ownership violations:\n{}",
         errors.join("\n")
+    );
+    let violations = inventory.plugin_names();
+    assert!(
+        violations.is_empty(),
+        "Bevy plugin types and aliases must have descriptive names ending in Plugin:\n{}",
+        violations.join("\n")
     );
     policy.prove_legacy(&root.0);
     policy.shape.prove(&root.0);
@@ -7608,6 +7631,7 @@ impl Instantiations {
 #[derive(Default)]
 struct Inventory {
     sources: BTreeMap<String, String>,
+    parsed: BTreeMap<String, (String, Rc<syn::File>)>,
     resolved_namespaces: BTreeMap<String, BTreeSet<String>>,
     entries: BTreeMap<String, Declaration>,
     usage: BTreeMap<String, Usage>,
@@ -7623,6 +7647,8 @@ struct Inventory {
     fixture_registered_keys: BTreeSet<String>,
     instantiated_systems: BTreeMap<String, BTreeSet<String>>,
     generic_usage: Instantiations,
+    lookup_ready: bool,
+    local_bindings: RefCell<BTreeMap<(String, String), bool>>,
     lookup_depth: Cell<usize>,
     root_bindings: RefCell<BTreeMap<(String, String), Option<String>>>,
     root_namespaces: RefCell<BTreeMap<(String, String), Option<String>>>,
@@ -7639,22 +7665,22 @@ struct DeclarationLookup {
 
 impl Inventory {
     fn enum_job(&self, entry: &Declaration) -> bool {
-        self.entries.values().any(|implementation| {
-            matches!(implementation.kind, Kind::Impl)
-                && implementation
-                    .owner
-                    .as_deref()
-                    .and_then(|owner| {
-                        self.resolve(&implementation.namespace, owner, &mut BTreeSet::new())
-                    })
-                    .is_some_and(|owner| owner.key == entry.key)
-                && implementation.reference_paths.iter().any(|path| {
+        for implementation in self.implementations(entry) {
+            if !matches!(implementation.kind, Kind::Impl) {
+                continue;
+            }
+            for path in &implementation.reference_paths {
+                let Some(target) =
                     self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
-                        .is_some_and(|target| {
-                            target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
-                        })
-                })
-        })
+                else {
+                    continue;
+                };
+                if target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job" {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn body_owner(&self, key: &str) -> Option<&Declaration> {
@@ -7860,6 +7886,8 @@ impl Inventory {
     }
 
     fn source(&mut self, path: &str, source: &str) {
+        self.lookup_ready = false;
+        self.local_bindings.get_mut().clear();
         self.sources.insert(path.into(), source.into());
         if path.ends_with(".rs") {
             let namespace = self.namespace(path, &[]).0;
@@ -7878,7 +7906,17 @@ impl Inventory {
             self.script(path, source);
             return;
         }
-        let file = syn::parse_file(source).unwrap_or_else(|error| panic!("{path}: {error}"));
+        let file = match self.parsed.get(path) {
+            Some((cached, file)) if cached == source => Rc::clone(file),
+            _ => {
+                let file = Rc::new(
+                    syn::parse_file(source).unwrap_or_else(|error| panic!("{path}: {error}")),
+                );
+                self.parsed
+                    .insert(path.into(), (source.into(), Rc::clone(&file)));
+                file
+            }
+        };
         let mut usage = Usage {
             testing: path.contains("/tests/"),
             namespace: self.namespace(path, &[]).0,
@@ -10250,6 +10288,19 @@ impl Inventory {
     }
 
     fn local_binding(&self, namespace: &str, name: &str) -> bool {
+        if !self.lookup_ready {
+            return self.lookup_binding(namespace, name);
+        }
+        let key = (namespace.to_string(), name.to_string());
+        if let Some(result) = self.local_bindings.borrow().get(&key) {
+            return *result;
+        }
+        let result = self.lookup_binding(namespace, name);
+        self.local_bindings.borrow_mut().insert(key, result);
+        result
+    }
+
+    fn lookup_binding(&self, namespace: &str, name: &str) -> bool {
         let mut scope = Some(namespace);
         while let Some(current) = scope {
             if self.symbols.contains_key(&format!("{current}::{name}"))
@@ -10457,6 +10508,7 @@ impl Inventory {
             let mut bindings = std::mem::take(&mut self.module_namespaces);
             for _ in 0..=sources.len() {
                 let mut inventory = Self {
+                    parsed: std::mem::take(&mut self.parsed),
                     resolved_namespaces: bindings.clone(),
                     ..Default::default()
                 };
@@ -10471,6 +10523,8 @@ impl Inventory {
                 }
             }
         }
+        self.lookup_ready = true;
+        self.local_bindings.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
         *self.implementation_index.get_mut() = None;
         self.resolve_components();

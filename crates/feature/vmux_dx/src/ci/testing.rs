@@ -81,6 +81,49 @@ impl Fixture {
         output
     }
 
+    pub(super) fn bootstrap(&self, step: &str, expected: &str) -> Output {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap();
+        let source =
+            std::fs::read_to_string(root.join(".github/actions/setup-ci/action.yml")).unwrap();
+        let documents = yaml_rust::YamlLoader::load_from_str(&source).unwrap();
+        let steps = documents[0]["runs"]["steps"].as_vec().unwrap();
+        let script = steps
+            .iter()
+            .find(|candidate| candidate["name"].as_str() == Some(step))
+            .expect("required bootstrap step")["run"]
+            .as_str()
+            .unwrap();
+        self.write("bootstrap.sh", script);
+        Command::new("bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-e",
+                "-o",
+                "pipefail",
+                "bootstrap.sh",
+            ])
+            .current_dir(self.root())
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    self.root().join("bin").display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .env("EXPECTED_SHA256", expected)
+            .env("GITHUB_OUTPUT", self.root().join("bootstrap-output"))
+            .env("GITHUB_ENV", self.root().join("bootstrap-env"))
+            .env("GITHUB_PATH", self.root().join("bootstrap-path"))
+            .env("GITHUB_WORKSPACE", self.root())
+            .output()
+            .unwrap()
+    }
+
     pub(super) fn git(&self, arguments: &[&str]) -> String {
         String::from_utf8(self.execute("git", arguments).stdout)
             .unwrap()
