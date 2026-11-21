@@ -62,6 +62,8 @@ vmux run my-vmux -p local
 
 Use this when the change affects native integration, resources, or packaging. `vmux cache status` reports build storage, and `vmux cache clean` previews reclaimable caches; add `--apply` to clean them. Running apps and locked build outputs are retained. Try the behavior in that completed build. Use copied data for storage/migration changes.
 
+Set `VMUX_DATA_DIR` to an absolute copied data root for persistence QA. Configuration lives under its `config/` directory, and Tools uses its `home/` directory for dotfile targets. Copy the relevant configuration and home files into those directories; keep them separate from live paths. This does not relocate external package managers such as Homebrew, so use managed ACP/LSP packages for isolated install and removal checks. Ordinary runs without the override keep the existing user paths.
+
 ## Choose how to share
 
 A local build can be the finished result. Push to your fork if you want a durable personal branch or a reviewable PR. For an upstream contribution, keep the diff focused and explain the behavior and validation.

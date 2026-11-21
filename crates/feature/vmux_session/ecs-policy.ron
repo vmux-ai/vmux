@@ -133,7 +133,6 @@ legacy: [
     (key: "crates/feature/vmux_session/src/model.rs||impl:SessionConfiguration", fingerprint: "270f45142183ba30", issue: "VMX-253"),
     (key: "crates/feature/vmux_session/src/model.rs||struct:AgentFamily", fingerprint: "180d33be95d1d327", issue: "VMX-253"),
     (key: "crates/feature/vmux_session/src/model.rs||struct:EntityPlugin", fingerprint: "b7954933efb83814", issue: "VMX-253"),
-    (key: "crates/feature/vmux_session/src/model.rs||struct:LocalTask", fingerprint: "4e0932ba0f2f2f8f", issue: "VMX-253"),
     (key: "crates/feature/vmux_session/src/model.rs||struct:ProviderSessionCandidate", fingerprint: "7dbe65a675518973", issue: "VMX-253"),
     (key: "crates/feature/vmux_session/src/model.rs||struct:SessionConfiguration", fingerprint: "fa8ae85e86f047d9", issue: "VMX-253"),
     (key: "crates/feature/vmux_session/src/model.rs||struct:StagePlugin", fingerprint: "142aacbcfd1b03bf", issue: "VMX-253"),

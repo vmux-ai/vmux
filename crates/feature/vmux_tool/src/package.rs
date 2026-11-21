@@ -125,10 +125,28 @@ struct Notifications<'w> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct Sources<'w, 's> {
     stores: Query<'w, 's, &'static ToolStore>,
-    providers: Query<'w, 's, &'static ToolProviderId, With<crate::observation::PackageProvider>>,
+    providers: Query<'w, 's, &'static ToolProviderId, With<crate::observation::ManifestProvider>>,
 }
 
 impl Sources<'_, '_> {
+    fn provider(&self, key: &ToolOperationKey, target: Entity) -> Option<&ToolProviderId> {
+        let id = self.providers.get(target).ok()?;
+        if key.provider != id.0 {
+            return None;
+        }
+        if id.0.is("mcp") && key.kind != ToolOperationKind::Forget {
+            return None;
+        }
+        let native = matches!(
+            key.kind,
+            ToolOperationKind::Install | ToolOperationKind::Update | ToolOperationKind::Uninstall
+        );
+        if native && !matches!(id.0.id(), "npm" | "homebrew-formula" | "homebrew-cask") {
+            return None;
+        }
+        Some(id)
+    }
+
     fn current(
         &self,
         change: &Change,
@@ -168,25 +186,19 @@ fn route<R: Clone + Send + Sync + 'static>(
         if !matches!(state, OperationState::Pending | OperationState::Running) {
             continue;
         }
-        let Ok(id) = sources.providers.get(provider.entity()) else {
+        let key = ToolOperationKey::from(request.0.clone());
+        let Some(id) = sources.provider(&key, provider.entity()) else {
             continue;
         };
-        let key = ToolOperationKey::from(request.0.clone());
-        if key.provider != id.0 {
-            continue;
-        }
         let native = matches!(
             key.kind,
             ToolOperationKind::Install | ToolOperationKind::Update | ToolOperationKind::Uninstall
         );
-        if native && !matches!(id.0.id(), "npm" | "homebrew-formula" | "homebrew-cask") {
-            continue;
-        }
         let Ok(captured) = sources.stores.get(store.entity()) else {
             continue;
         };
         let item = key.item_id.trim();
-        if item.is_empty() || item.starts_with('-') || item.contains('\0') {
+        if item.is_empty() || !id.0.is("mcp") && (item.starts_with('-') || item.contains('\0')) {
             commands.entity(entity).insert((
                 ToolStoreOperation,
                 ToolOperationFailed("package name is required".into()),
@@ -464,13 +476,22 @@ fn reconcile(
         if *state != OperationState::Running {
             continue;
         }
-        if manifest.0.contains(change.id.0.id(), &change.item) == change.enabled {
+        let present = if change.id.0.is("mcp") {
+            manifest.0.mcp.servers.contains_key(&change.item)
+        } else {
+            manifest.0.contains(change.id.0.id(), &change.item)
+        };
+        if present == change.enabled {
             commands.entity(entity).insert(Outcome(Ok(())));
             continue;
         }
-        manifest
-            .0
-            .set_package(change.id.0.id(), &change.item, change.enabled);
+        if change.id.0.is("mcp") {
+            manifest.0.mcp.servers.remove(&change.item);
+        } else {
+            manifest
+                .0
+                .set_package(change.id.0.id(), &change.item, change.enabled);
+        }
         commands.entity(entity).insert(WriteRequest {
             manifest: manifest.0.clone(),
             retain_lease: true,
@@ -596,6 +617,181 @@ mod tests {
     use super::*;
     use bevy::prelude::{App, Commands, Entity, Plugin, Query, Res, Resource, Update};
     use std::os::unix::process::ExitStatusExt;
+
+    struct McpFixture {
+        app: App,
+        directory: tempfile::TempDir,
+        store: ToolStore,
+        source: Entity,
+        provider: Entity,
+    }
+
+    impl McpFixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ToolStore::new(directory.path(), directory.path());
+            let manifest: ToolsManifest = toml::from_str(
+                "version = 1\n[mcp.servers.keep]\ntransport = 'stdio'\ncommand = 'keep'\n[mcp.servers.'-remove']\ntransport = 'stdio'\ncommand = 'remove'\n",
+            )
+            .unwrap();
+            manifest.write_to(&store.manifest_path()).unwrap();
+            let mut app = App::new();
+            app.add_plugins((
+                bevy::app::TaskPoolPlugin::default(),
+                vmux_feature::manifest::FeaturePlugin::<crate::Feature>::default(),
+                crate::ToolRuntimePlugin,
+                crate::mcp::McpToolPlugin,
+            ));
+            let source = app
+                .world_mut()
+                .spawn((
+                    crate::inventory::Registry::default(),
+                    crate::catalog::Catalog::default(),
+                    store.clone(),
+                    manifest,
+                    crate::inventory::Sequence::default(),
+                ))
+                .id();
+            app.update();
+            let provider = app
+                .world_mut()
+                .query::<(Entity, &ToolProviderId)>()
+                .iter(app.world())
+                .find(|(_, id)| id.0.is("mcp"))
+                .unwrap()
+                .0;
+            Self {
+                app,
+                directory,
+                store,
+                source,
+                provider,
+            }
+        }
+
+        fn forget(&mut self) -> Entity {
+            self.app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.mcp.forget").unwrap(),
+                    ToolStoreTarget::new(self.source),
+                    ToolProviderTarget::new(self.provider),
+                    ToolOperationRequest(ToolForgetRequest {
+                        provider: ToolProvider::new("mcp"),
+                        id: "-remove".into(),
+                    }),
+                ))
+                .id()
+        }
+
+        fn finish(&mut self, requester: Entity) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                self.app.update();
+                let pending = self
+                    .app
+                    .world_mut()
+                    .query::<&Change>()
+                    .iter(self.app.world())
+                    .any(|change| change.requester == requester);
+                let finished = self.app.world().get_entity(requester).is_err()
+                    || self
+                        .app
+                        .world()
+                        .get::<ToolOperationFinished>(requester)
+                        .is_some()
+                    || self
+                        .app
+                        .world()
+                        .get::<OperationState>(requester)
+                        .is_some_and(|state| {
+                            !matches!(state, OperationState::Pending | OperationState::Running)
+                        });
+                if !pending && finished {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "MCP configuration did not drain"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_forget_commits_configuration_through_the_registered_store_systems() {
+        let mut fixture = McpFixture::new();
+        let request = fixture.forget();
+        fixture.finish(request);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationSucceeded>(request)
+                .is_some()
+        );
+        let manifest: ToolsManifest =
+            toml::from_str(&std::fs::read_to_string(fixture.store.manifest_path()).unwrap())
+                .unwrap();
+        assert_eq!(
+            manifest.mcp.servers.keys().cloned().collect::<Vec<_>>(),
+            ["keep"]
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn mcp_forget_refuses_cancelled_replaced_and_orphaned_configuration_owners() {
+        for interruption in ["cancel", "store", "provider", "requester"] {
+            let mut fixture = McpFixture::new();
+            let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+            let blocker = fixture.store.lease().unwrap();
+            let request = fixture.forget();
+            fixture.app.update();
+            match interruption {
+                "cancel" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(request)
+                        .insert(OperationState::Canceled);
+                }
+                "store" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.source)
+                        .insert(ToolStore::new(
+                            fixture.directory.path().join("replacement"),
+                            fixture.directory.path(),
+                        ));
+                }
+                "provider" => {
+                    fixture.app.world_mut().despawn(fixture.provider);
+                }
+                "requester" => {
+                    fixture.app.world_mut().despawn(request);
+                }
+                _ => unreachable!(),
+            }
+            drop(blocker);
+            fixture.finish(request);
+            assert_eq!(
+                std::fs::read(fixture.store.manifest_path()).unwrap(),
+                before,
+                "{interruption}"
+            );
+            assert!(fixture.store.lease().is_some(), "{interruption}");
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<ToolOperationSucceeded>(request)
+                    .is_none()
+            );
+        }
+    }
 
     struct DrainWake(std::sync::mpsc::SyncSender<()>);
 

@@ -144,8 +144,6 @@ legacy: [
     (key: "crates/app/vmux_desktop/src/screenshot.rs||const:PERMISSION_MSG", fingerprint: "d02ac78e9dff0622", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/screenshot.rs||fn:encode_downscaled_png", fingerprint: "da0e8122c43d41c3", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/screenshot.rs||fn:err_response", fingerprint: "fc82207fcd7dbc46", issue: "VMX-253"),
-    (key: "crates/app/vmux_desktop/src/screenshot.rs||impl:Default for ScreenshotBridge", fingerprint: "28d2611c048907ff", issue: "VMX-253"),
-    (key: "crates/app/vmux_desktop/src/screenshot.rs||struct:ScreenshotBridge", fingerprint: "d08d374235e4309b", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/splash.rs|fn show|const:H", fingerprint: "3b3ddbadbb771ec4", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/splash.rs|fn show|const:SPIN", fingerprint: "628f4c4657333281", issue: "VMX-253"),
     (key: "crates/app/vmux_desktop/src/splash.rs|fn show|const:STATUS_H", fingerprint: "59dd155fd0fb354d", issue: "VMX-253"),

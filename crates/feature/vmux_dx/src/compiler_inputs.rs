@@ -1,9 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use quote::ToTokens;
-use serde::Deserialize;
 use syn::visit::{self, Visit};
 use syn::{Expr, Item, Pat, Stmt, Type, UseTree};
 
@@ -11,6 +10,7 @@ static CURRENT: OnceLock<CompilerInputs> = OnceLock::new();
 
 #[derive(Default)]
 pub(super) struct CompilerInputs {
+    workspace: PathBuf,
     files: BTreeMap<PathBuf, String>,
     aliases: BTreeMap<String, String>,
     bindings: BTreeSet<String>,
@@ -41,6 +41,11 @@ impl CompilerInputs {
     }
 
     pub(super) fn owner(&self, path: &Path) -> Option<&str> {
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.workspace.join(path)
+        };
         let Ok(path) = path.canonicalize() else {
             return None;
         };
@@ -56,25 +61,61 @@ impl CompilerInputs {
                 Self::paths(&directory, &mut paths)?;
             }
         }
-        let mut inputs = Self::default();
+        let mut inputs = Self {
+            workspace: root.canonicalize().map_err(|error| error.to_string())?,
+            ..Self::default()
+        };
         for path in &paths {
-            if path.file_name().is_none_or(|name| name != "ecs-policy.ron") {
+            if path.extension().is_none_or(|extension| extension != "rs") {
                 continue;
             }
             let source = Self::regular(path)?;
-            let fragment: Fragment = ron::from_str(&source).map_err(|error| error.to_string())?;
-            for record in &fragment.boundaries {
-                if record.interface != "Rust compiler input data" {
-                    continue;
-                }
-                let (path, owner) = inputs.verify(root, record, &fragment)?;
-                if inputs.files.insert(path, owner).is_some() {
-                    return Err("Duplicate compiler input record".into());
-                }
-            }
+            let Ok(file) = syn::parse_file(&source) else {
+                continue;
+            };
+            inputs.discover(root, path, &file)?;
         }
         inputs.refuse_modules(&paths)?;
         Ok(inputs)
+    }
+
+    fn discover(&mut self, root: &Path, source: &Path, file: &syn::File) -> Result<(), String> {
+        let workspace = root.canonicalize().map_err(|error| error.to_string())?;
+        let source = source.canonicalize().map_err(|error| error.to_string())?;
+        let relative = source
+            .strip_prefix(&workspace)
+            .map_err(|error| error.to_string())?;
+        let parent = source.parent().ok_or("Compiler harness has no directory")?;
+        for item in &file.items {
+            let Item::Struct(structure) = item else {
+                continue;
+            };
+            if !Self::testing(&structure.attrs) {
+                continue;
+            }
+            let name = structure.ident.to_string();
+            let Ok(proof) = Self::harness(file, &name) else {
+                continue;
+            };
+            let owner = format!("{}||impl:{name}", relative.display());
+            for included in proof.included {
+                let path = parent.join(included);
+                Self::regular(&path)?;
+                let path = path.canonicalize().map_err(|error| error.to_string())?;
+                if !path.starts_with(&workspace) {
+                    return Err("Compiler input is outside the workspace".into());
+                }
+                if path.extension().is_none_or(|extension| extension != "rs") {
+                    return Err("Compiler input must be an ordinary Rust file".into());
+                }
+                if let Some(previous) = self.files.insert(path, owner.clone())
+                    && previous != owner
+                {
+                    return Err("Compiler input has multiple harness owners".into());
+                }
+            }
+        }
+        Ok(())
     }
 
     fn paths(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -94,9 +135,7 @@ impl CompilerInputs {
                 }
                 Self::paths(&path, paths)?;
             } else if path.extension().is_some_and(|extension| extension == "rs")
-                || path
-                    .file_name()
-                    .is_some_and(|name| name == "ecs-policy.ron" || name == "Cargo.toml")
+                || path.file_name().is_some_and(|name| name == "Cargo.toml")
             {
                 paths.push(path);
             }
@@ -115,73 +154,7 @@ impl CompilerInputs {
         std::fs::read_to_string(path).map_err(|error| error.to_string())
     }
 
-    fn verify(
-        &self,
-        root: &Path,
-        record: &Record,
-        fragment: &Fragment,
-    ) -> Result<(PathBuf, String), String> {
-        let owner = record
-            .owner
-            .as_ref()
-            .ok_or("Compiler input has no harness owner")?;
-        let contract = fragment
-            .boundaries
-            .iter()
-            .find(|record| &record.key == owner)
-            .ok_or("Compiler input owner is not reviewed in its fragment")?;
-        if contract.interface != "Rust compiler callback and Cargo regression interface" {
-            return Err("Compiler input owner is not a compiler harness".into());
-        }
-        let (source, name) = owner
-            .split_once("||impl:")
-            .ok_or("Compiler input owner must be its harness implementation")?;
-        let source_path = root.join(source);
-        let workspace = root.canonicalize().map_err(|error| error.to_string())?;
-        if !source_path
-            .canonicalize()
-            .map_err(|error| error.to_string())?
-            .starts_with(&workspace)
-        {
-            return Err("Compiler harness is outside the workspace".into());
-        }
-        let source = Self::regular(&source_path)?;
-        let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
-        let proof = Self::harness(&file, name, &contract.fingerprint)?;
-        let (input, kind) = record
-            .key
-            .split_once("||")
-            .ok_or("Invalid compiler input key")?;
-        if kind != "script" || !input.ends_with(".rs") {
-            return Err("Compiler input must identify an ordinary Rust file".into());
-        }
-        let path = root.join(input);
-        let bytes = Self::regular(&path)?;
-        if Self::fingerprint(&bytes) != record.fingerprint {
-            return Err(format!("Compiler input fingerprint changed: {input}"));
-        }
-        let path = path.canonicalize().map_err(|error| error.to_string())?;
-        if !path.starts_with(&workspace) {
-            return Err("Compiler input is outside the workspace".into());
-        }
-        let parent = source_path
-            .parent()
-            .ok_or("Compiler harness has no directory")?;
-        for included in proof.included {
-            let included = parent
-                .join(included)
-                .canonicalize()
-                .map_err(|error| error.to_string())?;
-            if included == path {
-                return Ok((path, owner.clone()));
-            }
-        }
-        Err(format!(
-            "Compiler input is not passed to its Cargo harness: {input}"
-        ))
-    }
-
-    fn harness(file: &syn::File, name: &str, fingerprint: &str) -> Result<Self, String> {
+    fn harness(file: &syn::File, name: &str) -> Result<Self, String> {
         let mut proof = Self {
             harness: name.into(),
             ..Self::default()
@@ -202,6 +175,19 @@ impl CompilerInputs {
                     .is_some_and(|name| name == "include_str")
             {
                 return Err("Compiler harness shadows source inclusion".into());
+            }
+        }
+        for item in &file.items {
+            let name = match item {
+                Item::Struct(value) => &value.ident,
+                Item::Enum(value) => &value.ident,
+                Item::Union(value) => &value.ident,
+                Item::Type(value) => &value.ident,
+                Item::Trait(value) => &value.ident,
+                _ => continue,
+            };
+            if proof.aliases.contains_key(&name.to_string()) {
+                return Err("Compiler harness shadows an imported interface".into());
             }
         }
         let structure = file
@@ -235,10 +221,8 @@ impl CompilerInputs {
                 _ => None,
             })
             .ok_or("Compiler harness implementation is missing")?;
-        if !Self::testing(&implementation.attrs)
-            || Self::fingerprint(&implementation.to_token_stream().to_string()) != fingerprint
-        {
-            return Err("Compiler harness contract is stale".into());
+        if !Self::testing(&implementation.attrs) {
+            return Err("Compiler harness implementation must be test-only".into());
         }
         proof.visit_item_impl(implementation);
         if proof.methods.is_empty() {
@@ -273,12 +257,10 @@ impl CompilerInputs {
                 self.imports(&value.tree, &format!("{prefix}{}::", value.ident))
             }
             UseTree::Name(value) => {
-                self.aliases
-                    .insert(value.ident.to_string(), format!("{prefix}{}", value.ident));
+                self.import(value.ident.to_string(), format!("{prefix}{}", value.ident));
             }
             UseTree::Rename(value) => {
-                self.aliases
-                    .insert(value.rename.to_string(), format!("{prefix}{}", value.ident));
+                self.import(value.rename.to_string(), format!("{prefix}{}", value.ident));
             }
             UseTree::Group(value) => {
                 for item in &value.items {
@@ -286,6 +268,17 @@ impl CompilerInputs {
                 }
             }
             UseTree::Glob(_) => {}
+        }
+    }
+
+    fn import(&mut self, name: String, path: String) {
+        match self.aliases.entry(name) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(String::new());
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(path);
+            }
         }
     }
 
@@ -297,14 +290,6 @@ impl CompilerInputs {
             Some(alias) => alias.clone(),
             None => name,
         }
-    }
-
-    fn fingerprint(source: &str) -> String {
-        let mut hash = 0xcbf29ce484222325u64;
-        for byte in source.bytes() {
-            hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
-        }
-        format!("{hash:016x}")
     }
 
     fn refuse_modules(&self, paths: &[PathBuf]) -> Result<(), String> {
@@ -696,19 +681,4 @@ impl<'ast> Visit<'ast> for CompilerInputs {
         }
         visit::visit_macro(self, value);
     }
-}
-
-#[derive(Deserialize)]
-struct Fragment {
-    #[serde(default)]
-    boundaries: Vec<Record>,
-}
-
-#[derive(Deserialize)]
-struct Record {
-    key: String,
-    fingerprint: String,
-    interface: String,
-    #[serde(default)]
-    owner: Option<String>,
 }

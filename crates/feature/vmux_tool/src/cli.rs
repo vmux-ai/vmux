@@ -6,7 +6,10 @@ use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_feature::manifest::FeaturePlugin;
 
-use crate::DotfileLinkState;
+use crate::dotfiles::{
+    AppliedEnabledDotfiles, ApplyEnabledDotfiles, DisableDotfilePackage, DisabledDotfilePackage,
+    DiscoverDotfilePackages, DiscoveredDotfilePackages, DotfilePlan, PlanDotfilePackage,
+};
 use crate::homebrew::ImportedBrewfile;
 use crate::npm::ImportedNpmManifest;
 use crate::storage::{ReadRequest, ReadResult, StoragePlugin, StoreLease};
@@ -31,18 +34,25 @@ impl Plugin for ToolCliPlugin {
         if !app.is_plugin_added::<crate::npm::NpmToolPlugin>() {
             app.add_plugins(crate::npm::NpmToolPlugin);
         }
+        if !app.is_plugin_added::<crate::dotfiles::DotfileToolPlugin>() {
+            app.add_plugins(crate::dotfiles::DotfileToolPlugin);
+        }
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_systems(
                 Update,
                 (
                     route,
                     execute_status,
+                    status_cancelled,
+                    status_discovered,
+                    status_reported,
                     execute_apply,
                     execute_homebrew_import,
                     execute_npm_import,
                     execute_dotfile_import,
                     execute_adopt,
                     execute_unlink,
+                    complete_dotfiles,
                     complete_imports,
                 )
                     .chain(),
@@ -54,7 +64,28 @@ impl Plugin for ToolCliPlugin {
 struct ToolStatusRequest;
 
 #[derive(Component)]
+struct StatusSource(ToolStore);
+
+#[derive(Component)]
+struct StatusSnapshot(ToolsManifest);
+
+#[derive(Component)]
+struct StatusDiscovery;
+
+#[derive(Component)]
+struct StatusPlan;
+
+#[derive(Component)]
+struct Reported;
+
+#[derive(Component)]
+struct StatusCancelled;
+
+#[derive(Component)]
 struct ToolApplyRequest;
+
+#[derive(Component)]
+struct WaitingDotfiles;
 
 #[derive(Component)]
 struct HomebrewImportRequest(PathBuf);
@@ -96,11 +127,7 @@ fn route(
                 ));
             }
             "tool.apply" => {
-                entity.insert((
-                    ToolApplyRequest,
-                    store.clone(),
-                    ReadRequest { retain_lease: true },
-                ));
+                entity.insert((ToolApplyRequest, store.clone()));
             }
             "tool.import.homebrew" => {
                 if let Some(path) = invocation.value_os("path") {
@@ -133,7 +160,9 @@ fn route(
             }
             "tool.unlink" => {
                 if let Some(package) = invocation.value("package") {
-                    entity.insert(DotfileUnlinkRequest(package.to_string()));
+                    entity.insert((DotfileUnlinkRequest(package.to_string()), store.clone()));
+                } else {
+                    entity.insert(CliResult(Err("dotfile package is required".into())));
                 }
             }
             _ => {}
@@ -146,42 +175,247 @@ fn execute_status(
     mut commands: Commands,
 ) {
     for (entity, store, loaded) in &requests {
-        let result = match &loaded.0 {
-            Ok(manifest) => status(store, manifest),
-            Err(error) => Err(io::Error::other(error.clone())),
-        };
         commands
             .entity(entity)
-            .insert(CliResult::from(result))
-            .remove::<(ToolStatusRequest, ReadResult, StoreLease, ToolStore)>();
-    }
-}
-
-fn execute_apply(
-    requests: Query<(Entity, &ToolStore, &ReadResult), With<ToolApplyRequest>>,
-    mut commands: Commands,
-) {
-    for (entity, store, loaded) in &requests {
-        let result = match &loaded.0 {
-            Ok(manifest) => store
-                .apply_enabled_dotfiles(manifest)
-                .map_err(io::Error::other),
-            Err(error) => Err(io::Error::other(error.clone())),
-        };
-        commands
-            .entity(entity)
-            .remove::<(ToolApplyRequest, ReadResult, StoreLease, ToolStore)>();
-        match result {
-            Ok(linked) => {
-                println!("linked {linked} file(s)");
-                commands.entity(entity).insert(CliResult::default());
-            }
+            .remove::<(ToolStatusRequest, ReadResult, StoreLease)>();
+        let manifest = match &loaded.0 {
+            Ok(manifest) => manifest,
             Err(error) => {
                 commands
                     .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
+                    .insert(CliResult(Err(error.clone())));
+                continue;
+            }
+        };
+        println!("{}", store.root().display());
+        for (provider, packages) in &manifest.packages {
+            println!("{provider} ({})", packages.len());
+            for package in packages {
+                println!("  {package}");
             }
         }
+        if !manifest.mcp.servers.is_empty() {
+            println!("mcp ({})", manifest.mcp.servers.len());
+            for (name, server) in &manifest.mcp.servers {
+                println!("  {name} · {:?}", server.transport);
+            }
+        }
+        commands.entity(entity).insert((
+            StatusSource(store.clone()),
+            StatusSnapshot(manifest.clone()),
+        ));
+        commands.spawn((
+            vmux_ecs::Operation::bundle("tool.dotfile.status.discovery").unwrap(),
+            vmux_ecs::OperationRetained,
+            bevy_ecs::hierarchy::ChildOf(entity),
+            StatusDiscovery,
+            store.clone(),
+            DiscoverDotfilePackages,
+        ));
+    }
+}
+
+fn status_discovered(
+    discovery: Query<
+        (
+            Entity,
+            &ChildOf,
+            Option<&DiscoveredDotfilePackages>,
+            Option<&ToolOperationFailed>,
+            Has<crate::ToolOperationFinished>,
+        ),
+        With<StatusDiscovery>,
+    >,
+    status: Query<(&StatusSource, &StatusSnapshot, Has<StatusCancelled>), Without<CliResult>>,
+    drain: crate::dotfile_ops::DotfileDrain,
+    mut commands: Commands,
+) {
+    for (entity, parent, packages, error, finished) in &discovery {
+        let Ok((source, snapshot, cancelled)) = status.get(parent.parent()) else {
+            continue;
+        };
+        if cancelled && finished && drain.is_drained(entity) {
+            commands
+                .entity(parent.parent())
+                .insert(CliResult(Err("tool status source changed".into())))
+                .remove::<(StatusSource, StatusSnapshot, ToolStore, StatusCancelled)>();
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if let Some(error) = error {
+            commands
+                .entity(parent.parent())
+                .insert(CliResult(Err(error.0.clone())))
+                .remove::<(StatusSource, StatusSnapshot, ToolStore)>();
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let Some(packages) = packages else {
+            continue;
+        };
+        let mut names = packages.packages.clone();
+        for name in &snapshot.0.dotfiles.packages {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        names.sort();
+        if names.is_empty() {
+            commands
+                .entity(parent.parent())
+                .insert(CliResult::default())
+                .remove::<(StatusSource, StatusSnapshot, ToolStore)>();
+        } else {
+            println!("dotfiles ({})", names.len());
+            for (order, name) in names.into_iter().enumerate() {
+                commands.spawn((
+                    vmux_ecs::Operation::bundle("tool.dotfile.status.plan").unwrap(),
+                    vmux_ecs::OperationRetained,
+                    ChildOf(parent.parent()),
+                    StatusPlan,
+                    Name::new(name.clone()),
+                    vmux_ecs::Order(
+                        u32::try_from(order).expect("bounded dotfile status package count"),
+                    ),
+                    source.0.clone(),
+                    PlanDotfilePackage::new(name),
+                ));
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn status_reported(
+    status: Query<(Entity, &StatusSnapshot, Has<StatusCancelled>), Without<CliResult>>,
+    mut plans: Query<
+        (
+            Entity,
+            &ChildOf,
+            &Name,
+            &vmux_ecs::Order,
+            Option<&DotfilePlan>,
+            Option<&ToolOperationFailed>,
+            Has<Reported>,
+            Has<crate::ToolOperationFinished>,
+        ),
+        With<StatusPlan>,
+    >,
+    discovery: Query<&ChildOf, With<StatusDiscovery>>,
+    drain: crate::dotfile_ops::DotfileDrain,
+    mut commands: Commands,
+) {
+    for (entity, snapshot, cancelled) in &status {
+        if discovery.iter().any(|parent| parent.parent() == entity) {
+            continue;
+        }
+        let mut ordered = Vec::new();
+        for (plan, parent, _, order, _, _, reported, _) in &plans {
+            if parent.parent() == entity && !reported {
+                ordered.push((order.0, plan));
+            }
+        }
+        ordered.sort_by_key(|(order, _)| *order);
+        let mut pending = false;
+        for (_, plan) in ordered {
+            let Ok((_, _, name, _, output, error, _, finished)) = plans.get_mut(plan) else {
+                continue;
+            };
+            if cancelled && finished && drain.is_drained(plan) {
+            } else if let Some(output) = output {
+                println!(
+                    "  {}{} · {} linked · {} missing · {} conflicts",
+                    name.as_str(),
+                    if snapshot
+                        .0
+                        .dotfiles
+                        .packages
+                        .iter()
+                        .any(|package| package == name.as_str())
+                    {
+                        " [managed]"
+                    } else {
+                        ""
+                    },
+                    output.linked(),
+                    output.missing(),
+                    output.conflicts()
+                );
+            } else if let Some(error) = error {
+                println!("  {} · {}", name.as_str(), error.0);
+            } else {
+                pending = true;
+                break;
+            }
+            commands.entity(plan).insert(Reported);
+        }
+        if pending {
+            continue;
+        }
+        for (plan, parent, ..) in &plans {
+            if parent.parent() == entity {
+                commands.entity(plan).despawn();
+            }
+        }
+        let result = if cancelled {
+            CliResult(Err("tool status source changed".into()))
+        } else {
+            CliResult::default()
+        };
+        commands.entity(entity).insert(result).remove::<(
+            StatusSource,
+            StatusSnapshot,
+            ToolStore,
+            StatusCancelled,
+        )>();
+    }
+}
+
+fn status_cancelled(
+    status: Query<
+        (
+            Entity,
+            &StatusSource,
+            Option<&ToolStore>,
+            Option<&vmux_ecs::OperationState>,
+        ),
+        Without<CliResult>,
+    >,
+    mut children: Query<
+        (&ChildOf, &mut vmux_ecs::OperationState),
+        (
+            Or<(With<StatusPlan>, With<StatusDiscovery>)>,
+            Without<StatusSource>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, source, current, state) in &status {
+        let valid = current == Some(&source.0)
+            && state.is_none_or(|state| {
+                matches!(
+                    state,
+                    vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+                )
+            });
+        if valid {
+            continue;
+        }
+        commands.entity(entity).insert(StatusCancelled);
+        for (parent, mut state) in &mut children {
+            if parent.parent() == entity {
+                *state = vmux_ecs::OperationState::Canceled;
+            }
+        }
+    }
+}
+
+fn execute_apply(requests: Query<Entity, Added<ToolApplyRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        commands
+            .entity(entity)
+            .remove::<ToolApplyRequest>()
+            .insert((WaitingDotfiles, ApplyEnabledDotfiles));
     }
 }
 
@@ -314,22 +548,47 @@ fn execute_unlink(
     requests: Query<(Entity, &DotfileUnlinkRequest), Added<DotfileUnlinkRequest>>,
     mut commands: Commands,
 ) {
-    let store = ToolStore::current();
     for (entity, request) in &requests {
-        match store
-            .disable_and_unlink_dotfile_package(&request.0)
-            .map_err(io::Error::other)
-        {
-            Ok(removed) => {
-                println!("unlinked {removed} file(s)");
-                commands.entity(entity).insert(CliResult::default());
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-            }
-        }
+        commands
+            .entity(entity)
+            .remove::<DotfileUnlinkRequest>()
+            .insert((
+                WaitingDotfiles,
+                DisableDotfilePackage::new(request.0.clone()),
+            ));
+    }
+}
+
+fn complete_dotfiles(
+    requests: Query<
+        (
+            Entity,
+            Option<&AppliedEnabledDotfiles>,
+            Option<&DisabledDotfilePackage>,
+            Option<&ToolOperationFailed>,
+        ),
+        (With<WaitingDotfiles>, With<crate::ToolOperationFinished>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, applied, disabled, failure) in &requests {
+        let result = if let Some(failure) = failure {
+            CliResult(Err(failure.0.clone()))
+        } else if let Some(applied) = applied {
+            println!("linked {} file(s)", applied.files);
+            CliResult::default()
+        } else if let Some(disabled) = disabled {
+            println!("unlinked {} file(s)", disabled.files);
+            CliResult::default()
+        } else {
+            continue;
+        };
+        commands.entity(entity).insert(result).remove::<(
+            WaitingDotfiles,
+            ApplyEnabledDotfiles,
+            DisableDotfilePackage,
+            ToolStore,
+        )>();
     }
 }
 
@@ -345,62 +604,173 @@ fn import_dotfile_packages(store: &ToolStore) -> io::Result<usize> {
     Ok(imported)
 }
 
-fn status(store: &ToolStore, manifest: &ToolsManifest) -> io::Result<()> {
-    println!("{}", store.root().display());
-    for (provider, packages) in &manifest.packages {
-        println!("{provider} ({})", packages.len());
-        for package in packages {
-            println!("  {package}");
-        }
-    }
-    if !manifest.mcp.servers.is_empty() {
-        println!("mcp ({})", manifest.mcp.servers.len());
-        for (name, server) in &manifest.mcp.servers {
-            println!("  {name} · {:?}", server.transport);
-        }
-    }
-    let mut packages = store.dotfile_packages().map_err(io::Error::other)?;
-    for package in &manifest.dotfiles.packages {
-        if !packages.contains(package) {
-            packages.push(package.clone());
-        }
-    }
-    packages.sort();
-    if !packages.is_empty() {
-        println!("dotfiles ({})", packages.len());
-    }
-    for package in packages {
-        let managed = manifest.dotfiles.packages.contains(&package);
-        match store.plan_dotfile_package(&package) {
-            Ok(plan) => println!(
-                "  {}{} · {} linked · {} missing · {} conflicts",
-                package,
-                if managed { " [managed]" } else { "" },
-                plan.links
-                    .iter()
-                    .filter(|link| link.state == DotfileLinkState::Linked)
-                    .count(),
-                plan.links
-                    .iter()
-                    .filter(|link| link.state == DotfileLinkState::Missing)
-                    .count(),
-                plan.links
-                    .iter()
-                    .filter(|link| link.state == DotfileLinkState::Conflict)
-                    .count(),
-            ),
-            Err(error) => println!("  {package} · {error}"),
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn cli_apply_and_unlink_share_dotfile_operations_for_the_selected_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let mut manifest = ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.write_to(&store.manifest_path()).unwrap();
+        let source = store.dotfiles_dir().join("shell/.zshrc");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, b"shell").unwrap();
+        let target = store.home().join(".zshrc");
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        for command in ["tool.apply", "tool.unlink"] {
+            let request = app
+                .world_mut()
+                .spawn((
+                    store.clone(),
+                    CliInvocation {
+                        command: command.into(),
+                        arguments: BTreeMap::from([("package".into(), vec!["shell".into()])]),
+                    },
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.world().get::<CliResult>(request).is_none() {
+                app.update();
+                assert!(Instant::now() < deadline, "{command} did not drain");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
+            if command == "tool.apply" {
+                assert_eq!(std::fs::read(&target).unwrap(), b"shell");
+                assert_eq!(
+                    vmux_path::PathIdentity::resolve(&target),
+                    vmux_path::PathIdentity::resolve(&source)
+                );
+            } else {
+                assert!(target.symlink_metadata().is_err());
+                assert!(
+                    ToolsManifest::read(&store.manifest_path())
+                        .unwrap()
+                        .dotfiles
+                        .packages
+                        .is_empty()
+                );
+            }
+            assert!(store.lease().is_some(), "{command}");
+            app.world_mut().despawn(request);
+        }
+    }
+
+    #[test]
+    fn cli_status_uses_canonical_dotfile_plans_for_the_selected_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let mut manifest = ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.set_dotfile_package("missing", true);
+        manifest.write_to(&store.manifest_path()).unwrap();
+        let package = store.dotfiles_dir().join("shell");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join(".zshrc"), b"shell").unwrap();
+        let before = std::fs::read(store.manifest_path()).unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+        let request = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.status".into(),
+                    arguments: BTreeMap::new(),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(request).is_none() {
+            app.update();
+            assert!(Instant::now() < deadline, "CLI status did not complete");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(request).unwrap().0, Ok(0));
+        assert_eq!(std::fs::read(store.manifest_path()).unwrap(), before);
+        assert!(store.lease().is_some());
+        assert!(
+            app.world_mut()
+                .query_filtered::<Entity, With<StatusPlan>>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn cli_status_cancellation_and_store_replacement_drain_owned_plans() {
+        for interruption in ["cancel", "store"] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ToolStore::new(
+                directory.path().join("config"),
+                directory.path().join("home"),
+            );
+            ToolsManifest::default()
+                .write_to(&store.manifest_path())
+                .unwrap();
+            let package = store.dotfiles_dir().join("shell");
+            std::fs::create_dir_all(&package).unwrap();
+            std::fs::write(package.join(".zshrc"), b"shell").unwrap();
+            let mut app = App::new();
+            app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+            let request = app
+                .world_mut()
+                .spawn((
+                    store.clone(),
+                    CliInvocation {
+                        command: "tool.status".into(),
+                        arguments: BTreeMap::new(),
+                    },
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.world().get::<StatusSnapshot>(request).is_none() {
+                app.update();
+                assert!(
+                    Instant::now() < deadline,
+                    "CLI status did not accept its source"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if interruption == "cancel" {
+                app.world_mut()
+                    .entity_mut(request)
+                    .insert(vmux_ecs::OperationState::Canceled);
+            } else {
+                app.world_mut().entity_mut(request).insert(ToolStore::new(
+                    directory.path().join("replacement"),
+                    directory.path().join("other-home"),
+                ));
+            }
+            while app.world().get::<CliResult>(request).is_none() {
+                app.update();
+                assert!(
+                    Instant::now() < deadline,
+                    "cancelled CLI status did not drain"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                app.world().get::<CliResult>(request).unwrap().0.is_err(),
+                "{interruption}"
+            );
+            assert!(store.lease().is_some(), "{interruption}");
+        }
+    }
 
     #[test]
     fn cli_imports_use_the_selected_store_and_preserve_existing_packages_and_brewfile_comments() {

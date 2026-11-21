@@ -57,6 +57,8 @@ mod command_bar;
 mod connection;
 #[cfg(host)]
 mod dotfile_inventory;
+#[cfg(host)]
+mod dotfile_ops;
 mod dotfiles;
 #[cfg(ui)]
 mod extension;
@@ -151,15 +153,8 @@ impl Plugin for ToolRuntimePlugin {
             app.add_plugins(io::ObservationIoPlugin);
         }
         app.add_plugins((
-            TaskPlugin::<Result<mcp::ForgottenMcpServer, String>>::default(),
-            TaskPlugin::<Result<dotfiles::DiscoveredDotfilePackages, String>>::default(),
-            TaskPlugin::<Result<dotfiles::DotfilePlan, String>>::default(),
             TaskPlugin::<Result<dotfiles::ImportedDotfiles, String>>::default(),
             TaskPlugin::<Result<dotfiles::ImportedAvailableDotfiles, String>>::default(),
-            TaskPlugin::<Result<dotfiles::LinkedDotfilePackage, String>>::default(),
-            TaskPlugin::<Result<dotfiles::DisabledDotfilePackage, String>>::default(),
-            TaskPlugin::<Result<dotfiles::UnlinkedDotfilePackage, String>>::default(),
-            TaskPlugin::<Result<dotfiles::AppliedEnabledDotfiles, String>>::default(),
             TaskPlugin::<Result<dotfiles::AdoptedDotfile, String>>::default(),
             TaskPlugin::<Result<homebrew::ImportedBrewfile, String>>::default(),
             TaskPlugin::<Result<npm::ImportedNpmManifest, String>>::default(),
@@ -186,15 +181,8 @@ impl Plugin for ToolRuntimePlugin {
         .configure_sets(
             Update,
             (
-                TaskSet::of::<Result<mcp::ForgottenMcpServer, String>>(),
-                TaskSet::of::<Result<dotfiles::DiscoveredDotfilePackages, String>>(),
-                TaskSet::of::<Result<dotfiles::DotfilePlan, String>>(),
                 TaskSet::of::<Result<dotfiles::ImportedDotfiles, String>>(),
                 TaskSet::of::<Result<dotfiles::ImportedAvailableDotfiles, String>>(),
-                TaskSet::of::<Result<dotfiles::LinkedDotfilePackage, String>>(),
-                TaskSet::of::<Result<dotfiles::DisabledDotfilePackage, String>>(),
-                TaskSet::of::<Result<dotfiles::UnlinkedDotfilePackage, String>>(),
-                TaskSet::of::<Result<dotfiles::AppliedEnabledDotfiles, String>>(),
                 TaskSet::of::<Result<dotfiles::AdoptedDotfile, String>>(),
                 TaskSet::of::<Result<homebrew::ImportedBrewfile, String>>(),
                 TaskSet::of::<Result<npm::ImportedNpmManifest, String>>(),
@@ -211,15 +199,8 @@ impl Plugin for ToolRuntimePlugin {
         .add_observer(accept::<ToolApplyRequest>)
         .add_observer(accept::<ToolImportRequest>)
         .add_observer(completed)
-        .add_observer(store::<mcp::ForgottenMcpServer>)
-        .add_observer(store::<dotfiles::DiscoveredDotfilePackages>)
-        .add_observer(store::<dotfiles::DotfilePlan>)
         .add_observer(store::<dotfiles::ImportedDotfiles>)
         .add_observer(store::<dotfiles::ImportedAvailableDotfiles>)
-        .add_observer(store::<dotfiles::LinkedDotfilePackage>)
-        .add_observer(store::<dotfiles::DisabledDotfilePackage>)
-        .add_observer(store::<dotfiles::UnlinkedDotfilePackage>)
-        .add_observer(store::<dotfiles::AppliedEnabledDotfiles>)
         .add_observer(store::<dotfiles::AdoptedDotfile>)
         .add_observer(store::<homebrew::ImportedBrewfile>)
         .add_observer(store::<npm::ImportedNpmManifest>)
@@ -250,15 +231,8 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                finish_operation::<mcp::ForgottenMcpServer>,
-                finish_operation::<dotfiles::DiscoveredDotfilePackages>,
-                finish_operation::<dotfiles::DotfilePlan>,
                 finish_operation::<dotfiles::ImportedDotfiles>,
                 finish_operation::<dotfiles::ImportedAvailableDotfiles>,
-                finish_operation::<dotfiles::LinkedDotfilePackage>,
-                finish_operation::<dotfiles::DisabledDotfilePackage>,
-                finish_operation::<dotfiles::UnlinkedDotfilePackage>,
-                finish_operation::<dotfiles::AppliedEnabledDotfiles>,
                 finish_operation::<dotfiles::AdoptedDotfile>,
                 finish_operation::<homebrew::ImportedBrewfile>,
                 finish_operation::<npm::ImportedNpmManifest>,
@@ -505,6 +479,78 @@ fn route_external_operation<R: Clone + Send + Sync + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn overridden_data_root_keeps_configuration_and_link_effects_in_the_copy() {
+        if let Some(root) = std::env::var_os("VMUX_QA_PATHS_CHILD") {
+            let root = PathBuf::from(root);
+            let store = ToolStore::current();
+            assert!(
+                store.root().starts_with(&root),
+                "refuse live configuration writes"
+            );
+            assert!(
+                store.home().starts_with(&root),
+                "refuse live home mutations"
+            );
+            ToolsManifest::default()
+                .write_to(&store.manifest_path())
+                .unwrap();
+            let source = store.dotfiles_dir().join("qa/.vmx-qa");
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(&source, b"copied input").unwrap();
+            let mut app = App::new();
+            app.add_plugins((
+                bevy_app::TaskPoolPlugin::default(),
+                ToolRuntimePlugin,
+                dotfiles::DotfileToolPlugin,
+            ));
+            let owner = app.world_mut().spawn(store.clone()).id();
+            let request = app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.copied.dotfile.link").unwrap(),
+                    ToolStoreTarget::new(owner),
+                    LinkDotfilePackage::new("qa"),
+                ))
+                .id();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while app.world().get::<ToolOperationFinished>(request).is_none() {
+                app.update();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "copied operation did not drain"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(app.world().get::<ToolOperationSucceeded>(request).is_some());
+            assert!(store.lease().is_some());
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let live = ToolStore::current().manifest_path();
+        let before = std::fs::read(&live).ok();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::overridden_data_root_keeps_configuration_and_link_effects_in_the_copy",
+                "--nocapture",
+            ])
+            .env("VMUX_DATA_DIR", directory.path())
+            .env("VMUX_QA_PATHS_CHILD", directory.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let config = directory.path().join("config/tools/tools.toml");
+        let manifest = ToolsManifest::read(&config).unwrap();
+        assert_eq!(manifest.dotfiles.packages, ["qa"]);
+        assert_eq!(
+            std::fs::read(directory.path().join("home/.vmx-qa")).unwrap(),
+            b"copied input"
+        );
+        assert_eq!(std::fs::read(&live).ok(), before);
+    }
 
     struct TaskFixture {
         app: App,

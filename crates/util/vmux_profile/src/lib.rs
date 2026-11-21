@@ -108,6 +108,8 @@ pub struct ProfilePaths {
     build: &'static str,
     profile: Profile,
     data: PathBuf,
+    config: PathBuf,
+    home: PathBuf,
     test: bool,
 }
 
@@ -144,26 +146,32 @@ impl ProjectsDirectory {
 impl ProfilePaths {
     pub fn at(profile: Profile, data: PathBuf) -> Self {
         assert!(data.is_absolute(), "profile data root must be absolute");
+        let isolated = std::env::var_os("VMUX_DATA_DIR").is_some_and(|value| !value.is_empty());
+        let (config, home) = Self::native_paths(&data, isolated);
         Self {
             build: build_profile(),
             profile,
             data,
+            config,
+            home,
             test: false,
         }
     }
 
     pub fn current() -> Self {
         #[cfg(target_os = "macos")]
-        let base = home_dir().join("Library/Application Support");
+        let base = Self::native_home().join("Library/Application Support");
         #[cfg(not(target_os = "macos"))]
         let base = std::env::temp_dir();
         let test = SessionEnvironment::is_test();
         let mut data = base.join(Product::data_name());
+        let mut isolated = false;
         if let Some(override_dir) = std::env::var_os("VMUX_DATA_DIR")
             && !override_dir.is_empty()
         {
             data = PathBuf::from(override_dir);
             assert!(data.is_absolute(), "VMUX_DATA_DIR must be an absolute path");
+            isolated = true;
         }
         if test {
             data = data.join("test");
@@ -173,12 +181,29 @@ impl ProfilePaths {
                 .expect("current directory unavailable")
                 .join(data);
         }
+        let (config, home) = Self::native_paths(&data, isolated);
         Self {
             build: build_profile(),
             profile: Profile::current(),
             data,
+            config,
+            home,
             test,
         }
+    }
+
+    fn native_paths(data: &Path, isolated: bool) -> (PathBuf, PathBuf) {
+        if isolated {
+            return (data.join("config"), data.join("home"));
+        }
+        let home = Self::native_home();
+        (home.join(Product::config_name()), home)
+    }
+
+    fn native_home() -> PathBuf {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"))
     }
 
     pub fn shared_data(&self) -> PathBuf {
@@ -197,7 +222,11 @@ impl ProfilePaths {
     }
 
     pub fn config(&self) -> PathBuf {
-        home_dir().join(Product::config_name())
+        self.config.clone()
+    }
+
+    pub fn home(&self) -> PathBuf {
+        self.home.clone()
     }
 
     pub fn projects(&self) -> PathBuf {
@@ -378,12 +407,6 @@ fn space_dir_path(data: &Path, profile: &str, space_id: &str) -> PathBuf {
     spaces_root_for(data, profile).join(space_id)
 }
 
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,12 +490,9 @@ mod tests {
     #[test]
     fn local_and_dev_reuse_browser_cookies_without_mixing_named_profiles() {
         let directory = tempfile::tempdir().unwrap();
-        let local = ProfilePaths {
-            build: "local",
-            profile: Profile::named("personal"),
-            data: directory.path().to_path_buf(),
-            test: false,
-        };
+        let mut local =
+            ProfilePaths::at(Profile::named("personal"), directory.path().to_path_buf());
+        local.build = "local";
         let mut dev = local.clone();
         dev.build = "dev";
         std::fs::create_dir_all(local.cef_directory()).unwrap();
@@ -488,12 +508,9 @@ mod tests {
     #[test]
     fn browser_profile_adopts_legacy_local_data_once_without_overwriting_it() {
         let directory = tempfile::tempdir().unwrap();
-        let paths = ProfilePaths {
-            build: "dev",
-            profile: Profile::named("personal"),
-            data: directory.path().to_path_buf(),
-            test: false,
-        };
+        let mut paths =
+            ProfilePaths::at(Profile::named("personal"), directory.path().to_path_buf());
+        paths.build = "dev";
         let legacy = paths.profile().join("cef/local-worktree-a");
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("Cookies"), b"existing login").unwrap();
@@ -525,12 +542,8 @@ mod tests {
     fn copied_browser_profile_cannot_link_back_to_live_data() {
         let live = tempfile::tempdir().unwrap();
         let copy = tempfile::tempdir().unwrap();
-        let paths = ProfilePaths {
-            build: "dev",
-            profile: Profile::named("personal"),
-            data: copy.path().to_path_buf(),
-            test: false,
-        };
+        let mut paths = ProfilePaths::at(Profile::named("personal"), copy.path().to_path_buf());
+        paths.build = "dev";
         std::fs::write(live.path().join("Cookies"), b"live login").unwrap();
         std::fs::create_dir_all(paths.profile().join("cef")).unwrap();
         std::os::unix::fs::symlink(live.path(), paths.cef_directory()).unwrap();
@@ -546,12 +559,9 @@ mod tests {
     #[test]
     fn dangling_browser_profile_link_recovers_without_blocking_startup() {
         let directory = tempfile::tempdir().unwrap();
-        let paths = ProfilePaths {
-            build: "dev",
-            profile: Profile::named("personal"),
-            data: directory.path().to_path_buf(),
-            test: false,
-        };
+        let mut paths =
+            ProfilePaths::at(Profile::named("personal"), directory.path().to_path_buf());
+        paths.build = "dev";
         std::fs::create_dir_all(paths.profile().join("cef")).unwrap();
         std::os::unix::fs::symlink("local-removed", paths.cef_directory()).unwrap();
         paths.prepare_browser_profile().unwrap();
@@ -569,12 +579,9 @@ mod tests {
     #[test]
     fn copied_store_and_runtime_are_separate_from_normal_data() {
         let directory = tempfile::tempdir().unwrap();
-        let local = ProfilePaths {
-            build: "local",
-            profile: Profile::named("personal"),
-            data: directory.path().join("normal"),
-            test: false,
-        };
+        let mut local =
+            ProfilePaths::at(Profile::named("personal"), directory.path().join("normal"));
+        local.build = "local";
         let mut dev = local.clone();
         dev.build = "dev";
         std::fs::write(local.store().join("store.ron"), b"workspace").unwrap();
@@ -583,7 +590,8 @@ mod tests {
             b"workspace"
         );
         assert_ne!(local.runtime_data(), dev.runtime_data());
-        dev.data = directory.path().join("copy");
+        dev = ProfilePaths::at(Profile::named("personal"), directory.path().join("copy"));
+        dev.build = "dev";
         assert!(!dev.store().join("store.ron").exists());
         assert!(dev.runtime_data().starts_with(&dev.data));
     }

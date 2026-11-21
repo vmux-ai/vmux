@@ -317,19 +317,24 @@ fn plugin_naming_covers_owned_source_and_preserves_vendored_types() {
 }
 
 #[test]
-fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
+fn compiler_inputs_require_actual_cargo_data_flow_and_cannot_be_product_modules() {
     for change in [
         "valid",
         "unused",
         "shadowed",
         "assigned",
         "renamed",
+        "owner_renamed",
+        "import_shadow",
+        "duplicate_import",
         "receiver",
         "disabled",
         "disconnected",
         "cargo",
         "macro",
         "content",
+        "unrecorded",
+        "unconsumed",
         "module",
         "plain_module",
         "inline_module",
@@ -364,7 +369,6 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
                     original.replace("Command::new(\"cargo\")", "Command::new(\"echo\")"),
                 )
                 .unwrap();
-                fixture.refresh_owner();
             }
             "renamed" => {
                 let source_text = original
@@ -374,7 +378,15 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
                     .replace("fn new(", "fn start(")
                     .replace("Fixture::new()", "Fixture::start()");
                 std::fs::write(&source, source_text).unwrap();
-                fixture.refresh_owner();
+            }
+            "owner_renamed" => {
+                std::fs::write(&source, original.replace("Fixture", "Harness")).unwrap();
+            }
+            "import_shadow" => {
+                std::fs::write(&source, format!("struct Command;\n{original}")).unwrap();
+            }
+            "duplicate_import" => {
+                std::fs::write(&source, format!("use fake::Command;\n{original}")).unwrap();
             }
             "assigned" => std::fs::write(
                 &source,
@@ -408,7 +420,6 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
                     "let _unused = Command::new(\"cargo\"); let output = Other",
                 );
                 std::fs::write(&source, source_text).unwrap();
-                fixture.refresh_owner();
             }
             "macro" => std::fs::write(
                 &source,
@@ -416,6 +427,20 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
             )
             .unwrap(),
             "content" => std::fs::write(fixture.input("private"), "fn main() {}\n").unwrap(),
+            "unrecorded" => {
+                std::fs::write(fixture.input("added"), "fn main() {}\n").unwrap();
+                std::fs::write(
+                    &source,
+                    original.replace(
+                        "(\"private\", include_str!(\"../ui/private.rs\"), &[][..]),",
+                        "(\"private\", include_str!(\"../ui/private.rs\"), &[][..]), (\"added\", include_str!(\"../ui/added.rs\"), &[][..]),",
+                    ),
+                )
+                .unwrap();
+            }
+            "unconsumed" => {
+                std::fs::write(fixture.input("added"), "fn main() {}\n").unwrap();
+            }
             "module" => std::fs::write(
                 source.parent().unwrap().join("lib.rs"),
                 "#[path=\"../ui/private.rs\"] mod input;",
@@ -425,19 +450,6 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
                 let input = source.parent().unwrap().join("domain.rs");
                 std::fs::rename(fixture.input("private"), &input).unwrap();
                 std::fs::write(&source, original.replace("../ui/private.rs", "domain.rs")).unwrap();
-                let root = fixture.0.path().join("crates/feature/vmux_dx");
-                let mut policy = Policy::read(&root.join("ecs-policy.ron")).unwrap();
-                let record = policy
-                    .boundaries
-                    .iter_mut()
-                    .find(|record| record.key.ends_with("/ui/private.rs||script"))
-                    .unwrap();
-                record.key = "crates/feature/vmux_dx/lints/src/domain.rs||script".into();
-                std::fs::write(
-                    root.join("ecs-policy.ron"),
-                    ron::to_string(&policy).unwrap(),
-                )
-                .unwrap();
                 std::fs::write(source.parent().unwrap().join("lib.rs"), "mod domain;").unwrap();
             }
             "inline_module" => {
@@ -462,11 +474,29 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
             _ => unreachable!(),
         }
         let result = CompilerInputs::read(fixture.0.path());
-        if change != "valid" && change != "renamed" {
-            assert!(result.is_err(), "{change}");
+        if !matches!(
+            change,
+            "valid" | "renamed" | "owner_renamed" | "content" | "unrecorded" | "unconsumed"
+        ) {
+            if let Ok(inputs) = result {
+                assert!(
+                    inputs.owner(&fixture.input("private")).is_none(),
+                    "{change}"
+                );
+            }
             continue;
         }
         let inputs = result.unwrap();
+        let owner = if change == "owner_renamed" {
+            "crates/feature/vmux_dx/lints/src/registrations.rs||impl:Harness"
+        } else {
+            "crates/feature/vmux_dx/lints/src/registrations.rs||impl:Fixture"
+        };
+        assert_eq!(
+            inputs.owner(Path::new("crates/feature/vmux_dx/lints/ui/private.rs")),
+            Some(owner),
+            "workspace-relative input must not depend on the test process directory: {change}"
+        );
         for name in [
             "adapters",
             "aliases",
@@ -482,11 +512,16 @@ fn compiler_inputs_require_reviewed_data_flow_and_cannot_be_product_modules() {
             "uninitialized",
             "unrelated",
         ] {
+            assert_eq!(inputs.owner(&fixture.input(name)), Some(owner), "{name}");
+        }
+        if change == "unrecorded" {
             assert_eq!(
-                inputs.owner(&fixture.input(name)),
+                inputs.owner(&fixture.input("added")),
                 Some("crates/feature/vmux_dx/lints/src/registrations.rs||impl:Fixture"),
-                "{name}"
             );
+        }
+        if change == "unconsumed" {
+            assert!(inputs.owner(&fixture.input("added")).is_none());
         }
     }
 }
@@ -510,25 +545,6 @@ impl CompilerInputFixture {
             let entry = entry.unwrap();
             std::fs::copy(entry.path(), root.join("ui").join(entry.file_name())).unwrap();
         }
-        let policy =
-            Policy::read(&workspace.join("crates/feature/vmux_dx/ecs-policy.ron")).unwrap();
-        let policy = Policy {
-            boundaries: policy
-                .boundaries
-                .into_iter()
-                .filter(|record| {
-                    record.interface == "Rust compiler input data"
-                        || record.key
-                            == "crates/feature/vmux_dx/lints/src/registrations.rs||impl:Fixture"
-                })
-                .collect(),
-            ..Default::default()
-        };
-        std::fs::write(
-            root.parent().unwrap().join("ecs-policy.ron"),
-            ron::to_string(&policy).unwrap(),
-        )
-        .unwrap();
         Self(directory)
     }
 
@@ -537,32 +553,6 @@ impl CompilerInputFixture {
             .path()
             .join("crates/feature/vmux_dx/lints/ui")
             .join(format!("{name}.rs"))
-    }
-
-    fn refresh_owner(&self) {
-        let root = self.0.path().join("crates/feature/vmux_dx");
-        let source = std::fs::read_to_string(root.join("lints/src/registrations.rs")).unwrap();
-        let file = syn::parse_file(&source).unwrap();
-        let implementation = file
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::Impl(value) => Some(value),
-                _ => None,
-            })
-            .unwrap();
-        let mut policy = Policy::read(&root.join("ecs-policy.ron")).unwrap();
-        let owner = policy
-            .boundaries
-            .iter_mut()
-            .find(|record| record.key.ends_with("||impl:Fixture"))
-            .unwrap();
-        owner.fingerprint = Declaration::fingerprint(&implementation.to_token_stream().to_string());
-        std::fs::write(
-            root.join("ecs-policy.ron"),
-            ron::to_string(&policy).unwrap(),
-        )
-        .unwrap();
     }
 }
 
@@ -7947,6 +7937,15 @@ impl Inventory {
         }
         if self.automatic_boundary(entry) || self.fixture_bootstrap(entry) {
             return true;
+        }
+        if matches!(entry.kind, Kind::Script) && entry.path.ends_with(".rs") {
+            let Some(owner) = CompilerInputs::current().owner(Path::new(&entry.path)) else {
+                return false;
+            };
+            let Some(owner) = self.entries.get(owner) else {
+                return false;
+            };
+            return !owner.production && self.canonical(owner, policy, visiting);
         }
         if policy.boundaries.iter().any(|boundary| {
             boundary.key == entry.key
