@@ -64,6 +64,16 @@ impl CompilerInputs {
         self.files.get(&path).map(String::as_str)
     }
 
+    pub(super) fn verifies_harness(source: &str, name: &str, path: &Path) -> bool {
+        let Ok(file) = syn::parse_file(source) else {
+            return false;
+        };
+        let Ok(proof) = Self::harness(&file, name, path) else {
+            return false;
+        };
+        !proof.included.is_empty()
+    }
+
     pub(super) fn read(root: &Path) -> Result<Self, String> {
         let mut paths = Vec::new();
         Self::paths(&root.join("crates"), &mut paths)?;

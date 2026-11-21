@@ -3440,38 +3440,61 @@ fn generic_example_registrations_resolve_hyphenated_package_directories() {
 
 #[test]
 fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
-    for (source, accepted) in [
+    for (source, accepted, canonical) in [
         (
             "use rustc_lint::LateLintPass as Pass; struct Adapter; impl Pass for Adapter {}",
             true,
+            false,
         ),
         (
             "use rustc_hir::intravisit::Visitor; struct Adapter; impl Visitor for Adapter {}",
             true,
+            false,
         ),
         (
             "use rustc_lint::LintStore; use rustc_session::Session; fn register_lints(_: &Session, store: &mut LintStore) {}",
-            true,
+            false,
+            false,
         ),
         (
             "struct LintStore; struct Session; fn register_lints(_: &Session, store: &mut LintStore) {}",
+            false,
             false,
         ),
         (
             "trait LateLintPass {} struct Adapter; impl LateLintPass for Adapter {}",
             false,
+            false,
         ),
         (
             "mod rustc_lint { pub trait LateLintPass {} } struct Adapter; impl rustc_lint::LateLintPass for Adapter {}",
+            false,
             false,
         ),
         (
             "struct Adapter { data: Vec<String> } impl Adapter { fn choose(&self) {} }",
             false,
+            false,
         ),
         (
             "use std::process::Command; #[cfg(test)] struct Adapter { directory: tempfile::TempDir } #[cfg(test)] impl Adapter { fn check(&self) { Command::new(\"cargo\"); } } #[test] fn fixture() { let _ = include_str!(\"case.rs\"); Adapter::check(); }",
+            false,
+            false,
+        ),
+        (
+            "use std::process::Command; #[cfg(test)] struct Adapter { directory: tempfile::TempDir } #[cfg(test)] impl Adapter { fn new() -> Self { Self { directory: tempfile::tempdir().unwrap() } } fn check(&self, name: &str, source: &str) { std::fs::write(self.directory.path().join(name), source).unwrap(); Command::new(\"cargo\").current_dir(self.directory.path()).args([\"dylint\"]).output().unwrap(); } } #[test] fn fixture() { let adapter = Adapter::new(); for (name, source) in [(\"valid\", include_str!(\"case.rs\"))] { adapter.check(name, source); } }",
+            false,
+            false,
+        ),
+        (
+            "use rustc_lint::{LateLintPass, LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { store.register_late_lint_pass(Box::new(|_| Box::new(Adapter))); }",
             true,
+            true,
+        ),
+        (
+            "use rustc_lint::{LateLintPass, LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} struct Other; impl LateLintPass for Other {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { let _unused = Adapter; store.register_late_lint_pass(Box::new(|_| Box::new(Other))); }",
+            true,
+            false,
         ),
     ] {
         let inventory = Inventory::fixture(source);
@@ -3481,6 +3504,11 @@ fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
             .or_else(|| inventory.entries.get("fixture.rs||fn:register_lints"))
             .unwrap();
         assert_eq!(inventory.compiler_boundary(adapter), accepted, "{source}");
+        assert_eq!(
+            inventory.canonical(adapter, &Policy::default(), &mut BTreeSet::new()),
+            canonical,
+            "{source}"
+        );
     }
 }
 
@@ -12200,7 +12228,195 @@ impl Inventory {
     }
 
     fn automatic_boundary(&self, entry: &Declaration) -> bool {
-        self.framework_bootstrap(entry) || self.manifest_source(entry) || self.typed_page(entry)
+        self.compiler_registration(entry)
+            || self.registered_compiler_owner(entry)
+            || self.fixture_lock(entry)
+            || self.framework_bootstrap(entry)
+            || self.manifest_source(entry)
+            || self.typed_page(entry)
+    }
+
+    fn registered_compiler_owner(&self, entry: &Declaration) -> bool {
+        if !self.compiler_boundary(entry) {
+            return false;
+        }
+        let source = match &entry.owner {
+            Some(owner) => self.resolve(&entry.namespace, owner, &mut BTreeSet::new()),
+            None => Some(entry),
+        };
+        let Some(source) = source else {
+            return false;
+        };
+        if !source.production {
+            return self.sources.get(&source.path).is_some_and(|input| {
+                CompilerInputs::verifies_harness(
+                    input,
+                    &source.name,
+                    &Workspace::current().0.join(&source.path),
+                )
+            });
+        }
+        if !self.implementations(source).iter().any(|implementation| {
+            let Some((interface, _)) = implementation.name.split_once(" for ") else {
+                return false;
+            };
+            let interface = interface.split('<').next().unwrap().replace(' ', "");
+            self.external_path(&implementation.namespace, &interface, &mut BTreeSet::new())
+                .as_deref()
+                == Some("rustc_lint::LateLintPass")
+        }) {
+            return false;
+        }
+        self.entries.values().any(|registration| {
+            matches!(registration.kind, Kind::Function)
+                && self.compiler_registration(registration)
+                && self.compiler_factory_registration(registration, source)
+        })
+    }
+
+    fn compiler_factory_registration(
+        &self,
+        registration: &Declaration,
+        owner: &Declaration,
+    ) -> bool {
+        let Some(source) = self.sources.get(&registration.path) else {
+            return false;
+        };
+        let Ok(file) = syn::parse_file(source) else {
+            return false;
+        };
+        for item in &file.items {
+            let Item::Fn(function) = item else {
+                continue;
+            };
+            if function.sig.ident != registration.name {
+                continue;
+            }
+            for input in &function.sig.inputs {
+                let syn::FnArg::Typed(input) = input else {
+                    continue;
+                };
+                let syn::Pat::Ident(binding) = input.pat.as_ref() else {
+                    continue;
+                };
+                let Type::Reference(reference) = input.ty.as_ref() else {
+                    continue;
+                };
+                let Type::Path(ty) = reference.elem.as_ref() else {
+                    continue;
+                };
+                if reference.mutability.is_none()
+                    || self
+                        .external_path(
+                            &registration.namespace,
+                            &References::path(&ty.path),
+                            &mut BTreeSet::new(),
+                        )
+                        .as_deref()
+                        != Some("rustc_lint::LintStore")
+                {
+                    continue;
+                }
+                for statement in &function.block.stmts {
+                    if matches!(statement, syn::Stmt::Local(local) if matches!(&local.pat, syn::Pat::Ident(name) if name.ident == binding.ident))
+                    {
+                        return false;
+                    }
+                    let syn::Stmt::Expr(expression, _) = statement else {
+                        continue;
+                    };
+                    if matches!(expression, syn::Expr::Return(_))
+                        || matches!(expression, syn::Expr::Assign(assignment) if matches!(assignment.left.as_ref(), syn::Expr::Path(path) if path.path.is_ident(&binding.ident)))
+                    {
+                        return false;
+                    }
+                    let syn::Expr::MethodCall(call) = expression else {
+                        continue;
+                    };
+                    if call.method == "register_late_lint_pass"
+                        && matches!(call.receiver.as_ref(), syn::Expr::Path(path) if path.path.is_ident(&binding.ident))
+                        && call.args.first().is_some_and(|factory| {
+                            self.compiler_factory_value(&registration.namespace, factory, owner)
+                        })
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn compiler_factory_value(
+        &self,
+        namespace: &str,
+        value: &syn::Expr,
+        owner: &Declaration,
+    ) -> bool {
+        match value {
+            syn::Expr::Closure(closure) => {
+                self.compiler_factory_value(namespace, &closure.body, owner)
+            }
+            syn::Expr::Paren(value) => self.compiler_factory_value(namespace, &value.expr, owner),
+            syn::Expr::Group(value) => self.compiler_factory_value(namespace, &value.expr, owner),
+            syn::Expr::Block(block) => {
+                let Some(syn::Stmt::Expr(value, None)) = block.block.stmts.last() else {
+                    return false;
+                };
+                self.compiler_factory_value(namespace, value, owner)
+            }
+            syn::Expr::Call(call) => {
+                let syn::Expr::Path(function) = call.func.as_ref() else {
+                    return false;
+                };
+                let path = References::path(&function.path);
+                if (path == "Box::new" && !self.local_binding(namespace, "Box")
+                    || matches!(
+                        self.external_path(namespace, &path, &mut BTreeSet::new())
+                            .as_deref(),
+                        Some("std::boxed::Box::new" | "alloc::boxed::Box::new")
+                    ))
+                    && call.args.len() == 1
+                {
+                    return self.compiler_factory_value(
+                        namespace,
+                        call.args.first().unwrap(),
+                        owner,
+                    );
+                }
+                if let Some((path, "default")) = path.rsplit_once("::")
+                    && call.args.is_empty()
+                    && owner.derive_paths.contains("Default")
+                    && !self.local_binding(namespace, "Default")
+                    && !self.implementations(owner).iter().any(|implementation| {
+                        implementation
+                            .bodies
+                            .iter()
+                            .any(|body| body.name == "default")
+                    })
+                {
+                    return self
+                        .resolve(namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|resolved| resolved.key == owner.key);
+                }
+                false
+            }
+            syn::Expr::Path(path) => self
+                .resolve(
+                    namespace,
+                    &References::path(&path.path),
+                    &mut BTreeSet::new(),
+                )
+                .is_some_and(|resolved| resolved.key == owner.key),
+            syn::Expr::Struct(value) => self
+                .resolve(
+                    namespace,
+                    &References::path(&value.path),
+                    &mut BTreeSet::new(),
+                )
+                .is_some_and(|resolved| resolved.key == owner.key),
+            _ => false,
+        }
     }
 
     fn typed_page(&self, entry: &Declaration) -> bool {
@@ -12932,8 +13148,28 @@ impl Inventory {
                     interfaces.insert(interface);
                 }
             }
-            return interfaces.contains("rustc_lint::LintStore")
-                && interfaces.contains("rustc_session::Session");
+            if !interfaces.contains("rustc_lint::LintStore")
+                || !interfaces.contains("rustc_session::Session")
+            {
+                return false;
+            }
+            let Some(source) = self.sources.get(&adapter.path) else {
+                return false;
+            };
+            let Ok(file) = syn::parse_file(source) else {
+                return false;
+            };
+            return file.items.iter().any(|item| {
+                let Item::Fn(function) = item else {
+                    return false;
+                };
+                function.sig.ident == "register_lints"
+                    && function.attrs.iter().any(|attribute| {
+                        attribute.path().is_ident("no_mangle")
+                            || attribute.path().is_ident("unsafe")
+                                && matches!(&attribute.meta, syn::Meta::List(list) if list.tokens.to_string() == "no_mangle")
+                    })
+            });
         }
         false
     }
@@ -12963,16 +13199,7 @@ impl Inventory {
                 temporary = true;
             }
         }
-        for implementation in self.entries.values() {
-            let Some(owner) = &implementation.owner else {
-                continue;
-            };
-            if self
-                .resolve(&implementation.namespace, owner, &mut BTreeSet::new())
-                .is_none_or(|owner| owner.key != source.key)
-            {
-                continue;
-            }
+        for implementation in self.implementations(source) {
             if let Some((interface, _)) = implementation.name.split_once(" for ") {
                 let interface = interface.split('<').next().unwrap().replace(' ', "");
                 if matches!(
@@ -12987,6 +13214,9 @@ impl Inventory {
                     return true;
                 }
             }
+            if source.production || !temporary {
+                continue;
+            }
             for reference in &implementation.reference_paths {
                 if self
                     .external_path(&implementation.namespace, reference, &mut BTreeSet::new())
@@ -13000,13 +13230,12 @@ impl Inventory {
         if source.production || !temporary || !cargo {
             return false;
         }
-        self.entries.values().any(|test| {
-            test.test
-                && test
-                    .included_sources
-                    .iter()
-                    .any(|input| input.ends_with(".rs"))
-                && self.owner_references(test, source)
+        self.sources.get(&source.path).is_some_and(|input| {
+            CompilerInputs::verifies_harness(
+                input,
+                &source.name,
+                &Workspace::current().0.join(&source.path),
+            )
         })
     }
 

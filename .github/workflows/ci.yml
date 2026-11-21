@@ -483,10 +483,14 @@ jobs:
           name: ${{ github.job }}
 
   lint-ecs:
-    name: Lint ECS
-    runs-on: ubuntu-latest
+    name: Lint ECS (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     needs: [plan, changes]
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.compiler_lints == 'true' && !needs.changes.outputs.reuse_lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -499,13 +503,21 @@ jobs:
           tree: ${{ needs.plan.outputs.tree }}
           runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
       - uses: ./.github/actions/setup-linux
+        if: runner.os == 'Linux'
         with:
           cache-key: lint-ecs
           dependency-cache-key: lint
           cef-version: ${{ needs.plan.outputs.cef }}
+      - uses: ./.github/actions/setup-macos
+        if: runner.os == 'macOS'
+        with:
+          cache-key: lint-ecs
+          cef-version: ${{ needs.plan.outputs.cef }}
+          packaging: "false"
+          fast-rust: "true"
       - uses: ./.github/actions/cache-ecs-lints
       - name: Check typed registration fixtures
-        if: needs.changes.outputs.tooling == 'true'
+        if: runner.os == 'Linux' && needs.changes.outputs.tooling == 'true'
         run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
       - name: Lint registered systems
         if: needs.changes.outputs.lint_args != ''

@@ -9,12 +9,13 @@ extern crate rustc_session;
 use rustc_errors::DiagDecorator;
 use rustc_hir::def::Res;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
-use rustc_hir::{Expr, ExprKind, HirId, Node, PatKind};
+use rustc_hir::{Body, Expr, ExprKind, HirId, Node, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind, Visibility};
 use std::collections::HashSet;
 
 mod aliases;
+mod naming;
 mod ownership;
 #[cfg(test)]
 mod registrations;
@@ -33,16 +34,23 @@ rustc_session::declare_lint! {
     "Vmux state must have a resolved registered ECS owner"
 }
 
+rustc_session::declare_lint! {
+    pub VMUX_SYSTEM_NAME,
+    Deny,
+    "registered Vmux systems must use short operation names within their module"
+}
+
 #[unsafe(no_mangle)]
 pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintStore) {
-    store.register_lints(&[VMUX_EXPORTED_SYSTEM, VMUX_ECS_OWNERSHIP]);
+    store.register_lints(&[VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_ECS_OWNERSHIP]);
     store.register_late_lint_pass(Box::new(|_| Box::new(VmuxExportedSystem::default())));
 }
 
-rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_ECS_OWNERSHIP]);
+rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_ECS_OWNERSHIP]);
 
 #[derive(Default)]
 struct VmuxExportedSystem<'tcx> {
+    named_systems: HashSet<DefId>,
     ownership: ownership::Ownership<'tcx>,
     reported: HashSet<DefId>,
     configurations: HashSet<HirId>,
@@ -58,12 +66,42 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
-        let package = std::env::var("CARGO_PKG_NAME")
-            .unwrap_or_else(|_| cx.tcx.crate_name(LOCAL_CRATE).as_str().to_owned());
-        if !package.starts_with("vmux_") {
+        if !Self::applies(cx) {
             return;
         }
         self.ownership.call(cx, expression);
+        self.register(cx, expression);
+    }
+
+    fn check_body(&mut self, cx: &LateContext<'tcx>, body: &Body<'tcx>) {
+        if !Self::applies(cx) {
+            return;
+        }
+        let method = body.value.hir_id.owner.def_id.to_def_id();
+        let Some(interface) = Self::trait_owner(cx, method) else {
+            return;
+        };
+        if cx.tcx.crate_name(interface.krate).as_str() != "bevy_ecs"
+            || cx.tcx.item_name(interface).as_str() != "Component"
+            || !matches!(
+                cx.tcx.item_name(method).as_str(),
+                "on_add" | "on_insert" | "on_discard" | "on_remove" | "on_despawn"
+            )
+        {
+            return;
+        }
+        self.configuration(cx, body.value);
+    }
+}
+
+impl<'tcx> VmuxExportedSystem<'tcx> {
+    fn applies(cx: &LateContext<'_>) -> bool {
+        let package = std::env::var("CARGO_PKG_NAME")
+            .unwrap_or_else(|_| cx.tcx.crate_name(LOCAL_CRATE).as_str().to_owned());
+        package.starts_with("vmux_")
+    }
+
+    fn register(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
         let (method, arguments, qualified) = match expression.kind {
             ExprKind::MethodCall(_, _, arguments, _) => {
                 let Some(method) = cx.typeck_results().type_dependent_def_id(expression.hir_id)
@@ -80,8 +118,32 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
             }
             _ => return,
         };
-        let Some(implementation) = cx.tcx.impl_of_assoc(method) else {
+        let Some(index) = Self::registration_argument(cx, method, qualified) else {
             return;
+        };
+        if let Some(systems) = arguments.get(index) {
+            self.ownership.site = Some(expression.hir_id.owner.def_id.to_def_id());
+            self.configuration(cx, systems);
+        }
+    }
+
+    fn registration_argument(
+        cx: &LateContext<'_>,
+        method: DefId,
+        qualified: bool,
+    ) -> Option<usize> {
+        if let Some(interface) = Self::trait_owner(cx, method)
+            && cx.tcx.crate_name(interface.krate).as_str() == "bevy_ecs"
+            && cx.tcx.item_name(interface).as_str() == "RunSystemOnce"
+            && matches!(
+                cx.tcx.item_name(method).as_str(),
+                "run_system_once" | "run_system_once_with"
+            )
+        {
+            return Some(usize::from(qualified));
+        }
+        let Some(implementation) = cx.tcx.impl_of_assoc(method) else {
+            return None;
         };
         let TyKind::Adt(owner, _) = cx
             .tcx
@@ -90,39 +152,28 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
             .skip_norm_wip()
             .kind()
         else {
-            return;
+            return None;
         };
         let package = cx.tcx.crate_name(method.krate);
         let owner = cx.tcx.item_name(owner.did());
         let name = cx.tcx.item_name(method);
-        let index = match (package.as_str(), owner.as_str(), name.as_str()) {
-            ("bevy_app", "App" | "SubApp", "add_systems") => {
-                if qualified {
-                    2
-                } else {
-                    1
-                }
-            }
+        match (package.as_str(), owner.as_str(), name.as_str()) {
+            ("bevy_app", "App" | "SubApp", "add_systems") => Some(1 + usize::from(qualified)),
             ("bevy_app", "App" | "SubApp", "add_observer")
             | ("bevy_ecs", "World" | "Commands", "add_observer")
             | ("bevy_ecs", "EntityCommands" | "EntityWorldMut", "observe") => {
-                if qualified {
-                    1
-                } else {
-                    0
-                }
+                Some(usize::from(qualified))
             }
-            ("bevy_ecs", "Observer", "new") if qualified => 0,
-            _ => return,
-        };
-        if let Some(systems) = arguments.get(index) {
-            self.ownership.site = Some(expression.hir_id.owner.def_id.to_def_id());
-            self.configuration(cx, systems);
+            (
+                "bevy_ecs",
+                "ComponentHooks",
+                "on_add" | "on_insert" | "on_discard" | "on_remove" | "on_despawn",
+            ) => Some(usize::from(qualified)),
+            ("bevy_ecs", "Observer", "new") if qualified => Some(0),
+            _ => None,
         }
     }
-}
 
-impl<'tcx> VmuxExportedSystem<'tcx> {
     fn configuration(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
         if !self.configurations.insert(expression.hir_id) {
             return;
@@ -146,7 +197,10 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
                 };
                 if Self::configuration_method(cx, method) {
                     self.configuration(cx, receiver);
-                    if cx.tcx.item_name(method).as_str() == "pipe" {
+                    if matches!(
+                        cx.tcx.item_name(method).as_str(),
+                        "pipe" | "run_if" | "distributive_run_if"
+                    ) {
                         for system in arguments {
                             self.configuration(cx, system);
                         }
@@ -175,8 +229,10 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
                     if let Some(system) = arguments.first() {
                         self.configuration(cx, system);
                     }
-                    if cx.tcx.item_name(*method).as_str() == "pipe"
-                        && let Some(system) = arguments.get(1)
+                    if matches!(
+                        cx.tcx.item_name(*method).as_str(),
+                        "pipe" | "run_if" | "distributive_run_if"
+                    ) && let Some(system) = arguments.get(1)
                     {
                         self.configuration(cx, system);
                     }
@@ -211,23 +267,29 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
     }
 
     fn configuration_method(cx: &LateContext<'_>, method: DefId) -> bool {
-        let trait_id = match cx.tcx.trait_of_assoc(method) {
-            Some(owner) => owner,
-            None => {
-                let Some(method) = cx.tcx.trait_item_of(method) else {
-                    return false;
-                };
-                let Some(owner) = cx.tcx.trait_of_assoc(method) else {
-                    return false;
-                };
-                owner
-            }
+        let parent = cx.tcx.parent(method);
+        if cx.tcx.crate_name(method.krate).as_str() == "core"
+            && cx.tcx.item_name(parent).as_str() == "Some"
+            && cx.tcx.item_name(cx.tcx.parent(parent)).as_str() == "Option"
+        {
+            return true;
+        }
+        let Some(trait_id) = Self::trait_owner(cx, method) else {
+            return false;
         };
         cx.tcx.crate_name(trait_id.krate).as_str() == "bevy_ecs"
             && matches!(
                 cx.tcx.item_name(trait_id).as_str(),
                 "IntoScheduleConfigs" | "IntoSystem"
             )
+    }
+
+    fn trait_owner(cx: &LateContext<'_>, method: DefId) -> Option<DefId> {
+        if let Some(owner) = cx.tcx.trait_of_assoc(method) {
+            return Some(owner);
+        }
+        let method = cx.tcx.trait_item_of(method)?;
+        cx.tcx.trait_of_assoc(method)
     }
 
     fn system_type(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>) {
@@ -250,6 +312,7 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
         let Some(local) = function.as_local() else {
             return;
         };
+        self.check_name(cx, function);
         let Visibility::Restricted(scope) = cx.tcx.visibility(function) else {
             self.report(cx, function);
             return;
