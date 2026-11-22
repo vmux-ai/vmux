@@ -6,8 +6,6 @@ use super::client_operation_driver::{
     ClaimClientOperation, ClientOperationInbox, ReleaseClientOperation,
 };
 
-const MAX_CLIENT_OPERATIONS: usize = 4096;
-
 pub struct ClientOperationPlugin;
 
 impl Plugin for ClientOperationPlugin {
@@ -29,8 +27,23 @@ impl Plugin for ClientOperationPlugin {
 #[derive(Component, Clone, Eq, PartialEq)]
 struct ClientOperationId(ClientOpId);
 
+impl ClientOperationId {
+    const MAX_ENTRIES: usize = 4096;
+}
+
 #[derive(Component, Clone, Copy)]
 struct ClientOperationSequence(u64);
+
+#[derive(Component, Default)]
+pub(super) struct ClientOperationCounter(u64);
+
+impl ClientOperationCounter {
+    fn next(&mut self) -> u64 {
+        let order = self.0;
+        self.0 = order.wrapping_add(1);
+        order
+    }
+}
 
 fn receive_requests(mut inbox: Single<&mut ClientOperationInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.releases.try_recv() {
@@ -64,8 +77,8 @@ fn release_client_operations(
 
 fn claim_client_operations(
     operations: Query<(Entity, &ClientOperationId, &ClientOperationSequence)>,
+    mut counter: Single<&mut ClientOperationCounter>,
     mut requests: Query<(Entity, &mut ClaimClientOperation)>,
-    mut sequence: Local<u64>,
     mut commands: Commands,
 ) {
     let mut claimed = Vec::new();
@@ -76,7 +89,7 @@ fn claim_client_operations(
     for (request_entity, mut request) in &mut requests {
         let accepted = !claimed.iter().any(|(_, id, _)| *id == request.id);
         if accepted {
-            if claimed.len() >= MAX_CLIENT_OPERATIONS {
+            if claimed.len() >= ClientOperationId::MAX_ENTRIES {
                 let oldest = claimed
                     .iter()
                     .enumerate()
@@ -86,8 +99,7 @@ fn claim_client_operations(
                 let (entity, _, _) = claimed.swap_remove(oldest);
                 commands.entity(entity).despawn();
             }
-            let order = *sequence;
-            *sequence = order.wrapping_add(1);
+            let order = counter.next();
             let entity = commands
                 .spawn((
                     Name::new(format!("client operation {}", request.id.as_str())),
@@ -109,50 +121,63 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
-    async fn claim(app: &mut App, operations: ClientOperations, id: ClientOpId) -> bool {
-        let task = tokio::spawn(async move { operations.claim(id).await });
-        while !task.is_finished() {
-            tokio::task::yield_now().await;
-            app.update();
-        }
-        task.await.unwrap()
+    struct ClientOperationFixture {
+        app: App,
+        _operations: ClientOperations,
     }
 
-    #[tokio::test]
-    async fn client_operations_are_entities_with_bounded_claims() {
-        let (wake, _wake_inbox) = mpsc::unbounded_channel();
-        let (operations, runtime) = ClientOperations::new(wake);
-        let mut app = App::new();
-        app.add_plugins(ClientOperationPlugin);
-        app.world_mut()
-            .spawn((Name::new("remote client operations"), runtime));
+    impl ClientOperationFixture {
+        fn new() -> Self {
+            let (wake, _wake_inbox) = mpsc::unbounded_channel();
+            let (operations, runtime) = ClientOperations::new(wake);
+            let mut app = App::new();
+            app.add_plugins(ClientOperationPlugin);
+            app.world_mut()
+                .spawn((Name::new("remote client operations"), runtime));
+            Self {
+                app,
+                _operations: operations,
+            }
+        }
+
+        fn claim(&mut self, id: ClientOpId) -> bool {
+            let (response, mut receiver) = tokio::sync::oneshot::channel();
+            self.app.world_mut().spawn(ClaimClientOperation {
+                id,
+                response: Some(response),
+            });
+            self.app.update();
+            receiver.try_recv().unwrap()
+        }
+
+        fn release(&mut self, id: ClientOpId) {
+            let (response, mut receiver) = tokio::sync::oneshot::channel();
+            self.app.world_mut().spawn(ReleaseClientOperation {
+                id,
+                response: Some(response),
+            });
+            self.app.update();
+            receiver.try_recv().unwrap();
+        }
+    }
+
+    #[test]
+    fn client_operations_are_entities_with_bounded_claims() {
+        let mut fixture = ClientOperationFixture::new();
 
         let first = ClientOpId::new("first");
-        assert!(claim(&mut app, operations.clone(), first.clone()).await);
-        assert!(!claim(&mut app, operations.clone(), first.clone()).await);
+        assert!(fixture.claim(first.clone()));
+        assert!(!fixture.claim(first.clone()));
 
-        let release = operations.clone();
-        let release_task = tokio::spawn(async move { release.release(first.clone()).await });
-        while !release_task.is_finished() {
-            tokio::task::yield_now().await;
-            app.update();
-        }
-        release_task.await.unwrap();
-        assert!(claim(&mut app, operations.clone(), ClientOpId::new("first")).await);
+        fixture.release(first);
+        assert!(fixture.claim(ClientOpId::new("first")));
 
-        for index in 0..MAX_CLIENT_OPERATIONS {
-            assert!(
-                claim(
-                    &mut app,
-                    operations.clone(),
-                    ClientOpId::new(format!("op-{index}")),
-                )
-                .await
-            );
+        for index in 0..ClientOperationId::MAX_ENTRIES {
+            assert!(fixture.claim(ClientOpId::new(format!("op-{index}"))));
         }
-        let world = app.world_mut();
+        let world = fixture.app.world_mut();
         let mut query = world.query::<&ClientOperationId>();
         let count = query.iter(world).count();
-        assert_eq!(count, MAX_CLIENT_OPERATIONS);
+        assert_eq!(count, ClientOperationId::MAX_ENTRIES);
     }
 }

@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::hash::{DefaultHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use vmux_transport::{ClientCredential, DeviceId};
 
+use super::authorization::{AuthorizationAuthority, PairingCredential};
 use super::file_driver::PrivateFile;
 use crate::RemotePaths;
 
@@ -69,8 +71,11 @@ pub enum AuthorizationOutcome {
 
 #[derive(Clone, Component)]
 pub(crate) struct RemoteAuthorizations {
-    authenticate: mpsc::UnboundedSender<AuthenticateAuthorization>,
+    authenticate_device: mpsc::UnboundedSender<AuthenticateDevice>,
+    pair_device: mpsc::UnboundedSender<PairDevice>,
     revalidate: mpsc::UnboundedSender<RevalidateAuthorization>,
+    revoke: mpsc::UnboundedSender<RevokeAuthorization>,
+    reset: mpsc::UnboundedSender<ResetAuthorization>,
     wake: mpsc::UnboundedSender<()>,
 }
 
@@ -83,19 +88,29 @@ impl RemoteAuthorizations {
         store: RemoteAuthorizationStore,
         wake: mpsc::UnboundedSender<()>,
     ) -> (Self, impl Bundle) {
-        let (authenticate, authenticate_inbox) = mpsc::unbounded_channel();
+        let (authenticate_device, authenticate_device_inbox) = mpsc::unbounded_channel();
+        let (pair_device, pair_device_inbox) = mpsc::unbounded_channel();
         let (revalidate, revalidate_inbox) = mpsc::unbounded_channel();
+        let (revoke, revoke_inbox) = mpsc::unbounded_channel();
+        let (reset, reset_inbox) = mpsc::unbounded_channel();
         (
             Self {
-                authenticate,
+                authenticate_device,
+                pair_device,
                 revalidate,
+                revoke,
+                reset,
                 wake,
             },
             (
-                store,
+                AuthorizationAuthority::new(store.path),
+                PairingCredential::default(),
                 AuthorizationInbox(AuthorizationReceivers {
-                    authenticate: authenticate_inbox,
+                    authenticate_device: authenticate_device_inbox,
+                    pair_device: pair_device_inbox,
                     revalidate: revalidate_inbox,
+                    revoke: revoke_inbox,
+                    reset: reset_inbox,
                 }),
             ),
         )
@@ -107,13 +122,24 @@ impl RemoteAuthorizations {
         credential: ClientCredential,
     ) -> std::io::Result<Option<AuthorizationOutcome>> {
         let (response, receiver) = oneshot::channel();
-        self.authenticate
-            .send(AuthenticateAuthorization {
-                client_id,
-                credential,
-                response: Some(response),
-            })
-            .map_err(|_| Self::unavailable())?;
+        match credential {
+            ClientCredential::Device(device_token) => self
+                .authenticate_device
+                .send(AuthenticateDevice {
+                    client_id,
+                    device_token,
+                    response: Some(response),
+                })
+                .map_err(|_| Self::unavailable())?,
+            ClientCredential::Pairing(pairing_token) => self
+                .pair_device
+                .send(PairDevice {
+                    client_id,
+                    pairing_token,
+                    response: Some(response),
+                })
+                .map_err(|_| Self::unavailable())?,
+        }
         self.wake.send(()).map_err(|_| Self::unavailable())?;
         receiver.await.map_err(|_| Self::unavailable())?
     }
@@ -135,6 +161,31 @@ impl RemoteAuthorizations {
         receiver.await.map_err(|_| Self::unavailable())?
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn revoke(&self, client_id: DeviceId) -> std::io::Result<bool> {
+        let (response, receiver) = oneshot::channel();
+        self.revoke
+            .send(RevokeAuthorization {
+                client_id,
+                response: Some(response),
+            })
+            .map_err(|_| Self::unavailable())?;
+        self.wake.send(()).map_err(|_| Self::unavailable())?;
+        receiver.await.map_err(|_| Self::unavailable())?
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn reset(&self) -> std::io::Result<()> {
+        let (response, receiver) = oneshot::channel();
+        self.reset
+            .send(ResetAuthorization {
+                response: Some(response),
+            })
+            .map_err(|_| Self::unavailable())?;
+        self.wake.send(()).map_err(|_| Self::unavailable())?;
+        receiver.await.map_err(|_| Self::unavailable())?
+    }
+
     fn unavailable() -> std::io::Error {
         std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
@@ -144,17 +195,27 @@ impl RemoteAuthorizations {
 }
 
 pub(super) struct AuthorizationReceivers {
-    pub(super) authenticate: mpsc::UnboundedReceiver<AuthenticateAuthorization>,
+    pub(super) authenticate_device: mpsc::UnboundedReceiver<AuthenticateDevice>,
+    pub(super) pair_device: mpsc::UnboundedReceiver<PairDevice>,
     pub(super) revalidate: mpsc::UnboundedReceiver<RevalidateAuthorization>,
+    pub(super) revoke: mpsc::UnboundedReceiver<RevokeAuthorization>,
+    pub(super) reset: mpsc::UnboundedReceiver<ResetAuthorization>,
 }
 
 #[derive(Component)]
 pub(super) struct AuthorizationInbox(pub(super) AuthorizationReceivers);
 
 #[derive(Component)]
-pub(super) struct AuthenticateAuthorization {
+pub(super) struct AuthenticateDevice {
     pub(super) client_id: DeviceId,
-    pub(super) credential: ClientCredential,
+    pub(super) device_token: String,
+    pub(super) response: Option<oneshot::Sender<std::io::Result<Option<AuthorizationOutcome>>>>,
+}
+
+#[derive(Component)]
+pub(super) struct PairDevice {
+    pub(super) client_id: DeviceId,
+    pub(super) pairing_token: String,
     pub(super) response: Option<oneshot::Sender<std::io::Result<Option<AuthorizationOutcome>>>>,
 }
 
@@ -163,6 +224,17 @@ pub(super) struct RevalidateAuthorization {
     pub(super) client_id: DeviceId,
     pub(super) device_token: String,
     pub(super) response: Option<oneshot::Sender<std::io::Result<bool>>>,
+}
+
+#[derive(Component)]
+pub(super) struct RevokeAuthorization {
+    pub(super) client_id: DeviceId,
+    pub(super) response: Option<oneshot::Sender<std::io::Result<bool>>>,
+}
+
+#[derive(Component)]
+pub(super) struct ResetAuthorization {
+    pub(super) response: Option<oneshot::Sender<std::io::Result<()>>>,
 }
 
 #[derive(Clone, Component, Debug)]
@@ -190,63 +262,14 @@ impl RemoteAuthorizationStore {
 
     pub fn devices(&self) -> std::io::Result<Vec<AuthorizedDevice>> {
         let file = self.load_or_create()?;
-        Ok(file
-            .devices
-            .into_iter()
-            .map(|device| AuthorizedDevice {
+        let mut devices = Vec::with_capacity(file.devices.len());
+        for device in file.devices {
+            devices.push(AuthorizedDevice {
                 id: device.id,
                 authorized_at_unix: device.authorized_at_unix,
-            })
-            .collect())
-    }
-
-    pub fn authenticate(
-        &self,
-        client_id: &DeviceId,
-        credential: &ClientCredential,
-    ) -> std::io::Result<Option<AuthorizationOutcome>> {
-        let mut file = self.load_or_create()?;
-        match credential {
-            ClientCredential::Device(token) => {
-                let accepted = file
-                    .devices
-                    .iter()
-                    .any(|device| device.id == *client_id && device.token_hash.matches(token));
-                Ok(accepted.then_some(AuthorizationOutcome::Accepted))
-            }
-            ClientCredential::Pairing(token) => {
-                if !Token::secure_eq(token, &file.pairing_token) {
-                    return Ok(None);
-                }
-                let device_token = Token::generate();
-                let authorization = StoredDevice {
-                    id: client_id.clone(),
-                    token_hash: TokenHash::of(&device_token),
-                    authorized_at_unix: chrono::Utc::now().timestamp(),
-                };
-                if let Some(existing) = file
-                    .devices
-                    .iter_mut()
-                    .find(|device| device.id == *client_id)
-                {
-                    *existing = authorization;
-                } else {
-                    file.devices.push(authorization);
-                }
-                file.devices.sort_by(|left, right| left.id.cmp(&right.id));
-                file.pairing_token = Token::generate();
-                self.save(&file)?;
-                Ok(Some(AuthorizationOutcome::Paired { device_token }))
-            }
+            });
         }
-    }
-
-    pub fn authorizes(&self, client_id: &DeviceId, device_token: &str) -> std::io::Result<bool> {
-        let file = self.load_or_create()?;
-        Ok(file
-            .devices
-            .iter()
-            .any(|device| device.id == *client_id && device.token_hash.matches(device_token)))
+        Ok(devices)
     }
 
     pub fn revoke(&self, client_id: &DeviceId) -> std::io::Result<bool> {
@@ -256,45 +279,71 @@ impl RemoteAuthorizationStore {
         if file.devices.len() == before {
             return Ok(false);
         }
-        self.save(&file)?;
+        AuthorizationFile::write(&self.path, &file)?;
         Ok(true)
     }
 
     pub fn reset(&self) -> std::io::Result<()> {
-        match std::fs::remove_file(&self.path) {
+        AuthorizationFile::remove(&self.path)
+    }
+
+    fn load_or_create(&self) -> std::io::Result<StoredAuthorizations> {
+        match AuthorizationFile::read(&self.path)? {
+            Some((_, file)) => Ok(file),
+            None => {
+                let file = StoredAuthorizations::new();
+                AuthorizationFile::write(&self.path, &file)?;
+                Ok(file)
+            }
+        }
+    }
+}
+
+pub(super) struct AuthorizationFile;
+
+impl AuthorizationFile {
+    pub(super) fn read(path: &Path) -> std::io::Result<Option<(u64, StoredAuthorizations)>> {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                let fingerprint = Self::fingerprint(&bytes);
+                let parsed = serde_json::from_slice(&bytes).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("invalid remote authorization store: {error}"),
+                    )
+                })?;
+                Ok(Some((fingerprint, parsed)))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(super) fn write(path: &Path, file: &StoredAuthorizations) -> std::io::Result<u64> {
+        let bytes = serde_json::to_vec_pretty(file).map_err(std::io::Error::other)?;
+        PrivateFile::new(path.to_path_buf()).write(&bytes)?;
+        Ok(Self::fingerprint(&bytes))
+    }
+
+    pub(super) fn remove(path: &Path) -> std::io::Result<()> {
+        match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error),
         }
     }
 
-    fn load_or_create(&self) -> std::io::Result<StoredAuthorizations> {
-        match std::fs::read(&self.path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("invalid remote authorization store: {error}"),
-                )
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let file = StoredAuthorizations::new();
-                self.save(&file)?;
-                Ok(file)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    fn save(&self, file: &StoredAuthorizations) -> std::io::Result<()> {
-        let bytes = serde_json::to_vec_pretty(file).map_err(std::io::Error::other)?;
-        PrivateFile::new(self.path.clone()).write(&bytes)
+    fn fingerprint(bytes: &[u8]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(bytes);
+        hasher.finish()
     }
 }
 
-struct Token;
+pub(super) struct Token;
 
 impl Token {
-    fn generate() -> String {
+    pub(super) fn generate() -> String {
         format!(
             "{}{}",
             uuid::Uuid::new_v4().simple(),
@@ -302,28 +351,27 @@ impl Token {
         )
     }
 
-    fn secure_eq(left: &str, right: &str) -> bool {
+    pub(super) fn secure_eq(left: &str, right: &str) -> bool {
         if left.len() != right.len() {
             return false;
         }
-        left.bytes()
-            .zip(right.bytes())
-            .fold(0_u8, |difference, (left, right)| {
-                difference | (left ^ right)
-            })
-            == 0
+        let mut difference = 0_u8;
+        for (left, right) in left.bytes().zip(right.bytes()) {
+            difference |= left ^ right;
+        }
+        difference == 0
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct StoredAuthorizations {
-    version: u32,
-    pairing_token: String,
-    devices: Vec<StoredDevice>,
+pub(super) struct StoredAuthorizations {
+    pub(super) version: u32,
+    pub(super) pairing_token: String,
+    pub(super) devices: Vec<StoredDevice>,
 }
 
 impl StoredAuthorizations {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             version: 1,
             pairing_token: Token::generate(),
@@ -333,18 +381,18 @@ impl StoredAuthorizations {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct StoredDevice {
-    id: DeviceId,
-    token_hash: TokenHash,
-    authorized_at_unix: i64,
+pub(super) struct StoredDevice {
+    pub(super) id: DeviceId,
+    pub(super) token_hash: TokenHash,
+    pub(super) authorized_at_unix: i64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)]
-struct TokenHash(String);
+pub(super) struct TokenHash(String);
 
 impl TokenHash {
-    fn of(token: &str) -> Self {
+    pub(super) fn of(token: &str) -> Self {
         let hash = digest(&SHA256, token.as_bytes());
         let mut encoded = String::with_capacity(hash.as_ref().len() * 2);
         for byte in hash.as_ref() {
@@ -353,90 +401,7 @@ impl TokenHash {
         Self(encoded)
     }
 
-    fn matches(&self, token: &str) -> bool {
+    pub(super) fn matches(&self, token: &str) -> bool {
         Token::secure_eq(&self.0, &Self::of(token).0)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Store {
-        _directory: tempfile::TempDir,
-        file: RemoteAuthorizationStore,
-    }
-
-    impl Store {
-        fn new() -> Self {
-            let directory = tempfile::tempdir().unwrap();
-            let file = RemoteAuthorizationStore::new(directory.path().join("authorizations.json"));
-            Self {
-                _directory: directory,
-                file,
-            }
-        }
-    }
-
-    #[test]
-    fn pairing_issues_a_device_token_and_rotates_the_pairing_token() {
-        let store = Store::new();
-        let pairing_token = store.file.pairing_token().unwrap();
-        let client = DeviceId::new("phone-a");
-        let outcome = store
-            .file
-            .authenticate(&client, &ClientCredential::Pairing(pairing_token.clone()))
-            .unwrap()
-            .unwrap();
-        let AuthorizationOutcome::Paired { device_token } = outcome else {
-            panic!("pairing did not issue a device token")
-        };
-
-        assert!(store.file.authorizes(&client, &device_token).unwrap());
-        assert_ne!(store.file.pairing_token().unwrap(), pairing_token);
-        assert_eq!(
-            store
-                .file
-                .authenticate(
-                    &DeviceId::new("phone-b"),
-                    &ClientCredential::Pairing(pairing_token)
-                )
-                .unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn each_device_has_an_independent_revocable_token() {
-        let store = Store::new();
-        let first = DeviceId::new("phone-a");
-        let second = DeviceId::new("phone-b");
-        let first_token = store.file.pairing_token().unwrap();
-        let AuthorizationOutcome::Paired {
-            device_token: first_token,
-        } = store
-            .file
-            .authenticate(&first, &ClientCredential::Pairing(first_token))
-            .unwrap()
-            .unwrap()
-        else {
-            panic!("first pairing failed")
-        };
-        let second_token = store.file.pairing_token().unwrap();
-        let AuthorizationOutcome::Paired {
-            device_token: second_token,
-        } = store
-            .file
-            .authenticate(&second, &ClientCredential::Pairing(second_token))
-            .unwrap()
-            .unwrap()
-        else {
-            panic!("second pairing failed")
-        };
-
-        assert!(store.file.revoke(&first).unwrap());
-        assert!(!store.file.authorizes(&first, &first_token).unwrap());
-        assert!(store.file.authorizes(&second, &second_token).unwrap());
-        assert_eq!(store.file.devices().unwrap().len(), 1);
     }
 }

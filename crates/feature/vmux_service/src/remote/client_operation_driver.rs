@@ -3,6 +3,8 @@ use tokio::sync::{mpsc, oneshot};
 use vmux_api::session::ClientOpId;
 use vmux_transport::service::{RemoteFuture, RemoteOperationStore};
 
+use super::client_operation::ClientOperationCounter;
+
 #[derive(Clone)]
 pub(crate) struct ClientOperations {
     claims: mpsc::UnboundedSender<ClaimClientOperation>,
@@ -20,10 +22,13 @@ impl ClientOperations {
                 releases,
                 wake,
             },
-            ClientOperationInbox(ClientOperationReceivers {
-                claims: claim_inbox,
-                releases: release_inbox,
-            }),
+            (
+                ClientOperationCounter::default(),
+                ClientOperationInbox(ClientOperationReceivers {
+                    claims: claim_inbox,
+                    releases: release_inbox,
+                }),
+            ),
         )
     }
 
