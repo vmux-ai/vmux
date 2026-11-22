@@ -1544,26 +1544,26 @@ fn cancel_requests(
     }
 }
 
-impl LspRequestOperation {
+impl LspResponseWriters<'_> {
     #[allow(clippy::too_many_arguments)]
     fn dispatch_response(
-        &self,
+        &mut self,
+        request: &LspRequestOperation,
         value: serde_json::Value,
         origin: LspOrigin,
         ready: bool,
         dark: bool,
         manager: &LspManager,
-        writers: &mut LspResponseWriters,
         commands: &mut Commands,
     ) {
-        match &self.kind {
+        match &request.kind {
             ReqKind::Hover { line, col } => {
-                let blocks = Self::parse_hover(&value, dark);
+                let blocks = LspRequestOperation::parse_hover(&value, dark);
                 if !blocks.is_empty() && ready {
                     commands.queue(GuardedResponse {
                         origin,
                         event: FileUiStateWrite::from_event(
-                            self.target,
+                            request.target,
                             &FileHoverState {
                                 value: Some(FileHover {
                                     line: *line,
@@ -1576,9 +1576,10 @@ impl LspRequestOperation {
                 }
             }
             ReqKind::Definition => {
-                if let Some((path, line, utf16_col)) = Self::parse_definition(&value) {
-                    writers.goto.write(LspGoto {
-                        entity: self.target,
+                if let Some((path, line, utf16_col)) = LspRequestOperation::parse_definition(&value)
+                {
+                    self.goto.write(LspGoto {
+                        entity: request.target,
                         path,
                         line,
                         utf16_col,
@@ -1586,21 +1587,25 @@ impl LspRequestOperation {
                     });
                 }
             }
-            ReqKind::Rename { root } => self.dispatch_rename(&value, root, origin, writers),
-            ReqKind::CodeAction => self.dispatch_code_actions(&value, origin, ready, commands),
-            ReqKind::Formatting { path, root } => {
-                self.dispatch_formatting(&value, path, root, origin, writers);
+            ReqKind::Rename { root } => self.dispatch_rename(request.target, &value, root, origin),
+            ReqKind::CodeAction => {
+                self.dispatch_code_actions(request.target, &value, origin, ready, commands);
             }
-            ReqKind::References => self.dispatch_references(&value, origin, commands),
+            ReqKind::Formatting { path, root } => {
+                self.dispatch_formatting(request.target, &value, path, root, origin);
+            }
+            ReqKind::References => {
+                self.dispatch_references(request.target, &value, origin, commands);
+            }
             ReqKind::Completion {
                 line,
                 replace_from_col,
             } => {
-                let items = Self::parse_completion(&value);
+                let items = LspRequestOperation::parse_completion(&value);
                 commands.queue(GuardedResponse {
                     origin,
                     event: crate::host::panel::CompletionResult::new(
-                        self.target,
+                        request.target,
                         items,
                         *replace_from_col,
                         *line,
@@ -1609,8 +1614,8 @@ impl LspRequestOperation {
                 });
             }
             ReqKind::Folding { path } => {
-                writers.folds.write(LspFolds {
-                    entity: self.target,
+                self.folds.write(LspFolds {
+                    entity: request.target,
                     path: path.clone(),
                     regions: LspFolds::regions(
                         value.get("result").unwrap_or(&serde_json::Value::Null),
@@ -1626,13 +1631,16 @@ impl LspRequestOperation {
                 if ready {
                     commands.queue(GuardedResponse {
                         origin,
-                        event: FileUiStateWrite::from_event(self.target, &OutlineEvent { items }),
+                        event: FileUiStateWrite::from_event(
+                            request.target,
+                            &OutlineEvent { items },
+                        ),
                     });
                 }
             }
             ReqKind::SemanticTokens { key, path } => {
-                writers.semantic.write(LspSemantic {
-                    entity: self.target,
+                self.semantic.write(LspSemantic {
+                    entity: request.target,
                     path: path.clone(),
                     tokens: parse_semantic_tokens(&value, manager.semantic_legend(key).as_ref()),
                     origin: Some(origin),
@@ -1642,11 +1650,11 @@ impl LspRequestOperation {
     }
 
     fn dispatch_rename(
-        &self,
+        &mut self,
+        target: Entity,
         value: &serde_json::Value,
         root: &Path,
         origin: LspOrigin,
-        writers: &mut LspResponseWriters,
     ) {
         let payload = value.get("result").cloned().unwrap_or_default();
         let result = if payload.is_null() {
@@ -1655,8 +1663,8 @@ impl LspRequestOperation {
             serde_json::from_value::<lsp_types::WorkspaceEdit>(payload)
                 .map_err(|e| format!("the rename could not be read: {e}"))
         };
-        writers.edit.write(LspRequestedEdit {
-            entity: self.target,
+        self.edit.write(LspRequestedEdit {
+            entity: target,
             root: root.to_path_buf(),
             result,
             origin: Some(origin),
@@ -1665,6 +1673,7 @@ impl LspRequestOperation {
 
     fn dispatch_code_actions(
         &self,
+        target: Entity,
         value: &serde_json::Value,
         origin: LspOrigin,
         ready: bool,
@@ -1692,7 +1701,7 @@ impl LspRequestOperation {
             commands.queue(GuardedResponse {
                 origin,
                 event: crate::host::feedback::EditFailure::new(
-                    self.target,
+                    target,
                     "no code actions here".to_string(),
                 ),
             });
@@ -1701,7 +1710,7 @@ impl LspRequestOperation {
         commands.queue(GuardedResponse {
             origin,
             event: FileUiStateWrite::from_event(
-                self.target,
+                target,
                 &FileCodeActions {
                     titles,
                     selected: 0,
@@ -1711,22 +1720,22 @@ impl LspRequestOperation {
     }
 
     fn dispatch_formatting(
-        &self,
+        &mut self,
+        target: Entity,
         value: &serde_json::Value,
         path: &Path,
         root: &Path,
         origin: LspOrigin,
-        writers: &mut LspResponseWriters,
     ) {
         let payload = value.get("result").cloned().unwrap_or_default();
         let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(payload) {
             Ok(edits) if edits.is_empty() => return,
-            Ok(edits) => Self::one_document_edit(path, edits)
+            Ok(edits) => LspRequestOperation::one_document_edit(path, edits)
                 .ok_or_else(|| format!("{} has no URI to format", path.display())),
             Err(_) => Err("the language server would not format this".to_string()),
         };
-        writers.edit.write(LspRequestedEdit {
-            entity: self.target,
+        self.edit.write(LspRequestedEdit {
+            entity: target,
             root: root.to_path_buf(),
             result,
             origin: Some(origin),
@@ -1735,16 +1744,17 @@ impl LspRequestOperation {
 
     fn dispatch_references(
         &self,
+        target: Entity,
         value: &serde_json::Value,
         origin: LspOrigin,
         commands: &mut Commands,
     ) {
         let mut items = Vec::new();
-        for (path, line, utf16_col) in Self::parse_references(value) {
+        for (path, line, utf16_col) in LspRequestOperation::parse_references(value) {
             let text = LspLine::read(&path, line);
             let col = text.char_col(utf16_col);
             items.push(RefItem {
-                display: Self::ref_display(&path, line),
+                display: LspRequestOperation::ref_display(&path, line),
                 path: path.to_string_lossy().into_owned(),
                 line,
                 col,
@@ -1753,11 +1763,12 @@ impl LspRequestOperation {
         }
         commands.queue(GuardedResponse {
             origin,
-            event: crate::host::panel::ReferencesResult::new(self.target, items)
-                .with_origin(origin),
+            event: crate::host::panel::ReferencesResult::new(target, items).with_origin(origin),
         });
     }
+}
 
+impl LspRequestOperation {
     #[allow(clippy::mutable_key_type)]
     fn one_document_edit(
         path: &Path,
@@ -1954,15 +1965,7 @@ fn drain_requests(
             operation: matches!(request.kind, ReqKind::Rename { .. } | ReqKind::CodeAction)
                 .then_some(request_entity),
         };
-        request.dispatch_response(
-            value,
-            origin,
-            ready,
-            dark,
-            &manager,
-            &mut writers,
-            &mut commands,
-        );
+        writers.dispatch_response(request, value, origin, ready, dark, &manager, &mut commands);
     }
 }
 
