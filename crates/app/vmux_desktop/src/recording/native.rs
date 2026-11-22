@@ -56,6 +56,7 @@ impl CapturePorts {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) struct OpenRequest {
     pub attempt: Entity,
     pub window: Entity,

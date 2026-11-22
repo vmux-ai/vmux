@@ -2,28 +2,33 @@ use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
 };
-#[cfg(all(feature = "recording", any(target_os = "macos", test)))]
+#[cfg(feature = "recording")]
 use std::path::Path;
 use std::path::PathBuf;
 
+use vmux_ecs::profile::CurrentProfile;
 use vmux_flex::prelude::ComputedNode;
 use vmux_setting::AppSettings;
 
-pub(crate) struct CaptureOutput;
+#[derive(SystemParam)]
+pub(crate) struct CaptureOutput<'w, 's> {
+    settings: Res<'w, AppSettings>,
+    profile: CurrentProfile<'w, 's>,
+}
 
-impl CaptureOutput {
-    pub(crate) fn directory(settings: &AppSettings) -> PathBuf {
-        settings
-            .recording
-            .output_dir
-            .as_deref()
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| vmux_ecs::profile::ProfilePaths::current().recording())
+impl CaptureOutput<'_, '_> {
+    pub(crate) fn directory(&self) -> Result<PathBuf, String> {
+        if let Some(path) = self.settings.recording.output_dir.as_deref() {
+            let path = path.trim();
+            if !path.is_empty() {
+                return Ok(PathBuf::from(path));
+            }
+        }
+        let paths = self.profile.paths().ok_or("no active capture profile")?;
+        Ok(paths.recording())
     }
 
-    #[cfg(all(feature = "recording", any(target_os = "macos", test)))]
+    #[cfg(feature = "recording")]
     pub(crate) fn paths(
         directory: Option<&str>,
         name: Option<&str>,
@@ -54,7 +59,7 @@ impl CaptureSize {
         Self { width, height }
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(feature = "recording", target_os = "macos", test))]
     pub(crate) fn downscaled(self, max_edge: u32) -> Self {
         let long = self.width.max(self.height);
         if long == 0 {
