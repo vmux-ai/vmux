@@ -1,53 +1,68 @@
 #![allow(non_snake_case)]
 
-use crate::logs::Logs;
-use crate::pairing::{AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest};
-use crate::runtime::RuntimeHandle;
-use crate::session::{LeaveSession, RestartSession, use_session};
-use bevy_app::{App as BevyApp, AppExit, Plugin};
-use dioxus::prelude::*;
-use vmux_session::host::Agents;
-use vmux_start::roster::Roster;
-use vmux_ui::back::PageBack;
-use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
-use vmux_ui::i18n::translate;
-
+use bevy_app::{App as BevyApp, AppExit, Plugin, PreUpdate};
+use bevy_ecs::schedule::{IntoScheduleConfigs, SystemSet};
 use dioxus::mobile::tao::event::Event;
+use dioxus::prelude::*;
 #[cfg(target_os = "ios")]
 use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
+use vmux_ui::back::PageBack;
+use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
+use vmux_ui::hooks::use_ui_state;
+use vmux_ui::i18n::translate;
 
+use crate::connection::{DisconnectRequest, PairCard, PairLinkChanged, PairRequest, ScanRequest};
+use crate::logs::Logs;
+use crate::presentation::{
+    MobileAuthStage, MobileConnectionUiState, MobileScreenRoute, MobileSessionUiState,
+};
+use crate::runtime::RuntimeHandle;
+use crate::session::{CloseTeam, LeaveScreen, OpenSession, OpenTeam, RestartSession};
+
+mod actions;
+mod catalog;
+mod connection;
 mod credentials;
 mod host;
+mod io;
 mod lifecycle;
 mod logs;
-mod pairing;
+mod presentation;
 mod qr_scanner;
 mod quic;
 mod remote;
 mod runtime;
 mod session;
+mod stream;
+#[cfg(test)]
+mod tests;
 mod transition;
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
-
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
 #[cfg(target_os = "ios")]
 const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
-#[cfg(target_os = "ios")]
-fn webview_background() -> (u8, u8, u8, u8) {
-    let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
-    if style == UIUserInterfaceStyle::Dark {
-        DARK_BACKGROUND
-    } else {
-        LIGHT_BACKGROUND
-    }
-}
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct AdmitSet;
 
-#[cfg(not(target_os = "ios"))]
-fn webview_background() -> (u8, u8, u8, u8) {
-    LIGHT_BACKGROUND
-}
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct InvalidateSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CollectSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MaterializeSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DecideSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct SubmitSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ProjectSet;
 
 fn main() {
     Logs::start();
@@ -59,16 +74,47 @@ fn main() {
         .run();
 }
 
+pub(crate) struct MobileDomainPlugin;
+
+impl Plugin for MobileDomainPlugin {
+    fn build(&self, app: &mut BevyApp) {
+        if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
+            app.add_plugins(vmux_ecs::PrimitivesPlugin);
+        }
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.configure_sets(
+            PreUpdate,
+            (
+                AdmitSet,
+                InvalidateSet,
+                CollectSet,
+                MaterializeSet,
+                DecideSet,
+                SubmitSet,
+                ProjectSet,
+            )
+                .chain(),
+        )
+        .add_plugins((
+            runtime::RuntimePlugin,
+            connection::MobileConnectionPlugin,
+            catalog::MobileCatalogPlugin,
+            session::MobileSessionPlugin,
+            stream::MobileStreamPlugin,
+            actions::MobileActionsPlugin,
+            presentation::MobilePresentationPlugin,
+        ));
+    }
+}
+
 struct MobilePlugin;
 
 impl Plugin for MobilePlugin {
     fn build(&self, app: &mut BevyApp) {
-        app.add_plugins((
-            runtime::RuntimePlugin,
-            pairing::PairingPlugin,
-            session::SessionPlugin,
-        ))
-        .set_runner(MobileRunner::run);
+        app.add_plugins((MobileDomainPlugin, io::MobileIoPlugin))
+            .set_runner(MobileRunner::run);
     }
 }
 
@@ -77,11 +123,10 @@ struct MobileRunner;
 impl MobileRunner {
     fn run(app: BevyApp) -> AppExit {
         let runtime = RuntimeHandle::from_app(app);
-        lifecycle::install(runtime.clone());
-
+        let _lifecycle = runtime.install_lifecycle();
         let event_runtime = runtime.clone();
         let config = dioxus::mobile::Config::new()
-            .with_background_color(webview_background())
+            .with_background_color(Self::webview_background())
             .with_custom_event_handler(move |event, _| match event {
                 Event::Opened { urls } => {
                     for url in urls {
@@ -101,137 +146,109 @@ impl MobileRunner {
             .launch(AppBody);
         AppExit::Success
     }
+
+    #[cfg(target_os = "ios")]
+    fn webview_background() -> (u8, u8, u8, u8) {
+        let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
+        if style == UIUserInterfaceStyle::Dark {
+            DARK_BACKGROUND
+        } else {
+            LIGHT_BACKGROUND
+        }
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    fn webview_background() -> (u8, u8, u8, u8) {
+        LIGHT_BACKGROUND
+    }
 }
 
 #[component]
 fn AppBody() -> Element {
     let runtime = use_context_provider(RuntimeHandle::ui);
-    transition::install(&dioxus::mobile::window());
-    qr_scanner::install(&dioxus::mobile::window(), runtime.clone());
-    let connection = pairing::use_connection(runtime.clone());
-    let api = connection.api;
-    let sessions = connection.sessions;
-    let agents = connection.agents;
-    let session = use_session(runtime.clone());
-    let composer = host::use_composer_exchange();
-    let mut team_open = use_signal(|| false);
-
+    use_hook({
+        let runtime = runtime.clone();
+        move || {
+            let window = dioxus::mobile::window();
+            OpenSession::install_sheet(&window);
+            ScanRequest::install_host(&window, runtime);
+        }
+    });
+    let lease = use_hook({
+        let runtime = runtime.clone();
+        move || {
+            let (binding, lease) = host::MobileHost::mount(runtime);
+            provide_context(binding);
+            std::rc::Rc::new(std::cell::RefCell::new(Some(lease)))
+        }
+    });
+    use_drop(move || {
+        let _ = lease.borrow_mut().take();
+    });
+    let connection = use_ui_state::<MobileConnectionUiState>();
+    let session = use_ui_state::<MobileSessionUiState>();
     let page_back_runtime = runtime.clone();
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
-            team_open.set(false);
-            page_back_runtime.send(LeaveSession);
+            page_back_runtime.send(LeaveScreen);
         }))
     });
 
-    let host_runtime = runtime.clone();
-    use_effect(move || {
-        if let Some(client) = api() {
-            host::install(host_runtime.clone(), client, sessions, session, composer);
-        }
-    });
+    let connection_view = connection.state.read().clone();
+    let session_view = session.state.read().clone();
 
-    let roster_runtime = runtime.clone();
-    use_effect(move || {
-        let roster = Roster {
-            sessions: sessions(),
-            agents: agents(),
-        };
-        roster_runtime.send(roster);
-    });
-
-    let agents_runtime = runtime.clone();
-    use_effect(move || {
-        agents_runtime.send(Agents(agents()));
-    });
-
-    let view = (connection.view)();
-
-    let content = if view.auth == AuthState::Loading {
-        rsx! {
+    let content = match connection_view.auth {
+        MobileAuthStage::Loading => rsx! {
             div { class: "flex h-dvh items-center justify-center bg-background text-foreground",
                 div { class: "h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" }
             }
-        }
-    } else if view.auth == AuthState::Unpaired {
-        let value_runtime = runtime.clone();
-        let pair_runtime = runtime.clone();
-        let scan_runtime = runtime.clone();
-        let pair_url = view.pair_url.clone();
-        rsx! {
-            PairScreen {
-                value: view.pair_url,
-                error: view.error,
-                pairing: view.pairing,
-                on_value: move |value| {
-                    value_runtime.send(PairLinkChanged(value));
-                },
-                on_pair: move |_| {
-                    pair_runtime.send(PairRequest(pair_url.clone()));
-                },
-                on_scan: move |_| {
-                    scan_runtime.send(pairing::ScanRequest);
-                },
-            }
-        }
-    } else if team_open() {
-        rsx! {
-            div { class: "flex h-dvh flex-col bg-background text-foreground",
-                div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
-                    button {
-                        class: "rounded-lg px-3 py-2 text-sm text-muted-foreground active:bg-accent",
-                        r#type: "button",
-                        onclick: move |_| team_open.set(false),
-                        {translate("mobile-chat-back")}
-                    }
-                }
-                div { class: "min-h-0 flex-1", vmux_team::ui::Page {} }
-            }
-        }
-    } else if session.is_open() {
-        rsx! {
-            vmux_session::ui::Page {}
-        }
-    } else {
-        let (dot, pill, label) = if view.reachable {
-            (
-                "h-1.5 w-1.5 rounded-full bg-success",
-                "flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success",
-                translate("mobile-status-connected"),
-            )
-        } else {
-            (
-                "h-1.5 w-1.5 rounded-full bg-muted-foreground",
-                "flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground",
-                translate("mobile-status-reaching"),
-            )
-        };
-        rsx! {
-            div { class: "relative h-dvh bg-background",
-                div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
-                    vmux_start::ui::Page {}
-                }
-                header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
-                    span { class: "text-sm font-semibold tracking-tight text-foreground", {vmux_app::host::Product::name()} }
-                    span { class: "pointer-events-auto ml-auto {pill}",
-                        span { class: "{dot}" }
-                        {label}
-                    }
-                    button {
-                        class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
-                        r#type: "button",
-                        onclick: move |_| team_open.set(true),
-                        {translate("mobile-start-team")}
-                    }
-                    button {
-                        class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
-                        r#type: "button",
-                        onclick: move |_| runtime.send(DisconnectRequest),
-                        {translate("mobile-pair-disconnect")}
-                    }
+        },
+        MobileAuthStage::Unpaired => {
+            let value_runtime = runtime.clone();
+            let pair_runtime = runtime.clone();
+            let scan_runtime = runtime.clone();
+            let pair_url = connection_view.pair_url.clone();
+            rsx! {
+                PairScreen {
+                    value: connection_view.pair_url,
+                    error: connection_view.error,
+                    pairing: connection_view.pairing,
+                    on_value: move |value| {
+                        value_runtime.send(PairLinkChanged(value));
+                    },
+                    on_pair: move |_| {
+                        pair_runtime.send(PairRequest(pair_url.clone()));
+                    },
+                    on_scan: move |_| {
+                        scan_runtime.send(ScanRequest);
+                    },
                 }
             }
         }
+        MobileAuthStage::Paired => match session_view.route {
+            MobileScreenRoute::Team => {
+                let back_runtime = runtime.clone();
+                rsx! {
+                    TeamScreen {
+                        on_back: move |_| back_runtime.send(CloseTeam),
+                    }
+                }
+            }
+            MobileScreenRoute::Session => rsx! {
+                vmux_session::ui::Page {}
+            },
+            MobileScreenRoute::Start => {
+                let team_runtime = runtime.clone();
+                let disconnect_runtime = runtime.clone();
+                rsx! {
+                    StartScreen {
+                        reachable: connection_view.reachable,
+                        on_team: move |_| team_runtime.send(OpenTeam),
+                        on_disconnect: move |_| disconnect_runtime.send(DisconnectRequest),
+                    }
+                }
+            }
+        },
     };
     rsx! {
         document::Title { {vmux_app::host::Product::name()} }
@@ -239,6 +256,70 @@ fn AppBody() -> Element {
         document::Meta { name: "color-scheme", content: "light dark" }
         document::Stylesheet { href: TAILWIND_CSS }
         {content}
+    }
+}
+
+#[component]
+fn TeamScreen(on_back: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "flex h-dvh flex-col bg-background text-foreground",
+            div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
+                button {
+                    class: "rounded-lg px-3 py-2 text-sm text-muted-foreground active:bg-accent",
+                    r#type: "button",
+                    onclick: move |_| on_back.call(()),
+                    {translate("mobile-chat-back")}
+                }
+            }
+            div { class: "min-h-0 flex-1", vmux_team::ui::Page {} }
+        }
+    }
+}
+
+#[component]
+fn StartScreen(
+    reachable: bool,
+    on_team: EventHandler<()>,
+    on_disconnect: EventHandler<()>,
+) -> Element {
+    let (dot, pill, label) = if reachable {
+        (
+            "h-1.5 w-1.5 rounded-full bg-success",
+            "flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success",
+            translate("mobile-status-connected"),
+        )
+    } else {
+        (
+            "h-1.5 w-1.5 rounded-full bg-muted-foreground",
+            "flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground",
+            translate("mobile-status-reaching"),
+        )
+    };
+    rsx! {
+        div { class: "relative h-dvh bg-background",
+            div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
+                vmux_start::ui::Page {}
+            }
+            header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
+                span { class: "text-sm font-semibold tracking-tight text-foreground", {vmux_app::host::Product::name()} }
+                span { class: "pointer-events-auto ml-auto {pill}",
+                    span { class: "{dot}" }
+                    {label}
+                }
+                button {
+                    class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                    r#type: "button",
+                    onclick: move |_| on_team.call(()),
+                    {translate("mobile-start-team")}
+                }
+                button {
+                    class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                    r#type: "button",
+                    onclick: move |_| on_disconnect.call(()),
+                    {translate("mobile-pair-disconnect")}
+                }
+            }
+        }
     }
 }
 

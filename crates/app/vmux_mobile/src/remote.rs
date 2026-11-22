@@ -1,8 +1,7 @@
-use crate::pairing::Credentials;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentListModels, AgentNewChat, AgentSelectModel, AgentSetEffort, SharedMessage, SharedResponse,
+    AgentListModels, AgentNewChat, AgentSelectModel, AgentSetEffort, SharedEvent as Shared,
+    SharedFailure, SharedMessage, SharedResponse,
 };
 use vmux_api::session::{
     ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteAgent,
@@ -11,24 +10,8 @@ use vmux_api::session::{
 };
 use vmux_ui::i18n::translate;
 
+use crate::credentials::Credentials;
 use crate::quic::QuicError;
-use vmux_api::protocol::SharedEvent as Shared;
-use vmux_api::protocol::SharedFailure;
-
-static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) struct ClientOperationIds;
-
-impl ClientOperationIds {
-    pub(crate) fn next() -> ClientOpId {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
-        ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct Api {
@@ -36,7 +19,7 @@ pub(crate) struct Api {
     credentials: Credentials,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ApiError {
     Unauthorized,
     NotFound,
@@ -50,6 +33,30 @@ impl std::fmt::Display for ApiError {
             Self::NotFound => f.write_str(&translate("mobile-error-not-offered")),
             Self::Message(message) => f.write_str(message),
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct CreatedChatReceipt {
+    client_op_id: ClientOpId,
+    session_id: SessionId,
+}
+
+impl CreatedChatReceipt {
+    fn decode(expected_op_id: &ClientOpId, json: &str) -> Result<SessionId, ApiError> {
+        let receipt: Self = serde_json::from_str(json)
+            .map_err(|_| ApiError::Message(translate("mobile-error-unexpected-answer")))?;
+        if receipt.client_op_id != *expected_op_id {
+            return Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            )));
+        }
+        if receipt.session_id.as_str().trim().is_empty() {
+            return Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            )));
+        }
+        Ok(receipt.session_id)
     }
 }
 
@@ -80,8 +87,12 @@ impl Api {
         self.quic.reset().await;
     }
 
-    pub(crate) fn close(&self) {
-        self.quic.close();
+    pub(crate) fn seal(&self) {
+        self.quic.seal();
+    }
+
+    pub(crate) async fn close_and_drain(&self) {
+        self.quic.close_and_drain().await;
     }
 
     pub(crate) async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
@@ -154,15 +165,18 @@ impl Api {
         self.applied(self.quic.request(message).await)
     }
 
-    pub(crate) async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
-        let request = SharedMessage::AgentNewChat {
+    pub(crate) async fn create_chat(
+        &self,
+        request: &NewChatRequest,
+    ) -> Result<SessionId, ApiError> {
+        let message = SharedMessage::AgentNewChat {
             request: AgentNewChat {
                 client_op_id: request.client_op_id.clone(),
                 prompt: request.text.clone(),
                 agent_url: request.agent_url.clone(),
             },
         };
-        self.applied(self.quic.request(request).await)
+        Self::created_chat(&request.client_op_id, self.quic.request(message).await)
     }
 
     pub(crate) async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
@@ -216,7 +230,7 @@ impl Api {
         }
     }
 
-    pub(crate) fn event(event: vmux_api::protocol::SharedEvent) -> Option<RemoteEvent> {
+    pub(crate) fn event(event: Shared) -> Option<RemoteEvent> {
         match event {
             Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
                 session_id: SessionId::from(sid),
@@ -254,6 +268,22 @@ impl Api {
         }
     }
 
+    fn created_chat(
+        expected_op_id: &ClientOpId,
+        outcome: Result<SharedResponse, QuicError>,
+    ) -> Result<SessionId, ApiError> {
+        match outcome {
+            Ok(SharedResponse::BrokerJson(json)) => {
+                CreatedChatReceipt::decode(expected_op_id, &json)
+            }
+            Ok(SharedResponse::Ok | SharedResponse::AlreadyApplied) => Err(ApiError::NotFound),
+            Ok(_) => Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            ))),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     async fn broker_json<T: serde::de::DeserializeOwned>(
         &self,
         request: SharedMessage,
@@ -277,5 +307,41 @@ impl From<QuicError> for ApiError {
             QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,
             other => Self::Message(other.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_chat_receipt_requires_matching_operation_id_and_non_empty_session_id() {
+        let op = ClientOpId::new("mobile:1:1");
+        let valid = Api::created_chat(
+            &op,
+            Ok(SharedResponse::BrokerJson(
+                r#"{"client_op_id":"mobile:1:1","session_id":"sid-42"}"#.to_string(),
+            )),
+        );
+        assert_eq!(valid, Ok(SessionId::new("sid-42")));
+
+        let mismatched = Api::created_chat(
+            &op,
+            Ok(SharedResponse::BrokerJson(
+                r#"{"client_op_id":"mobile:1:2","session_id":"sid-42"}"#.to_string(),
+            )),
+        );
+        assert!(mismatched.is_err());
+
+        let empty_sid = Api::created_chat(
+            &op,
+            Ok(SharedResponse::BrokerJson(
+                r#"{"client_op_id":"mobile:1:1","session_id":"   "}"#.to_string(),
+            )),
+        );
+        assert!(empty_sid.is_err());
+
+        let legacy_ok = Api::created_chat(&op, Ok(SharedResponse::Ok));
+        assert_eq!(legacy_ok, Err(ApiError::NotFound));
     }
 }

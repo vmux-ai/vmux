@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::Mutex;
 use vmux_api::protocol::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
@@ -12,16 +13,15 @@ use vmux_transport::{ClientCredential, DeviceId, PeerRole};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-
 const SETUP: FrameStream = FrameStream::new(16 * 1024);
-
 const CONTROL: FrameStream = FrameStream::new(MAX_RESPONSE_BYTES);
 
 #[derive(Debug)]
-pub enum QuicError {
+pub(crate) enum QuicError {
     Unauthorized,
     RemoteDisabled,
     Refused(SharedFailure),
+    Closed,
     Transport(String),
 }
 
@@ -37,6 +37,7 @@ impl std::fmt::Display for QuicError {
                 f.write_str(&translate("mobile-error-no-desktop"))
             }
             Self::Refused(_) => f.write_str(&translate("mobile-error-refused")),
+            Self::Closed => f.write_str(&translate("mobile-error-connection-closed")),
             Self::Transport(message) => f.write_str(message),
         }
     }
@@ -72,21 +73,30 @@ impl QuicError {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum StreamFrame {
+    Event(Box<SharedEvent>),
+    Malformed,
+    Ended,
+    Refused(QuicError),
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct Endpoint {
-    pub address: String,
-    pub relay_token: String,
-    pub credential: ClientCredential,
-    pub client_id: DeviceId,
-    pub fingerprint: String,
-    pub desktop: DeviceId,
+pub(crate) struct Endpoint {
+    pub(crate) address: String,
+    pub(crate) relay_token: String,
+    pub(crate) credential: ClientCredential,
+    pub(crate) client_id: DeviceId,
+    pub(crate) fingerprint: String,
+    pub(crate) desktop: DeviceId,
 }
 
 #[derive(Clone)]
-pub struct QuicApi {
+pub(crate) struct QuicApi {
     endpoint: Endpoint,
     credential: Arc<Mutex<ClientCredential>>,
     connection: Arc<Mutex<Option<Dialled>>>,
+    sealed: Arc<AtomicBool>,
 }
 
 struct Dialled {
@@ -95,53 +105,83 @@ struct Dialled {
     _inner: quinn::Endpoint,
 }
 
+impl Dialled {
+    fn close_with(self, reason: &[u8]) {
+        self.connection
+            .close(CloseCode::Normal.as_u32().into(), reason);
+    }
+}
+
 impl QuicApi {
-    pub fn new(endpoint: Endpoint) -> Self {
+    const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+    pub(crate) fn new(endpoint: Endpoint) -> Self {
         let credential = endpoint.credential.clone();
         Self {
             endpoint,
             credential: Arc::new(Mutex::new(credential)),
             connection: Arc::new(Mutex::new(None)),
+            sealed: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub fn close(&self) {
-        let Ok(mut slot) = self.connection.try_lock() else {
-            return;
-        };
-        if let Some(dialled) = slot.take() {
-            dialled
-                .connection
-                .close(CloseCode::Normal.as_u32().into(), b"replaced");
+    pub(crate) fn seal(&self) {
+        self.sealed.store(true, Ordering::Release);
+        if let Ok(mut slot) = self.connection.try_lock()
+            && let Some(dialled) = slot.take()
+        {
+            dialled.close_with(b"replaced");
         }
     }
 
-    pub async fn reset(&self) {
-        if let Some(dialled) = self.connection.lock().await.take() {
-            dialled
-                .connection
-                .close(CloseCode::Normal.as_u32().into(), b"suspended");
+    pub(crate) async fn close_and_drain(&self) {
+        self.sealed.store(true, Ordering::Release);
+        let dialled = self.connection.lock().await.take();
+        if let Some(dialled) = dialled {
+            dialled.close_with(b"replaced");
         }
     }
 
-    pub async fn credential(&self) -> ClientCredential {
+    pub(crate) async fn reset(&self) {
+        let dialled = self.connection.lock().await.take();
+        if let Some(dialled) = dialled {
+            dialled.close_with(b"suspended");
+        }
+    }
+
+    pub(crate) async fn credential(&self) -> ClientCredential {
         self.credential.lock().await.clone()
     }
 
+    pub(crate) fn is_sealed(&self) -> bool {
+        self.sealed.load(Ordering::Acquire)
+    }
+
     async fn connected(&self) -> Result<quinn::Connection, QuicError> {
+        if self.is_sealed() {
+            return Err(QuicError::Closed);
+        }
         let mut slot = self.connection.lock().await;
+        if self.is_sealed() {
+            if let Some(existing) = slot.take() {
+                existing.close_with(b"replaced");
+            }
+            return Err(QuicError::Closed);
+        }
         if let Some(existing) = slot.as_ref()
             && existing.connection.close_reason().is_none()
         {
             return Ok(existing.connection.clone());
         }
         let dialled = self.dial().await?;
+        if self.is_sealed() {
+            dialled.close_with(b"replaced");
+            return Err(QuicError::Closed);
+        }
         let connection = dialled.connection.clone();
         *slot = Some(dialled);
         Ok(connection)
     }
-
-    const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
     async fn dial(&self) -> Result<Dialled, QuicError> {
         match tokio::time::timeout(Self::DIAL_TIMEOUT, self.dial_inner()).await {
@@ -171,15 +211,7 @@ impl QuicApi {
         let address = vmux_transport::quic::endpoint::resolve_preferring_ipv4(host, port)
             .await
             .map_err(QuicError::Transport)?;
-
-        let server_name = self
-            .endpoint
-            .address
-            .rsplit_once(':')
-            .map(|(host, _)| host)
-            .unwrap_or(&self.endpoint.address)
-            .to_string();
-
+        let server_name = host.to_string();
         let relay_endpoint = Trust::Relay
             .endpoint(address)
             .map_err(QuicError::Transport)?;
@@ -188,10 +220,8 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| QuicError::from_connection_error(&error))?;
-
         self.say_hello_to_the_relay(&control).await?;
-
-        let tunnel = TunnelSocket::new(control.clone());
+        let tunnel = TunnelSocket::new(control);
         let inner_endpoint = Trust::Desktop {
             fingerprint: self.endpoint.fingerprint.clone(),
         }
@@ -205,7 +235,15 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| QuicError::from_connection_error(&error))?;
+        self.authenticate_desktop(&connection).await?;
+        Ok(Dialled {
+            connection,
+            _relay: relay_endpoint,
+            _inner: inner_endpoint,
+        })
+    }
 
+    async fn authenticate_desktop(&self, connection: &quinn::Connection) -> Result<(), QuicError> {
         let (mut send, mut recv) = connection
             .open_bi()
             .await
@@ -222,21 +260,16 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-
         let accepted = SETUP
             .accept(&mut recv)
             .await
-            .map_err(|_| QuicError::from_close(&connection))?
+            .map_err(|_| QuicError::from_close(connection))?
             .read_json::<SessionAccepted>(MessageType::SESSION_ACCEPTED)
-            .map_err(|_| QuicError::from_close(&connection))?;
+            .map_err(|_| QuicError::from_close(connection))?;
         if let Some(device_token) = accepted.device_token {
             *self.credential.lock().await = ClientCredential::Device(device_token);
         }
-        Ok(Dialled {
-            connection,
-            _relay: relay_endpoint,
-            _inner: inner_endpoint,
-        })
+        Ok(())
     }
 
     async fn say_hello_to_the_relay(&self, control: &quinn::Connection) -> Result<(), QuicError> {
@@ -257,7 +290,6 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-
         SETUP
             .accept(&mut recv)
             .await
@@ -267,13 +299,12 @@ impl QuicApi {
         Ok(())
     }
 
-    pub async fn subscribe(&self, sid: &str) -> Result<Subscription, QuicError> {
+    pub(crate) async fn subscribe(&self, sid: &str) -> Result<Subscription, QuicError> {
         let connection = self.connected().await?;
         let (mut send, recv) = connection
             .open_bi()
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-
         let request = SharedMessage::AgentAttach {
             sid: sid.to_string(),
         };
@@ -286,20 +317,22 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-
         Ok(Subscription {
+            connection,
             recv,
             opened: false,
         })
     }
 
-    pub async fn request(&self, message: SharedMessage) -> Result<SharedResponse, QuicError> {
+    pub(crate) async fn request(
+        &self,
+        message: SharedMessage,
+    ) -> Result<SharedResponse, QuicError> {
         let connection = self.connected().await?;
         let (mut send, mut recv) = connection
             .open_bi()
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&message)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         let frame = Frame::new(MessageType::CONTROL_REQUEST, body.to_vec());
@@ -309,7 +342,6 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-
         let answer = CONTROL
             .accept(&mut recv)
             .await
@@ -326,21 +358,49 @@ impl QuicApi {
     }
 }
 
-pub struct Subscription {
+pub(crate) struct Subscription {
+    connection: quinn::Connection,
     recv: quinn::RecvStream,
     opened: bool,
 }
 
 impl Subscription {
-    pub async fn next(&mut self) -> Option<SharedEvent> {
+    pub(crate) fn stop(&mut self) {
+        let _ = self.recv.stop(CloseCode::Normal.as_u32().into());
+    }
+
+    pub(crate) async fn next_frame(&mut self) -> StreamFrame {
         let frame = if self.opened {
-            CONTROL.next(&mut self.recv).await.ok()??
+            match CONTROL.next(&mut self.recv).await {
+                Ok(Some(frame)) => frame,
+                Ok(None) => return StreamFrame::Ended,
+                Err(_) => return self.read_failure(),
+            }
         } else {
             self.opened = true;
-            CONTROL.accept(&mut self.recv).await.ok()?
+            match CONTROL.accept(&mut self.recv).await {
+                Ok(frame) => frame,
+                Err(_) => return self.read_failure(),
+            }
         };
-        let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
-        rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(body).ok()
+        Self::decode_frame(&frame)
+    }
+
+    fn read_failure(&self) -> StreamFrame {
+        if self.connection.close_reason().is_some() {
+            return StreamFrame::Refused(QuicError::from_close(&self.connection));
+        }
+        StreamFrame::Ended
+    }
+
+    fn decode_frame(frame: &Frame) -> StreamFrame {
+        let Ok(body) = frame.body_of(MessageType::SESSION_EVENT) else {
+            return StreamFrame::Malformed;
+        };
+        match rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(body) {
+            Ok(event) => StreamFrame::Event(Box::new(event)),
+            Err(_) => StreamFrame::Malformed,
+        }
     }
 }
 
@@ -375,5 +435,54 @@ mod tests {
             QuicError::Unauthorized.to_string(),
             "Pairing expired. Scan the QR on your Mac again."
         );
+    }
+
+    #[test]
+    fn sealing_while_connection_mutex_is_held_refuses_new_connections_and_drains() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let api = QuicApi::new(Endpoint {
+                address: "127.0.0.1:8787".to_string(),
+                relay_token: "relay".to_string(),
+                credential: ClientCredential::Pairing("pair".to_string()),
+                client_id: DeviceId::new("phone-a"),
+                fingerprint: "deadbeef".to_string(),
+                desktop: DeviceId::new("mac-a"),
+            });
+            let held = api.connection.lock().await;
+            api.seal();
+            assert!(api.is_sealed());
+
+            let drain_api = api.clone();
+            let drain = tokio::spawn(async move {
+                drain_api.close_and_drain().await;
+            });
+            tokio::task::yield_now().await;
+            assert!(!drain.is_finished());
+
+            drop(held);
+            drain.await.unwrap();
+
+            assert!(matches!(api.connected().await, Err(QuicError::Closed)));
+            assert!(api.connection.lock().await.is_none());
+        });
+    }
+
+    #[test]
+    fn malformed_session_event_frame_is_distinct_from_clean_end() {
+        let wrong_type = Frame::new(MessageType::CONTROL_RESPONSE, vec![1, 2, 3]);
+        assert!(matches!(
+            Subscription::decode_frame(&wrong_type),
+            StreamFrame::Malformed
+        ));
+
+        let invalid_payload = Frame::new(MessageType::SESSION_EVENT, vec![0xff, 0x00, 0x13]);
+        assert!(matches!(
+            Subscription::decode_frame(&invalid_payload),
+            StreamFrame::Malformed
+        ));
     }
 }
