@@ -1451,8 +1451,9 @@ impl<'ast> Visit<'ast> for CompilerInputs {
             && !self.methods.contains_key(&call.method.to_string())
             && let Expr::Path(receiver) = call.receiver.as_ref()
             && let Some(receiver) = receiver.path.get_ident()
+            && self.bindings.remove(&receiver.to_string())
         {
-            self.bindings.remove(&receiver.to_string());
+            self.unknown();
         }
         if Self::guarded(call)
             && let Expr::Call(operation) = call.receiver.as_ref()

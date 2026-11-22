@@ -1257,6 +1257,7 @@ fn compiler_inputs_refuse_stale_manifest_evidence_after_an_intervening_fixture_c
         "fixture.prepare();",
         "#[cfg(any())] fixture.prepare();",
         "before_loop",
+        "before_loop_scoped",
     ] {
         let fixture = CompilerInputFixture::new();
         let source = fixture
@@ -1265,7 +1266,12 @@ fn compiler_inputs_refuse_stale_manifest_evidence_after_an_intervening_fixture_c
             .join("crates/feature/vmux_dx/lints/src/registrations.rs");
         let original = std::fs::read_to_string(&source).unwrap();
         let replacement = original.replace("    fn check(&self", "    fn prepare(&self) { std::fs::write(self.directory.path().join(\"Cargo.toml\"), \"[package]\\nname=\\\"compiler-fixture\\\"\\nversion=\\\"0.0.0\\\"\\n[[example]]\\nname=\\\"private\\\"\\npath=\\\"examples/other.rs\\\"\\n\").unwrap(); }\n    fn check(&self");
-        let replacement = if call == "before_loop" {
+        let replacement = if call == "before_loop_scoped" {
+            replacement.replace(
+                "let fixture = Fixture::new();",
+                "let fixture = Fixture::new(); { fixture.prepare(); }",
+            )
+        } else if call == "before_loop" {
             replacement.replace(
                 "let fixture = Fixture::new();",
                 "let fixture = Fixture::new(); fixture.prepare();",
@@ -1280,7 +1286,10 @@ fn compiler_inputs_refuse_stale_manifest_evidence_after_an_intervening_fixture_c
         let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
         assert_eq!(
             inputs.owner(&fixture.input("private")).is_some(),
-            !matches!(call, "fixture.prepare();" | "before_loop"),
+            !matches!(
+                call,
+                "fixture.prepare();" | "before_loop" | "before_loop_scoped"
+            ),
             "{call}"
         );
     }
