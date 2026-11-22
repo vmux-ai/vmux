@@ -24,7 +24,7 @@ runs:
   steps:
     - uses: ./.github/actions/setup-rust
       with:
-        targets: wasm32-unknown-unknown
+        targets: ${{ inputs.packaging == 'true' && 'wasm32-unknown-unknown' || '' }}
         fast-rust: ${{ inputs.fast-rust }}
         cli: ${{ inputs.cli }}
 
@@ -40,27 +40,57 @@ runs:
         branch-cache: ${{ inputs.cache-key == 'build-mac-pr' }}
 
     - name: Cache cargo binaries
-      if: inputs.packaging == 'true'
+      if: inputs.packaging == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache@v5
       with:
         path: ~/.cargo/bin
         key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cba${{ env.BEVY_CEF_BUNDLE_APP_VERSION }}-cef${{ inputs.cef-version }}-v3
 
+    - name: Restore cargo binaries
+      if: inputs.packaging == 'true' && github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.cargo/bin
+        key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cba${{ env.BEVY_CEF_BUNDLE_APP_VERSION }}-cef${{ inputs.cef-version }}-v3
+
     - name: Cache binaryen
-      if: inputs.packaging == 'true'
+      if: inputs.packaging == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache@v5
       with:
         path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
         key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
 
+    - name: Restore binaryen
+      if: inputs.packaging == 'true' && github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
+      with:
+        path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+        key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
     - name: Cache CEF framework
+      if: github.ref == 'refs/heads/main'
       uses: actions/cache@v5
       with:
         path: ~/.local/share/Chromium Embedded Framework.framework
         key: cef-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-${{ hashFiles('cef/manifest.toml') }}
 
+    - name: Restore CEF framework
+      if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.local/share/Chromium Embedded Framework.framework
+        key: cef-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-${{ hashFiles('cef/manifest.toml') }}
+
     - name: Cache tailwindcss
+      if: inputs.packaging == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache@v5
+      with:
+        path: ~/.local/bin/tailwindcss
+        key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+    - name: Restore tailwindcss
+      if: inputs.packaging == 'true' && github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
       with:
         path: ~/.local/bin/tailwindcss
         key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
@@ -91,5 +121,6 @@ runs:
       run: vmux internal install-package-tools
 
     - name: Install tailwindcss
+      if: inputs.packaging == 'true'
       shell: bash
       run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" vmux internal install-tailwindcss

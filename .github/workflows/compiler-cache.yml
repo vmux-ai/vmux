@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - Cargo.lock
+      - rust-toolchain.toml
       - tool-versions.env
       - '**/Cargo.toml'
       - crates/build_*.rs
@@ -15,6 +16,9 @@ on:
       - crates/feature/vmux_dx/src/ci_io/**
       - .github/actions/setup-ci/**
       - .github/actions/setup-compiler-cache/**
+      - .github/actions/setup-rust/**
+      - .github/actions/setup-linux/**
+      - .github/actions/setup-macos/**
       - .github/actions/cache-sources/**
       - .github/actions/save-sources/**
       - .github/actions/cache-ecs-lints/**
@@ -42,8 +46,13 @@ env:
 
 jobs:
   compiler-cache:
+    name: Warm ECS compiler cache (${{ matrix.os }})
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -56,11 +65,22 @@ jobs:
           test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-linux
+        if: runner.os == 'Linux'
         with:
-          cache-key: compiler-warm
+          cache-key: lint-ecs
+          dependency-cache-key: lint
           cef-version: ${{ steps.cef.outputs.version }}
+      - uses: ./.github/actions/setup-macos
+        if: runner.os == 'macOS'
+        with:
+          cache-key: lint-ecs
+          cef-version: ${{ steps.cef.outputs.version }}
+          packaging: "false"
+          fast-rust: "true"
+          cli: "build"
       - uses: ./.github/actions/cache-ecs-lints
       - name: Validate compiler fixtures
+        if: runner.os == 'Linux'
         run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
       - name: Warm nightly workspace dependencies
         run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --workspace --all-targets
@@ -72,8 +92,8 @@ jobs:
       - name: Publish successful compiler workspace snapshot
         uses: ./.github/actions/save-workspace
         with:
-          cache-key: compiler-warm
+          cache-key: lint-ecs
       - uses: ./.github/actions/report-compiler-cache
         if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
         with:
-          name: compiler-warm
+          name: compiler-warm-${{ matrix.os }}
