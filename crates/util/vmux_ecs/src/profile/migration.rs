@@ -219,15 +219,65 @@ fn drive_migration(world: &mut World) {
     for entity in uninitialized {
         world.entity_mut(entity).insert(MigrationPending);
     }
-    for _ in 0..100_000 {
+    let mut last_progress = None;
+    let mut stalled = 0u8;
+    loop {
         let mut remaining = world.query_filtered::<Entity, (
             With<ProfileMigrationSpec>,
             Without<ProfileMigrationComplete>,
         )>();
-        if remaining.iter(world).next().is_none() {
+        let unfinished: Vec<Entity> = remaining.iter(world).collect();
+        if unfinished.is_empty() {
             break;
         }
         world.run_schedule(ProfileMigrationStep);
+        let progress = (
+            world.entities().len(),
+            world
+                .query_filtered::<Entity, With<RelocationSettled>>()
+                .iter(world)
+                .count(),
+            world
+                .query_filtered::<Entity, With<RelocationMergingChildren>>()
+                .iter(world)
+                .count(),
+            world
+                .query_filtered::<Entity, With<PruneSettled>>()
+                .iter(world)
+                .count(),
+            world
+                .query_filtered::<Entity, With<PruneWaitingChildren>>()
+                .iter(world)
+                .count(),
+            world
+                .query_filtered::<Entity, With<ProfileMigrationComplete>>()
+                .iter(world)
+                .count(),
+        );
+        if last_progress == Some(progress) {
+            stalled += 1;
+            if stalled >= 4 {
+                for root in unfinished {
+                    let path = world
+                        .get::<ProfileMigrationSpec>(root)
+                        .map(|spec| spec.data.clone())
+                        .unwrap_or_default();
+                    world.spawn((
+                        MigrationOwner(root),
+                        MigrationRefusal {
+                            path,
+                            operation: "drive_migration_stalled",
+                            message: "migration did not make progress".to_string(),
+                        },
+                    ));
+                    world.entity_mut(root).insert(ProfileMigrationComplete);
+                }
+                break;
+            }
+        } else {
+            stalled = 0;
+            last_progress = Some(progress);
+        }
     }
 }
 
@@ -529,12 +579,25 @@ fn admit_space_pruning(
             .remove::<MigratingLegacyProfiles>()
             .insert(PruningLegacyProfiles);
         let legacy_profiles = spec.config().join("profiles");
-        if NativeRelocation::observe(&legacy_profiles).is_ok_and(|obs| obs.is_directory()) {
-            commands.spawn((
-                MigrationOwner(root),
-                PruneNode(legacy_profiles),
-                PruneWaitingChildren,
-            ));
+        match NativeRelocation::observe(&legacy_profiles) {
+            Ok(obs) if obs.is_directory() => {
+                commands.spawn((
+                    MigrationOwner(root),
+                    PruneNode(legacy_profiles),
+                    PruneWaitingChildren,
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                commands.spawn((
+                    MigrationOwner(root),
+                    MigrationRefusal {
+                        path: legacy_profiles,
+                        operation: "observe_legacy_profiles_prune",
+                        message: error.to_string(),
+                    },
+                ));
+            }
         }
     }
     for (root, spec) in &pruning_legacy {
@@ -546,8 +609,21 @@ fn admit_space_pruning(
             .remove::<PruningLegacyProfiles>()
             .insert(PruningSpaces);
         let spaces = spec.spaces();
-        if NativeRelocation::observe(&spaces).is_ok_and(|obs| obs.is_directory()) {
-            commands.spawn((MigrationOwner(root), PruneNode(spaces), PruneScanning));
+        match NativeRelocation::observe(&spaces) {
+            Ok(obs) if obs.is_directory() => {
+                commands.spawn((MigrationOwner(root), PruneNode(spaces), PruneScanning));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                commands.spawn((
+                    MigrationOwner(root),
+                    MigrationRefusal {
+                        path: spaces,
+                        operation: "observe_spaces_prune",
+                        message: error.to_string(),
+                    },
+                ));
+            }
         }
     }
 }
