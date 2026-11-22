@@ -67,7 +67,10 @@ impl Native {
     }
 
     fn hooks(&self) -> Result<()> {
-        let binary = self.checkout.root.join(".build-tools/bin/vmux");
+        let binary = self
+            .checkout
+            .tools_root(&self.environment)
+            .join(".build-tools/bin/vmux");
         self.copy(&std::env::current_exe()?, &binary)?;
         let path = self.text(
             "git",
@@ -89,7 +92,10 @@ impl Native {
     }
 
     fn pre_push(&mut self) -> Result<()> {
-        let target = self.checkout.root.join(".build-tools/cargo");
+        let target = self
+            .checkout
+            .tools_root(&self.environment)
+            .join(".build-tools/cargo");
         self.environment.set("CARGO_TARGET_DIR", target.as_os_str());
         for args in [
             vec!["test", "-p", "vmux_dx", "--features", "ci-syntax", "--lib"],
