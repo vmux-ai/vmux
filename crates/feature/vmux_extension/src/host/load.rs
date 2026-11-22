@@ -1,6 +1,7 @@
-use crate::{driver, store};
+use std::path::Path;
 
-use crate::{Evidence, PreparedEvidence};
+use crate::filesystem::FileStore;
+use crate::{Catalog, Evidence, PreparedEvidence, driver, snapshot};
 use bevy::prelude::Component;
 
 use super::runtime::{self, PreparedRuntime};
@@ -12,11 +13,11 @@ pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 impl PreparedExtensions {
     pub(crate) fn snapshot(
         &self,
-        index: &store::Index,
+        index: &snapshot::Index,
         profile: &str,
         loaded: &[String],
     ) -> vmux_api::extension::ExtensionsUiState {
-        let mut snapshot = index.snapshot(profile, loaded);
+        let mut state = Catalog::project_ui_state(index, profile, loaded);
         for entry in &index.entries {
             if !entry.enabled_for(profile) {
                 continue;
@@ -26,7 +27,7 @@ impl PreparedExtensions {
                 .iter()
                 .find(|runtime| runtime.extension_id == entry.id)
             else {
-                snapshot.pending = true;
+                state.pending = true;
                 continue;
             };
             let grants = entry.grants_for(profile);
@@ -34,19 +35,19 @@ impl PreparedExtensions {
                 || runtime.granted_permissions != grants.permissions
                 || runtime.granted_host_permissions != grants.host_permissions
             {
-                snapshot.pending = true;
+                state.pending = true;
             }
         }
-        snapshot
+        state
     }
 
-    pub(super) fn prepare(index: &store::Index) -> Result<(Self, PreparedEvidence), String> {
-        let store = store::ExtensionStore::current();
-        let runtime_store = store::ExtensionStore::at(Self::runtime_store_root());
+    pub(super) fn prepare(index: &snapshot::Index) -> Result<(Self, PreparedEvidence), String> {
+        let source_root = vmux_ecs::profile::ProfilePaths::current().extensions();
+        let runtime_root = Self::runtime_store_root();
         let profile = vmux_ecs::profile::Profile::current().into_id();
         let (prepared, evidence) =
             Self::prepare_enabled_entries(&profile, &index.entries, |entry| {
-                PreparedRuntime::prepare(&store, &runtime_store, &profile, entry)
+                PreparedRuntime::prepare(&source_root, &runtime_root, &profile, entry)
             })?;
         let profile_dir = vmux_ecs::profile::ProfilePaths::current().profile();
         ServiceWorkerCache::from(profile_dir.as_path()).reconcile(&prepared)?;
@@ -61,15 +62,15 @@ impl PreparedExtensions {
         } else {
             unsafe { std::env::set_var("VMUX_LOAD_EXTENSIONS", directories.join(",")) };
         }
-        store.save_loaded_ids(&profile, &loaded)?;
+        FileStore::write_loaded_ids(&source_root, &profile, &loaded)?;
         Ok((Self(prepared), evidence))
     }
 
     fn prepare_enabled_entries(
         profile: &str,
-        entries: &[store::ExtEntry],
+        entries: &[snapshot::ExtEntry],
         mut prepare: impl FnMut(
-            &store::ExtEntry,
+            &snapshot::ExtEntry,
         ) -> Result<PreparedRuntime, runtime::PrepareRuntimeError>,
     ) -> Result<(Vec<PreparedRuntime>, PreparedEvidence), String> {
         let mut prepared = Vec::new();
@@ -85,7 +86,7 @@ impl PreparedExtensions {
                             id: entry.id.clone(),
                             profile: profile.into(),
                             source_hash: Some(runtime.source_hash.clone()),
-                            error: None,
+                            ..Default::default()
                         });
                     }
                     prepared.push(runtime);
@@ -94,8 +95,8 @@ impl PreparedExtensions {
                     evidence.push(Evidence {
                         id: entry.id.clone(),
                         profile: profile.into(),
-                        source_hash: None,
                         error: Some(error),
+                        ..Default::default()
                     });
                 }
                 Err(runtime::PrepareRuntimeError::Infrastructure(error)) => {
@@ -112,72 +113,62 @@ impl PreparedExtensions {
             .join("extensions")
     }
 
-    pub(super) fn migrate_index_permissions(
-        store: &store::ExtensionStore,
-        index: &mut store::Index,
-    ) -> Result<(), String> {
-        for entry in &mut index.entries {
-            let expected = store.source_dir(&entry.id, &entry.version);
+    pub(super) fn migrate_catalog_permissions(
+        root: &Path,
+        index: &snapshot::Index,
+    ) -> Result<PreparedEvidence, String> {
+        let mut evidence = Vec::new();
+        for entry in &index.entries {
+            let expected = FileStore::source_dir(root, &entry.id, &entry.version);
             let source = if expected.exists() {
                 expected
             } else {
-                store.migrate_legacy_package(entry)?
+                FileStore::migrate_legacy_package(
+                    root,
+                    &entry.id,
+                    &entry.version,
+                    &entry.source_hash,
+                )?
             };
             let text = std::fs::read_to_string(source.join("manifest.json"))
                 .map_err(|error| error.to_string())?;
             let parsed = driver::ExtensionManifest::parse(&text)?;
-            entry.permissions = parsed.permissions;
-            entry.optional_permissions = parsed.optional_permissions;
-            entry.host_permissions = parsed.host_permissions;
-            entry.optional_host_permissions = parsed.optional_host_permissions;
-            for profile in entry
-                .profile_enabled
-                .iter()
-                .filter_map(|(profile, enabled)| enabled.then_some(profile.clone()))
-                .collect::<Vec<_>>()
-            {
-                entry.approved_grants.insert(
-                    profile,
-                    store::ExtensionGrants {
-                        permissions: entry.permissions.clone(),
-                        host_permissions: entry.host_permissions.clone(),
-                    },
-                );
-            }
+            evidence.push(Evidence {
+                id: entry.id.clone(),
+                declared_permissions: Some(parsed.permissions),
+                optional_permissions: Some(parsed.optional_permissions),
+                host_permissions: Some(parsed.host_permissions),
+                optional_host_permissions: Some(parsed.optional_host_permissions),
+                grant_enabled_profiles: true,
+                ..Default::default()
+            });
         }
-        Ok(())
+        Ok(PreparedEvidence(evidence))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn enabled_entry(id: &str) -> store::ExtEntry {
-        let mut profile_enabled = std::collections::BTreeMap::new();
-        profile_enabled.insert("personal".to_string(), true);
-        store::ExtEntry {
-            id: id.to_string(),
-            name: id.to_string(),
-            version: "1".to_string(),
-            popup: None,
-            icon: None,
-            enabled: false,
-            profile_enabled,
-            profile_pinned: std::collections::BTreeMap::new(),
-            permissions: Vec::new(),
-            optional_permissions: Vec::new(),
-            host_permissions: Vec::new(),
-            optional_host_permissions: Vec::new(),
-            approved_grants: std::collections::BTreeMap::new(),
-            source_hash: "source-hash".to_string(),
-            public_key_b64: None,
-        }
-    }
+    use crate::{Catalog, CorePlugin, ExtensionSchedule, Root, Seed};
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::App;
 
     #[test]
     fn preparation_failure_disables_only_the_broken_extension() {
-        let entries = vec![enabled_entry("broken"), enabled_entry("working")];
+        let mut entries = Vec::new();
+        for id in ["broken", "working"] {
+            let mut profile_enabled = std::collections::BTreeMap::new();
+            profile_enabled.insert("personal".to_string(), true);
+            entries.push(snapshot::ExtEntry {
+                id: id.to_string(),
+                name: id.to_string(),
+                version: "1".to_string(),
+                profile_enabled,
+                source_hash: "source-hash".to_string(),
+                ..Default::default()
+            });
+        }
 
         let (prepared, evidence) =
             PreparedExtensions::prepare_enabled_entries("personal", &entries, |entry| {
@@ -208,8 +199,17 @@ mod tests {
     #[test]
     fn same_identity_updates_and_grant_changes_require_a_prepared_runtime_refresh() {
         let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let mut index = store::Index::default();
-        index.entries.push(enabled_entry(id));
+        let mut index = snapshot::Index::default();
+        let mut profile_enabled = std::collections::BTreeMap::new();
+        profile_enabled.insert("personal".to_string(), true);
+        index.entries.push(snapshot::ExtEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            version: "1".to_string(),
+            profile_enabled,
+            source_hash: "source-hash".to_string(),
+            ..Default::default()
+        });
         let prepared = PreparedExtensions(vec![PreparedRuntime::fixture(id, "runtime-hash")]);
         let loaded = vec![id.to_string()];
         assert!(!prepared.snapshot(&index, "personal", &loaded).pending);
@@ -218,7 +218,7 @@ mod tests {
         index.entries[0].source_hash = "source-hash".into();
         index.entries[0].approved_grants.insert(
             "personal".into(),
-            store::ExtensionGrants {
+            snapshot::ExtensionGrants {
                 permissions: vec!["storage".into()],
                 host_permissions: Vec::new(),
             },
@@ -235,7 +235,19 @@ mod tests {
 
     #[test]
     fn infrastructure_failure_keeps_extensions_enabled() {
-        let entries = vec![enabled_entry("broken"), enabled_entry("working")];
+        let mut entries = Vec::new();
+        for id in ["broken", "working"] {
+            let mut profile_enabled = std::collections::BTreeMap::new();
+            profile_enabled.insert("personal".to_string(), true);
+            entries.push(snapshot::ExtEntry {
+                id: id.to_string(),
+                name: id.to_string(),
+                version: "1".to_string(),
+                profile_enabled,
+                source_hash: "source-hash".to_string(),
+                ..Default::default()
+            });
+        }
 
         let error = PreparedExtensions::prepare_enabled_entries("personal", &entries, |entry| {
             if entry.id == "broken" {
@@ -258,13 +270,12 @@ mod tests {
     #[test]
     fn migration_populates_every_entry_and_enabled_profile() {
         let root = tempfile::tempdir().unwrap();
-        let store = store::ExtensionStore::at(root.path());
         let ids = [
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         ];
         for (id, permission) in ids.iter().zip(["storage", "bookmarks"]) {
-            let source = store.source_dir(id, "1");
+            let source = FileStore::source_dir(root.path(), id, "1");
             std::fs::create_dir_all(&source).unwrap();
             std::fs::write(
                 source.join("manifest.json"),
@@ -298,18 +309,30 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let mut index = store.load_index().unwrap();
+        let index = FileStore::read(root.path()).unwrap();
+        let mut app = App::new();
+        app.add_plugins(CorePlugin);
+        let owner = app
+            .world_mut()
+            .spawn((Root(root.path().to_path_buf()), Seed(Ok(index))))
+            .id();
+        app.world_mut().run_schedule(ExtensionSchedule);
+        let mut catalog = SystemState::<Catalog>::new(app.world_mut());
+        let initial = catalog.get(app.world()).unwrap().snapshot(owner).unwrap();
+        let evidence =
+            PreparedExtensions::migrate_catalog_permissions(root.path(), &initial).unwrap();
+        app.world_mut().entity_mut(owner).insert(evidence);
+        app.world_mut().run_schedule(ExtensionSchedule);
+        let migrated = catalog.get(app.world()).unwrap().snapshot(owner).unwrap();
 
-        PreparedExtensions::migrate_index_permissions(&store, &mut index).unwrap();
-
-        assert_eq!(index.entries[0].permissions, ["storage"]);
+        assert_eq!(migrated.entries[0].permissions, ["storage"]);
         assert_eq!(
-            index.entries[0].grants_for("personal").permissions,
+            migrated.entries[0].grants_for("personal").permissions,
             ["storage"]
         );
-        assert_eq!(index.entries[1].permissions, ["bookmarks"]);
+        assert_eq!(migrated.entries[1].permissions, ["bookmarks"]);
         assert_eq!(
-            index.entries[1].grants_for("work").permissions,
+            migrated.entries[1].grants_for("work").permissions,
             ["bookmarks"]
         );
     }

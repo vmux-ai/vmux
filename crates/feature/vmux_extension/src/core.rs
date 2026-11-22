@@ -337,11 +337,16 @@ impl Install {
 #[derive(Component, Debug)]
 pub struct PreparedEvidence(pub Vec<Evidence>);
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Evidence {
     pub id: String,
     pub profile: String,
     pub source_hash: Option<String>,
+    pub declared_permissions: Option<Vec<String>>,
+    pub optional_permissions: Option<Vec<String>>,
+    pub host_permissions: Option<Vec<String>>,
+    pub optional_host_permissions: Option<Vec<String>>,
+    pub grant_enabled_profiles: bool,
     pub error: Option<String>,
 }
 
@@ -509,6 +514,55 @@ impl Catalog<'_, '_> {
         }
         snapshot.entries.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(snapshot)
+    }
+
+    pub fn project_ui_state(
+        index: &Index,
+        profile: &str,
+        loaded: &[String],
+    ) -> vmux_api::extension::ExtensionsUiState {
+        let mut extensions = Vec::new();
+        let mut enabled_ids = Vec::new();
+        for entry in &index.entries {
+            if entry.enabled_for(profile) {
+                enabled_ids.push(entry.id.clone());
+            }
+            if !entry.installed_for(profile) {
+                continue;
+            }
+            let enabled = entry.enabled_for(profile);
+            extensions.push(vmux_api::extension::ExtRow {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+                version: entry.version.clone(),
+                icon: entry.icon.clone(),
+                popup: entry.popup.clone(),
+                enabled,
+                pinned: entry.pinned_for(profile),
+                needs_approval: !entry
+                    .grants_for(profile)
+                    .covers(&entry.permissions, &entry.host_permissions),
+                required_permissions: entry.permissions.clone(),
+                required_host_permissions: entry.host_permissions.clone(),
+                status: if enabled {
+                    vmux_api::extension::ExtStatus::Installed
+                } else {
+                    vmux_api::extension::ExtStatus::Disabled
+                },
+            });
+        }
+        enabled_ids.sort();
+        let mut loaded_ids = loaded.to_vec();
+        loaded_ids.sort();
+        let visible = extensions.clone();
+        vmux_api::extension::ExtensionsUiState {
+            loaded: true,
+            extensions,
+            visible,
+            query: String::new(),
+            installing: Vec::new(),
+            pending: enabled_ids != loaded_ids,
+        }
     }
 }
 
@@ -1113,15 +1167,40 @@ fn retire(
 
 fn evidence(
     mut roots: Query<(Entity, &Scope, &mut State, &mut Revision, &PreparedEvidence), With<Loaded>>,
-    mut packages: Query<(Entity, &Id, &ChildOf, &mut SourceHash), With<Package>>,
-    associations: Query<(Entity, &ProfileId, &ChildOf), With<Association>>,
+    mut packages: Query<
+        (
+            Entity,
+            &Id,
+            &ChildOf,
+            &mut SourceHash,
+            &mut Permissions,
+            &mut OptionalPermissions,
+            &mut HostPermissions,
+            &mut OptionalHostPermissions,
+        ),
+        With<Package>,
+    >,
+    mut associations: Query<
+        (Entity, &ProfileId, &ChildOf, Has<Enabled>, &mut Grants),
+        With<Association>,
+    >,
     mut changed: MessageWriter<Changed>,
     mut commands: Commands,
 ) {
     for (owner, _, mut state, mut revision, evidence) in &mut roots {
         let mut touched = false;
         for evidence in &evidence.0 {
-            for (entity, id, parent, mut hash) in &mut packages {
+            for (
+                entity,
+                id,
+                parent,
+                mut hash,
+                mut permissions,
+                mut optional_permissions,
+                mut host_permissions,
+                mut optional_host_permissions,
+            ) in &mut packages
+            {
                 if parent.parent() != owner || id.0 != evidence.id {
                     continue;
                 }
@@ -1131,8 +1210,35 @@ fn evidence(
                     hash.0 = source_hash.clone();
                     touched = true;
                 }
+                if let Some(declared) = &evidence.declared_permissions {
+                    permissions.0.clone_from(declared);
+                    touched = true;
+                }
+                if let Some(optional) = &evidence.optional_permissions {
+                    optional_permissions.0.clone_from(optional);
+                    touched = true;
+                }
+                if let Some(hosts) = &evidence.host_permissions {
+                    host_permissions.0.clone_from(hosts);
+                    touched = true;
+                }
+                if let Some(optional_hosts) = &evidence.optional_host_permissions {
+                    optional_host_permissions.0.clone_from(optional_hosts);
+                    touched = true;
+                }
+                if evidence.grant_enabled_profiles {
+                    for (_, _, parent, enabled, mut grants) in &mut associations {
+                        if parent.parent() == entity && enabled {
+                            grants.0 = ExtensionGrants {
+                                permissions: permissions.0.clone(),
+                                host_permissions: host_permissions.0.clone(),
+                            };
+                            touched = true;
+                        }
+                    }
+                }
                 if let Some(error) = &evidence.error {
-                    for (association, profile, parent) in &associations {
+                    for (association, profile, parent, _, _) in &associations {
                         if parent.parent() == entity && profile.0 == evidence.profile {
                             commands.entity(association).remove::<Enabled>();
                             commands.entity(entity).insert(WriteError(error.clone()));
@@ -2086,7 +2192,7 @@ mod tests {
                 id: PACKAGE_ID.into(),
                 profile: "personal".into(),
                 source_hash: Some("validated-source".into()),
-                error: None,
+                ..Default::default()
             }]));
         fixture.app.world_mut().run_schedule(ExtensionSchedule);
         assert_eq!(
