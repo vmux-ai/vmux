@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 pub use lease::DataLease;
 pub use product::Product;
-pub use profile_driver::{ProfileMigration, ProfileRecord, ProfileStore};
+pub use relocation::{DirectoryChild, EntryObservation, NativeRelocation};
 pub use service::{RemotePaths, ServicePaths};
 
 #[cfg(target_os = "macos")]
@@ -10,7 +10,7 @@ pub mod account_credentials;
 mod lease;
 pub mod mcp_credentials;
 mod product;
-mod profile_driver;
+mod relocation;
 pub mod safe_storage;
 mod service;
 
