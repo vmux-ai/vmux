@@ -1,6 +1,8 @@
+use bevy::ecs::reflect::ReflectComponent;
 use bevy::ecs::resource::IsResource;
+use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::any_with_component;
-use bevy::ecs::system::Command;
+use bevy::ecs::system::{Command, SystemParam};
 use bevy::prelude::*;
 use bevy::prelude::{App, Plugin};
 use bevy::tasks::IoTaskPool;
@@ -20,10 +22,10 @@ use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
-use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
+use vmux_ecs::profile::{ActiveProfile, CurrentProfile, SessionEnvironment};
 use vmux_ecs::store::{
-    StoreDirty, WorkspaceRestore, WorkspaceRestoreValidator, WorkspaceSaveRequest,
-    WorkspaceStoreValidators, WorkspaceStored,
+    StoreDirty, WorkspaceCommitCompleted, WorkspaceCommitRequest, WorkspaceRestore,
+    WorkspaceRestoreValidator, WorkspaceSaveRequest, WorkspaceStoreValidators, WorkspaceStored,
 };
 #[cfg(test)]
 use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage};
@@ -84,7 +86,8 @@ struct WorkspacePersistencePlugin;
 
 impl Plugin for WorkspacePersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AppExit>()
+        app.add_plugins(WorkspaceCommitPlugin)
+            .add_message::<AppExit>()
             .add_observer(begin_auto)
             .add_observer(begin_direct)
             .add_observer(captured)
@@ -105,6 +108,536 @@ impl Plugin for WorkspacePersistencePlugin {
                     .after(flush_on_exit)
                     .before(vmux_ecs::service::ShutdownSet),
             );
+    }
+}
+
+struct WorkspaceCommitPlugin;
+
+impl Plugin for WorkspaceCommitPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.add_message::<WorkspaceCommitRequest>()
+            .add_message::<WorkspaceCommitCompleted>()
+            .add_systems(
+                Update,
+                (admit, ApplyDeferred, retire, ApplyDeferred, dispatch)
+                    .chain()
+                    .before(auto_save),
+            )
+            .add_systems(Update, settle.after(drain_writes).after(drain_orphans))
+            .add_observer(capture)
+            .add_observer(receive_written);
+    }
+}
+
+#[derive(Component)]
+struct Commit {
+    request: WorkspaceCommitRequest,
+    store: Entity,
+    revision: u64,
+}
+
+impl Commit {
+    fn completed(&self, result: Result<(), String>) -> WorkspaceCommitCompleted {
+        WorkspaceCommitCompleted {
+            request_id: self.request.request_id.clone(),
+            requester: self.request.requester,
+            profile: self.request.profile,
+            store: self.store,
+            path: self.request.path.clone(),
+            revision: self.revision,
+            result,
+        }
+    }
+}
+
+#[derive(Component)]
+struct CommitFlight {
+    revision: u64,
+    capture: vmux_ecs::Uuid,
+}
+
+#[derive(Component)]
+struct CommitRetired(String);
+
+#[derive(Component)]
+struct CommitOutcome(Result<(), String>);
+
+#[derive(Component)]
+struct CommitFinished;
+
+#[derive(SystemParam)]
+struct CommitSchema<'w, 's> {
+    entities: Query<
+        'w,
+        's,
+        EntityRef<'static>,
+        (
+            With<Save>,
+            Without<AutoSave>,
+            Without<Commit>,
+            Without<IsResource>,
+        ),
+    >,
+    registry: Res<'w, AppTypeRegistry>,
+    components: &'w bevy::ecs::component::Components,
+}
+
+#[derive(SystemParam)]
+struct CommitAdmission<'w, 's> {
+    state: ParamSet<
+        'w,
+        's,
+        (
+            SaveAdmission<'w, 's>,
+            Query<
+                'w,
+                's,
+                (
+                    Entity,
+                    &'static WorkspaceStorePath,
+                    &'static EntityTarget<ActiveProfile>,
+                    &'static mut State,
+                    &'static SnapshotFilter,
+                    &'static WorkspaceRestore,
+                ),
+                With<AutoSave>,
+            >,
+        ),
+    >,
+    profile: CurrentProfile<'w, 's>,
+}
+
+impl CommitAdmission<'_, '_> {
+    fn source(&mut self, request: &WorkspaceCommitRequest) -> Result<Entity, String> {
+        if self.profile.entity() != Some(request.profile)
+            || self
+                .profile
+                .paths()
+                .is_none_or(|paths| paths.store().join("store.ron") != request.path)
+        {
+            return Err("Workspace commit profile is not current".into());
+        }
+        if !self.state.p0().accepts(&request.path) {
+            return Err("Workspace save admission refused the commit".into());
+        }
+        let mut matching = None;
+        for (entity, path, owner, state, _, restore) in &self.state.p1() {
+            if path.0 != request.path || owner.entity() != request.profile {
+                continue;
+            }
+            if matching.is_some() {
+                return Err("Workspace commit source is ambiguous".into());
+            }
+            if state.phase() != vmux_ecs::store::Phase::Ready || !restore.complete {
+                return Err("Workspace restore is not ready".into());
+            }
+            matching = Some(entity);
+        }
+        matching.ok_or_else(|| "Workspace commit source does not match the profile and path".into())
+    }
+}
+
+impl CommitSchema<'_, '_> {
+    fn required(
+        &self,
+        entity: Entity,
+        filter: &WorldFilter,
+    ) -> Result<Vec<std::any::TypeId>, String> {
+        let entity = self
+            .entities
+            .get(entity)
+            .map_err(|_| "Required entity is absent")?;
+        if !entity.contains::<Save>() {
+            return Err("Required entity is not stored".into());
+        }
+        let registry = self.registry.read();
+        let mut required = Vec::new();
+        for component in entity.archetype().components() {
+            let Some(id) = self
+                .components
+                .get_info(*component)
+                .and_then(|info| info.type_id())
+            else {
+                continue;
+            };
+            let Some(registration) = registry.get(id) else {
+                continue;
+            };
+            if registration.data::<WorkspaceStored>().is_none() {
+                continue;
+            }
+            if !filter.is_allowed_by_id(id) || registration.data::<ReflectComponent>().is_none() {
+                return Err(
+                    "Required registered component is omitted by the workspace schema".into(),
+                );
+            }
+            required.push(id);
+        }
+        if required.is_empty() {
+            return Err("Required entity has no registered workspace data".into());
+        }
+        Ok(required)
+    }
+
+    fn captured(&self, entity: Entity, writer: &SnapshotWriter) -> bool {
+        let Ok(required) = self.required(entity, &writer.filter) else {
+            return false;
+        };
+        let Some(captured) = writer
+            .saved
+            .world
+            .entities
+            .iter()
+            .find(|entry| entry.entity == entity)
+        else {
+            return false;
+        };
+        for id in required {
+            if !captured.components.iter().any(|value| {
+                value
+                    .get_represented_type_info()
+                    .is_some_and(|info| info.type_id() == id)
+            }) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn admit(
+    mut requests: MessageReader<WorkspaceCommitRequest>,
+    existing: Query<&Commit>,
+    mut admission: CommitAdmission,
+    requesters: Query<Option<&vmux_ecs::OperationState>>,
+    schema: CommitSchema,
+    mut replies: MessageWriter<WorkspaceCommitCompleted>,
+    mut commands: Commands,
+) {
+    let mut seen = Vec::<WorkspaceCommitRequest>::new();
+    for request in requests.read() {
+        let previous = existing
+            .iter()
+            .find(|commit| commit.request.request_id == request.request_id)
+            .map(|commit| &commit.request)
+            .or_else(|| {
+                seen.iter()
+                    .find(|previous| previous.request_id == request.request_id)
+            });
+        if let Some(previous) = previous {
+            if previous != request {
+                replies.write(
+                    Commit {
+                        request: request.clone(),
+                        store: Entity::PLACEHOLDER,
+                        revision: 0,
+                    }
+                    .completed(Err(
+                        "Commit request identity was reused for different work".into(),
+                    )),
+                );
+            }
+            continue;
+        }
+        seen.push(request.clone());
+        let store = match admission.source(request) {
+            Ok(store) => store,
+            Err(error) => {
+                replies.write(
+                    Commit {
+                        request: request.clone(),
+                        store: Entity::PLACEHOLDER,
+                        revision: 0,
+                    }
+                    .completed(Err(error)),
+                );
+                continue;
+            }
+        };
+        let mut stores = admission.state.p1();
+        let (_, _, _, mut state, filter, _) = stores.get_mut(store).unwrap();
+        let result = match requesters.get(request.requester) {
+            Err(_) => Err("Workspace commit requester is absent".to_string()),
+            Ok(Some(vmux_ecs::OperationState::Canceled | vmux_ecs::OperationState::Failed)) => {
+                Err("Workspace commit requester is canceled".to_string())
+            }
+            Ok(_) => schema
+                .required(request.required, &filter.components)
+                .map(|_| ()),
+        };
+        if let Err(error) = result {
+            replies.write(
+                Commit {
+                    request: request.clone(),
+                    store,
+                    revision: 0,
+                }
+                .completed(Err(error)),
+            );
+            continue;
+        }
+        state.advance();
+        let revision = state.dirty().unwrap();
+        commands.spawn((
+            Name::new("Accepted workspace commit"),
+            vmux_ecs::Operation::bundle("workspace.commit")
+                .unwrap()
+                .running(),
+            vmux_ecs::OperationRetained,
+            Commit {
+                request: request.clone(),
+                store,
+                revision,
+            },
+        ));
+    }
+}
+
+fn retire(
+    commits: Query<
+        (Entity, &Commit, Has<CommitFlight>),
+        (
+            Without<CommitFinished>,
+            Without<CommitOutcome>,
+            Without<CommitRetired>,
+        ),
+    >,
+    sources: Query<
+        (
+            &WorkspaceStorePath,
+            &EntityTarget<ActiveProfile>,
+            &State,
+            &WorkspaceRestore,
+        ),
+        With<AutoSave>,
+    >,
+    requesters: Query<Option<&vmux_ecs::OperationState>>,
+    profile: CurrentProfile,
+    mut commands: Commands,
+) {
+    for (entity, commit, flight) in &commits {
+        let current = sources
+            .get(commit.store)
+            .is_ok_and(|(path, source, state, restore)| {
+                path.0 == commit.request.path
+                    && source.entity() == commit.request.profile
+                    && state.phase() == vmux_ecs::store::Phase::Ready
+                    && restore.complete
+            })
+            && profile.entity() == Some(commit.request.profile)
+            && profile
+                .paths()
+                .is_some_and(|paths| paths.store().join("store.ron") == commit.request.path);
+        let requester = requesters.get(commit.request.requester).is_ok_and(|state| {
+            !matches!(
+                state,
+                Some(vmux_ecs::OperationState::Canceled | vmux_ecs::OperationState::Failed)
+            )
+        });
+        if current && requester {
+            continue;
+        }
+        let error = "Workspace commit source or requester retired".to_string();
+        if flight {
+            commands.entity(entity).insert(CommitRetired(error));
+        } else {
+            commands.entity(entity).insert(CommitOutcome(Err(error)));
+        }
+    }
+}
+
+fn dispatch(
+    commits: Query<
+        &Commit,
+        (
+            Without<CommitFlight>,
+            Without<CommitOutcome>,
+            Without<CommitFinished>,
+        ),
+    >,
+    sources: Query<
+        (Entity, &State, &WorkspaceStorePath, &SnapshotFilter),
+        (With<AutoSave>, Without<PendingWrite>),
+    >,
+    saved: SpaceSaveEntities,
+    mut saver: SpaceSaver,
+) {
+    for (entity, state, path, filter) in &sources {
+        if state.phase() != vmux_ecs::store::Phase::Ready || state.error().is_some() {
+            continue;
+        }
+        if !commits.iter().any(|commit| commit.store == entity) {
+            continue;
+        }
+        saver.autosave(
+            entity,
+            path.0.clone(),
+            saved.excluded(),
+            filter.components.clone(),
+            true,
+        );
+    }
+}
+
+#[derive(Event)]
+struct SnapshotCaptured {
+    capture: vmux_ecs::Uuid,
+    target: EntityTarget<AutoSave>,
+    revision: u64,
+    commit: bool,
+    writer: Option<SnapshotWriter>,
+}
+
+fn capture(
+    mut captured: On<SnapshotCaptured>,
+    mut commits: Query<
+        (Entity, &mut Commit),
+        (
+            Without<CommitFlight>,
+            Without<CommitOutcome>,
+            Without<CommitFinished>,
+        ),
+    >,
+    schema: CommitSchema,
+    profile: CurrentProfile,
+    requesters: Query<Option<&vmux_ecs::OperationState>>,
+    mut stores: Query<&mut State, With<AutoSave>>,
+    restores: Query<&WorkspaceRestore, With<AutoSave>>,
+    mut commands: Commands,
+) {
+    let Some(writer) = captured.writer.take() else {
+        return;
+    };
+    let ready = stores.get_mut(captured.target.entity()).is_ok_and(|state| {
+        state.phase() == vmux_ecs::store::Phase::Ready && state.saving() == Some(captured.revision)
+    }) && restores
+        .get(captured.target.entity())
+        .is_ok_and(|restore| restore.complete);
+    let mut included = false;
+    for (entity, mut commit) in &mut commits {
+        if commit.store != captured.target.entity()
+            || commit.request.path != writer.path.0
+            || commit.revision > captured.revision
+        {
+            continue;
+        }
+        let requester = requesters.get(commit.request.requester).is_ok_and(|state| {
+            !matches!(
+                state,
+                Some(vmux_ecs::OperationState::Canceled | vmux_ecs::OperationState::Failed)
+            )
+        });
+        let source = profile.entity() == Some(commit.request.profile)
+            && profile
+                .paths()
+                .is_some_and(|paths| paths.store().join("store.ron") == writer.path.0);
+        if !ready || !requester || !source || !schema.captured(commit.request.required, &writer) {
+            commands.entity(entity).insert(CommitOutcome(Err(
+                "Required workspace data was not captured".into(),
+            )));
+            continue;
+        }
+        commit.revision = captured.revision;
+        commands.entity(entity).insert(CommitFlight {
+            revision: captured.revision,
+            capture: captured.capture.clone(),
+        });
+        included = true;
+    }
+    if captured.commit && !included {
+        if let Ok(mut state) = stores.get_mut(captured.target.entity()) {
+            state.retry(
+                captured.revision,
+                "Workspace commit has no current included requirement".into(),
+            );
+        }
+        return;
+    }
+    commands.queue(SubmitSnapshot {
+        capture: captured.capture.clone(),
+        target: captured.target,
+        revision: captured.revision,
+        writer,
+    });
+}
+
+fn receive_written(
+    written: On<WriteCompleted>,
+    commits: Query<(Entity, &Commit, &CommitFlight, Option<&CommitRetired>)>,
+    mut commands: Commands,
+) {
+    for (entity, commit, flight, retired) in &commits {
+        if commit.store != written.target.entity()
+            || commit.request.path != written.path
+            || flight.revision != written.revision
+            || flight.capture != written.capture
+        {
+            continue;
+        }
+        commands.entity(entity).remove::<CommitFlight>();
+        if let Some(retired) = retired {
+            commands
+                .entity(entity)
+                .insert(CommitOutcome(Err(retired.0.clone())));
+        } else if written.result.is_ok() {
+            commands.entity(entity).insert(CommitOutcome(Ok(())));
+        }
+    }
+}
+
+fn settle(
+    commits: Query<
+        (Entity, &Commit, &CommitOutcome),
+        (Without<CommitFlight>, Without<CommitFinished>),
+    >,
+    profile: CurrentProfile,
+    requesters: Query<Option<&vmux_ecs::OperationState>>,
+    sources: Query<
+        (
+            &WorkspaceStorePath,
+            &EntityTarget<ActiveProfile>,
+            &State,
+            &WorkspaceRestore,
+        ),
+        With<AutoSave>,
+    >,
+    mut replies: MessageWriter<WorkspaceCommitCompleted>,
+    mut commands: Commands,
+) {
+    for (entity, commit, outcome) in &commits {
+        let mut result = outcome.0.clone();
+        let requester = requesters.get(commit.request.requester).is_ok_and(|state| {
+            !matches!(
+                state,
+                Some(vmux_ecs::OperationState::Canceled | vmux_ecs::OperationState::Failed)
+            )
+        });
+        let source = sources
+            .get(commit.store)
+            .is_ok_and(|(path, profile, state, restore)| {
+                path.0 == commit.request.path
+                    && profile.entity() == commit.request.profile
+                    && state.phase() == vmux_ecs::store::Phase::Ready
+                    && restore.complete
+            });
+        if profile.entity() != Some(commit.request.profile)
+            || !requester
+            || !source
+            || profile
+                .paths()
+                .is_none_or(|paths| paths.store().join("store.ron") != commit.request.path)
+        {
+            result = Err("Workspace commit delivery owner retired".into());
+        }
+        replies.write(commit.completed(result.clone()));
+        commands.trigger(vmux_ecs::OperationCompleted { entity, result });
+        commands
+            .entity(entity)
+            .remove::<vmux_ecs::OperationRetained>()
+            .insert(CommitFinished);
     }
 }
 
@@ -179,7 +712,7 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
             }
         }
     };
-    commands.spawn((
+    let mut store = commands.spawn((
         Name::new("Space store"),
         AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
@@ -189,6 +722,9 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
         WorkspaceRestore::default(),
         WorkspaceStorePath(path),
     ));
+    if let Some(profile) = profile.entity() {
+        store.insert(EntityTarget::<ActiveProfile>::new(profile));
+    }
 }
 
 fn flush_on_exit(
@@ -537,12 +1073,14 @@ impl SpaceSaver<'_, '_> {
         path: PathBuf,
         excluded: impl IntoIterator<Item = Entity>,
         components: WorldFilter,
+        commit: bool,
     ) {
         let save = Self::snapshot(path.clone(), excluded, components);
         self.commands.trigger(AutoSnapshot {
             target: EntityTarget::new(entity),
             schema: WorkspaceStorePath(path),
             save: Some(save),
+            commit,
         });
     }
 
@@ -563,6 +1101,7 @@ struct AutoSnapshot {
     target: EntityTarget<AutoSave>,
     schema: WorkspaceStorePath,
     save: Option<SaveWorld>,
+    commit: bool,
 }
 
 #[derive(Event)]
@@ -579,6 +1118,7 @@ struct Captured {
 
 #[derive(Event)]
 struct WriteCompleted {
+    capture: vmux_ecs::Uuid,
     target: EntityTarget<AutoSave>,
     revision: u64,
     path: PathBuf,
@@ -658,10 +1198,12 @@ fn begin_auto(
         return;
     };
     commands.queue(CaptureSnapshot {
+        capture: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
         target: request.target,
         revision,
         schema: WorkspaceStorePath(request.schema.0.clone()),
         save,
+        commit: request.commit,
     });
 }
 
@@ -686,6 +1228,7 @@ fn begin_direct(
         }
         let result = write.finish();
         commands.trigger(WriteCompleted {
+            capture: write.capture.clone(),
             target: target.copied().unwrap_or_else(|| EntityTarget::new(entity)),
             revision: write.revision,
             path: write.path.clone(),
@@ -741,7 +1284,8 @@ fn write_completed(
     let Ok((mut autosave, mut state, pending)) = stores.get_mut(request.target.entity()) else {
         return;
     };
-    if pending.is_some_and(|pending| pending.result.is_some()) {
+    if pending.is_some_and(|pending| pending.capture != request.capture || pending.result.is_some())
+    {
         return;
     }
     match &request.result {
@@ -791,6 +1335,7 @@ fn preserve_pending(
             return;
         };
         PendingWrite {
+            capture: pending.capture.clone(),
             revision: pending.revision,
             path: pending.path.clone(),
             result: Some(result),
@@ -826,6 +1371,7 @@ fn drain_orphans(
             continue;
         };
         commands.trigger(WriteCompleted {
+            capture: write.capture.clone(),
             target: *target,
             revision: write.revision,
             path: write.path.clone(),
@@ -846,6 +1392,7 @@ fn flush_orphans(
     for (entity, target, mut write) in &mut pending {
         let result = write.finish();
         commands.trigger(WriteCompleted {
+            capture: write.capture.clone(),
             target: *target,
             revision: write.revision,
             path: write.path.clone(),
@@ -866,6 +1413,7 @@ fn flush_attached(
     for (entity, mut write) in &mut pending {
         let result = write.finish();
         commands.trigger(WriteCompleted {
+            capture: write.capture.clone(),
             target: EntityTarget::new(entity),
             revision: write.revision,
             path: write.path.clone(),
@@ -878,6 +1426,7 @@ fn flush_attached(
 #[derive(Component)]
 #[component(on_discard = preserve_pending)]
 struct PendingWrite {
+    capture: vmux_ecs::Uuid,
     revision: u64,
     path: PathBuf,
     result: Option<Mutex<mpsc::Receiver<Result<(), String>>>>,
@@ -914,6 +1463,7 @@ struct SnapshotWriter {
     saved: Saved,
     registry: AppTypeRegistry,
     path: WorkspaceStorePath,
+    filter: WorldFilter,
 }
 
 impl SnapshotWriter {
@@ -933,19 +1483,18 @@ impl SnapshotWriter {
 }
 
 struct CaptureSnapshot {
+    capture: vmux_ecs::Uuid,
     target: EntityTarget<AutoSave>,
     revision: u64,
     schema: WorkspaceStorePath,
     save: SaveWorld,
+    commit: bool,
 }
 
 impl Command for CaptureSnapshot {
     type Out = ();
 
     fn apply(mut self, world: &mut World) {
-        if let Some(parent) = self.schema.0.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
         let mut entities = Vec::new();
         for entity in world.query_filtered::<Entity, With<Save>>().iter(world) {
             let included = match &self.save.entities {
@@ -959,10 +1508,11 @@ impl Command for CaptureSnapshot {
         self.save.before_save(world);
         self.save.before_serialize(world, &entities);
         let registry = world.resource::<AppTypeRegistry>().clone();
+        let filter = self.save.component_filter();
         let snapshot = {
             let registry = registry.read();
             DynamicWorldBuilder::from_world(world, &registry)
-                .with_component_filter(self.save.component_filter())
+                .with_component_filter(filter.clone())
                 .with_resource_filter(self.save.resource_filter())
                 .extract_resources()
                 .extract_entities(entities.iter().copied())
@@ -973,12 +1523,35 @@ impl Command for CaptureSnapshot {
         let Ok(saved) = captured else {
             return;
         };
-        let path = self.schema.0.clone();
         let writer = SnapshotWriter {
             saved,
             registry,
             path: self.schema,
+            filter,
         };
+        world.trigger(SnapshotCaptured {
+            capture: self.capture,
+            target: self.target,
+            revision: self.revision,
+            commit: self.commit,
+            writer: Some(writer),
+        });
+    }
+}
+
+struct SubmitSnapshot {
+    capture: vmux_ecs::Uuid,
+    target: EntityTarget<AutoSave>,
+    revision: u64,
+    writer: SnapshotWriter,
+}
+
+impl Command for SubmitSnapshot {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let path = self.writer.path.0.clone();
+        let writer = self.writer;
         let proxy = world
             .get_resource::<EventLoopProxyWrapper>()
             .map(|proxy| (**proxy).clone());
@@ -994,6 +1567,7 @@ impl Command for CaptureSnapshot {
         world.trigger(Captured {
             target: self.target,
             pending: Some(PendingWrite {
+                capture: self.capture,
                 revision: self.revision,
                 path,
                 result: Some(Mutex::new(result)),
@@ -1034,6 +1608,7 @@ fn drain_writes(
             continue;
         };
         commands.trigger(WriteCompleted {
+            capture: pending.capture.clone(),
             target: EntityTarget::new(entity),
             revision: pending.revision,
             path: pending.path.clone(),
@@ -1193,6 +1768,7 @@ fn auto_save(
         path.0.clone(),
         save_entities.excluded(),
         filter.components.clone(),
+        false,
     );
 }
 
@@ -1704,6 +2280,555 @@ mod tests {
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
+    #[derive(Component, Clone, Debug, Default, Reflect)]
+    #[reflect(Component)]
+    #[require(Save)]
+    struct CommitValue {
+        text: String,
+    }
+
+    #[derive(Component, Clone, Reflect)]
+    #[reflect(opaque)]
+    #[reflect(Component, Serialize, Deserialize)]
+    #[require(Save)]
+    struct CommitGateValue(std::sync::Arc<SerializationGate>);
+
+    impl serde::Serialize for CommitGateValue {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            if !self.0.enter() {
+                return Err(serde::ser::Error::custom(
+                    "Workspace serialization did not drain",
+                ));
+            }
+            serializer.serialize_u32(1)
+        }
+    }
+
+    impl<'de> serde::Deserialize<'de> for CommitGateValue {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let _ = <u32 as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(Self(std::sync::Arc::new(SerializationGate::default())))
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct CommitReplies(Vec<WorkspaceCommitCompleted>);
+
+    impl CommitReplies {
+        fn record(
+            mut requests: MessageReader<WorkspaceCommitCompleted>,
+            mut replies: ResMut<Self>,
+        ) {
+            for request in requests.read() {
+                replies.0.push(request.clone());
+            }
+        }
+    }
+
+    struct CommitFixture {
+        app: App,
+        profile: Entity,
+        store: Entity,
+        requester: Entity,
+        value: Entity,
+        path: PathBuf,
+        _directory: tempfile::TempDir,
+    }
+
+    impl CommitFixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let profile = vmux_ecs::profile::Profile::named("workspace-commit-fixture");
+            let paths = ProfilePaths::at(profile.clone(), directory.path().to_path_buf());
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                AssetPlugin::default(),
+                vmux_ecs::PrimitivesPlugin,
+            ))
+            .register_stored::<Space>()
+            .register_stored::<CommitValue>()
+            .register_stored::<CommitGateValue>()
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::ZERO,
+            ))
+            .init_resource::<CommitReplies>()
+            .add_systems(Last, CommitReplies::record)
+            .add_plugins(WorkspaceStorePlugin);
+            let profile = app
+                .world_mut()
+                .spawn((
+                    ActiveProfile(profile),
+                    Name::new("Workspace commit fixture profile"),
+                    vmux_ecs::profile::ProfileDirectories(paths),
+                ))
+                .id();
+            let requester = app
+                .world_mut()
+                .spawn(
+                    vmux_ecs::Operation::bundle("fixture.commit")
+                        .unwrap()
+                        .running(),
+                )
+                .id();
+            app.world_mut().spawn((Save, Space, Name::new("Workspace")));
+            let value = app
+                .world_mut()
+                .spawn(CommitValue {
+                    text: "before".into(),
+                })
+                .id();
+            app.update();
+            let store = app
+                .world_mut()
+                .query_filtered::<Entity, With<AutoSave>>()
+                .single(app.world())
+                .unwrap();
+            let path = app
+                .world()
+                .get::<WorkspaceStorePath>(store)
+                .unwrap()
+                .0
+                .clone();
+            assert!(path.starts_with(directory.path()));
+            assert!(!path.exists());
+            Self {
+                app,
+                profile,
+                store,
+                requester,
+                value,
+                path,
+                _directory: directory,
+            }
+        }
+
+        fn request(&mut self) -> WorkspaceCommitRequest {
+            let request = WorkspaceCommitRequest {
+                request_id: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
+                requester: self.requester,
+                profile: self.profile,
+                path: self.path.clone(),
+                required: self.value,
+            };
+            self.app.world_mut().write_message(request.clone());
+            request
+        }
+
+        fn reply(&self, request: &WorkspaceCommitRequest) -> Option<&WorkspaceCommitCompleted> {
+            self.app
+                .world()
+                .resource::<CommitReplies>()
+                .0
+                .iter()
+                .find(|reply| reply.request_id == request.request_id)
+        }
+
+        fn finish(&mut self, request: &WorkspaceCommitRequest) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while self.reply(request).is_none() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "Workspace commit did not settle"
+                );
+                self.app.update();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+
+        fn restored(&self) -> String {
+            let registry = self.app.world().resource::<AppTypeRegistry>().clone();
+            let registry = registry.read();
+            let mut assets = self.app.world().resource::<AssetServer>().clone();
+            let bytes = std::fs::read(&self.path).unwrap();
+            let mut deserializer = ron::Deserializer::from_bytes(&bytes).unwrap();
+            let saved = bevy_world_serialization::serde::WorldDeserializer {
+                type_registry: &registry,
+                load_from_path: &mut assets,
+            }
+            .deserialize(&mut deserializer)
+            .unwrap();
+            let mut world = World::new();
+            saved
+                .write_to_world_with(&mut world, &mut Default::default(), &registry)
+                .unwrap();
+            world
+                .query::<&CommitValue>()
+                .single(&world)
+                .unwrap()
+                .text
+                .clone()
+        }
+
+        fn block(&mut self) -> std::sync::Arc<SerializationGate> {
+            let gate = std::sync::Arc::new(SerializationGate::default());
+            self.app.world_mut().spawn(CommitGateValue(gate.clone()));
+            gate
+        }
+
+        fn advance_time(&mut self) {
+            self.app
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_secs(61),
+                ));
+            self.app
+                .world_mut()
+                .resource_mut::<Time<bevy::time::Virtual>>()
+                .set_max_delta(std::time::Duration::from_secs(120));
+        }
+    }
+
+    #[test]
+    fn workspace_commit_correlates_native_success_and_restored_data() {
+        let mut fixture = CommitFixture::new();
+        let request = fixture.request();
+        fixture.finish(&request);
+        let reply = fixture.reply(&request).unwrap();
+        assert_eq!(
+            (reply.requester, reply.profile, reply.store, &reply.path),
+            (
+                fixture.requester,
+                fixture.profile,
+                fixture.store,
+                &fixture.path
+            )
+        );
+        assert!(reply.result.is_ok());
+        assert!(reply.revision > 0);
+        assert_eq!(fixture.restored(), "before");
+        fixture.app.world_mut().write_message(request.clone());
+        fixture.app.update();
+        assert_eq!(fixture.app.world().resource::<CommitReplies>().0.len(), 1);
+    }
+
+    #[test]
+    fn workspace_commit_coalesces_independent_waiters_into_one_snapshot() {
+        let mut fixture = CommitFixture::new();
+        let first = fixture.request();
+        let second = fixture.request();
+        fixture.finish(&second);
+        assert!(fixture.reply(&first).unwrap().result.is_ok());
+        assert_eq!(
+            fixture.reply(&first).unwrap().revision,
+            fixture.reply(&second).unwrap().revision
+        );
+        assert_eq!(fixture.restored(), "before");
+    }
+
+    #[test]
+    fn workspace_commit_refuses_required_data_excluded_from_the_actual_capture() {
+        let mut fixture = CommitFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow));
+        let secondary = fixture.app.world_mut().spawn(Window::default()).id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.value)
+            .insert(HostWindow(secondary));
+        let request = fixture.request();
+        fixture.finish(&request);
+        assert!(fixture.reply(&request).unwrap().result.is_err());
+        assert!(!fixture.path.exists());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<PendingWrite>(fixture.store)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn workspace_commit_refuses_missing_or_omitted_required_data_without_io() {
+        for kind in ["missing", "not-stored", "omitted", "unregistered"] {
+            let mut fixture = CommitFixture::new();
+            match kind {
+                "missing" => {
+                    fixture.app.world_mut().despawn(fixture.value);
+                }
+                "not-stored" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.value)
+                        .remove::<Save>();
+                }
+                "omitted" => {
+                    let mut filter = fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<SnapshotFilter>(fixture.store)
+                        .unwrap();
+                    filter.components = filter.components.clone().deny::<CommitValue>();
+                }
+                "unregistered" => {
+                    fixture.value = fixture
+                        .app
+                        .world_mut()
+                        .spawn((Save, Name::new("No stored data")))
+                        .id();
+                }
+                _ => unreachable!(),
+            }
+            let request = fixture.request();
+            fixture.finish(&request);
+            assert!(fixture.reply(&request).unwrap().result.is_err(), "{kind}");
+            assert!(!fixture.path.exists(), "{kind}");
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<PendingWrite>(fixture.store)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_commit_rejects_wrong_source_and_cancellation_before_submit() {
+        for kind in [
+            "profile",
+            "path",
+            "requester",
+            "canceled",
+            "restore",
+            "incomplete",
+            "refused",
+        ] {
+            let mut fixture = CommitFixture::new();
+            let mut request = WorkspaceCommitRequest {
+                request_id: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
+                requester: fixture.requester,
+                profile: fixture.profile,
+                path: fixture.path.clone(),
+                required: fixture.value,
+            };
+            match kind {
+                "profile" => {
+                    request.profile = fixture.app.world_mut().spawn_empty().id();
+                }
+                "path" => {
+                    request.path = fixture.path.with_extension("other");
+                }
+                "requester" => {
+                    fixture.app.world_mut().despawn(fixture.requester);
+                }
+                "canceled" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.requester)
+                        .insert(vmux_ecs::OperationState::Canceled);
+                }
+                "restore" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<State>(fixture.store)
+                        .unwrap()
+                        .resolve();
+                }
+                "incomplete" => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<WorkspaceRestore>(fixture.store)
+                        .unwrap()
+                        .complete = false;
+                }
+                "refused" => {
+                    fixture.app.insert_resource(WorkspaceLoadRefused);
+                }
+                _ => unreachable!(),
+            }
+            fixture.app.world_mut().write_message(request.clone());
+            fixture.finish(&request);
+            assert!(fixture.reply(&request).unwrap().result.is_err(), "{kind}");
+            assert!(!fixture.path.exists(), "{kind}");
+        }
+    }
+
+    #[test]
+    fn workspace_commit_an_older_native_receipt_cannot_complete_a_newer_request() {
+        let mut fixture = CommitFixture::new();
+        let gate = fixture.block();
+        let first = fixture.request();
+        fixture.app.update();
+        gate.wait_started();
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<CommitValue>(fixture.value)
+            .unwrap()
+            .text = "after".into();
+        let second = fixture.request();
+        fixture.app.update();
+        assert!(fixture.reply(&second).is_none());
+        gate.release();
+        fixture.finish(&second);
+        assert!(fixture.reply(&first).unwrap().revision < fixture.reply(&second).unwrap().revision);
+        assert_eq!(fixture.restored(), "after");
+    }
+
+    #[test]
+    fn workspace_commit_requester_retirement_waits_for_submitted_io() {
+        let mut fixture = CommitFixture::new();
+        let gate = fixture.block();
+        let request = fixture.request();
+        fixture.app.update();
+        gate.wait_started();
+        fixture.app.world_mut().despawn(fixture.requester);
+        fixture.app.update();
+        assert!(fixture.reply(&request).is_none());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<PendingWrite>(fixture.store)
+                .is_some()
+        );
+        gate.release();
+        fixture.finish(&request);
+        assert!(fixture.reply(&request).unwrap().result.is_err());
+        assert_eq!(fixture.restored(), "before");
+    }
+
+    #[test]
+    fn workspace_commit_in_place_profile_replacement_refuses_stale_delivery_after_drain() {
+        let mut fixture = CommitFixture::new();
+        let gate = fixture.block();
+        let request = fixture.request();
+        fixture.app.update();
+        gate.wait_started();
+        let replacement = ProfilePaths::at(
+            vmux_ecs::profile::Profile::named("replacement"),
+            fixture._directory.path().join("replacement"),
+        );
+        let replacement_path = replacement.store().join("store.ron");
+        fixture.app.world_mut().entity_mut(fixture.profile).insert((
+            ActiveProfile(vmux_ecs::profile::Profile::named("replacement")),
+            vmux_ecs::profile::ProfileDirectories(replacement),
+        ));
+        fixture.app.update();
+        assert!(fixture.reply(&request).is_none());
+        gate.release();
+        fixture.finish(&request);
+        assert!(fixture.reply(&request).unwrap().result.is_err());
+        assert_eq!(fixture.restored(), "before");
+        assert!(!replacement_path.exists());
+    }
+
+    #[test]
+    fn workspace_commit_store_retirement_keeps_orphan_custody_and_original_path() {
+        let mut fixture = CommitFixture::new();
+        let gate = fixture.block();
+        let request = fixture.request();
+        fixture.app.update();
+        gate.wait_started();
+        fixture.app.world_mut().despawn(fixture.store);
+        fixture.app.update();
+        assert!(fixture.reply(&request).is_none());
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<OrphanWrite>>()
+                .iter(fixture.app.world())
+                .count(),
+            1
+        );
+        gate.release();
+        fixture.finish(&request);
+        assert!(fixture.reply(&request).unwrap().result.is_err());
+        assert_eq!(fixture.reply(&request).unwrap().path, fixture.path);
+        assert_eq!(fixture.restored(), "before");
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<OrphanWrite>>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn workspace_commit_partial_schema_failure_retries_the_same_identity() {
+        let mut fixture = CommitFixture::new();
+        let version = WorkspaceStorePath(fixture.path.clone()).version();
+        std::fs::create_dir_all(&version).unwrap();
+        let request = fixture.request();
+        fixture.app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fixture
+            .app
+            .world()
+            .get::<State>(fixture.store)
+            .unwrap()
+            .error()
+            .is_none()
+        {
+            assert!(std::time::Instant::now() < deadline);
+            fixture.app.update();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(fixture.path.is_file());
+        assert!(fixture.reply(&request).is_none());
+        std::fs::remove_dir(version).unwrap();
+        fixture.advance_time();
+        fixture.finish(&request);
+        assert!(fixture.reply(&request).unwrap().result.is_ok());
+        assert_eq!(fixture.app.world().resource::<CommitReplies>().0.len(), 1);
+        assert_eq!(fixture.restored(), "before");
+    }
+
+    #[test]
+    fn workspace_commit_a_receipt_from_a_failed_capture_cannot_complete_its_retry() {
+        let mut fixture = CommitFixture::new();
+        let version = WorkspaceStorePath(fixture.path.clone()).version();
+        std::fs::create_dir_all(&version).unwrap();
+        let request = fixture.request();
+        fixture.app.update();
+        let pending = fixture
+            .app
+            .world()
+            .get::<PendingWrite>(fixture.store)
+            .unwrap();
+        let capture = pending.capture.clone();
+        let revision = pending.revision;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fixture
+            .app
+            .world()
+            .get::<State>(fixture.store)
+            .unwrap()
+            .error()
+            .is_none()
+        {
+            assert!(std::time::Instant::now() < deadline);
+            fixture.app.update();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        std::fs::remove_dir(version).unwrap();
+        fixture.advance_time();
+        fixture.app.update();
+        fixture.app.world_mut().trigger(WriteCompleted {
+            capture,
+            target: EntityTarget::new(fixture.store),
+            revision,
+            path: fixture.path.clone(),
+            result: Ok(()),
+        });
+        assert!(fixture.reply(&request).is_none());
+        fixture.finish(&request);
+        assert!(fixture.reply(&request).unwrap().result.is_ok());
+        assert_eq!(fixture.restored(), "before");
+    }
+
     #[test]
     fn explicit_workspace_saves_wait_for_runtime_restore_commit() {
         if HomeEnvGuard::isolated() {
@@ -1764,6 +2889,16 @@ mod tests {
     }
 
     impl WorkspaceRestoreFixture {
+        fn live_entities(&self) -> std::collections::HashSet<Entity> {
+            let mut entities = std::collections::HashSet::new();
+            for archetype in self.app.world().archetypes().iter() {
+                for entity in archetype.entities() {
+                    entities.insert(entity.id());
+                }
+            }
+            entities
+        }
+
         fn new(name: &str) -> Self {
             let home = HomeEnvGuard::use_temp_home(name);
             let mut app = App::new();
@@ -1927,7 +3062,7 @@ mod tests {
             .world_mut()
             .spawn(Name::new("live runtime"))
             .id();
-        let baseline = fixture.app.world().entities().len();
+        let baseline = fixture.live_entities();
         let body = fixture.load(bevy_world_serialization::DynamicWorld {
             resources: Vec::new(),
             entities: vec![
@@ -1941,7 +3076,7 @@ mod tests {
                 },
             ],
         });
-        assert_eq!(fixture.app.world().entities().len(), baseline);
+        assert_eq!(fixture.live_entities(), baseline);
         assert!(fixture.app.world().get::<Name>(live).is_some());
         assert!(
             fixture
@@ -2120,6 +3255,7 @@ mod tests {
             .world_mut()
             .entity_mut(fixture.store)
             .insert(PendingWrite {
+                capture: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
                 revision: 1,
                 path: pending.clone(),
                 result: Some(Mutex::new(result)),
@@ -2172,6 +3308,7 @@ mod tests {
             .world_mut()
             .entity_mut(fixture.store)
             .insert(PendingWrite {
+                capture: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
                 revision,
                 path: fixture.path.clone(),
                 result: Some(Mutex::new(result)),
@@ -2224,6 +3361,7 @@ mod tests {
             .world_mut()
             .entity_mut(fixture.store)
             .insert(PendingWrite {
+                capture: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
                 revision: 1,
                 path: fixture.path.clone(),
                 result: Some(Mutex::new(result)),
@@ -2292,6 +3430,7 @@ mod tests {
             .world_mut()
             .entity_mut(fixture.store)
             .insert(PendingWrite {
+                capture: vmux_ecs::Uuid(uuid::Uuid::new_v4().to_string()),
                 revision,
                 path: fixture.path.clone(),
                 result: Some(Mutex::new(result)),
