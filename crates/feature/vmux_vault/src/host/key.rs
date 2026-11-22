@@ -18,6 +18,9 @@ use crate::storage::keys::port::{KeyIngress, KeyOrigin};
 
 pub(super) struct KeyAuthorityPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct KeyAuthoritySet;
+
 impl Plugin for KeyAuthorityPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LockVault>().add_systems(
@@ -29,8 +32,6 @@ impl Plugin for KeyAuthorityPlugin {
                     retire_requests,
                     receive_load,
                     receive_observe,
-                    receive_create,
-                    receive_store,
                     materialize,
                     admit_reads,
                     admit_creates,
@@ -53,6 +54,7 @@ impl Plugin for KeyAuthorityPlugin {
                     .chain(),
             )
                 .chain()
+                .in_set(KeyAuthoritySet)
                 .after(super::RuntimeSet)
                 .before(super::OperationSet),
         );
@@ -111,13 +113,13 @@ pub(super) struct KeyPermissions {
 pub(super) struct KeyManifest(pub(super) String);
 
 #[derive(Component)]
-struct VaultKey;
+pub(super) struct VaultKey;
 
 #[derive(Component)]
-struct VaultId(String);
+pub(super) struct VaultId(pub(super) String);
 
 #[derive(Component)]
-struct KeyGeneration(u64);
+pub(super) struct KeyGeneration(pub(super) u64);
 
 #[derive(Component)]
 struct AcceptedNamespaceGeneration(u64);
@@ -135,25 +137,35 @@ struct LockCutoff(u64);
 pub struct LockVault(pub Entity);
 
 #[derive(Component)]
-struct KeyRequester(KeyOrigin);
+pub(super) struct KeyRequester(pub(super) KeyOrigin);
+
+#[derive(Component)]
+pub(super) struct EcsKeyRequest;
+
+#[derive(Component)]
+pub(super) struct StoreRequest;
+
+#[derive(Component)]
+pub(super) struct KeyOutcome {
+    pub(super) result: Result<Zeroizing<Vec<u8>>, String>,
+    pub(super) owner: Option<Entity>,
+    pub(super) generation: Option<u64>,
+}
 
 #[derive(Component)]
 struct KeyReply(mpsc::Sender<Result<Zeroizing<Vec<u8>>, String>>);
 
 #[derive(Component)]
-struct StoreReply(mpsc::Sender<Result<(), String>>);
-
-#[derive(Component)]
-struct LoadKey;
+pub(super) struct LoadKey;
 
 #[derive(Component)]
 struct ObserveKey;
 
 #[derive(Component)]
-struct CreateKey;
+pub(super) struct CreateKey;
 
 #[derive(Component)]
-struct StoreKey(Zeroizing<Vec<u8>>);
+pub(super) struct StoreKey(pub(super) Zeroizing<Vec<u8>>);
 
 #[derive(Component)]
 struct KeyWaiting(Entity);
@@ -238,7 +250,7 @@ struct KeyAuthority<'w, 's> {
             Has<LoadKey>,
             Has<ObserveKey>,
             Has<CreateKey>,
-            Has<StoreReply>,
+            Has<StoreRequest>,
         ),
     >,
     ios: Query<'w, 's, &'static KeyIo>,
@@ -427,7 +439,7 @@ fn retire_namespaces(
 fn retire_requests(
     authority: KeyAuthority,
     ports: Query<(&KeyPort, &KeyCanceled)>,
-    requests: Query<Entity, (With<KeyRequester>, Without<KeyResult>)>,
+    requests: Query<Entity, (With<KeyRequester>, Without<KeyResult>, Without<KeyOutcome>)>,
     mut commands: Commands,
 ) {
     for (port, canceled) in &ports {
@@ -469,36 +481,6 @@ fn receive_observe(ingress: Query<&KeyIngress>, mut commands: Commands) {
                 VaultId(request.vault_id),
                 KeyReply(request.reply),
                 ObserveKey,
-            ));
-        }
-    }
-}
-
-fn receive_create(ingress: Query<&KeyIngress>, mut commands: Commands) {
-    for ingress in &ingress {
-        for request in ingress.create.lock().try_iter() {
-            commands.spawn((
-                Operation::bundle("vault.key.create").unwrap().running(),
-                OperationRetained,
-                KeyRequester(request.origin),
-                VaultId(request.vault_id),
-                KeyReply(request.reply),
-                CreateKey,
-            ));
-        }
-    }
-}
-
-fn receive_store(ingress: Query<&KeyIngress>, mut commands: Commands) {
-    for ingress in &ingress {
-        for request in ingress.store.lock().try_iter() {
-            commands.spawn((
-                Operation::bundle("vault.key.store").unwrap().running(),
-                OperationRetained,
-                KeyRequester(request.origin),
-                VaultId(request.vault_id),
-                StoreReply(request.reply),
-                StoreKey(request.key),
             ));
         }
     }
@@ -975,10 +957,19 @@ fn adopt_jobs(
 
 fn deliver_replies(
     authority: KeyAuthority,
-    finished: Query<(Entity, &KeyResult, Option<&KeyReply>, Option<&StoreReply>), Without<KeyIo>>,
+    finished: Query<
+        (
+            Entity,
+            &KeyResult,
+            Option<&EntityTarget<VaultKey>>,
+            Option<&KeyReply>,
+            Has<EcsKeyRequest>,
+        ),
+        (Without<KeyIo>, Without<KeyOutcome>),
+    >,
     mut commands: Commands,
 ) {
-    for (entity, result, key_reply, store_reply) in &finished {
+    for (entity, result, target, key_reply, ecs_request) in &finished {
         let valid = authority.request_valid(entity);
         let outcome = if valid {
             match &result.0 {
@@ -990,15 +981,29 @@ fn deliver_replies(
         };
         if let Some(reply) = key_reply {
             let _ = reply.0.send(outcome);
-        } else if let Some(reply) = store_reply {
-            let _ = reply.0.send(outcome.map(|_| ()));
+            commands.entity(entity).despawn();
+        } else if ecs_request {
+            let owner = target.map(|t| t.entity());
+            let generation = owner.and_then(|o| authority.owners.get(o).ok().map(|(_, g, _)| g.0));
+            commands
+                .entity(entity)
+                .remove::<KeyResult>()
+                .insert(KeyOutcome {
+                    result: outcome,
+                    owner,
+                    generation,
+                });
+        } else {
+            commands.entity(entity).despawn();
         }
-        commands.entity(entity).despawn();
     }
 }
 
 fn cleanup(
-    waiting: Query<(Entity, &KeyWaiting), (With<KeyRequester>, Without<KeyResult>)>,
+    waiting: Query<
+        (Entity, &KeyWaiting),
+        (With<KeyRequester>, Without<KeyResult>, Without<KeyOutcome>),
+    >,
     ios: Query<(), With<KeyIo>>,
     mut commands: Commands,
 ) {
@@ -1168,6 +1173,56 @@ mod tests {
             receiver
         }
 
+        fn create_request(&mut self, origin: KeyOrigin, vault_id: &str) -> Entity {
+            self.app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("vault.key.create").unwrap().running(),
+                    OperationRetained,
+                    KeyRequester(origin),
+                    VaultId(vault_id.to_string()),
+                    CreateKey,
+                    EcsKeyRequest,
+                ))
+                .id()
+        }
+
+        fn store_request(&mut self, origin: KeyOrigin, vault_id: &str, key: &[u8]) -> Entity {
+            self.app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("vault.key.store").unwrap().running(),
+                    OperationRetained,
+                    KeyRequester(origin),
+                    VaultId(vault_id.to_string()),
+                    StoreKey(Zeroizing::new(key.to_vec())),
+                    StoreRequest,
+                    EcsKeyRequest,
+                ))
+                .id()
+        }
+
+        fn ecs_result(&mut self, request: Entity) -> Result<Zeroizing<Vec<u8>>, String> {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if let Some(outcome) = self
+                    .app
+                    .world_mut()
+                    .entity_mut(request)
+                    .take::<KeyOutcome>()
+                {
+                    self.app.world_mut().despawn(request);
+                    return outcome.result;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "canonical key response did not complete"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
         fn result<T>(&mut self, receiver: &mpsc::Receiver<T>) -> T {
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
@@ -1327,8 +1382,8 @@ mod tests {
         files.fail_write.store(true, Ordering::SeqCst);
         let mut scenario = Scenario::new(files);
         let port = scenario.caller();
-        let reply = scenario.request(port, |p| p.create("vault"));
-        assert!(scenario.result(&reply).is_err());
+        let request = scenario.create_request(port.origin, "vault");
+        assert!(scenario.ecs_result(request).is_err());
         assert!(!temp.path().join("vault").exists());
         let port = scenario.caller();
         let reply = scenario.request(port, |p| p.observe("vault"));
@@ -1344,12 +1399,12 @@ mod tests {
         *files.write_gate.lock() = Some(gate);
         let mut scenario = Scenario::new(files);
         let port = scenario.caller();
-        let reply = scenario.request(port, |p| p.create("vault"));
+        let request = scenario.create_request(port.origin, "vault");
         scenario.entered(&writes);
         let owner = scenario.owner();
         assert!(scenario.app.world().get::<UnlockedKey>(owner).is_none());
         release.send(()).unwrap();
-        let key = scenario.result(&reply).unwrap();
+        let key = scenario.ecs_result(request).unwrap();
         assert_eq!(
             std::fs::read(temp.path().join("vault")).unwrap(),
             key.to_vec()
@@ -1402,8 +1457,8 @@ mod tests {
             .get_mut::<KeyPermissions>(port.origin.operation)
             .unwrap()
             .store = false;
-        let reply = scenario.request(port, |p| p.store("vault", &[8; 32]));
-        assert!(scenario.result(&reply).is_err());
+        let request = scenario.store_request(port.origin, "vault", &[8; 32]);
+        assert!(scenario.ecs_result(request).is_err());
         assert_eq!(writes.load(Ordering::SeqCst), 0);
     }
 
@@ -1529,7 +1584,7 @@ mod tests {
         let mut scenario = Scenario::new(files);
         let creator = scenario.caller();
         let creator_op = creator.origin.operation;
-        let create_reply = scenario.request(creator, |p| p.create("vault"));
+        let create_req = scenario.create_request(creator.origin, "vault");
         scenario.entered(&generates);
         let reader = scenario.caller();
         scenario
@@ -1556,7 +1611,7 @@ mod tests {
             .0
             .store(true, Ordering::Release);
         release.send(()).unwrap();
-        assert!(scenario.result(&create_reply).is_err());
+        assert!(scenario.ecs_result(create_req).is_err());
         assert!(scenario.result(&load_reply).is_err());
         assert_eq!(writes.load(Ordering::SeqCst), 0);
         assert!(!temp.path().join("vault").exists());

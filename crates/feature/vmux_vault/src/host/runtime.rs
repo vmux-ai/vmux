@@ -187,6 +187,7 @@ fn start_scan(
     scans: Query<(), With<VaultScanTask>>,
     requests: Query<(), With<VaultScanRequest>>,
     tasks: Query<(), With<VaultOperationTask>>,
+    active: Query<(), With<super::vault_io::ActiveVaultOperation>>,
     ready: Query<(), With<ReadyVaultOperation>>,
     pending: Query<(), With<PendingVaultOperation>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -201,6 +202,7 @@ fn start_scan(
         || !scans.is_empty()
         || !requests.is_empty()
         || !tasks.is_empty()
+        || !active.is_empty()
         || !ready.is_empty()
         || !pending.is_empty()
     {
@@ -403,7 +405,10 @@ fn queue_auto_sync(
     tasks: Query<
         (),
         (
-            With<VaultOperationTask>,
+            Or<(
+                With<VaultOperationTask>,
+                With<super::vault_io::ActiveVaultOperation>,
+            )>,
             With<VaultOperationRequest<VaultSyncRequest>>,
         ),
     >,

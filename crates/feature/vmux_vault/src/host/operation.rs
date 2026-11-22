@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -9,6 +8,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use parking_lot::Mutex;
+use vmux_ecs::{Operation, OperationRetained, OperationTarget, OperationTargetRevision};
 
 use crate::state::{
     VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
@@ -22,13 +22,13 @@ use super::key::{
     AcceptedStorage, KeyAdmission, KeyCanceled, KeyNamespace, KeyPermissions, KeyPort,
     NamespaceGeneration,
 };
-use vmux_ecs::{Operation, OperationRetained, OperationTarget};
+use super::vault_io::{ActiveVaultOperation, VaultOperationOutcome};
 
 use super::{
     OperationPlugin, OperationSet, PendingVaultOperation, ReadyVaultOperation, RuntimeSet,
     VaultOperationContext, VaultOperationOutput, VaultOperationRequest, VaultOperationSequence,
     VaultOperationTarget, VaultOperationTask, VaultRecoveryState, VaultRegistry, VaultScanTask,
-    VaultSubscriber,
+    VaultStatusProjection, VaultSubscriber,
 };
 
 impl Plugin for OperationPlugin {
@@ -63,20 +63,14 @@ impl Plugin for OperationPlugin {
                     cancel_superseded,
                     start,
                     (
-                        create,
-                        connect,
-                        sync,
                         connect_github,
-                        connect_folder,
                         generate_recovery_key,
                         create_recovery_key,
-                        unlock_recovery_key,
                         connect_cloud,
-                        create_cloud_folder,
-                        choose_cloud_folder,
                     )
                         .chain(),
                     drain,
+                    drain_outcomes,
                 )
                     .chain()
                     .after(RuntimeSet)
@@ -95,7 +89,7 @@ impl VaultOperationTarget {
 }
 
 impl VaultOperationOutput {
-    fn message(message: String) -> Self {
+    pub(super) fn message(message: String) -> Self {
         Self {
             message,
             pending_upload: false,
@@ -401,11 +395,13 @@ fn queue_choose_cloud_folder(
 fn start(
     pending: Query<(Entity, &VaultOperationContext), With<PendingVaultOperation>>,
     tasks: Query<(), With<VaultOperationTask>>,
+    active: Query<(), With<ActiveVaultOperation>>,
     ready: Query<(), With<ReadyVaultOperation>>,
     scans: Query<(), With<VaultScanTask>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    if !tasks.is_empty() || !ready.is_empty() || !scans.is_empty() {
+    if !tasks.is_empty() || !active.is_empty() || !ready.is_empty() || !scans.is_empty() {
         return;
     }
     let mut next = None;
@@ -422,259 +418,9 @@ fn start(
         .entity(entity)
         .remove::<PendingVaultOperation>()
         .insert(ReadyVaultOperation);
-}
-
-fn create(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultCreateRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let worker_storage = storage.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation = create_vault(worker_storage, worker_keys, request.0.clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.create").unwrap().running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: true,
-                    observe: false,
-                    create: true,
-                    store: true,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
+    if let Some(proxy) = proxy {
+        let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
     }
-}
-
-async fn create_vault(
-    storage: VaultStorage,
-    keys: KeyPort,
-    request: VaultCreateRequest,
-) -> Result<VaultOperationOutput, String> {
-    let visibility = if request.private {
-        crate::storage::RepositoryVisibility::Private
-    } else {
-        crate::storage::RepositoryVisibility::Public
-    };
-    let message = storage.create_remote(&request.repository, visibility, &keys)?;
-    Ok(VaultOperationOutput::message(message))
-}
-
-fn connect(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultConnectRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let worker_storage = storage.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation = connect_vault(worker_storage, worker_keys, request.0.clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.connect").unwrap().running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: true,
-                    observe: false,
-                    create: true,
-                    store: true,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
-    }
-}
-
-async fn connect_vault(
-    storage: VaultStorage,
-    keys: KeyPort,
-    request: VaultConnectRequest,
-) -> Result<VaultOperationOutput, String> {
-    let message = storage.connect_remote(&request.repository, &keys)?;
-    Ok(VaultOperationOutput::message(message))
-}
-
-fn sync(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultSyncRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, _request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let worker_storage = storage.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation = sync_vault(worker_storage, worker_keys);
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.sync").unwrap().running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: true,
-                    observe: false,
-                    create: false,
-                    store: false,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
-    }
-}
-
-async fn sync_vault(storage: VaultStorage, keys: KeyPort) -> Result<VaultOperationOutput, String> {
-    let message = storage.sync(&keys)?;
-    Ok(VaultOperationOutput::message(message))
 }
 
 fn connect_github(
@@ -730,9 +476,7 @@ fn connect_github(
             }
             result
         });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
+        commands.entity(namespace).remove::<VaultStatusProjection>();
         commands
             .entity(entity)
             .remove::<ReadyVaultOperation>()
@@ -740,7 +484,7 @@ fn connect_github(
                 Operation::bundle("vault.connect_github").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.0),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -778,101 +522,6 @@ where
         },
         canceled,
     )?;
-    Ok(VaultOperationOutput::message(message))
-}
-
-fn connect_folder(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultConnectFolderRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, _request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let worker_storage = storage.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation = connect_vault_folder(worker_storage, worker_keys);
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.connect_folder").unwrap().running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: true,
-                    observe: false,
-                    create: true,
-                    store: true,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
-    }
-}
-
-async fn connect_vault_folder(
-    storage: VaultStorage,
-    keys: KeyPort,
-) -> Result<VaultOperationOutput, String> {
-    let initial_dir = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .map(|home| home.join("Library/CloudStorage"))
-        .filter(|path| path.is_dir())
-        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
-    let mut dialog = rfd::AsyncFileDialog::new();
-    if let Some(initial_dir) = initial_dir {
-        dialog = dialog.set_directory(initial_dir);
-    }
-    let Some(folder) = dialog.pick_folder().await else {
-        return Err(String::new());
-    };
-    let message = storage.connect_folder(folder.path(), &keys)?;
     Ok(VaultOperationOutput::message(message))
 }
 
@@ -922,9 +571,7 @@ fn generate_recovery_key(
             }
             result
         });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
+        commands.entity(namespace).remove::<VaultStatusProjection>();
         commands
             .entity(entity)
             .remove::<ReadyVaultOperation>()
@@ -934,7 +581,7 @@ fn generate_recovery_key(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.0),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -1013,9 +660,7 @@ fn create_recovery_key(
             }
             result
         });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
+        commands.entity(namespace).remove::<VaultStatusProjection>();
         commands
             .entity(entity)
             .remove::<ReadyVaultOperation>()
@@ -1025,7 +670,7 @@ fn create_recovery_key(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.0),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -1058,97 +703,6 @@ async fn create_vault_recovery_key(
         pending_upload: result.pending_upload,
         generated_recovery_key: None,
     })
-}
-
-fn unlock_recovery_key(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultUnlockRecoveryKeyRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &VaultRecoveryState,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, recovery, captured)) =
-        namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation =
-            unlock_vault_recovery_key(worker_keys, recovery.service(), request.0.clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.unlock_recovery_key")
-                    .unwrap()
-                    .running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: false,
-                    observe: false,
-                    create: false,
-                    store: true,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
-    }
-}
-
-async fn unlock_vault_recovery_key(
-    keys: KeyPort,
-    recovery: VaultRecovery,
-    request: VaultUnlockRecoveryKeyRequest,
-) -> Result<VaultOperationOutput, String> {
-    let message = recovery.unlock(&request.recovery_key, &keys)?;
-    Ok(VaultOperationOutput::message(message))
 }
 
 fn connect_cloud(
@@ -1194,9 +748,7 @@ fn connect_cloud(
             }
             result
         });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
+        commands.entity(namespace).remove::<VaultStatusProjection>();
         commands
             .entity(entity)
             .remove::<ReadyVaultOperation>()
@@ -1204,7 +756,7 @@ fn connect_cloud(
                 Operation::bundle("vault.connect_cloud").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.0),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -1231,211 +783,12 @@ async fn connect_vault_cloud(
     Ok(VaultOperationOutput::message(message))
 }
 
-fn create_cloud_folder(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultCreateCloudFolderRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let worker_storage = storage.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation = create_vault_cloud_folder(worker_storage, worker_keys, request.0.clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.create_cloud_folder")
-                    .unwrap()
-                    .running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: true,
-                    observe: false,
-                    create: true,
-                    store: true,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
-    }
-}
-
-async fn create_vault_cloud_folder(
-    storage: VaultStorage,
-    keys: KeyPort,
-    request: VaultCreateCloudFolderRequest,
-) -> Result<VaultOperationOutput, String> {
-    let folder = Path::new(&request.root).join(&request.folder_name);
-    let message = storage.connect_folder(&folder, &keys)?;
-    Ok(VaultOperationOutput::message(message))
-}
-
-fn choose_cloud_folder(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultChooseCloudFolderRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut namespaces: Query<
-        (
-            Entity,
-            &KeyNamespace,
-            &NamespaceGeneration,
-            &mut KeyAdmission,
-            &AcceptedStorage,
-        ),
-        With<VaultRegistry>,
-    >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
-    else {
-        return;
-    };
-    for (entity, request) in &operations {
-        let storage = captured.0.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let (keys, ingress) = access.port(
-            namespace,
-            generation.0,
-            &mut admission,
-            entity,
-            wake.clone(),
-        );
-        let worker_keys = keys.clone();
-        let worker_storage = storage.clone();
-        let completion_wake = wake.clone();
-        let (_sender, receiver) = mpsc::channel();
-        let canceled = Arc::new(AtomicBool::new(false));
-        let operation = choose_vault_cloud_folder(worker_storage, worker_keys, request.0.clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.await;
-            if let Some(wake) = completion_wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(namespace)
-            .remove::<super::VaultStatusProjection>();
-        commands
-            .entity(entity)
-            .remove::<ReadyVaultOperation>()
-            .insert((
-                Operation::bundle("vault.choose_cloud_folder")
-                    .unwrap()
-                    .running(),
-                OperationRetained,
-                OperationTarget::new(namespace),
-                vmux_ecs::OperationTargetRevision(generation.0),
-                AcceptedStorage(storage),
-                keys,
-                ingress,
-                KeyCanceled(canceled.clone()),
-                KeyPermissions {
-                    load: true,
-                    observe: false,
-                    create: true,
-                    store: true,
-                },
-                VaultOperationTask {
-                    task,
-                    progress: Mutex::new(receiver),
-                    canceled,
-                },
-            ));
-    }
-}
-
-async fn choose_vault_cloud_folder(
-    storage: VaultStorage,
-    keys: KeyPort,
-    request: VaultChooseCloudFolderRequest,
-) -> Result<VaultOperationOutput, String> {
-    let mut dialog = rfd::AsyncFileDialog::new();
-    let root = Path::new(&request.root);
-    if root.is_dir() {
-        dialog = dialog.set_directory(root);
-    }
-    let Some(folder) = dialog.pick_folder().await else {
-        return Err(String::new());
-    };
-    let remote = if folder
-        .path()
-        .extension()
-        .is_some_and(|extension| extension == "git")
-    {
-        folder.path().to_path_buf()
-    } else {
-        folder.path().join("vmux-vault.git")
-    };
-    if !remote.exists() {
-        return Err("selected folder does not contain a Vault".to_string());
-    }
-    let message = storage.connect_folder(folder.path(), &keys)?;
-    Ok(VaultOperationOutput::message(message))
-}
-
 fn drain(
     mut operations: Query<(
         Entity,
         &VaultOperationContext,
         &OperationTarget,
-        &vmux_ecs::OperationTargetRevision,
+        &OperationTargetRevision,
         &mut VaultOperationTask,
         Has<VaultOperationRequest<VaultSyncRequest>>,
         Has<VaultOperationRequest<VaultConnectGithubRequest>>,
@@ -1514,6 +867,55 @@ fn drain(
         state.dirty = true;
         state.loaded = false;
         state.load_repositories |= is_github;
+        state.generation = state.generation.wrapping_add(1);
+    }
+}
+
+fn drain_outcomes(
+    operations: Query<(
+        Entity,
+        &VaultOperationContext,
+        &OperationTarget,
+        &OperationTargetRevision,
+        &VaultOperationOutcome,
+        Option<&KeyCanceled>,
+        Has<VaultOperationRequest<VaultSyncRequest>>,
+    )>,
+    mut registry: Query<(&mut VaultRegistry, &NamespaceGeneration)>,
+    mut subscribers: Query<&mut VaultSubscriber>,
+    mut commands: Commands,
+) {
+    for (entity, context, target, accepted, outcome, canceled, is_sync) in &operations {
+        commands.entity(entity).despawn();
+        if canceled.is_some_and(|flag| flag.0.load(Ordering::Acquire)) {
+            continue;
+        }
+        let Ok((mut state, generation)) = registry.get_mut(target.entity()) else {
+            continue;
+        };
+        if generation.0 != accepted.0 {
+            continue;
+        }
+        let (success, message, pending_upload) = match &outcome.0 {
+            Ok(output) => (true, output.message.clone(), output.pending_upload),
+            Err(message) => (false, message.clone(), false),
+        };
+        let completion = VaultCompletion {
+            success,
+            message,
+            pending_upload,
+        };
+        if is_sync {
+            state.snapshot.sync_failed = !success;
+            state.revision = state.revision.wrapping_add(1);
+        }
+        if let Some(webview) = context.target.webview()
+            && let Ok(mut subscriber) = subscribers.get_mut(webview)
+        {
+            subscriber.complete_operation(context.operation_id, context.kind, completion);
+        }
+        state.dirty = true;
+        state.loaded = false;
         state.generation = state.generation.wrapping_add(1);
     }
 }

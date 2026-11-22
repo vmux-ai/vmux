@@ -13,8 +13,6 @@ pub(crate) const LOCKED: &str = "This Vault is locked on this device. Unlock it 
 
 pub(super) trait KeyStore {
     fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
-    fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
-    fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String>;
 }
 
 #[derive(Clone)]
