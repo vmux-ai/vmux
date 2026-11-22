@@ -1,10 +1,12 @@
 #![allow(non_snake_case)]
 
 use crate::{
-    ShortcutCollectionViewRequest, ShortcutProbeClearRequest, ShortcutProbePressRequest,
-    ShortcutProbeStatus, ShortcutStroke, ShortcutUiState,
+    ShortcutCollectionViewRequest, ShortcutEntry, ShortcutProbeClearRequest,
+    ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutStroke, ShortcutUiState,
 };
 use dioxus::prelude::*;
+use vmux_api::BuiltinIcon;
+use vmux_ecs::CollectionView;
 use vmux_ui::components::manager::{
     ManagerCollection, ManagerGridSize, ManagerList, ManagerRow, ManagerSection, ManagerView,
 };
@@ -26,12 +28,12 @@ pub fn Page() -> Element {
     let state = use_ui_state::<ShortcutUiState>().state;
     let state = state();
     let view = match state.collection_view {
-        vmux_ecs::CollectionView::List => ManagerView::List,
-        vmux_ecs::CollectionView::Grid => ManagerView::Grid,
+        CollectionView::List => ManagerView::List,
+        CollectionView::Grid => ManagerView::Grid,
     };
-    let probe = state.probe;
+    let probe_sequence = state.probe_sequence;
+    let probe_status = state.probe_status;
     let groups = state.groups;
-    let (status_label, status_tone) = probe_presentation(&probe.status);
     let subtitle = translate_with(
         "shortcuts-count",
         &[(
@@ -46,8 +48,8 @@ pub fn Page() -> Element {
         translate("tools-view-grid"),
         move |next| {
             let view = match next {
-                ManagerView::List => vmux_ecs::CollectionView::List,
-                ManagerView::Grid => vmux_ecs::CollectionView::Grid,
+                ManagerView::List => CollectionView::List,
+                ManagerView::Grid => CollectionView::Grid,
             };
             let _ = send(&ShortcutCollectionViewRequest { view });
         },
@@ -70,7 +72,7 @@ pub fn Page() -> Element {
                 if event.is_auto_repeating() {
                     return;
                 }
-                let Some(stroke) = ShortcutStroke::from_keyboard_event(&event) else {
+                let Some(stroke) = KeyboardStroke::decode(&event) else {
                     return;
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
@@ -79,77 +81,79 @@ pub fn Page() -> Element {
                 controls: toolbar,
             }
             ManagerList {
-                    div {
-                        class: "mb-3 flex min-h-12 w-full items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
-                        aria_label: translate("shortcuts-try-title"),
-                        span { class: "flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground",
-                            span { class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.055] text-muted-foreground",
-                                BuiltinIconView {
-                                    icon: vmux_api::BuiltinIcon::Keyboard,
-                                    class: "h-4 w-4".to_string(),
-                                }
-                            }
-                            span { class: "hidden sm:inline", {translate("shortcuts-try-title")} }
-                        }
-                        div { class: "flex min-w-0 flex-1 items-center justify-center gap-3",
-                            if probe.sequence.is_empty() {
-                                span { class: "truncate text-sm text-foreground/70", {translate("shortcuts-try-hint")} }
-                            } else {
-                                ShortcutSequence { strokes: probe.sequence.clone() }
-                            }
-                            if !probe.sequence.is_empty() {
-                                span { class: "min-w-0 truncate text-xs font-medium {status_tone}", "{status_label}" }
+                div {
+                    class: "mb-3 flex min-h-12 w-full items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
+                    aria_label: translate("shortcuts-try-title"),
+                    span { class: "flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground",
+                        span { class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.055] text-muted-foreground",
+                            BuiltinIconView {
+                                icon: BuiltinIcon::Keyboard,
+                                class: "h-4 w-4".to_string(),
                             }
                         }
-                        if !probe.sequence.is_empty() {
-                            button {
-                                r#type: "button",
-                                tabindex: "-1",
-                                class: "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.045] px-2 text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground",
-                                onpointerdown: move |event| event.prevent_default(),
-                                onclick: move |event| {
-                                    event.stop_propagation();
-                                    let _ = send(&ShortcutProbeClearRequest);
-                                },
-                                LineIconView { icon: LineIcon::RotateCcw, class: "size-3".to_string() }
-                                {translate("shortcuts-clear")}
-                            }
+                        span { class: "hidden sm:inline", {translate("shortcuts-try-title")} }
+                    }
+                    div { class: "flex min-w-0 flex-1 items-center justify-center gap-3",
+                        if probe_sequence.is_empty() {
+                            span { class: "truncate text-sm text-foreground/70", {translate("shortcuts-try-hint")} }
+                        } else {
+                            ShortcutSequence { strokes: probe_sequence.clone() }
+                        }
+                        if !probe_sequence.is_empty() {
+                            ShortcutProbeLabel { status: probe_status.clone() }
                         }
                     }
-                    if groups.is_empty() {
-                        div { class: "flex min-h-40 items-center justify-center rounded-lg bg-foreground/[0.025] text-sm text-muted-foreground",
-                            if matches!(probe.status, ShortcutProbeStatus::Miss) {
-                                {translate("shortcuts-no-match")}
-                            } else {
-                                {translate("shortcuts-empty")}
-                            }
+                    if !probe_sequence.is_empty() {
+                        button {
+                            r#type: "button",
+                            tabindex: "-1",
+                            class: "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.045] px-2 text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground",
+                            onpointerdown: move |event| event.prevent_default(),
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                let _ = send(&ShortcutProbeClearRequest);
+                            },
+                            LineIconView { icon: LineIcon::RotateCcw, class: "size-3".to_string() }
+                            {translate("shortcuts-clear")}
                         }
-                    } else {
-                        for group in groups {
-                            ManagerSection {
-                                key: "{group.name}",
-                                label: group.name,
-                                count: group.entries.len(),
-                                ManagerCollection {
-                                    view,
-                                    grid_size: ManagerGridSize::Comfortable,
-                                    for entry in group.entries {
-                                        ShortcutEntryView {
-                                            key: "{entry.id}",
-                                            entry,
-                                        }
+                    }
+                }
+                if groups.is_empty() {
+                    div { class: "flex min-h-40 items-center justify-center rounded-lg bg-foreground/[0.025] text-sm text-muted-foreground",
+                        if matches!(probe_status, ShortcutProbeStatus::Miss) {
+                            {translate("shortcuts-no-match")}
+                        } else {
+                            {translate("shortcuts-empty")}
+                        }
+                    }
+                } else {
+                    for group in groups {
+                        ManagerSection {
+                            key: "{group.name}",
+                            label: group.name,
+                            count: group.entries.len(),
+                            ManagerCollection {
+                                view,
+                                grid_size: ManagerGridSize::Comfortable,
+                                for entry in group.entries {
+                                    ShortcutEntryView {
+                                        key: "{entry.id}",
+                                        entry,
                                     }
                                 }
                             }
                         }
                     }
+                }
             }
         }
     }
 }
 
-impl ShortcutStroke {
-    fn from_keyboard_event(event: &KeyboardEvent) -> Option<Self> {
+struct KeyboardStroke;
+
+impl KeyboardStroke {
+    fn decode(event: &KeyboardEvent) -> Option<ShortcutStroke> {
         let key = event.key().to_string();
         if matches!(
             key.as_str(),
@@ -159,7 +163,7 @@ impl ShortcutStroke {
         }
         let code = event.code().to_string();
         let modifiers = event.modifiers();
-        Some(Self {
+        Some(ShortcutStroke {
             label: Self::label_for(&code, &key),
             code,
             ctrl: modifiers.ctrl(),
@@ -191,7 +195,30 @@ impl ShortcutStroke {
 }
 
 #[component]
-fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
+fn ShortcutProbeLabel(status: ShortcutProbeStatus) -> Element {
+    let (label, tone) = match status {
+        ShortcutProbeStatus::Idle => (translate("shortcuts-try-hint"), "text-muted-foreground"),
+        ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-muted-foreground"),
+        ShortcutProbeStatus::Match(names) => {
+            let commands = names.join(", ");
+            (
+                translate_with(
+                    "shortcuts-triggered",
+                    &[("action", TranslationValue::String(&commands))],
+                ),
+                "text-foreground",
+            )
+        }
+        ShortcutProbeStatus::Contextual(labels) => (labels.join(", "), "text-foreground/80"),
+        ShortcutProbeStatus::Miss => (translate("shortcuts-no-match"), "text-ansi-1"),
+    };
+    rsx! {
+        span { class: "min-w-0 truncate text-xs font-medium {tone}", "{label}" }
+    }
+}
+
+#[component]
+fn ShortcutEntryView(entry: ShortcutEntry) -> Element {
     let selected = entry.shortcuts.iter().any(|shortcut| shortcut.emphasized);
     rsx! {
         ManagerRow {
@@ -212,8 +239,9 @@ fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
                                         if stroke_index > 0 {
                                             span { class: "px-0.5 text-[11px] text-muted-foreground/55", "›" }
                                         }
-                                        for keycap in stroke.keycaps() {
-                                            kbd { class: shortcut_key_class(shortcut.emphasized), "{keycap}" }
+                                        ShortcutKeycaps {
+                                            stroke: stroke.clone(),
+                                            emphasized: shortcut.emphasized,
                                         }
                                     }
                                 }
@@ -232,25 +260,6 @@ fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
     }
 }
 
-fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
-    match status {
-        ShortcutProbeStatus::Idle => (translate("shortcuts-try-hint"), "text-muted-foreground"),
-        ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-muted-foreground"),
-        ShortcutProbeStatus::Match(names) => {
-            let commands = names.join(", ");
-            (
-                translate_with(
-                    "shortcuts-triggered",
-                    &[("action", TranslationValue::String(&commands))],
-                ),
-                "text-foreground",
-            )
-        }
-        ShortcutProbeStatus::Contextual(labels) => (labels.join(", "), "text-foreground/80"),
-        ShortcutProbeStatus::Miss => (translate("shortcuts-no-match"), "text-ansi-1"),
-    }
-}
-
 #[component]
 fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
     rsx! {
@@ -259,18 +268,39 @@ fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
                 if stroke_index > 0 {
                     span { class: "text-xs text-muted-foreground/55", "›" }
                 }
-                for keycap in stroke.keycaps() {
-                    kbd { class: "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.09] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground", "{keycap}" }
+                ShortcutKeycaps {
+                    stroke,
+                    emphasized: true,
                 }
             }
         }
     }
 }
 
-fn shortcut_key_class(emphasized: bool) -> &'static str {
-    if emphasized {
+#[component]
+fn ShortcutKeycaps(stroke: ShortcutStroke, emphasized: bool) -> Element {
+    let class = if emphasized {
         "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.09] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
     } else {
         "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.06] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
+    };
+    let mut keycaps = Vec::new();
+    if stroke.ctrl {
+        keycaps.push("⌃".to_string());
+    }
+    if stroke.alt {
+        keycaps.push("⌥".to_string());
+    }
+    if stroke.shift {
+        keycaps.push("⇧".to_string());
+    }
+    if stroke.super_key {
+        keycaps.push("⌘".to_string());
+    }
+    keycaps.push(stroke.label);
+    rsx! {
+        for keycap in keycaps {
+            kbd { class: "{class}", "{keycap}" }
+        }
     }
 }

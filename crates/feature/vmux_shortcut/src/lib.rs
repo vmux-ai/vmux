@@ -62,35 +62,6 @@ pub struct ShortcutCollectionViewRequest {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct ShortcutCatalog {
-    pub groups: Vec<ShortcutGroup>,
-    pub chord_timeout_ms: u64,
-}
-
-impl ShortcutCatalog {
-    pub fn bindings(&self) -> impl Iterator<Item = (&ShortcutEntry, &ShortcutBinding)> {
-        self.groups.iter().flat_map(|group| {
-            group.entries.iter().flat_map(|entry| {
-                entry
-                    .shortcuts
-                    .iter()
-                    .map(move |shortcut| (entry, shortcut))
-            })
-        })
-    }
-
-    pub fn resolutions(&self) -> impl Iterator<Item = (&ShortcutEntry, &ShortcutBinding)> {
-        self.bindings().filter(|(_, shortcut)| shortcut.resolves)
-    }
-}
-
-#[vmux_api::contract(Default, Eq)]
-pub struct ShortcutProbeView {
-    pub sequence: Vec<ShortcutStroke>,
-    pub status: ShortcutProbeStatus,
-}
-
-#[vmux_api::contract(Default, Eq)]
 pub enum ShortcutProbeStatus {
     #[default]
     Idle,
@@ -103,13 +74,11 @@ pub enum ShortcutProbeStatus {
 #[vmux_api::ui_state(Default)]
 pub struct ShortcutUiState {
     pub groups: Vec<ShortcutGroup>,
-    pub probe: ShortcutProbeView,
+    pub probe_sequence: Vec<ShortcutStroke>,
+    pub probe_status: ShortcutProbeStatus,
     pub shortcut_count: u32,
     pub collection_view: vmux_ecs::CollectionView,
 }
-
-#[cfg(host)]
-pub type ShortcutUiStateUpdates = vmux_ecs::UiState<ShortcutUiState>;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {
@@ -134,21 +103,6 @@ pub struct ShortcutBinding {
     pub emphasized: bool,
 }
 
-impl ShortcutBinding {
-    pub fn starts_with(&self, sequence: &[ShortcutStroke]) -> bool {
-        sequence.len() <= self.strokes.len()
-            && self
-                .strokes
-                .iter()
-                .zip(sequence)
-                .all(|(expected, actual)| expected.same_press(actual))
-    }
-
-    pub fn matches(&self, sequence: &[ShortcutStroke]) -> bool {
-        self.strokes.len() == sequence.len() && self.starts_with(sequence)
-    }
-}
-
 #[vmux_api::contract(Default, Eq, Hash)]
 pub struct ShortcutStroke {
     pub code: String,
@@ -157,42 +111,6 @@ pub struct ShortcutStroke {
     pub shift: bool,
     pub alt: bool,
     pub super_key: bool,
-}
-
-impl ShortcutStroke {
-    pub fn keycaps(&self) -> Vec<String> {
-        let mut keycaps = Vec::new();
-        if self.ctrl {
-            keycaps.push("⌃".to_string());
-        }
-        if self.alt {
-            keycaps.push("⌥".to_string());
-        }
-        if self.shift {
-            keycaps.push("⇧".to_string());
-        }
-        if self.super_key {
-            keycaps.push("⌘".to_string());
-        }
-        keycaps.push(self.label.clone());
-        keycaps
-    }
-
-    pub fn same_press(&self, other: &Self) -> bool {
-        self.code == other.code
-            && self.ctrl == other.ctrl
-            && self.shift == other.shift
-            && self.alt == other.alt
-            && self.super_key == other.super_key
-    }
-
-    pub fn after(&self, prefix: &Self) -> Self {
-        let mut stroke = self.clone();
-        stroke.ctrl &= !prefix.ctrl;
-        stroke.alt &= !prefix.alt;
-        stroke.super_key &= !prefix.super_key;
-        stroke
-    }
 }
 
 #[cfg(host)]
@@ -212,15 +130,13 @@ mod tests {
     #[test]
     fn ui_state_round_trips_projected_shortcuts() {
         let state = ShortcutUiState {
-            probe: ShortcutProbeView {
-                sequence: vec![ShortcutStroke {
-                    code: "KeyK".to_string(),
-                    label: "K".to_string(),
-                    ctrl: true,
-                    ..Default::default()
-                }],
-                status: ShortcutProbeStatus::Pending,
-            },
+            probe_sequence: vec![ShortcutStroke {
+                code: "KeyK".to_string(),
+                label: "K".to_string(),
+                ctrl: true,
+                ..Default::default()
+            }],
+            probe_status: ShortcutProbeStatus::Pending,
             shortcut_count: 3,
             ..Default::default()
         };
@@ -229,7 +145,7 @@ mod tests {
         let decoded = rkyv::from_bytes::<ShortcutUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.shortcut_count, 3);
-        assert_eq!(decoded.probe.sequence[0].code, "KeyK");
-        assert_eq!(decoded.probe.status, ShortcutProbeStatus::Pending);
+        assert_eq!(decoded.probe_sequence[0].code, "KeyK");
+        assert_eq!(decoded.probe_status, ShortcutProbeStatus::Pending);
     }
 }
