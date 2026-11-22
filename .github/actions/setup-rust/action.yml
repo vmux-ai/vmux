@@ -40,7 +40,7 @@ runs:
       if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
       uses: actions/cache/restore@v5
       with:
-        path: .build-tools/cli-cache
+        path: .vmux/cli-cache
         key: ${{ steps.cli-inputs.outputs.key }}
 
     - name: Verify cached development CLI
@@ -48,32 +48,32 @@ runs:
       if: inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1'
       shell: bash
       run: |
-        vmux-ci cli-reuse .build-tools/cli-cache >> "$GITHUB_OUTPUT"
-        echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
+        vmux-ci cli-reuse .vmux/cli-cache >> "$GITHUB_OUTPUT"
+        echo "$GITHUB_WORKSPACE/.vmux/bin" >> "$GITHUB_PATH"
 
     - name: Restore development CLI compiler cache
       if: github.ref == 'refs/heads/main' && (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       uses: actions/cache@v4
       with:
-        path: .build-tools/cargo
-        key: dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
+        path: .vmux/cargo
+        key: dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
         restore-keys: |
-          dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
+          dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
 
     - name: Restore shared development CLI compiler cache
       if: github.ref != 'refs/heads/main' && (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       uses: actions/cache/restore@v4
       with:
-        path: .build-tools/cargo
-        key: dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
+        path: .vmux/cargo
+        key: dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_task/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
         restore-keys: |
-          dx-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
+          dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
 
     - uses: ./.github/actions/cache-workspace
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       with:
-        cache-key: dx-cli-compile${{ env.VMUX_CI_FAST_RUST }}
-        target: .build-tools/cargo
+        cache-key: dx-v2-cli-compile${{ env.VMUX_CI_FAST_RUST }}
+        target: .vmux/cargo
 
     - name: Build development CLI
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
@@ -83,27 +83,27 @@ runs:
         if [ "${VMUX_CI_FAST_RUST:-}" = "1" ]; then
           cli_flags="-C opt-level=1 -C codegen-units=16"
         fi
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_DEV_DEBUG=0 RUSTFLAGS="$cli_flags" cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .build-tools/cargo
-        mkdir -p .build-tools/bin
-        install -m 0755 .build-tools/cargo/debug/vmux .build-tools/bin/vmux
-        echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_DEV_DEBUG=0 RUSTFLAGS="$cli_flags" cargo build --locked -p vmux_cli --no-default-features --features dx,ci-syntax --target-dir .vmux/cargo
+        mkdir -p .vmux/bin
+        install -m 0755 .vmux/cargo/debug/vmux .vmux/bin/vmux
+        echo "$GITHUB_WORKSPACE/.vmux/bin" >> "$GITHUB_PATH"
 
     - name: Save development CLI compiler artifacts
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       uses: ./.github/actions/save-workspace
       with:
-        cache-key: dx-cli-compile${{ env.VMUX_CI_FAST_RUST }}
+        cache-key: dx-v2-cli-compile${{ env.VMUX_CI_FAST_RUST }}
 
     - name: Record reusable development CLI binary
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       shell: bash
-      run: vmux-ci cli-publish .build-tools/cli-cache
+      run: vmux-ci cli-publish .vmux/cli-cache
 
     - name: Save reusable development CLI binary
       if: (inputs.cli == 'build' || env.VMUX_CI_PREBUILT_DX != '1') && steps.cli-cache.outputs.reused != 'true'
       uses: actions/cache/save@v5
       with:
-        path: .build-tools/cli-cache
+        path: .vmux/cli-cache
         key: ${{ steps.cli-inputs.outputs.key }}
 
     - name: Download this run's development CLI
@@ -111,14 +111,14 @@ runs:
       uses: actions/download-artifact@v7
       with:
         name: dx-cli-${{ runner.os }}-${{ runner.arch }}
-        path: .build-tools/prebuilt
+        path: .vmux/prebuilt
 
     - name: Verify and install the development CLI
       if: inputs.cli != 'build' && env.VMUX_CI_PREBUILT_DX == '1'
       shell: bash
       run: |
-        vmux-ci artifact-install .build-tools/prebuilt
-        echo "$GITHUB_WORKSPACE/.build-tools/bin" >> "$GITHUB_PATH"
+        vmux-ci artifact-install .vmux/prebuilt
+        echo "$GITHUB_WORKSPACE/.vmux/bin" >> "$GITHUB_PATH"
 
     - name: Configure CI Rust compilation
       if: inputs.fast-rust == 'true' || (inputs.fast-rust == 'auto' && env.VMUX_CI_FAST_RUST == '1')

@@ -127,8 +127,7 @@ fn start(mut requests: StartRequests<'_, '_>, mut io: Io) {
             entity,
             &mut sequence,
             ReadFile {
-                location: context
-                    .location(format!(".build-tools/source-cache-{partition}.json.inputs")),
+                location: context.location(format!(".vmux/source-cache-{partition}.json.inputs")),
                 limit: 8 * 1024 * 1024,
             },
             ConfigurationSlot,
@@ -160,9 +159,8 @@ fn load(
                 continue;
             }
         };
-        if configuration.paths != format!(".build-tools/workspace-cache-{}", transfer.partition)
-            || configuration.snapshot
-                != format!(".build-tools/source-cache-{}.json", transfer.partition)
+        if configuration.paths != format!(".vmux/workspace-cache-{}", transfer.partition)
+            || configuration.snapshot != format!(".vmux/source-cache-{}.json", transfer.partition)
         {
             io.fail(entity, "Cache staging identity differs from its partition");
             continue;

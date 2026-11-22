@@ -296,7 +296,7 @@ fn configure(
             settings.0.remove(name);
         }
         let tools = checkout.tools_root(&settings.0);
-        let mut paths = vec![tools.join(".build-tools/dylint/bin")];
+        let mut paths = vec![tools.join(".vmux/dylint/bin")];
         let path = match settings.0.required("PATH") {
             Ok(path) => path,
             Err(error) => {
@@ -319,12 +319,11 @@ fn configure(
         settings.0.set("PATH", path);
         settings
             .0
-            .set("CARGO_TARGET_DIR", tools.join(".build-tools/lints"));
+            .set("CARGO_TARGET_DIR", tools.join(".vmux/lints"));
         settings.0.set("CARGO_INCREMENTAL", "0");
-        settings.0.set(
-            "DYLINT_DRIVER_PATH",
-            tools.join(".build-tools/dylint-drivers"),
-        );
+        settings
+            .0
+            .set("DYLINT_DRIVER_PATH", tools.join(".vmux/dylint-drivers"));
         let policy = match Policy::configured(&settings.0) {
             Ok(policy) => policy,
             Err(error) => {
@@ -385,10 +384,7 @@ fn guard(
                 &settings.0,
                 &checkout.root,
                 "df".into(),
-                vec![
-                    "-Pk".into(),
-                    tools.join(".build-tools/lints").into_os_string(),
-                ],
+                vec!["-Pk".into(), tools.join(".vmux/lints").into_os_string()],
             ),
             CapacitySlot,
             false,
@@ -471,7 +467,7 @@ fn acquire(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
             &mut None,
             AcquireTarget {
                 root: checkout.root.clone(),
-                target: tools.join(".build-tools/lints"),
+                target: tools.join(".vmux/lints"),
             },
             Lock,
             false,
@@ -502,14 +498,13 @@ fn adopt(
         io.commands.entity(child).remove::<AcquiredLock>();
         settings
             .0
-            .set("VMUX_TARGET_LOCK_TARGET", tools.join(".build-tools/lints"));
+            .set("VMUX_TARGET_LOCK_TARGET", tools.join(".vmux/lints"));
         settings
             .0
             .set("VMUX_TARGET_LOCK_OWNER_PID", std::process::id().to_string());
-        settings.0.set(
-            "VMUX_BUILD_STORAGE_TARGET",
-            tools.join(".build-tools/lints"),
-        );
+        settings
+            .0
+            .set("VMUX_BUILD_STORAGE_TARGET", tools.join(".vmux/lints"));
         settings
             .0
             .set("VMUX_BUILD_STORAGE_ROOT", checkout.root.as_os_str());
@@ -597,9 +592,9 @@ fn install(
             configuration.version.clone().into(),
             "--locked".into(),
             "--root".into(),
-            tools.join(".build-tools/dylint").into_os_string(),
+            tools.join(".vmux/dylint").into_os_string(),
             "--target-dir".into(),
-            tools.join(".build-tools/dylint-cargo").into_os_string(),
+            tools.join(".vmux/dylint-cargo").into_os_string(),
         ];
         io.request(
             &mut sequence,

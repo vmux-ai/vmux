@@ -25,14 +25,14 @@ impl Job for Prepare {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        let target = self.root.join(".build-tools/lints");
+        let target = self.root.join(".vmux/lints");
         let directories = [
-            self.root.join(".build-tools"),
+            self.root.join(".vmux"),
             target.clone(),
-            self.root.join(".build-tools/dylint"),
-            self.root.join(".build-tools/dylint/bin"),
-            self.root.join(".build-tools/dylint-cargo"),
-            self.root.join(".build-tools/dylint-drivers"),
+            self.root.join(".vmux/dylint"),
+            self.root.join(".vmux/dylint/bin"),
+            self.root.join(".vmux/dylint-cargo"),
+            self.root.join(".vmux/dylint-drivers"),
         ];
         for directory in &directories {
             Self::validate(directory)?;

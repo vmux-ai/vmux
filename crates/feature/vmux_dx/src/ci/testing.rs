@@ -47,7 +47,7 @@ impl Fixture {
         fixture.git(&["config", "commit.gpgsign", "false"]);
         fixture.write(
             ".gitignore",
-            ".build-tools/\ntarget/\nevent.json\nbin/\nci-check-inputs.json\n",
+            ".vmux/\ntarget/\nevent.json\nbin/\nci-check-inputs.json\n",
         );
         fixture.write("Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = []\n[workspace.package]\nversion = \"1.0.0\"\n");
         fixture.write("rust-toolchain.toml", "[toolchain]\nchannel = \"stable\"\n");

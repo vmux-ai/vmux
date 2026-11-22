@@ -6,9 +6,9 @@ runs:
     - name: Prepare isolated compiler checkout
       shell: bash
       run: |
-        compiler_workspace=.build-tools/compiler-checkout
+        compiler_workspace=.vmux/compiler-checkout
         test ! -e "$compiler_workspace"
-        mkdir -p .build-tools
+        mkdir -p .vmux
         git clone --shared --no-checkout . "$compiler_workspace"
         git -C "$compiler_workspace" checkout --detach "$(git rev-parse HEAD)"
     - name: Resolve compiler cache identity
@@ -24,50 +24,50 @@ runs:
       uses: actions/cache@v5
       with:
         path: |
-          .build-tools/compiler-checkout/.build-tools/dylint
-          .build-tools/compiler-checkout/.build-tools/dylint-cargo
-          .build-tools/compiler-checkout/.build-tools/dylint-drivers
+          .vmux/compiler-checkout/.vmux/dylint
+          .vmux/compiler-checkout/.vmux/dylint-cargo
+          .vmux/compiler-checkout/.vmux/dylint-drivers
           ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
-        key: ecs-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('rust-toolchain.toml', 'crates/feature/vmux_dx/lints/rust-toolchain.toml', 'crates/feature/vmux_dx/lints/tool-versions.toml') }}
+        key: ecs-tools-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('rust-toolchain.toml', 'crates/feature/vmux_dx/lints/rust-toolchain.toml', 'crates/feature/vmux_dx/lints/tool-versions.toml') }}
 
     - name: Restore pinned compiler and Dylint tools
       if: github.ref != 'refs/heads/main'
       uses: actions/cache/restore@v5
       with:
         path: |
-          .build-tools/compiler-checkout/.build-tools/dylint
-          .build-tools/compiler-checkout/.build-tools/dylint-cargo
-          .build-tools/compiler-checkout/.build-tools/dylint-drivers
+          .vmux/compiler-checkout/.vmux/dylint
+          .vmux/compiler-checkout/.vmux/dylint-cargo
+          .vmux/compiler-checkout/.vmux/dylint-drivers
           ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
-        key: ecs-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('rust-toolchain.toml', 'crates/feature/vmux_dx/lints/rust-toolchain.toml', 'crates/feature/vmux_dx/lints/tool-versions.toml') }}
+        key: ecs-tools-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('rust-toolchain.toml', 'crates/feature/vmux_dx/lints/rust-toolchain.toml', 'crates/feature/vmux_dx/lints/tool-versions.toml') }}
 
     - name: Cache ECS lint compiler artifacts
       if: github.ref == 'refs/heads/main'
       uses: actions/cache@v5
       with:
         path: |
-          .build-tools/compiler-checkout/.build-tools/lints
-          .build-tools/compiler-checkout/.build-tools/lints-sources.json
-        key: ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+          .vmux/compiler-checkout/.vmux/lints
+          .vmux/compiler-checkout/.vmux/lints-sources.json
+        key: ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
         restore-keys: |
-          ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
-          ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
+          ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
+          ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
 
     - name: Restore ECS lint compiler artifacts
       if: github.ref != 'refs/heads/main'
       uses: actions/cache/restore@v5
       with:
         path: |
-          .build-tools/compiler-checkout/.build-tools/lints
-          .build-tools/compiler-checkout/.build-tools/lints-sources.json
-        key: ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+          .vmux/compiler-checkout/.vmux/lints
+          .vmux/compiler-checkout/.vmux/lints-sources.json
+        key: ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
         restore-keys: |
-          ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
-          ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
+          ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
+          ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
 
     - uses: ./.github/actions/cache-sources
       with:
-        workspace: .build-tools/compiler-checkout
-        snapshot: .build-tools/lints-sources.json
-        target: .build-tools/lints
+        workspace: .vmux/compiler-checkout
+        snapshot: .vmux/lints-sources.json
+        target: .vmux/lints
         save: ${{ github.ref == 'refs/heads/main' }}

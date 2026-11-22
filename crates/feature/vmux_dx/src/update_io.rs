@@ -72,6 +72,7 @@ impl Installation {
         for component in self.executable.components() {
             let name = component.as_os_str();
             if name == "target"
+                || name == ".vmux"
                 || name == ".build-tools"
                 || Path::new(name)
                     .extension()

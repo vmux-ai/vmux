@@ -480,7 +480,7 @@ fn scan(
             for (path, metadata) in entries {
                 if matches!(
                     path.file_name().and_then(|name| name.to_str()),
-                    Some(".git" | ".worktrees" | ".build-tools" | "target")
+                    Some(".git" | ".worktrees" | ".vmux" | ".build-tools" | "target")
                 ) {
                     continue;
                 }

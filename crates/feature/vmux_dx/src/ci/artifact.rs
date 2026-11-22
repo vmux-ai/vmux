@@ -380,7 +380,7 @@ fn install(mut requests: InstallRequests<'_, '_>, mut io: Io, results: Results) 
             entity,
             &mut sequence,
             Publish {
-                location: context.location(".build-tools/bin/vmux"),
+                location: context.location(".vmux/bin/vmux"),
                 bytes,
                 executable: true,
             },
@@ -867,7 +867,7 @@ fn key_encode(mut requests: KeyEncodeRequests<'_, '_>, mut io: Io, results: Resu
             entity,
             &mut sequence,
             Publish {
-                location: context.location(".build-tools/cli-inputs.json"),
+                location: context.location(".vmux/cli-inputs.json"),
                 bytes: serde_json::to_vec(identity).unwrap(),
                 executable: false,
             },
@@ -909,7 +909,7 @@ fn reuse_start(mut requests: ReuseStartRequests<'_, '_>, mut io: Io) {
             continue;
         }
         let values = Arguments::values(invocation);
-        if values != [std::ffi::OsString::from(".build-tools/cli-cache")] {
+        if values != [std::ffi::OsString::from(".vmux/cli-cache")] {
             io.fail(entity, "CLI cache must be runner-owned");
             continue;
         }
@@ -917,7 +917,7 @@ fn reuse_start(mut requests: ReuseStartRequests<'_, '_>, mut io: Io) {
             entity,
             &mut sequence,
             ReadFile {
-                location: context.location(".build-tools/cli-inputs.json"),
+                location: context.location(".vmux/cli-inputs.json"),
                 limit: 32768,
             },
             ExpectedSlot,
@@ -926,7 +926,7 @@ fn reuse_start(mut requests: ReuseStartRequests<'_, '_>, mut io: Io) {
             entity,
             &mut sequence,
             ProbeRead(ReadFile {
-                location: context.location(".build-tools/cli-cache/manifest.json"),
+                location: context.location(".vmux/cli-cache/manifest.json"),
                 limit: 32768,
             }),
             ManifestSlot,
@@ -935,7 +935,7 @@ fn reuse_start(mut requests: ReuseStartRequests<'_, '_>, mut io: Io) {
             entity,
             &mut sequence,
             ProbeRead(ReadFile {
-                location: context.location(".build-tools/cli-cache/vmux"),
+                location: context.location(".vmux/cli-cache/vmux"),
                 limit: 256 * 1024 * 1024,
             }),
             BinarySlot,
@@ -982,7 +982,7 @@ fn reuse_validate(mut requests: ReuseValidateRequests<'_, '_>, mut io: Io, resul
                 entity,
                 &mut sequence,
                 Publish {
-                    location: context.location(".build-tools/bin/vmux"),
+                    location: context.location(".vmux/bin/vmux"),
                     bytes,
                     executable: true,
                 },
@@ -1043,7 +1043,7 @@ fn cache_publish_start(mut requests: CachePublishStartRequests<'_, '_>, mut io: 
             continue;
         }
         let values = Arguments::values(invocation);
-        if values != [std::ffi::OsString::from(".build-tools/cli-cache")] {
+        if values != [std::ffi::OsString::from(".vmux/cli-cache")] {
             io.fail(entity, "CLI cache must be runner-owned");
             continue;
         }
@@ -1051,7 +1051,7 @@ fn cache_publish_start(mut requests: CachePublishStartRequests<'_, '_>, mut io: 
             entity,
             &mut sequence,
             ReadFile {
-                location: context.location(".build-tools/cli-inputs.json"),
+                location: context.location(".vmux/cli-inputs.json"),
                 limit: 32768,
             },
             ExpectedSlot,
@@ -1060,7 +1060,7 @@ fn cache_publish_start(mut requests: CachePublishStartRequests<'_, '_>, mut io: 
             entity,
             &mut sequence,
             ReadFile {
-                location: context.location(".build-tools/bin/vmux"),
+                location: context.location(".vmux/bin/vmux"),
                 limit: 256 * 1024 * 1024,
             },
             BinarySlot,
@@ -1068,7 +1068,7 @@ fn cache_publish_start(mut requests: CachePublishStartRequests<'_, '_>, mut io: 
         io.request(
             entity,
             &mut sequence,
-            RemoveLink(context.location(".build-tools/cli-cache")),
+            RemoveLink(context.location(".vmux/cli-cache")),
             RepairDirectorySlot,
         );
         io.commands
@@ -1088,13 +1088,13 @@ fn cache_publish_repair(
             io.request(
                 entity,
                 &mut sequence,
-                RemoveLink(context.location(".build-tools/cli-cache/vmux")),
+                RemoveLink(context.location(".vmux/cli-cache/vmux")),
                 RepairBinarySlot,
             );
             io.request(
                 entity,
                 &mut sequence,
-                RemoveLink(context.location(".build-tools/cli-cache/manifest.json")),
+                RemoveLink(context.location(".vmux/cli-cache/manifest.json")),
                 RepairManifestSlot,
             );
             *phase = CachePublishPhase::Leaves;
@@ -1141,7 +1141,7 @@ fn cache_publish_write(
             entity,
             &mut sequence,
             Publish {
-                location: context.location(".build-tools/cli-cache/vmux"),
+                location: context.location(".vmux/cli-cache/vmux"),
                 bytes,
                 executable: true,
             },
@@ -1151,7 +1151,7 @@ fn cache_publish_write(
             entity,
             &mut sequence,
             Publish {
-                location: context.location(".build-tools/cli-cache/manifest.json"),
+                location: context.location(".vmux/cli-cache/manifest.json"),
                 bytes: serde_json::to_vec(&manifest).unwrap(),
                 executable: false,
             },
@@ -1403,7 +1403,7 @@ mod tests {
             .unwrap();
         fixture.run("artifact-install", &["artifact"]).unwrap();
         assert_eq!(
-            std::fs::read(fixture.root().join(".build-tools/bin/vmux")).unwrap(),
+            std::fs::read(fixture.root().join(".vmux/bin/vmux")).unwrap(),
             b"new binary"
         );
         for (key, value) in [
@@ -1431,7 +1431,7 @@ mod tests {
                 .contains("checksum")
         );
         assert_eq!(
-            std::fs::read(fixture.root().join(".build-tools/bin/vmux")).unwrap(),
+            std::fs::read(fixture.root().join(".vmux/bin/vmux")).unwrap(),
             b"new binary"
         );
     }
@@ -1441,44 +1441,26 @@ mod tests {
             let fixture = Fixture::new();
             fixture.cli();
             fixture.run("cli-key", &[]).unwrap();
-            fixture.write(".build-tools/bin/vmux", "fresh binary");
+            fixture.write(".vmux/bin/vmux", "fresh binary");
             let external = tempfile::tempdir().unwrap();
             let target = external.path().join("target");
             std::fs::write(&target, "external").unwrap();
             if directory_link {
-                symlink(
-                    external.path(),
-                    fixture.root().join(".build-tools/cli-cache"),
-                )
-                .unwrap();
+                symlink(external.path(), fixture.root().join(".vmux/cli-cache")).unwrap();
             } else {
-                std::fs::create_dir(fixture.root().join(".build-tools/cli-cache")).unwrap();
+                std::fs::create_dir(fixture.root().join(".vmux/cli-cache")).unwrap();
                 for name in ["vmux", "manifest.json"] {
-                    symlink(
-                        &target,
-                        fixture.root().join(".build-tools/cli-cache").join(name),
-                    )
-                    .unwrap();
+                    symlink(&target, fixture.root().join(".vmux/cli-cache").join(name)).unwrap();
                 }
             }
             assert_eq!(
-                Fixture::outputs(
-                    &fixture
-                        .run("cli-reuse", &[".build-tools/cli-cache"])
-                        .unwrap()
-                )["reused"],
+                Fixture::outputs(&fixture.run("cli-reuse", &[".vmux/cli-cache"]).unwrap())["reused"],
                 "false"
             );
-            fixture
-                .run("cli-publish", &[".build-tools/cli-cache"])
-                .unwrap();
+            fixture.run("cli-publish", &[".vmux/cli-cache"]).unwrap();
             assert_eq!(std::fs::read(&target).unwrap(), b"external");
             assert_eq!(
-                Fixture::outputs(
-                    &fixture
-                        .run("cli-reuse", &[".build-tools/cli-cache"])
-                        .unwrap()
-                )["reused"],
+                Fixture::outputs(&fixture.run("cli-reuse", &[".vmux/cli-cache"]).unwrap())["reused"],
                 "true"
             );
         }
