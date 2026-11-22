@@ -8,7 +8,7 @@ pub use definition::CommandMessageRegistration;
 pub use definition::{
     BindCommands, CommandBinding, CommandBindingRegistration, CommandDefinition, CommandDispatch,
     CommandInvocation, CommandMcp, CommandRuntimePlugin, CommandShortcut,
-    DispatchCommandInvocations, ReadCommandRequests, ShortcutDefinition, WriteCommandRequests,
+    DispatchCommandInvocations, ReadCommandRequests, WriteCommandRequests,
 };
 pub use payload::{CommandBarOpenProjection, CommandBarProjector};
 pub use plugin::CommandPlugin;

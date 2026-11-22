@@ -270,17 +270,16 @@ mod tests {
         );
     }
 
-    const CTRL: Modifiers = Modifiers {
-        ctrl: true,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
-
     struct Seam;
 
     impl Seam {
         fn app() -> App {
+            let ctrl = Modifiers {
+                ctrl: true,
+                shift: false,
+                alt: false,
+                super_key: false,
+            };
             let mut keymap = Keymap::default();
             keymap.extend(
                 Source::Settings,
@@ -288,7 +287,7 @@ mod tests {
                     Binding {
                         shortcut: Shortcut::Direct(KeyCombo {
                             key: KeyCode::KeyN,
-                            modifiers: CTRL,
+                            modifiers: ctrl,
                         }),
                         command: "command_bar_next".to_string(),
                         when: When::parse("command-bar"),
@@ -296,7 +295,7 @@ mod tests {
                     Binding {
                         shortcut: Shortcut::Direct(KeyCombo {
                             key: KeyCode::KeyX,
-                            modifiers: CTRL,
+                            modifiers: ctrl,
                         }),
                         command: "stack_close".to_string(),
                         when: None,
@@ -319,12 +318,18 @@ mod tests {
         }
 
         fn press(app: &mut App, page: Entity, code: &str) -> Vec<(Entity, String)> {
+            let ctrl = Modifiers {
+                ctrl: true,
+                shift: false,
+                alt: false,
+                super_key: false,
+            };
             app.world_mut().trigger(UiInput {
                 webview: page,
                 payload: KeyStroke {
                     key: code.to_string(),
                     code: code.to_string(),
-                    mods: KeyModifiers::from(CTRL),
+                    mods: KeyModifiers::from(ctrl),
                     text: None,
                     repeat: false,
                 },

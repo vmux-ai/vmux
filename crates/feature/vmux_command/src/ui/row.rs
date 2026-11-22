@@ -92,7 +92,16 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
             }
         };
     }
-    if AgentRow::matches(&item.url) {
+    let is_agent_row = vmux_api::VmuxRoute::parse(&item.url)
+        .filter(|route| route.is_agent())
+        .and_then(|route| {
+            route.query().map(|query| {
+                url::form_urlencoded::parse(query.as_bytes())
+                    .any(|(key, value)| key == "agent" && !value.is_empty())
+            })
+        })
+        .unwrap_or(false);
+    if is_agent_row {
         let icon = if item.favicon_url.is_empty() {
             item.icon.favicon_url().to_string()
         } else {
@@ -133,24 +142,6 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
     }
     rsx! {
         span { class: "mt-0.5 shrink-0 font-mono text-sm text-muted-foreground", "{item.leading}" }
-    }
-}
-
-struct AgentRow;
-
-impl AgentRow {
-    fn matches(url: &str) -> bool {
-        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
-            return false;
-        };
-        if !route.is_agent() {
-            return false;
-        }
-        let Some(query) = route.query() else {
-            return false;
-        };
-        url::form_urlencoded::parse(query.as_bytes())
-            .any(|(key, value)| key == "agent" && !value.is_empty())
     }
 }
 

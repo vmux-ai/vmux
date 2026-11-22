@@ -22,14 +22,14 @@ pub enum Source {
     Settings,
 }
 
-const DEFAULT_CHORD_TIMEOUT_MS: u64 = 1000;
-
 impl Keymap {
+    const DEFAULT_CHORD_TIMEOUT_MS: u64 = 1000;
+
     pub fn defaults() -> Self {
         Self {
             bindings: Vec::new(),
             registered: std::collections::BTreeSet::new(),
-            chord_timeout_ms: DEFAULT_CHORD_TIMEOUT_MS,
+            chord_timeout_ms: Self::DEFAULT_CHORD_TIMEOUT_MS,
         }
     }
 
@@ -678,133 +678,185 @@ mod display_tests {
 mod tests {
     use super::*;
 
-    const STACK_CLOSE: &str = "stack_close";
-    const PANE_CLOSE: &str = "close_pane";
+    struct KeymapFixture;
 
-    fn combo(key: KeyCode) -> KeyCombo {
-        KeyCombo {
-            key,
-            modifiers: Modifiers::default(),
+    impl KeymapFixture {
+        const STACK_CLOSE: &str = "stack_close";
+        const PANE_CLOSE: &str = "close_pane";
+        const CTRL: Modifiers = Modifiers {
+            ctrl: true,
+            shift: false,
+            alt: false,
+            super_key: false,
+        };
+        const SHIFT: Modifiers = Modifiers {
+            ctrl: false,
+            shift: true,
+            alt: false,
+            super_key: false,
+        };
+
+        fn combo(key: KeyCode) -> KeyCombo {
+            KeyCombo {
+                key,
+                modifiers: Modifiers::default(),
+            }
         }
-    }
 
-    fn binding(command: &str, when: Option<&str>) -> Binding {
-        Binding {
-            shortcut: Shortcut::Direct(combo(KeyCode::KeyX)),
-            command: command.to_string(),
-            when: when.and_then(When::parse),
+        fn binding(command: &str, when: Option<&str>) -> Binding {
+            Binding {
+                shortcut: Shortcut::Direct(Self::combo(KeyCode::KeyX)),
+                command: command.to_string(),
+                when: when.and_then(When::parse),
+            }
         }
-    }
 
-    fn context(keys: &[&str]) -> KeyContext {
-        keys.iter().map(|key| key.to_string()).collect()
-    }
+        fn context(keys: &[&str]) -> KeyContext {
+            keys.iter().map(|key| key.to_string()).collect()
+        }
 
-    fn combo_with(key: KeyCode, modifiers: Modifiers) -> KeyCombo {
-        KeyCombo { key, modifiers }
+        fn modified(key: KeyCode, modifiers: Modifiers) -> KeyCombo {
+            KeyCombo { key, modifiers }
+        }
+
+        fn space_keymap() -> Keymap {
+            let definitions = vec![
+                crate::CommandDefinition::new("space_next", "Next Space", "Layout > Space")
+                    .hidden()
+                    .direct_when("ArrowDown", Some("spaces"))
+                    .direct_when("Ctrl+n", Some("spaces"))
+                    .direct_when("Ctrl+j", Some("spaces")),
+                crate::CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
+                    .hidden()
+                    .direct_when("ArrowUp", Some("spaces"))
+                    .direct_when("Ctrl+p", Some("spaces"))
+                    .direct_when("Ctrl+k", Some("spaces")),
+                crate::CommandDefinition::new(
+                    "space_attach",
+                    "Open Selected Space",
+                    "Layout > Space",
+                )
+                .hidden()
+                .direct_when("Enter", Some("spaces")),
+                crate::CommandDefinition::new(
+                    "space_delete",
+                    "Delete Selected Space",
+                    "Layout > Space",
+                )
+                .hidden()
+                .direct_when("Delete", Some("spaces"))
+                .direct_when("Backspace", Some("spaces")),
+            ];
+            Keymap::defaults_with(&definitions)
+        }
     }
 
     #[test]
     fn bare_escape_is_escape_with_no_modifier_but_shift() {
-        let ctrl = Modifiers {
-            ctrl: true,
-            ..Default::default()
-        };
-        let shift = Modifiers {
-            shift: true,
-            ..Default::default()
-        };
         let super_key = Modifiers {
             super_key: true,
             ..Default::default()
         };
 
-        assert!(combo(KeyCode::Escape).is_bare_escape());
-        assert!(combo_with(KeyCode::Escape, shift).is_bare_escape());
-        assert!(!combo_with(KeyCode::Escape, ctrl).is_bare_escape());
-        assert!(!combo_with(KeyCode::Escape, super_key).is_bare_escape());
-        assert!(!combo(KeyCode::KeyH).is_bare_escape());
+        assert!(KeymapFixture::combo(KeyCode::Escape).is_bare_escape());
+        assert!(KeymapFixture::modified(KeyCode::Escape, KeymapFixture::SHIFT).is_bare_escape());
+        assert!(!KeymapFixture::modified(KeyCode::Escape, KeymapFixture::CTRL).is_bare_escape());
+        assert!(!KeymapFixture::modified(KeyCode::Escape, super_key).is_bare_escape());
+        assert!(!KeymapFixture::combo(KeyCode::KeyH).is_bare_escape());
     }
 
     #[test]
     fn command_bar_dismisses_on_escape_and_ctrl_c_only() {
-        let ctrl = Modifiers {
-            ctrl: true,
-            ..Default::default()
-        };
         let super_key = Modifiers {
             super_key: true,
             ..Default::default()
         };
 
-        assert!(combo(KeyCode::Escape).dismisses_command_bar());
-        assert!(combo_with(KeyCode::KeyC, ctrl).dismisses_command_bar());
-        assert!(!combo(KeyCode::KeyC).dismisses_command_bar());
-        assert!(!combo_with(KeyCode::KeyC, super_key).dismisses_command_bar());
+        assert!(KeymapFixture::combo(KeyCode::Escape).dismisses_command_bar());
+        assert!(
+            KeymapFixture::modified(KeyCode::KeyC, KeymapFixture::CTRL).dismisses_command_bar()
+        );
+        assert!(!KeymapFixture::combo(KeyCode::KeyC).dismisses_command_bar());
+        assert!(!KeymapFixture::modified(KeyCode::KeyC, super_key).dismisses_command_bar());
     }
 
     #[test]
     fn a_configured_binding_outranks_the_default_on_the_same_key() {
         let mut keymap = Keymap::default();
-        keymap.register([STACK_CLOSE, PANE_CLOSE]);
-        keymap.extend(Source::Default, [binding(STACK_CLOSE, None)]);
-        keymap.extend(Source::Settings, [binding(PANE_CLOSE, None)]);
+        keymap.register([KeymapFixture::STACK_CLOSE, KeymapFixture::PANE_CLOSE]);
+        keymap.extend(
+            Source::Default,
+            [KeymapFixture::binding(KeymapFixture::STACK_CLOSE, None)],
+        );
+        keymap.extend(
+            Source::Settings,
+            [KeymapFixture::binding(KeymapFixture::PANE_CLOSE, None)],
+        );
 
         assert_eq!(
-            keymap.direct(&combo(KeyCode::KeyX)),
-            Some(PANE_CLOSE.to_string())
+            keymap.direct(&KeymapFixture::combo(KeyCode::KeyX)),
+            Some(KeymapFixture::PANE_CLOSE.to_string())
         );
     }
 
     #[test]
     fn the_default_still_loses_when_it_arrives_last() {
         let mut keymap = Keymap::default();
-        keymap.register([STACK_CLOSE, PANE_CLOSE]);
-        keymap.extend(Source::Settings, [binding(PANE_CLOSE, None)]);
-        keymap.extend(Source::Default, [binding(STACK_CLOSE, None)]);
+        keymap.register([KeymapFixture::STACK_CLOSE, KeymapFixture::PANE_CLOSE]);
+        keymap.extend(
+            Source::Settings,
+            [KeymapFixture::binding(KeymapFixture::PANE_CLOSE, None)],
+        );
+        keymap.extend(
+            Source::Default,
+            [KeymapFixture::binding(KeymapFixture::STACK_CLOSE, None)],
+        );
 
         assert_eq!(
-            keymap.direct(&combo(KeyCode::KeyX)),
-            Some(PANE_CLOSE.to_string())
+            keymap.direct(&KeymapFixture::combo(KeyCode::KeyX)),
+            Some(KeymapFixture::PANE_CLOSE.to_string())
         );
     }
 
     #[test]
     fn a_scoped_binding_wins_only_inside_its_context() {
         let mut keymap = Keymap::default();
-        keymap.register([STACK_CLOSE, PANE_CLOSE]);
+        keymap.register([KeymapFixture::STACK_CLOSE, KeymapFixture::PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [
-                binding(STACK_CLOSE, None),
-                binding(PANE_CLOSE, Some("chat.selector")),
+                KeymapFixture::binding(KeymapFixture::STACK_CLOSE, None),
+                KeymapFixture::binding(KeymapFixture::PANE_CLOSE, Some("chat.selector")),
             ],
         );
 
         assert_eq!(
             keymap
-                .in_context(&context(&["chat.selector"]))
-                .direct(&combo(KeyCode::KeyX)),
-            Some(PANE_CLOSE.to_string())
+                .in_context(&KeymapFixture::context(&["chat.selector"]))
+                .direct(&KeymapFixture::combo(KeyCode::KeyX)),
+            Some(KeymapFixture::PANE_CLOSE.to_string())
         );
         assert_eq!(
             keymap
-                .in_context(&context(&["chat"]))
-                .direct(&combo(KeyCode::KeyX)),
-            Some(STACK_CLOSE.to_string())
+                .in_context(&KeymapFixture::context(&["chat"]))
+                .direct(&KeymapFixture::combo(KeyCode::KeyX)),
+            Some(KeymapFixture::STACK_CLOSE.to_string())
         );
     }
 
     #[test]
     fn a_scoped_binding_never_matches_an_absent_context() {
         let mut keymap = Keymap::default();
-        keymap.register([PANE_CLOSE]);
+        keymap.register([KeymapFixture::PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
-            [binding(PANE_CLOSE, Some("chat.selector"))],
+            [KeymapFixture::binding(
+                KeymapFixture::PANE_CLOSE,
+                Some("chat.selector"),
+            )],
         );
 
-        assert_eq!(keymap.direct(&combo(KeyCode::KeyX)), None);
+        assert_eq!(keymap.direct(&KeymapFixture::combo(KeyCode::KeyX)), None);
     }
 
     #[test]
@@ -816,30 +868,36 @@ mod tests {
             [
                 Binding {
                     shortcut: Shortcut::Chord(
-                        modified(KeyCode::KeyB, CTRL),
-                        modified(KeyCode::ArrowLeft, CTRL),
+                        KeymapFixture::modified(KeyCode::KeyB, KeymapFixture::CTRL),
+                        KeymapFixture::modified(KeyCode::ArrowLeft, KeymapFixture::CTRL),
                     ),
                     command: "resize_pane_left".to_string(),
                     when: None,
                 },
                 Binding {
                     shortcut: Shortcut::Chord(
-                        modified(KeyCode::KeyB, CTRL),
-                        modified(KeyCode::KeyH, CTRL),
+                        KeymapFixture::modified(KeyCode::KeyB, KeymapFixture::CTRL),
+                        KeymapFixture::modified(KeyCode::KeyH, KeymapFixture::CTRL),
                     ),
                     command: "select_pane_left".to_string(),
                     when: None,
                 },
             ],
         );
-        let prefix = modified(KeyCode::KeyB, CTRL);
+        let prefix = KeymapFixture::modified(KeyCode::KeyB, KeymapFixture::CTRL);
 
         assert_eq!(
-            keymap.chord(&prefix, &modified(KeyCode::ArrowLeft, CTRL)),
+            keymap.chord(
+                &prefix,
+                &KeymapFixture::modified(KeyCode::ArrowLeft, KeymapFixture::CTRL)
+            ),
             Some("resize_pane_left".to_string())
         );
         assert_eq!(
-            keymap.chord(&prefix, &modified(KeyCode::KeyH, CTRL)),
+            keymap.chord(
+                &prefix,
+                &KeymapFixture::modified(KeyCode::KeyH, KeymapFixture::CTRL)
+            ),
             Some("select_pane_left".to_string())
         );
     }
@@ -848,9 +906,9 @@ mod tests {
     fn every_term_must_hold_and_a_negated_term_inverts() {
         let when = When::parse("chat && !chat.approval").unwrap();
         assert_eq!(when.specificity(), 2);
-        assert!(when.matches(&context(&["chat"])));
-        assert!(!when.matches(&context(&["chat", "chat.approval"])));
-        assert!(!when.matches(&context(&["chat.approval"])));
+        assert!(when.matches(&KeymapFixture::context(&["chat"])));
+        assert!(!when.matches(&KeymapFixture::context(&["chat", "chat.approval"])));
+        assert!(!when.matches(&KeymapFixture::context(&["chat.approval"])));
     }
 
     #[test]
@@ -860,23 +918,6 @@ mod tests {
         assert_eq!(When::parse("chat && "), None);
         assert_eq!(When::parse("!"), None);
     }
-
-    fn modified(key: KeyCode, modifiers: Modifiers) -> KeyCombo {
-        KeyCombo { key, modifiers }
-    }
-
-    const CTRL: Modifiers = Modifiers {
-        ctrl: true,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
-    const SHIFT: Modifiers = Modifiers {
-        ctrl: false,
-        shift: true,
-        alt: false,
-        super_key: false,
-    };
 
     #[test]
     fn web_code_round_trips_through_resolve_key() {
@@ -921,44 +962,69 @@ mod tests {
             "F12",
         ] {
             let key = ResolvedKey::parse(name).expect("table key resolves").key;
-            assert_eq!(combo(key).web_code(), name);
+            assert_eq!(KeymapFixture::combo(key).web_code(), name);
         }
     }
 
     #[test]
     fn only_strokes_a_page_cannot_decide_for_itself_are_claimable() {
-        assert_eq!(combo(KeyCode::KeyX).claimed("test"), None);
-        assert_eq!(combo(KeyCode::Space).claimed("test"), None);
-        assert_eq!(combo(KeyCode::Digit5).claimed("test"), None);
-        assert_eq!(modified(KeyCode::KeyX, SHIFT).claimed("test"), None);
+        assert_eq!(KeymapFixture::combo(KeyCode::KeyX).claimed("test"), None);
+        assert_eq!(KeymapFixture::combo(KeyCode::Space).claimed("test"), None);
+        assert_eq!(KeymapFixture::combo(KeyCode::Digit5).claimed("test"), None);
+        assert_eq!(
+            KeymapFixture::modified(KeyCode::KeyX, KeymapFixture::SHIFT).claimed("test"),
+            None
+        );
 
-        assert!(modified(KeyCode::KeyX, CTRL).claimed("test").is_some());
-        assert!(combo(KeyCode::Escape).claimed("test").is_some());
-        assert!(combo(KeyCode::Enter).claimed("test").is_some());
-        assert!(combo(KeyCode::ArrowUp).claimed("test").is_some());
-        assert!(combo(KeyCode::F5).claimed("test").is_some());
+        assert!(
+            KeymapFixture::modified(KeyCode::KeyX, KeymapFixture::CTRL)
+                .claimed("test")
+                .is_some()
+        );
+        assert!(
+            KeymapFixture::combo(KeyCode::Escape)
+                .claimed("test")
+                .is_some()
+        );
+        assert!(
+            KeymapFixture::combo(KeyCode::Enter)
+                .claimed("test")
+                .is_some()
+        );
+        assert!(
+            KeymapFixture::combo(KeyCode::ArrowUp)
+                .claimed("test")
+                .is_some()
+        );
+        assert!(KeymapFixture::combo(KeyCode::F5).claimed("test").is_some());
     }
 
     #[test]
     fn the_claimed_set_follows_the_context() {
         let mut keymap = Keymap::default();
-        keymap.register([STACK_CLOSE, PANE_CLOSE]);
+        keymap.register([KeymapFixture::STACK_CLOSE, KeymapFixture::PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [
                 Binding {
-                    shortcut: Shortcut::Direct(modified(KeyCode::KeyX, CTRL)),
-                    command: STACK_CLOSE.to_string(),
+                    shortcut: Shortcut::Direct(KeymapFixture::modified(
+                        KeyCode::KeyX,
+                        KeymapFixture::CTRL,
+                    )),
+                    command: KeymapFixture::STACK_CLOSE.to_string(),
                     when: None,
                 },
                 Binding {
-                    shortcut: Shortcut::Direct(combo(KeyCode::Escape)),
-                    command: PANE_CLOSE.to_string(),
+                    shortcut: Shortcut::Direct(KeymapFixture::combo(KeyCode::Escape)),
+                    command: KeymapFixture::PANE_CLOSE.to_string(),
                     when: When::parse("chat.selector"),
                 },
                 Binding {
-                    shortcut: Shortcut::Chord(modified(KeyCode::KeyG, CTRL), combo(KeyCode::KeyS)),
-                    command: PANE_CLOSE.to_string(),
+                    shortcut: Shortcut::Chord(
+                        KeymapFixture::modified(KeyCode::KeyG, KeymapFixture::CTRL),
+                        KeymapFixture::combo(KeyCode::KeyS),
+                    ),
+                    command: KeymapFixture::PANE_CLOSE.to_string(),
                     when: None,
                 },
             ],
@@ -978,7 +1044,7 @@ mod tests {
 
         assert_eq!(codes(KeyContext::NONE), vec!["KeyG", "KeyX"]);
         assert_eq!(
-            codes(&context(&["chat.selector"])),
+            codes(&KeymapFixture::context(&["chat.selector"])),
             vec!["Escape", "KeyG", "KeyX"]
         );
     }
@@ -989,7 +1055,10 @@ mod tests {
         keymap.extend(
             Source::Settings,
             [Binding {
-                shortcut: Shortcut::Direct(modified(KeyCode::KeyX, CTRL)),
+                shortcut: Shortcut::Direct(KeymapFixture::modified(
+                    KeyCode::KeyX,
+                    KeymapFixture::CTRL,
+                )),
                 command: "no_such_command".to_string(),
                 when: None,
             }],
@@ -1001,7 +1070,11 @@ mod tests {
     #[test]
     fn a_claim_matches_the_stroke_that_produced_it() {
         let claims = KeyClaimsUiState {
-            keys: vec![modified(KeyCode::KeyX, CTRL).claimed("test").unwrap()],
+            keys: vec![
+                KeymapFixture::modified(KeyCode::KeyX, KeymapFixture::CTRL)
+                    .claimed("test")
+                    .unwrap(),
+            ],
         };
         let stroke = |mods: KeyModifiers| vmux_api::input::KeyStroke {
             key: "x".to_string(),
@@ -1011,7 +1084,7 @@ mod tests {
             repeat: false,
         };
 
-        assert!(claims.contains(&stroke(KeyModifiers::from(CTRL))));
+        assert!(claims.contains(&stroke(KeyModifiers::from(KeymapFixture::CTRL))));
         assert!(!claims.contains(&stroke(KeyModifiers::default())));
         assert!(!claims.contains(&stroke(KeyModifiers {
             ctrl: true,
@@ -1020,47 +1093,32 @@ mod tests {
         })));
     }
 
-    fn space_keymap() -> Keymap {
-        let definitions = vec![
-            crate::CommandDefinition::new("space_next", "Next Space", "Layout > Space")
-                .hidden()
-                .direct_when("ArrowDown", Some("spaces"))
-                .direct_when("Ctrl+n", Some("spaces"))
-                .direct_when("Ctrl+j", Some("spaces")),
-            crate::CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
-                .hidden()
-                .direct_when("ArrowUp", Some("spaces"))
-                .direct_when("Ctrl+p", Some("spaces"))
-                .direct_when("Ctrl+k", Some("spaces")),
-            crate::CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
-                .hidden()
-                .direct_when("Enter", Some("spaces")),
-            crate::CommandDefinition::new(
-                "space_delete",
-                "Delete Selected Space",
-                "Layout > Space",
-            )
-            .hidden()
-            .direct_when("Delete", Some("spaces"))
-            .direct_when("Backspace", Some("spaces")),
-        ];
-        Keymap::defaults_with(&definitions)
-    }
-
     #[test]
     fn the_spaces_page_resolves_every_chord_it_hands_over() {
-        let keymap = space_keymap();
-        let on_spaces = context(&["spaces"]);
+        let keymap = KeymapFixture::space_keymap();
+        let on_spaces = KeymapFixture::context(&["spaces"]);
         let table = [
-            (combo(KeyCode::ArrowDown), "space_next"),
-            (modified(KeyCode::KeyN, CTRL), "space_next"),
-            (modified(KeyCode::KeyJ, CTRL), "space_next"),
-            (combo(KeyCode::ArrowUp), "space_previous"),
-            (modified(KeyCode::KeyP, CTRL), "space_previous"),
-            (modified(KeyCode::KeyK, CTRL), "space_previous"),
-            (combo(KeyCode::Enter), "space_attach"),
-            (combo(KeyCode::Delete), "space_delete"),
-            (combo(KeyCode::Backspace), "space_delete"),
+            (KeymapFixture::combo(KeyCode::ArrowDown), "space_next"),
+            (
+                KeymapFixture::modified(KeyCode::KeyN, KeymapFixture::CTRL),
+                "space_next",
+            ),
+            (
+                KeymapFixture::modified(KeyCode::KeyJ, KeymapFixture::CTRL),
+                "space_next",
+            ),
+            (KeymapFixture::combo(KeyCode::ArrowUp), "space_previous"),
+            (
+                KeymapFixture::modified(KeyCode::KeyP, KeymapFixture::CTRL),
+                "space_previous",
+            ),
+            (
+                KeymapFixture::modified(KeyCode::KeyK, KeymapFixture::CTRL),
+                "space_previous",
+            ),
+            (KeymapFixture::combo(KeyCode::Enter), "space_attach"),
+            (KeymapFixture::combo(KeyCode::Delete), "space_delete"),
+            (KeymapFixture::combo(KeyCode::Backspace), "space_delete"),
         ];
 
         for (pressed, expected) in table {
@@ -1085,14 +1143,14 @@ mod tests {
 
     #[test]
     fn a_spaces_chord_means_nothing_off_the_spaces_page() {
-        let keymap = space_keymap();
+        let keymap = KeymapFixture::space_keymap();
 
         for pressed in [
-            combo(KeyCode::Backspace),
-            combo(KeyCode::Delete),
-            combo(KeyCode::Enter),
-            combo(KeyCode::ArrowDown),
-            modified(KeyCode::KeyJ, CTRL),
+            KeymapFixture::combo(KeyCode::Backspace),
+            KeymapFixture::combo(KeyCode::Delete),
+            KeymapFixture::combo(KeyCode::Enter),
+            KeymapFixture::combo(KeyCode::ArrowDown),
+            KeymapFixture::modified(KeyCode::KeyJ, KeymapFixture::CTRL),
         ] {
             assert_eq!(
                 keymap.in_context(KeyContext::NONE).scoped(&pressed),

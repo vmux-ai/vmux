@@ -1,3 +1,4 @@
+use bevy::prelude::Commands;
 use bevy::prelude::*;
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_flex::prelude::*;
@@ -11,7 +12,6 @@ pub use panel::CommandBarPanelActive;
 
 mod completion;
 mod controller;
-mod controller_driver;
 mod palette;
 mod panel;
 mod work_snapshot;

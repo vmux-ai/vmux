@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::prelude::{Added, Commands};
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
