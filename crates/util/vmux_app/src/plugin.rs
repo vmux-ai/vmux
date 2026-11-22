@@ -12,7 +12,7 @@ pub enum VmuxPlugin {
     Account(vmux_account::AccountPlugin),
     #[plugin(feature = "account-local", desktop, requires(account))]
     AccountLocal(vmux_account::local::LocalPlugin),
-    #[plugin(feature = "release-flags", desktop, requires(ecs))]
+    #[plugin(feature = "release-flags", desktop, daemon, requires(ecs))]
     ReleaseFlags(crate::feature_flags::ReleaseFlagsPlugin),
     #[plugin(
         feature = "account-cloud",
@@ -24,7 +24,7 @@ pub enum VmuxPlugin {
     ProfileAccount(crate::profile_account::ProfileAccountPlugin),
     #[plugin(feature = "cli", cli, mcp, requires(ecs))]
     CliTools(crate::VmuxToolPlugin),
-    #[plugin(feature = "daemon", daemon, requires(ecs))]
+    #[plugin(feature = "daemon", daemon, requires(ecs, release_flags))]
     ServiceDaemon(crate::SessionHostRuntimePlugin),
     #[plugin(feature = "project", desktop, requires(ecs))]
     Project(vmux_project::ProjectPlugin),
@@ -380,6 +380,7 @@ mod account_tests {
     use bevy_app::Update;
     use bevy_ecs::prelude::*;
     use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
     use std::time::{SystemTime, UNIX_EPOCH};
     use vmux_feature::snapshot::Document;
 
@@ -411,7 +412,24 @@ mod account_tests {
         app.add_plugins(crate::feature_flags::FeatureFlagsPlugin);
         app.finish();
         app.cleanup();
-        app.world_mut().run_schedule(bevy_app::Startup);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            app.update();
+            let world = app.world_mut();
+            let ready = world
+                .query_filtered::<Entity, (
+                    With<vmux_feature::InstallationScope>,
+                    With<vmux_feature::flag::Context>,
+                )>()
+                .iter(world)
+                .next()
+                .is_some();
+            if ready {
+                break;
+            }
+            assert!(Instant::now() < deadline, "installation identity timed out");
+            std::thread::sleep(Duration::from_millis(2));
+        }
         let world = app.world_mut();
         let release = world
             .query_filtered::<&ChildOf, With<vmux_account::AccountCloudFlag>>()
@@ -430,22 +448,33 @@ mod account_tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
+        app.update();
         for (index, enabled) in [true, false].into_iter().enumerate() {
             for (provider, name, decision) in [
                 (release, environment.as_str(), enabled),
                 (other, "administration-only", !enabled),
             ] {
+                let generation = app
+                    .world()
+                    .get::<vmux_feature::Generation>(provider)
+                    .unwrap()
+                    .0;
                 app.world_mut().write_message(vmux_feature::Receive {
+                    receipt: None,
                     provider,
-                    generation: 0,
+                    generation,
                     document: Document {
                         schema_version: 1,
                         environment: name.into(),
                         revision: index as u64 + 1,
                         issued_at: now,
                         valid_until: now + 600,
-                        flags: BTreeMap::from([("account.cloud".into(), decision)]),
+                        flags: BTreeMap::from([(
+                            "account.cloud".into(),
+                            vmux_feature::flag::Configuration::boolean(decision),
+                        )]),
                     },
+                    source: vmux_feature::flag::Source::Cloud,
                 });
             }
             app.world_mut().run_schedule(Update);

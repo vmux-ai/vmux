@@ -1,3 +1,34 @@
+features-history-older = Загрузить более раннюю историю
+features-configuration = Конфигурация
+features-configuration-help = Измените значение, вариант, упорядоченные правила и поколение. Доля внедрения задаётся в диапазоне 0–10000.
+features-configuration-stage = Подготовить конфигурацию
+features-configuration-invalid = Конфигурация неверна или не соответствует объявленному типу.
+features-typed-unavailable = Этот endpoint поддерживает только логические флаги.
+features-authorization-unavailable = Авторизация управления флагами недоступна.
+
+features-assignments = Сохранённые назначения
+features-assignment-retire = Завершить назначения
+features-assignment-active = Активное поколение
+features-assignment-unavailable = В этом контексте нельзя завершить назначения.
+
+features-effective = Действующее значение
+features-reason = Причина
+features-variant = Вариант
+features-owner = Ответственный
+features-expiry = Срок удаления
+features-lifecycle = Жизненный цикл
+features-context = Контекст назначения
+features-snapshot = Ревизия снимка / срок действия
+features-retained = Сохранённая ревизия отключения
+features-override = Переопределение для разработки
+features-override-apply = Применить переопределение
+features-override-clear = Удалить переопределение
+features-override-unavailable = Переопределения недоступны в этом контексте.
+features-override-invalid = Введите корректный JSON, соответствующий объявленному типу флага.
+features-class = Класс
+features-type = Тип значения
+features-age = Возраст снимка (секунды)
+
 
 features-all = Все флаги
 features-boolean = Логическое значение

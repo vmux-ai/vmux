@@ -25,6 +25,14 @@ pub use sync_runtime::{
     SyncProjection, SyncedRevision, UseRemoteRequest,
 };
 
+#[cfg(feature = "cloud")]
+pub struct Feature;
+
+#[cfg(feature = "cloud")]
+impl vmux_feature::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("../feature.ron");
+}
+
 mod account;
 #[cfg(feature = "cloud")]
 mod availability;
@@ -39,6 +47,8 @@ pub mod local;
 
 #[cfg(feature = "cloud")]
 pub mod cloud;
+#[cfg(feature = "cloud")]
+pub mod control;
 
 #[cfg(feature = "cloud")]
 mod sync;

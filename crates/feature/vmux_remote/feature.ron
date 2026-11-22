@@ -1,0 +1,14 @@
+(
+    flags: [
+        (
+            key: "remote.live",
+            type: Boolean,
+            class: Release,
+            default: Boolean(true),
+            owner: "Vmux Remote",
+            expiry: Some("2027-06-01T00:00:00Z"),
+            lifecycle: Temporary,
+            offline: RetainOff,
+        ),
+    ],
+)

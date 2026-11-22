@@ -1,3 +1,34 @@
+features-history-older = Load older history
+features-configuration = Configuration
+features-configuration-help = Edit the typed value, variant, ordered rules and experiment generation. Rollout percent uses 0–10000.
+features-configuration-stage = Stage configuration
+features-configuration-invalid = The configuration is invalid or does not match the declared value type.
+features-typed-unavailable = This endpoint supports boolean flags only.
+features-authorization-unavailable = Flag administration authorization is unavailable.
+
+features-assignments = Stored assignments
+features-assignment-retire = Retire assignments
+features-assignment-active = Active generation
+features-assignment-unavailable = Assignment retirement is unavailable for this context.
+
+features-effective = Effective value
+features-reason = Reason
+features-variant = Variant
+features-owner = Owner
+features-expiry = Removal deadline
+features-lifecycle = Lifecycle
+features-context = Targeting context
+features-snapshot = Snapshot revision / valid until
+features-retained = Retained disable revision
+features-override = Development override
+features-override-apply = Apply override
+features-override-clear = Clear override
+features-override-unavailable = Overrides are unavailable for this context.
+features-override-invalid = Enter valid JSON matching the declared flag type.
+features-class = Class
+features-type = Value type
+features-age = Snapshot age (seconds)
+
 
 features-all = All flags
 features-boolean = Boolean

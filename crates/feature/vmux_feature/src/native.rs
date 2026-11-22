@@ -14,6 +14,9 @@ pub struct Endpoint {
     url: Url,
     pub(crate) environment: String,
     credential: Option<String>,
+    pub(crate) source: Option<(Entity, u64)>,
+    captured: Option<vmux_api::control::ControlToken>,
+    schema: u32,
 }
 
 impl Endpoint {
@@ -40,14 +43,42 @@ impl Endpoint {
             return Err("Invalid feature administration endpoint".into());
         }
         Ok(Self {
+            schema: if local { 1 } else { 2 },
+            source: None,
+            captured: None,
             url,
             environment: environment.into(),
             credential,
         })
     }
 
+    pub(crate) fn typed(&self) -> bool {
+        self.schema == 2
+    }
+
     pub(crate) fn writable(&self) -> bool {
-        self.credential.is_some()
+        self.credential.is_some() || self.source.is_some()
+    }
+
+    pub fn schema(mut self, schema: u32) -> Result<Self, String> {
+        if !matches!(schema, 1 | 2) {
+            return Err("unsupported administration schema".into());
+        }
+        self.schema = schema;
+        Ok(self)
+    }
+
+    pub(crate) fn capture(&self, credential: Option<&crate::http::Credential>) -> Self {
+        let mut endpoint = self.clone();
+        endpoint.captured = credential.map(|credential| credential.lease().token);
+        endpoint
+    }
+
+    fn path(&self, legacy: &str, operation: &str) -> String {
+        if self.schema == 1 {
+            return legacy.into();
+        }
+        format!("/v1/flag-environments/{}{}", self.environment, operation)
     }
 
     pub fn is_loopback(&self) -> bool {
@@ -59,6 +90,11 @@ impl Endpoint {
 
     pub(crate) fn fingerprint(&self) -> [u8; 32] {
         let mut digest = Sha256::new();
+        digest.update(self.schema.to_be_bytes());
+        if let Some((source, revision)) = self.source {
+            digest.update(source.to_bits().to_be_bytes());
+            digest.update(revision.to_be_bytes());
+        }
         for value in [
             self.url.as_str(),
             self.environment.as_str(),
@@ -85,7 +121,9 @@ impl Endpoint {
             .map_err(|error| error.to_string())?;
         let url = self.url.join(path).map_err(|error| error.to_string())?;
         let mut request = client.request(method, url);
-        if let Some(credential) = &self.credential {
+        if let Some(credential) = &self.captured {
+            request = request.bearer_auth(credential.as_str());
+        } else if let Some(credential) = &self.credential {
             request = request.bearer_auth(credential);
         }
         if let Some(body) = body {
@@ -104,7 +142,10 @@ impl Endpoint {
             return Err("Feature response exceeds 2 MiB".into());
         }
         if !status.is_success() {
-            let detail = String::from_utf8_lossy(&bytes);
+            let detail = match serde_json::from_slice::<administration::Refusal>(&bytes) {
+                Ok(refusal) => refusal.message,
+                Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
+            };
             return Err(format!(
                 "HTTP {status}: {}",
                 detail.chars().take(512).collect::<String>()
@@ -149,9 +190,11 @@ impl Job for Load {
     }
 
     fn run(self) -> Self::Output {
-        let bytes =
-            self.endpoint
-                .request(reqwest::Method::GET, "/v1/flags/administration", None)?;
+        let bytes = self.endpoint.request(
+            reqwest::Method::GET,
+            &self.endpoint.path("/v1/flags/administration", ""),
+            None,
+        )?;
         Snapshot::decode(&bytes, &self.endpoint.environment)
     }
 }
@@ -170,10 +213,40 @@ impl Job for Save {
     }
 
     fn run(self) -> Self::Output {
-        let body = serde_json::to_vec(&self.request).map_err(|error| error.to_string())?;
-        let bytes = self
-            .endpoint
-            .request(reqwest::Method::POST, "/v1/flags/draft", Some(body))?;
+        let body = if self.endpoint.schema == 1 {
+            let mut changes = std::collections::BTreeMap::new();
+            for (key, configuration) in &self.request.changes {
+                changes.insert(
+                    key.clone(),
+                    configuration
+                        .legacy_boolean()
+                        .ok_or("features-typed-unavailable")?,
+                );
+            }
+            serde_json::to_vec(&administration::Save {
+                operation_id: String::new(),
+                draft_id: self.request.draft_id.clone(),
+                expected_revision: self.request.expected_revision,
+                base_revision: self.request.base_revision,
+                changes,
+            })
+        } else {
+            serde_json::to_vec(&self.request)
+        }
+        .map_err(|error| error.to_string())?;
+        let path = self.endpoint.path(
+            "/v1/flags/draft",
+            &format!("/drafts/{}", self.request.draft_id),
+        );
+        let bytes = self.endpoint.request(
+            if self.endpoint.schema == 1 {
+                reqwest::Method::POST
+            } else {
+                reqwest::Method::PUT
+            },
+            &path,
+            Some(body),
+        )?;
         Snapshot::decode(&bytes, &self.endpoint.environment)
     }
 }
@@ -192,10 +265,16 @@ impl Job for Review {
     }
 
     fn run(self) -> Self::Output {
-        let body = serde_json::to_vec(&self.request).map_err(|error| error.to_string())?;
-        let bytes = self
-            .endpoint
-            .request(reqwest::Method::POST, "/v1/flags/review", Some(body))?;
+        let mut request = self.request;
+        if self.endpoint.schema == 1 {
+            request.operation_id.clear();
+        }
+        let body = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+        let bytes = self.endpoint.request(
+            reqwest::Method::POST,
+            &self.endpoint.path("/v1/flags/review", "/review"),
+            Some(body),
+        )?;
         Snapshot::decode(&bytes, &self.endpoint.environment)
     }
 }
@@ -215,9 +294,11 @@ impl Job for Publish {
 
     fn run(self) -> Self::Output {
         let body = serde_json::to_vec(&self.request).map_err(|error| error.to_string())?;
-        let bytes =
-            self.endpoint
-                .request(reqwest::Method::POST, "/v1/flags/publish", Some(body))?;
+        let bytes = self.endpoint.request(
+            reqwest::Method::POST,
+            &self.endpoint.path("/v1/flags/publish", "/publish"),
+            Some(body),
+        )?;
         Snapshot::decode(&bytes, &self.endpoint.environment)
     }
 }
@@ -236,10 +317,68 @@ impl Job for Discard {
     }
 
     fn run(self) -> Self::Output {
+        let mut request = self.request;
+        if self.endpoint.schema == 1 {
+            request.operation_id.clear();
+        }
+        let path = self.endpoint.path(
+            "/v1/flags/discard",
+            &format!("/drafts/{}", request.draft_id),
+        );
+        let body = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+        let bytes = self.endpoint.request(
+            if self.endpoint.schema == 1 {
+                reqwest::Method::POST
+            } else {
+                reqwest::Method::DELETE
+            },
+            &path,
+            Some(body),
+        )?;
+        Snapshot::decode(&bytes, &self.endpoint.environment)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct Audit {
+    pub endpoint: Endpoint,
+    pub request: administration::ListAudit,
+}
+
+impl Job for Audit {
+    type Output = Result<administration::AuditPage, String>;
+    fn lane(&self) -> vmux_ecs::blocking::Lane {
+        vmux_ecs::blocking::Lane::Long
+    }
+    fn run(self) -> Self::Output {
+        let mut path = self.endpoint.path("/v1/flags/audit", "/audit");
+        path.push_str(&format!("?limit={}", self.request.limit));
+        if let Some(before) = self.request.before {
+            path.push_str(&format!("&before={before}"));
+        }
+        let bytes = self.endpoint.request(reqwest::Method::GET, &path, None)?;
+        administration::AuditPage::decode(&bytes, &self.endpoint.environment, &self.request)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct Rollback {
+    pub endpoint: Endpoint,
+    pub request: administration::Rollback,
+}
+
+impl Job for Rollback {
+    type Output = Result<Snapshot, String>;
+    fn lane(&self) -> vmux_ecs::blocking::Lane {
+        vmux_ecs::blocking::Lane::Long
+    }
+    fn run(self) -> Self::Output {
         let body = serde_json::to_vec(&self.request).map_err(|error| error.to_string())?;
-        let bytes =
-            self.endpoint
-                .request(reqwest::Method::POST, "/v1/flags/discard", Some(body))?;
+        let bytes = self.endpoint.request(
+            reqwest::Method::POST,
+            &self.endpoint.path("/v1/flags/rollback", "/rollback"),
+            Some(body),
+        )?;
         Snapshot::decode(&bytes, &self.endpoint.environment)
     }
 }

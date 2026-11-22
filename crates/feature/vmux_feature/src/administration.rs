@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::flag::Configuration;
+use crate::snapshot::WireFlag;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -8,19 +10,22 @@ pub struct Capabilities {
     pub edit: bool,
     pub review: bool,
     pub publish: bool,
+    #[serde(default)]
+    pub audit: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Snapshot {
+#[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de>"))]
+pub struct Snapshot<F = Configuration> {
     pub schema_version: u32,
     pub environment: String,
     pub revision: u64,
     pub capabilities: Capabilities,
     #[serde(with = "serde_with::rust::maps_duplicate_key_is_error")]
-    pub flags: BTreeMap<String, bool>,
-    pub draft: Option<Draft>,
-    pub history: Vec<Publication>,
+    pub flags: BTreeMap<String, F>,
+    pub draft: Option<Draft<F>>,
+    pub history: Vec<Publication<F>>,
 }
 
 impl Snapshot {
@@ -28,8 +33,10 @@ impl Snapshot {
         if bytes.len() > 2 * 1024 * 1024 {
             return Err("administration response exceeds 2 MiB".into());
         }
-        let snapshot: Self = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-        if snapshot.schema_version != 1
+        let wire: Snapshot<WireFlag> =
+            serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        let snapshot = Self::try_from(wire)?;
+        if !matches!(snapshot.schema_version, 1 | 2)
             || snapshot.environment != environment
             || snapshot.revision == 0
             || snapshot.history.len() > 128
@@ -65,7 +72,6 @@ impl Snapshot {
                 || entry.draft_revision == 0
                 || entry.actor.is_empty()
                 || entry.actor.len() > 128
-                || entry.created_at == 0
                 || !Self::valid_values(&entry.flags)
             {
                 return Err("invalid administration history".into());
@@ -80,11 +86,11 @@ impl Snapshot {
         Ok(snapshot)
     }
 
-    fn valid_values(flags: &BTreeMap<String, bool>) -> bool {
+    fn valid_values(flags: &BTreeMap<String, Configuration>) -> bool {
         if flags.len() > 128 {
             return false;
         }
-        for key in flags.keys() {
+        for (key, configuration) in flags {
             if key.is_empty()
                 || key.len() > 128
                 || !key.bytes().all(|byte| {
@@ -93,25 +99,41 @@ impl Snapshot {
             {
                 return false;
             }
+            if configuration.validate().is_err() {
+                return false;
+            }
         }
         true
+    }
+
+    fn decode_values(
+        schema: u32,
+        values: BTreeMap<String, WireFlag>,
+    ) -> Result<BTreeMap<String, Configuration>, String> {
+        let mut result = BTreeMap::new();
+        for (key, value) in values {
+            result.insert(key, value.decode(schema)?);
+        }
+        Ok(result)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Draft {
+#[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de>"))]
+pub struct Draft<F = Configuration> {
     pub id: String,
     pub revision: u64,
     pub base_revision: u64,
     pub reviewed_revision: Option<u64>,
     #[serde(with = "serde_with::rust::maps_duplicate_key_is_error")]
-    pub flags: BTreeMap<String, bool>,
+    pub flags: BTreeMap<String, F>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Publication {
+#[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de>"))]
+pub struct Publication<F = Configuration> {
     pub operation_id: String,
     pub draft_id: String,
     pub draft_revision: u64,
@@ -119,19 +141,22 @@ pub struct Publication {
     pub actor: String,
     pub created_at: u64,
     #[serde(with = "serde_with::rust::maps_duplicate_key_is_error")]
-    pub flags: BTreeMap<String, bool>,
+    pub flags: BTreeMap<String, F>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Component))]
 #[cfg_attr(feature = "ecs", component(immutable))]
-pub struct Save {
+#[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de>"))]
+pub struct Save<F: Send + Sync + 'static = Configuration> {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub operation_id: String,
     pub draft_id: String,
     pub expected_revision: u64,
     pub base_revision: u64,
     #[serde(with = "serde_with::rust::maps_duplicate_key_is_error")]
-    pub changes: BTreeMap<String, bool>,
+    pub changes: BTreeMap<String, F>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +164,8 @@ pub struct Save {
 #[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Component))]
 #[cfg_attr(feature = "ecs", component(immutable))]
 pub struct Review {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub operation_id: String,
     pub draft_id: String,
     pub expected_revision: u64,
     pub base_revision: u64,
@@ -160,8 +187,134 @@ pub struct Publish {
 #[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Component))]
 #[cfg_attr(feature = "ecs", component(immutable))]
 pub struct Discard {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub operation_id: String,
     pub draft_id: String,
     pub expected_revision: u64,
+}
+
+impl TryFrom<Snapshot<WireFlag>> for Snapshot {
+    type Error = String;
+
+    fn try_from(wire: Snapshot<WireFlag>) -> Result<Self, Self::Error> {
+        let schema = wire.schema_version;
+        let flags = Self::decode_values(schema, wire.flags)?;
+        let draft = match wire.draft {
+            Some(draft) => Some(Draft {
+                id: draft.id,
+                revision: draft.revision,
+                base_revision: draft.base_revision,
+                reviewed_revision: draft.reviewed_revision,
+                flags: Self::decode_values(schema, draft.flags)?,
+            }),
+            None => None,
+        };
+        let mut history = Vec::new();
+        for publication in wire.history {
+            history.push(Publication {
+                operation_id: publication.operation_id,
+                draft_id: publication.draft_id,
+                draft_revision: publication.draft_revision,
+                revision: publication.revision,
+                actor: publication.actor,
+                created_at: publication.created_at,
+                flags: Self::decode_values(schema, publication.flags)?,
+            });
+        }
+        Ok(Self {
+            schema_version: schema,
+            environment: wire.environment,
+            revision: wire.revision,
+            capabilities: wire.capabilities,
+            flags,
+            draft,
+            history,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Component))]
+#[cfg_attr(feature = "ecs", component(immutable))]
+pub struct Rollback {
+    pub operation_id: String,
+    pub base_revision: u64,
+    pub target_revision: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Component))]
+#[cfg_attr(feature = "ecs", component(immutable))]
+pub struct ListAudit {
+    pub before: Option<u64>,
+    pub limit: u16,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditPage {
+    pub environment: String,
+    pub publications: Vec<Publication>,
+    pub next: Option<u64>,
+}
+
+impl AuditPage {
+    pub fn decode(bytes: &[u8], environment: &str, request: &ListAudit) -> Result<Self, String> {
+        if bytes.len() > 2 * 1024 * 1024 || request.limit == 0 || request.limit > 128 {
+            return Err("invalid audit response bounds".into());
+        }
+        let page: Self = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        if page.environment != environment || page.publications.len() > request.limit as usize {
+            return Err("invalid audit environment or page size".into());
+        }
+        let mut previous = request.before;
+        for entry in &page.publications {
+            if entry.revision == 0
+                || previous.is_some_and(|revision| entry.revision >= revision)
+                || entry.operation_id.is_empty()
+                || entry.operation_id.len() > 128
+                || entry.draft_id.is_empty()
+                || entry.draft_id.len() > 128
+                || entry.draft_revision == 0
+                || entry.actor.is_empty()
+                || entry.actor.len() > 128
+                || !Snapshot::valid_values(&entry.flags)
+            {
+                return Err("invalid audit publication".into());
+            }
+            previous = Some(entry.revision);
+        }
+        if let Some(next) = page.next
+            && (page.publications.len() != request.limit as usize
+                || page
+                    .publications
+                    .last()
+                    .is_none_or(|entry| entry.revision != next))
+        {
+            return Err("invalid audit continuation cursor".into());
+        }
+        Ok(page)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorKind {
+    Invalid,
+    Unauthenticated,
+    Forbidden,
+    Conflict,
+    NotFound,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Refusal {
+    pub kind: ErrorKind,
+    pub message: String,
 }
 
 #[cfg(test)]
@@ -193,5 +346,44 @@ mod tests {
             ]
         });
         assert!(Snapshot::decode(&serde_json::to_vec(&value).unwrap(), "development").is_err());
+    }
+
+    #[test]
+    fn audit_decode_rejects_foreign_reordered_or_inconsistent_cursor_pages() {
+        let request = ListAudit {
+            before: Some(10),
+            limit: 2,
+        };
+        let valid = serde_json::json!({"environment":"development","next":8,"publications":[
+            {"operation_id":"nine","draft_id":"nine","draft_revision":1,"revision":9,"actor":"operator","created_at":1,"flags":{}},
+            {"operation_id":"eight","draft_id":"eight","draft_revision":1,"revision":8,"actor":"operator","created_at":1,"flags":{}}
+        ]});
+        assert!(
+            AuditPage::decode(
+                &serde_json::to_vec(&valid).unwrap(),
+                "development",
+                &request
+            )
+            .is_ok()
+        );
+        for fault in 0..5 {
+            let mut value = valid.clone();
+            match fault {
+                0 => value["environment"] = serde_json::json!("foreign"),
+                1 => value["publications"][1]["revision"] = serde_json::json!(9),
+                2 => value["publications"][0]["revision"] = serde_json::json!(10),
+                3 => value["next"] = serde_json::json!(7),
+                4 => value["publications"][0]["actor"] = serde_json::json!(""),
+                _ => unreachable!(),
+            }
+            assert!(
+                AuditPage::decode(
+                    &serde_json::to_vec(&value).unwrap(),
+                    "development",
+                    &request
+                )
+                .is_err()
+            );
+        }
     }
 }

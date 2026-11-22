@@ -1,3 +1,34 @@
+features-history-older = Oudere geschiedenis laden
+features-configuration = Configuratie
+features-configuration-help = Bewerk waarde, variant, geordende regels en generatie. Het uitrolpercentage gebruikt 0–10000.
+features-configuration-stage = Configuratie klaarzetten
+features-configuration-invalid = De configuratie is ongeldig of past niet bij het gedeclareerde type.
+features-typed-unavailable = Dit endpoint ondersteunt alleen booleaanse vlaggen.
+features-authorization-unavailable = Autorisatie voor vlagbeheer is niet beschikbaar.
+
+features-assignments = Opgeslagen toewijzingen
+features-assignment-retire = Toewijzingen beëindigen
+features-assignment-active = Actieve generatie
+features-assignment-unavailable = Toewijzingen kunnen niet worden beëindigd in deze context.
+
+features-effective = Effectieve waarde
+features-reason = Reden
+features-variant = Variant
+features-owner = Verantwoordelijke
+features-expiry = Verwijderingsdeadline
+features-lifecycle = Levenscyclus
+features-context = Doelcontext
+features-snapshot = Snapshotrevisie / geldig tot
+features-retained = Bewaarde uitschakelrevisie
+features-override = Ontwikkelingsoverschrijving
+features-override-apply = Overschrijving toepassen
+features-override-clear = Overschrijving wissen
+features-override-unavailable = Overschrijvingen zijn niet beschikbaar in deze context.
+features-override-invalid = Voer geldige JSON in die past bij het gedeclareerde vlagtype.
+features-class = Klasse
+features-type = Waardetype
+features-age = Leeftijd van snapshot (seconden)
+
 
 features-all = Alle flags
 features-boolean = Booleaans

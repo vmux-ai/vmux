@@ -52,6 +52,8 @@ fn FeaturesSidebar(state: FeaturesUiState) -> Element {
             onclick:move |_| { let _=send(&FeatureSelectRequest {key:key.clone(),tab:"changes".into()}); } }
         ManagerSidebarItem { label:translate("features-history"),count:state.history.len(),selected:state.tab=="history",
             onclick:move |_| { let _=send(&FeatureSelectRequest {key:String::new(),tab:"history".into()}); } }
+        ManagerSidebarItem { label:translate("features-assignments"),count:state.assignments.len(),selected:state.tab=="assignments",
+            onclick:move |_| { let _=send(&FeatureSelectRequest {key:String::new(),tab:"assignments".into()}); } }
     }
 }
 
@@ -95,6 +97,20 @@ fn FeaturesBody(state: FeaturesUiState) -> Element {
         .iter()
         .find(|flag| flag.key == state.selected)
         .cloned();
+    let inspection_only: Vec<_> = state
+        .inspection
+        .iter()
+        .filter(|row| {
+            row.key.to_lowercase().contains(&query)
+                && !state.flags.iter().any(|flag| flag.key == row.key)
+        })
+        .cloned()
+        .collect();
+    let selected_inspection = state
+        .inspection
+        .iter()
+        .find(|row| row.key == state.selected)
+        .cloned();
     rsx! {
         div { class:"flex min-h-0 flex-1 flex-col",
             if !state.error.is_empty() {
@@ -102,13 +118,18 @@ fn FeaturesBody(state: FeaturesUiState) -> Element {
                     if state.error.starts_with("features-") { {translate(&state.error)} } else { "{state.error}" }
                 }
             }
+            if !state.override_error.is_empty() {
+                div { class:"px-5 py-3 text-xs text-ansi-1", role:"alert", {translate(&state.override_error)} }
+            }
             if !state.loaded {
                 ManagerList { ManagerSkeleton {} }
             } else if state.tab=="changes" {
                 FeaturesReview { state:state.clone() }
             } else if state.tab=="history" {
                 FeaturesHistory { state:state.clone() }
-            } else if visible.is_empty() {
+            } else if state.tab=="assignments" {
+                FeaturesAssignments { state:state.clone() }
+            } else if visible.is_empty() && inspection_only.is_empty() {
                 ManagerEmpty { title:translate("common-no-results"),detail:translate("features-empty") }
             } else {
                 div { class:"flex min-h-0 flex-1",
@@ -117,9 +138,18 @@ fn FeaturesBody(state: FeaturesUiState) -> Element {
                             for flag in visible {
                                 FeatureRow { key:"{flag.key}",selected:flag.key==state.selected,flag }
                             }
+                            for row in inspection_only {
+                                InspectionListRow { key:"{row.key}:{row.scope}", selected:row.key==state.selected, row }
+                            }
                         }
                     }
                     if let Some(flag)=selected { FeatureDetails { flag,state:state.clone() } }
+                    else if let Some(row)=selected_inspection {
+                        ManagerDetails { title:row.key.clone(),subtitle:translate("features-overview"),show_icon:false,icon:rsx! {},actions:rsx! {},
+                            onclose:move |_| { let _=send(&FeatureSelectRequest {key:String::new(),tab:"overview".into()}); },
+                            div { class:"flex flex-col gap-5 px-4 pb-5 text-xs", InspectionFields { row, environment:state.environment.clone(), can_override:state.can_override } }
+                        }
+                    }
                 }
                 if !state.draft_id.is_empty() { FeaturesActions { state:state.clone() } }
             }
@@ -131,9 +161,9 @@ fn FeaturesBody(state: FeaturesUiState) -> Element {
 fn FeatureRow(flag: FlagRow, selected: bool) -> Element {
     let key = flag.key.clone();
     rsx! {
-        ManagerRow { title:flag.key.clone(),subtitle:translate("features-boolean"),show_icon:false,icon:rsx! {},selected,
+        ManagerRow { title:flag.key.clone(),subtitle:flag.value_type.clone(),show_icon:false,icon:rsx! {},selected,
             meta:rsx! { div { class:"flex items-center gap-2 text-xs text-muted-foreground",
-                FeatureValue { value:flag.published }
+                ConfigurationValue { value:flag.published_configuration.clone() }
                 if flag.changed { span { {translate("features-draft")} } }
             } },
             actions:rsx! {},
@@ -145,23 +175,121 @@ fn FeatureRow(flag: FlagRow, selected: bool) -> Element {
 #[component]
 fn FeatureDetails(flag: FlagRow, state: FeaturesUiState) -> Element {
     let key = flag.key.clone();
+    let inspections: Vec<_> = state
+        .inspection
+        .iter()
+        .filter(|row| row.key == flag.key)
+        .cloned()
+        .collect();
     rsx! {
         ManagerDetails { title:flag.key.clone(),subtitle:translate("features-overview"),show_icon:false,icon:rsx! {},actions:rsx! {},
             onclose:move |_| { let _=send(&FeatureSelectRequest {key:String::new(),tab:"overview".into()}); },
             div { class:"flex flex-col gap-5 px-4 pb-5 text-xs",
-                FeatureField { label:translate("features-published"), FeatureValue {value:flag.published} }
+                FeatureField { label:translate("features-published"), ConfigurationValue {value:flag.published_configuration.clone()} }
                 FeatureField { label:translate("features-default"),
-                    if flag.default.is_some() {FeatureValue {value:flag.default}} else {{translate("features-not-declared")}}
+                    if !flag.default_value.is_empty() { code { "{flag.default_value}" } } else {{translate("features-not-declared")}}
                 }
                 FeatureField { label:translate("features-source"), {translate(if flag.source=="default" {"features-default"} else {"features-published"})} }
                 FeatureField { label:translate("features-draft"),
                     div { class:"flex items-center gap-3",
-                        Switch { checked:flag.proposed,disabled:state.busy || !state.can_edit,
+                        if flag.value_type=="Boolean" { Switch { checked:flag.proposed,disabled:state.busy || !state.can_edit,
                             on_checked_change:move |enabled| { let _=send(&DraftEditRequest {key:key.clone(),enabled}); }, SwitchThumb { attributes:vec![] } }
-                        FeatureValue {value:Some(flag.proposed)}
+                        FeatureValue {value:Some(flag.proposed)} }
                     }
                 }
+                ConfigurationEditor { flag:flag.clone(),allowed:state.can_edit && !state.busy }
                 p { class:"text-muted-foreground", {translate("features-draft-help")} }
+                for row in inspections {
+                    InspectionFields { key:"{row.scope}", row, environment:state.environment.clone(), can_override:state.can_override }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn InspectionListRow(row: InspectionRow, selected: bool) -> Element {
+    let key = row.key.clone();
+    rsx! {
+        ManagerRow { title:row.key.clone(),subtitle:row.value_type.clone(),show_icon:false,icon:rsx! {},selected,
+            meta:rsx! { code { class:"max-w-48 truncate text-xs text-muted-foreground", "{row.effective}" } },
+            actions:rsx! {}, onselect:move |_| { let _=send(&FeatureSelectRequest {key:key.clone(),tab:"overview".into()}); }
+        }
+    }
+}
+
+#[component]
+fn FeaturesAssignments(state: FeaturesUiState) -> Element {
+    rsx! {
+        ManagerList {
+            for row in state.assignments {
+                AssignmentListRow { key:"{row.key}:{row.generation}",row,environment:state.environment.clone(),allowed:state.can_override && !state.busy }
+            }
+        }
+    }
+}
+
+#[component]
+fn AssignmentListRow(row: AssignmentRow, environment: String, allowed: bool) -> Element {
+    rsx! {
+        ManagerRow {
+            title:row.key.clone(),subtitle:row.generation.clone(),show_icon:false,icon:rsx! {},
+            meta:rsx! { span { "{row.subjects}" } if row.active { span { {translate("features-assignment-active")} } } },
+            actions:rsx! { ManagerButton { disabled:row.active || !allowed,
+                onclick:move |_| { let _=send(&FeatureAssignmentRetireRequest {key:row.key.clone(),environment:environment.clone(),generation:row.generation.clone()}); },
+                {translate("features-assignment-retire")}
+            } }
+        }
+    }
+}
+
+#[component]
+fn InspectionFields(row: InspectionRow, environment: String, can_override: bool) -> Element {
+    let initial = if row.local_override.is_empty() {
+        row.default.clone()
+    } else {
+        row.local_override.clone()
+    };
+    let mut value = use_signal(move || initial);
+    let apply_key = row.key.clone();
+    let apply_environment = environment.clone();
+    let apply_scope = row.scope.clone();
+    let clear_key = row.key.clone();
+    let clear_scope = row.scope.clone();
+    let generation = row.context_generation;
+    rsx! {
+        FeatureField { label:translate("features-effective"), code { "{row.effective}" } }
+        FeatureField { label:translate("features-default"), code { "{row.default}" } }
+        FeatureField { label:translate("features-type"), "{row.value_type}" }
+        FeatureField { label:translate("features-class"), "{row.class}" }
+        FeatureField { label:translate("features-source"), "{row.source}" }
+        FeatureField { label:translate("features-reason"), "{row.reason}" }
+        FeatureField { label:translate("features-variant"), "{row.variant}" }
+        FeatureField { label:translate("features-owner"), "{row.owner}" }
+        FeatureField { label:translate("features-expiry"), "{row.expiry}" }
+        FeatureField { label:translate("features-lifecycle"), "{row.lifecycle}" }
+        FeatureField { label:translate("features-context"),
+            code { "{row.scope_kind}: {row.scope}" }
+            for attribute in row.context {
+                div { "{attribute.attribute}: ", code { "{attribute.value}" } }
+            }
+        }
+        FeatureField { label:translate("features-snapshot"),
+            code { "{row.snapshot_revision} / {row.valid_until}" }
+        }
+        FeatureField { label:translate("features-age"), "{row.snapshot_age}" }
+        FeatureField { label:translate("features-retained"), code { "{row.retained_revision}" } }
+        if can_override && !row.scope.is_empty() {
+            FeatureField { label:translate("features-override"),
+                textarea { class:"w-full rounded-md bg-muted p-2 font-mono text-xs", aria_label:translate("features-override"), value:"{value}", oninput:move |event| value.set(event.value()) }
+                div { class:"flex gap-2",
+                    ManagerButton { onclick:move |_| {
+                        let _=send(&FeatureOverrideRequest {key:apply_key.clone(),environment:apply_environment.clone(),scope:apply_scope.clone(),context_generation:generation,value:value()});
+                    }, {translate("features-override-apply")} }
+                    ManagerButton { onclick:move |_| {
+                        let _=send(&FeatureOverrideClearRequest {key:clear_key.clone(),environment:environment.clone(),scope:clear_scope.clone(),context_generation:generation});
+                    }, {translate("features-override-clear")} }
+                }
             }
         }
     }
@@ -175,6 +303,36 @@ fn FeatureField(label: String, children: Element) -> Element {
 #[component]
 fn FeatureValue(value: Option<bool>) -> Element {
     rsx! { span { {translate(match value {Some(true)=>"features-on",Some(false)=>"features-off",None=>"features-not-published"})} } }
+}
+
+#[component]
+fn ConfigurationValue(value: Option<String>) -> Element {
+    let boolean = value
+        .as_ref()
+        .and_then(|value| serde_json::from_str::<crate::flag::Configuration>(value).ok())
+        .and_then(|configuration| configuration.legacy_boolean());
+    rsx! {
+        if let Some(boolean)=boolean { FeatureValue { value:Some(boolean) } }
+        else if let Some(value)=value { code { class:"whitespace-pre-wrap break-words", "{value}" } }
+        else { span { {translate("features-not-published")} } }
+    }
+}
+
+#[component]
+fn ConfigurationEditor(flag: FlagRow, allowed: bool) -> Element {
+    let initial = flag.configuration.clone();
+    let mut configuration = use_signal(move || initial);
+    let key = flag.key.clone();
+    rsx! {
+        FeatureField { label:translate("features-configuration"),
+            textarea { class:"min-h-40 w-full rounded-md bg-muted p-2 font-mono text-xs", aria_label:translate("features-configuration"), value:"{configuration}", disabled:!allowed,
+                oninput:move |event| configuration.set(event.value()) }
+            p { class:"text-muted-foreground", {translate("features-configuration-help")} }
+            ManagerButton { disabled:!allowed,onclick:move |_| { let _=send(&DraftConfigurationEditRequest {key:key.clone(),configuration:configuration()}); },
+                {translate("features-configuration-stage")}
+            }
+        }
+    }
 }
 
 #[component]
@@ -208,7 +366,7 @@ fn FeaturesReview(state: FeaturesUiState) -> Element {
                     ManagerList {
                         for flag in changes {
                             ManagerRow {key:"{flag.key}",title:flag.key,subtitle:String::new(),show_icon:false,icon:rsx! {},actions:rsx! {},
-                                meta:rsx! {div {class:"flex items-center gap-3 text-xs",FeatureValue {value:flag.published} span {"→"} FeatureValue {value:Some(flag.proposed)}}} }
+                                meta:rsx! {div {class:"flex items-center gap-3 text-xs",ConfigurationValue {value:flag.published_configuration} span {"→"} ConfigurationValue {value:Some(flag.configuration)}}} }
                         }
                     }
                 }
@@ -333,6 +491,10 @@ mod tests {
             flags: vec![
                 FlagRow {
                     key: "visible.flag".into(),
+                    published_configuration: Some(
+                        crate::flag::Configuration::boolean(false).encode(),
+                    ),
+                    configuration: crate::flag::Configuration::boolean(true).encode(),
                     published: Some(false),
                     proposed: true,
                     changed: true,
@@ -340,6 +502,10 @@ mod tests {
                 },
                 FlagRow {
                     key: "other.flag".into(),
+                    published_configuration: Some(
+                        crate::flag::Configuration::boolean(true).encode(),
+                    ),
+                    configuration: crate::flag::Configuration::boolean(false).encode(),
                     published: Some(true),
                     proposed: false,
                     changed: true,
@@ -369,15 +535,23 @@ fn FeaturesHistory(state: FeaturesUiState) -> Element {
                             let revision_text=revision.to_string();
                             let title=translate_with("features-revision",&[("revision",TranslationValue::String(&revision_text))]);
                             let count=translate_with("features-history-changes",&[("count",TranslationValue::Number(entry.changes.len() as i64))]);
-                            let timestamp=i64::try_from(entry.created_at).ok().and_then(|seconds| chrono::DateTime::from_timestamp(seconds,0));
+                            let timestamp=if entry.created_at==0 {None} else {i64::try_from(entry.created_at).ok().and_then(|seconds| chrono::DateTime::from_timestamp(seconds,0))};
                             let timestamp=timestamp.map(|date| date.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_else(|| "—".into());
                             let subtitle=format!("{} · {}",entry.actor,timestamp);
                             rsx! {ManagerRow {key:"{revision}",title,subtitle,show_icon:false,icon:rsx! {},
                                 meta:rsx! {span {class:"text-xs text-muted-foreground","{count}"}},
-                                actions:rsx! {ManagerButton {variant:ManagerButtonVariant::Secondary,disabled:state.busy || !state.can_edit || !state.draft_id.is_empty() || revision==state.revision,
+                                actions:rsx! {ManagerButton {variant:ManagerButtonVariant::Secondary,disabled:state.busy || !state.can_rollback || !state.draft_id.is_empty() || revision==state.revision,
                                     onclick:move |_| {let _=send(&FlagRollbackRequest {revision});}, {translate("features-rollback")} }} }
                             }
                         }
+                    }
+                }
+            }
+            if let Some(before) = state.audit_before {
+                div { class:"p-4",
+                    ManagerButton { disabled:state.busy || !state.can_audit,
+                        onclick:move |_| { let _=send(&FlagAuditRequest {before}); },
+                        {translate("features-history-older")}
                     }
                 }
             }

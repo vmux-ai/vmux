@@ -1,3 +1,34 @@
+features-history-older = 古い履歴を読み込む
+features-configuration = 設定内容
+features-configuration-help = 型付きの値、バリアント、順序付きルール、実験の世代を編集します。rollout percent は 0–10000 です。
+features-configuration-stage = 下書きに反映
+features-configuration-invalid = 設定が無効か、宣言された値の型と一致しません。
+features-typed-unavailable = この endpoint は boolean フラグのみ対応しています。
+features-authorization-unavailable = フラグ管理の認可を利用できません。
+
+features-assignments = 保存済みの割り当て
+features-assignment-retire = 割り当てを終了
+features-assignment-active = 使用中の世代
+features-assignment-unavailable = このコンテキストでは割り当てを終了できません。
+
+features-effective = 実効値
+features-reason = 評価理由
+features-variant = バリアント
+features-owner = 担当
+features-expiry = 削除期限
+features-lifecycle = ライフサイクル
+features-context = 評価コンテキスト
+features-snapshot = スナップショットのリビジョン / 有効期限
+features-retained = 保持した無効化のリビジョン
+features-override = 開発用 override
+features-override-apply = override を適用
+features-override-clear = override を解除
+features-override-unavailable = このコンテキストでは override を使用できません。
+features-override-invalid = 宣言されたフラグの型に合う JSON を入力してください。
+features-class = 分類
+features-type = 値の型
+features-age = スナップショットの経過秒数
+
 
 features-all = すべてのフラグ
 features-boolean = 真偽値

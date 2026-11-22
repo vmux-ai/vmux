@@ -27,6 +27,7 @@ use crate::registry::RegistryPlugin;
 
 #[derive(Clone, Deserialize)]
 #[cfg_attr(feature = "ecs", derive(Component))]
+#[cfg_attr(feature = "ecs", component(immutable))]
 #[serde(deny_unknown_fields)]
 pub struct FeatureManifest {
     #[serde(default)]
@@ -66,6 +67,15 @@ pub struct FeatureManifest {
 }
 
 impl FeatureManifest {
+    pub fn flag(&self, key: &str) -> Option<(usize, &crate::flag::Declaration)> {
+        for (index, declaration) in self.flags.iter().enumerate() {
+            if declaration.key == key {
+                return Some((index, declaration));
+            }
+        }
+        None
+    }
+
     pub fn of<M: FeatureManifestSource>() -> &'static Self {
         static PARSED: OnceLock<Mutex<HashMap<TypeId, &'static OnceLock<FeatureManifest>>>> =
             OnceLock::new();

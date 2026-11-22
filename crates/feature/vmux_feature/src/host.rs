@@ -12,6 +12,7 @@ use vmux_ecs::{
 };
 
 use crate::administration::{Capabilities, Publication, Snapshot};
+use crate::flag::{Configuration, Value};
 use crate::native::{self, Endpoint};
 use crate::state::*;
 
@@ -19,13 +20,20 @@ pub(crate) struct FeatureHostPlugin;
 
 impl Plugin for FeatureHostPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::FeaturePlugin>() {
+            app.add_plugins(crate::FeaturePlugin);
+        }
         app.add_plugins((
+            crate::inspection::InspectionPlugin,
+            crate::access::AdministrationAccessPlugin,
             JobPlugin::<native::Inspect>::default(),
             JobPlugin::<native::Load>::default(),
             JobPlugin::<native::Save>::default(),
             JobPlugin::<native::Review>::default(),
             JobPlugin::<native::Publish>::default(),
             JobPlugin::<native::Discard>::default(),
+            JobPlugin::<native::Audit>::default(),
+            JobPlugin::<native::Rollback>::default(),
             UiStatePlugin::<FeaturesUiState>::default(),
             UiEventPlugin::<(
                 FeaturesOpenRequest,
@@ -39,21 +47,27 @@ impl Plugin for FeatureHostPlugin {
                 DraftPublishRequest,
                 DraftDiscardRequest,
                 FlagRollbackRequest,
+                FlagAuditRequest,
             )>::default(),
         ))
+        .add_plugins(UiEventPlugin::<(DraftConfigurationEditRequest,)>::default())
         .add_message::<Received>()
         .add_message::<ReadRequested>()
+        .add_message::<AuditReceived>()
         .add_systems(Update, load.before(JobSet::Submit))
         .add_observer(page_ready)
         .add_observer(open)
         .add_observer(filter)
         .add_observer(select)
         .add_observer(edit)
+        .add_observer(configure)
         .add_observer(save)
         .add_observer(review)
         .add_observer(publish)
         .add_observer(discard)
         .add_observer(rollback)
+        .add_observer(restore)
+        .add_observer(audit)
         .add_systems(
             Update,
             (
@@ -63,7 +77,10 @@ impl Plugin for FeatureHostPlugin {
                 receive::<native::Review>,
                 receive::<native::Publish>,
                 receive::<native::Discard>,
+                receive::<native::Rollback>,
+                receive_audit,
                 adopt,
+                adopt_audit,
                 emit,
             )
                 .chain()
@@ -83,6 +100,7 @@ struct Context {
     capabilities: Capabilities,
     pending: Option<Entity>,
     error: String,
+    audit_before: Option<u64>,
 }
 
 #[derive(Component, Default)]
@@ -94,9 +112,9 @@ struct Selection {
 
 #[derive(Component)]
 struct Flag {
-    published: Option<bool>,
-    desired: bool,
-    saved: bool,
+    published: Option<Configuration>,
+    desired: Configuration,
+    saved: Configuration,
     persisted: bool,
     staged: bool,
 }
@@ -165,6 +183,22 @@ impl crate::administration::Discard {
     }
 }
 
+impl crate::administration::Rollback {
+    fn matches(&self, snapshot: &Snapshot) -> bool {
+        snapshot.revision == self.base_revision.saturating_add(1)
+            && snapshot.history.iter().any(|entry| {
+                entry.operation_id == self.operation_id && entry.revision == snapshot.revision
+            })
+    }
+}
+
+#[derive(Component)]
+struct RollbackAttempt {
+    endpoint: Entity,
+    configuration: [u8; 32],
+    request: crate::administration::Rollback,
+}
+
 #[derive(Component)]
 struct History(Publication);
 
@@ -219,6 +253,7 @@ fn load(
     mut contexts: Query<&mut Context>,
     endpoints: Query<&Endpoint>,
     owned: OwnedPageValues,
+    access: crate::access::Access,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -234,6 +269,15 @@ fn load(
         let Ok(endpoint) = endpoints.get(request.endpoint) else {
             continue;
         };
+        let captured = match access.capture(request.endpoint, endpoint) {
+            Ok(captured) => captured,
+            Err(error) => {
+                context.loaded = true;
+                context.error = error;
+                context.capabilities = Capabilities::default();
+                continue;
+            }
+        };
         if !context.loaded || context.configuration != endpoint.fingerprint() {
             for (entity, owner) in &owned {
                 if owner.parent() == request.page {
@@ -243,6 +287,7 @@ fn load(
             context.loaded = false;
             context.revision = 0;
             context.capabilities = Capabilities::default();
+            context.audit_before = None;
         }
         context.configuration = endpoint.fingerprint();
         context.environment = endpoint.environment.clone();
@@ -250,15 +295,13 @@ fn load(
             .spawn(Pending::read(request.page, request.endpoint, &context))
             .id();
         if endpoint.writable() {
-            commands.entity(operation).insert(JobRequest(native::Load {
-                endpoint: endpoint.clone(),
-            }));
+            commands
+                .entity(operation)
+                .insert(JobRequest(native::Load { endpoint: captured }));
         } else {
             commands
                 .entity(operation)
-                .insert(JobRequest(native::Inspect {
-                    endpoint: endpoint.clone(),
-                }));
+                .insert(JobRequest(native::Inspect { endpoint: captured }));
         }
         context.pending = Some(operation);
         context.error.clear();
@@ -296,6 +339,7 @@ type RequestData<'w, 's> = Query<
         Option<&'static crate::administration::Review>,
         Option<&'static crate::administration::Publish>,
         Option<&'static crate::administration::Discard>,
+        Option<&'static crate::administration::Rollback>,
     ),
 >;
 type Completions<'w, 's, J> = Query<
@@ -314,7 +358,7 @@ type OwnedPageValues<'w, 's> =
 
 impl Requested<'_, '_> {
     fn matches(&self, operation: Entity, snapshot: &Snapshot) -> bool {
-        let Ok((save, review, publish, discard)) = self.requests.get(operation) else {
+        let Ok((save, review, publish, discard, rollback)) = self.requests.get(operation) else {
             return false;
         };
         if let Some(request) = save {
@@ -327,6 +371,9 @@ impl Requested<'_, '_> {
             return request.matches(snapshot);
         }
         if let Some(request) = discard {
+            return request.matches(snapshot);
+        }
+        if let Some(request) = rollback {
             return request.matches(snapshot);
         }
         false
@@ -343,15 +390,26 @@ struct Received {
     snapshot: Snapshot,
 }
 
+#[derive(Message)]
+struct AuditReceived {
+    page: Entity,
+    endpoint: Entity,
+    generation: u64,
+    configuration: [u8; 32],
+    before: u64,
+    snapshot: crate::administration::AuditPage,
+}
+
 #[derive(SystemParam)]
 struct Declarations<'w, 's> {
     endpoints: Query<'w, 's, &'static Endpoint>,
     definitions: Query<'w, 's, (&'static Name, &'static crate::Definition, &'static ChildOf)>,
     providers: Query<'w, 's, &'static Name, With<crate::Provider>>,
+    sources: Query<'w, 's, &'static crate::manifest::FeatureManifest>,
 }
 
 impl Declarations<'_, '_> {
-    fn defaults(&self, environment: &str) -> BTreeMap<String, bool> {
+    fn defaults(&self, environment: &str) -> BTreeMap<String, Configuration> {
         let mut values = BTreeMap::new();
         for (name, definition, owner) in &self.definitions {
             if self
@@ -359,7 +417,16 @@ impl Declarations<'_, '_> {
                 .get(owner.parent())
                 .is_ok_and(|name| name.as_str() == environment)
             {
-                values.insert(name.as_str().to_string(), definition.default);
+                let Ok(source) = self.sources.get(definition.source) else {
+                    continue;
+                };
+                let Some(declaration) = source.flags.get(definition.index) else {
+                    continue;
+                };
+                values.insert(
+                    name.as_str().to_string(),
+                    Configuration::constant(declaration.default.clone()),
+                );
             }
         }
         values
@@ -392,6 +459,7 @@ fn page_ready(
     let mut context = Context::default();
     if let Some((entity, endpoint)) = endpoint {
         context.endpoint = Some(entity);
+        context.environment = endpoint.environment.clone();
         commands.write_message(ReadRequested {
             page,
             endpoint: entity,
@@ -403,7 +471,7 @@ fn page_ready(
                 ChildOf(page),
                 Flag {
                     published: None,
-                    desired: value,
+                    desired: value.clone(),
                     saved: value,
                     persisted: false,
                     staged: false,
@@ -425,6 +493,28 @@ fn page_ready(
 impl Context {
     fn matches(&self, endpoint: &Endpoint) -> bool {
         self.configuration == endpoint.fingerprint()
+    }
+    fn can_rollback(&self, endpoint: &Endpoint) -> bool {
+        if endpoint.typed() {
+            self.capabilities.publish
+        } else {
+            self.capabilities.edit
+        }
+    }
+    fn read_snapshot_metadata(&mut self, snapshot: &Snapshot, endpoint: Option<&Endpoint>) {
+        self.revision = snapshot.revision;
+        self.loaded = true;
+        self.capabilities = snapshot.capabilities.clone();
+        self.error.clear();
+        self.audit_before = None;
+        if snapshot.capabilities.audit
+            && snapshot.history.len() == 128
+            && endpoint.is_some_and(Endpoint::typed)
+            && let Some(first) = snapshot.history.first()
+            && first.revision > 1
+        {
+            self.audit_before = Some(first.revision);
+        }
     }
 }
 
@@ -487,7 +577,10 @@ fn filter(trigger: On<UiInput<FeaturesFilterRequest>>, mut selections: Query<&mu
 fn select(trigger: On<UiInput<FeatureSelectRequest>>, mut selections: Query<&mut Selection>) {
     if let Ok(mut selection) = selections.get_mut(trigger.event().webview) {
         let request = &trigger.event().payload;
-        if matches!(request.tab.as_str(), "overview" | "changes" | "history") {
+        if matches!(
+            request.tab.as_str(),
+            "overview" | "changes" | "history" | "assignments"
+        ) {
             selection.tab = request.tab.clone();
         }
         selection.key = request.key.clone();
@@ -512,7 +605,7 @@ fn edit(
     let request = &trigger.event().payload;
     for (name, owner, mut flag) in &mut flags {
         if owner.parent() == page && name.as_str() == request.key {
-            flag.desired = request.enabled;
+            flag.desired.value = Value::Boolean(request.enabled);
             flag.staged = true;
             if !drafts.iter().any(|owner| owner.parent() == page) {
                 commands.spawn(Draft::local(page, context.revision));
@@ -522,13 +615,12 @@ fn edit(
     }
 }
 
-fn save(
-    trigger: On<UiInput<DraftSaveRequest>>,
+fn configure(
+    trigger: On<UiInput<DraftConfigurationEditRequest>>,
     mut contexts: Query<&mut Context>,
-    endpoints: Query<&Endpoint>,
-    drafts: Query<(&Name, &Revision, &ChildOf, &Draft)>,
-    flags: Query<(&Name, &ChildOf, &Flag)>,
     attempts: Query<&PublicationAttempt>,
+    mut flags: Query<(&Name, &ChildOf, &mut Flag)>,
+    drafts: Query<&ChildOf, With<Draft>>,
     mut commands: Commands,
 ) {
     let page = trigger.event().webview;
@@ -536,6 +628,52 @@ fn save(
         return;
     };
     if !context.capabilities.edit || context.pending.is_some() || attempts.contains(page) {
+        return;
+    }
+    let request = &trigger.event().payload;
+    if request.configuration.len() > 65536 {
+        context.error = "features-configuration-invalid".into();
+        return;
+    }
+    let proposed = match serde_json::from_str::<Configuration>(&request.configuration) {
+        Ok(proposed) if proposed.validate().is_ok() => proposed,
+        _ => {
+            context.error = "features-configuration-invalid".into();
+            return;
+        }
+    };
+    for (name, parent, mut flag) in &mut flags {
+        if parent.parent() != page || name.as_str() != request.key {
+            continue;
+        }
+        if flag.desired.value.value_type() != proposed.value.value_type() {
+            context.error = "features-configuration-invalid".into();
+            return;
+        }
+        flag.desired = proposed;
+        flag.staged = true;
+        context.error.clear();
+        if !drafts.iter().any(|parent| parent.parent() == page) {
+            commands.spawn(Draft::local(page, context.revision));
+        }
+        break;
+    }
+}
+
+fn save(
+    trigger: On<UiInput<DraftSaveRequest>>,
+    mut contexts: Query<(&mut Context, Has<PublicationAttempt>)>,
+    endpoints: Query<&Endpoint>,
+    drafts: Query<(&Name, &Revision, &ChildOf, &Draft)>,
+    flags: Query<(&Name, &ChildOf, &Flag)>,
+    mut commands: Commands,
+    access: crate::access::Access,
+) {
+    let page = trigger.event().webview;
+    let Ok((mut context, attempted)) = contexts.get_mut(page) else {
+        return;
+    };
+    if !context.capabilities.edit || context.pending.is_some() || attempted {
         return;
     }
     let Some((name, revision, _, draft)) = drafts
@@ -556,16 +694,24 @@ fn save(
     if !context.matches(endpoint) {
         return;
     }
+    let captured = match access.capture(context.endpoint.unwrap(), endpoint) {
+        Ok(captured) => captured,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
     let mut changes = BTreeMap::new();
     for (name, owner, flag) in &flags {
         if owner.parent() == page && flag.unsaved() {
-            changes.insert(name.as_str().to_string(), flag.desired);
+            changes.insert(name.as_str().to_string(), flag.desired.clone());
         }
     }
     if changes.is_empty() {
         return;
     }
     let request = crate::administration::Save {
+        operation_id: uuid::Uuid::new_v4().to_string(),
         draft_id: name.as_str().into(),
         expected_revision: revision.0,
         base_revision: draft.base,
@@ -575,7 +721,7 @@ fn save(
         .spawn((
             Pending::write(page, &context),
             JobRequest(native::Save {
-                endpoint: endpoint.clone(),
+                endpoint: captured,
                 request: request.clone(),
             }),
         ))
@@ -587,20 +733,20 @@ fn save(
 
 fn review(
     trigger: On<UiInput<DraftReviewRequest>>,
-    mut contexts: Query<&mut Context>,
+    mut contexts: Query<(&mut Context, Has<PublicationAttempt>)>,
     endpoints: Query<&Endpoint>,
     drafts: Query<(&Name, &Revision, &ChildOf, &Draft)>,
     flags: Query<(&ChildOf, &Flag)>,
-    attempts: Query<&PublicationAttempt>,
     mut commands: Commands,
+    access: crate::access::Access,
 ) {
     let page = trigger.event().webview;
-    let Ok(mut context) = contexts.get_mut(page) else {
+    let Ok((mut context, attempted)) = contexts.get_mut(page) else {
         return;
     };
     if !context.capabilities.review
         || context.pending.is_some()
-        || attempts.contains(page)
+        || attempted
         || flags
             .iter()
             .any(|(owner, flag)| owner.parent() == page && flag.unsaved())
@@ -629,7 +775,15 @@ fn review(
     if !context.matches(endpoint) {
         return;
     }
+    let captured = match access.capture(context.endpoint.unwrap(), endpoint) {
+        Ok(captured) => captured,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
     let request = crate::administration::Review {
+        operation_id: uuid::Uuid::new_v4().to_string(),
         draft_id: request.draft_id.clone(),
         expected_revision: request.expected_revision,
         base_revision: request.base_revision,
@@ -638,7 +792,7 @@ fn review(
         .spawn((
             Pending::write(page, &context),
             JobRequest(native::Review {
-                endpoint: endpoint.clone(),
+                endpoint: captured,
                 request: request.clone(),
             }),
         ))
@@ -650,15 +804,15 @@ fn review(
 
 fn publish(
     trigger: On<UiInput<DraftPublishRequest>>,
-    mut contexts: Query<&mut Context>,
+    mut contexts: Query<(&mut Context, Option<&PublicationAttempt>)>,
     endpoints: Query<&Endpoint>,
     drafts: Query<(&Name, &Revision, &ChildOf, &Draft)>,
     flags: Query<(&ChildOf, &Flag)>,
-    attempts: Query<&PublicationAttempt>,
     mut commands: Commands,
+    access: crate::access::Access,
 ) {
     let page = trigger.event().webview;
-    let Ok(mut context) = contexts.get_mut(page) else {
+    let Ok((mut context, attempt)) = contexts.get_mut(page) else {
         return;
     };
     if !context.capabilities.publish
@@ -693,19 +847,26 @@ fn publish(
     if !context.matches(endpoint) {
         return;
     }
-    let publication = match attempts.get(page) {
-        Ok(attempt)
+    let captured = match access.capture(context.endpoint.unwrap(), endpoint) {
+        Ok(captured) => captured,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
+    let publication = match attempt {
+        Some(attempt)
             if attempt.0.draft_id == request.draft_id
                 && attempt.0.expected_revision == request.expected_revision
                 && attempt.0.base_revision == request.base_revision =>
         {
             attempt.0.clone()
         }
-        Ok(_) => {
+        Some(_) => {
             context.error = "features-publication-pending".into();
             return;
         }
-        Err(_) => crate::administration::Publish {
+        None => crate::administration::Publish {
             operation_id: uuid::Uuid::new_v4().to_string(),
             draft_id: request.draft_id.clone(),
             expected_revision: request.expected_revision,
@@ -719,7 +880,7 @@ fn publish(
         .spawn((
             Pending::write(page, &context),
             JobRequest(native::Publish {
-                endpoint: endpoint.clone(),
+                endpoint: captured,
                 request: publication.clone(),
             }),
         ))
@@ -731,18 +892,18 @@ fn publish(
 
 fn discard(
     trigger: On<UiInput<DraftDiscardRequest>>,
-    mut contexts: Query<&mut Context>,
+    mut contexts: Query<(&mut Context, Has<PublicationAttempt>)>,
     endpoints: Query<&Endpoint>,
     drafts: Query<(Entity, &Name, &Revision, &ChildOf), With<Draft>>,
     mut flags: Query<(&ChildOf, &mut Flag)>,
-    attempts: Query<&PublicationAttempt>,
     mut commands: Commands,
+    access: crate::access::Access,
 ) {
     let page = trigger.event().webview;
-    let Ok(mut context) = contexts.get_mut(page) else {
+    let Ok((mut context, attempted)) = contexts.get_mut(page) else {
         return;
     };
-    if !context.capabilities.edit || context.pending.is_some() || attempts.contains(page) {
+    if !context.capabilities.edit || context.pending.is_some() || attempted {
         return;
     }
     let request = &trigger.event().payload;
@@ -758,7 +919,7 @@ fn discard(
     if revision.0 == 0 {
         for (owner, mut flag) in &mut flags {
             if owner.parent() == page {
-                flag.desired = flag.saved;
+                flag.desired = flag.saved.clone();
                 flag.staged = false;
             }
         }
@@ -774,7 +935,15 @@ fn discard(
     if !context.matches(endpoint) {
         return;
     }
+    let captured = match access.capture(context.endpoint.unwrap(), endpoint) {
+        Ok(captured) => captured,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
     let request = crate::administration::Discard {
+        operation_id: uuid::Uuid::new_v4().to_string(),
         draft_id: request.draft_id.clone(),
         expected_revision: request.expected_revision,
     };
@@ -782,7 +951,7 @@ fn discard(
         .spawn((
             Pending::write(page, &context),
             JobRequest(native::Discard {
-                endpoint: endpoint.clone(),
+                endpoint: captured,
                 request: request.clone(),
             }),
         ))
@@ -794,20 +963,27 @@ fn discard(
 
 fn rollback(
     trigger: On<UiInput<FlagRollbackRequest>>,
-    contexts: Query<&Context>,
+    contexts: Query<(&Context, Has<PublicationAttempt>)>,
+    endpoints: Query<&Endpoint>,
     history: Query<(&ChildOf, &History)>,
     mut flags: Query<(&Name, &ChildOf, &mut Flag)>,
     drafts: Query<&ChildOf, With<Draft>>,
-    attempts: Query<&PublicationAttempt>,
     mut commands: Commands,
 ) {
     let page = trigger.event().webview;
-    let Ok(context) = contexts.get(page) else {
+    let Ok((context, attempted)) = contexts.get(page) else {
         return;
     };
+    if context
+        .endpoint
+        .and_then(|endpoint| endpoints.get(endpoint).ok())
+        .is_some_and(Endpoint::typed)
+    {
+        return;
+    }
     if !context.capabilities.edit
         || context.pending.is_some()
-        || attempts.contains(page)
+        || attempted
         || drafts.iter().any(|owner| owner.parent() == page)
     {
         return;
@@ -821,11 +997,87 @@ fn rollback(
         if owner.parent() == page
             && let Some(value) = history.0.flags.get(name.as_str())
         {
-            flag.desired = *value;
+            flag.desired = value.clone();
             flag.staged = true;
         }
     }
     commands.spawn(Draft::local(page, context.revision));
+}
+
+fn restore(
+    trigger: On<UiInput<FlagRollbackRequest>>,
+    mut contexts: Query<(&mut Context, Option<&RollbackAttempt>)>,
+    endpoints: Query<&Endpoint>,
+    history: Query<(&ChildOf, &History)>,
+    drafts: Query<&ChildOf, With<Draft>>,
+    access: crate::access::Access,
+    mut commands: Commands,
+) {
+    let page = trigger.event().webview;
+    let Ok((mut context, attempt)) = contexts.get_mut(page) else {
+        return;
+    };
+    let Some(provider) = context.endpoint else {
+        return;
+    };
+    let Ok(endpoint) = endpoints.get(provider) else {
+        return;
+    };
+    if !endpoint.typed()
+        || !context.matches(endpoint)
+        || !context.capabilities.publish
+        || context.pending.is_some()
+        || drafts.iter().any(|parent| parent.parent() == page)
+    {
+        return;
+    }
+    let revision = trigger.event().payload.revision;
+    if revision == context.revision
+        || !history
+            .iter()
+            .any(|(parent, entry)| parent.parent() == page && entry.0.revision == revision)
+    {
+        return;
+    }
+    let captured = match access.capture(provider, endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
+    let request = match attempt {
+        Some(attempt)
+            if attempt.endpoint == provider
+                && attempt.configuration == context.configuration
+                && attempt.request.base_revision == context.revision
+                && attempt.request.target_revision == revision =>
+        {
+            attempt.request.clone()
+        }
+        _ => crate::administration::Rollback {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            base_revision: context.revision,
+            target_revision: revision,
+        },
+    };
+    commands.entity(page).insert(RollbackAttempt {
+        endpoint: provider,
+        configuration: context.configuration,
+        request: request.clone(),
+    });
+    let operation = commands
+        .spawn((
+            Pending::write(page, &context),
+            request.clone(),
+            JobRequest(native::Rollback {
+                endpoint: captured,
+                request,
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
 }
 
 fn receive<J: Job<Output = Result<Snapshot, String>>>(
@@ -835,6 +1087,7 @@ fn receive<J: Job<Output = Result<Snapshot, String>>>(
     requested: Requested,
     mut received: MessageWriter<Received>,
     mut commands: Commands,
+    access: crate::access::Access,
 ) {
     for (operation, owner, pending, job_owner, mut result) in &mut results {
         let page = owner.parent();
@@ -851,10 +1104,10 @@ fn receive<J: Job<Output = Result<Snapshot, String>>>(
             continue;
         }
         context.pending = None;
-        if !endpoints
-            .get(pending.endpoint)
-            .is_ok_and(|endpoint| endpoint.fingerprint() == pending.configuration)
-        {
+        if !endpoints.get(pending.endpoint).is_ok_and(|endpoint| {
+            endpoint.fingerprint() == pending.configuration
+                && access.current(pending.endpoint, endpoint)
+        }) {
             context.capabilities = Capabilities::default();
             context.error = "features-invalid-snapshot".into();
             context.loaded = true;
@@ -885,11 +1138,65 @@ fn receive<J: Job<Output = Result<Snapshot, String>>>(
     }
 }
 
-fn inspect(
-    mut results: Completions<'_, '_, native::Inspect>,
+fn audit(
+    trigger: On<UiInput<FlagAuditRequest>>,
     mut contexts: Query<&mut Context>,
     endpoints: Query<&Endpoint>,
-    mut received: MessageWriter<Received>,
+    access: crate::access::Access,
+    mut commands: Commands,
+) {
+    let page = trigger.event().webview;
+    let Ok(mut context) = contexts.get_mut(page) else {
+        return;
+    };
+    let Some(provider) = context.endpoint else {
+        return;
+    };
+    let Ok(endpoint) = endpoints.get(provider) else {
+        return;
+    };
+    let before = trigger.event().payload.before;
+    if !context.loaded
+        || !context.capabilities.audit
+        || context.pending.is_some()
+        || context.audit_before != Some(before)
+        || !endpoint.typed()
+        || !context.matches(endpoint)
+    {
+        return;
+    }
+    let captured = match access.capture(provider, endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
+    let request = crate::administration::ListAudit {
+        before: Some(before),
+        limit: 128,
+    };
+    let operation = commands
+        .spawn((
+            Pending::read(page, provider, &context),
+            request.clone(),
+            JobRequest(native::Audit {
+                endpoint: captured,
+                request,
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
+}
+
+fn receive_audit(
+    mut results: Completions<'_, '_, native::Audit>,
+    mut contexts: Query<&mut Context>,
+    requests: Query<&crate::administration::ListAudit>,
+    endpoints: Query<&Endpoint>,
+    access: crate::access::Access,
+    mut received: MessageWriter<AuditReceived>,
     mut commands: Commands,
 ) {
     for (operation, owner, pending, job_owner, mut result) in &mut results {
@@ -907,10 +1214,121 @@ fn inspect(
             continue;
         }
         context.pending = None;
-        if !endpoints
-            .get(pending.endpoint)
-            .is_ok_and(|endpoint| endpoint.fingerprint() == pending.configuration)
+        let before = requests
+            .get(operation)
+            .ok()
+            .and_then(|request| request.before);
+        if before != context.audit_before
+            || !context.capabilities.audit
+            || !endpoints.get(pending.endpoint).is_ok_and(|endpoint| {
+                endpoint.fingerprint() == pending.configuration
+                    && access.current(pending.endpoint, endpoint)
+            })
         {
+            context.error = "features-invalid-snapshot".into();
+            commands.entity(operation).despawn();
+            continue;
+        }
+        match std::mem::replace(&mut result.0, Err("audit receipt consumed".into())) {
+            Ok(Ok(snapshot)) => {
+                if let Some(before) = before {
+                    received.write(AuditReceived {
+                        page,
+                        endpoint: pending.endpoint,
+                        generation: pending.generation,
+                        configuration: pending.configuration,
+                        before,
+                        snapshot,
+                    });
+                }
+            }
+            Ok(Err(error)) | Err(error) => {
+                context.error = error;
+            }
+        }
+        commands.entity(operation).despawn();
+    }
+}
+
+fn adopt_audit(
+    mut received: MessageReader<AuditReceived>,
+    mut contexts: Query<&mut Context>,
+    endpoints: Query<&Endpoint>,
+    history: Query<(&ChildOf, &History)>,
+    access: crate::access::Access,
+    mut commands: Commands,
+) {
+    for receipt in received.read() {
+        let Ok(mut context) = contexts.get_mut(receipt.page) else {
+            continue;
+        };
+        if context.endpoint != Some(receipt.endpoint)
+            || context.generation != receipt.generation
+            || !context.capabilities.audit
+            || context.audit_before != Some(receipt.before)
+            || receipt.snapshot.environment != context.environment
+            || !endpoints.get(receipt.endpoint).is_ok_and(|endpoint| {
+                endpoint.fingerprint() == receipt.configuration
+                    && access.current(receipt.endpoint, endpoint)
+            })
+        {
+            continue;
+        }
+        let conflict = receipt.snapshot.publications.iter().any(|entry| {
+            history.iter().any(|(parent, existing)| {
+                parent.parent() == receipt.page
+                    && existing.0.revision == entry.revision
+                    && existing.0 != *entry
+            })
+        });
+        if conflict {
+            context.error = "features-invalid-snapshot".into();
+            continue;
+        }
+        for publication in &receipt.snapshot.publications {
+            if history.iter().any(|(parent, existing)| {
+                parent.parent() == receipt.page && existing.0.revision == publication.revision
+            }) {
+                continue;
+            }
+            commands.spawn((
+                Name::new(publication.operation_id.clone()),
+                ChildOf(receipt.page),
+                History(publication.clone()),
+            ));
+        }
+        context.audit_before = receipt.snapshot.next;
+        context.error.clear();
+    }
+}
+
+fn inspect(
+    mut results: Completions<'_, '_, native::Inspect>,
+    mut contexts: Query<&mut Context>,
+    endpoints: Query<&Endpoint>,
+    mut received: MessageWriter<Received>,
+    mut commands: Commands,
+    access: crate::access::Access,
+) {
+    for (operation, owner, pending, job_owner, mut result) in &mut results {
+        let page = owner.parent();
+        let Ok(mut context) = contexts.get_mut(page) else {
+            commands.entity(operation).despawn();
+            continue;
+        };
+        if !job_owner.accepts(Some(owner))
+            || context.pending != Some(operation)
+            || context.generation != pending.generation
+            || context.endpoint != Some(pending.endpoint)
+        {
+            commands.entity(operation).despawn();
+            continue;
+        }
+        context.pending = None;
+        if !endpoints.get(pending.endpoint).is_ok_and(|endpoint| {
+            endpoint.fingerprint() == pending.configuration
+                && access.current(pending.endpoint, endpoint)
+        }) {
             context.capabilities = Capabilities::default();
             context.error = "features-invalid-snapshot".into();
             context.loaded = true;
@@ -927,6 +1345,7 @@ fn inspect(
                     .get(pending.endpoint)
                     .is_ok_and(|endpoint| document.is_valid(&endpoint.environment, now)) =>
             {
+                let flags = document.flags;
                 received.write(Received {
                     page,
                     endpoint: pending.endpoint,
@@ -934,11 +1353,11 @@ fn inspect(
                     configuration: pending.configuration,
                     preserve: pending.preserve,
                     snapshot: Snapshot {
-                        schema_version: 1,
+                        schema_version: document.schema_version,
                         environment: document.environment,
                         revision: document.revision,
                         capabilities: Capabilities::default(),
-                        flags: document.flags,
+                        flags,
                         draft: None,
                         history: Vec::new(),
                     },
@@ -959,15 +1378,15 @@ fn inspect(
 
 fn adopt(
     mut received: MessageReader<Received>,
-    mut contexts: Query<&mut Context>,
+    mut contexts: Query<(&mut Context, Option<&PublicationAttempt>)>,
     owned: OwnedPageValues<'_, '_>,
     flags: Query<(&Name, &ChildOf, &Flag)>,
-    attempts: Query<&PublicationAttempt>,
     declarations: Declarations,
     mut commands: Commands,
+    access: crate::access::Access,
 ) {
     for received in received.read() {
-        let Ok(mut context) = contexts.get_mut(received.page) else {
+        let Ok((mut context, attempt)) = contexts.get_mut(received.page) else {
             continue;
         };
         if context.endpoint != Some(received.endpoint) || context.generation != received.generation
@@ -977,7 +1396,10 @@ fn adopt(
         if !declarations
             .endpoints
             .get(received.endpoint)
-            .is_ok_and(|endpoint| endpoint.fingerprint() == received.configuration)
+            .is_ok_and(|endpoint| {
+                endpoint.fingerprint() == received.configuration
+                    && access.current(received.endpoint, endpoint)
+            })
         {
             continue;
         }
@@ -986,7 +1408,7 @@ fn adopt(
         if received.preserve && context.loaded {
             for (name, owner, flag) in &flags {
                 if owner.parent() == received.page && flag.unsaved() {
-                    local.insert(name.as_str().to_string(), flag.desired);
+                    local.insert(name.as_str().to_string(), flag.desired.clone());
                 }
             }
         }
@@ -995,10 +1417,8 @@ fn adopt(
                 commands.entity(entity).despawn();
             }
         }
-        context.revision = snapshot.revision;
-        context.loaded = true;
-        context.capabilities = snapshot.capabilities.clone();
-        context.error.clear();
+        context
+            .read_snapshot_metadata(snapshot, declarations.endpoints.get(received.endpoint).ok());
         let mut values = snapshot.flags.clone();
         if let Some(draft) = &snapshot.draft {
             values.extend(draft.flags.clone());
@@ -1007,8 +1427,8 @@ fn adopt(
             values.entry(name).or_insert(value);
         }
         for (key, saved) in values {
-            let desired = local.get(&key).copied().unwrap_or(saved);
-            let published = snapshot.flags.get(&key).copied();
+            let desired = local.get(&key).cloned().unwrap_or_else(|| saved.clone());
+            let published = snapshot.flags.get(&key).cloned();
             let persisted = published.is_some()
                 || snapshot
                     .draft
@@ -1018,7 +1438,7 @@ fn adopt(
                 || snapshot
                     .draft
                     .as_ref()
-                    .is_some_and(|draft| draft.flags.get(&key).copied() != published);
+                    .is_some_and(|draft| draft.flags.get(&key) != published.as_ref());
             commands.spawn((
                 Name::new(key),
                 ChildOf(received.page),
@@ -1051,7 +1471,7 @@ fn adopt(
                 History(publication.clone()),
             ));
         }
-        if let Ok(attempt) = attempts.get(received.page)
+        if let Some(attempt) = attempt
             && attempt.settled_by(snapshot)
         {
             commands
@@ -1061,24 +1481,54 @@ fn adopt(
     }
 }
 
+#[derive(SystemParam)]
+struct PageValues<'w, 's> {
+    flags: Query<'w, 's, (&'static Name, &'static ChildOf, &'static Flag)>,
+    drafts: Query<
+        'w,
+        's,
+        (
+            &'static Name,
+            &'static Revision,
+            &'static ChildOf,
+            &'static Draft,
+        ),
+    >,
+    history: Query<'w, 's, (&'static ChildOf, &'static History)>,
+}
+
 fn emit(
-    contexts: Query<(Entity, &Context, &Selection)>,
-    flags: Query<(&Name, &ChildOf, &Flag)>,
-    drafts: Query<(&Name, &Revision, &ChildOf, &Draft)>,
-    history: Query<(&ChildOf, &History)>,
+    contexts: Query<(
+        Entity,
+        &Context,
+        &Selection,
+        Option<&crate::inspection::OverrideOutcome>,
+    )>,
+    values: PageValues,
     declarations: Declarations,
+    inspection: crate::inspection::Inspection,
     mut previous: Local<BTreeMap<Entity, FeaturesUiState>>,
     mut commands: Commands,
+    access: crate::access::Access,
 ) {
     previous.retain(|entity, _| contexts.contains(*entity));
-    for (page, context, selection) in &contexts {
+    for (page, context, selection, outcome) in &contexts {
         let environment = context.environment.clone();
         let valid = context
             .endpoint
             .and_then(|entity| declarations.endpoints.get(entity).ok())
-            .is_some_and(|endpoint| context.matches(endpoint));
+            .is_some_and(|endpoint| {
+                context.matches(endpoint)
+                    && context
+                        .endpoint
+                        .is_some_and(|provider| access.current(provider, endpoint))
+            });
         let defaults = declarations.defaults(&environment);
         let mut state = FeaturesUiState {
+            assignments: inspection.generations(&environment),
+            inspection: inspection.rows(&environment),
+            can_override: inspection.allows_overrides(),
+            override_error: outcome.map_or(String::new(), |outcome| outcome.0.clone()),
             environment: environment.clone(),
             environments: declarations
                 .endpoints
@@ -1090,6 +1540,13 @@ fn emit(
             can_edit: valid && context.capabilities.edit,
             can_review: valid && context.capabilities.review,
             can_publish: valid && context.capabilities.publish,
+            can_audit: valid && context.capabilities.audit,
+            audit_before: if valid { context.audit_before } else { None },
+            can_rollback: valid
+                && context
+                    .endpoint
+                    .and_then(|provider| declarations.endpoints.get(provider).ok())
+                    .is_some_and(|endpoint| context.can_rollback(endpoint)),
             revision: context.revision,
             query: selection.query.clone(),
             selected: selection.key.clone(),
@@ -1097,28 +1554,17 @@ fn emit(
             error: context.error.clone(),
             ..Default::default()
         };
-        for (name, owner, flag) in &flags {
+        for (name, owner, flag) in &values.flags {
             if owner.parent() != page {
                 continue;
             }
-            let default = defaults.get(name.as_str()).copied();
+            let default = defaults.get(name.as_str());
             state.unsaved |= flag.unsaved();
-            state.flags.push(FlagRow {
-                key: name.as_str().into(),
-                published: flag.published,
-                proposed: flag.desired,
-                default,
-                source: if flag.published.is_some() {
-                    "published"
-                } else {
-                    "default"
-                }
-                .into(),
-                changed: flag.staged && Some(flag.desired) != flag.published,
-            });
+            state.flags.push(flag_row(name, flag, default));
         }
         state.flags.sort_by(|left, right| left.key.cmp(&right.key));
-        if let Some((name, revision, _, draft)) = drafts
+        if let Some((name, revision, _, draft)) = values
+            .drafts
             .iter()
             .find(|(_, _, owner, _)| owner.parent() == page)
         {
@@ -1129,22 +1575,23 @@ fn emit(
                 && !state.unsaved
                 && context.revision == draft.base;
         }
-        let mut entries: Vec<_> = history
+        let mut entries: Vec<_> = values
+            .history
             .iter()
             .filter(|(owner, _)| owner.parent() == page)
             .map(|(_, history)| &history.0)
             .collect();
         entries.sort_by_key(|entry| entry.revision);
-        let mut prior: BTreeMap<String, bool> = BTreeMap::new();
+        let mut prior: BTreeMap<String, Configuration> = BTreeMap::new();
         for entry in entries {
             let mut changes = Vec::new();
             for (key, value) in &entry.flags {
-                let before = prior.get(key).copied();
-                if before != Some(*value) {
+                let before = prior.get(key);
+                if before != Some(value) {
                     changes.push(ChangeRow {
                         key: key.clone(),
-                        before,
-                        after: *value,
+                        before: before.map(Configuration::encode),
+                        after: value.encode(),
                     });
                 }
             }
@@ -1163,6 +1610,28 @@ fn emit(
     }
 }
 
+fn flag_row(name: &Name, flag: &Flag, default: Option<&Configuration>) -> FlagRow {
+    FlagRow {
+        key: name.as_str().into(),
+        published: flag
+            .published
+            .as_ref()
+            .and_then(|configuration| configuration.value.as_boolean()),
+        proposed: flag.desired.value.as_boolean().unwrap_or(false),
+        default: default.and_then(|configuration| configuration.value.as_boolean()),
+        configuration: flag.desired.encode(),
+        published_configuration: flag.published.as_ref().map(Configuration::encode),
+        value_type: format!("{:?}", flag.desired.value.value_type()),
+        default_value: default.map_or(String::new(), |configuration| configuration.value.encode()),
+        source: if flag.published.is_some() {
+            "published"
+        } else {
+            "default"
+        }
+        .into(),
+        changed: flag.staged && Some(&flag.desired) != flag.published.as_ref(),
+    }
+}
 impl Flag {
     fn unsaved(&self) -> bool {
         self.desired != self.saved || (!self.persisted && self.staged)
@@ -1176,6 +1645,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
+    use vmux_api::BinEvent;
 
     struct Server {
         url: String,
@@ -1225,6 +1695,211 @@ mod tests {
                 worker: Some(worker),
             }
         }
+
+        fn rollback_script() -> (Self, mpsc::Receiver<crate::administration::Rollback>) {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let (started_send, started) = mpsc::channel();
+            let (release, released) = mpsc::channel();
+            let (capture, captured) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                for index in 0..3 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut headers = Vec::new();
+                    while !headers.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        stream.read_exact(&mut byte).unwrap();
+                        headers.push(byte[0]);
+                        assert!(headers.len() <= 16384);
+                    }
+                    let headers = String::from_utf8(headers).unwrap();
+                    let mut length = 0;
+                    for line in headers.lines() {
+                        if let Some((name, value)) = line.split_once(':')
+                            && name.eq_ignore_ascii_case("content-length")
+                        {
+                            length = value.trim().parse::<usize>().unwrap();
+                        }
+                    }
+                    assert!(length <= 65536);
+                    let mut body = vec![0; length];
+                    stream.read_exact(&mut body).unwrap();
+                    let request = if index == 0 {
+                        assert!(
+                            headers.starts_with("GET /v1/flag-environments/development HTTP/1.1")
+                        );
+                        None
+                    } else {
+                        assert!(headers.starts_with(
+                            "POST /v1/flag-environments/development/rollback HTTP/1.1"
+                        ));
+                        let request: crate::administration::Rollback =
+                            serde_json::from_slice(&body).unwrap();
+                        capture.send(request.clone()).unwrap();
+                        Some(request)
+                    };
+                    started_send.send(()).unwrap();
+                    released.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let (status, bytes) = if index == 1 {
+                        (503, b"{}".to_vec())
+                    } else {
+                        let enabled = index == 0;
+                        let revision = if enabled { 2 } else { 3 };
+                        let flags = BTreeMap::from([(
+                            "published.flag".into(),
+                            Configuration::boolean(enabled),
+                        )]);
+                        let operation_id = request
+                            .as_ref()
+                            .map_or("original".into(), |request| request.operation_id.clone());
+                        let snapshot = Snapshot {
+                            schema_version: 2,
+                            environment: "development".into(),
+                            revision,
+                            capabilities: Capabilities {
+                                edit: false,
+                                review: false,
+                                publish: true,
+                                audit: true,
+                            },
+                            flags: flags.clone(),
+                            draft: None,
+                            history: vec![
+                                Publication {
+                                    operation_id: "first".into(),
+                                    draft_id: "first".into(),
+                                    draft_revision: 1,
+                                    revision: 1,
+                                    actor: "operator".into(),
+                                    created_at: 1,
+                                    flags: BTreeMap::from([(
+                                        "published.flag".into(),
+                                        Configuration::boolean(false),
+                                    )]),
+                                },
+                                Publication {
+                                    operation_id: operation_id.clone(),
+                                    draft_id: operation_id,
+                                    draft_revision: 1,
+                                    revision,
+                                    actor: "operator".into(),
+                                    created_at: 2,
+                                    flags,
+                                },
+                            ],
+                        };
+                        (200, serde_json::to_vec(&snapshot).unwrap())
+                    };
+                    write!(stream,"HTTP/1.1 {status} Result\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",bytes.len()).unwrap();
+                    stream.write_all(&bytes).unwrap();
+                }
+            });
+            (
+                Self {
+                    url,
+                    started,
+                    release,
+                    worker: Some(worker),
+                },
+                captured,
+            )
+        }
+
+        fn audit_script() -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let (send, started) = mpsc::channel();
+            let (release, receive) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                for index in 0..2 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut headers = Vec::new();
+                    while !headers.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        stream.read_exact(&mut byte).unwrap();
+                        headers.push(byte[0]);
+                        assert!(headers.len() <= 16384);
+                    }
+                    let headers = String::from_utf8(headers).unwrap();
+                    if index == 0 {
+                        assert!(
+                            headers.starts_with("GET /v1/flag-environments/development HTTP/1.1")
+                        );
+                    } else {
+                        assert!(headers.starts_with("GET /v1/flag-environments/development/audit?limit=128&before=3 HTTP/1.1"));
+                    }
+                    send.send(()).unwrap();
+                    receive.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let mut publications = Vec::new();
+                    let range = if index == 0 { 3..=130 } else { 1..=2 };
+                    for revision in range {
+                        publications.push(Publication {
+                            operation_id: format!("publication-{revision}"),
+                            draft_id: format!("draft-{revision}"),
+                            draft_revision: 1,
+                            revision,
+                            actor: "operator".into(),
+                            created_at: revision,
+                            flags: BTreeMap::from([(
+                                "published.flag".into(),
+                                Configuration::boolean(revision >= 3),
+                            )]),
+                        });
+                    }
+                    let body = if index == 0 {
+                        serde_json::to_vec(&Snapshot {
+                            schema_version: 2,
+                            environment: "development".into(),
+                            revision: 130,
+                            capabilities: Capabilities {
+                                edit: true,
+                                review: true,
+                                publish: true,
+                                audit: true,
+                            },
+                            flags: BTreeMap::from([(
+                                "published.flag".into(),
+                                Configuration::boolean(true),
+                            )]),
+                            draft: Some(crate::administration::Draft {
+                                id: "editable".into(),
+                                revision: 1,
+                                base_revision: 130,
+                                reviewed_revision: None,
+                                flags: BTreeMap::from([(
+                                    "published.flag".into(),
+                                    Configuration::boolean(false),
+                                )]),
+                            }),
+                            history: publications,
+                        })
+                        .unwrap()
+                    } else {
+                        publications.reverse();
+                        serde_json::to_vec(&crate::administration::AuditPage {
+                            environment: "development".into(),
+                            publications,
+                            next: None,
+                        })
+                        .unwrap()
+                    };
+                    write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).unwrap();
+                    stream.write_all(&body).unwrap();
+                }
+            });
+            Self {
+                url,
+                started,
+                release,
+                worker: Some(worker),
+            }
+        }
     }
 
     impl Drop for Server {
@@ -1242,8 +1917,18 @@ mod tests {
         endpoint: Entity,
     }
 
+    struct DeclaredFeature;
+
+    impl crate::manifest::FeatureManifestSource for DeclaredFeature {
+        const SOURCE: &'static str = r#"(flags: [(key: "declared.flag", type: Boolean, class: Config, default: Boolean(false))])"#;
+    }
+
     impl Fixture {
         fn new(server: &Server) -> Self {
+            Self::with_schema(server, 1)
+        }
+
+        fn with_schema(server: &Server, schema: u32) -> Self {
             let mut app = App::new();
             app.add_plugins(FeatureHostPlugin);
             let endpoint = Endpoint::new(
@@ -1251,6 +1936,8 @@ mod tests {
                 "development",
                 Some("fixture-credential".into()),
             )
+            .unwrap()
+            .schema(schema)
             .unwrap();
             let owner = app
                 .world_mut()
@@ -1356,10 +2043,27 @@ mod tests {
     fn inspector_includes_published_and_declared_flags_without_staging_defaults() {
         let server = Server::new();
         let mut fixture = Fixture::new(&server);
+        fixture
+            .app
+            .add_plugins(crate::manifest::FeaturePlugin::<DeclaredFeature>::default());
+        let source = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::manifest::FeatureManifestOwner<DeclaredFeature>>>(
+            )
+            .single(fixture.app.world())
+            .unwrap();
+        let scope = fixture
+            .app
+            .world_mut()
+            .spawn(crate::flag::Context::installation("inspection-fixture"))
+            .id();
         fixture.app.world_mut().spawn(crate::Definition::bundle(
             fixture.endpoint,
-            "declared.flag",
-            false,
+            source,
+            0,
+            scope,
+            &crate::manifest::FeatureManifest::of::<DeclaredFeature>().flags[0],
         ));
         fixture.wait_for_request(&server);
         server.release.send(()).unwrap();
@@ -1444,17 +2148,24 @@ mod tests {
                     environment: "development".into(),
                     revision: 1,
                     capabilities: Capabilities {
+                        audit: true,
                         edit: true,
                         review: true,
                         publish: true,
                     },
-                    flags: BTreeMap::from([("published.flag".into(), true)]),
+                    flags: BTreeMap::from([(
+                        "published.flag".into(),
+                        Configuration::boolean(true),
+                    )]),
                     draft: draft_id.map(|id| crate::administration::Draft {
                         id: id.into(),
                         revision,
                         base_revision: 1,
                         reviewed_revision: None,
-                        flags: BTreeMap::from([("published.flag".into(), true)]),
+                        flags: BTreeMap::from([(
+                            "published.flag".into(),
+                            Configuration::boolean(true),
+                        )]),
                     }),
                     history: Vec::new(),
                 },
@@ -1502,10 +2213,11 @@ mod tests {
             .unwrap()
             .clone();
         let request = crate::administration::Save {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             draft_id: "intended-draft".into(),
             expected_revision: 0,
             base_revision: 1,
-            changes: BTreeMap::from([("published.flag".into(), false)]),
+            changes: BTreeMap::from([("published.flag".into(), Configuration::boolean(false))]),
         };
         let mut context = fixture
             .app
@@ -1540,5 +2252,209 @@ mod tests {
                 .error,
             "features-invalid-snapshot"
         );
+    }
+
+    #[test]
+    fn a_publisher_can_rollback_without_manage_and_retry_keeps_the_operation_identity() {
+        let (server, captured) = Server::rollback_script();
+        let mut fixture = Fixture::with_schema(&server, 2);
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .capabilities
+                .edit
+        );
+        for index in 0..2 {
+            fixture.app.world_mut().trigger(UiInput {
+                webview: fixture.page,
+                payload: FlagRollbackRequest { revision: 1 },
+            });
+            fixture.wait_for_request(&server);
+            server.release.send(()).unwrap();
+            fixture.drain();
+            let revision = fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .revision;
+            assert_eq!(revision, if index == 0 { 2 } else { 3 });
+        }
+        let first = captured.recv().unwrap();
+        let retry = captured.recv().unwrap();
+        assert_eq!(first.operation_id, retry.operation_id);
+        assert_eq!(first.base_revision, 2);
+        assert_eq!(first.target_revision, 1);
+        let world = fixture.app.world_mut();
+        assert_eq!(
+            world
+                .query::<&Flag>()
+                .single(world)
+                .unwrap()
+                .published
+                .as_ref()
+                .unwrap()
+                .value,
+            Value::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn older_audit_pages_append_without_changing_published_or_editable_values() {
+        let server = Server::audit_script();
+        let mut fixture = Fixture::with_schema(&server, 2);
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .audit_before,
+            Some(3)
+        );
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FlagAuditRequest { before: 4 },
+        });
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .pending
+                .is_none()
+        );
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FlagAuditRequest { before: 3 },
+        });
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        let context = fixture.app.world().get::<Context>(fixture.page).unwrap();
+        assert_eq!(context.revision, 130);
+        assert!(context.audit_before.is_none());
+        let world = fixture.app.world_mut();
+        let entries = world
+            .query::<(&ChildOf, &History)>()
+            .iter(world)
+            .filter(|(parent, _)| parent.parent() == fixture.page)
+            .count();
+        assert_eq!(entries, 130);
+        let flag = world.query::<&Flag>().single(world).unwrap();
+        assert_eq!(flag.published.as_ref().unwrap().value, Value::Boolean(true));
+        assert_eq!(flag.desired.value, Value::Boolean(false));
+        let draft = world
+            .query_filtered::<(&Name, &Revision), With<Draft>>()
+            .single(world)
+            .unwrap();
+        assert_eq!(draft.0.as_str(), "editable");
+        assert_eq!(draft.1.0, 1);
+    }
+
+    #[test]
+    fn an_audit_completion_cannot_cross_a_replaced_credential_source() {
+        let server = Server::audit_script();
+        let mut fixture = Fixture::with_schema(&server, 2);
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FlagAuditRequest { before: 3 },
+        });
+        fixture.wait_for_request(&server);
+        fixture.app.world_mut().entity_mut(fixture.endpoint).insert(
+            Endpoint::new(
+                &server.url,
+                "development",
+                Some("replacement-credential".into()),
+            )
+            .unwrap()
+            .schema(2)
+            .unwrap(),
+        );
+        server.release.send(()).unwrap();
+        fixture.drain();
+        let world = fixture.app.world_mut();
+        assert_eq!(world.query::<&History>().iter(world).count(), 128);
+        assert_eq!(
+            world.get::<Context>(fixture.page).unwrap().error,
+            "features-invalid-snapshot"
+        );
+    }
+
+    #[test]
+    fn the_assignments_navigation_intent_selects_its_page_surface() {
+        let mut app = App::new();
+        app.add_plugins(FeatureHostPlugin);
+        let page = app.world_mut().spawn(Selection::default()).id();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: FeatureSelectRequest {
+                key: String::new(),
+                tab: "assignments".into(),
+            },
+        });
+        assert_eq!(
+            app.world().get::<Selection>(page).unwrap().tab,
+            "assignments"
+        );
+    }
+
+    #[test]
+    fn the_registered_features_page_permits_its_typed_intents_only_for_its_route() {
+        let mut app = App::new();
+        app.add_plugins(crate::ui::FeaturesPage::plugin());
+        app.update();
+        let mut query = app.world_mut().query::<&vmux_api::UiEventPermissions>();
+        let permissions = query.iter(app.world()).copied().collect::<Vec<_>>();
+        assert!(
+            !permissions.is_empty(),
+            "the production page plugin must register IPC permissions"
+        );
+        for event in [
+            FeaturesOpenRequest::PERMISSION,
+            FeaturesFilterRequest::PERMISSION,
+            FeatureSelectRequest::PERMISSION,
+            DraftEditRequest::PERMISSION,
+            DraftSaveRequest::PERMISSION,
+            DraftReviewRequest::PERMISSION,
+            DraftPublishRequest::PERMISSION,
+            DraftDiscardRequest::PERMISSION,
+            DraftConfigurationEditRequest::PERMISSION,
+            FlagRollbackRequest::PERMISSION,
+            FlagAuditRequest::PERMISSION,
+            FeatureOverrideRequest::PERMISSION,
+            FeatureOverrideClearRequest::PERMISSION,
+            FeatureAssignmentRetireRequest::PERMISSION,
+        ] {
+            assert!(
+                vmux_api::UiEventPermissions::allows_page(
+                    permissions.iter(),
+                    "vmux://features/",
+                    event
+                ),
+                "{event}"
+            );
+            assert!(
+                !vmux_api::UiEventPermissions::allows_page(
+                    permissions.iter(),
+                    "vmux://settings/",
+                    event
+                ),
+                "{event}"
+            );
+        }
     }
 }

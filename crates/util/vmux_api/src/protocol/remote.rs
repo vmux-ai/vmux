@@ -195,6 +195,10 @@ pub enum ClientMessage {
         cwd: String,
     },
     SpawnAcpAgentWithMcp(Box<AcpSpawnWithMcp>),
+    ControlHello(Box<crate::control::ControlHello>),
+    CredentialOffer(Box<crate::control::CredentialOffer>),
+    CredentialWithdraw(Box<crate::control::CredentialWithdraw>),
+    SubscribeRemoteObservations,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -346,6 +350,9 @@ pub enum ServiceMessage {
         cwd: String,
         error: Option<String>,
     },
+    ControlReady(crate::control::ControlReady),
+    CredentialReply(crate::control::CredentialReply),
+    RemoteObserved(crate::remote::Observation),
 }
 
 #[vmux_api::contract(Eq)]

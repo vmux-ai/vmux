@@ -1,3 +1,34 @@
+features-history-older = 載入較早的歷史記錄
+features-configuration = 設定
+features-configuration-help = 編輯類型值、變體、有序規則和實驗世代。發佈比例使用 0–10000。
+features-configuration-stage = 暫存設定
+features-configuration-invalid = 設定無效或與宣告的值類型不符。
+features-typed-unavailable = 此 endpoint 僅支援 boolean 旗標。
+features-authorization-unavailable = 旗標管理授權無法使用。
+
+features-assignments = 已儲存的指派
+features-assignment-retire = 結束指派
+features-assignment-active = 使用中的世代
+features-assignment-unavailable = 此情境無法結束指派。
+
+features-effective = 有效值
+features-reason = 評估原因
+features-variant = 變體
+features-owner = 負責人
+features-expiry = 移除期限
+features-lifecycle = 生命週期
+features-context = 目標情境
+features-snapshot = 快照版本 / 有效期限
+features-retained = 保留的停用版本
+features-override = 開發覆寫值
+features-override-apply = 套用覆寫值
+features-override-clear = 清除覆寫值
+features-override-unavailable = 此情境不支援覆寫值。
+features-override-invalid = 請輸入符合已宣告旗標類型的有效 JSON。
+features-class = 類別
+features-type = 值類型
+features-age = 快照存續時間（秒）
+
 
 features-all = 所有功能旗標
 features-boolean = 布林值

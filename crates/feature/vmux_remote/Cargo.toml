@@ -8,14 +8,26 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = ["host"]
+host = ["dep:bevy", "dep:bevy_cef", "dep:vmux_clipboard", "dep:vmux_service", "dep:uuid", "vmux_ecs/host"]
+
 [dependencies]
-bevy = { workspace = true }
-bevy_cef = { workspace = true }
-uuid = { workspace = true }
-vmux_clipboard = { path = "../../util/vmux_clipboard" }
-vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
-vmux_layout = { path = "../vmux_layout", features = ["host"] }
-vmux_service = { path = "../vmux_service" }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy = { workspace = true, optional = true }
+bevy_cef = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
+vmux_clipboard = { path = "../../util/vmux_clipboard", optional = true }
+vmux_ecs = { path = "../../util/vmux_ecs", default-features = false }
+vmux_service = { path = "../vmux_service", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = { workspace = true }
+vmux_feature = { path = "../vmux_feature", default-features = false, features = ["cache"] }
 
 [lints]
 workspace = true

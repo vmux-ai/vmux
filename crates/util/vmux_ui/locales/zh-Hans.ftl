@@ -1,3 +1,34 @@
+features-history-older = 加载更早的历史记录
+features-configuration = 配置
+features-configuration-help = 编辑类型值、变体、有序规则和实验代次。发布比例使用 0–10000。
+features-configuration-stage = 暂存配置
+features-configuration-invalid = 配置无效或与声明的值类型不符。
+features-typed-unavailable = 此 endpoint 仅支持 boolean 标志。
+features-authorization-unavailable = 标志管理授权不可用。
+
+features-assignments = 已保存的分配
+features-assignment-retire = 结束分配
+features-assignment-active = 活动代次
+features-assignment-unavailable = 此上下文无法结束分配。
+
+features-effective = 有效值
+features-reason = 评估原因
+features-variant = 变体
+features-owner = 负责人
+features-expiry = 移除期限
+features-lifecycle = 生命周期
+features-context = 目标上下文
+features-snapshot = 快照版本 / 有效期
+features-retained = 保留的禁用版本
+features-override = 开发覆盖值
+features-override-apply = 应用覆盖值
+features-override-clear = 清除覆盖值
+features-override-unavailable = 此上下文不支持覆盖值。
+features-override-invalid = 请输入符合已声明标志类型的有效 JSON。
+features-class = 类别
+features-type = 值类型
+features-age = 快照存续时间（秒）
+
 
 features-all = 所有功能标记
 features-boolean = 布尔值
