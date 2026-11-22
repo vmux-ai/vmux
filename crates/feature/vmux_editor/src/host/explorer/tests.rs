@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::{BinEvent, UiEventPermissions};
 #[cfg(ui)]

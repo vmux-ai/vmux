@@ -185,8 +185,8 @@ impl EditorBundle {
         hl: HighlightCache,
         folds: crate::fold::FoldState,
     ) -> Self {
-        let parsed_note =
-            ParsedNote::supports(&core.buffer.path).then(|| ParsedNote::parse(&core.buffer.text()));
+        let parsed_note = ParsedNote::supports(&core.buffer.path)
+            .then(|| ParsedNote::parse_with_scheme(&core.buffer.text(), hl.is_dark()));
         let indent_width = crate::shape::BufferShape::detect(&core.buffer.rope)
             .indent
             .width;
@@ -268,7 +268,7 @@ impl EditItem<'_, '_> {
 
     pub(super) fn refresh_parsed_note(&mut self) {
         self.cache.parsed_note = ParsedNote::supports(&self.core.buffer.path)
-            .then(|| ParsedNote::parse(&self.core.buffer.text()));
+            .then(|| ParsedNote::parse_with_scheme(&self.core.buffer.text(), self.hl.is_dark()));
     }
 }
 

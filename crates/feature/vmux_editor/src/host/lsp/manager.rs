@@ -27,7 +27,7 @@ use vmux_path::PathIdentity;
 use vmux_setting::AppSettings;
 
 use crate::host::editor::FileView;
-use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
+use crate::host::highlight::{HighlightScheme, Highlighter};
 use crate::host::language::LspEditDirty;
 use crate::host::markdown::ParsedNote;
 use crate::host::viewport::ViewportRenderRequest;
@@ -173,8 +173,6 @@ impl LspDiagnostics {
 }
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
-
-const LSP_MAX_BYTES: u64 = HIGHLIGHT_MAX_BYTES;
 
 enum ReqKind {
     Hover { line: u32, col: u32 },
@@ -414,29 +412,15 @@ fn uri_for(path: &Path) -> Option<String> {
     url::Url::from_file_path(path).ok().map(|u| u.to_string())
 }
 
-#[allow(clippy::mutable_key_type)]
-fn one_document_edit(
-    path: &Path,
-    edits: Vec<lsp_types::TextEdit>,
-) -> Option<lsp_types::WorkspaceEdit> {
-    let uri: lsp_types::Uri = uri_for(path)?.parse().ok()?;
-    let mut changes = HashMap::new();
-    changes.insert(uri, edits);
-    Some(lsp_types::WorkspaceEdit {
-        changes: Some(changes),
-        ..Default::default()
-    })
-}
-
-fn read_text(path: &Path) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
-    if !meta.is_file() || meta.len() > LSP_MAX_BYTES {
-        return None;
-    }
-    std::fs::read_to_string(path).ok()
-}
-
 impl LspManager<'_, '_> {
+    fn read_text(path: &Path) -> Option<String> {
+        let meta = std::fs::metadata(path).ok()?;
+        if !meta.is_file() || meta.len() > Highlighter::MAX_HIGHLIGHT_BYTES {
+            return None;
+        }
+        std::fs::read_to_string(path).ok()
+    }
+
     fn stamp_current(&self, owner: Entity, stamp: &RequestStamp) -> bool {
         self.views
             .get(owner)
@@ -941,7 +925,7 @@ impl LspManager<'_, '_> {
     }
 
     fn line_len_utf16(&self, path: &Path, line: u32) -> u32 {
-        let Some(text) = read_text(path) else {
+        let Some(text) = Self::read_text(path) else {
             return 0;
         };
         let Some(l) = text.lines().nth(line as usize) else {
@@ -1074,153 +1058,9 @@ impl LspManager<'_, '_> {
     }
 }
 
-fn hover_contents_to_string(c: HoverContents) -> String {
-    let marked = |m: MarkedString| match m {
-        MarkedString::String(s) => s,
-        MarkedString::LanguageString(ls) => {
-            format!("```{}\n{}\n```", ls.language, ls.value)
-        }
-    };
-    match c {
-        HoverContents::Scalar(m) => marked(m),
-        HoverContents::Array(items) => items
-            .into_iter()
-            .map(marked)
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-        HoverContents::Markup(mc) => mc.value,
-    }
-}
-
-fn parse_hover(value: &serde_json::Value) -> Vec<HoverBlock> {
-    let Some(result) = value.get("result") else {
-        return Vec::new();
-    };
-    if result.is_null() {
-        return Vec::new();
-    }
-    let md = serde_json::from_value::<lsp_types::Hover>(result.clone())
-        .map(|h| hover_contents_to_string(h.contents))
-        .unwrap_or_default();
-    markdown_to_hover_blocks(&md)
-}
-
-fn markdown_to_hover_blocks(md: &str) -> Vec<HoverBlock> {
-    let mut blocks = Vec::new();
-    let mut in_code = false;
-    let mut lang = String::new();
-    let mut buf = String::new();
-    let flush_prose = |buf: &mut String, blocks: &mut Vec<HoverBlock>| {
-        let t = buf.trim();
-        if !t.is_empty() {
-            blocks.push(HoverBlock {
-                code: false,
-                text: t.to_string(),
-                lines: Vec::new(),
-            });
-        }
-        buf.clear();
-    };
-    for line in md.lines() {
-        if let Some(rest) = line.trim_start().strip_prefix("```") {
-            if in_code {
-                blocks.push(HoverBlock {
-                    code: true,
-                    text: String::new(),
-                    lines: Highlighter::snippet(&buf, lang.trim()),
-                });
-                buf.clear();
-                in_code = false;
-            } else {
-                flush_prose(&mut buf, &mut blocks);
-                in_code = true;
-                lang = rest.trim().to_string();
-            }
-            continue;
-        }
-        buf.push_str(line);
-        buf.push('\n');
-    }
-    if in_code {
-        blocks.push(HoverBlock {
-            code: true,
-            text: String::new(),
-            lines: Highlighter::snippet(&buf, lang.trim()),
-        });
-    } else {
-        flush_prose(&mut buf, &mut blocks);
-    }
-    blocks
-}
-
 fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
     let path = ServerClient::path_from_uri(uri.as_str())?;
     Some((path, pos.line, pos.character))
-}
-
-fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
-    let result = value.get("result")?;
-    if result.is_null() {
-        return None;
-    }
-
-    match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
-        Scalar(l) => loc_tuple(&l.uri, l.range.start),
-        Array(ls) => ls
-            .into_iter()
-            .find_map(|l| loc_tuple(&l.uri, l.range.start)),
-        Link(lls) => lls
-            .into_iter()
-            .find_map(|l| loc_tuple(&l.target_uri, l.target_range.start)),
-    }
-}
-
-fn parse_references(value: &serde_json::Value) -> Vec<(PathBuf, u32, u32)> {
-    let Some(result) = value.get("result") else {
-        return Vec::new();
-    };
-    serde_json::from_value::<Vec<lsp_types::Location>>(result.clone())
-        .map(|ls| {
-            ls.into_iter()
-                .filter_map(|l| loc_tuple(&l.uri, l.range.start))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn parse_completion(value: &serde_json::Value) -> Vec<CompletionItem> {
-    let Some(result) = value.get("result") else {
-        return Vec::new();
-    };
-    if result.is_null() {
-        return Vec::new();
-    }
-    let items = match serde_json::from_value::<lsp_types::CompletionResponse>(result.clone()) {
-        Ok(lsp_types::CompletionResponse::Array(a)) => a,
-        Ok(lsp_types::CompletionResponse::List(l)) => l.items,
-        Err(_) => return Vec::new(),
-    };
-    items
-        .into_iter()
-        .take(200)
-        .map(|it| {
-            let insert_text = it.insert_text.clone().unwrap_or_else(|| it.label.clone());
-            CompletionItem {
-                label: it.label.clone(),
-                insert_text,
-                detail: it.detail.clone().unwrap_or_default(),
-                kind: it.kind.map(|k| format!("{k:?}")).unwrap_or_default(),
-            }
-        })
-        .collect()
-}
-
-fn ref_display(path: &Path, line: u32) -> String {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned());
-    format!("{}:{}", name, line + 1)
 }
 
 #[derive(Component)]
@@ -1520,7 +1360,7 @@ fn open_documents(
         if manager.client(key).is_none() || editor.core.buffer.path != view.path {
             continue;
         }
-        if editor.core.buffer.rope.len_bytes() as u64 > LSP_MAX_BYTES {
+        if editor.core.buffer.rope.len_bytes() as u64 > Highlighter::MAX_HIGHLIGHT_BYTES {
             commands.entity(entity).insert(LspOpened);
             continue;
         }
@@ -1704,45 +1544,21 @@ fn cancel_requests(
     }
 }
 
-fn drain_requests(
-    manager: LspManager,
-    mut requests: Query<(
-        Entity,
-        &LspRequestOperation,
-        &OperationState,
-        Option<&mut vmux_lsp::Response>,
-    )>,
-    browsers: NonSend<Browsers>,
-    mut writers: LspResponseWriters,
-    mut commands: Commands,
-) {
-    for (request_entity, request, state, response) in &mut requests {
-        if matches!(state, OperationState::Pending | OperationState::Running) {
-            continue;
-        }
-        commands
-            .entity(request_entity)
-            .remove::<LspRequestOperation>();
-        let Some(mut response) = response else {
-            continue;
-        };
-        if *state != OperationState::Succeeded {
-            continue;
-        }
-        let value = response.0.take();
-        commands
-            .entity(request_entity)
-            .remove::<vmux_lsp::Response>();
-        let ready = browsers.can_emit_to(&request.target);
-        let origin = LspOrigin {
-            owner: request.target,
-            stamp: request.stamp,
-            operation: matches!(request.kind, ReqKind::Rename { .. } | ReqKind::CodeAction)
-                .then_some(request_entity),
-        };
+impl LspResponseWriters<'_> {
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_response(
+        &mut self,
+        request: &LspRequestOperation,
+        value: serde_json::Value,
+        origin: LspOrigin,
+        ready: bool,
+        dark: bool,
+        manager: &LspManager,
+        commands: &mut Commands,
+    ) {
         match &request.kind {
             ReqKind::Hover { line, col } => {
-                let blocks = parse_hover(&value);
+                let blocks = LspRequestOperation::parse_hover(&value, dark);
                 if !blocks.is_empty() && ready {
                     commands.queue(GuardedResponse {
                         origin,
@@ -1760,8 +1576,9 @@ fn drain_requests(
                 }
             }
             ReqKind::Definition => {
-                if let Some((path, line, utf16_col)) = parse_definition(&value) {
-                    writers.goto.write(LspGoto {
+                if let Some((path, line, utf16_col)) = LspRequestOperation::parse_definition(&value)
+                {
+                    self.goto.write(LspGoto {
                         entity: request.target,
                         path,
                         line,
@@ -1770,102 +1587,21 @@ fn drain_requests(
                     });
                 }
             }
-            ReqKind::Rename { root } => {
-                let payload = value.get("result").cloned().unwrap_or_default();
-                let result = if payload.is_null() {
-                    Err("the language server would not rename this".to_string())
-                } else {
-                    serde_json::from_value::<lsp_types::WorkspaceEdit>(payload)
-                        .map_err(|e| format!("the rename could not be read: {e}"))
-                };
-                writers.edit.write(LspRequestedEdit {
-                    entity: request.target,
-                    root: root.clone(),
-                    result,
-                    origin: Some(origin),
-                });
-            }
+            ReqKind::Rename { root } => self.dispatch_rename(request.target, &value, root, origin),
             ReqKind::CodeAction => {
-                let payload = value.get("result").cloned().unwrap_or_default();
-                let offered =
-                    serde_json::from_value::<Vec<lsp_types::CodeActionOrCommand>>(payload)
-                        .unwrap_or_default();
-                let titles: Vec<String> = offered
-                    .iter()
-                    .map(|item| match item {
-                        lsp_types::CodeActionOrCommand::Command(c) => c.title.clone(),
-                        lsp_types::CodeActionOrCommand::CodeAction(a) => a.title.clone(),
-                    })
-                    .collect();
-                commands.queue(GuardedOffer {
-                    origin,
-                    actions: offered,
-                });
-                if !ready {
-                    continue;
-                }
-                if titles.is_empty() {
-                    commands.queue(GuardedResponse {
-                        origin,
-                        event: crate::host::feedback::EditFailure::new(
-                            request.target,
-                            "no code actions here".to_string(),
-                        ),
-                    });
-                    continue;
-                }
-                commands.queue(GuardedResponse {
-                    origin,
-                    event: FileUiStateWrite::from_event(
-                        request.target,
-                        &FileCodeActions {
-                            titles,
-                            selected: 0,
-                        },
-                    ),
-                });
+                self.dispatch_code_actions(request.target, &value, origin, ready, commands);
             }
             ReqKind::Formatting { path, root } => {
-                let payload = value.get("result").cloned().unwrap_or_default();
-                let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(payload) {
-                    Ok(edits) if edits.is_empty() => continue,
-                    Ok(edits) => one_document_edit(path, edits)
-                        .ok_or_else(|| format!("{} has no URI to format", path.display())),
-                    Err(_) => Err("the language server would not format this".to_string()),
-                };
-                writers.edit.write(LspRequestedEdit {
-                    entity: request.target,
-                    root: root.clone(),
-                    result,
-                    origin: Some(origin),
-                });
+                self.dispatch_formatting(request.target, &value, path, root, origin);
             }
             ReqKind::References => {
-                let items: Vec<RefItem> = parse_references(&value)
-                    .into_iter()
-                    .map(|(path, line, utf16_col)| {
-                        let text = LspLine::read(&path, line);
-                        let col = text.char_col(utf16_col);
-                        RefItem {
-                            display: ref_display(&path, line),
-                            path: path.to_string_lossy().into_owned(),
-                            line,
-                            col,
-                            preview: text.as_str().trim().to_string(),
-                        }
-                    })
-                    .collect();
-                commands.queue(GuardedResponse {
-                    origin,
-                    event: crate::host::panel::ReferencesResult::new(request.target, items)
-                        .with_origin(origin),
-                });
+                self.dispatch_references(request.target, &value, origin, commands);
             }
             ReqKind::Completion {
                 line,
                 replace_from_col,
             } => {
-                let items = parse_completion(&value);
+                let items = LspRequestOperation::parse_completion(&value);
                 commands.queue(GuardedResponse {
                     origin,
                     event: crate::host::panel::CompletionResult::new(
@@ -1878,7 +1614,7 @@ fn drain_requests(
                 });
             }
             ReqKind::Folding { path } => {
-                writers.folds.write(LspFolds {
+                self.folds.write(LspFolds {
                     entity: request.target,
                     path: path.clone(),
                     regions: LspFolds::regions(
@@ -1903,7 +1639,7 @@ fn drain_requests(
                 }
             }
             ReqKind::SemanticTokens { key, path } => {
-                writers.semantic.write(LspSemantic {
+                self.semantic.write(LspSemantic {
                     entity: request.target,
                     path: path.clone(),
                     tokens: parse_semantic_tokens(&value, manager.semantic_legend(key).as_ref()),
@@ -1911,6 +1647,325 @@ fn drain_requests(
                 });
             }
         }
+    }
+
+    fn dispatch_rename(
+        &mut self,
+        target: Entity,
+        value: &serde_json::Value,
+        root: &Path,
+        origin: LspOrigin,
+    ) {
+        let payload = value.get("result").cloned().unwrap_or_default();
+        let result = if payload.is_null() {
+            Err("the language server would not rename this".to_string())
+        } else {
+            serde_json::from_value::<lsp_types::WorkspaceEdit>(payload)
+                .map_err(|e| format!("the rename could not be read: {e}"))
+        };
+        self.edit.write(LspRequestedEdit {
+            entity: target,
+            root: root.to_path_buf(),
+            result,
+            origin: Some(origin),
+        });
+    }
+
+    fn dispatch_code_actions(
+        &self,
+        target: Entity,
+        value: &serde_json::Value,
+        origin: LspOrigin,
+        ready: bool,
+        commands: &mut Commands,
+    ) {
+        let payload = value.get("result").cloned().unwrap_or_default();
+        let offered = serde_json::from_value::<Vec<lsp_types::CodeActionOrCommand>>(payload)
+            .unwrap_or_default();
+        let mut titles = Vec::with_capacity(offered.len());
+        for item in &offered {
+            let title = match item {
+                lsp_types::CodeActionOrCommand::Command(c) => c.title.clone(),
+                lsp_types::CodeActionOrCommand::CodeAction(a) => a.title.clone(),
+            };
+            titles.push(title);
+        }
+        commands.queue(GuardedOffer {
+            origin,
+            actions: offered,
+        });
+        if !ready {
+            return;
+        }
+        if titles.is_empty() {
+            commands.queue(GuardedResponse {
+                origin,
+                event: crate::host::feedback::EditFailure::new(
+                    target,
+                    "no code actions here".to_string(),
+                ),
+            });
+            return;
+        }
+        commands.queue(GuardedResponse {
+            origin,
+            event: FileUiStateWrite::from_event(
+                target,
+                &FileCodeActions {
+                    titles,
+                    selected: 0,
+                },
+            ),
+        });
+    }
+
+    fn dispatch_formatting(
+        &mut self,
+        target: Entity,
+        value: &serde_json::Value,
+        path: &Path,
+        root: &Path,
+        origin: LspOrigin,
+    ) {
+        let payload = value.get("result").cloned().unwrap_or_default();
+        let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(payload) {
+            Ok(edits) if edits.is_empty() => return,
+            Ok(edits) => LspRequestOperation::one_document_edit(path, edits)
+                .ok_or_else(|| format!("{} has no URI to format", path.display())),
+            Err(_) => Err("the language server would not format this".to_string()),
+        };
+        self.edit.write(LspRequestedEdit {
+            entity: target,
+            root: root.to_path_buf(),
+            result,
+            origin: Some(origin),
+        });
+    }
+
+    fn dispatch_references(
+        &self,
+        target: Entity,
+        value: &serde_json::Value,
+        origin: LspOrigin,
+        commands: &mut Commands,
+    ) {
+        let mut items = Vec::new();
+        for (path, line, utf16_col) in LspRequestOperation::parse_references(value) {
+            let text = LspLine::read(&path, line);
+            let col = text.char_col(utf16_col);
+            items.push(RefItem {
+                display: LspRequestOperation::ref_display(&path, line),
+                path: path.to_string_lossy().into_owned(),
+                line,
+                col,
+                preview: text.as_str().trim().to_string(),
+            });
+        }
+        commands.queue(GuardedResponse {
+            origin,
+            event: crate::host::panel::ReferencesResult::new(target, items).with_origin(origin),
+        });
+    }
+}
+
+impl LspRequestOperation {
+    #[allow(clippy::mutable_key_type)]
+    fn one_document_edit(
+        path: &Path,
+        edits: Vec<lsp_types::TextEdit>,
+    ) -> Option<lsp_types::WorkspaceEdit> {
+        let uri: lsp_types::Uri = uri_for(path)?.parse().ok()?;
+        let mut changes = HashMap::new();
+        changes.insert(uri, edits);
+        Some(lsp_types::WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        })
+    }
+
+    fn hover_contents_to_string(c: HoverContents) -> String {
+        let marked = |m: MarkedString| match m {
+            MarkedString::String(s) => s,
+            MarkedString::LanguageString(ls) => {
+                format!("```{}\n{}\n```", ls.language, ls.value)
+            }
+        };
+        match c {
+            HoverContents::Scalar(m) => marked(m),
+            HoverContents::Array(items) => items
+                .into_iter()
+                .map(marked)
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+            HoverContents::Markup(mc) => mc.value,
+        }
+    }
+
+    fn parse_hover(value: &serde_json::Value, dark: bool) -> Vec<HoverBlock> {
+        let Some(result) = value.get("result") else {
+            return Vec::new();
+        };
+        if result.is_null() {
+            return Vec::new();
+        }
+        let md = serde_json::from_value::<lsp_types::Hover>(result.clone())
+            .map(|h| Self::hover_contents_to_string(h.contents))
+            .unwrap_or_default();
+        Self::markdown_to_hover_blocks(&md, dark)
+    }
+
+    fn markdown_to_hover_blocks(md: &str, dark: bool) -> Vec<HoverBlock> {
+        let mut blocks = Vec::new();
+        let mut in_code = false;
+        let mut lang = String::new();
+        let mut buf = String::new();
+        let flush_prose = |buf: &mut String, blocks: &mut Vec<HoverBlock>| {
+            let t = buf.trim();
+            if !t.is_empty() {
+                blocks.push(HoverBlock {
+                    code: false,
+                    text: t.to_string(),
+                    lines: Vec::new(),
+                });
+            }
+            buf.clear();
+        };
+        for line in md.lines() {
+            if let Some(rest) = line.trim_start().strip_prefix("```") {
+                if in_code {
+                    blocks.push(HoverBlock {
+                        code: true,
+                        text: String::new(),
+                        lines: Highlighter::snippet(&buf, lang.trim(), dark),
+                    });
+                    buf.clear();
+                    in_code = false;
+                } else {
+                    flush_prose(&mut buf, &mut blocks);
+                    in_code = true;
+                    lang = rest.trim().to_string();
+                }
+                continue;
+            }
+            buf.push_str(line);
+            buf.push('\n');
+        }
+        if in_code {
+            blocks.push(HoverBlock {
+                code: true,
+                text: String::new(),
+                lines: Highlighter::snippet(&buf, lang.trim(), dark),
+            });
+        } else {
+            flush_prose(&mut buf, &mut blocks);
+        }
+        blocks
+    }
+
+    fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
+        let result = value.get("result")?;
+        if result.is_null() {
+            return None;
+        }
+        match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
+            Scalar(l) => loc_tuple(&l.uri, l.range.start),
+            Array(ls) => ls
+                .into_iter()
+                .find_map(|l| loc_tuple(&l.uri, l.range.start)),
+            Link(lls) => lls
+                .into_iter()
+                .find_map(|l| loc_tuple(&l.target_uri, l.target_range.start)),
+        }
+    }
+
+    fn parse_references(value: &serde_json::Value) -> Vec<(PathBuf, u32, u32)> {
+        let Some(result) = value.get("result") else {
+            return Vec::new();
+        };
+        serde_json::from_value::<Vec<lsp_types::Location>>(result.clone())
+            .map(|ls| {
+                ls.into_iter()
+                    .filter_map(|l| loc_tuple(&l.uri, l.range.start))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn parse_completion(value: &serde_json::Value) -> Vec<CompletionItem> {
+        let Some(result) = value.get("result") else {
+            return Vec::new();
+        };
+        if result.is_null() {
+            return Vec::new();
+        }
+        let items = match serde_json::from_value::<lsp_types::CompletionResponse>(result.clone()) {
+            Ok(lsp_types::CompletionResponse::Array(a)) => a,
+            Ok(lsp_types::CompletionResponse::List(l)) => l.items,
+            Err(_) => return Vec::new(),
+        };
+        items
+            .into_iter()
+            .take(200)
+            .map(|it| {
+                let insert_text = it.insert_text.clone().unwrap_or_else(|| it.label.clone());
+                CompletionItem {
+                    label: it.label.clone(),
+                    insert_text,
+                    detail: it.detail.clone().unwrap_or_default(),
+                    kind: it.kind.map(|k| format!("{k:?}")).unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+
+    fn ref_display(path: &Path, line: u32) -> String {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        format!("{}:{}", name, line + 1)
+    }
+}
+
+fn drain_requests(
+    manager: LspManager,
+    mut requests: Query<(
+        Entity,
+        &LspRequestOperation,
+        &OperationState,
+        Option<&mut vmux_lsp::Response>,
+    )>,
+    scheme: Option<Res<HighlightScheme>>,
+    browsers: NonSend<Browsers>,
+    mut writers: LspResponseWriters,
+    mut commands: Commands,
+) {
+    let dark = scheme.as_deref().is_none_or(HighlightScheme::is_dark);
+    for (request_entity, request, state, response) in &mut requests {
+        if matches!(state, OperationState::Pending | OperationState::Running) {
+            continue;
+        }
+        commands
+            .entity(request_entity)
+            .remove::<LspRequestOperation>();
+        let Some(mut response) = response else {
+            continue;
+        };
+        if *state != OperationState::Succeeded {
+            continue;
+        }
+        let value = response.0.take();
+        commands
+            .entity(request_entity)
+            .remove::<vmux_lsp::Response>();
+        let ready = browsers.can_emit_to(&request.target);
+        let origin = LspOrigin {
+            owner: request.target,
+            stamp: request.stamp,
+            operation: matches!(request.kind, ReqKind::Rename { .. } | ReqKind::CodeAction)
+                .then_some(request_entity),
+        };
+        writers.dispatch_response(request, value, origin, ready, dark, &manager, &mut commands);
     }
 }
 
@@ -4150,7 +4205,10 @@ mod tests {
                 language: "rust".into(),
                 value: "fn build(self) -> StartHeroProps".into(),
             }));
-        let blocks = markdown_to_hover_blocks(&hover_contents_to_string(contents));
+        let blocks = LspRequestOperation::markdown_to_hover_blocks(
+            &LspRequestOperation::hover_contents_to_string(contents),
+            true,
+        );
 
         let [block] = blocks.as_slice() else {
             panic!("one block, got {}", blocks.len());

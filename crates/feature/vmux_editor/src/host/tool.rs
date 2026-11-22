@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -33,13 +34,13 @@ enum PaneDirection {
     Left,
 }
 
-impl From<PaneDirection> for AgentPaneDirection {
-    fn from(value: PaneDirection) -> Self {
-        match value {
-            PaneDirection::Top => Self::Top,
-            PaneDirection::Right => Self::Right,
-            PaneDirection::Bottom => Self::Bottom,
-            PaneDirection::Left => Self::Left,
+impl PaneDirection {
+    fn into_agent(self) -> AgentPaneDirection {
+        match self {
+            PaneDirection::Top => AgentPaneDirection::Top,
+            PaneDirection::Right => AgentPaneDirection::Right,
+            PaneDirection::Bottom => AgentPaneDirection::Bottom,
+            PaneDirection::Left => AgentPaneDirection::Left,
         }
     }
 }
@@ -89,7 +90,7 @@ fn open_file(
             };
             AgentRequest::encode(&AgentOpenBeside {
                 anchor,
-                direction: args.direction.map(Into::into),
+                direction: args.direction.map(PaneDirection::into_agent),
                 url,
                 focus: args.focus,
             })
@@ -277,7 +278,6 @@ impl FileToolExecution {
     ) -> Result<Value, String> {
         let requested = requested.as_deref().unwrap_or(".");
         let search_path = Self::scoped_path(anchor, Path::new(requested), "grep").await?;
-
         let mut child = std::process::Command::new("rg")
             .args(["--json", "--", &query])
             .arg(&search_path)
@@ -297,7 +297,66 @@ impl FileToolExecution {
             }
             buffer
         });
+        let (order, first_line, first_cols, lines_out, search_matches, capped) =
+            Self::collect_rg_matches(stdout);
+        if capped {
+            let _ = child.kill();
+        }
+        let status = child.wait().map_err(|error| format!("grep: {error}"))?;
+        let stderr = stderr_handle.join().unwrap_or_default();
+        if order.is_empty() {
+            if !capped && status.code() != Some(0) && status.code() != Some(1) {
+                let error = stderr.trim();
+                return Err(if error.is_empty() {
+                    "grep: rg failed".to_string()
+                } else {
+                    format!("grep: {error}")
+                });
+            }
+            return Ok(
+                json!({ "content": [{"type": "text", "text": format!("no matches for {query:?}")}] }),
+            );
+        }
+        if let Some(anchor) = anchor {
+            Self::report_grep_touches(
+                anchor,
+                &search_path,
+                &query,
+                &order,
+                &first_line,
+                &first_cols,
+                search_matches,
+            )
+            .await;
+        }
+        let mut text = lines_out.join("\n");
+        if capped {
+            text.push_str(&format!(
+                "\n… results truncated at {} files / {} lines; refine the query",
+                Self::GREP_MAX_FILES,
+                Self::GREP_MAX_LINES
+            ));
+        } else if order.len() > Self::GREP_MAX_FILES {
+            text.push_str(&format!(
+                "\n… opened first {} of {} matching files",
+                Self::GREP_MAX_FILES,
+                order.len()
+            ));
+        }
+        Ok(json!({ "content": [{"type": "text", "text": text}] }))
+    }
 
+    #[allow(clippy::type_complexity)]
+    fn collect_rg_matches(
+        stdout: std::process::ChildStdout,
+    ) -> (
+        Vec<String>,
+        std::collections::HashMap<String, u32>,
+        std::collections::HashMap<String, (u32, u32)>,
+        Vec<String>,
+        Vec<(String, u32, u32, u32, String)>,
+        bool,
+    ) {
         let mut order = Vec::new();
         let mut first_line = std::collections::HashMap::new();
         let mut first_cols = std::collections::HashMap::new();
@@ -364,84 +423,66 @@ impl FileToolExecution {
                 break;
             }
         }
-        if capped {
-            let _ = child.kill();
-        }
-        let status = child.wait().map_err(|error| format!("grep: {error}"))?;
-        let stderr = stderr_handle.join().unwrap_or_default();
+        (
+            order,
+            first_line,
+            first_cols,
+            lines_out,
+            search_matches,
+            capped,
+        )
+    }
 
-        if order.is_empty() {
-            if !capped && status.code() != Some(0) && status.code() != Some(1) {
-                let error = stderr.trim();
-                return Err(if error.is_empty() {
-                    "grep: rg failed".to_string()
-                } else {
-                    format!("grep: {error}")
-                });
-            }
-            return Ok(
-                json!({ "content": [{"type": "text", "text": format!("no matches for {query:?}")}] }),
-            );
+    async fn report_grep_touches(
+        anchor: ProcessId,
+        search_path: &Path,
+        query: &str,
+        order: &[String],
+        first_line: &std::collections::HashMap<String, u32>,
+        first_cols: &std::collections::HashMap<String, (u32, u32)>,
+        search_matches: Vec<(String, u32, u32, u32, String)>,
+    ) {
+        if let Some(file) = order.first()
+            && let Ok(path) = std::fs::canonicalize(file)
+            && let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+                anchor,
+                path: path.to_string_lossy().into_owned(),
+                line: first_line.get(file).copied(),
+                col: first_cols.get(file).map(|cols| cols.0),
+                end_col: first_cols.get(file).map(|cols| cols.1),
+                kind: FileTouchKind::Read,
+            })
+        {
+            let _ = Self::send(request, Some(anchor)).await;
         }
-
-        if let Some(anchor) = anchor {
-            if let Some(file) = order.first()
-                && let Ok(path) = std::fs::canonicalize(file)
-                && let Ok(request) = AgentRequest::encode(&AgentFileTouched {
-                    anchor,
-                    path: path.to_string_lossy().into_owned(),
-                    line: first_line.get(file).copied(),
-                    col: first_cols.get(file).map(|cols| cols.0),
-                    end_col: first_cols.get(file).map(|cols| cols.1),
-                    kind: FileTouchKind::Read,
-                })
-            {
-                let _ = Self::send(request, Some(anchor)).await;
-            }
-            let mut canonical_paths = std::collections::HashMap::new();
-            let matches = search_matches
-                .into_iter()
-                .filter_map(|(path, line, col, end_col, preview)| {
-                    let canonical = canonical_paths
-                        .entry(path.clone())
-                        .or_insert_with(|| std::fs::canonicalize(&path).ok())
-                        .clone()?;
-                    Some(vmux_api::protocol::FileSearchMatch {
-                        path: canonical.to_string_lossy().into_owned(),
-                        line,
-                        col,
-                        end_col,
-                        preview,
-                    })
-                })
-                .collect::<Vec<_>>();
-            if !matches.is_empty()
-                && let Ok(request) = AgentRequest::encode(&AgentFileSearch {
-                    anchor,
-                    root: search_path.to_string_lossy().into_owned(),
-                    query: query.clone(),
-                    matches,
-                })
-            {
-                let _ = Self::send(request, Some(anchor)).await;
-            }
+        let mut canonical_paths = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+        for (path, line, col, end_col, preview) in search_matches {
+            let Some(canonical) = canonical_paths
+                .entry(path.clone())
+                .or_insert_with(|| std::fs::canonicalize(&path).ok())
+                .clone()
+            else {
+                continue;
+            };
+            matches.push(vmux_api::protocol::FileSearchMatch {
+                path: canonical.to_string_lossy().into_owned(),
+                line,
+                col,
+                end_col,
+                preview,
+            });
         }
-
-        let mut text = lines_out.join("\n");
-        if capped {
-            text.push_str(&format!(
-                "\n… results truncated at {} files / {} lines; refine the query",
-                Self::GREP_MAX_FILES,
-                Self::GREP_MAX_LINES
-            ));
-        } else if order.len() > Self::GREP_MAX_FILES {
-            text.push_str(&format!(
-                "\n… opened first {} of {} matching files",
-                Self::GREP_MAX_FILES,
-                order.len()
-            ));
+        if !matches.is_empty()
+            && let Ok(request) = AgentRequest::encode(&AgentFileSearch {
+                anchor,
+                root: search_path.to_string_lossy().into_owned(),
+                query: query.to_string(),
+                matches,
+            })
+        {
+            let _ = Self::send(request, Some(anchor)).await;
         }
-        Ok(json!({ "content": [{"type": "text", "text": text}] }))
     }
 
     const READ_FILE_DEFAULT_LINES: usize = 2000;

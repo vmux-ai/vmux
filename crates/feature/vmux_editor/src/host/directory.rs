@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy::tasks::IoTaskPool;
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     FileBreadcrumbRequest, FileBreadcrumbState, FileDirEntry, FileDirectoryActivateRequest,
     FileDirectoryAscendRequest, FileDirectoryBackRequest, FileDirectoryDescendRequest,
@@ -181,7 +182,14 @@ fn initialize(
     }
 }
 
-fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut commands: Commands) {
+fn publish(
+    directories: DirectoryProjection,
+    browsers: crate::host::delivery::Surface,
+    mut commands: Commands,
+) {
+    if !browsers.available() {
+        return;
+    }
     for (entity, file, directory, navigation) in &directories {
         if !directory.is_changed() && !navigation.is_changed() {
             continue;
@@ -306,31 +314,19 @@ impl Command for BreadcrumbReady {
 fn emit(
     request: On<BreadcrumbReady>,
     views: Query<&FileView>,
-    delivery: Delivery,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let Ok(view) = views.get(request.entity) else {
         return;
     };
-    if !view.path.starts_with(&request.state.path) || !delivery.available(request.entity) {
+    if !view.path.starts_with(&request.state.path) || !browsers.can_emit_to(&request.entity) {
         return;
     }
     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         request.entity,
         &request.state,
     ));
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct Delivery<'w, 's> {
-    views: Query<'w, 's, (), With<FileView>>,
-    browsers: NonSend<'w, Browsers>,
-}
-
-impl Delivery<'_, '_> {
-    fn available(&self, entity: Entity) -> bool {
-        self.views.contains(entity) && self.browsers.can_emit_to(&entity)
-    }
 }
 
 fn select(
@@ -618,6 +614,7 @@ impl FileDir {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::Browsers;
     use std::fs;
 
     struct BreadcrumbFixture {
@@ -638,7 +635,7 @@ mod tests {
                 vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default(),
             ))
             .insert_non_send(Browsers::default())
-            .add_observer(deliver);
+            .add_observer(Self::deliver);
             let entity = app
                 .world_mut()
                 .spawn((
@@ -699,10 +696,17 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         }
-    }
+        fn deliver(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
+            event.mark_delivered();
+        }
 
-    fn deliver(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
-        event.mark_delivered();
+        fn entry(name: &str, is_dir: bool) -> FileDirEntry {
+            FileDirEntry {
+                name: name.to_string(),
+                path: format!("/tmp/{name}"),
+                is_dir,
+            }
+        }
     }
 
     #[test]
@@ -816,37 +820,41 @@ mod tests {
         assert!(state.document.breadcrumb.entries.is_empty());
     }
 
-    fn entry(name: &str, is_dir: bool) -> FileDirEntry {
-        FileDirEntry {
-            name: name.to_string(),
-            path: format!("/tmp/{name}"),
-            is_dir,
-        }
-    }
-
     #[test]
     fn projection_filters_hidden_entries_before_indexing() {
         let file = FileView {
             path: PathBuf::from("/tmp"),
         };
         let directory = FileDir {
-            entries: vec![entry(".hidden", true), entry("visible", false)],
+            entries: vec![
+                BreadcrumbFixture::entry(".hidden", true),
+                BreadcrumbFixture::entry("visible", false),
+            ],
         };
         let navigation = FileDirectoryNavigation {
             path: file.path.clone(),
             parent_path: PathBuf::from("/"),
-            parent_entries: vec![entry(".parent", true), entry("sibling", true)],
+            parent_entries: vec![
+                BreadcrumbFixture::entry(".parent", true),
+                BreadcrumbFixture::entry("sibling", true),
+            ],
             selected: 0,
             show_hidden: false,
         };
 
         let state = navigation.state(&file, &directory);
 
-        assert_eq!(state.entries, vec![entry("visible", false)]);
-        assert_eq!(state.parent_entries, vec![entry("sibling", true)]);
+        assert_eq!(
+            state.entries,
+            vec![BreadcrumbFixture::entry("visible", false)]
+        );
+        assert_eq!(
+            state.parent_entries,
+            vec![BreadcrumbFixture::entry("sibling", true)]
+        );
         assert_eq!(
             navigation.selected_entry(&directory),
-            Some(&entry("visible", false))
+            Some(&BreadcrumbFixture::entry("visible", false))
         );
     }
 

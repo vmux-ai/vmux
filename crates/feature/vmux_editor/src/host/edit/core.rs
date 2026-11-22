@@ -1721,7 +1721,7 @@ impl EditCoreItem<'_, '_> {
     fn reshape(&mut self, to: crate::shape::BufferShape) -> bool {
         let source: String = self.buffer.rope.chars().collect();
         let from = crate::shape::BufferShape::detect(&self.buffer.rope).indent;
-        let out = crate::shape::Reindent { from, to }.applied(&source);
+        let out = to.reindent(from, &source);
         if out == source {
             return false;
         }

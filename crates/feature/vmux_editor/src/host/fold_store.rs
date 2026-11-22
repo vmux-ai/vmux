@@ -10,8 +10,8 @@ use crate::host::fold_preferences::{
     Collapsed, FileId, FoldPlugin, FoldSet, Mutation, Preferences, RetryRequest, Root, State,
     Ticket, UpdateRequest,
 };
-use bevy::app::Plugin as BevyPlugin;
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy::winit::EventLoopProxyWrapper;
 use vmux_ecs::Revision;
 use vmux_ecs::profile::{ActiveProfile, ProfileDirectories};
@@ -22,7 +22,7 @@ use super::viewport::{CursorRenderRequest, FoldsDirty, ViewportRenderRequest};
 
 pub(super) struct FoldStorePlugin;
 
-impl BevyPlugin for FoldStorePlugin {
+impl Plugin for FoldStorePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((FoldPlugin, FilesystemPlugin))
             .add_systems(Update, (bind, forward).chain().before(FoldSet::Restore))

@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Entity, Plugin};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput, set_media_allowlist};
 use vmux_api::media::MediaKind;
 use vmux_ecs::event::{
     FileMediaEvent, FileOpenExternalRequest, FilePreviewItem, FilePreviewRequest, FilePreviewState,
@@ -13,6 +14,7 @@ use vmux_ecs::event::{
 use crate::host::directory::FileDirectoryNavigation;
 use crate::host::editor::FileView;
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
+use crate::host::highlight::HighlightScheme;
 use crate::host::preview::PreviewBuilder;
 use crate::host::status::FileInitialMetaSent;
 
@@ -54,7 +56,7 @@ pub struct FileMedia {
 struct ThumbTask {
     webview: Entity,
     root: PathBuf,
-    task: Task<(String, Result<Vec<u8>, String>)>,
+    task: Task<(String, std::result::Result<Vec<u8>, String>)>,
 }
 
 #[derive(Component, Clone, Default)]
@@ -100,9 +102,12 @@ fn sync_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir
 
 fn send_initial(
     media: Query<(Entity, &FileView, &FileMedia), ReadyMedia>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
+    if !browsers.available() {
+        return;
+    }
     for (entity, file, media) in &media {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -122,7 +127,7 @@ fn send_initial(
 
 fn attach_video_overlays(
     media: Query<(Entity, &FileView, &FileMedia)>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
 ) {
     for (entity, file, media) in &media {
         if media.kind != MediaKind::Video
@@ -140,7 +145,7 @@ fn attach_video_overlays(
 fn file_video_rect(
     trigger: On<UiInput<FileVideoRect>>,
     file_views: Query<(), With<FileView>>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
 ) {
     let entity = trigger.event().webview;
     if file_views.get(entity).is_err() || !browsers.has_browser(entity) {
@@ -156,7 +161,7 @@ fn file_video_rect(
 fn detach_video_overlays(
     mut removed_media: RemovedComponents<FileMedia>,
     mut removed_dir: RemovedComponents<FileDir>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
 ) {
     for entity in removed_media.read().chain(removed_dir.read()) {
         browsers.detach_media_overlay(&entity);
@@ -175,7 +180,8 @@ fn load_file_preview(
     trigger: On<FilePreviewLoad>,
     file_views: Query<&FileView>,
     directories: Query<(&FileDir, &FileDirectoryNavigation)>,
-    browsers: NonSend<Browsers>,
+    scheme: Option<Res<HighlightScheme>>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -225,7 +231,8 @@ fn load_file_preview(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let mut kind = PreviewBuilder::build(&path);
+    let dark = scheme.as_deref().is_none_or(HighlightScheme::is_dark);
+    let mut kind = PreviewBuilder::build(&path, dark);
     if let PreviewKind::Dir(entries) = &mut kind
         && let Some(navigation) = selected_navigation
     {
@@ -242,7 +249,7 @@ fn load_file_preview(
 
 fn drain_thumb_tasks(
     mut tasks: Query<(Entity, &mut ThumbTask)>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     for (task_entity, mut task) in &mut tasks {

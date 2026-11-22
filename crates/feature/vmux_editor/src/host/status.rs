@@ -1,7 +1,7 @@
 use crate::host::editor::{Edit, EditReadOnly};
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::FileUiStateWrite;
 use vmux_ecs::event::*;
 use vmux_ecs::page::PageReady;
@@ -91,9 +91,12 @@ type ReadySentKeymap = (With<FileView>, With<FileKeymapSent>, With<PageReady>);
 
 fn send_initial_meta(
     buffers: Query<(Entity, &FileBuffer), ReadyUnsentMeta>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
+    if !browsers.available() {
+        return;
+    }
     for (entity, buffer) in &buffers {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -193,9 +196,12 @@ fn resend_file_theme_on_change(
 fn send_file_theme(
     pending: Query<Entity, ReadyUnsentTheme>,
     settings: Res<AppSettings>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
+    if !browsers.available() {
+        return;
+    }
     for entity in &pending {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -228,9 +234,12 @@ fn send_file_view_mode(
     state: Single<(Ref<SharedFileViewMode>, Ref<FileViewModeRevision>)>,
     pending: Query<Entity, ReadyUnsentViewMode>,
     sent: Query<Entity, ReadySentViewMode>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
+    if !browsers.available() {
+        return;
+    }
     let (mode, revision) = state.into_inner();
     let event = FileViewModeEvent {
         mode: mode.0,
@@ -257,9 +266,12 @@ fn send_file_keymap(
     settings: Option<Res<AppSettings>>,
     pending: Query<Entity, ReadyUnsentKeymap>,
     sent: Query<Entity, ReadySentKeymap>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
+    if !browsers.available() {
+        return;
+    }
     let event = FileKeymapEvent {
         keymap: KeymapConfig::resolve(settings.as_deref()).kind(),
     };

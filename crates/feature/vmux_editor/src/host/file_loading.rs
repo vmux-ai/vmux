@@ -16,7 +16,7 @@ use super::file_lifecycle::{
     MissingFileView,
 };
 use super::file_loading_io::{Bytes, Directory, Inspect};
-use super::highlight::{FILE_VIEW_MAX_BYTES, HIGHLIGHT_MAX_BYTES};
+use super::highlight::{HighlightScheme, Highlighter};
 use super::keymap::{EditorKeymap, KeymapConfig};
 use super::markdown::ParsedNote;
 use super::media::FileMedia;
@@ -320,16 +320,19 @@ fn prepare(
                 continue;
             }
         };
-        if size > FILE_VIEW_MAX_BYTES {
+        if size > Highlighter::MAX_VIEW_BYTES {
             failures.write(Failed {
                 operation,
                 reason: LoadFailure::Fatal,
-                message: format!("file too large ({size} bytes, max {})", FILE_VIEW_MAX_BYTES),
+                message: format!(
+                    "file too large ({size} bytes, max {})",
+                    Highlighter::MAX_VIEW_BYTES
+                ),
                 missing: false,
             });
             continue;
         }
-        if size > HIGHLIGHT_MAX_BYTES {
+        if size > Highlighter::MAX_HIGHLIGHT_BYTES {
             commands.entity(operation).insert(Heavy);
         }
         commands.spawn((
@@ -338,7 +341,7 @@ fn prepare(
             ChildOf(operation),
             JobRequest(Bytes {
                 path: path.to_path_buf(),
-                maximum: FILE_VIEW_MAX_BYTES,
+                maximum: Highlighter::MAX_VIEW_BYTES,
             }),
         ));
         if let Some(wake) = &wake {
@@ -438,10 +441,12 @@ fn loaded(
     texts: Query<(Entity, &Text, Has<Heavy>)>,
     loads: Loads,
     settings: Option<Res<vmux_setting::AppSettings>>,
+    scheme: Option<Res<HighlightScheme>>,
     mut revisions: Query<&mut super::editor::FileDocumentRevision>,
     mut commands: Commands,
 ) {
     let keymap = KeymapConfig::resolve(settings.as_deref());
+    let dark = scheme.as_deref().is_none_or(HighlightScheme::is_dark);
     for (operation, text, heavy) in &texts {
         let Some((view, path, _)) = loads.current(operation) else {
             continue;
@@ -450,8 +455,8 @@ fn loaded(
             revision.advance();
         }
         let highlight = match heavy {
-            true => HighlightCache::plain(path),
-            false => HighlightCache::new(path),
+            true => HighlightCache::plain_with_scheme(path, dark),
+            false => HighlightCache::new_with_scheme(path, dark),
         };
         let mut core = crate::edit::Document::new(
             path.to_path_buf(),

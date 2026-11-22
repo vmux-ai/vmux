@@ -1,7 +1,7 @@
 use crate::host::editor::Edit;
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
 use vmux_ecs::event::{
@@ -82,31 +82,31 @@ fn save_with(
     ));
 }
 
-const BINARY_SNIFF_BYTES: usize = 8 * 1024;
-
-const DETECT_SAMPLE_BYTES: usize = 64 * 1024;
-
-const UTF16_SNIFF_BYTES: usize = 4 * 1024;
-
-const UTF16_STRAY_PERCENT: usize = 1;
-
 pub struct DecodedText {
     pub text: String,
     pub encoding: FileEncoding,
 }
 
 impl DecodedText {
+    const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+    const DETECT_SAMPLE_BYTES: usize = 64 * 1024;
+    const UTF16_SNIFF_BYTES: usize = 4 * 1024;
+    const UTF16_STRAY_PERCENT: usize = 1;
+    const BOM_UTF8: [u8; 3] = [0xEF, 0xBB, 0xBF];
+    const BOM_UTF16LE: [u8; 2] = [0xFF, 0xFE];
+    const BOM_UTF16BE: [u8; 2] = [0xFE, 0xFF];
+
     pub fn read(path: &std::path::Path) -> Option<Self> {
         let bytes = std::fs::read(path).ok()?;
         Self::decode(&bytes)
     }
 
     pub fn decode(bytes: &[u8]) -> Option<Self> {
-        if let Some(encoding) = Bom::detect(bytes) {
+        if let Some(encoding) = Self::detect_bom(bytes) {
             return Some(Self::forced(bytes, encoding));
         }
-        if BinarySniff::rejects(bytes) {
-            let encoding = Utf16Sniff::encoding(bytes)?;
+        if Self::rejects_binary(bytes) {
+            let encoding = Self::sniff_utf16(bytes)?;
             return Some(Self::forced(bytes, encoding));
         }
         if let Ok(text) = std::str::from_utf8(bytes) {
@@ -115,91 +115,113 @@ impl DecodedText {
                 encoding: FileEncoding::Utf8,
             });
         }
-        Some(Self::forced(bytes, Detected::encoding(bytes)))
+        Some(Self::forced(bytes, Self::detect_legacy(bytes)))
     }
 
     pub fn forced(bytes: &[u8], encoding: FileEncoding) -> Self {
-        let body = Bom::stripped(bytes, encoding);
+        let body = Self::strip_bom(bytes, encoding);
         let text = match encoding {
-            FileEncoding::Utf16Le => Utf16::decoded(body, u16::from_le_bytes),
-            FileEncoding::Utf16Be => Utf16::decoded(body, u16::from_be_bytes),
-            FileEncoding::Iso8859_1 => Latin1::decoded(body),
-            _ => encoding
-                .charset()
+            FileEncoding::Utf16Le => Self::decode_utf16(body, u16::from_le_bytes),
+            FileEncoding::Utf16Be => Self::decode_utf16(body, u16::from_be_bytes),
+            FileEncoding::Iso8859_1 => body.iter().map(|b| char::from(*b)).collect(),
+            _ => Self::charset(encoding)
                 .decode_without_bom_handling(body)
                 .0
                 .into_owned(),
         };
         Self { text, encoding }
     }
-}
 
-pub struct BinarySniff;
-
-impl BinarySniff {
-    pub fn rejects(bytes: &[u8]) -> bool {
-        bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
+    fn rejects_binary(bytes: &[u8]) -> bool {
+        bytes[..bytes.len().min(Self::BINARY_SNIFF_BYTES)].contains(&0)
     }
-}
 
-struct Utf16Sniff {
-    ascii: usize,
-    strays: usize,
-    total: usize,
-}
+    fn detect_bom(bytes: &[u8]) -> Option<FileEncoding> {
+        if bytes.starts_with(&Self::BOM_UTF8) {
+            return Some(FileEncoding::Utf8Bom);
+        }
+        if bytes.starts_with(&Self::BOM_UTF16LE) {
+            return Some(FileEncoding::Utf16Le);
+        }
+        if bytes.starts_with(&Self::BOM_UTF16BE) {
+            return Some(FileEncoding::Utf16Be);
+        }
+        None
+    }
 
-impl Utf16Sniff {
-    fn encoding(bytes: &[u8]) -> Option<FileEncoding> {
+    fn bom_bytes(encoding: FileEncoding) -> &'static [u8] {
+        match encoding {
+            FileEncoding::Utf8Bom => &Self::BOM_UTF8,
+            FileEncoding::Utf16Le => &Self::BOM_UTF16LE,
+            FileEncoding::Utf16Be => &Self::BOM_UTF16BE,
+            _ => &[],
+        }
+    }
+
+    fn strip_bom(bytes: &[u8], encoding: FileEncoding) -> &[u8] {
+        let mark = Self::bom_bytes(encoding);
+        if mark.is_empty() {
+            return bytes;
+        }
+        bytes.strip_prefix(mark).unwrap_or(bytes)
+    }
+
+    fn detect_legacy(bytes: &[u8]) -> FileEncoding {
+        let head = &bytes[..bytes.len().min(Self::DETECT_SAMPLE_BYTES)];
+        let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
+        detector.feed(head, head.len() == bytes.len());
+        FileEncoding::try_from(detector.guess(None, Utf8Detection::Deny).name())
+            .unwrap_or(FileEncoding::Windows1252)
+    }
+
+    fn sniff_utf16(bytes: &[u8]) -> Option<FileEncoding> {
         if bytes.len() < 2 || !bytes.len().is_multiple_of(2) {
             return None;
         }
-        let capped = bytes.len().min(UTF16_SNIFF_BYTES);
+        let capped = bytes.len().min(Self::UTF16_SNIFF_BYTES);
         let sample = &bytes[..capped - capped % 2];
-        let le = Self::read(sample, u16::from_le_bytes);
-        let be = Self::read(sample, u16::from_be_bytes);
-        match (le.reads_as_text(), be.reads_as_text()) {
+        let (le_ascii, le_ok) = Self::score_utf16(sample, u16::from_le_bytes);
+        let (be_ascii, be_ok) = Self::score_utf16(sample, u16::from_be_bytes);
+        match (le_ok, be_ok) {
             (false, false) => None,
             (true, false) => Some(FileEncoding::Utf16Le),
             (false, true) => Some(FileEncoding::Utf16Be),
-            (true, true) => match be.ascii > le.ascii {
+            (true, true) => match be_ascii > le_ascii {
                 true => Some(FileEncoding::Utf16Be),
                 false => Some(FileEncoding::Utf16Le),
             },
         }
     }
 
-    fn read(sample: &[u8], unit: fn([u8; 2]) -> u16) -> Self {
+    fn score_utf16(sample: &[u8], unit: fn([u8; 2]) -> u16) -> (usize, bool) {
         let mut units = Vec::with_capacity(sample.len() / 2);
         for pair in sample.chunks_exact(2) {
             units.push(unit([pair[0], pair[1]]));
         }
-        let mut reading = Self {
-            ascii: 0,
-            strays: 0,
-            total: 0,
-        };
+        let mut ascii = 0usize;
+        let mut strays = 0usize;
+        let mut total = 0usize;
         for decoded in char::decode_utf16(units) {
-            reading.total += 1;
+            total += 1;
             let Ok(ch) = decoded else {
-                reading.strays += 1;
+                strays += 1;
                 continue;
             };
-            if Self::stray(ch) {
-                reading.strays += 1;
+            if Self::is_stray(ch) {
+                strays += 1;
                 continue;
             }
             if ch.is_ascii() {
-                reading.ascii += 1;
+                ascii += 1;
             }
         }
-        reading
+        (
+            ascii,
+            total > 0 && strays * 100 <= total * Self::UTF16_STRAY_PERCENT,
+        )
     }
 
-    fn reads_as_text(&self) -> bool {
-        self.total > 0 && self.strays * 100 <= self.total * UTF16_STRAY_PERCENT
-    }
-
-    fn stray(ch: char) -> bool {
+    fn is_stray(ch: char) -> bool {
         if matches!(ch, '\t' | '\n' | '\r') {
             return false;
         }
@@ -215,62 +237,8 @@ impl Utf16Sniff {
         }
         point & 0xFFFE == 0xFFFE
     }
-}
 
-struct Bom;
-
-impl Bom {
-    const UTF8: [u8; 3] = [0xEF, 0xBB, 0xBF];
-    const UTF16LE: [u8; 2] = [0xFF, 0xFE];
-    const UTF16BE: [u8; 2] = [0xFE, 0xFF];
-
-    fn detect(bytes: &[u8]) -> Option<FileEncoding> {
-        if bytes.starts_with(&Self::UTF8) {
-            return Some(FileEncoding::Utf8Bom);
-        }
-        if bytes.starts_with(&Self::UTF16LE) {
-            return Some(FileEncoding::Utf16Le);
-        }
-        if bytes.starts_with(&Self::UTF16BE) {
-            return Some(FileEncoding::Utf16Be);
-        }
-        None
-    }
-
-    fn stripped(bytes: &[u8], encoding: FileEncoding) -> &[u8] {
-        let mark = Self::bytes(encoding);
-        if mark.is_empty() {
-            return bytes;
-        }
-        bytes.strip_prefix(mark).unwrap_or(bytes)
-    }
-
-    fn bytes(encoding: FileEncoding) -> &'static [u8] {
-        match encoding {
-            FileEncoding::Utf8Bom => &Self::UTF8,
-            FileEncoding::Utf16Le => &Self::UTF16LE,
-            FileEncoding::Utf16Be => &Self::UTF16BE,
-            _ => &[],
-        }
-    }
-}
-
-struct Detected;
-
-impl Detected {
-    fn encoding(bytes: &[u8]) -> FileEncoding {
-        let head = &bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)];
-        let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
-        detector.feed(head, head.len() == bytes.len());
-        FileEncoding::try_from(detector.guess(None, Utf8Detection::Deny).name())
-            .unwrap_or(FileEncoding::Windows1252)
-    }
-}
-
-struct Utf16;
-
-impl Utf16 {
-    fn decoded(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
+    fn decode_utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
         let mut units = Vec::with_capacity(bytes.len() / 2);
         for pair in bytes.chunks_exact(2) {
             units.push(unit([pair[0], pair[1]]));
@@ -278,38 +246,20 @@ impl Utf16 {
         String::from_utf16_lossy(&units)
     }
 
-    fn encoded(text: &str, order: fn(u16) -> [u8; 2]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(text.len() * 2);
-        let mut buffer = [0u16; 2];
-        for ch in text.chars() {
-            for unit in ch.encode_utf16(&mut buffer) {
-                out.extend_from_slice(&order(*unit));
-            }
+    fn charset(encoding: FileEncoding) -> &'static Encoding {
+        match encoding {
+            FileEncoding::Utf8
+            | FileEncoding::Utf8Bom
+            | FileEncoding::Utf16Le
+            | FileEncoding::Utf16Be => encoding_rs::UTF_8,
+            FileEncoding::ShiftJis => encoding_rs::SHIFT_JIS,
+            FileEncoding::EucJp => encoding_rs::EUC_JP,
+            FileEncoding::Iso2022Jp => encoding_rs::ISO_2022_JP,
+            FileEncoding::Gbk => encoding_rs::GBK,
+            FileEncoding::Big5 => encoding_rs::BIG5,
+            FileEncoding::EucKr => encoding_rs::EUC_KR,
+            FileEncoding::Windows1252 | FileEncoding::Iso8859_1 => encoding_rs::WINDOWS_1252,
         }
-        out
-    }
-}
-
-struct Latin1;
-
-impl Latin1 {
-    fn decoded(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| char::from(*b)).collect()
-    }
-
-    fn encoded(text: &str) -> Result<Vec<u8>, Unmappable> {
-        let mut out = Vec::with_capacity(text.len());
-        for ch in text.chars() {
-            let point = u32::from(ch);
-            if point > 0xFF {
-                return Err(Unmappable {
-                    ch,
-                    encoding: FileEncoding::Iso8859_1,
-                });
-            }
-            out.push(point as u8);
-        }
-        Ok(out)
     }
 }
 
@@ -339,18 +289,18 @@ impl Reencode {
     pub fn applied(&self, text: &str) -> Result<Vec<u8>, Unmappable> {
         let body = match self.encoding {
             FileEncoding::Utf8 | FileEncoding::Utf8Bom => text.as_bytes().to_vec(),
-            FileEncoding::Utf16Le => Utf16::encoded(text, u16::to_le_bytes),
-            FileEncoding::Utf16Be => Utf16::encoded(text, u16::to_be_bytes),
-            FileEncoding::Iso8859_1 => Latin1::encoded(text)?,
+            FileEncoding::Utf16Le => Self::encode_utf16(text, u16::to_le_bytes),
+            FileEncoding::Utf16Be => Self::encode_utf16(text, u16::to_be_bytes),
+            FileEncoding::Iso8859_1 => Self::encode_latin1(text)?,
             _ => {
-                let (bytes, _, unmappable) = self.encoding.charset().encode(text);
+                let (bytes, _, unmappable) = DecodedText::charset(self.encoding).encode(text);
                 if unmappable {
                     return Err(self.first_unmappable(text));
                 }
                 bytes.into_owned()
             }
         };
-        let mark = Bom::bytes(self.encoding);
+        let mark = DecodedText::bom_bytes(self.encoding);
         if mark.is_empty() {
             return Ok(body);
         }
@@ -360,8 +310,34 @@ impl Reencode {
         Ok(out)
     }
 
+    fn encode_utf16(text: &str, order: fn(u16) -> [u8; 2]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(text.len() * 2);
+        let mut buffer = [0u16; 2];
+        for ch in text.chars() {
+            for unit in ch.encode_utf16(&mut buffer) {
+                out.extend_from_slice(&order(*unit));
+            }
+        }
+        out
+    }
+
+    fn encode_latin1(text: &str) -> Result<Vec<u8>, Unmappable> {
+        let mut out = Vec::with_capacity(text.len());
+        for ch in text.chars() {
+            let point = u32::from(ch);
+            if point > 0xFF {
+                return Err(Unmappable {
+                    ch,
+                    encoding: FileEncoding::Iso8859_1,
+                });
+            }
+            out.push(point as u8);
+        }
+        Ok(out)
+    }
+
     fn first_unmappable(&self, text: &str) -> Unmappable {
-        let charset = self.encoding.charset();
+        let charset = DecodedText::charset(self.encoding);
         let mut buffer = [0u8; 4];
         for ch in text.chars() {
             let (_, _, unmappable) = charset.encode(ch.encode_utf8(&mut buffer));
@@ -375,25 +351,6 @@ impl Reencode {
         Unmappable {
             ch: char::REPLACEMENT_CHARACTER,
             encoding: self.encoding,
-        }
-    }
-}
-
-pub trait Charset: Sized {
-    fn charset(self) -> &'static Encoding;
-}
-
-impl Charset for FileEncoding {
-    fn charset(self) -> &'static Encoding {
-        match self {
-            Self::Utf8 | Self::Utf8Bom | Self::Utf16Le | Self::Utf16Be => encoding_rs::UTF_8,
-            Self::ShiftJis => encoding_rs::SHIFT_JIS,
-            Self::EucJp => encoding_rs::EUC_JP,
-            Self::Iso2022Jp => encoding_rs::ISO_2022_JP,
-            Self::Gbk => encoding_rs::GBK,
-            Self::Big5 => encoding_rs::BIG5,
-            Self::EucKr => encoding_rs::EUC_KR,
-            Self::Windows1252 | Self::Iso8859_1 => encoding_rs::WINDOWS_1252,
         }
     }
 }
@@ -478,9 +435,9 @@ mod tests {
                 "日本語のテキスト\n",
                 "中文和 english 混在\r\n",
             ] {
-                let bytes = Utf16::encoded(text, order);
+                let bytes = Reencode::encode_utf16(text, order);
                 assert!(
-                    BinarySniff::rejects(&bytes),
+                    DecodedText::rejects_binary(&bytes),
                     "{text:?} must be one the guard would have refused"
                 );
 

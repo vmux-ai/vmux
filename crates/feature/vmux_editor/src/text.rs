@@ -1,19 +1,5 @@
 use unicode_width::UnicodeWidthChar;
 
-struct DisplayCellWidth(u32);
-
-impl From<char> for DisplayCellWidth {
-    fn from(character: char) -> Self {
-        Self(UnicodeWidthChar::width(character).unwrap_or(0) as u32)
-    }
-}
-
-impl DisplayCellWidth {
-    fn get(self) -> u32 {
-        self.0
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(crate) struct DisplayCells<'a> {
     text: &'a str,
@@ -50,6 +36,6 @@ impl DisplayCells<'_> {
     }
 
     pub(crate) fn width_of(character: char) -> u32 {
-        DisplayCellWidth::from(character).get()
+        UnicodeWidthChar::width(character).unwrap_or(0) as u32
     }
 }
