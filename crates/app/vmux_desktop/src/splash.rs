@@ -12,248 +12,243 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
+use crate::boot_status::{
+    Closed, Dismissal, PageCounts, PresentedAt, SplashRequestSet, SplashStatus,
+};
+
 pub(crate) struct SplashPlugin;
 
 impl Plugin for SplashPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<SplashState>()
-            .add_systems(Startup, show)
-            .add_systems(Last, (update_text, dismiss).chain());
+            .add_systems(PostStartup, show)
+            .add_systems(
+                Last,
+                (update_text, dismiss, drain)
+                    .chain()
+                    .after(SplashRequestSet),
+            );
     }
-}
-
-const SPLASH_TIMEOUT: Duration = Duration::from_secs(20);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SplashDismissDecision {
-    None,
-    Fade,
-    Force,
-}
-
-fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashDismissDecision {
-    if dismissed {
-        return SplashDismissDecision::None;
-    }
-    if visible {
-        return SplashDismissDecision::Fade;
-    }
-    if elapsed >= SPLASH_TIMEOUT {
-        return SplashDismissDecision::Force;
-    }
-    SplashDismissDecision::None
 }
 
 #[derive(Default)]
 struct SplashState {
     window: Option<Retained<NSPanel>>,
     status_label: Option<Retained<NSTextField>>,
-    shown: bool,
-    dismissed: bool,
-    created_at: Option<Instant>,
+    owner: Option<Entity>,
     fade_started: Option<Instant>,
+    cleanup_wake: Option<bevy::tasks::Task<()>>,
+}
+
+impl SplashState {
+    fn show(&mut self, owner: Entity, boot: &SplashStatus, pages: &PageCounts) -> bool {
+        if self.window.is_some() {
+            return false;
+        }
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let Some(screen) = NSScreen::mainScreen(mtm) else {
+            return false;
+        };
+
+        const W: f64 = 280.0;
+        const H: f64 = 280.0;
+        let vf = screen.visibleFrame();
+        let frame = NSRect::new(
+            NSPoint::new(
+                vf.origin.x + (vf.size.width - W) / 2.0,
+                vf.origin.y + (vf.size.height - H) / 2.0,
+            ),
+            NSSize::new(W, H),
+        );
+
+        let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
+            NSPanel::alloc(mtm),
+            frame,
+            NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
+            NSBackingStoreType::Buffered,
+            false,
+        );
+        let window: &NSWindow = panel.as_super();
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setHasShadow(true);
+        unsafe { window.setReleasedWhenClosed(false) };
+        panel.setBecomesKeyOnlyIfNeeded(true);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+
+        let bounds = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(W, H));
+        let resize = NSAutoresizingMaskOptions::ViewWidthSizable
+            | NSAutoresizingMaskOptions::ViewHeightSizable;
+
+        let container = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+        container.setWantsLayer(true);
+        if let Some(layer) = container.layer() {
+            layer.setCornerRadius(20.0);
+            layer.setMasksToBounds(true);
+        }
+
+        if AnyClass::get(c"NSGlassEffectView").is_some() {
+            let glass = NSGlassEffectView::new(mtm);
+            glass.setStyle(NSGlassEffectViewStyle::Clear);
+            glass.setTintColor(Some(&NSColor::clearColor()));
+            let view: &NSView = &glass;
+            view.setFrame(bounds);
+            view.setAutoresizingMask(resize);
+            container.addSubview(view);
+        } else {
+            let blur = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), bounds);
+            blur.setMaterial(NSVisualEffectMaterial::HUDWindow);
+            blur.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+            blur.setState(NSVisualEffectState::Active);
+            let view: &NSView = &blur;
+            view.setAutoresizingMask(resize);
+            container.addSubview(view);
+        }
+
+        const TITLE_H: f64 = 40.0;
+        let title =
+            NSTextField::labelWithString(&NSString::from_str(vmux_profile::Product::name()), mtm);
+        title.setFrame(NSRect::new(
+            NSPoint::new(0.0, (H - TITLE_H) / 2.0 + 40.0),
+            NSSize::new(W, TITLE_H),
+        ));
+        title.setAlignment(NSTextAlignment::Center);
+        title.setFont(Some(&NSFont::boldSystemFontOfSize(28.0)));
+        title.setTextColor(Some(&NSColor::labelColor()));
+        container.addSubview(&title);
+
+        const SPIN: f64 = 32.0;
+        let spinner = NSProgressIndicator::initWithFrame(
+            NSProgressIndicator::alloc(mtm),
+            NSRect::new(
+                NSPoint::new((W - SPIN) / 2.0, (H - SPIN) / 2.0 - 56.0),
+                NSSize::new(SPIN, SPIN),
+            ),
+        );
+        spinner.setStyle(NSProgressIndicatorStyle::Spinning);
+        spinner.setIndeterminate(true);
+        unsafe { spinner.startAnimation(None) };
+        container.addSubview(&spinner);
+
+        const STATUS_H: f64 = 20.0;
+        let text = boot.display(pages);
+        let status = NSTextField::labelWithString(&NSString::from_str(&text), mtm);
+        status.setFrame(NSRect::new(
+            NSPoint::new(0.0, (H - STATUS_H) / 2.0 - 96.0),
+            NSSize::new(W, STATUS_H),
+        ));
+        status.setAlignment(NSTextAlignment::Center);
+        status.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+        status.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        container.addSubview(&status);
+        self.status_label = Some(status);
+
+        window.setContentView(Some(&container));
+        window.orderFrontRegardless();
+
+        self.window = Some(panel);
+        self.owner = Some(owner);
+        true
+    }
+
+    fn dismiss(&mut self, owner: Entity, wake: std::task::Waker) {
+        if self.owner != Some(owner) || self.fade_started.is_some() {
+            return;
+        }
+        let Some(panel) = self.window.as_ref() else {
+            return;
+        };
+        let window: &NSWindow = panel.as_super();
+        window.animator().setAlphaValue(0.0);
+        self.fade_started = Some(Instant::now());
+        self.cleanup_wake = Some(bevy::tasks::IoTaskPool::get().spawn(async move {
+            async_io::Timer::after(Duration::from_millis(280)).await;
+            wake.wake();
+        }));
+    }
+
+    fn drain(&mut self, cancelled: bool) -> Option<Entity> {
+        if !cancelled
+            && self
+                .fade_started
+                .is_none_or(|started| started.elapsed() < Duration::from_millis(280))
+        {
+            return None;
+        }
+        if let Some(panel) = self.window.take() {
+            let window: &NSWindow = panel.as_super();
+            window.close();
+        }
+        self.status_label = None;
+        self.fade_started = None;
+        self.cleanup_wake = None;
+        self.owner.take()
+    }
+
+    fn update_text(&self, text: &str) {
+        if let Some(label) = &self.status_label {
+            label.setStringValue(&NSString::from_str(text));
+        }
+    }
+}
+
+impl Drop for SplashState {
+    fn drop(&mut self) {
+        let _ = self.drain(true);
+    }
 }
 
 fn show(
     mut state: NonSendMut<SplashState>,
-    boot: Option<Single<&crate::boot_status::SplashStatus>>,
+    boot: Single<(Entity, &SplashStatus, &PageCounts)>,
+    mut commands: Commands,
 ) {
-    if state.shown {
-        return;
+    let (owner, boot, pages) = *boot;
+    if state.show(owner, boot, pages) {
+        commands.entity(owner).insert(PresentedAt(Instant::now()));
     }
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    state.shown = true;
-    let Some(screen) = NSScreen::mainScreen(mtm) else {
-        return;
-    };
-
-    const W: f64 = 280.0;
-    const H: f64 = 280.0;
-    let vf = screen.visibleFrame();
-    let frame = NSRect::new(
-        NSPoint::new(
-            vf.origin.x + (vf.size.width - W) / 2.0,
-            vf.origin.y + (vf.size.height - H) / 2.0,
-        ),
-        NSSize::new(W, H),
-    );
-
-    let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
-        NSPanel::alloc(mtm),
-        frame,
-        NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
-        NSBackingStoreType::Buffered,
-        false,
-    );
-    let window: &NSWindow = panel.as_super();
-    window.setOpaque(false);
-    window.setBackgroundColor(Some(&NSColor::clearColor()));
-    window.setHasShadow(true);
-    unsafe { window.setReleasedWhenClosed(false) };
-    panel.setBecomesKeyOnlyIfNeeded(true);
-    window.setCollectionBehavior(
-        NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::IgnoresCycle,
-    );
-
-    let bounds = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(W, H));
-    let resize =
-        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable;
-
-    let container = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-    container.setWantsLayer(true);
-    if let Some(layer) = container.layer() {
-        layer.setCornerRadius(20.0);
-        layer.setMasksToBounds(true);
-    }
-
-    if AnyClass::get(c"NSGlassEffectView").is_some() {
-        let glass = NSGlassEffectView::new(mtm);
-        glass.setStyle(NSGlassEffectViewStyle::Clear);
-        glass.setTintColor(Some(&NSColor::clearColor()));
-        let view: &NSView = &glass;
-        view.setFrame(bounds);
-        view.setAutoresizingMask(resize);
-        container.addSubview(view);
-    } else {
-        let blur = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), bounds);
-        blur.setMaterial(NSVisualEffectMaterial::HUDWindow);
-        blur.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-        blur.setState(NSVisualEffectState::Active);
-        let view: &NSView = &blur;
-        view.setAutoresizingMask(resize);
-        container.addSubview(view);
-    }
-
-    const TITLE_H: f64 = 40.0;
-    let title =
-        NSTextField::labelWithString(&NSString::from_str(vmux_profile::Product::name()), mtm);
-    title.setFrame(NSRect::new(
-        NSPoint::new(0.0, (H - TITLE_H) / 2.0 + 40.0),
-        NSSize::new(W, TITLE_H),
-    ));
-    title.setAlignment(NSTextAlignment::Center);
-    title.setFont(Some(&NSFont::boldSystemFontOfSize(28.0)));
-    title.setTextColor(Some(&NSColor::labelColor()));
-    container.addSubview(&title);
-
-    const SPIN: f64 = 32.0;
-    let spinner = NSProgressIndicator::initWithFrame(
-        NSProgressIndicator::alloc(mtm),
-        NSRect::new(
-            NSPoint::new((W - SPIN) / 2.0, (H - SPIN) / 2.0 - 56.0),
-            NSSize::new(SPIN, SPIN),
-        ),
-    );
-    spinner.setStyle(NSProgressIndicatorStyle::Spinning);
-    spinner.setIndeterminate(true);
-    unsafe { spinner.startAnimation(None) };
-    container.addSubview(&spinner);
-
-    const STATUS_H: f64 = 20.0;
-    let text = boot
-        .as_ref()
-        .map(|boot| boot.phase.display())
-        .unwrap_or_default();
-    let status = NSTextField::labelWithString(&NSString::from_str(&text), mtm);
-    status.setFrame(NSRect::new(
-        NSPoint::new(0.0, (H - STATUS_H) / 2.0 - 96.0),
-        NSSize::new(W, STATUS_H),
-    ));
-    status.setAlignment(NSTextAlignment::Center);
-    status.setFont(Some(&NSFont::systemFontOfSize(12.0)));
-    status.setTextColor(Some(&NSColor::secondaryLabelColor()));
-    container.addSubview(&status);
-    state.status_label = Some(status);
-
-    window.setContentView(Some(&container));
-    window.orderFrontRegardless();
-
-    state.window = Some(panel);
-    state.created_at = Some(Instant::now());
 }
 
 fn dismiss(
     mut state: NonSendMut<SplashState>,
-    window_q: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    requests: Query<Entity, With<Dismissal>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
 ) {
-    if state.window.is_none() {
+    let Some(wake) = wake else {
         return;
-    }
-    let visible = window_q.single().map(|w| w.visible).unwrap_or(false);
-    let elapsed = state.created_at.map(|t| t.elapsed()).unwrap_or_default();
-    let decision = splash_decision(visible, state.dismissed, elapsed);
-
-    match decision {
-        SplashDismissDecision::None => {
-            let close = state
-                .fade_started
-                .is_some_and(|t| t.elapsed() >= Duration::from_millis(280));
-            if close && let Some(panel) = state.window.take() {
-                let window: &NSWindow = panel.as_super();
-                window.close();
-            }
-        }
-        SplashDismissDecision::Fade | SplashDismissDecision::Force => {
-            if decision == SplashDismissDecision::Force {
-                warn!("splash: window did not reveal within timeout; dismissing splash");
-            }
-            if let Some(panel) = state.window.as_ref() {
-                let window: &NSWindow = panel.as_super();
-                window.animator().setAlphaValue(0.0);
-            }
-            state.dismissed = true;
-            state.fade_started = Some(Instant::now());
-        }
+    };
+    for owner in &requests {
+        state.dismiss(owner, wake.0.clone());
     }
 }
 
-fn update_text(state: NonSend<SplashState>, status: Single<&crate::boot_status::SplashStatus>) {
-    if let Some(label) = &state.status_label {
-        label.setStringValue(&NSString::from_str(&status.phase.display()));
+fn drain(
+    mut state: NonSendMut<SplashState>,
+    owners: Query<(), With<SplashStatus>>,
+    mut commands: Commands,
+) {
+    let Some(owner) = state.owner else {
+        return;
+    };
+    let current = owners.contains(owner);
+    if let Some(owner) = state.drain(!current)
+        && current
+    {
+        commands.entity(owner).try_insert(Closed);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hidden_within_timeout_does_nothing() {
-        assert_eq!(
-            splash_decision(false, false, Duration::from_secs(1)),
-            SplashDismissDecision::None
-        );
-    }
-
-    #[test]
-    fn visible_triggers_fade() {
-        assert_eq!(
-            splash_decision(true, false, Duration::from_secs(1)),
-            SplashDismissDecision::Fade
-        );
-    }
-
-    #[test]
-    fn hidden_past_timeout_forces_dismiss() {
-        assert_eq!(
-            splash_decision(false, false, Duration::from_secs(20)),
-            SplashDismissDecision::Force
-        );
-    }
-
-    #[test]
-    fn dismissed_is_idempotent() {
-        assert_eq!(
-            splash_decision(true, true, Duration::from_secs(1)),
-            SplashDismissDecision::None
-        );
-        assert_eq!(
-            splash_decision(false, true, Duration::from_secs(99)),
-            SplashDismissDecision::None
-        );
+fn update_text(state: NonSend<SplashState>, owners: Query<(&SplashStatus, &PageCounts)>) {
+    let Some(owner) = state.owner else {
+        return;
+    };
+    if let Ok((status, pages)) = owners.get(owner) {
+        state.update_text(&status.display(pages));
     }
 }

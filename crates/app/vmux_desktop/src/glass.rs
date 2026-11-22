@@ -41,7 +41,8 @@ impl Plugin for GlassPlugin {
                     restore_fullscreen_after_reveal,
                     activate_revealed_window,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(crate::boot_status::WindowRevealSet),
             );
     }
 }

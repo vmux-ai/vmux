@@ -69,6 +69,7 @@ name = "vmux_desktop"
 path = "src/main.rs"
 
 [dependencies]
+async-io = "2"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }

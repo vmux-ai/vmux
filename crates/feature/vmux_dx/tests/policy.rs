@@ -2246,6 +2246,53 @@ fn stateless_framework_bootstraps_require_real_interfaces_and_registration() {
 }
 
 #[test]
+fn framework_initialization_preserves_registration_without_owning_hidden_state() {
+    for (binding, fields, initialization, expected) in [
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "init_resource::<State>()",
+            true,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            ";",
+            "init_non_send::<Native>()",
+            true,
+        ),
+        (
+            "struct App; trait Plugin {}",
+            ";",
+            "init_non_send::<Native>()",
+            false,
+        ),
+        (
+            "use bevy_app::{App, Plugin};",
+            "{ engine: Native }",
+            "init_non_send::<Native>()",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "{binding} use bevy_ecs::prelude::*; #[derive(Component, Resource, Default)] struct State; #[derive(Default)] struct Native {{ rows: std::collections::HashMap<String, String> }} fn read(state: Query<&State>) {{}} struct RootPlugin{fields} impl Plugin for RootPlugin {{ fn build(&self, app: &mut App) {{ app.{initialization}.add_systems(Update, read); }} }}"
+        ));
+        for key in ["struct:RootPlugin", "impl:Plugin for RootPlugin"] {
+            let entry = &inventory.entries[&inventory.key(key)];
+            assert_eq!(
+                inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()),
+                expected,
+                "{binding} {fields} {initialization} {key}"
+            );
+        }
+        let hidden = &inventory.entries[&inventory.key("struct:Native")];
+        assert!(
+            !inventory.canonical(hidden, &Policy::default(), &mut BTreeSet::new()),
+            "initialization cannot own hidden native/domain state"
+        );
+    }
+}
+
+#[test]
 fn system_set_factories_require_real_derive_and_type_identity_construction() {
     for (binding, fields, derive, body, expected) in [
         (
@@ -7485,6 +7532,7 @@ impl BodyShape {
                         | "add_message"
                         | "add_event"
                         | "init_resource"
+                        | "init_non_send"
                         | "insert_resource"
                         | "register_type"
                         | "configure_sets"
@@ -7825,6 +7873,8 @@ impl<'ast> Visit<'ast> for Footprint {
                 | "add_observer"
                 | "add_message"
                 | "add_event"
+                | "init_resource"
+                | "init_non_send"
                 | "register_type"
                 | "configure_sets"
                 | "register_required_components"
@@ -14081,6 +14131,7 @@ impl References<'_> {
                         | "add_plugins"
                         | "add_message"
                         | "init_resource"
+                        | "init_non_send"
                         | "insert_resource"
                         | "register_type"
                         | "configure_sets"
