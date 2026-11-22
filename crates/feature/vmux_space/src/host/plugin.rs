@@ -760,6 +760,62 @@ struct SpaceGraph<'w, 's> {
 }
 
 impl SpaceGraph<'_, '_> {
+    fn view_template(&self, id: &str, matching: bool) -> Option<(String, String, u32)> {
+        let mut selected: Option<(String, String, u32)> = None;
+        for (_, candidate, name, _, order, _, _) in &self.rows {
+            if (candidate.0 == id) != matching {
+                continue;
+            }
+            let order = order.map(|order| order.0).unwrap_or(u32::MAX);
+            if selected.as_ref().is_some_and(|current| current.2 <= order) {
+                continue;
+            }
+            selected = Some((candidate.0.clone(), name.to_string(), order));
+        }
+        selected
+    }
+
+    fn template_bundle(&self, template: &(String, String, u32), main: Entity) -> impl Bundle {
+        (
+            SpaceId(template.0.clone()),
+            Name::new(template.1.clone()),
+            Order(template.2),
+            Active,
+            LastActivatedAt::now(),
+            Space::bundle(),
+            ChildOf(main),
+        )
+    }
+
+    fn template_layout_request(
+        &self,
+        template: &(String, String, u32),
+        space: Entity,
+        window: Entity,
+        settings: Option<&AppSettings>,
+        startup_page: &str,
+    ) -> TabLayoutSpawnRequest {
+        let startup_dir = settings.and_then(|settings| settings.startup_dir(&template.0));
+        let content = settings
+            .map(|settings| settings.startup_url(&template.0, startup_page))
+            .or_else(|| Some(startup_page.to_string()))
+            .filter(|url| !url.is_empty())
+            .map(|url| TabLayoutSpawnContent::Url {
+                url,
+                pending_prompt: None,
+            })
+            .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
+        TabLayoutSpawnRequest {
+            space,
+            primary_window: window,
+            name: None,
+            startup_dir,
+            content,
+            clear_pending_stack: true,
+            focus: true,
+        }
+    }
+
     fn bump_tab(&self, space: Entity, commands: &mut Commands) {
         if let Some((tab, _, _, _)) = self
             .tabs
@@ -812,79 +868,6 @@ impl SpaceWindow<'_, '_> {
 
     fn window_of(&self, entity: Entity) -> Option<Entity> {
         self.hierarchy.get(entity)
-    }
-}
-
-#[derive(Clone)]
-struct SpaceViewTemplate {
-    id: String,
-    name: String,
-    order: u32,
-}
-
-impl SpaceViewTemplate {
-    fn find(spaces: &SpaceListQuery, id: &str) -> Option<Self> {
-        spaces
-            .iter()
-            .filter(|(_, candidate, _, _, _, _, _)| candidate.0 == id)
-            .min_by_key(|(_, _, _, _, order, _, _)| order.map(|order| order.0).unwrap_or(u32::MAX))
-            .map(|(_, id, name, _, order, _, _)| Self {
-                id: id.0.clone(),
-                name: name.to_string(),
-                order: order.map(|order| order.0).unwrap_or(u32::MAX),
-            })
-    }
-
-    fn first_other(spaces: &SpaceListQuery, excluded: &str) -> Option<Self> {
-        spaces
-            .iter()
-            .filter(|(_, candidate, _, _, _, _, _)| candidate.0 != excluded)
-            .min_by_key(|(_, _, _, _, order, _, _)| order.map(|order| order.0).unwrap_or(u32::MAX))
-            .map(|(_, id, name, _, order, _, _)| Self {
-                id: id.0.clone(),
-                name: name.to_string(),
-                order: order.map(|order| order.0).unwrap_or(u32::MAX),
-            })
-    }
-
-    fn bundle(&self, main: Entity) -> impl Bundle {
-        (
-            SpaceId(self.id.clone()),
-            Name::new(self.name.clone()),
-            Order(self.order),
-            Active,
-            LastActivatedAt::now(),
-            Space::bundle(),
-            ChildOf(main),
-        )
-    }
-
-    fn layout_request(
-        &self,
-        space: Entity,
-        window: Entity,
-        settings: Option<&AppSettings>,
-        startup_page: &str,
-    ) -> TabLayoutSpawnRequest {
-        let startup_dir = settings.and_then(|settings| settings.startup_dir(&self.id));
-        let content = settings
-            .map(|settings| settings.startup_url(&self.id, startup_page))
-            .or_else(|| Some(startup_page.to_string()))
-            .filter(|url| !url.is_empty())
-            .map(|url| TabLayoutSpawnContent::Url {
-                url,
-                pending_prompt: None,
-            })
-            .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
-        TabLayoutSpawnRequest {
-            space,
-            primary_window: window,
-            name: None,
-            startup_dir,
-            content,
-            clear_pending_stack: true,
-            focus: true,
-        }
     }
 }
 
@@ -994,7 +977,7 @@ fn delete(
     if logical_ids.len() <= 1 {
         return;
     }
-    let Some(fallback) = SpaceViewTemplate::first_other(&graph.rows, id) else {
+    let Some(fallback) = graph.view_template(id, false) else {
         return;
     };
     let mut affected_mains = Vec::new();
@@ -1029,8 +1012,11 @@ fn delete(
         let Some(affected_window) = space_window.window_of(affected_main) else {
             continue;
         };
-        let space = commands.spawn(fallback.bundle(affected_main)).id();
-        layout_requests.write(fallback.layout_request(
+        let space = commands
+            .spawn(graph.template_bundle(&fallback, affected_main))
+            .id();
+        layout_requests.write(graph.template_layout_request(
+            &fallback,
             space,
             affected_window,
             settings.as_deref(),
@@ -1057,12 +1043,13 @@ fn attach(
         .iter()
         .find(|(_, space_id, _, _, parent)| space_id.0 == id && parent.parent() == main);
     let Some((entity, _, is_active, _, _)) = local else {
-        let Some(template) = SpaceViewTemplate::find(&graph.rows, id) else {
+        let Some(template) = graph.view_template(id, true) else {
             return;
         };
         graph.deactivate_in_main(main, &mut commands);
-        let space = commands.spawn(template.bundle(main)).id();
-        layout_requests.write(template.layout_request(
+        let space = commands.spawn(graph.template_bundle(&template, main)).id();
+        layout_requests.write(graph.template_layout_request(
+            &template,
             space,
             window,
             settings.as_deref(),

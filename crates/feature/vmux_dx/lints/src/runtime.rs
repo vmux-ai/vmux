@@ -298,7 +298,9 @@ impl crate::VmuxExportedSystem<'_> {
             while cx.tcx.def_kind(caller) == DefKind::Closure && !self.systems.contains(&caller) {
                 caller = cx.tcx.parent(caller);
             }
-            owners.insert(caller);
+            if caller != function {
+                owners.insert(caller);
+            }
         }
         if owners.len() != 1 {
             return false;

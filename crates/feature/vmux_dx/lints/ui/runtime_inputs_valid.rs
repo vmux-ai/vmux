@@ -50,6 +50,17 @@ fn inspect(access: Access, input: Inputs) {
 
 fn generic_helper<T: SystemParam>(_: T) {}
 
+fn walk(input: &Inputs) {
+    if input.iter().next().is_some() {
+        let recurse = || walk(input);
+        recurse();
+    }
+}
+
+fn traverse(input: Inputs) {
+    walk(&input);
+}
+
 #[derive(Component)]
 struct Writer {
     run: for<'w, 's> fn(&mut Commands<'w, 's>),
@@ -109,6 +120,6 @@ trait Framework {
 }
 
 fn main() {
-    App::new().add_systems(Update, (apply, inspect, forward));
+    App::new().add_systems(Update, (apply, inspect, forward, traverse));
     Engine.unrelated(unrelated::Query);
 }

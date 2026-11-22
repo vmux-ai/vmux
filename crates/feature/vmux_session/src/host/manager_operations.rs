@@ -698,10 +698,13 @@ impl Accepted<'_, '_> {
         target: &EntityTarget<vmux_ecs::profile::ActiveProfile>,
         id: &ProfileId,
     ) -> bool {
-        self.contexts
-            .get(entity)
-            .is_ok_and(|context| context.matches(&self.profile))
-            && self.profile.entity() == Some(target.entity())
+        self.contexts.get(entity).is_ok_and(|context| {
+            context.matches(
+                self.profile.entity(),
+                self.profile.profile(),
+                self.profile.paths(),
+            )
+        }) && self.profile.entity() == Some(target.entity())
             && self
                 .profile
                 .profile()
