@@ -9538,6 +9538,7 @@ struct Declaration {
     page_components: BTreeSet<(String, String)>,
     page_input_errors: BTreeSet<String>,
     inventory_inputs: BTreeSet<(String, String)>,
+    native_class: Option<(String, Type)>,
     dom_mounts: BTreeSet<(String, String)>,
     rendered: BTreeSet<String>,
     renderer: bool,
@@ -11769,6 +11770,7 @@ impl Inventory {
                 page_components: BTreeSet::new(),
                 page_input_errors: BTreeSet::new(),
                 inventory_inputs: BTreeSet::new(),
+                native_class: None,
                 dom_mounts: BTreeSet::new(),
                 rendered: BTreeSet::new(),
                 renderer: false,
@@ -13435,7 +13437,7 @@ impl Inventory {
             candidates.push(implementation);
         }
         for candidate in candidates {
-            if self.inventory_value(candidate, value) {
+            if self.inventory_value(candidate, value) || self.native_class_value(candidate, value) {
                 return true;
             }
             for (attribute, input) in &candidate.page_inputs {
@@ -13585,6 +13587,56 @@ impl Inventory {
                 .is_some_and(|input| input.key == value.key)
             {
                 return true;
+            }
+        }
+        false
+    }
+
+    fn native_class_value(&self, adapter: &Declaration, value: &Declaration) -> bool {
+        let Some((interface, ivars)) = &adapter.native_class else {
+            return false;
+        };
+        if self
+            .external_path(&adapter.namespace, interface, &mut BTreeSet::new())
+            .as_deref()
+            != Some("objc2::define_class")
+        {
+            return false;
+        }
+        let mut pending = vec![ivars.clone()];
+        while let Some(field) = pending.pop() {
+            match field {
+                Type::Tuple(tuple) => pending.extend(tuple.elems),
+                Type::Paren(field) => pending.push(*field.elem),
+                Type::Group(field) => pending.push(*field.elem),
+                Type::Path(field) if field.qself.is_none() => {
+                    let path = References::path(&field.path);
+                    let target = self.resolve(&adapter.namespace, &path, &mut BTreeSet::new());
+                    if target.is_none_or(|target| {
+                        target.key != "crates/util/vmux_ecs/src/component.rs||struct:EntityTarget"
+                    }) {
+                        continue;
+                    }
+                    let arguments = References::arguments(&field.path);
+                    if arguments.len() != 1 {
+                        continue;
+                    }
+                    let Ok(Type::Path(endpoint)) = syn::parse_str::<Type>(&arguments[0]) else {
+                        continue;
+                    };
+                    if endpoint.qself.is_none()
+                        && self
+                            .resolve(
+                                &adapter.namespace,
+                                &References::path(&endpoint.path),
+                                &mut BTreeSet::new(),
+                            )
+                            .is_some_and(|endpoint| endpoint.key == value.key)
+                    {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
         false
@@ -16555,6 +16607,11 @@ impl Declarations<'_> {
             page_components: references.page_components,
             page_input_errors: references.page_input_errors,
             inventory_inputs: references.inventory_inputs,
+            native_class: match &parsed_item {
+                Some(Item::Macro(item)) => References::native_class_ivars(item.mac.tokens.clone())
+                    .map(|ivars| (References::path(&item.mac.path), ivars)),
+                _ => None,
+            },
             dom_mounts: references.dom_mounts,
             rendered: references.rendered,
             renderer: matches!(kind, Kind::Function)
@@ -16860,6 +16917,123 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
             _ => {}
         }
         visit::visit_item(self, item);
+    }
+}
+
+#[test]
+fn native_objc_class_references_require_the_real_macro_and_retained_target() {
+    let cases = [
+        (
+            "direct",
+            "use objc2::define_class;",
+            "define_class",
+            "#[ivars = EntityTarget<State>]",
+            true,
+        ),
+        (
+            "alias",
+            "use objc2::define_class as Native;",
+            "Native",
+            "#[ivars = (EntityTarget<State>, std::sync::Weak<u32>)]",
+            true,
+        ),
+        (
+            "other_target",
+            "use objc2::define_class;",
+            "define_class",
+            "#[ivars = EntityTarget<Other>]",
+            false,
+        ),
+        (
+            "owned_state",
+            "use objc2::define_class;",
+            "define_class",
+            "#[ivars = State]",
+            false,
+        ),
+        (
+            "boxed_target",
+            "use objc2::define_class;",
+            "define_class",
+            "#[ivars = Box<EntityTarget<State>>]",
+            false,
+        ),
+        (
+            "missing",
+            "use objc2::define_class;",
+            "define_class",
+            "",
+            false,
+        ),
+        (
+            "malformed",
+            "use objc2::define_class;",
+            "define_class",
+            "#[ivars = EntityTarget<]",
+            false,
+        ),
+        (
+            "duplicate",
+            "use objc2::define_class;",
+            "define_class",
+            "#[ivars = EntityTarget<State>] #[ivars = EntityTarget<Other>]",
+            false,
+        ),
+        (
+            "other_macro",
+            "use other::define_class;",
+            "define_class",
+            "#[ivars = EntityTarget<State>]",
+            false,
+        ),
+        (
+            "shadow_root",
+            "mod objc2 {} use objc2::define_class;",
+            "define_class",
+            "#[ivars = EntityTarget<State>]",
+            false,
+        ),
+    ];
+    let target_path = "crates/util/vmux_ecs/src/component.rs";
+    let target_source = std::fs::read_to_string(Workspace::current().0.join(target_path))
+        .expect("the actual EntityTarget interface must exist");
+    for (name, import, invocation, attributes, expected) in cases {
+        let text = format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use vmux_ecs::component::EntityTarget; {import} #[derive(Component)] struct State; #[derive(Component)] struct Other; fn observe(values:Query<(&State,&Other)>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,observe);}}}} {invocation}!({attributes} #[unsafe(super(NSObject))] struct Delegate; unsafe impl NSObjectProtocol for Delegate {{}});"
+        );
+        let mut inventory = Inventory::fixture(&text);
+        inventory.source(target_path, &target_source);
+        inventory.resolve_usage();
+        let owner = inventory
+            .entries
+            .values()
+            .find(|entry| matches!(entry.kind, Kind::Macro) && entry.path == "fixture.rs")
+            .expect("native declaration macro");
+        let endpoint = inventory
+            .entries
+            .values()
+            .find(|entry| entry.name == "State" && entry.path == "fixture.rs")
+            .expect("canonical state");
+        assert_eq!(
+            inventory.native_class_value(owner, endpoint),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn native_objc_class_ivars_must_belong_to_the_declared_native_class() {
+    for source in [
+        "#[ivars = EntityTarget<State>] fn unrelated() {} #[unsafe(super(NSObject))] struct Delegate; unsafe impl NSObjectProtocol for Delegate {}",
+        "#[ivars = EntityTarget<State>] struct Delegate; unsafe impl NSObjectProtocol for Delegate {}",
+        "#[ivars = EntityTarget<State>] #[unsafe(super(NSObject))] struct Delegate; unsafe impl NSObjectProtocol for Other {}",
+        "#[ivars = EntityTarget<State>] #[unsafe(super(NSObject))] struct Delegate; struct Extra; unsafe impl NSObjectProtocol for Delegate {}",
+    ] {
+        assert!(
+            References::native_class_ivars(source.parse().unwrap()).is_none(),
+            "{source}"
+        );
     }
 }
 
@@ -17355,6 +17529,79 @@ impl<'ast> Visit<'ast> for References<'_> {
 }
 
 impl References<'_> {
+    fn native_class_ivars(tokens: proc_macro2::TokenStream) -> Option<Type> {
+        let mut input = tokens.into_iter().peekable();
+        let mut cleaned = proc_macro2::TokenStream::new();
+        let mut ivars = None;
+        while let Some(token) = input.next() {
+            if matches!(&token, proc_macro2::TokenTree::Punct(value) if value.as_char() == '#')
+                && matches!(input.peek(), Some(proc_macro2::TokenTree::Group(value)) if value.delimiter() == proc_macro2::Delimiter::Bracket)
+            {
+                let Some(proc_macro2::TokenTree::Group(attribute)) = input.next() else {
+                    return None;
+                };
+                let parts: Vec<_> = attribute.stream().into_iter().collect();
+                if matches!(parts.first(), Some(proc_macro2::TokenTree::Ident(value)) if value == "ivars")
+                {
+                    if ivars.is_some()
+                        || !matches!(parts.get(1), Some(proc_macro2::TokenTree::Punct(value)) if value.as_char() == '=')
+                    {
+                        return None;
+                    }
+                    ivars = Some(syn::parse2::<Type>(parts.into_iter().skip(2).collect()).ok()?);
+                    cleaned.extend(quote::quote!(#[ivars = ()]));
+                    continue;
+                }
+                cleaned.extend([token, proc_macro2::TokenTree::Group(attribute)]);
+            } else {
+                cleaned.extend([token]);
+            }
+        }
+        let file = syn::parse2::<syn::File>(cleaned).ok()?;
+        let mut class = None;
+        for item in &file.items {
+            let Item::Struct(value) = item else {
+                continue;
+            };
+            if class.is_some()
+                || !matches!(value.fields, syn::Fields::Unit)
+                || !value.generics.params.is_empty()
+                || !value
+                    .attrs
+                    .iter()
+                    .any(|attribute| attribute.path().is_ident("ivars"))
+            {
+                return None;
+            }
+            let mut superclass = false;
+            for attribute in &value.attrs {
+                if attribute.path().is_ident("unsafe")
+                    && let Ok(syn::Meta::List(value)) = attribute.parse_args::<syn::Meta>()
+                    && value.path.is_ident("super")
+                    && syn::parse2::<Type>(value.tokens).is_ok()
+                {
+                    superclass = true;
+                }
+            }
+            if !superclass {
+                return None;
+            }
+            class = Some(value.ident.clone());
+        }
+        let class = class?;
+        for item in &file.items {
+            if let Item::Impl(value) = item
+                && value.trait_.is_some()
+                && let Type::Path(owner) = &*value.self_ty
+                && owner.qself.is_none()
+                && owner.path.is_ident(&class)
+            {
+                return ivars;
+            }
+        }
+        None
+    }
+
     fn parameter_type_path(&mut self, value: &syn::TypePath) {
         let inventory = self.parameter_inventory.unwrap();
         let namespace = self.parameter_namespace;

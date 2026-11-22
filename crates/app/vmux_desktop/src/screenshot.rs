@@ -4,7 +4,6 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use vmux_input::{ScreenshotRequest, ScreenshotResponse};
-use vmux_setting::AppSettings;
 
 #[cfg(any(target_os = "macos", test))]
 use crate::capture_output::CaptureSize;
@@ -60,14 +59,14 @@ fn start_screenshots(
     _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
     bridge: Query<&ScreenshotBridge>,
-    settings: Res<AppSettings>,
+    output: CaptureOutput,
     source: CaptureSource,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let Ok(bridge) = bridge.single() else {
         return;
     };
-    let base_dir = CaptureOutput::directory(&settings);
+    let base_dir = output.directory();
     for req in reader.read() {
         if !vmux_profile::Product::screen() {
             let _ = bridge.tx.send(err_response(
@@ -80,6 +79,15 @@ fn start_screenshots(
             Ok(capture) => capture,
             Err(message) => {
                 let _ = bridge.tx.send(err_response(req.request_id, message));
+                continue;
+            }
+        };
+        let base_dir = match &base_dir {
+            Ok(path) => path.clone(),
+            Err(message) => {
+                let _ = bridge
+                    .tx
+                    .send(err_response(req.request_id, message.clone()));
                 continue;
             }
         };
@@ -97,7 +105,7 @@ fn start_screenshots(
             capture.size.height,
             capture.crop,
             req.request_id,
-            base_dir.clone(),
+            base_dir,
             tx,
             wake,
         );
@@ -142,6 +150,33 @@ fn encode_downscaled_png(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_setting::AppSettings;
+
+    #[test]
+    fn missing_profile_refuses_screenshot_before_native_capture() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ScreenshotPlugin))
+            .add_message::<ScreenshotRequest>()
+            .add_message::<ScreenshotResponse>()
+            .insert_resource(AppSettings::default());
+        app.world_mut().spawn((Window::default(), vmux_ecs::Active));
+        app.world_mut().write_message(ScreenshotRequest {
+            request_id: [41; 16],
+            pane: None,
+        });
+        app.update();
+        let responses: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<ScreenshotResponse>>()
+            .drain()
+            .collect();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].request_id, [41; 16]);
+        match &responses[0].result {
+            Err(error) => assert_eq!(error, "no active capture profile"),
+            Ok(_) => panic!("a missing Profile must refuse before native capture"),
+        }
+    }
 
     #[test]
     fn encode_downscaled_png_emits_png_header() {

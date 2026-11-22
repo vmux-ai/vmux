@@ -3,7 +3,9 @@ use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
 #[cfg(feature = "recording")]
-use crate::recording::{RecordingControl, RecordingStatus};
+use crate::recording::RecordingStatus;
+#[cfg(feature = "recording")]
+use crate::recording::lifecycle::{FinishRecording, PauseRecording, ResumeRecording};
 use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
 use vmux_page::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
 use vmux_setting::AppSettings;
@@ -196,28 +198,27 @@ fn quit_from(
     }
 }
 
-#[cfg(feature = "recording")]
 fn control_recording_from(
     mut selections: MessageReader<OsMenuSelection>,
-    pause: Query<(), With<PauseRecordingFromTray>>,
-    resume: Query<(), With<ResumeRecordingFromTray>>,
-    finish: Query<(), With<FinishRecordingFromTray>>,
-    mut controls: MessageWriter<RecordingControl>,
+    #[cfg(feature = "recording")] pause: Query<(), With<PauseRecordingFromTray>>,
+    #[cfg(feature = "recording")] resume: Query<(), With<ResumeRecordingFromTray>>,
+    #[cfg(feature = "recording")] finish: Query<(), With<FinishRecordingFromTray>>,
+    #[cfg(feature = "recording")] mut pause_requests: MessageWriter<PauseRecording>,
+    #[cfg(feature = "recording")] mut resume_requests: MessageWriter<ResumeRecording>,
+    #[cfg(feature = "recording")] mut finish_requests: MessageWriter<FinishRecording>,
 ) {
+    #[cfg(feature = "recording")]
     for selection in selections.read() {
         let target = selection.target();
         if pause.contains(target) {
-            controls.write(RecordingControl::Pause);
+            pause_requests.write(PauseRecording);
         } else if resume.contains(target) {
-            controls.write(RecordingControl::Resume);
+            resume_requests.write(ResumeRecording);
         } else if finish.contains(target) {
-            controls.write(RecordingControl::Done);
+            finish_requests.write(FinishRecording);
         }
     }
-}
-
-#[cfg(not(feature = "recording"))]
-fn control_recording_from(mut selections: MessageReader<OsMenuSelection>) {
+    #[cfg(not(feature = "recording"))]
     for _ in selections.read() {}
 }
 
