@@ -481,7 +481,7 @@ fn apply_lsp_folds(
     for fold in folds.read() {
         if fold
             .origin
-            .is_some_and(|origin| !origin.current(&view_params.p0()))
+            .is_some_and(|origin| !view_params.p0().origin_current(&origin))
         {
             continue;
         }

@@ -117,7 +117,11 @@ fn attach(
         ManagerQuery::default(),
         ManagerFilters,
         ManagerDisplayMode::default(),
-        crate::provider::NativeContext::capture(&profile),
+        crate::provider::NativeContext::capture(
+            profile.entity(),
+            profile.profile(),
+            profile.paths(),
+        ),
         UiState::<ManagerUiState>::default(),
     ));
     if let (Some(entity), Some(current)) = (profile.entity(), profile.profile()) {
@@ -932,7 +936,7 @@ fn project(
     let Ok((query, filters, mode, context)) = views.get(event.entity) else {
         return;
     };
-    if !context.matches(&profile) {
+    if !context.matches(profile.entity(), profile.profile(), profile.paths()) {
         commands.trigger(UiStateWrite::<ManagerUiState>::from_event(
             event.entity,
             &ManagerUiState {

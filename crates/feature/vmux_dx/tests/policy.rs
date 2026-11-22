@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use compiler_inputs::CompilerInputs;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -1309,6 +1311,34 @@ fn compiler_inputs_recognize_the_automatic_package_binary_and_explicit_overrides
         }
         let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
         assert_eq!(inputs.owner(&fixture.input("private")).is_some(), !explicit);
+    }
+}
+
+#[test]
+fn compiler_inputs_allow_diagnostic_levels_without_compiler_redirection() {
+    for (key, value, expected) in [
+        ("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime", true),
+        ("DYLINT_RUSTFLAGS", "--cfg test", false),
+        ("RUSTC_WRAPPER", "echo", false),
+    ] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let changed = original.replace(
+            "Command::new(\"cargo\")",
+            &format!("Command::new(\"cargo\").env({key:?}, {value:?})"),
+        );
+        assert_ne!(original, changed);
+        std::fs::write(source, changed).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert_eq!(
+            inputs.owner(&fixture.input("private")).is_some(),
+            expected,
+            "{key}: {value}"
+        );
     }
 }
 

@@ -437,7 +437,11 @@ impl CatalogViews<'_, '_> {
         Some((
             entity,
             vmux_ecs::ProfileId(profile.id().to_string()),
-            crate::provider::NativeContext::capture(&self.profile),
+            crate::provider::NativeContext::capture(
+                self.profile.entity(),
+                self.profile.profile(),
+                self.profile.paths(),
+            ),
         ))
     }
 
@@ -451,11 +455,13 @@ impl CatalogViews<'_, '_> {
         session: Option<&SessionId>,
         cwd: &Path,
     ) -> bool {
-        if self
-            .contexts
-            .get(entity)
-            .is_ok_and(|context| !context.matches(&self.profile))
-        {
+        if self.contexts.get(entity).is_ok_and(|context| {
+            !context.matches(
+                self.profile.entity(),
+                self.profile.profile(),
+                self.profile.paths(),
+            )
+        }) {
             return false;
         }
         if let Ok((target, id)) = self.bindings.get(entity) {
@@ -1072,7 +1078,11 @@ fn scope_projection(
     };
     commands.entity(target).insert((
         SessionScopeView(cwd.clone()),
-        crate::provider::NativeContext::capture(&profile),
+        crate::provider::NativeContext::capture(
+            profile.entity(),
+            profile.profile(),
+            profile.paths(),
+        ),
     ));
     let state = SessionScopeView::project(cwd, &sources.snapshot());
     commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(

@@ -484,7 +484,6 @@ legacy: [
     (key: "crates/feature/vmux_editor/src/host/tool.rs||struct:FileToolPlugin", fingerprint: "080b62248b50f141", issue: "VMX-253"),
     (key: "crates/feature/vmux_editor/src/host/tool.rs||struct:OpenFileTool", fingerprint: "1b27a9c0d79a147e", issue: "VMX-253"),
     (key: "crates/feature/vmux_editor/src/host/viewport.rs||const:STICKY_SCROLL_DEPTH", fingerprint: "8d374498ecf2b456", issue: "VMX-253"),
-    (key: "crates/feature/vmux_editor/src/host/viewport.rs||fn:apply_lsp_folds", fingerprint: "5679589e4b462abb", issue: "VMX-253"),
     (key: "crates/feature/vmux_editor/src/host/viewport.rs||fn:rehighlight_on_color_scheme", fingerprint: "330823793c95be31", issue: "VMX-253"),
     (key: "crates/feature/vmux_editor/src/host/viewport.rs||impl:DriftedWindow", fingerprint: "fcdb8cdb6aee923e", issue: "VMX-253"),
     (key: "crates/feature/vmux_editor/src/host/viewport.rs||impl:Plugin for ViewportPlugin", fingerprint: "02c34e276fb5f578", issue: "VMX-253"),

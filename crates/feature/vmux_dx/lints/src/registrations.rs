@@ -51,6 +51,7 @@ impl Fixture {
         )
         .unwrap();
         let output = Command::new("cargo")
+            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime")
             .current_dir(self.directory.path())
             .args([
                 "dylint",
@@ -140,6 +141,38 @@ impl Fixture {
             diagnostics.push(diagnostic);
         }
         (diagnostics, unexpected)
+    }
+}
+
+#[test]
+fn runtime_inputs_follow_resolved_systems_and_system_param_methods() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        (
+            "runtime_inputs",
+            include_str!("../ui/runtime_inputs.rs"),
+            &[
+                "`inspect`: inherent methods with ECS runtime inputs must belong to a SystemParam",
+                "`inspect_access`: inherent methods with ECS runtime inputs must belong to a SystemParam",
+                "`isolated`: ECS runtime helpers must be private and have one local registered owner",
+                "`shared`: ECS runtime helpers must be private and have one local registered owner",
+                "`exposed`: ECS runtime helpers must be private and have one local registered owner",
+                "`detached`: ECS runtime helpers must be private and have one local registered owner",
+                "`unregistered`: ECS runtime helpers must be private and have one local registered owner",
+                "`generic`: ECS runtime helpers must be private and have one local registered owner",
+                "`captured`: ECS runtime helpers must be private and have one local registered owner",
+                "`disconnected`: ECS runtime helpers must be private and have one local registered owner",
+                "`unread`: ECS runtime helpers must be private and have one local registered owner",
+                "`plain_helper`: ECS runtime helpers must be private and have one local registered owner",
+            ][..],
+        ),
+        (
+            "runtime_inputs_valid",
+            include_str!("../ui/runtime_inputs_valid.rs"),
+            &[][..],
+        ),
+    ] {
+        fixture.check(name, source, expected, "vmux_ecs_runtime");
     }
 }
 

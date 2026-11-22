@@ -8,53 +8,6 @@ use crate::protocol::{Focus, LayoutNode, NodeKind};
 use super::{Reconcile, current::CurrentLayout};
 
 impl Reconcile {
-    pub(super) fn preflight(
-        &self,
-        layout: &CurrentLayout,
-        scope: Option<Entity>,
-        revision: OperationTargetRevision,
-    ) -> Result<(HashSet<Entity>, HashMap<Entity, Entity>), String> {
-        if layout.scope()? != scope || !revision.accepts(Some(layout.revision(scope))) {
-            return Err("update_layout: layout revision or scope changed".into());
-        }
-        let mut retained = self.validate()?;
-        let current = layout.entities(scope);
-        for &entity in &retained {
-            if !current.contains(&entity) || layout.retiring(entity) {
-                return Err(format!("update_layout: MissingReferencedEntity {entity:?}"));
-            }
-        }
-        let mut roots = HashMap::new();
-        for tab in &self.snapshot.tabs {
-            if matches!(tab.root, LayoutNode::Split { id: None, .. })
-                && let Some(id) = tab.id.as_deref()
-            {
-                let tab = Self::parse(id)?.1;
-                if let Some(root) = layout.root_split(tab)
-                    && retained.insert(root)
-                {
-                    roots.insert(tab, root);
-                }
-            }
-        }
-        for &entity in &current {
-            if !retained.contains(&entity)
-                && (layout.retiring(entity)
-                    || layout.is_stack(entity)
-                        && (layout.protected(entity) || layout.uncaptured(entity)))
-            {
-                return Err(
-                    "update_layout: close requires confirmation or presentation drain".into(),
-                );
-            }
-        }
-        for tab in &self.snapshot.tabs {
-            Self::check_kind(tab.id.as_deref(), NodeKind::Tab, layout)?;
-            Self::check_node(&tab.root, layout)?;
-        }
-        Ok((retained, roots))
-    }
-
     pub(super) fn validate(&self) -> Result<HashSet<Entity>, String> {
         let mut seen = HashSet::new();
         let mut active = 0;
@@ -196,43 +149,87 @@ impl Reconcile {
         }
     }
 
-    fn check_kind(
-        id: Option<&str>,
-        expected: NodeKind,
-        layout: &CurrentLayout,
-    ) -> Result<(), String> {
-        if let Some(id) = id {
-            let (_, entity) = Self::parse(id)?;
-            if !layout.matches(entity, expected) {
-                return Err(format!("update_layout: WrongKindForPosition {id}"));
-            }
-        }
-        Ok(())
-    }
-
-    fn check_node(node: &LayoutNode, layout: &CurrentLayout) -> Result<(), String> {
-        match node {
-            LayoutNode::Split { id, children, .. } => {
-                Self::check_kind(id.as_deref(), NodeKind::Split, layout)?;
-                for child in children {
-                    Self::check_node(child, layout)?;
-                }
-            }
-            LayoutNode::Pane { id, stacks, .. } => {
-                Self::check_kind(id.as_deref(), NodeKind::Pane, layout)?;
-                for stack in stacks {
-                    Self::check_kind(stack.id.as_deref(), NodeKind::Stack, layout)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn parse(id: &str) -> Result<(NodeKind, Entity), String> {
         let (kind, bits) =
             NodeKind::parse_id(id).map_err(|_| format!("update_layout: InvalidIdFormat {id}"))?;
         let entity = Entity::try_from_bits(bits)
             .ok_or_else(|| format!("update_layout: InvalidIdFormat {id}"))?;
         Ok((kind, entity))
+    }
+}
+
+impl CurrentLayout<'_, '_> {
+    pub(super) fn preflight(
+        &self,
+        intent: &Reconcile,
+        scope: Option<Entity>,
+        revision: OperationTargetRevision,
+    ) -> Result<(HashSet<Entity>, HashMap<Entity, Entity>), String> {
+        if self.scope()? != scope || !revision.accepts(Some(self.revision(scope))) {
+            return Err("update_layout: layout revision or scope changed".into());
+        }
+        let mut retained = intent.validate()?;
+        let current = self.entities(scope);
+        for &entity in &retained {
+            if !current.contains(&entity) || self.retiring(entity) {
+                return Err(format!("update_layout: MissingReferencedEntity {entity:?}"));
+            }
+        }
+        let mut roots = HashMap::new();
+        for tab in &intent.snapshot.tabs {
+            if matches!(tab.root, LayoutNode::Split { id: None, .. })
+                && let Some(id) = tab.id.as_deref()
+            {
+                let tab = Reconcile::parse(id)?.1;
+                if let Some(root) = self.root_split(tab)
+                    && retained.insert(root)
+                {
+                    roots.insert(tab, root);
+                }
+            }
+        }
+        for &entity in &current {
+            if !retained.contains(&entity)
+                && (self.retiring(entity)
+                    || self.is_stack(entity) && (self.protected(entity) || self.uncaptured(entity)))
+            {
+                return Err(
+                    "update_layout: close requires confirmation or presentation drain".into(),
+                );
+            }
+        }
+        for tab in &intent.snapshot.tabs {
+            self.check_kind(tab.id.as_deref(), NodeKind::Tab)?;
+            self.check_node(&tab.root)?;
+        }
+        Ok((retained, roots))
+    }
+
+    fn check_kind(&self, id: Option<&str>, expected: NodeKind) -> Result<(), String> {
+        if let Some(id) = id {
+            let (_, entity) = Reconcile::parse(id)?;
+            if !self.matches(entity, expected) {
+                return Err(format!("update_layout: WrongKindForPosition {id}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_node(&self, node: &LayoutNode) -> Result<(), String> {
+        match node {
+            LayoutNode::Split { id, children, .. } => {
+                self.check_kind(id.as_deref(), NodeKind::Split)?;
+                for child in children {
+                    self.check_node(child)?;
+                }
+            }
+            LayoutNode::Pane { id, stacks, .. } => {
+                self.check_kind(id.as_deref(), NodeKind::Pane)?;
+                for stack in stacks {
+                    self.check_kind(stack.id.as_deref(), NodeKind::Stack)?;
+                }
+            }
+        }
+        Ok(())
     }
 }

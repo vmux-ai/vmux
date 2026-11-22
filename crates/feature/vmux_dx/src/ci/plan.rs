@@ -49,6 +49,7 @@ impl bevy_app::Plugin for CiPlanPlugin {
                 tip,
                 fetched,
                 ancestry,
+                probe,
                 merged,
                 presentation_start,
                 presentation_compare,
@@ -197,45 +198,6 @@ impl Plan {
             .and_then(toml::Value::as_str)
             .ok_or("Missing CI workspace version")?;
         Ok(value.into())
-    }
-    fn probe(
-        &self,
-        entity: Entity,
-        context: &Context,
-        settings: &Settings,
-        sequence: &mut Sequence,
-        io: &mut Io,
-    ) {
-        io.request(
-            entity,
-            sequence,
-            context.git(
-                &settings.0,
-                &["merge-tree", "--write-tree", &self.base, &self.head],
-            ),
-            MergeSlot,
-        );
-        io.request(
-            entity,
-            sequence,
-            context.git(
-                &settings.0,
-                &["rev-parse", &format!("{}^{{tree}}", self.checkout)],
-            ),
-            TreeSlot,
-        );
-        io.request(
-            entity,
-            sequence,
-            context.git(&settings.0, &["show", &format!("{}:Cargo.toml", self.base)]),
-            BaseVersionSlot,
-        );
-        io.request(
-            entity,
-            sequence,
-            context.git(&settings.0, &["show", &format!("{}:Cargo.toml", self.head)]),
-            HeadVersionSlot,
-        );
     }
     fn verify_merge(
         &mut self,
@@ -453,7 +415,6 @@ fn parents(mut plans: Plans, mut io: Io, results: Results) {
         }
         plan.base = parents[0].into();
         if plan.base == plan.supplied_base {
-            plan.probe(entity, context, settings, &mut sequence, &mut io);
             *phase = Phase::Merge;
         } else {
             let endpoint = format!(
@@ -575,7 +536,7 @@ fn fetched(mut plans: Plans, mut io: Io, results: Results) {
     }
 }
 fn ancestry(mut plans: Plans, mut io: Io, results: Results) {
-    for (entity, context, settings, mut plan, mut phase, mut sequence) in &mut plans {
+    for (entity, _, _, mut plan, mut phase, _) in &mut plans {
         if *phase != Phase::Ancestry {
             continue;
         }
@@ -612,8 +573,47 @@ fn ancestry(mut plans: Plans, mut io: Io, results: Results) {
         if !second.0.status.success() {
             plan.base = plan.tip.clone();
         }
-        plan.probe(entity, context, settings, &mut sequence, &mut io);
         *phase = Phase::Merge;
+    }
+}
+fn probe(mut plans: Plans, mut io: Io, results: Results) {
+    for (entity, context, settings, plan, phase, mut sequence) in &mut plans {
+        if *phase != Phase::Merge
+            || results.merge_slot_captured.pending(entity)
+            || results.merge_slot_captured.get(entity).is_some()
+        {
+            continue;
+        }
+        io.request(
+            entity,
+            &mut sequence,
+            context.git(
+                &settings.0,
+                &["merge-tree", "--write-tree", &plan.base, &plan.head],
+            ),
+            MergeSlot,
+        );
+        io.request(
+            entity,
+            &mut sequence,
+            context.git(
+                &settings.0,
+                &["rev-parse", &format!("{}^{{tree}}", plan.checkout)],
+            ),
+            TreeSlot,
+        );
+        io.request(
+            entity,
+            &mut sequence,
+            context.git(&settings.0, &["show", &format!("{}:Cargo.toml", plan.base)]),
+            BaseVersionSlot,
+        );
+        io.request(
+            entity,
+            &mut sequence,
+            context.git(&settings.0, &["show", &format!("{}:Cargo.toml", plan.head)]),
+            HeadVersionSlot,
+        );
     }
 }
 fn merged(mut plans: Plans, mut io: Io, results: Results) {

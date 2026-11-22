@@ -2,10 +2,12 @@
 
 extern crate rustc_errors;
 extern crate rustc_hir;
+extern crate rustc_infer;
 extern crate rustc_lint;
 extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
+extern crate rustc_trait_selection;
 
 use rustc_errors::DiagDecorator;
 use rustc_hir::def::Res;
@@ -13,7 +15,7 @@ use rustc_hir::def_id::{DefId, LOCAL_CRATE};
 use rustc_hir::{Body, Expr, ExprKind, HirId, Item, Node, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind, Visibility};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, PathBuf};
 
 mod aliases;
@@ -22,6 +24,7 @@ mod ownership;
 mod plugins;
 #[cfg(test)]
 mod registrations;
+mod runtime;
 
 dylint_linting::dylint_library!();
 
@@ -49,6 +52,12 @@ rustc_session::declare_lint! {
     "Vmux plugin types and aliases must use descriptive names ending in Plugin"
 }
 
+rustc_session::declare_lint! {
+    pub VMUX_ECS_RUNTIME,
+    Deny,
+    "ECS runtime inputs belong to systems, local helpers, or SystemParam methods"
+}
+
 #[unsafe(no_mangle)]
 pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintStore) {
     store.register_lints(&[
@@ -56,11 +65,12 @@ pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintSt
         VMUX_SYSTEM_NAME,
         VMUX_PLUGIN_NAME,
         VMUX_ECS_OWNERSHIP,
+        VMUX_ECS_RUNTIME,
     ]);
     store.register_late_lint_pass(Box::new(|_| Box::new(VmuxExportedSystem::default())));
 }
 
-rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_PLUGIN_NAME, VMUX_ECS_OWNERSHIP]);
+rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_PLUGIN_NAME, VMUX_ECS_OWNERSHIP, VMUX_ECS_RUNTIME]);
 
 #[derive(Default)]
 struct VmuxExportedSystem<'tcx> {
@@ -70,6 +80,12 @@ struct VmuxExportedSystem<'tcx> {
     ownership: ownership::Ownership<'tcx>,
     reported: HashSet<DefId>,
     configurations: HashSet<HirId>,
+    systems: HashSet<DefId>,
+    helper_callers: HashMap<DefId, HashSet<DefId>>,
+    runtime_fields: HashMap<DefId, HashSet<DefId>>,
+    runtime_field_callers: HashMap<DefId, HashSet<DefId>>,
+    parameter_trait: Option<DefId>,
+    trait_implementations: HashSet<DefId>,
 }
 
 impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
@@ -77,6 +93,7 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
         self.owned = Self::applies(cx);
         self.ownership.traits(cx);
         self.collect_plugins(cx);
+        self.collect_runtime(cx);
     }
 
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
@@ -84,6 +101,9 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
     }
 
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        if self.owned && !cx.tcx.sess.opts.test {
+            self.check_runtime(cx);
+        }
         self.ownership.finish(cx);
     }
 
@@ -92,6 +112,8 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
             return;
         }
         self.ownership.call(cx, expression);
+        self.runtime_reference(cx, expression);
+        self.runtime_field_reference(cx, expression);
         self.register(cx, expression);
     }
 
@@ -346,6 +368,9 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
 
     fn system_type(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>) {
         match ty.kind() {
+            TyKind::Closure(function, _) => {
+                self.systems.insert(*function);
+            }
             TyKind::FnDef(function, arguments) => {
                 self.ownership
                     .system(cx, *function, arguments.skip_binder());
@@ -364,6 +389,7 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
         let Some(local) = function.as_local() else {
             return;
         };
+        self.systems.insert(function);
         self.check_name(cx, function);
         let Visibility::Restricted(scope) = cx.tcx.visibility(function) else {
             self.report(cx, function);

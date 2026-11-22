@@ -309,10 +309,6 @@ impl Surface {
     pub(crate) fn new(url: &str) -> Self {
         Self(url.to_string())
     }
-
-    fn belongs_to(&self, page: &HostedPage, url: &str, placements: &PagePlacementCatalog) -> bool {
-        page.answers_for(&self.0) || placements.reuses(url, &self.0)
-    }
 }
 
 impl Plugin for HostedPagePlugin {
@@ -472,9 +468,9 @@ fn open(
                         .iter()
                         .filter_map(|child| {
                             let (surface, pending) = hosted_browsers.get(child).ok()?;
-                            surface
-                                .belongs_to(page, &task.url, &placements)
-                                .then_some((child, pending))
+                            (page.answers_for(&surface.0)
+                                || placements.reuses(&task.url, &surface.0))
+                            .then_some((child, pending))
                         })
                         .max_by_key(|(_, pending)| *pending)
                 })

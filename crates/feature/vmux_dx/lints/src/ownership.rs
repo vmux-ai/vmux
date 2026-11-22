@@ -107,7 +107,7 @@ impl<'tcx> Ownership<'tcx> {
         }
     }
 
-    fn has_role(&self, owner: DefId, role: &str) -> bool {
+    pub(super) fn has_role(&self, owner: DefId, role: &str) -> bool {
         self.roles
             .get(&owner)
             .is_some_and(|roles| roles.contains(role))

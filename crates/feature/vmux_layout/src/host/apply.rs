@@ -154,7 +154,7 @@ fn commit(
         let (validated, previous) = {
             let (layout, _, _) = params.get_mut(world).unwrap();
             (
-                intent.preflight(&layout, scope, revision),
+                layout.preflight(&intent, scope, revision),
                 layout.entities(scope),
             )
         };

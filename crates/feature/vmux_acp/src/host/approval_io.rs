@@ -62,9 +62,9 @@ impl Json {
         Ok(records)
     }
 
-    fn encode(grants: &Records, file: Entity) -> Result<Vec<u8>, String> {
+    fn encode(records: Vec<(&str, &str, &str)>) -> Result<Vec<u8>, String> {
         let mut data = Self::default();
-        for (agent, scope, tool) in grants.records(file) {
+        for (agent, scope, tool) in records {
             data.by_agent
                 .entry(agent.into())
                 .or_default()
@@ -280,7 +280,7 @@ fn write(
         let Some(path) = state.path.clone() else {
             continue;
         };
-        let bytes = match Json::encode(&grants, file) {
+        let bytes = match Json::encode(grants.records(file)) {
             Ok(bytes) => bytes,
             Err(error) => {
                 state.write_failed = true;
@@ -440,107 +440,116 @@ fn flush(world: &mut World) {
             warn!("approval exit finalization exceeded its lock budget");
             break;
         }
-        let dirty = world.get::<Revision>(file).map(|revision| revision.0)
-            != world.get::<BaseRevision>(file).map(|saved| saved.0);
-        if !dirty {
-            continue;
-        }
-        let pending = [
-            world.get::<File>(file).and_then(|state| state.read),
-            world.get::<File>(file).and_then(|state| state.write),
-        ];
-        for operation in pending.into_iter().flatten() {
-            world.despawn(operation);
-        }
-        let state = world.get_mut::<File>(file).unwrap().into_inner();
-        state.read = None;
-        state.write = None;
-        {
-            let operation = world
-                .spawn((
-                    Operation::bundle("approval.exit-read").unwrap().running(),
-                    EntityTarget::<File>::new(file),
-                ))
-                .id();
-            world.get_mut::<File>(file).unwrap().read = Some(operation);
-            match FileJob::read(path.clone()).execute(deadline) {
-                Ok(Content::Read {
-                    records,
-                    fingerprint,
-                }) => {
-                    world.write_message(Loaded {
-                        file,
-                        operation,
-                        fingerprint,
-                        result: Ok(records),
-                    });
-                    world.run_schedule(Reconcile);
-                    world.despawn(operation);
-                }
-                Err(error) => {
-                    world.write_message(Loaded {
-                        file,
-                        operation,
-                        fingerprint: None,
-                        result: Err(error.clone()),
-                    });
-                    world.run_schedule(Reconcile);
-                    warn!("approval exit read failed: {error}");
-                    continue;
-                }
-                _ => continue,
-            }
-        }
-        let bytes = match world.run_system_once(move |grants: Records| Json::encode(&grants, file))
-        {
+        flush_file(world, file, path, deadline);
+    }
+}
+
+fn flush_file(world: &mut World, file: Entity, path: PathBuf, deadline: Instant) {
+    let dirty = world.get::<Revision>(file).map(|revision| revision.0)
+        != world.get::<BaseRevision>(file).map(|saved| saved.0);
+    if !dirty {
+        return;
+    }
+    let pending = [
+        world.get::<File>(file).and_then(|state| state.read),
+        world.get::<File>(file).and_then(|state| state.write),
+    ];
+    for operation in pending.into_iter().flatten() {
+        world.despawn(operation);
+    }
+    let state = world.get_mut::<File>(file).unwrap().into_inner();
+    state.read = None;
+    state.write = None;
+    if !flush_read(world, file, path.clone(), deadline) {
+        return;
+    }
+    let bytes =
+        match world.run_system_once(move |grants: Records| Json::encode(grants.records(file))) {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(error)) => {
                 warn!("approval exit encoding failed: {error}");
-                continue;
+                return;
             }
             Err(error) => {
                 warn!("approval exit snapshot failed: {error}");
-                continue;
+                return;
             }
         };
-        let fingerprint = world.get::<File>(file).unwrap().fingerprint;
-        let revision = world.get::<Revision>(file).unwrap().0;
-        let operation = world
-            .spawn((
-                Operation::bundle("approval.exit-write").unwrap().running(),
-                EntityTarget::<File>::new(file),
-                BaseRevision(revision),
-            ))
-            .id();
-        world.get_mut::<File>(file).unwrap().write = Some(operation);
-        match FileJob::write(path, bytes, fingerprint).execute(deadline) {
-            Ok(Content::Written(fingerprint)) => {
-                world.write_message(Saved {
-                    file,
-                    operation,
-                    revision,
-                    fingerprint: Some(fingerprint),
-                    result: Ok(()),
-                });
-                world.run_schedule(Reconcile);
-                world
-                    .entity_mut(operation)
-                    .insert(OperationState::Succeeded);
-            }
-            Err(error) => {
-                world.write_message(Saved {
-                    file,
-                    operation,
-                    revision,
-                    fingerprint: None,
-                    result: Err(error.clone()),
-                });
-                world.run_schedule(Reconcile);
-                world.entity_mut(operation).insert(OperationState::Failed);
-                warn!("approval exit write failed: {error}");
-            }
-            _ => {}
+    let fingerprint = world.get::<File>(file).unwrap().fingerprint;
+    let revision = world.get::<Revision>(file).unwrap().0;
+    let operation = world
+        .spawn((
+            Operation::bundle("approval.exit-write").unwrap().running(),
+            EntityTarget::<File>::new(file),
+            BaseRevision(revision),
+        ))
+        .id();
+    world.get_mut::<File>(file).unwrap().write = Some(operation);
+    match FileJob::write(path, bytes, fingerprint).execute(deadline) {
+        Ok(Content::Written(fingerprint)) => {
+            world.write_message(Saved {
+                file,
+                operation,
+                revision,
+                fingerprint: Some(fingerprint),
+                result: Ok(()),
+            });
+            world.run_schedule(Reconcile);
+            world
+                .entity_mut(operation)
+                .insert(OperationState::Succeeded);
         }
+        Err(error) => {
+            world.write_message(Saved {
+                file,
+                operation,
+                revision,
+                fingerprint: None,
+                result: Err(error.clone()),
+            });
+            world.run_schedule(Reconcile);
+            world.entity_mut(operation).insert(OperationState::Failed);
+            warn!("approval exit write failed: {error}");
+        }
+        _ => {}
+    }
+}
+
+fn flush_read(world: &mut World, file: Entity, path: PathBuf, deadline: Instant) -> bool {
+    let operation = world
+        .spawn((
+            Operation::bundle("approval.exit-read").unwrap().running(),
+            EntityTarget::<File>::new(file),
+        ))
+        .id();
+    world.get_mut::<File>(file).unwrap().read = Some(operation);
+    match FileJob::read(path).execute(deadline) {
+        Ok(Content::Read {
+            records,
+            fingerprint,
+        }) => {
+            world.write_message(Loaded {
+                file,
+                operation,
+                fingerprint,
+                result: Ok(records),
+            });
+            world.run_schedule(Reconcile);
+            world.despawn(operation);
+            true
+        }
+        Err(error) => {
+            world.write_message(Loaded {
+                file,
+                operation,
+                fingerprint: None,
+                result: Err(error.clone()),
+            });
+            world.run_schedule(Reconcile);
+            warn!("approval exit read failed: {error}");
+            false
+        }
+        _ => false,
     }
 }
 

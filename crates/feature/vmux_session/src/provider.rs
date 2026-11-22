@@ -135,8 +135,12 @@ pub struct NativeContext(Option<(Entity, String, PathBuf)>);
 
 #[cfg(feature = "app")]
 impl NativeContext {
-    pub fn capture(profile: &vmux_ecs::profile::CurrentProfile) -> Self {
-        let context = match (profile.entity(), profile.profile(), profile.paths()) {
+    pub fn capture(
+        entity: Option<Entity>,
+        profile: Option<&vmux_ecs::profile::Profile>,
+        paths: Option<&vmux_ecs::profile::ProfilePaths>,
+    ) -> Self {
+        let context = match (entity, profile, paths) {
             (Some(entity), Some(profile), Some(paths)) => {
                 Some((entity, profile.id().to_string(), paths.profile()))
             }
@@ -145,8 +149,13 @@ impl NativeContext {
         Self(context)
     }
 
-    pub fn matches(&self, profile: &vmux_ecs::profile::CurrentProfile) -> bool {
-        *self == Self::capture(profile)
+    pub fn matches(
+        &self,
+        entity: Option<Entity>,
+        profile: Option<&vmux_ecs::profile::Profile>,
+        paths: Option<&vmux_ecs::profile::ProfilePaths>,
+    ) -> bool {
+        *self == Self::capture(entity, profile, paths)
     }
 }
 
@@ -1246,7 +1255,9 @@ fn archive(
         .get(receipt.operation)
         .ok()
         .flatten()
-        .is_some_and(|context| !context.matches(&profile))
+        .is_some_and(|context| {
+            !context.matches(profile.entity(), profile.profile(), profile.paths())
+        })
     {
         *state = OperationState::Canceled;
         if sources
@@ -1344,7 +1355,9 @@ fn written(
         .get(receipt.operation)
         .ok()
         .flatten()
-        .is_some_and(|context| !context.matches(&profile))
+        .is_some_and(|context| {
+            !context.matches(profile.entity(), profile.profile(), profile.paths())
+        })
     {
         *state = OperationState::Canceled;
         commands

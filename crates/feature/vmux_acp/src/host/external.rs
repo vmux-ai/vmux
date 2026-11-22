@@ -249,7 +249,9 @@ struct CatalogWitness<'w, 's> {
 
 impl CatalogWitness<'_, '_> {
     fn accepts(&self, binding: &CatalogBinding) -> bool {
-        binding.source.profile_matches(&self.profile)
+        binding
+            .source
+            .profile_matches(self.profile.entity(), self.profile.paths())
             && self.installed.get(binding.agent).ok() == Some(&binding.source)
     }
 }

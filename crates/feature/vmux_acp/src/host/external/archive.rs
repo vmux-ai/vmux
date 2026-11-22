@@ -128,7 +128,11 @@ impl StorageReads<'_, '_> {
     }
 
     fn context(&self) -> vmux_session::provider::NativeContext {
-        vmux_session::provider::NativeContext::capture(&self.profile)
+        vmux_session::provider::NativeContext::capture(
+            self.profile.entity(),
+            self.profile.profile(),
+            self.profile.paths(),
+        )
     }
 }
 
@@ -147,7 +151,13 @@ impl ContextReads<'_, '_> {
                 .get(operation)
                 .ok()
                 .flatten()
-                .is_none_or(|context| context.matches(&self.profile))
+                .is_none_or(|context| {
+                    context.matches(
+                        self.profile.entity(),
+                        self.profile.profile(),
+                        self.profile.paths(),
+                    )
+                })
     }
 }
 
@@ -349,7 +359,9 @@ fn retire_contexts(
             continue;
         }
         if sources.contains(source.entity())
-            && context.is_none_or(|context| context.matches(&profile))
+            && context.is_none_or(|context| {
+                context.matches(profile.entity(), profile.profile(), profile.paths())
+            })
         {
             continue;
         }

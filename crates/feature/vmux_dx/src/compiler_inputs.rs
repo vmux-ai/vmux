@@ -823,6 +823,27 @@ impl CompilerInputs {
                         }
                         directory = root;
                     }
+                    "env" => {
+                        if call.args.len() != 2
+                            || self.string(call.args.first()?)? != "DYLINT_RUSTFLAGS"
+                        {
+                            return None;
+                        }
+                        let flags = self.string(call.args.iter().nth(1)?)?;
+                        let mut flags = flags.split_whitespace();
+                        while let Some(level) = flags.next() {
+                            if !matches!(level, "-A" | "-W" | "-D" | "-F") {
+                                return None;
+                            }
+                            let name = flags.next()?;
+                            if !name
+                                .bytes()
+                                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                            {
+                                return None;
+                            }
+                        }
+                    }
                     _ => return None,
                 }
                 Some((directory, arguments))
