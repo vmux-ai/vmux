@@ -240,7 +240,7 @@ fn open_context(
         && let Ok(mut repository_info) = source.info.single_mut()
         && let Some(repository) = repository_info.cached(directory)
     {
-        project = Some(repository.project_root().to_path_buf());
+        project = Some(repository.main_worktree_root().to_path_buf());
     }
     let selected = project
         .as_ref()

@@ -116,6 +116,32 @@ impl ResumeCatalog<'_, '_> {
         let query_lower = query.trim().to_ascii_lowercase();
         let now = vmux_ecs::UnixMillis::now().0;
         let mut sessions = Vec::new();
+        self.collect_native_sessions(&query_lower, now, &mut sessions);
+        self.collect_provider_sessions(&query_lower, now, &mut sessions);
+        self.apply_stages(now, &mut sessions);
+        sessions.sort_by_key(|(activated, _)| std::cmp::Reverse(*activated));
+        let total = sessions.len() as u32;
+        let sessions = sessions
+            .into_iter()
+            .skip(offset as usize)
+            .take(ResumableSessions::PAGE as usize)
+            .map(|(_, session)| session)
+            .collect();
+        ResumableSessions {
+            request_id,
+            query: query.to_string(),
+            sessions,
+            offset,
+            total,
+        }
+    }
+
+    fn collect_native_sessions(
+        &mut self,
+        query_lower: &str,
+        now: i64,
+        sessions: &mut Vec<(i64, ResumableSessionEntry)>,
+    ) {
         for (id, name, description, cwd, activated, agent, profile) in &self.sessions {
             let path = cwd.0.as_path();
             let info = self.cache.as_mut().and_then(|cache| cache.cached(path));
@@ -125,7 +151,7 @@ impl ResumeCatalog<'_, '_> {
                 .unwrap_or_else(|| cwd.0.to_string_lossy().into_owned());
             let project = info
                 .as_ref()
-                .map(vmux_git::worktree::RepoInfo::project_name)
+                .map(vmux_git::worktree::RepoInfo::main_worktree_name)
                 .filter(|project| !project.is_empty())
                 .unwrap_or_else(|| subtitle.clone());
             let branch = info.map(|info| info.branch).unwrap_or_default();
@@ -149,7 +175,7 @@ impl ResumeCatalog<'_, '_> {
                     agent_name.as_str(),
                 ]
                 .iter()
-                .any(|value| value.to_ascii_lowercase().contains(&query_lower))
+                .any(|value| value.to_ascii_lowercase().contains(query_lower))
             {
                 continue;
             }
@@ -182,6 +208,14 @@ impl ResumeCatalog<'_, '_> {
                 },
             ));
         }
+    }
+
+    fn collect_provider_sessions(
+        &self,
+        query_lower: &str,
+        now: i64,
+        sessions: &mut Vec<(i64, ResumableSessionEntry)>,
+    ) {
         for entity in self.providers.selected() {
             let Some(session) = self.providers.record(entity) else {
                 continue;
@@ -214,7 +248,7 @@ impl ResumeCatalog<'_, '_> {
                     session.agent_name.map_or("", Name::as_str),
                 ]
                 .iter()
-                .any(|value| value.to_ascii_lowercase().contains(&query_lower))
+                .any(|value| value.to_ascii_lowercase().contains(query_lower))
             {
                 continue;
             }
@@ -247,6 +281,9 @@ impl ResumeCatalog<'_, '_> {
                 },
             ));
         }
+    }
+
+    fn apply_stages(&self, now: i64, sessions: &mut [(i64, ResumableSessionEntry)]) {
         let default_stage = self
             .stages
             .iter()
@@ -254,7 +291,7 @@ impl ResumeCatalog<'_, '_> {
             .min_by_key(|(_, _, order, _)| order.0)
             .map(|(id, _, _, _)| id.0.as_str())
             .unwrap_or("in_progress");
-        for (updated_at, entry) in &mut sessions {
+        for (updated_at, entry) in sessions {
             let mut stage = default_stage;
             let mut runtime = "inactive";
             if entry.kind == "session" {
@@ -292,21 +329,6 @@ impl ResumeCatalog<'_, '_> {
                 && !matches!(runtime, "streaming" | "awaiting" | "installing" | "errored")
                 && now.saturating_sub(*updated_at).max(0) as u64
                     >= crate::SessionSummaryProjection::STALE_AFTER * 1_000;
-        }
-        sessions.sort_by_key(|(activated, _)| std::cmp::Reverse(*activated));
-        let total = sessions.len() as u32;
-        let sessions = sessions
-            .into_iter()
-            .skip(offset as usize)
-            .take(ResumableSessions::PAGE as usize)
-            .map(|(_, session)| session)
-            .collect();
-        ResumableSessions {
-            request_id,
-            query: query.to_string(),
-            sessions,
-            offset,
-            total,
         }
     }
 }

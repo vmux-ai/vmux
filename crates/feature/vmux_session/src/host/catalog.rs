@@ -965,10 +965,10 @@ fn sync_repositories(
             .and_then(|cache| cache.bypass_change_detection().cached(path));
         let repository = match info {
             Some(info) => SessionRepository {
-                project_identity: info.project_root().to_string_lossy().into_owned(),
+                project_identity: info.main_worktree_root().to_string_lossy().into_owned(),
                 id: session.id.clone(),
-                project: info.project_name(),
-                project_url: SessionProject::url(projects_root, info.project_root()),
+                project: info.main_worktree_name(),
+                project_url: SessionProject::url(projects_root, info.main_worktree_root()),
                 branch: info.branch,
                 url: vmux_git::GitUrl::from_path(&info.repo_root).unwrap_or_default(),
             },

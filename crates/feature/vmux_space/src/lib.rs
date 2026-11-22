@@ -6,7 +6,7 @@
 
 #[cfg(host)]
 pub use host::{
-    ActiveProjectRows, AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
     AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentSpaceCreate,
     AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
     RepositoryNeedsWorktree, SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest,

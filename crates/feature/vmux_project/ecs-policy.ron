@@ -43,8 +43,6 @@ values: [
 shape: (
   debt: [
     (key: "crates/feature/vmux_project/src/registration.rs||enum:Mutation", fingerprint: "5bef72928173b3e1", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_project/src/registration.rs||fn:finish", fingerprint: "c3dc7be08bf11b86", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_project/src/registration.rs||fn:write", fingerprint: "7e7cd37a2f74f08e", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_project/src/registration.rs||enum:StoreSet", fingerprint: "eba5d5607878ae7b", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_project/src/contract.rs||enum:ProjectSource", fingerprint: "932d456f972efae0", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_project/src/registration.rs||enum:Error", fingerprint: "c4a0361c45e37f65", issue: "VMX-253", finding: "AU-13"),
