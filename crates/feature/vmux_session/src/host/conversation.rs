@@ -252,7 +252,7 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         ..ChatTranscriptState::default()
     };
     let mut next = ChatSnapshot {
-        status: conversation.status.page_status().to_string(),
+        status: Conversation::status_label(&conversation.status).to_string(),
         error,
         approval,
         agent_id: agent_id.clone(),
@@ -306,13 +306,9 @@ impl Log {
     }
 }
 
-trait PageStatus {
-    fn page_status(&self) -> &'static str;
-}
-
-impl PageStatus for RemoteStatus {
-    fn page_status(&self) -> &'static str {
-        match self {
+impl Conversation {
+    fn status_label(status: &RemoteStatus) -> &'static str {
+        match status {
             RemoteStatus::Streaming => "streaming",
             RemoteStatus::Errored(_) => "errored",
             RemoteStatus::Interrupted => "interrupted",
@@ -516,11 +512,17 @@ mod tests {
 
     #[test]
     fn every_remote_status_names_a_state_the_shared_page_knows() {
-        assert_eq!(RemoteStatus::Idle.page_status(), "idle");
-        assert_eq!(RemoteStatus::Streaming.page_status(), "streaming");
-        assert_eq!(RemoteStatus::Interrupted.page_status(), "interrupted");
+        assert_eq!(Conversation::status_label(&RemoteStatus::Idle), "idle");
         assert_eq!(
-            RemoteStatus::Errored("boom".to_string()).page_status(),
+            Conversation::status_label(&RemoteStatus::Streaming),
+            "streaming"
+        );
+        assert_eq!(
+            Conversation::status_label(&RemoteStatus::Interrupted),
+            "interrupted"
+        );
+        assert_eq!(
+            Conversation::status_label(&RemoteStatus::Errored("boom".to_string())),
             "errored"
         );
     }

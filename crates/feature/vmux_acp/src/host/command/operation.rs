@@ -3,9 +3,8 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentFileSearch, AgentFileTouched, AgentListAgents, AgentNewChat,
     AgentTurnEnded,
 };
-use vmux_ecs::PageOpenTarget;
-use vmux_ecs::agent::AgentRequestReady;
-use vmux_ecs::agent::{AgentCommandResponse, AgentReply};
+use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestReady};
+use vmux_ecs::{Operation, PageOpenTarget};
 use vmux_session::host::StartRequest;
 use vmux_session::{Created, SessionId};
 
@@ -18,7 +17,10 @@ pub(super) struct OperationPlugin;
 
 impl bevy::prelude::Plugin for OperationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingSessionCreations>()
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.add_message::<vmux_session::mutation::Rejected>()
             .add_observer(open_created_session)
             .add_systems(
                 Update,
@@ -27,6 +29,7 @@ impl bevy::prelude::Plugin for OperationPlugin {
                     acknowledge_file_search,
                     acknowledge_turn_ended,
                     create_session,
+                    reject_created_session,
                     list_agents,
                 )
                     .in_set(CommandSet::Commands)
@@ -36,22 +39,47 @@ impl bevy::prelude::Plugin for OperationPlugin {
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingSessionCreations(std::collections::HashMap<SessionId, PendingSessionCreation>);
-
+#[derive(Component)]
 struct PendingSessionCreation {
     request_id: vmux_api::protocol::AgentRequestId,
 }
 
 fn open_created_session(
     trigger: On<Created>,
-    mut pending: ResMut<PendingSessionCreations>,
+    pending: Query<(Entity, &SessionId, &PendingSessionCreation)>,
     mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
 ) {
-    let Some(pending) = pending.0.remove(&trigger.event().id) else {
-        return;
-    };
-    responses.write(AgentReply::new(pending.request_id).ok());
+    let created_id = &trigger.event().id;
+    for (entity, session_id, creation) in &pending {
+        if session_id != created_id {
+            continue;
+        }
+        responses.write(AgentReply::new(creation.request_id).ok());
+        commands.entity(entity).despawn();
+    }
+}
+
+fn reject_created_session(
+    mut rejected: MessageReader<vmux_session::mutation::Rejected>,
+    pending: Query<(Entity, &SessionId, &PendingSessionCreation)>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
+) {
+    for rejection in rejected.read() {
+        for (entity, session_id, creation) in &pending {
+            if session_id != &rejection.session {
+                continue;
+            }
+            responses.write(AgentReply::new(creation.request_id).response(
+                AgentCommandResult::Error(format!(
+                    "create session rejected: {:?}",
+                    rejection.reason
+                )),
+            ));
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 fn acknowledge_file_touched(
@@ -91,8 +119,8 @@ fn create_session(
     mut requests: MessageReader<AgentRequestReady>,
     contributed_pages: vmux_command::ContributedPages,
     mut session_requests: MessageWriter<StartRequest>,
-    mut pending: ResMut<PendingSessionCreations>,
     mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
         let Ok(Some(payload)) = request.decode::<AgentNewChat>() else {
@@ -112,12 +140,15 @@ fn create_session(
                 );
                 let id = create.id().clone();
                 session_requests.write(create);
-                pending.0.insert(
+                commands.spawn((
+                    Operation::bundle("acp.command.create-session")
+                        .unwrap()
+                        .running(),
                     id,
                     PendingSessionCreation {
                         request_id: request.request_id,
                     },
-                );
+                ));
                 continue;
             }
             None => AgentCommandResult::Error("no agent is installed".to_string()),

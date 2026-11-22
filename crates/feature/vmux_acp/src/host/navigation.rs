@@ -220,69 +220,189 @@ impl TransitionProjection<'_, '_> {
             &SessionDetailUiState::default(),
         ));
     }
-}
-
-fn ancestor_tab_entity(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    tabs: &Query<(
-        Entity,
-        &mut Tab,
-        Option<&TabWorkspace>,
-        Option<&TabWorktree>,
-        Option<&TabWorktreeReady>,
-        Option<&TabDirDecided>,
-    )>,
-) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if tabs.contains(current) {
-            return Some(current);
+    fn start_transition(
+        &self,
+        route: &Route,
+        task: &PageOpenTask,
+        view: Entity,
+        wake: Option<&bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+        commands: &mut Commands,
+    ) {
+        self.capture(view, commands);
+        let metadata = Self::target_metadata(route, &task.url);
+        commands
+            .entity(view)
+            .insert((metadata, SessionView, PreparingAgentChatView))
+            .remove::<(
+                SessionManagerView,
+                StartInlineTransitionView,
+                vmux_ecs::launcher::HostsLauncher,
+                vmux_ecs::page::PageReady,
+            )>();
+        self.reset(view, commands);
+        commands.entity(task.stack).insert(StartInlineTransition {
+            webview: view,
+            navigation: Some(task.id),
+        });
+        if let Some(wake) = wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
-        current = child_of.get(current).ok()?.parent();
+    }
+
+    fn target_metadata(route: &Route, url: &str) -> PageMetadata {
+        match route {
+            Route::Manager => PageMetadata {
+                url: Route::manager_url(url).unwrap_or_else(|| Route::Manager.url()),
+                title: translate("sessions-title"),
+                ..default()
+            },
+            Route::Session(id) => PageMetadata {
+                url: Route::Session(id.clone()).url(),
+                title: id.0.clone(),
+                ..default()
+            },
+            Route::Provider { .. } => PageMetadata {
+                url: url.to_string(),
+                title: translate("sessions-title"),
+                ..default()
+            },
+        }
     }
 }
 
-fn target_metadata(route: &Route, url: &str) -> PageMetadata {
-    match route {
-        Route::Manager => PageMetadata {
-            url: Route::manager_url(url).unwrap_or_else(|| Route::Manager.url()),
-            title: translate("sessions-title"),
-            ..default()
-        },
-        Route::Session(id) => PageMetadata {
-            url: Route::Session(id.clone()).url(),
-            title: id.0.clone(),
-            ..default()
-        },
-        Route::Provider { .. } => PageMetadata {
-            url: url.to_string(),
-            title: translate("sessions-title"),
-            ..default()
-        },
+#[derive(SystemParam)]
+struct TabWorkspacePrep<'w, 's> {
+    pending: Query<'w, 's, (), With<TabWorktreePending>>,
+    workspace_checks:
+        Query<'w, 's, (), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    space_hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
+    tabs: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static mut Tab,
+            Option<&'static TabWorkspace>,
+            Option<&'static TabWorktree>,
+            Option<&'static TabWorktreeReady>,
+            Option<&'static TabDirDecided>,
+        ),
+    >,
+    settings: Option<Res<'w, AppSettings>>,
+    active_space: FocusedSpace<'w, 's>,
+}
+
+impl TabWorkspacePrep<'_, '_> {
+    fn ancestor_tab(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        loop {
+            if self.tabs.contains(current) {
+                return Some(current);
+            }
+            current = self.child_of.get(current).ok()?.parent();
+        }
+    }
+
+    fn prepare_task(&mut self, task_entity: Entity, task: &PageOpenTask, commands: &mut Commands) {
+        if self.workspace_checks.contains(task_entity) {
+            return;
+        }
+        let Some(tab_entity) = self.ancestor_tab(task.stack) else {
+            return;
+        };
+        if self.pending.contains(tab_entity) {
+            commands.entity(task_entity).insert((
+                PageOpenDeferred,
+                PageOpenWaitForWorktree { tab: tab_entity },
+            ));
+            return;
+        }
+        let configured_project_dir = self.settings.as_deref().and_then(|settings| {
+            let space_id = self
+                .space_hierarchy
+                .id(task.stack)
+                .or_else(|| self.active_space.id().map(str::to_string))?;
+            vmux_setting::StartupDir::resolve(settings, &space_id, None)
+                .map(|dir| dir.path.to_string_lossy().into_owned())
+        });
+        let Ok((_, mut tab, workspace, metadata, ready, decided)) = self.tabs.get_mut(tab_entity)
+        else {
+            return;
+        };
+        let has_workspace = workspace.is_some();
+        let workspace = workspace.cloned().unwrap_or_else(|| {
+            let project_dir = metadata
+                .map(|metadata| metadata.repo_root.clone())
+                .filter(|path| !path.is_empty())
+                .or_else(|| tab.startup_dir.clone())
+                .or_else(|| configured_project_dir.clone())
+                .unwrap_or_default();
+            TabWorkspace { project_dir }
+        });
+        if workspace.project_dir.is_empty() {
+            return;
+        }
+        if metadata.is_none()
+            && vmux_space::WorkspaceCwd::from_tab(tab.startup_dir.as_deref())
+                .ok()
+                .flatten()
+                .is_none()
+            && vmux_space::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
+                .ok()
+                .flatten()
+                .is_none()
+        {
+            tab.startup_dir = None;
+            commands
+                .entity(tab_entity)
+                .remove::<TabWorkspace>()
+                .remove::<TabDirDecided>()
+                .remove::<TabWorktreeUnavailable>()
+                .remove::<vmux_space::RepositoryNeedsWorktree>();
+            return;
+        }
+        if !has_workspace {
+            commands.entity(tab_entity).insert(workspace.clone());
+        }
+        if let Some(metadata) = metadata {
+            commands
+                .entity(tab_entity)
+                .remove::<vmux_space::RepositoryNeedsWorktree>();
+            if ready.is_some_and(|ready| ready.is_current(&tab, &workspace, metadata)) {
+                commands
+                    .entity(tab_entity)
+                    .remove::<TabWorktreeUnavailable>();
+                return;
+            }
+            commands
+                .entity(tab_entity)
+                .remove::<(TabWorktreeReady, TabWorktreeUnavailable)>()
+                .insert(TabWorktreePending);
+            commands.entity(task_entity).insert((
+                PageOpenDeferred,
+                PageOpenWaitForWorktree { tab: tab_entity },
+            ));
+        } else if decided.is_none() {
+            commands.entity(task_entity).insert((
+                PageOpenDeferred,
+                WorkspaceCheckRequest {
+                    tab: tab_entity,
+                    project_dir: workspace.project_dir,
+                    startup_dir: tab.startup_dir.clone(),
+                },
+            ));
+        }
     }
 }
 
 fn prepare(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     manager_views: Query<(Entity, &ChildOf), With<SessionManagerView>>,
     projection: TransitionProjection,
-    workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
-    child_of: Query<&ChildOf>,
-    space_hierarchy: vmux_layout::space::SpaceHierarchy,
-    mut tabs: Query<(
-        Entity,
-        &mut Tab,
-        Option<&TabWorkspace>,
-        Option<&TabWorktree>,
-        Option<&TabWorktreeReady>,
-        Option<&TabDirDecided>,
-    )>,
-    settings: Option<Res<AppSettings>>,
-    active_space: FocusedSpace,
+    mut workspaces: TabWorkspacePrep,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -312,26 +432,8 @@ fn prepare(
         if (!preparing_by_stack.contains_key(&task.stack) || transition_is_stale)
             && let Some(view) = transition_view
         {
-            projection.capture(view, &mut commands);
-            let metadata = target_metadata(&route, &task.url);
-            commands
-                .entity(view)
-                .insert((metadata, SessionView, PreparingAgentChatView))
-                .remove::<(
-                    SessionManagerView,
-                    StartInlineTransitionView,
-                    vmux_ecs::launcher::HostsLauncher,
-                    vmux_ecs::page::PageReady,
-                )>();
-            projection.reset(view, &mut commands);
-            commands.entity(task.stack).insert(StartInlineTransition {
-                webview: view,
-                navigation: Some(task.id),
-            });
+            projection.start_transition(&route, task, view, wake.as_ref(), &mut commands);
             preparing_by_stack.insert(task.stack, view);
-            if let Some(wake) = wake.as_ref() {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
             opened_stacks.insert(task.stack);
         }
         if opened_stacks.contains(&task.stack) {
@@ -343,94 +445,7 @@ fn prepare(
         if matches!(route, Route::Manager | Route::Provider { .. }) {
             continue;
         }
-        if workspace_checks.contains(task_entity) {
-            continue;
-        }
-        let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
-            continue;
-        };
-        if pending.contains(tab_entity) {
-            commands.entity(task_entity).insert((
-                PageOpenDeferred,
-                PageOpenWaitForWorktree { tab: tab_entity },
-            ));
-            continue;
-        }
-        let configured_project_dir = settings.as_deref().and_then(|settings| {
-            let space_id = space_hierarchy
-                .id(task.stack)
-                .or_else(|| active_space.id().map(str::to_string))?;
-            vmux_setting::StartupDir::resolve(settings, &space_id, None)
-                .map(|dir| dir.path.to_string_lossy().into_owned())
-        });
-        let Ok((_, mut tab, workspace, metadata, ready, decided)) = tabs.get_mut(tab_entity) else {
-            continue;
-        };
-        let has_workspace = workspace.is_some();
-        let workspace = workspace.cloned().unwrap_or_else(|| {
-            let project_dir = metadata
-                .map(|metadata| metadata.repo_root.clone())
-                .filter(|path| !path.is_empty())
-                .or_else(|| tab.startup_dir.clone())
-                .or_else(|| configured_project_dir.clone())
-                .unwrap_or_default();
-            TabWorkspace { project_dir }
-        });
-        if workspace.project_dir.is_empty() {
-            continue;
-        }
-        if metadata.is_none()
-            && vmux_space::WorkspaceCwd::from_tab(tab.startup_dir.as_deref())
-                .ok()
-                .flatten()
-                .is_none()
-            && vmux_space::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
-                .ok()
-                .flatten()
-                .is_none()
-        {
-            tab.startup_dir = None;
-            commands
-                .entity(tab_entity)
-                .remove::<TabWorkspace>()
-                .remove::<TabDirDecided>()
-                .remove::<TabWorktreeUnavailable>()
-                .remove::<vmux_space::RepositoryNeedsWorktree>();
-            continue;
-        }
-        if !has_workspace {
-            commands.entity(tab_entity).insert(workspace.clone());
-        }
-        if let Some(metadata) = metadata {
-            commands
-                .entity(tab_entity)
-                .remove::<vmux_space::RepositoryNeedsWorktree>();
-            if ready.is_some_and(|ready| ready.is_current(&tab, &workspace, metadata)) {
-                commands
-                    .entity(tab_entity)
-                    .remove::<TabWorktreeUnavailable>();
-                continue;
-            }
-            commands
-                .entity(tab_entity)
-                .remove::<(TabWorktreeReady, TabWorktreeUnavailable)>()
-                .insert(TabWorktreePending);
-            commands.entity(task_entity).insert((
-                PageOpenDeferred,
-                PageOpenWaitForWorktree { tab: tab_entity },
-            ));
-        } else {
-            if decided.is_none() {
-                commands.entity(task_entity).insert((
-                    PageOpenDeferred,
-                    WorkspaceCheckRequest {
-                        tab: tab_entity,
-                        project_dir: workspace.project_dir,
-                        startup_dir: tab.startup_dir.clone(),
-                    },
-                ));
-            }
-        }
+        workspaces.prepare_task(task_entity, task, &mut commands);
     }
 }
 
@@ -710,10 +725,10 @@ fn swap(
                 ImportedConversation {
                     source_agent: handoff.source_agent.clone(),
                     source_sid: handoff.source_sid.clone(),
-                    messages: handoff.messages.clone(),
                     truncated: handoff.truncated,
                     first_prompt: None,
                 },
+                handoff.messages.clone(),
                 super::handoff::PendingHandoff {
                     context: handoff.context.clone(),
                     sent: false,
@@ -753,11 +768,12 @@ fn swap(
             ),
             vmux_ecs::PageNavigation::new(navigation),
         ));
-        if let Some((imported, pending)) = imported {
+        if let Some((imported, messages, pending)) = imported {
             runtime
                 .commands
                 .entity(session_entity)
                 .insert((imported, pending));
+            ImportedConversation::spawn_messages(&mut runtime.commands, session_entity, messages);
         }
     }
 }
@@ -939,7 +955,7 @@ mod tests {
     #[test]
     fn manager_target_preserves_requested_agent() {
         let url = Route::manager_for_agent(&AgentId("codex".into()));
-        let target = target_metadata(&Route::parse(&url).unwrap(), &url);
+        let target = TransitionProjection::target_metadata(&Route::parse(&url).unwrap(), &url);
 
         assert_eq!(target.url, url);
     }
@@ -1113,7 +1129,6 @@ mod tests {
                 ImportedConversation {
                     source_agent: "codex".into(),
                     source_sid: "source".into(),
-                    messages: Vec::new(),
                     truncated: false,
                     first_prompt: None,
                 },

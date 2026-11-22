@@ -27,6 +27,13 @@ struct RequestUserChoiceTool {
     options: Vec<String>,
 }
 
+impl RequestUserChoiceTool {
+    fn non_empty(value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
+}
+
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,15 +56,15 @@ fn request_user_choice(
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
-            let question = Text::into_option(args.question.clone())
+            let question = RequestUserChoiceTool::non_empty(&args.question)
                 .ok_or("request_user_choice.question is empty")?;
-            let options = args
-                .options
-                .iter()
-                .cloned()
-                .map(Text::into_option)
-                .collect::<Option<Vec<_>>>()
-                .ok_or("request_user_choice options must be non-empty strings")?;
+            let mut options = Vec::with_capacity(args.options.len());
+            for option in &args.options {
+                let Some(value) = RequestUserChoiceTool::non_empty(option) else {
+                    return Err("request_user_choice options must be non-empty strings".into());
+                };
+                options.push(value);
+            }
             if !(2..=9).contains(&options.len()) {
                 return Err("request_user_choice requires 2 to 9 options".to_string());
             }
@@ -85,12 +92,12 @@ fn set_conversation_title(
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
-            let title = Text::into_option(args.title.clone())
+            let title = RequestUserChoiceTool::non_empty(&args.title)
                 .ok_or("set_conversation_title.title is empty")?;
             if title.chars().count() > 120 {
                 return Err("set_conversation_title.title exceeds 120 characters".to_string());
             }
-            let summary = Text::into_option(args.summary.clone())
+            let summary = RequestUserChoiceTool::non_empty(&args.summary)
                 .ok_or("set_conversation_title.summary is empty")?;
             if summary.chars().count() > 500 {
                 return Err("set_conversation_title.summary exceeds 500 characters".to_string());
@@ -102,14 +109,5 @@ fn set_conversation_title(
             })
         });
         commands.entity(entity).insert(ToolCommand(command));
-    }
-}
-
-struct Text;
-
-impl Text {
-    fn into_option(value: String) -> Option<String> {
-        let value = value.trim();
-        (!value.is_empty()).then(|| value.to_string())
     }
 }

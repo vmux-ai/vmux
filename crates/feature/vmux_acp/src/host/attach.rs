@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::{
@@ -24,6 +25,278 @@ impl bevy::prelude::Plugin for AttachPlugin {
     }
 }
 
+#[derive(SystemParam)]
+struct AttachWorld<'w, 's> {
+    titles: Query<'w, 's, (), With<AgentConversationTitle>>,
+    transcripts: vmux_session::Transcripts<'w, 's>,
+    navigations: Query<'w, 's, &'static PageNavigation>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    children: Query<'w, 's, &'static Children>,
+    tabs: Query<'w, 's, &'static mut Tab>,
+    workspaces: Query<'w, 's, &'static mut TabWorkspace>,
+    queues: QueuedPrompts<'w, 's>,
+    time: Res<'w, Time>,
+    commands: Commands<'w, 's>,
+}
+
+impl AttachWorld<'_, '_> {
+    fn sync_tab_workspace(&mut self, stack: Entity, cwd: &std::path::Path) {
+        let mut ancestor = stack;
+        loop {
+            if let Ok(mut tab) = self.tabs.get_mut(ancestor) {
+                let cwd = cwd.to_string_lossy().into_owned();
+                tab.startup_dir = Some(cwd.clone());
+                if let Ok(mut workspace) = self.workspaces.get_mut(ancestor) {
+                    workspace.project_dir.clone_from(&cwd);
+                } else {
+                    self.commands
+                        .entity(ancestor)
+                        .insert(TabWorkspace { project_dir: cwd });
+                }
+                break;
+            }
+            let Ok(parent) = self.child_of.get(ancestor) else {
+                break;
+            };
+            ancestor = parent.parent();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attach_session(
+        &mut self,
+        session_entity: Entity,
+        stack: Entity,
+        session_name: &str,
+        agent_name: &str,
+        agent_id: &str,
+        sid: &str,
+        cwd: &std::path::Path,
+        profile_icon: Option<String>,
+        resume: Option<String>,
+        prompt: Option<&DeferredAttachmentPrompt>,
+    ) -> ProcessId {
+        let mut prompt_title_inserted = false;
+        if let Some(prompt) = prompt {
+            let text = prompt.text.clone().unwrap_or_default();
+            if !text.trim().is_empty() || !prompt.attachments.is_empty() {
+                if let Some(title) = AgentConversationTitle::from_prompt(&text) {
+                    self.commands
+                        .entity(session_entity)
+                        .insert((title, TitlePending));
+                    prompt_title_inserted = true;
+                }
+                self.queues
+                    .enqueue(session_entity, text, prompt.attachments.clone(), false);
+                self.commands
+                    .entity(stack)
+                    .remove::<(PendingPrompt, PendingPromptAttachments)>();
+            }
+        }
+        let anchor = ProcessId::new();
+        self.commands
+            .entity(session_entity)
+            .remove::<super::navigation_driver::RetryRequested>();
+        self.commands.entity(session_entity).insert((
+            vmux_ecs::agent::AgentSessionRoot,
+            ProcessAnchor(anchor),
+            vmux_session::RunState::default(),
+            vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
+            vmux_ecs::team::Agent {
+                sid: sid.to_string(),
+            },
+        ));
+        self.commands.queue(vmux_session::mutation::Request::local(
+            SessionId(sid.to_string()),
+            vmux_session::mutation::Mutation::BindAgent {
+                agent: vmux_session::AgentId(agent_id.to_string()),
+                cwd: cwd.to_path_buf(),
+            },
+        ));
+        self.commands
+            .entity(session_entity)
+            .entry::<PromptQueue>()
+            .or_default();
+        if let Some(resume) = resume {
+            let mut session = self.commands.entity(session_entity);
+            session.insert(AcpSessionId(resume));
+            if self
+                .transcripts
+                .read(session_entity, |transcript| transcript.messages.is_empty())
+            {
+                session.insert(vmux_session::TranscriptLoading);
+            } else {
+                session.remove::<vmux_session::TranscriptLoading>();
+            }
+            if !prompt_title_inserted && !self.titles.contains(session_entity) {
+                session.insert((
+                    AgentConversationTitle(session_name.to_string()),
+                    TitlePending,
+                ));
+            }
+        } else {
+            self.commands
+                .entity(session_entity)
+                .remove::<(AcpSessionId, vmux_session::TranscriptLoading)>();
+        }
+        anchor
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attach_view(
+        &mut self,
+        stack: Entity,
+        url: &str,
+        session_name: &str,
+        icon: &vmux_api::PageIcon,
+        page_metadata: PageMetadata,
+        anchor: ProcessId,
+        webview: Option<&EntityTarget<vmux_session::host::SessionView>>,
+        navigation: Option<&PageNavigation>,
+    ) {
+        let view = if let Some(webview) = webview {
+            webview.entity()
+        } else if let Some(navigation) = navigation {
+            let previous = self
+                .children
+                .get(stack)
+                .map(|children| children.iter().collect::<Vec<_>>())
+                .unwrap_or_default();
+            for surface in &previous {
+                self.commands
+                    .entity(*surface)
+                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+            }
+            let handoff = vmux_layout::hosted_page::SurfaceHandoff::new(
+                previous,
+                navigation.id(),
+                0,
+                self.time.elapsed(),
+            );
+            self.commands
+                .spawn((
+                    vmux_layout::Browser::hosted_page_with_icon(url, session_name, icon.clone()),
+                    handoff,
+                    vmux_session::host::SessionView,
+                    ChildOf(stack),
+                    anchor,
+                ))
+                .insert(Visibility::Hidden)
+                .id()
+        } else {
+            self.commands
+                .spawn((
+                    vmux_layout::Browser::hosted_page_with_icon(url, session_name, icon.clone()),
+                    vmux_session::host::SessionView,
+                    ChildOf(stack),
+                    anchor,
+                ))
+                .id()
+        };
+        self.commands
+            .entity(view)
+            .insert((page_metadata, anchor, vmux_session::host::SessionView));
+        self.commands.entity(view).remove::<(
+            vmux_session::host::SessionManagerView,
+            vmux_session::host::SessionCatalogView,
+        )>();
+        if webview.is_some() {
+            self.commands.entity(view).remove::<(
+                PreparingAgentChatView,
+                InlineTransitionSnapshot,
+                vmux_start::StartInlineTransitionView,
+                vmux_ecs::launcher::HostsLauncher,
+                vmux_ecs::page::PageReady,
+            )>();
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn apply_attachment(
+        &mut self,
+        operation: Entity,
+        session_entity: Entity,
+        stack: Entity,
+        session_name: &str,
+        agent_name: &str,
+        agent_id: &str,
+        sid: &str,
+        cwd: &std::path::Path,
+        icon: &vmux_api::PageIcon,
+        resume: Option<String>,
+        open_task: Option<&EntityTarget<vmux_ecs::PageOpenTask>>,
+        webview: Option<&EntityTarget<vmux_session::host::SessionView>>,
+        navigation: Option<&PageNavigation>,
+        prompt: Option<&DeferredAttachmentPrompt>,
+    ) {
+        if navigation.is_some_and(|navigation| {
+            !self
+                .navigations
+                .get(stack)
+                .is_ok_and(|current| current == navigation)
+        }) {
+            self.commands.entity(operation).despawn();
+            return;
+        }
+        let url = vmux_session::Route::Session(SessionId(sid.to_string())).url();
+        let page_metadata = PageMetadata {
+            url: url.clone(),
+            title: session_name.to_string(),
+            bg_color: None,
+            icon: icon.clone(),
+        };
+        let profile_icon = (!icon.favicon_url().is_empty()).then(|| icon.favicon_url().to_string());
+        self.sync_tab_workspace(stack, cwd);
+        self.commands
+            .entity(stack)
+            .insert(EntityTarget::<vmux_session::Session>::new(session_entity));
+        if navigation.is_none() {
+            self.commands.entity(stack).insert(page_metadata.clone());
+        }
+        let transition_view = webview.map(|webview| webview.entity());
+        if transition_view.is_some()
+            && let Ok(stack_children) = self.children.get(stack)
+        {
+            for child in stack_children.iter() {
+                if Some(child) != transition_view {
+                    self.commands.entity(child).despawn();
+                }
+            }
+        }
+        let anchor = self.attach_session(
+            session_entity,
+            stack,
+            session_name,
+            agent_name,
+            agent_id,
+            sid,
+            cwd,
+            profile_icon,
+            resume,
+            prompt,
+        );
+        self.attach_view(
+            stack,
+            &url,
+            session_name,
+            icon,
+            page_metadata,
+            anchor,
+            webview,
+            navigation,
+        );
+        self.commands
+            .entity(stack)
+            .remove::<vmux_start::StartInlineTransition>();
+        if let Some(open_task) = open_task
+            && let Ok(mut task) = self.commands.get_entity(open_task.entity())
+        {
+            task.remove::<vmux_ecs::PageOpenDeferred>()
+                .insert(vmux_ecs::PageOpenHandled);
+        }
+        self.commands.entity(operation).despawn();
+    }
+}
+
 fn attach(
     attachments: Query<
         (
@@ -44,16 +317,7 @@ fn attach(
         ),
         Added<PendingAcpAgentAttachment>,
     >,
-    titles: Query<(), With<AgentConversationTitle>>,
-    transcripts: vmux_session::Transcripts,
-    navigations: Query<&PageNavigation>,
-    child_of: Query<&ChildOf>,
-    children: Query<&Children>,
-    mut tabs: Query<&mut Tab>,
-    mut workspaces: Query<&mut TabWorkspace>,
-    mut queues: QueuedPrompts,
-    time: Res<Time>,
-    mut commands: Commands,
+    mut world: AttachWorld,
 ) {
     for (
         operation,
@@ -72,176 +336,22 @@ fn attach(
         prompt,
     ) in &attachments
     {
-        if navigation.is_some_and(|navigation| {
-            !navigations
-                .get(*stack)
-                .is_ok_and(|current| current == navigation)
-        }) {
-            commands.entity(operation).despawn();
-            continue;
-        }
-        let agent_id = agent_id.as_str();
-        let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
-        let page_metadata = PageMetadata {
-            url: url.clone(),
-            title: session_name.clone(),
-            bg_color: None,
-            icon: icon.clone(),
-        };
-        let profile_icon = (!icon.favicon_url().is_empty()).then(|| icon.favicon_url().to_string());
-        let mut ancestor = *stack;
-        loop {
-            if let Ok(mut tab) = tabs.get_mut(ancestor) {
-                let cwd = cwd.to_string_lossy().into_owned();
-                tab.startup_dir = Some(cwd.clone());
-                if let Ok(mut workspace) = workspaces.get_mut(ancestor) {
-                    workspace.project_dir.clone_from(&cwd);
-                } else {
-                    commands
-                        .entity(ancestor)
-                        .insert(TabWorkspace { project_dir: cwd });
-                }
-                break;
-            }
-            let Ok(parent) = child_of.get(ancestor) else {
-                break;
-            };
-            ancestor = parent.parent();
-        }
-        commands
-            .entity(*stack)
-            .insert(EntityTarget::<vmux_session::Session>::new(*session_entity));
-        if navigation.is_none() {
-            commands.entity(*stack).insert(page_metadata.clone());
-        }
-        let transition_view = webview.map(|webview| webview.entity());
-        if transition_view.is_some()
-            && let Ok(stack_children) = children.get(*stack)
-        {
-            for child in stack_children.iter() {
-                if Some(child) != transition_view {
-                    commands.entity(child).despawn();
-                }
-            }
-        }
-        let mut prompt_title_inserted = false;
-        if let Some(prompt) = prompt {
-            let text = prompt.text.clone().unwrap_or_default();
-            if !text.trim().is_empty() || !prompt.attachments.is_empty() {
-                if let Some(title) = AgentConversationTitle::from_prompt(&text) {
-                    commands
-                        .entity(*session_entity)
-                        .insert((title, TitlePending));
-                    prompt_title_inserted = true;
-                }
-                queues.enqueue(*session_entity, text, prompt.attachments.clone(), false);
-                commands
-                    .entity(*stack)
-                    .remove::<(PendingPrompt, PendingPromptAttachments)>();
-            }
-        }
-        let anchor = ProcessId::new();
-        commands
-            .entity(*session_entity)
-            .remove::<super::navigation_driver::RetryRequested>();
-        commands.entity(*session_entity).insert((
-            vmux_ecs::agent::AgentSessionRoot,
-            ProcessAnchor(anchor),
-            vmux_session::RunState::default(),
-            vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
-            vmux_ecs::team::Agent { sid: sid.clone() },
-        ));
-        commands.queue(vmux_session::mutation::Request::local(
-            SessionId(sid.clone()),
-            vmux_session::mutation::Mutation::BindAgent {
-                agent: vmux_session::AgentId(agent_id.to_string()),
-                cwd: cwd.clone(),
-            },
-        ));
-        commands
-            .entity(*session_entity)
-            .entry::<PromptQueue>()
-            .or_default();
-        if let Some(resume) = resume.clone() {
-            let mut session = commands.entity(*session_entity);
-            session.insert(AcpSessionId(resume));
-            if transcripts.read(*session_entity, |transcript| transcript.messages.is_empty()) {
-                session.insert(vmux_session::TranscriptLoading);
-            } else {
-                session.remove::<vmux_session::TranscriptLoading>();
-            }
-            if !prompt_title_inserted && !titles.contains(*session_entity) {
-                session.insert((AgentConversationTitle(session_name.clone()), TitlePending));
-            }
-        } else {
-            commands
-                .entity(*session_entity)
-                .remove::<(AcpSessionId, vmux_session::TranscriptLoading)>();
-        }
-        let view = if let Some(webview) = webview {
-            webview.entity()
-        } else if let Some(navigation) = navigation {
-            let previous = children
-                .get(*stack)
-                .map(|children| children.iter().collect::<Vec<_>>())
-                .unwrap_or_default();
-            for surface in &previous {
-                commands
-                    .entity(*surface)
-                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
-            }
-            let handoff = vmux_layout::hosted_page::SurfaceHandoff::new(
-                previous,
-                navigation.id(),
-                0,
-                time.elapsed(),
-            );
-            commands
-                .spawn((
-                    vmux_layout::Browser::hosted_page_with_icon(&url, session_name, icon.clone()),
-                    handoff,
-                    vmux_session::host::SessionView,
-                    ChildOf(*stack),
-                    anchor,
-                ))
-                .insert(Visibility::Hidden)
-                .id()
-        } else {
-            commands
-                .spawn((
-                    vmux_layout::Browser::hosted_page_with_icon(&url, session_name, icon.clone()),
-                    vmux_session::host::SessionView,
-                    ChildOf(*stack),
-                    anchor,
-                ))
-                .id()
-        };
-        commands
-            .entity(view)
-            .insert((page_metadata, anchor, vmux_session::host::SessionView));
-        commands.entity(view).remove::<(
-            vmux_session::host::SessionManagerView,
-            vmux_session::host::SessionCatalogView,
-        )>();
-        if webview.is_some() {
-            commands.entity(view).remove::<(
-                PreparingAgentChatView,
-                InlineTransitionSnapshot,
-                vmux_start::StartInlineTransitionView,
-                vmux_ecs::launcher::HostsLauncher,
-                vmux_ecs::page::PageReady,
-            )>();
-        }
-        commands
-            .entity(*stack)
-            .remove::<vmux_start::StartInlineTransition>();
-        if let Some(open_task) = open_task
-            && let Ok(mut task) = commands.get_entity(open_task.entity())
-        {
-            task.remove::<vmux_ecs::PageOpenDeferred>()
-                .insert(vmux_ecs::PageOpenHandled);
-        }
-        commands.entity(operation).despawn();
+        world.apply_attachment(
+            operation,
+            *session_entity,
+            *stack,
+            session_name,
+            agent_name,
+            agent_id,
+            sid,
+            cwd,
+            icon,
+            resume.clone(),
+            open_task,
+            webview,
+            navigation,
+            prompt,
+        );
     }
 }
 

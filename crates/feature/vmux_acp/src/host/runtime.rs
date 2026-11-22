@@ -33,8 +33,10 @@ pub(super) struct RuntimePlugin;
 
 impl bevy::prelude::Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
-        crate::policy::add(app);
+        app.add_plugins((
+            FeaturePlugin::<crate::Feature>::default(),
+            crate::policy::PolicyPlugin,
+        ));
         app.add_plugins((
             crate::host::acp::registry::RegistryPlugin,
             crate::host::acp::AgentProviderPlugin,

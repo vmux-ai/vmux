@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -31,13 +31,14 @@ use vmux_ecs::ProcessId;
 
 use super::agent_process::AgentProcess;
 #[cfg(test)]
-use super::projection_driver::AcpProjector;
-use super::projection_driver::{AcpToolTitle, ApprovalDetailsQuery};
+use super::projection::AcpTranscripts;
+use super::projection::{AcpToolCallId, ApprovalDetailsQuery, ApprovalDetailsRequest};
 use super::workspace_driver::WorkspaceLocation;
 use super::{
-    AcpAgentInfoInbox, AcpApprovalRequestedInbox, AcpApprovalResolvedInbox, AcpConfigStateInbox,
-    AcpProjectionInboxes, AcpSelectedConfigInbox, AcpSelectionSnapshot, AcpSelectionSnapshotInbox,
-    AcpStatusInbox, AcpTranscriptInbox,
+    AcpAgentInfoInbox, AcpApprovalDetailsInbox, AcpApprovalRequestedInbox,
+    AcpApprovalResolvedInbox, AcpConfigStateInbox, AcpReplayBeginInbox, AcpReplayFinishInbox,
+    AcpSelectedConfigInbox, AcpSelectionSnapshot, AcpSelectionSnapshotInbox, AcpSessionUpdateInbox,
+    AcpSnapshotRequestInbox, AcpStatusInbox,
 };
 use vmux_api::protocol::{
     AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ManagedMcpServer,
@@ -192,17 +193,6 @@ impl AcpMcpServers {
     }
 }
 
-pub(super) enum AcpTranscriptInput {
-    BeginHistoryReplay,
-    Update(Box<SessionUpdate>),
-    FinishHistoryReplay(bool),
-    Snapshot,
-    ApprovalDetails {
-        query: ApprovalDetailsQuery,
-        response: oneshot::Sender<Option<(String, String)>>,
-    },
-}
-
 pub(super) struct AcpConfigStateInput {
     pub(super) config_options: Vec<SessionConfigOption>,
     pub(super) modes: Option<SessionModeState>,
@@ -215,7 +205,12 @@ pub(super) struct AcpSelectedConfigInput {
 }
 
 pub(super) struct AcpProjectionSenders {
-    transcript: mpsc::UnboundedSender<AcpTranscriptInput>,
+    next_seq: AtomicU64,
+    replay_begin: mpsc::UnboundedSender<u64>,
+    session_update: mpsc::UnboundedSender<(u64, Box<SessionUpdate>)>,
+    replay_finish: mpsc::UnboundedSender<(u64, bool)>,
+    snapshot_request: mpsc::UnboundedSender<u64>,
+    approval_details: mpsc::UnboundedSender<(u64, ApprovalDetailsRequest)>,
     agent_info: mpsc::UnboundedSender<String>,
     config_state: mpsc::UnboundedSender<AcpConfigStateInput>,
     selected_config: mpsc::UnboundedSender<AcpSelectedConfigInput>,
@@ -227,8 +222,33 @@ pub(super) struct AcpProjectionSenders {
 }
 
 impl AcpProjectionSenders {
-    pub(super) fn open(wake: mpsc::UnboundedSender<()>) -> (Self, AcpProjectionInboxes) {
-        let (transcript, transcript_inbox) = mpsc::unbounded_channel();
+    #[allow(clippy::type_complexity)]
+    pub(super) fn open(
+        wake: mpsc::UnboundedSender<()>,
+    ) -> (
+        Self,
+        (
+            AcpReplayBeginInbox,
+            AcpSessionUpdateInbox,
+            AcpReplayFinishInbox,
+            AcpSnapshotRequestInbox,
+            AcpApprovalDetailsInbox,
+        ),
+        (
+            AcpAgentInfoInbox,
+            AcpConfigStateInbox,
+            AcpSelectedConfigInbox,
+            AcpStatusInbox,
+            AcpApprovalRequestedInbox,
+            AcpApprovalResolvedInbox,
+            AcpSelectionSnapshotInbox,
+        ),
+    ) {
+        let (replay_begin, replay_begin_inbox) = mpsc::unbounded_channel();
+        let (session_update, session_update_inbox) = mpsc::unbounded_channel();
+        let (replay_finish, replay_finish_inbox) = mpsc::unbounded_channel();
+        let (snapshot_request, snapshot_request_inbox) = mpsc::unbounded_channel();
+        let (approval_details, approval_details_inbox) = mpsc::unbounded_channel();
         let (agent_info, agent_info_inbox) = mpsc::unbounded_channel();
         let (config_state, config_state_inbox) = mpsc::unbounded_channel();
         let (selected_config, selected_config_inbox) = mpsc::unbounded_channel();
@@ -238,7 +258,12 @@ impl AcpProjectionSenders {
         let (selection_snapshot, selection_snapshot_inbox) = mpsc::unbounded_channel();
         (
             Self {
-                transcript,
+                next_seq: AtomicU64::new(0),
+                replay_begin,
+                session_update,
+                replay_finish,
+                snapshot_request,
+                approval_details,
                 agent_info,
                 config_state,
                 selected_config,
@@ -248,17 +273,27 @@ impl AcpProjectionSenders {
                 selection_snapshot,
                 wake,
             },
-            AcpProjectionInboxes {
-                transcript: AcpTranscriptInbox(transcript_inbox),
-                agent_info: AcpAgentInfoInbox(agent_info_inbox),
-                config_state: AcpConfigStateInbox(config_state_inbox),
-                selected_config: AcpSelectedConfigInbox(selected_config_inbox),
-                status: AcpStatusInbox(status_inbox),
-                approval_requested: AcpApprovalRequestedInbox(approval_requested_inbox),
-                approval_resolved: AcpApprovalResolvedInbox(approval_resolved_inbox),
-                selection_snapshot: AcpSelectionSnapshotInbox(selection_snapshot_inbox),
-            },
+            (
+                AcpReplayBeginInbox(replay_begin_inbox),
+                AcpSessionUpdateInbox(session_update_inbox),
+                AcpReplayFinishInbox(replay_finish_inbox),
+                AcpSnapshotRequestInbox(snapshot_request_inbox),
+                AcpApprovalDetailsInbox(approval_details_inbox),
+            ),
+            (
+                AcpAgentInfoInbox(agent_info_inbox),
+                AcpConfigStateInbox(config_state_inbox),
+                AcpSelectedConfigInbox(selected_config_inbox),
+                AcpStatusInbox(status_inbox),
+                AcpApprovalRequestedInbox(approval_requested_inbox),
+                AcpApprovalResolvedInbox(approval_resolved_inbox),
+                AcpSelectionSnapshotInbox(selection_snapshot_inbox),
+            ),
         )
+    }
+
+    fn next_seq(&self) -> u64 {
+        self.next_seq.fetch_add(1, Ordering::Relaxed)
     }
 
     fn sent(&self, accepted: bool) {
@@ -267,8 +302,24 @@ impl AcpProjectionSenders {
         }
     }
 
-    fn transcript(&self, input: AcpTranscriptInput) {
-        self.sent(self.transcript.send(input).is_ok());
+    pub(super) fn begin_history_replay(&self) {
+        self.sent(self.replay_begin.send(self.next_seq()).is_ok());
+    }
+
+    pub(super) fn session_update(&self, update: SessionUpdate) {
+        self.sent(
+            self.session_update
+                .send((self.next_seq(), Box::new(update)))
+                .is_ok(),
+        );
+    }
+
+    pub(super) fn finish_history_replay(&self, loaded: bool) {
+        self.sent(self.replay_finish.send((self.next_seq(), loaded)).is_ok());
+    }
+
+    pub(super) fn request_snapshot(&self) {
+        self.sent(self.snapshot_request.send(self.next_seq()).is_ok());
     }
 
     fn agent_info(&self, name: String) {
@@ -295,12 +346,16 @@ impl AcpProjectionSenders {
         self.sent(self.approval_resolved.send(call_id).is_ok());
     }
 
-    fn approval_details(
+    pub(super) fn approval_details(
         &self,
         query: ApprovalDetailsQuery,
         response: oneshot::Sender<Option<(String, String)>>,
     ) {
-        self.transcript(AcpTranscriptInput::ApprovalDetails { query, response });
+        self.sent(
+            self.approval_details
+                .send((self.next_seq(), ApprovalDetailsRequest { query, response }))
+                .is_ok(),
+        );
     }
 
     async fn selection_snapshot(&self) -> AcpSelectionSnapshot {
@@ -536,32 +591,6 @@ impl AcpPermissionOptions<'_> {
             .iter()
             .find_map(|kind| self.0.iter().find(|option| &option.kind == kind))
             .map(|option| option.option_id.clone())
-    }
-}
-
-struct AcpToolName<'a>(&'a str);
-
-impl AcpToolName<'_> {
-    fn permissionless(&self) -> bool {
-        if AcpToolTitle::is_conversation_title(self.0) {
-            return true;
-        }
-        let normalized = self.0.trim().to_ascii_lowercase();
-        let parts = normalized
-            .split(|character: char| {
-                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
-            })
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>();
-        matches!(
-            parts.as_slice(),
-            ["mcp", "vmux", "request", "user", "choice"]
-                | ["vmux", "request", "user", "choice"]
-                | ["request", "user", "choice"]
-                | ["mcp", "vmux", "search" | "read", "knowledge"]
-                | ["vmux", "search" | "read", "knowledge"]
-                | ["search" | "read", "knowledge"]
-        )
     }
 }
 
@@ -956,6 +985,28 @@ async fn prompt_content_blocks(
 pub(super) struct AcpDriver;
 
 impl AcpDriver {
+    fn is_permissionless_tool(name: &str) -> bool {
+        if AcpToolCallId::is_conversation_title(name) {
+            return true;
+        }
+        let normalized = name.trim().to_ascii_lowercase();
+        let parts = normalized
+            .split(|character: char| {
+                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+            })
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        matches!(
+            parts.as_slice(),
+            ["mcp", "vmux", "request", "user", "choice"]
+                | ["vmux", "request", "user", "choice"]
+                | ["request", "user", "choice"]
+                | ["mcp", "vmux", "search" | "read", "knowledge"]
+                | ["vmux", "search" | "read", "knowledge"]
+                | ["search" | "read", "knowledge"]
+        )
+    }
+
     pub(super) async fn run(
         command: String,
         args: Vec<String>,
@@ -1101,9 +1152,7 @@ impl AcpDriver {
             )
             .on_receive_notification(
                 async move |note: SessionNotification, _cx| {
-                    update_shared
-                        .projection
-                        .transcript(AcpTranscriptInput::Update(Box::new(note.update)));
+                    update_shared.projection.session_update(note.update);
                     Ok(())
                 },
                 agent_client_protocol::on_receive_notification!(),
@@ -1155,7 +1204,7 @@ impl AcpDriver {
                 RequestPermissionOutcome::Cancelled,
             ));
         };
-        if AcpToolName(&name).permissionless() {
+        if Self::is_permissionless_tool(&name) {
             let outcome = match AcpPermissionOptions(&req.options).select(ApprovalDecision::Allow) {
                 Some(id) => RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id)),
                 None => RequestPermissionOutcome::Cancelled,
@@ -1314,9 +1363,7 @@ impl AcpDriver {
     ) -> Option<Option<SessionId>> {
         let resume_requested = resume.is_some();
         if resume_requested {
-            shared
-                .projection
-                .transcript(AcpTranscriptInput::BeginHistoryReplay);
+            shared.projection.begin_history_replay();
         }
         let loaded_session = load_requested_session(resume, load_supported, |sid| {
             let mut load = LoadSessionRequest::new(sid, shared.cwd());
@@ -1350,9 +1397,7 @@ impl AcpDriver {
             Err(error) => {
                 tracing::warn!(target: "acp", sid = %shared.sid, %error, "session resume failed");
                 if resume_requested {
-                    shared
-                        .projection
-                        .transcript(AcpTranscriptInput::FinishHistoryReplay(false));
+                    shared.projection.finish_history_replay(false);
                 }
                 shared.fail_startup(error);
                 return None;
@@ -1361,9 +1406,7 @@ impl AcpDriver {
         if resume_requested {
             shared
                 .projection
-                .transcript(AcpTranscriptInput::FinishHistoryReplay(
-                    session_id.is_some(),
-                ));
+                .finish_history_replay(session_id.is_some());
         }
         if let Some(sid) = &session_id {
             shared.emit(ServiceMessage::AcpSessionCreated {
@@ -1499,7 +1542,7 @@ impl AcpDriver {
                 Err(err) => Some(err.to_string()),
             };
             let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
-            shared.projection.transcript(AcpTranscriptInput::Snapshot);
+            shared.projection.request_snapshot();
             shared.projection.status(
                 PromptCompletion {
                     cancelled,
@@ -1848,7 +1891,8 @@ mod tests {
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
         SessionConfigSelectOption, SessionMode, ToolCall, ToolCallUpdateFields, ToolKind,
     };
-    use bevy::prelude::{App, Entity, IntoScheduleConfigs, Update};
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::prelude::{App, Entity};
 
     struct ProjectionHarness {
         app: App,
@@ -1873,7 +1917,7 @@ mod tests {
         fn new(capacity: usize) -> Self {
             let (stream_tx, stream) = broadcast::channel(capacity);
             let (wake, _) = mpsc::unbounded_channel();
-            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
+            let (projection, transcript_inboxes, state_inboxes) = AcpProjectionSenders::open(wake);
             let shared = Arc::new(AcpShared::with_projection(
                 "s1".into(),
                 PathBuf::from("/tmp"),
@@ -1883,27 +1927,15 @@ mod tests {
                 projection,
             ));
             let mut app = App::new();
-            super::super::projection::add(&mut app);
-            app.add_systems(
-                Update,
-                (
-                    super::super::project_info,
-                    super::super::project_config_state,
-                    super::super::project_selected_config,
-                    super::super::project_status,
-                    super::super::project_approval_requested,
-                    super::super::project_approval_resolved,
-                    super::super::snapshot_selection,
-                )
-                    .chain(),
-            );
+            app.add_plugins(super::super::AcpRuntimePlugin);
             let entity = app
                 .world_mut()
                 .spawn((
                     vmux_session::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
-                    projection_inboxes,
-                    AcpProjector::default(),
+                    super::super::projection::AcpProjectionOrder::default(),
+                    transcript_inboxes,
+                    state_inboxes,
                     super::super::AcpAgentName::default(),
                     super::super::AcpSessionConfigs::default(),
                     super::super::AcpRunState(AgentRunStatus::Idle),
@@ -1921,6 +1953,21 @@ mod tests {
 
         fn update(&mut self) {
             self.app.update();
+        }
+
+        fn messages(&mut self) -> Vec<Message> {
+            let entity = self.entity;
+            self.app
+                .world_mut()
+                .run_system_once(move |transcripts: AcpTranscripts| transcripts.messages(entity))
+                .unwrap()
+        }
+
+        fn approval_details(&mut self, query: ApprovalDetailsQuery) -> Option<(String, String)> {
+            let (response, mut receiver) = oneshot::channel();
+            self.shared.projection.approval_details(query, response);
+            self.update();
+            receiver.try_recv().unwrap()
         }
     }
 
@@ -2261,19 +2308,14 @@ mod tests {
     #[test]
     fn history_replay_emits_only_the_final_snapshot() {
         let mut harness = ProjectionHarness::new(64);
-        harness
-            .shared
-            .projection
-            .transcript(AcpTranscriptInput::BeginHistoryReplay);
+        harness.shared.projection.begin_history_replay();
         harness.update();
 
         harness
             .shared
             .projection
-            .transcript(AcpTranscriptInput::Update(Box::new(
-                SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
-                    TextContent::new("hello"),
-                ))),
+            .session_update(SessionUpdate::UserMessageChunk(ContentChunk::new(
+                ContentBlock::Text(TextContent::new("hello")),
             )));
         harness.update();
         assert!(matches!(
@@ -2284,10 +2326,8 @@ mod tests {
             harness
                 .shared
                 .projection
-                .transcript(AcpTranscriptInput::Update(Box::new(
-                    SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                        TextContent::new("x"),
-                    ))),
+                .session_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                    ContentBlock::Text(TextContent::new("x")),
                 )));
         }
         harness.update();
@@ -2296,10 +2336,7 @@ mod tests {
             harness.stream.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
-        harness
-            .shared
-            .projection
-            .transcript(AcpTranscriptInput::FinishHistoryReplay(true));
+        harness.shared.projection.finish_history_replay(true);
         harness.update();
 
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
@@ -2322,18 +2359,13 @@ mod tests {
     #[test]
     fn failed_history_replay_discards_partial_transcript() {
         let mut harness = ProjectionHarness::new(64);
-        harness
-            .shared
-            .projection
-            .transcript(AcpTranscriptInput::BeginHistoryReplay);
+        harness.shared.projection.begin_history_replay();
         harness.update();
         harness
             .shared
             .projection
-            .transcript(AcpTranscriptInput::Update(Box::new(
-                SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
-                    TextContent::new("partial"),
-                ))),
+            .session_update(SessionUpdate::UserMessageChunk(ContentChunk::new(
+                ContentBlock::Text(TextContent::new("partial")),
             )));
         harness.update();
         assert!(matches!(
@@ -2341,21 +2373,10 @@ mod tests {
             Err(broadcast::error::TryRecvError::Empty)
         ));
 
-        harness
-            .shared
-            .projection
-            .transcript(AcpTranscriptInput::FinishHistoryReplay(false));
+        harness.shared.projection.finish_history_replay(false);
         harness.update();
 
-        assert!(
-            harness
-                .app
-                .world()
-                .get::<AcpProjector>(harness.entity)
-                .unwrap()
-                .messages()
-                .is_empty()
-        );
+        assert!(harness.messages().is_empty());
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             harness.stream.try_recv().expect("clearing snapshot")
         else {
@@ -2370,11 +2391,14 @@ mod tests {
 
     #[test]
     fn approval_details_fall_back_to_projected_tool_call() {
-        let mut projector = AcpProjector::default();
-        projector.apply(agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
-            ToolCall::new("call-1", "vmux.run")
-                .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
-        ));
+        let mut harness = ProjectionHarness::new(4);
+        harness.shared.projection.session_update(
+            agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
+                ToolCall::new("call-1", "vmux.run")
+                    .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
+            ),
+        );
+        harness.update();
         let request = RequestPermissionRequest::new(
             "session-1",
             agent_client_protocol::schema::v1::ToolCallUpdate::new(
@@ -2385,7 +2409,7 @@ mod tests {
         );
 
         assert_eq!(
-            projector.approval_details(&ApprovalDetailsQuery::from_request(&request)),
+            harness.approval_details(ApprovalDetailsQuery::from_request(&request)),
             Some((
                 "vmux.run".to_string(),
                 r#"{"command":"echo hi","focus":true}"#.to_string(),
@@ -2395,10 +2419,13 @@ mod tests {
 
     #[test]
     fn approval_details_prefer_permission_request_fields() {
-        let mut projector = AcpProjector::default();
-        projector.apply(agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
-            ToolCall::new("call-1", "old").raw_input(serde_json::json!({"command": "old"})),
-        ));
+        let mut harness = ProjectionHarness::new(4);
+        harness.shared.projection.session_update(
+            agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
+                ToolCall::new("call-1", "old").raw_input(serde_json::json!({"command": "old"})),
+            ),
+        );
+        harness.update();
         let request = RequestPermissionRequest::new(
             "session-1",
             agent_client_protocol::schema::v1::ToolCallUpdate::new(
@@ -2411,13 +2438,14 @@ mod tests {
         );
 
         assert_eq!(
-            projector.approval_details(&ApprovalDetailsQuery::from_request(&request)),
+            harness.approval_details(ApprovalDetailsQuery::from_request(&request)),
             Some(("new".to_string(), r#"{"command":"new"}"#.to_string(),))
         );
     }
 
     #[test]
     fn approval_details_reject_missing_tool_identity() {
+        let mut harness = ProjectionHarness::new(4);
         let request = RequestPermissionRequest::new(
             "session-1",
             agent_client_protocol::schema::v1::ToolCallUpdate::new(
@@ -2428,7 +2456,7 @@ mod tests {
         );
 
         let query = ApprovalDetailsQuery::from_request(&request);
-        assert_eq!(AcpProjector::default().approval_details(&query), None);
+        assert_eq!(harness.approval_details(query.clone()), None);
         assert_eq!(query.fallback(), ("Use tool".to_string(), "{}".to_string()));
     }
 
@@ -2454,80 +2482,88 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn approval_details_wait_for_preceding_tool_call_projection() {
-        let mut harness = ProjectionHarness::new(2);
-        let request = RequestPermissionRequest::new(
-            "session-1",
-            agent_client_protocol::schema::v1::ToolCallUpdate::new(
-                "call-1",
-                ToolCallUpdateFields::new()
-                    .kind(ToolKind::Execute)
-                    .raw_input(serde_json::json!({"command": "echo hi"})),
-            ),
-            Vec::new(),
-        );
-        let waiting = {
-            let shared = Arc::clone(&harness.shared);
-            tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
-        };
-
-        tokio::task::yield_now().await;
-        harness.update();
-        harness
-            .shared
-            .projection
-            .transcript(AcpTranscriptInput::Update(Box::new(
-                SessionUpdate::ToolCall(
-                    ToolCall::new("call-1", "vmux.run")
+    #[test]
+    fn approval_details_wait_for_preceding_tool_call_projection() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut harness = ProjectionHarness::new(2);
+            let request = RequestPermissionRequest::new(
+                "session-1",
+                agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                    "call-1",
+                    ToolCallUpdateFields::new()
+                        .kind(ToolKind::Execute)
                         .raw_input(serde_json::json!({"command": "echo hi"})),
                 ),
-            )));
-        harness.update();
-        tokio::task::yield_now().await;
-        harness.update();
+                Vec::new(),
+            );
+            let waiting = {
+                let shared = Arc::clone(&harness.shared);
+                tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
+            };
 
-        assert_eq!(
-            waiting.await.unwrap(),
-            Some((
-                "vmux.run".to_string(),
-                r#"{"command":"echo hi"}"#.to_string(),
-            ))
-        );
+            tokio::task::yield_now().await;
+            harness.update();
+            harness
+                .shared
+                .projection
+                .session_update(SessionUpdate::ToolCall(
+                    ToolCall::new("call-1", "vmux.run")
+                        .raw_input(serde_json::json!({"command": "echo hi"})),
+                ));
+            harness.update();
+            tokio::task::yield_now().await;
+            harness.update();
+
+            assert_eq!(
+                waiting.await.unwrap(),
+                Some((
+                    "vmux.run".to_string(),
+                    r#"{"command":"echo hi"}"#.to_string(),
+                ))
+            );
+        });
     }
 
-    #[tokio::test]
-    async fn conversation_title_permission_resolves_as_host_owned_tool() {
-        let mut harness = ProjectionHarness::new(2);
-        harness
-            .shared
-            .projection
-            .transcript(AcpTranscriptInput::Update(Box::new(
-                SessionUpdate::ToolCall(
+    #[test]
+    fn conversation_title_permission_resolves_as_host_owned_tool() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut harness = ProjectionHarness::new(2);
+            harness
+                .shared
+                .projection
+                .session_update(SessionUpdate::ToolCall(
                     ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
                         .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+                ));
+            harness.update();
+            let request = RequestPermissionRequest::new(
+                "session-1",
+                agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                    "title-1",
+                    ToolCallUpdateFields::new()
+                        .kind(ToolKind::Execute)
+                        .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
                 ),
-            )));
-        harness.update();
-        let request = RequestPermissionRequest::new(
-            "session-1",
-            agent_client_protocol::schema::v1::ToolCallUpdate::new(
-                "title-1",
-                ToolCallUpdateFields::new()
-                    .kind(ToolKind::Execute)
-                    .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
-            ),
-            Vec::new(),
-        );
+                Vec::new(),
+            );
 
-        let waiting = {
-            let shared = Arc::clone(&harness.shared);
-            tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
-        };
-        tokio::task::yield_now().await;
-        harness.update();
-        let (name, _) = waiting.await.unwrap().unwrap();
-        assert!(AcpToolTitle::is_conversation_title(&name));
+            let waiting = {
+                let shared = Arc::clone(&harness.shared);
+                tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
+            };
+            tokio::task::yield_now().await;
+            harness.update();
+            let (name, _) = waiting.await.unwrap().unwrap();
+            assert!(AcpToolCallId::is_conversation_title(&name));
+        });
     }
 
     #[test]
@@ -2538,9 +2574,11 @@ mod tests {
             "vmux:request-user-choice",
             "request_user_choice",
         ] {
-            assert!(AcpToolName(name).permissionless(), "{name}");
+            assert!(AcpDriver::is_permissionless_tool(name), "{name}");
         }
-        assert!(!AcpToolName("other_request_user_choice").permissionless());
+        assert!(!AcpDriver::is_permissionless_tool(
+            "other_request_user_choice"
+        ));
     }
 
     #[test]
@@ -2551,10 +2589,10 @@ mod tests {
             "vmux:search-knowledge",
             "read_knowledge",
         ] {
-            assert!(AcpToolName(name).permissionless(), "{name}");
+            assert!(AcpDriver::is_permissionless_tool(name), "{name}");
         }
-        assert!(!AcpToolName("write_knowledge").permissionless());
-        assert!(!AcpToolName("other_search_knowledge").permissionless());
+        assert!(!AcpDriver::is_permissionless_tool("write_knowledge"));
+        assert!(!AcpDriver::is_permissionless_tool("other_search_knowledge"));
     }
 
     #[tokio::test]

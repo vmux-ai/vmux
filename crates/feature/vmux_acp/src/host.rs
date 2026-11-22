@@ -17,7 +17,6 @@ mod external;
 mod follow;
 mod follow_driver;
 mod handoff;
-mod handoff_driver;
 mod ingress;
 mod model_selection;
 mod navigation;
@@ -30,4 +29,3 @@ mod toast;
 mod test_support;
 
 mod tidy;
-mod tidy_driver;
