@@ -1,325 +1,496 @@
-use crate::pane::PaneSplitDirection;
-use bevy::math::Vec2;
-use bevy::prelude::Entity;
-#[cfg(test)]
-use vmux_ecs::page::PageSplitPreference;
-use vmux_ecs::page::{PagePlacement, PageSplitAxis};
+use bevy::prelude::*;
+use vmux_api::open_target::PaneDirection;
+use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState, Order};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Placement {
-    Focus {
-        tab: Entity,
-        stack: Entity,
-    },
-    AddTab {
-        pane: Entity,
-    },
-    Spiral {
-        anchor: Entity,
-        axis: PaneSplitDirection,
-    },
-}
+use crate::pane::{OpenBesideRequest, Pane};
+use crate::stack::Stack;
 
-#[derive(Debug, Clone)]
-pub(crate) struct LeafInfo {
-    pub(crate) pane: Entity,
-    pub(crate) placements: Vec<PagePlacement>,
-    pub(crate) spawn_seq: u64,
-    pub(crate) size: Vec2,
-}
+pub(crate) use query::PlacementQuery;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ReuseHit {
-    pub(crate) tab: Entity,
-    pub(crate) stack: Entity,
-}
+mod commit;
+mod query;
 
-fn longer_axis(size: Vec2) -> PaneSplitDirection {
-    if size.x >= size.y {
-        PaneSplitDirection::Row
-    } else {
-        PaneSplitDirection::Column
+pub struct PlacementPlugin;
+
+impl Plugin for PlacementPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Sequence>()
+            .add_message::<OpenBesideRequest>()
+            .add_message::<vmux_ecs::PageOpenRequest>()
+            .add_message::<vmux_ecs::agent::AgentCommandResponse>()
+            .add_observer(admit_stack)
+            .add_systems(Startup, ensure_counter.after(crate::LayoutStartupSet::Post))
+            .add_systems(
+                Update,
+                admit_open
+                    .in_set(PlacementAdmissionSet)
+                    .in_set(crate::host::command::LayoutRequestSet::Handle)
+                    .after(vmux_ecs::agent::AgentRequestApplySet),
+            )
+            .add_plugins(commit::PlacementCommitPlugin);
     }
 }
 
-fn newest_primary_leaf(leaves: &[LeafInfo]) -> Option<&LeafInfo> {
-    leaves
-        .iter()
-        .filter(|leaf| !leaf.placements.iter().any(|placement| placement.auxiliary))
-        .max_by_key(|leaf| leaf.spawn_seq)
-}
-
-fn newest_leaf_in_group<'a>(leaves: &'a [LeafInfo], group: &str) -> Option<&'a LeafInfo> {
-    leaves
-        .iter()
-        .filter(|leaf| leaf.placements.len() == 1 && leaf.placements[0].group == group)
-        .max_by_key(|leaf| leaf.spawn_seq)
-}
-
-fn preferred_split(
-    placement: PagePlacement,
-    leaves: &[LeafInfo],
-) -> Option<(Entity, PaneSplitDirection)> {
-    let split = placement.split?;
-    if !leaves.iter().all(|leaf| {
-        leaf.placements
-            .iter()
-            .all(|placement| split.allowed_groups.contains(&placement.group))
-    }) {
-        return None;
+fn ensure_counter(counters: Query<(), With<crate::pane::SpawnCounter>>, mut commands: Commands) {
+    if counters.is_empty() {
+        commands.spawn((
+            Name::new("Pane spawn counter"),
+            crate::pane::SpawnCounter::default(),
+        ));
     }
-    let anchor = newest_leaf_in_group(leaves, split.anchor_group)?;
-    let axis = match split.axis {
-        PageSplitAxis::Row => PaneSplitDirection::Row,
-        PageSplitAxis::Column => PaneSplitDirection::Column,
-    };
-    Some((anchor.pane, axis))
 }
 
-impl Placement {
-    pub(crate) fn resolve(
-        placement: PagePlacement,
-        reuse: Option<ReuseHit>,
-        leaves: &[LeafInfo],
-        self_pane: Entity,
-    ) -> Self {
-        if let Some(hit) = reuse {
-            return Self::Focus {
-                tab: hit.tab,
-                stack: hit.stack,
-            };
-        }
-        if let Some(empty) = leaves.iter().find(|leaf| leaf.placements.is_empty()) {
-            return Self::AddTab { pane: empty.pane };
-        }
-        if placement.auxiliary {
-            if let Some(existing) = newest_leaf_in_group(leaves, placement.group) {
-                return Self::AddTab {
-                    pane: existing.pane,
-                };
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlacementAdmissionSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlacementCommitSet;
+
+#[derive(EntityEvent, Clone)]
+pub struct PlaceStackRequest {
+    #[event_target]
+    pub operation: Entity,
+    pub stack: Entity,
+    pub anchor: Entity,
+    pub url: String,
+    pub direction: Option<PaneDirection>,
+    pub automatic: bool,
+    pub primary_anchor: bool,
+    pub focus: bool,
+}
+
+#[derive(EntityEvent)]
+pub struct StackPlaced {
+    #[event_target]
+    pub operation: Entity,
+    pub stack: Entity,
+    pub result: Result<Entity, String>,
+}
+
+#[derive(EntityEvent)]
+pub struct PlacementStarting {
+    #[event_target]
+    pub operation: Entity,
+}
+
+#[derive(Component, Clone)]
+struct OpenIntent {
+    url: String,
+    direction: Option<PaneDirection>,
+    request_id: [u8; 16],
+    focus: bool,
+}
+
+#[derive(Component, Clone)]
+struct StackIntent {
+    url: String,
+    direction: Option<PaneDirection>,
+    automatic: bool,
+    primary_anchor: bool,
+    focus: bool,
+}
+
+#[derive(Component)]
+struct Pending;
+
+#[derive(Component)]
+struct Routed;
+
+#[derive(Component)]
+struct CreatedStack;
+
+#[derive(Component)]
+struct PreviousNavigation(Option<vmux_ecs::PageOpenId>);
+
+#[derive(Component)]
+struct Unplaced;
+
+#[derive(Resource, Default)]
+struct Sequence(u32);
+
+impl Sequence {
+    fn next(&mut self) -> Order {
+        self.0 = self
+            .0
+            .checked_add(1)
+            .expect("placement admission sequence exhausted");
+        Order(self.0)
+    }
+}
+
+fn admit_open(
+    mut requests: MessageReader<OpenBesideRequest>,
+    layout: PlacementQuery,
+    mut sequence: ResMut<Sequence>,
+    mut commands: Commands,
+    mut responses: MessageWriter<vmux_ecs::agent::AgentCommandResponse>,
+) {
+    for request in requests.read() {
+        let Some(scope) = layout.scope(request.pane) else {
+            if !layout.registered(&request.url) {
+                responses.write(
+                    vmux_ecs::agent::AgentReply::new(vmux_api::protocol::AgentRequestId(
+                        request.request_id,
+                    ))
+                    .response(vmux_api::protocol::AgentCommandResult::Error(
+                        "placement source is unavailable".into(),
+                    )),
+                );
             }
-            if let Some(anchor) = newest_primary_leaf(leaves) {
-                return Self::Spiral {
-                    anchor: anchor.pane,
-                    axis: longer_axis(anchor.size),
-                };
-            }
-            return Self::AddTab { pane: self_pane };
-        }
-        if let Some(same) = newest_leaf_in_group(leaves, placement.group) {
-            return Self::AddTab { pane: same.pane };
-        }
-        if let Some((anchor, axis)) = preferred_split(placement, leaves) {
-            return Self::Spiral { anchor, axis };
-        }
-        if let Some(anchor) = newest_primary_leaf(leaves) {
-            return Self::Spiral {
-                anchor: anchor.pane,
-                axis: longer_axis(anchor.size),
-            };
-        }
-        if let Some(auxiliary) = leaves
-            .iter()
-            .find(|leaf| leaf.placements.iter().any(|placement| placement.auxiliary))
-        {
-            return Self::Spiral {
-                anchor: auxiliary.pane,
-                axis: longer_axis(auxiliary.size),
-            };
-        }
-        Self::AddTab { pane: self_pane }
+            continue;
+        };
+        commands.spawn((
+            Name::new("Place opened page"),
+            Operation::bundle("layout.place-page").expect("fixed placement operation"),
+            OperationRetained,
+            EntityTarget::<Pane>::new(request.pane),
+            scope,
+            sequence.next(),
+            OpenIntent {
+                url: request.url.clone(),
+                direction: request.direction,
+                request_id: request.request_id,
+                focus: request.focus,
+            },
+            Pending,
+        ));
     }
+}
 
-    pub(crate) fn split_anchor(leaves: &[LeafInfo], self_pane: Entity) -> Entity {
-        newest_primary_leaf(leaves)
-            .or_else(|| {
-                leaves
-                    .iter()
-                    .find(|leaf| leaf.placements.iter().any(|placement| placement.auxiliary))
-            })
-            .map(|leaf| leaf.pane)
-            .unwrap_or(self_pane)
+fn admit_stack(
+    request: On<PlaceStackRequest>,
+    layout: PlacementQuery,
+    states: Query<&OperationState>,
+    mut sequence: ResMut<Sequence>,
+    mut commands: Commands,
+) {
+    let request = request.event();
+    let valid = states
+        .get(request.operation)
+        .is_ok_and(|state| matches!(state, OperationState::Pending | OperationState::Running));
+    let scope = layout.scope(request.anchor);
+    if !valid
+        || scope.is_none()
+        || !layout.stack_exists(request.stack)
+        || layout.parent(request.stack).is_some()
+    {
+        commands.trigger(StackPlaced {
+            operation: request.operation,
+            stack: request.stack,
+            result: Err("placement source is unavailable".into()),
+        });
+        return;
     }
+    commands.entity(request.operation).insert((
+        sequence.next(),
+        EntityTarget::<Pane>::new(request.anchor),
+        EntityTarget::<Stack>::new(request.stack),
+        scope.unwrap(),
+        StackIntent {
+            url: request.url.clone(),
+            direction: request.direction,
+            automatic: request.automatic,
+            primary_anchor: request.primary_anchor,
+            focus: request.focus,
+        },
+        Pending,
+    ));
+    commands.entity(request.stack).insert(Unplaced);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::HostWindow;
+    use vmux_ecs::PageMetadata;
+    use vmux_flex::ComputedNode;
+    use vmux_history::LastActivatedAt;
 
-    fn entity(value: u64) -> Entity {
-        Entity::from_bits(value)
+    #[derive(Resource, Default)]
+    struct Results(Vec<(Entity, Entity, Result<Entity, String>)>);
+
+    struct Fixture {
+        app: App,
+        pane: Entity,
+        space: Entity,
+        window: Entity,
     }
 
-    fn page(group: &'static str) -> PagePlacement {
-        PagePlacement {
-            group,
-            ..PagePlacement::DEFAULT
+    impl Fixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, PlacementPlugin))
+                .init_resource::<Results>()
+                .add_observer(Self::receive);
+            let window = app.world_mut().spawn(Window::default()).id();
+            let space = app
+                .world_mut()
+                .spawn((crate::space::Space, HostWindow(window), ChildOf(window)))
+                .id();
+            let tab = app
+                .world_mut()
+                .spawn((crate::tab::Tab::default(), ChildOf(space)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((
+                    Pane::bundle(),
+                    crate::pane::SpawnSeq(1),
+                    ComputedNode {
+                        size: Vec2::new(1200.0, 800.0),
+                        ..Default::default()
+                    },
+                    ChildOf(tab),
+                ))
+                .id();
+            app.update();
+            Self {
+                app,
+                pane,
+                space,
+                window,
+            }
+        }
+
+        fn receive(event: On<StackPlaced>, mut results: ResMut<Results>) {
+            results
+                .0
+                .push((event.operation, event.stack, event.result.clone()));
+        }
+
+        fn place(
+            &mut self,
+            anchor: Entity,
+            direction: Option<PaneDirection>,
+            focus: bool,
+        ) -> (Entity, Entity) {
+            let stack = self
+                .app
+                .world_mut()
+                .spawn((Stack::bundle(),))
+                .insert(PageMetadata {
+                    url: "https://example.com".into(),
+                    ..Default::default()
+                })
+                .id();
+            let operation = self
+                .app
+                .world_mut()
+                .spawn(Operation::bundle("test.place-stack").unwrap())
+                .id();
+            self.app.world_mut().trigger(PlaceStackRequest {
+                operation,
+                stack,
+                anchor,
+                url: "https://example.com".into(),
+                direction,
+                automatic: false,
+                primary_anchor: false,
+                focus,
+            });
+            self.app.world_mut().flush();
+            (operation, stack)
         }
     }
 
-    fn auxiliary(group: &'static str) -> PagePlacement {
-        PagePlacement {
-            group,
-            auxiliary: true,
-            ..PagePlacement::DEFAULT
+    #[test]
+    fn same_frame_splits_read_the_preceding_canonical_children() {
+        let mut fixture = Fixture::new();
+        let original = fixture
+            .app
+            .world_mut()
+            .spawn((Stack::bundle(), ChildOf(fixture.pane)))
+            .insert(PageMetadata {
+                url: "https://original.example".into(),
+                ..Default::default()
+            })
+            .id();
+        let (_, first) = fixture.place(fixture.pane, Some(PaneDirection::Right), false);
+        let (_, second) = fixture.place(fixture.pane, Some(PaneDirection::Right), false);
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::pane::PaneSplit>(fixture.pane)
+                .is_some()
+        );
+        let original_pane = fixture
+            .app
+            .world()
+            .get::<ChildOf>(original)
+            .unwrap()
+            .parent();
+        let first_pane = fixture.app.world().get::<ChildOf>(first).unwrap().parent();
+        let second_pane = fixture.app.world().get::<ChildOf>(second).unwrap().parent();
+        assert_ne!(original_pane, first_pane);
+        assert_ne!(first_pane, second_pane);
+        for pane in [original_pane, first_pane, second_pane] {
+            assert_eq!(
+                fixture.app.world().get::<ChildOf>(pane).unwrap().parent(),
+                fixture.pane
+            );
+        }
+        assert_eq!(fixture.app.world().resource::<Results>().0.len(), 2);
+    }
+
+    #[test]
+    fn canceled_or_replaced_scope_refuses_before_topology_mutation() {
+        for replace in [false, true] {
+            let mut fixture = Fixture::new();
+            let (operation, stack) = fixture.place(fixture.pane, Some(PaneDirection::Right), true);
+            if replace {
+                let other = fixture.app.world_mut().spawn(crate::space::Space).id();
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.pane)
+                    .insert(ChildOf(other));
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(operation)
+                    .insert(OperationState::Canceled);
+            }
+            fixture.app.update();
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<crate::pane::PaneSplit>(fixture.pane)
+                    .is_none()
+            );
+            assert!(fixture.app.world().get::<ChildOf>(stack).is_none());
+            assert!(fixture.app.world().resource::<Results>().0[0].2.is_err());
         }
     }
 
-    fn terminal() -> PagePlacement {
-        PagePlacement {
-            group: "terminal",
-            split: Some(PageSplitPreference {
-                anchor_group: "browser",
-                allowed_groups: &["assistant", "browser"],
-                axis: PageSplitAxis::Column,
-            }),
-            ..PagePlacement::DEFAULT
+    #[test]
+    fn focus_false_preserves_existing_activity_on_current_stack_and_pane() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.pane)
+            .insert(LastActivatedAt(7));
+        let (_, stack) = fixture.place(fixture.pane, None, false);
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(stack).unwrap().parent(),
+            fixture.pane
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(fixture.pane)
+                .unwrap()
+                .0,
+            7
+        );
+    }
+
+    #[test]
+    fn late_window_retirement_does_not_allocate_a_split() {
+        let mut fixture = Fixture::new();
+        fixture.place(fixture.pane, Some(PaneDirection::Right), false);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.space)
+            .remove::<ChildOf>();
+        fixture.app.world_mut().despawn(fixture.window);
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::pane::PaneSplit>(fixture.pane)
+                .is_none()
+        );
+        assert!(fixture.app.world().resource::<Results>().0[0].2.is_err());
+    }
+
+    #[test]
+    fn a_transferred_stack_is_preserved_and_refused_before_split() {
+        let mut fixture = Fixture::new();
+        let (_, stack) = fixture.place(fixture.pane, Some(PaneDirection::Right), false);
+        let tab = fixture
+            .app
+            .world()
+            .get::<ChildOf>(fixture.pane)
+            .unwrap()
+            .parent();
+        let destination = fixture
+            .app
+            .world_mut()
+            .spawn((Pane::bundle(), ChildOf(tab)))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(stack)
+            .insert(ChildOf(destination));
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<crate::pane::PaneSplit>(fixture.pane)
+                .is_none()
+        );
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(stack).unwrap().parent(),
+            destination
+        );
+        assert!(fixture.app.world().resource::<Results>().0[0].2.is_err());
+        fixture.app.world_mut().write_message(OpenBesideRequest {
+            pane: fixture.pane,
+            direction: None,
+            url: "https://example.com".into(),
+            request_id: [0; 16],
+            focus: false,
+        });
+        fixture.app.update();
+        let world = fixture.app.world_mut();
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<Stack>>()
+                .iter(world)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_focused_new_split_activates_the_owning_tab_in_the_input_frame() {
+        let mut fixture = Fixture::new();
+        fixture.app.add_plugins(crate::host::active::ActivePlugin);
+        let tab = fixture
+            .app
+            .world()
+            .get::<ChildOf>(fixture.pane)
+            .unwrap()
+            .parent();
+        let (_, stack) = fixture.place(fixture.pane, Some(PaneDirection::Right), true);
+        fixture.app.update();
+        let pane = fixture.app.world().get::<ChildOf>(stack).unwrap().parent();
+        for entity in [stack, pane, tab] {
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_ecs::Active>(entity)
+                    .is_some()
+            );
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<LastActivatedAt>(entity)
+                    .is_some_and(|activated| activated.0 > 0)
+            );
         }
-    }
-
-    fn leaf(pane: u64, placements: &[PagePlacement], sequence: u64, size: (f32, f32)) -> LeafInfo {
-        LeafInfo {
-            pane: entity(pane),
-            placements: placements.to_vec(),
-            spawn_seq: sequence,
-            size: Vec2::new(size.0, size.1),
-        }
-    }
-
-    #[test]
-    fn reuse_wins() {
-        let hit = ReuseHit {
-            tab: entity(1),
-            stack: entity(2),
-        };
-        assert_eq!(
-            Placement::resolve(
-                page("browser"),
-                Some(hit),
-                &[leaf(10, &[page("browser")], 5, (800.0, 600.0))],
-                entity(10),
-            ),
-            Placement::Focus {
-                tab: entity(1),
-                stack: entity(2),
-            }
-        );
-    }
-
-    #[test]
-    fn newest_pure_group_receives_the_page() {
-        assert_eq!(
-            Placement::resolve(
-                page("terminal"),
-                None,
-                &[
-                    leaf(10, &[page("terminal")], 1, (800.0, 600.0)),
-                    leaf(20, &[page("terminal")], 9, (800.0, 600.0)),
-                    leaf(30, &[page("files")], 12, (800.0, 600.0)),
-                ],
-                entity(1),
-            ),
-            Placement::AddTab { pane: entity(20) }
-        );
-    }
-
-    #[test]
-    fn mixed_group_is_not_reused_as_a_bucket() {
-        assert_eq!(
-            Placement::resolve(
-                page("browser"),
-                None,
-                &[leaf(
-                    20,
-                    &[page("files"), page("browser")],
-                    9,
-                    (900.0, 400.0),
-                )],
-                entity(20),
-            ),
-            Placement::Spiral {
-                anchor: entity(20),
-                axis: PaneSplitDirection::Row,
-            }
-        );
-    }
-
-    #[test]
-    fn split_anchor_ignores_newer_auxiliary_pages() {
-        assert_eq!(
-            Placement::split_anchor(
-                &[
-                    leaf(10, &[page("terminal")], 9, (800.0, 600.0)),
-                    leaf(20, &[page("browser")], 12, (800.0, 600.0)),
-                    leaf(30, &[auxiliary("assistant")], 50, (800.0, 600.0)),
-                ],
-                entity(30),
-            ),
-            entity(20)
-        );
-    }
-
-    #[test]
-    fn empty_leaf_is_filled_first() {
-        assert_eq!(
-            Placement::resolve(
-                page("browser"),
-                None,
-                &[leaf(10, &[], 1, (800.0, 600.0))],
-                entity(10),
-            ),
-            Placement::AddTab { pane: entity(10) }
-        );
-    }
-
-    #[test]
-    fn preferred_split_uses_manifest_policy() {
-        assert_eq!(
-            Placement::resolve(
-                terminal(),
-                None,
-                &[
-                    leaf(1, &[auxiliary("assistant")], 1, (800.0, 900.0)),
-                    leaf(2, &[page("browser")], 10, (900.0, 400.0)),
-                ],
-                entity(1),
-            ),
-            Placement::Spiral {
-                anchor: entity(2),
-                axis: PaneSplitDirection::Column,
-            }
-        );
-    }
-
-    #[test]
-    fn auxiliary_pages_share_their_bucket() {
-        assert_eq!(
-            Placement::resolve(
-                auxiliary("assistant"),
-                None,
-                &[
-                    leaf(1, &[auxiliary("assistant")], 1, (800.0, 900.0)),
-                    leaf(2, &[page("browser")], 9, (900.0, 400.0)),
-                ],
-                entity(2),
-            ),
-            Placement::AddTab { pane: entity(1) }
-        );
-    }
-
-    #[test]
-    fn primary_page_bootstraps_from_auxiliary_leaf() {
-        assert_eq!(
-            Placement::resolve(
-                page("browser"),
-                None,
-                &[leaf(1, &[auxiliary("assistant")], 1, (1600.0, 900.0),)],
-                entity(1),
-            ),
-            Placement::Spiral {
-                anchor: entity(1),
-                axis: PaneSplitDirection::Row,
-            }
-        );
     }
 }

@@ -39,7 +39,9 @@ use vmux_ecs::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::pane::PanePlacement;
+use vmux_layout::placement::{
+    PlaceStackRequest, PlacementCommitSet, PlacementPlugin, PlacementStarting, StackPlaced,
+};
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack};
 #[cfg(test)]
@@ -86,6 +88,9 @@ impl Plugin for TerminalPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
+        if !app.is_plugin_added::<PlacementPlugin>() {
+            app.add_plugins(PlacementPlugin);
+        }
         app.add_plugins(Self::manifest().plugin().route(
             vmux_ecs::host_spawn::HostSpawnRoute::page("vmux://terminal/"),
         ))
@@ -95,7 +100,6 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::TerminalPrevRequest>()
         .add_message::<super::command::TerminalClearRequest>()
         .add_message::<super::command::CopyModeRequest>()
-        .add_message::<PendingProcessPresentation>()
         .add_plugins((
             vmux_ecs::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
@@ -106,10 +110,10 @@ impl Plugin for TerminalPlugin {
         .add_observer(seed_renderer)
         .add_observer(contribute)
         .add_observer(activate)
-        .add_observer(queue_presentation)
+        .add_observer(spawn_placed)
         .register_stored::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
-        .add_systems(PostUpdate, present)
+        .add_plugins(PresentationPlugin)
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
         .add_plugins((
@@ -125,6 +129,21 @@ impl Plugin for TerminalPlugin {
     }
 }
 
+struct PresentationPlugin;
+
+impl Plugin for PresentationPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<PlacementPlugin>() {
+            app.add_plugins(PlacementPlugin);
+        }
+        app.add_message::<PendingProcessPresentation>()
+            .add_observer(queue_presentation)
+            .add_observer(presentation_placed)
+            .add_observer(validate_presentation)
+            .add_systems(PostUpdate, present.before(PlacementCommitSet));
+    }
+}
+
 #[derive(Message, Clone, Copy)]
 struct PendingProcessPresentation(ProcessPresentationRequest);
 
@@ -135,40 +154,148 @@ fn queue_presentation(
     pending.write(PendingProcessPresentation(*trigger.event()));
 }
 
+#[derive(Component)]
+struct PendingPresentationPlacement {
+    request: ProcessPresentationRequest,
+    source_stack: Entity,
+    source_pane: Entity,
+    stack: Entity,
+}
+
 fn present(
     mut requests: MessageReader<PendingProcessPresentation>,
     stacks: Query<(Entity, &EntityTarget<Session>)>,
-    mut placement: PanePlacement,
+    parents: Query<&ChildOf>,
     mut commands: Commands,
 ) {
-    let mut split_batch = std::collections::HashSet::new();
     for pending in requests.read() {
-        let request = &pending.0;
-        let Some(stack) = stacks
+        let request = pending.0;
+        let Some(source_stack) = stacks
             .iter()
             .find(|(_, target)| target.entity() == request.owner)
             .map(|(stack, _)| stack)
         else {
             continue;
         };
-        let Ok(agent_pane) = placement
-            .child_of_q
-            .get(stack)
-            .map(|child_of| child_of.parent())
-        else {
+        let Ok(parent) = parents.get(source_stack) else {
             continue;
         };
-        let target_pane =
-            placement.resolve_spiral(agent_pane, TerminalPlugin::url(), false, &mut split_batch);
-        let tab = commands
-            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
+        let source_pane = parent.parent();
+        let stack = commands
+            .spawn((Stack::bundle(), LastActivatedAt(0)))
+            .insert(PageMetadata {
+                url: TerminalPlugin::url().into(),
+                ..Default::default()
+            })
             .id();
-        commands.spawn((
-            ReattachedTerminalBundle::new(request.process_id),
-            RetainOnProcessExit,
-            ChildOf(tab),
-        ));
+        let operation = commands
+            .spawn((
+                Name::new("Place process presentation"),
+                vmux_ecs::Operation::bundle("terminal.presentation.placement")
+                    .expect("fixed presentation placement operation"),
+                vmux_ecs::OperationRetained,
+                PendingPresentationPlacement {
+                    request,
+                    source_stack,
+                    source_pane,
+                    stack,
+                },
+            ))
+            .id();
+        commands.trigger(PlaceStackRequest {
+            operation,
+            stack,
+            anchor: source_pane,
+            url: TerminalPlugin::url().into(),
+            direction: None,
+            automatic: true,
+            primary_anchor: false,
+            focus: false,
+        });
     }
+}
+
+fn presentation_placed(
+    event: On<StackPlaced>,
+    pending: Query<&PendingPresentationPlacement>,
+    sources: Query<&EntityTarget<Session>, With<Stack>>,
+    sessions: Query<(), With<Session>>,
+    panes: Query<(), With<vmux_layout::Pane>>,
+    children: Query<&Children>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let Ok(pending) = pending.get(event.operation) else {
+        return;
+    };
+    let source_valid = panes.contains(pending.source_pane)
+        && sessions.contains(pending.request.owner)
+        && sources
+            .get(pending.source_stack)
+            .is_ok_and(|target| target.entity() == pending.request.owner);
+    if event.stack != pending.stack || event.result.is_err() || !source_valid {
+        if !parents.contains(pending.stack)
+            && children
+                .get(pending.stack)
+                .map_or(true, |children| children.is_empty())
+        {
+            commands.entity(pending.stack).try_despawn();
+        }
+        commands.entity(event.operation).try_despawn();
+        return;
+    }
+    commands.spawn((
+        ReattachedTerminalBundle::new(pending.request.process_id),
+        RetainOnProcessExit,
+        ChildOf(pending.stack),
+    ));
+    commands.entity(event.operation).try_despawn();
+}
+
+fn validate_presentation(
+    event: On<PlacementStarting>,
+    pending: Query<&PendingPresentationPlacement>,
+    sources: Query<&EntityTarget<Session>, With<Stack>>,
+    sessions: Query<(), With<Session>>,
+    mut commands: Commands,
+) {
+    let Ok(pending) = pending.get(event.operation) else {
+        return;
+    };
+    if !sessions.contains(pending.request.owner)
+        || !sources
+            .get(pending.source_stack)
+            .is_ok_and(|target| target.entity() == pending.request.owner)
+    {
+        commands
+            .entity(event.operation)
+            .insert(vmux_ecs::OperationState::Canceled);
+    }
+}
+
+#[derive(EntityEvent, Clone)]
+pub(super) struct SpawnPlacedTerminal {
+    #[event_target]
+    pub(super) stack: Entity,
+    pub(super) request: TerminalStackSpawnRequest,
+}
+
+fn spawn_placed(
+    event: On<SpawnPlacedTerminal>,
+    stacks: Query<&ChildOf, With<Stack>>,
+    terminals: Query<&ChildOf, With<Terminal>>,
+    mut spawn: SpawnTerminals,
+) {
+    if stacks
+        .get(event.stack)
+        .map_or(true, |parent| parent.parent() != event.request.pane)
+        || terminals
+            .iter()
+            .any(|parent| parent.parent() == event.stack)
+    {
+        return;
+    }
+    spawn.spawn(event.stack, &event.request);
 }
 
 #[derive(Component)]
@@ -800,9 +927,7 @@ impl TerminalBundle {
 
 fn respond_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
-    settings: Res<AppSettings>,
-    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
-    mut commands: Commands,
+    mut spawn: SpawnTerminals,
 ) {
     for request in reader.read() {
         let stack_ts = if request.activate {
@@ -810,7 +935,8 @@ fn respond_stack_spawn(
         } else {
             LastActivatedAt(0)
         };
-        let stack = commands
+        let stack = spawn
+            .commands
             .spawn((Stack::bundle(), stack_ts, ChildOf(request.pane)))
             .id();
         let title = request
@@ -818,31 +944,48 @@ fn respond_stack_spawn(
             .as_ref()
             .map(|cwd| format!("Terminal ({})", cwd.display()))
             .unwrap_or_else(|| "Terminal".to_string());
-        commands.entity(stack).insert(PageMetadata {
+        spawn.commands.entity(stack).insert(PageMetadata {
             url: TerminalPlugin::url().to_string(),
             title,
             bg_color: None,
             ..default()
         });
-        let terminal = commands
+        spawn.spawn(stack, request);
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpawnTerminals<'w, 's> {
+    settings: Res<'w, AppSettings>,
+    terminal_inputs: MessageWriter<'w, QueueTerminalInput>,
+    commands: Commands<'w, 's>,
+}
+
+impl SpawnTerminals<'_, '_> {
+    fn spawn(&mut self, stack: Entity, request: &TerminalStackSpawnRequest) {
+        let terminal = self
+            .commands
             .spawn((
                 TerminalBundle::with_shell(
-                    &settings,
+                    &self.settings,
                     request.cwd.as_deref(),
                     request.shell.as_deref(),
                 ),
                 ChildOf(stack),
             ))
             .id();
-        commands.entity(terminal).insert(KeyboardOwner);
+        self.commands.entity(terminal).insert(KeyboardOwner);
         if request.agent_run {
-            commands.entity(terminal).insert(crate::AgentRunTerminal);
+            self.commands
+                .entity(terminal)
+                .insert(crate::AgentRunTerminal);
         }
         if let Some(pid) = request.process_id {
-            commands.entity(terminal).insert(pid);
+            self.commands.entity(terminal).insert(pid);
         }
         if let Some(data) = request.pending_input.clone() {
-            terminal_inputs.write(QueueTerminalInput { terminal, data });
+            self.terminal_inputs
+                .write(QueueTerminalInput { terminal, data });
         }
     }
 }
@@ -2165,9 +2308,7 @@ mod tests {
     #[test]
     fn process_presentation_does_not_take_focus_from_owner() {
         let mut app = App::new();
-        app.add_message::<PendingProcessPresentation>()
-            .add_observer(queue_presentation)
-            .add_systems(Update, present);
+        app.add_plugins((MinimalPlugins, PresentationPlugin));
         let tab = app.world_mut().spawn(Tab::bundle()).id();
         let pane = app
             .world_mut()
@@ -2217,9 +2358,7 @@ mod tests {
     #[test]
     fn process_presentation_batches_splits_for_one_session() {
         let mut app = App::new();
-        app.add_message::<PendingProcessPresentation>()
-            .add_observer(queue_presentation)
-            .add_systems(Update, present);
+        app.add_plugins((MinimalPlugins, PresentationPlugin));
         app.world_mut().spawn(TerminalPlugin::manifest());
         let tab = app.world_mut().spawn(Tab::bundle()).id();
         let pane = app
@@ -2257,11 +2396,85 @@ mod tests {
                 .is_some()
         );
         let children = app.world().get::<Children>(pane).unwrap();
-        assert_eq!(children.len(), 3);
+        assert_eq!(children.len(), 2);
         assert!(
             children
                 .iter()
                 .all(|child| app.world().get::<vmux_layout::pane::Pane>(child).is_some())
+        );
+        let world = app.world_mut();
+        let mut terminals = world.query_filtered::<(&ProcessId, &ChildOf), With<Terminal>>();
+        let attachments = terminals
+            .iter(world)
+            .map(|(process, parent)| (*process, parent.parent()))
+            .collect::<Vec<_>>();
+        assert_eq!(attachments.len(), 2);
+        assert!(
+            attachments
+                .iter()
+                .any(|(process, _)| *process == process_id(1))
+        );
+        assert!(
+            attachments
+                .iter()
+                .any(|(process, _)| *process == process_id(2))
+        );
+        assert_eq!(
+            world.get::<ChildOf>(attachments[0].1).unwrap().parent(),
+            world.get::<ChildOf>(attachments[1].1).unwrap().parent()
+        );
+    }
+
+    #[test]
+    fn process_presentation_refuses_a_retired_session_without_splitting() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, PresentationPlugin));
+        app.world_mut().spawn(TerminalPlugin::manifest());
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane::bundle(), ChildOf(tab)))
+            .id();
+        let session = app.world_mut().spawn(Session).id();
+        app.world_mut().spawn((
+            Stack::bundle(),
+            ChildOf(pane),
+            EntityTarget::<Session>::new(session),
+        ));
+        app.add_observer(move |_: On<PlaceStackRequest>, mut commands: Commands| {
+            commands.entity(session).try_despawn();
+        });
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: ProcessId::new(),
+        });
+        app.update();
+        assert!(
+            app.world()
+                .get::<vmux_layout::pane::PaneSplit>(pane)
+                .is_none()
+        );
+        let world = app.world_mut();
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<Terminal>>()
+                .iter(world)
+                .count(),
+            0
+        );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<Stack>>()
+                .iter(world)
+                .count(),
+            1
+        );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<PendingPresentationPlacement>>()
+                .iter(world)
+                .count(),
+            0
         );
     }
 
