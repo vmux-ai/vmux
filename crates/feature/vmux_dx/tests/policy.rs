@@ -9418,9 +9418,11 @@ impl Boundary {
         if let Some(key) = endpoint.strip_prefix("ECS: ")
             && let Some(entry) = inventory.entries.get(key)
         {
-            for parent in inventory.entries.values() {
-                if inventory.automatic_boundary(parent)
-                    && inventory.owner_references(adapter, parent)
+            for parent_key in inventory.automatic_boundary_keys() {
+                let Some(parent) = inventory.entries.get(&parent_key) else {
+                    continue;
+                };
+                if inventory.owner_references(adapter, parent)
                     && inventory.boundary_references(parent, entry, &mut BTreeSet::new())
                 {
                     return true;
@@ -9784,8 +9786,16 @@ struct Inventory {
     root_bindings: RefCell<BTreeMap<(String, String), Option<String>>>,
     root_namespaces: RefCell<BTreeMap<(String, String), Option<String>>>,
     root_modules: RefCell<BTreeMap<(String, String), Option<String>>>,
+    exported_binding_cache: RefCell<BTreeMap<(String, String), bool>>,
     root_declarations: RefCell<BTreeMap<(String, String), DeclarationLookup>>,
     owner_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
+    boundary_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
+    framework_handle_cache: RefCell<BTreeMap<(String, String), Option<String>>>,
+    function_reference_cache: RefCell<BTreeMap<(String, String), Option<String>>>,
+    states_by_function: RefCell<Option<BTreeMap<String, Vec<[String; 3]>>>>,
+    constructors_by_owner: RefCell<Option<BTreeMap<String, BTreeSet<String>>>>,
+    shadowed_roots: RefCell<Option<BTreeSet<String>>>,
+    automatic_boundary_keys: RefCell<Option<Vec<String>>>,
     implementation_index: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     generated_ready: bool,
     generated_collisions: BTreeSet<String>,
@@ -10946,6 +10956,13 @@ impl Inventory {
         self.root_declarations.get_mut().clear();
         self.root_bindings.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
+        self.boundary_reference_cache.get_mut().clear();
+        self.framework_handle_cache.get_mut().clear();
+        self.function_reference_cache.get_mut().clear();
+        *self.states_by_function.get_mut() = None;
+        *self.constructors_by_owner.get_mut() = None;
+        *self.shadowed_roots.get_mut() = None;
+        *self.automatic_boundary_keys.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         let keys: Vec<_> = self
             .entries
@@ -11671,8 +11688,16 @@ impl Inventory {
         self.root_bindings.get_mut().clear();
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
+        self.exported_binding_cache.get_mut().clear();
         self.root_declarations.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
+        self.boundary_reference_cache.get_mut().clear();
+        self.framework_handle_cache.get_mut().clear();
+        self.function_reference_cache.get_mut().clear();
+        *self.states_by_function.get_mut() = None;
+        *self.constructors_by_owner.get_mut() = None;
+        *self.shadowed_roots.get_mut() = None;
+        *self.automatic_boundary_keys.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         if !path.ends_with(".rs") {
             self.script(path, source);
@@ -11706,6 +11731,7 @@ impl Inventory {
         .visit_file(&file);
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
+        self.exported_binding_cache.get_mut().clear();
         self.root_declarations.get_mut().clear();
     }
 
@@ -11728,6 +11754,13 @@ impl Inventory {
 
     fn script(&mut self, path: &str, source: &str) {
         self.owner_reference_cache.get_mut().clear();
+        self.boundary_reference_cache.get_mut().clear();
+        self.framework_handle_cache.get_mut().clear();
+        self.function_reference_cache.get_mut().clear();
+        *self.states_by_function.get_mut() = None;
+        *self.constructors_by_owner.get_mut() = None;
+        *self.shadowed_roots.get_mut() = None;
+        *self.automatic_boundary_keys.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         let key = format!("{path}||script");
         self.entries.insert(
@@ -12146,6 +12179,30 @@ impl Inventory {
         false
     }
 
+    fn automatic_boundary_keys(&self) -> Vec<String> {
+        if let Some(keys) = self.automatic_boundary_keys.borrow().as_ref() {
+            return keys.clone();
+        }
+        let mut keys = Vec::new();
+        for entry in self.entries.values() {
+            if self.automatic_boundary(entry) {
+                keys.push(entry.key.clone());
+            }
+        }
+        *self.automatic_boundary_keys.borrow_mut() = Some(keys.clone());
+        keys
+    }
+
+    fn parsed_file(&self, path: &str) -> Option<Rc<syn::File>> {
+        let input = self.sources.get(path)?;
+        if let Some((cached, file)) = self.parsed.get(path)
+            && cached == input
+        {
+            return Some(Rc::clone(file));
+        }
+        syn::parse_file(input).ok().map(Rc::new)
+    }
+
     fn automatic_boundary(&self, entry: &Declaration) -> bool {
         self.compiler_registration(entry)
             || self.registered_compiler_owner(entry)
@@ -12156,10 +12213,7 @@ impl Inventory {
     }
 
     fn compiler_harness(&self, source: &Declaration) -> bool {
-        let Some(input) = self.sources.get(&source.path) else {
-            return false;
-        };
-        let Ok(file) = syn::parse_file(input) else {
+        let Some(file) = self.parsed_file(&source.path) else {
             return false;
         };
         CompilerInputs::harness(
@@ -12207,10 +12261,7 @@ impl Inventory {
         registration: &Declaration,
         owner: &Declaration,
     ) -> bool {
-        let Some(source) = self.sources.get(&registration.path) else {
-            return false;
-        };
-        let Ok(file) = syn::parse_file(source) else {
+        let Some(file) = self.parsed_file(&registration.path) else {
             return false;
         };
         for item in &file.items {
@@ -13347,12 +13398,32 @@ impl Inventory {
         reference: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<&Declaration> {
+        if !visiting.is_empty() {
+            return self.function_reference_uncached(namespace, reference, visiting);
+        }
+        let key = (namespace.to_string(), reference.to_string());
+        if let Some(cached) = self.function_reference_cache.borrow().get(&key) {
+            return cached.as_ref().and_then(|entry| self.entries.get(entry));
+        }
+        let resolved = self.function_reference_uncached(namespace, reference, visiting);
+        self.function_reference_cache
+            .borrow_mut()
+            .insert(key, resolved.map(|entry| entry.key.clone()));
+        resolved
+    }
+
+    fn function_reference_uncached(
+        &self,
+        namespace: &str,
+        reference: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<&Declaration> {
         if let Some(reference) = reference.strip_prefix("::") {
             let (root, reference) = reference.split_once("::")?;
             if !self.roots.contains(root) && !self.imports.contains_key(root) {
                 return None;
             }
-            return self.function_reference(root, reference, visiting);
+            return self.function_reference_uncached(root, reference, visiting);
         }
         if visiting.len() > 128 || !visiting.insert(format!("function:{namespace}|{reference}")) {
             return None;
@@ -13553,6 +13624,53 @@ impl Inventory {
         false
     }
 
+    fn has_constructor(&self, owner_key: &str, method: &str) -> bool {
+        if let Some(index) = self.constructors_by_owner.borrow().as_ref() {
+            return index
+                .get(owner_key)
+                .is_some_and(|methods| methods.contains(method));
+        }
+        let mut index: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for implementation in self.entries.values() {
+            let Some(Item::Impl(syntax)) = &implementation.syntax else {
+                continue;
+            };
+            let Type::Path(value) = syntax.self_ty.as_ref() else {
+                continue;
+            };
+            let Some(resolved) = self.resolve(
+                &implementation.namespace,
+                &References::path(&value.path),
+                &mut BTreeSet::new(),
+            ) else {
+                continue;
+            };
+            let mut methods = Vec::new();
+            for item in &syntax.items {
+                let syn::ImplItem::Fn(value) = item else {
+                    continue;
+                };
+                let syn::ReturnType::Type(_, output) = &value.sig.output else {
+                    continue;
+                };
+                if matches!(output.as_ref(), Type::Path(value) if value.path.is_ident("Self")) {
+                    methods.push(value.sig.ident.to_string());
+                }
+            }
+            if !methods.is_empty() {
+                index
+                    .entry(resolved.key.clone())
+                    .or_default()
+                    .extend(methods);
+            }
+        }
+        let result = index
+            .get(owner_key)
+            .is_some_and(|methods| methods.contains(method));
+        *self.constructors_by_owner.borrow_mut() = Some(index);
+        result
+    }
+
     fn implementations(&self, owner: &Declaration) -> Vec<&Declaration> {
         if self.implementation_index.borrow().is_none() {
             let mut index: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -13661,6 +13779,31 @@ impl Inventory {
         endpoint: &Declaration,
         visiting: &mut BTreeSet<String>,
     ) -> bool {
+        let top_level = visiting.is_empty();
+        let cache_key = if top_level {
+            let key = (adapter.key.clone(), endpoint.key.clone());
+            if let Some(referenced) = self.boundary_reference_cache.borrow().get(&key) {
+                return *referenced;
+            }
+            Some(key)
+        } else {
+            None
+        };
+        let referenced = self.boundary_references_walk(adapter, endpoint, visiting);
+        if let Some(key) = cache_key {
+            self.boundary_reference_cache
+                .borrow_mut()
+                .insert(key, referenced);
+        }
+        referenced
+    }
+
+    fn boundary_references_walk(
+        &self,
+        adapter: &Declaration,
+        endpoint: &Declaration,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
         let owner = match &adapter.owner {
             Some(path)
                 if matches!(adapter.kind, Kind::Impl)
@@ -13694,7 +13837,7 @@ impl Inventory {
         for child in &owner.plugin_children {
             if let Some(child) = self.resolve(&owner.namespace, child, &mut BTreeSet::new())
                 && !self.typed_child(owner, child)
-                && self.boundary_references(child, endpoint, &mut visiting.clone())
+                && self.boundary_references_walk(child, endpoint, visiting)
             {
                 return true;
             }
@@ -13744,7 +13887,7 @@ impl Inventory {
                         self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
                     {
                         if !self.typed_child(implementation, child)
-                            && self.boundary_references(child, endpoint, &mut visiting.clone())
+                            && self.boundary_references_walk(child, endpoint, visiting)
                         {
                             return true;
                         }
@@ -13768,6 +13911,26 @@ impl Inventory {
     }
 
     fn framework_handle(
+        &self,
+        namespace: &str,
+        reference: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<String> {
+        if !visiting.is_empty() {
+            return self.framework_handle_uncached(namespace, reference, visiting);
+        }
+        let key = (namespace.to_string(), reference.to_string());
+        if let Some(cached) = self.framework_handle_cache.borrow().get(&key) {
+            return cached.clone();
+        }
+        let resolved = self.framework_handle_uncached(namespace, reference, visiting);
+        self.framework_handle_cache
+            .borrow_mut()
+            .insert(key, resolved.clone());
+        resolved
+    }
+
+    fn framework_handle_uncached(
         &self,
         namespace: &str,
         reference: &str,
@@ -14147,6 +14310,27 @@ impl Inventory {
         self.direct_endpoint(source, endpoint)
     }
 
+    fn states_for_function(&self, function_key: &str) -> Vec<[String; 3]> {
+        if let Some(index) = self.states_by_function.borrow().as_ref() {
+            return index.get(function_key).cloned().unwrap_or_default();
+        }
+        let mut index: BTreeMap<String, Vec<[String; 3]>> = BTreeMap::new();
+        for usage in self.usage.values() {
+            for (function, namespace, state, reference) in &usage.states {
+                if let Some(entry) = self.resolve_function(function, &mut BTreeSet::new()) {
+                    index.entry(entry.key.clone()).or_default().push([
+                        namespace.clone(),
+                        state.clone(),
+                        reference.clone(),
+                    ]);
+                }
+            }
+        }
+        let result = index.get(function_key).cloned().unwrap_or_default();
+        *self.states_by_function.borrow_mut() = Some(index);
+        result
+    }
+
     fn direct_endpoint(&self, source: &Declaration, endpoint: &Declaration) -> bool {
         for value in &source.field_types {
             if self.borrowed_type(
@@ -14161,48 +14345,38 @@ impl Inventory {
             }
         }
         if matches!(source.kind, Kind::Function) && self.registered_keys.contains(&source.key) {
-            for usage in self.usage.values() {
-                for (function, namespace, state, reference) in &usage.states {
-                    if self
-                        .resolve_function(function, &mut BTreeSet::new())
-                        .is_none_or(|entry| entry.key != source.key)
-                        || !self.system_state(namespace, state, &mut BTreeSet::new())
-                    {
-                        continue;
-                    }
-                    let Some(parameter) = self.resolve(namespace, reference, &mut BTreeSet::new())
-                    else {
-                        continue;
-                    };
-                    if !parameter.parameter
-                        || !parameter.production
-                        || !self.used(parameter)
-                        || parameter
-                            .parameter_path
-                            .as_deref()
-                            .and_then(|path| {
-                                self.framework_handle(
-                                    &parameter.namespace,
-                                    path,
-                                    &mut BTreeSet::new(),
-                                )
-                            })
-                            .as_deref()
-                            != Some("SystemParam")
-                    {
-                        continue;
-                    }
-                    for value in &parameter.field_types {
-                        if self.borrowed_type(
-                            &parameter.namespace,
-                            value,
-                            endpoint,
-                            false,
-                            false,
-                            &mut BTreeSet::new(),
-                        ) {
-                            return true;
-                        }
+            for [namespace, state, reference] in self.states_for_function(&source.key) {
+                if !self.system_state(&namespace, &state, &mut BTreeSet::new()) {
+                    continue;
+                }
+                let Some(parameter) = self.resolve(&namespace, &reference, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                if !parameter.parameter
+                    || !parameter.production
+                    || !self.used(parameter)
+                    || parameter
+                        .parameter_path
+                        .as_deref()
+                        .and_then(|path| {
+                            self.framework_handle(&parameter.namespace, path, &mut BTreeSet::new())
+                        })
+                        .as_deref()
+                        != Some("SystemParam")
+                {
+                    continue;
+                }
+                for value in &parameter.field_types {
+                    if self.borrowed_type(
+                        &parameter.namespace,
+                        value,
+                        endpoint,
+                        false,
+                        false,
+                        &mut BTreeSet::new(),
+                    ) {
+                        return true;
                     }
                 }
             }
@@ -14506,36 +14680,79 @@ impl Inventory {
         name: &str,
         visiting: &mut BTreeSet<String>,
     ) -> bool {
-        if !visiting.insert(format!("binding:{namespace}|{name}")) {
+        let mut cycle = false;
+        self.exported_binding_tracked(namespace, name, visiting, &mut cycle)
+    }
+
+    fn exported_binding_tracked(
+        &self,
+        namespace: &str,
+        name: &str,
+        visiting: &mut BTreeSet<String>,
+        cycle: &mut bool,
+    ) -> bool {
+        let marker = format!("binding:{namespace}|{name}");
+        if visiting.contains(&marker) {
+            *cycle = true;
             return false;
         }
-        if self.symbols.contains_key(&format!("{namespace}::{name}"))
+        let cache_key = (namespace.to_string(), name.to_string());
+        if let Some(cached) = self.exported_binding_cache.borrow().get(&cache_key) {
+            return *cached;
+        }
+        let top_level = visiting.is_empty();
+        visiting.insert(marker);
+        let mut local_cycle = false;
+        let result = if self.symbols.contains_key(&format!("{namespace}::{name}"))
             || self.symbols.contains_key(&format!("{namespace}::r#{name}"))
         {
-            return true;
-        }
-        let Some(imports) = self.imports.get(namespace) else {
-            return false;
-        };
-        if imports.aliases.contains_key(name) || imports.modules.contains(name) {
-            return true;
-        }
-        for prefix in &imports.globs {
-            let Some(source) = self.glob_namespace(namespace, prefix, &mut visiting.clone()) else {
-                let first = prefix.split("::").next().unwrap();
-                if matches!(first, "crate" | "self" | "super")
-                    || self.roots.contains(first)
-                    || self.exported_binding(namespace, first, visiting)
-                {
-                    return true;
+            true
+        } else if let Some(imports) = self.imports.get(namespace) {
+            if imports.aliases.contains_key(name) || imports.modules.contains(name) {
+                true
+            } else {
+                let mut found = false;
+                for prefix in &imports.globs {
+                    let Some(source) = self.glob_namespace_tracked(
+                        namespace,
+                        prefix,
+                        &mut visiting.clone(),
+                        &mut local_cycle,
+                    ) else {
+                        let first = prefix.split("::").next().unwrap();
+                        if matches!(first, "crate" | "self" | "super")
+                            || self.roots.contains(first)
+                            || self.exported_binding_tracked(
+                                namespace,
+                                first,
+                                visiting,
+                                &mut local_cycle,
+                            )
+                        {
+                            found = true;
+                            break;
+                        }
+                        continue;
+                    };
+                    if self.exported_binding_tracked(&source, name, visiting, &mut local_cycle) {
+                        found = true;
+                        break;
+                    }
                 }
-                continue;
-            };
-            if self.exported_binding(&source, name, visiting) {
-                return true;
+                found
             }
+        } else {
+            false
+        };
+        if local_cycle {
+            *cycle = true;
         }
-        false
+        if top_level || !local_cycle {
+            self.exported_binding_cache
+                .borrow_mut()
+                .insert(cache_key, result);
+        }
+        result
     }
 
     fn glob_namespace(
@@ -14544,29 +14761,51 @@ impl Inventory {
         prefix: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<String> {
-        if !visiting.is_empty() {
-            return self.lookup_namespace(namespace, prefix, visiting);
+        let mut cycle = false;
+        self.glob_namespace_tracked(namespace, prefix, visiting, &mut cycle)
+    }
+
+    fn glob_namespace_tracked(
+        &self,
+        namespace: &str,
+        prefix: &str,
+        visiting: &mut BTreeSet<String>,
+        cycle: &mut bool,
+    ) -> Option<String> {
+        let marker = format!("path:{namespace}|{prefix}");
+        if visiting.contains(&marker) {
+            *cycle = true;
+            return None;
         }
         let key = (namespace.to_string(), prefix.to_string());
         if let Some(result) = self.root_namespaces.borrow().get(&key) {
             return result.clone();
         }
-        let result = self.lookup_namespace(namespace, prefix, visiting);
-        self.root_namespaces
-            .borrow_mut()
-            .insert(key, result.clone());
+        let top_level = visiting.is_empty();
+        let mut local_cycle = false;
+        let result = self.lookup_namespace_tracked(namespace, prefix, visiting, &mut local_cycle);
+        if local_cycle {
+            *cycle = true;
+        }
+        if top_level || !local_cycle {
+            self.root_namespaces
+                .borrow_mut()
+                .insert(key, result.clone());
+        }
         result
     }
 
-    fn lookup_namespace(
+    fn lookup_namespace_tracked(
         &self,
         namespace: &str,
         prefix: &str,
         visiting: &mut BTreeSet<String>,
+        cycle: &mut bool,
     ) -> Option<String> {
         let mut scoped = visiting.clone();
         let visiting = &mut scoped;
         if !visiting.insert(format!("path:{namespace}|{prefix}")) {
+            *cycle = true;
             return None;
         }
         let mut parts = prefix.split("::");
@@ -14579,11 +14818,13 @@ impl Inventory {
                 let mut scope = Some(namespace);
                 let mut found = None;
                 while let Some(parent) = scope {
-                    if let Some(module) = self.module_binding(parent, first, visiting) {
+                    if let Some(module) =
+                        self.module_binding_tracked(parent, first, visiting, cycle)
+                    {
                         found = Some(module);
                         break;
                     }
-                    if self.exported_binding(parent, first, &mut visiting.clone()) {
+                    if self.exported_binding_tracked(parent, first, &mut visiting.clone(), cycle) {
                         return None;
                     }
                     scope = parent.rsplit_once("::").map(|(parent, _)| parent);
@@ -14599,7 +14840,7 @@ impl Inventory {
             if part == "super" {
                 current = current.rsplit_once("::")?.0.to_string();
             } else {
-                current = self.module_binding(&current, part, visiting)?;
+                current = self.module_binding_tracked(&current, part, visiting, cycle)?;
             }
         }
         Some(current)
@@ -14611,27 +14852,49 @@ impl Inventory {
         name: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<String> {
-        if !visiting.is_empty() {
-            return self.lookup_module(namespace, name, visiting);
+        let mut cycle = false;
+        self.module_binding_tracked(namespace, name, visiting, &mut cycle)
+    }
+
+    fn module_binding_tracked(
+        &self,
+        namespace: &str,
+        name: &str,
+        visiting: &mut BTreeSet<String>,
+        cycle: &mut bool,
+    ) -> Option<String> {
+        let marker = format!("module:{namespace}|{name}");
+        if visiting.contains(&marker) {
+            *cycle = true;
+            return None;
         }
         let key = (namespace.to_string(), name.to_string());
         if let Some(result) = self.root_modules.borrow().get(&key) {
             return result.clone();
         }
-        let result = self.lookup_module(namespace, name, visiting);
-        self.root_modules.borrow_mut().insert(key, result.clone());
+        let top_level = visiting.is_empty();
+        let mut local_cycle = false;
+        let result = self.lookup_module_tracked(namespace, name, visiting, &mut local_cycle);
+        if local_cycle {
+            *cycle = true;
+        }
+        if top_level || !local_cycle {
+            self.root_modules.borrow_mut().insert(key, result.clone());
+        }
         result
     }
 
-    fn lookup_module(
+    fn lookup_module_tracked(
         &self,
         namespace: &str,
         name: &str,
         visiting: &mut BTreeSet<String>,
+        cycle: &mut bool,
     ) -> Option<String> {
         let mut scoped = visiting.clone();
         let visiting = &mut scoped;
         if !visiting.insert(format!("module:{namespace}|{name}")) {
+            *cycle = true;
             return None;
         }
         let imports = self.imports.get(namespace)?;
@@ -14659,14 +14922,16 @@ impl Inventory {
             return Some(format!("{namespace}::{name}"));
         }
         if let Some(target) = imports.aliases.get(name) {
-            return self.glob_namespace(namespace, target, visiting);
+            return self.glob_namespace_tracked(namespace, target, visiting, cycle);
         }
         let mut found = None;
         for prefix in &imports.globs {
-            let Some(source) = self.glob_namespace(namespace, prefix, &mut visiting.clone()) else {
+            let Some(source) =
+                self.glob_namespace_tracked(namespace, prefix, &mut visiting.clone(), cycle)
+            else {
                 continue;
             };
-            if let Some(module) = self.module_binding(&source, name, visiting) {
+            if let Some(module) = self.module_binding_tracked(&source, name, visiting, cycle) {
                 if found.as_ref().is_some_and(|previous| *previous != module) {
                     return None;
                 }
@@ -14679,6 +14944,7 @@ impl Inventory {
     fn resolve_usage(&mut self) {
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
+        self.exported_binding_cache.get_mut().clear();
         self.root_declarations.get_mut().clear();
         if self.usage.iter().any(|(path, usage)| {
             path.ends_with(".rs") && usage.namespace != self.namespace(path, &[]).0
@@ -14705,6 +14971,13 @@ impl Inventory {
         self.lookup_ready = true;
         self.local_bindings.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
+        self.boundary_reference_cache.get_mut().clear();
+        self.framework_handle_cache.get_mut().clear();
+        self.function_reference_cache.get_mut().clear();
+        *self.states_by_function.get_mut() = None;
+        *self.constructors_by_owner.get_mut() = None;
+        *self.shadowed_roots.get_mut() = None;
+        *self.automatic_boundary_keys.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         self.resolve_components();
         self.generate_queries();
@@ -14875,9 +15148,6 @@ impl Inventory {
         self.resolve_event_usage();
         self.register_event_callbacks();
         self.resolve_event_query_usage();
-        self.root_namespaces.get_mut().clear();
-        self.root_modules.get_mut().clear();
-        self.root_declarations.get_mut().clear();
     }
 
     fn resolve_fixture_usage(&mut self) {
@@ -15618,6 +15888,31 @@ impl Inventory {
         entry
     }
 
+    fn is_root_shadowed(&self, first: &str) -> bool {
+        if self.names.contains_key(first) {
+            return true;
+        }
+        if let Some(shadowed) = self.shadowed_roots.borrow().as_ref() {
+            return shadowed.contains(first);
+        }
+        let mut shadowed = BTreeSet::new();
+        for (scope, imports) in &self.imports {
+            for module in &imports.modules {
+                if self.roots.contains(module) {
+                    shadowed.insert(module.clone());
+                }
+            }
+            for (alias, target) in &imports.aliases {
+                if self.roots.contains(alias) && (target != "self" || scope != alias) {
+                    shadowed.insert(alias.clone());
+                }
+            }
+        }
+        let result = shadowed.contains(first);
+        *self.shadowed_roots.borrow_mut() = Some(shadowed);
+        result
+    }
+
     fn resolve_path(
         &self,
         namespace: &str,
@@ -15644,14 +15939,7 @@ impl Inventory {
             return self.resolve(parent, &parts[1..].join("::"), visiting);
         }
         if parts.len() > 1 && self.roots.contains(first) {
-            let shadowed = self.names.contains_key(first)
-                || self.imports.iter().any(|(scope, imports)| {
-                    imports.modules.contains(first)
-                        || imports
-                            .aliases
-                            .get(first)
-                            .is_some_and(|target| target != "self" || scope != first)
-                });
+            let shadowed = self.is_root_shadowed(first);
             let module = if shadowed {
                 self.root_binding(namespace, first)?
             } else {
@@ -18474,40 +18762,7 @@ impl<'a> EcsAccess<'a> {
 
     fn constructor(&self, owner: &Declaration, method: &str) -> bool {
         let owner = self.inventory.nominal(owner).unwrap_or(owner);
-        for implementation in self.inventory.entries.values() {
-            let Some(Item::Impl(syntax)) = &implementation.syntax else {
-                continue;
-            };
-            let Type::Path(value) = syntax.self_ty.as_ref() else {
-                continue;
-            };
-            if self
-                .inventory
-                .resolve(
-                    &implementation.namespace,
-                    &References::path(&value.path),
-                    &mut BTreeSet::new(),
-                )
-                .is_none_or(|value| value.key != owner.key)
-            {
-                continue;
-            }
-            for item in &syntax.items {
-                let syn::ImplItem::Fn(value) = item else {
-                    continue;
-                };
-                if value.sig.ident != method {
-                    continue;
-                }
-                let syn::ReturnType::Type(_, output) = &value.sig.output else {
-                    continue;
-                };
-                if matches!(output.as_ref(), Type::Path(value) if value.path.is_ident("Self")) {
-                    return true;
-                }
-            }
-        }
-        false
+        self.inventory.has_constructor(&owner.key, method)
     }
 
     fn visit_operation(&mut self, value: &syn::ExprMethodCall) {
