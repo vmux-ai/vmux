@@ -1,3 +1,4 @@
+use bevy::prelude::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
@@ -61,47 +62,46 @@ pub(super) struct BranchMenuOpen;
 #[derive(Component, Default)]
 pub(super) struct PaletteMenuCursor(pub(super) usize);
 
-pub(super) type OpenMenu = (
-    AgentMenuOpen,
-    ModelMenuOpen,
-    PermissionMenuOpen,
-    ProjectMenuOpen,
-    BranchMenuOpen,
-    PaletteMenuCursor,
-);
+type MenuCursorQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static PaletteOpen,
+        &'static PaletteSnapshot,
+        &'static mut PaletteMenuCursor,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
+    ),
+>;
 
-type MenuCursorRow = (
-    &'static PaletteOpen,
-    &'static PaletteSnapshot,
-    &'static mut PaletteMenuCursor,
-    Has<AgentMenuOpen>,
-    Has<ModelMenuOpen>,
-    Has<PermissionMenuOpen>,
-    Has<ProjectMenuOpen>,
-    Has<BranchMenuOpen>,
-);
+type MenuActivationQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static PaletteOpen,
+        &'static mut PaletteDraftInput,
+        &'static PaletteSnapshot,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
+    ),
+>;
 
-type MenuActivationRow = (
-    &'static PaletteOpen,
-    &'static mut PaletteDraftInput,
-    &'static PaletteSnapshot,
-    Has<AgentMenuOpen>,
-    Has<ModelMenuOpen>,
-    Has<PermissionMenuOpen>,
-    Has<ProjectMenuOpen>,
-    Has<BranchMenuOpen>,
-);
-
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMenuNextBinding;
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMenuPreviousBinding;
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMenuChooseBinding;
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMenuDismissBinding;
 
 fn toggle_agent(
@@ -117,9 +117,16 @@ fn toggle_agent(
         return;
     }
     let mut entity = commands.entity(target);
-    entity.remove::<OpenMenu>();
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
     if !active {
-        let composer = &snapshot.0.projection.composer;
+        let composer = &snapshot.projection.composer;
         let cursor = composer
             .agents
             .iter()
@@ -142,9 +149,16 @@ fn toggle_model(
         return;
     }
     let mut entity = commands.entity(target);
-    entity.remove::<OpenMenu>();
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
     if !active {
-        let composer = &snapshot.0.projection.composer;
+        let composer = &snapshot.projection.composer;
         let cursor = composer
             .model_options
             .iter()
@@ -167,9 +181,16 @@ fn toggle_permission(
         return;
     }
     let mut entity = commands.entity(target);
-    entity.remove::<OpenMenu>();
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
     if !active {
-        let composer = &snapshot.0.projection.composer;
+        let composer = &snapshot.projection.composer;
         let cursor = composer
             .permission_modes
             .iter()
@@ -192,10 +213,16 @@ fn toggle_project(
         return;
     }
     let mut entity = commands.entity(target);
-    entity.remove::<OpenMenu>();
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
     if !active {
         let cursor = snapshot
-            .0
             .projection
             .composer
             .projects
@@ -220,11 +247,17 @@ fn toggle_branch(
         return;
     }
     let mut entity = commands.entity(target);
-    entity.remove::<OpenMenu>();
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
     if !active {
-        let composer = &snapshot.0.projection.composer;
+        let composer = &snapshot.projection.composer;
         let cursor = snapshot
-            .0
             .branches
             .iter()
             .position(|branch| branch.branch == composer.branch_label)
@@ -233,10 +266,7 @@ fn toggle_branch(
     }
 }
 
-fn navigate(
-    trigger: On<UiInput<CommandPaletteMenuMoveRequest>>,
-    mut palettes: Query<MenuCursorRow>,
-) {
+fn navigate(trigger: On<UiInput<CommandPaletteMenuMoveRequest>>, mut palettes: MenuCursorQuery) {
     let Ok((opened, snapshot, mut cursor, agent, model, permission, project, branch)) =
         palettes.get_mut(trigger.event().webview)
     else {
@@ -246,7 +276,7 @@ fn navigate(
     if request.open_id != opened.0.open_id {
         return;
     }
-    let composer = &snapshot.0.projection.composer;
+    let composer = &snapshot.projection.composer;
     let rows = if agent {
         composer.agents.len()
     } else if model {
@@ -261,7 +291,7 @@ fn navigate(
             .count()
             + 1
     } else if branch {
-        snapshot.0.branches.len()
+        snapshot.branches.len()
     } else {
         return;
     };
@@ -278,7 +308,7 @@ fn navigate(
 
 fn highlight(
     trigger: On<UiInput<CommandPaletteMenuHighlightRequest>>,
-    mut palettes: Query<MenuCursorRow>,
+    mut palettes: MenuCursorQuery,
 ) {
     let Ok((opened, snapshot, mut cursor, agent, model, permission, project, branch)) =
         palettes.get_mut(trigger.event().webview)
@@ -289,7 +319,7 @@ fn highlight(
     if request.open_id != opened.0.open_id {
         return;
     }
-    let composer = &snapshot.0.projection.composer;
+    let composer = &snapshot.projection.composer;
     let rows = if agent {
         composer.agents.len()
     } else if model {
@@ -304,7 +334,7 @@ fn highlight(
             .count()
             + 1
     } else if branch {
-        snapshot.0.branches.len()
+        snapshot.branches.len()
     } else {
         return;
     };
@@ -316,7 +346,7 @@ fn highlight(
 
 fn activate(
     trigger: On<UiInput<CommandPaletteMenuActivateRequest>>,
-    mut palettes: Query<MenuActivationRow>,
+    mut palettes: MenuActivationQuery,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -330,87 +360,86 @@ fn activate(
         return;
     }
     let index = request.index as usize;
-    let composer = &snapshot.0.projection.composer;
-    let handled = if agent {
-        let Some(agent) = composer.agents.get(index) else {
+    let composer = &snapshot.projection.composer;
+    if agent {
+        let Some(selected) = composer.agents.get(index) else {
             return;
         };
-        input.target_url.clone_from(&agent.url);
+        input.target_url.clone_from(&selected.url);
         input.selected = 0;
         input.navigating = false;
         input.set_changed();
-        true
     } else if model {
-        let Some(model) = composer.model_options.get(index) else {
+        let Some(selected) = composer.model_options.get(index) else {
             return;
         };
         commands.trigger(UiInput {
             webview: target,
             payload: StartSelectModel {
                 agent_key: composer.model_agent_key.clone(),
-                model_id: model.id.clone(),
+                model_id: selected.id.clone(),
             },
         });
-        true
     } else if permission {
-        let Some(mode) = composer.permission_modes.get(index) else {
+        let Some(selected) = composer.permission_modes.get(index) else {
             return;
         };
         commands.trigger(UiInput {
             webview: target,
             payload: StartSelectMode {
                 agent_key: composer.permission_agent_key.clone(),
-                mode_id: mode.id.clone(),
+                mode_id: selected.id.clone(),
             },
         });
-        true
     } else if project {
-        let projects = composer
+        let projects: Vec<_> = composer
             .projects
             .iter()
-            .filter(|project| project.depth == 0);
-        let count = projects.clone().count();
-        if index == count {
+            .filter(|row| row.depth == 0)
+            .collect();
+        if index == projects.len() {
             commands.trigger(UiInput {
                 webview: target,
                 payload: StartSelectWorkspace {
                     current_dir: composer.cwd.clone(),
                 },
             });
-            true
         } else {
-            let Some(project) = projects.into_iter().nth(index) else {
+            let Some(selected) = projects.get(index) else {
                 return;
             };
             commands.trigger(UiInput {
                 webview: target,
                 payload: StartGoToBranch {
-                    project: project.path.clone(),
+                    project: selected.path.clone(),
                     branch: String::new(),
                     checkout: String::new(),
                 },
             });
-            true
         }
     } else if branch {
-        let Some(branch) = snapshot.0.branches.get(index) else {
+        let Some(selected) = snapshot.branches.get(index) else {
             return;
         };
         commands.trigger(UiInput {
             webview: target,
             payload: StartGoToBranch {
                 project: composer.project.clone(),
-                branch: branch.branch.clone(),
-                checkout: branch.checkout.clone(),
+                branch: selected.branch.clone(),
+                checkout: selected.checkout.clone(),
             },
         });
-        true
     } else {
-        false
-    };
-    if handled {
-        commands.entity(target).remove::<OpenMenu>();
+        return;
     }
+    commands.entity(target).remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
 }
 
 fn dismiss_input(
@@ -425,7 +454,14 @@ fn dismiss_input(
     if trigger.event().payload.open_id != opened.0.open_id {
         return;
     }
-    commands.entity(target).remove::<OpenMenu>();
+    commands.entity(target).remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
 }
 
 fn move_cursor(

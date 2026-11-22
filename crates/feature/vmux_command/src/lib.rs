@@ -20,8 +20,6 @@ pub use palette_surface::CommandPaletteSurface;
 pub use ui::{CommandBarPanel, CommandPalette, PaletteProps, ResultRow, use_command_bar_ui};
 pub use vmux_macro::command;
 
-mod palette_surface_driver;
-
 #[doc(hidden)]
 pub mod __private {
     #[cfg(host)]

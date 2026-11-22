@@ -629,7 +629,7 @@ fn open(
     payload.picker_typed = picker_typed;
     payload.picker_numbered = picker_numbered;
     payload.caret_at_end =
-        super::driver::PaletteQuery::new(&payload.url).opens_at_end(payload.picker.as_ref());
+        super::palette::PaletteOpen::opens_at_end(&payload.url, payload.picker.as_ref());
     payload.picks = picks;
     commands.trigger(vmux_ecs::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,

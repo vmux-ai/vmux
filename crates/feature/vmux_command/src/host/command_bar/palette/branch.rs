@@ -5,8 +5,9 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, StartBranchesRequest, StartProjectBranches,
 };
 use vmux_ecs::UiStateWrite;
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{NewPalette, OpenVersion, PaletteContext, PaletteSnapshot};
+use super::{OpenVersion, PaletteContext, PaletteSnapshot};
 
 pub(super) struct PaletteBranchPlugin;
 
@@ -34,7 +35,17 @@ pub(super) struct PaletteBranch {
 #[derive(Component, Default)]
 struct BranchRevision(u64);
 
-fn attach(pages: Query<Entity, NewPalette<PaletteBranch>>, mut commands: Commands) {
+type NewBranchPages<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
+        Without<PaletteBranch>,
+    ),
+>;
+
+fn attach(pages: NewBranchPages, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PaletteBranch::default());
     }
@@ -59,16 +70,16 @@ fn update(
             branch.inflight = None;
             branch.desired.clear();
             branch.loaded.clear();
-            snapshot.0.open_id = context.open_id;
-            snapshot.0.branch_project.clear();
-            snapshot.0.branches.clear();
+            snapshot.open_id = context.open_id;
+            snapshot.branch_project.clear();
+            snapshot.branches.clear();
         }
         if branch.desired != context.project {
             branch.inflight = None;
             branch.desired.clone_from(&context.project);
             branch.loaded.clear();
-            snapshot.0.branch_project.clear();
-            snapshot.0.branches.clear();
+            snapshot.branch_project.clear();
+            snapshot.branches.clear();
         }
     }
 }
@@ -111,8 +122,8 @@ fn apply(
         && response.request_id == flight.request_id
     {
         let project = flight.project.clone();
-        snapshot.0.branch_project.clone_from(&response.project);
-        snapshot.0.branches.clone_from(&response.branches);
+        snapshot.branch_project.clone_from(&response.project);
+        snapshot.branches.clone_from(&response.branches);
         branch.loaded = project;
         branch.inflight = None;
     }
@@ -234,7 +245,7 @@ mod tests {
         let request = pages.requested();
         assert_eq!(request.project, "/project ");
         pages.respond(page, &request, "current");
-        let state = &pages.0.world().get::<PaletteSnapshot>(page).unwrap().0;
+        let state = pages.0.world().get::<PaletteSnapshot>(page).unwrap();
         assert_eq!(state.branch_project, "/project ");
         assert_eq!(state.branches[0].branch, "current");
     }
@@ -259,7 +270,6 @@ mod tests {
                 .world()
                 .get::<PaletteSnapshot>(page)
                 .unwrap()
-                .0
                 .branches
                 .is_empty()
         );
@@ -270,7 +280,6 @@ mod tests {
                 .world()
                 .get::<PaletteSnapshot>(page)
                 .unwrap()
-                .0
                 .branches[0]
                 .branch,
             "current"
@@ -308,7 +317,6 @@ mod tests {
                 .world()
                 .get::<PaletteSnapshot>(page)
                 .unwrap()
-                .0
                 .branches[0]
                 .branch,
             "new-document"
