@@ -94,6 +94,7 @@ jobs:
       ios: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false') }}
       code: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true') }}
       compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' || steps.scope.outputs.sdk == 'true' }}
+      ecs_lint_os: ${{ (github.event_name != 'pull_request' || steps.scope.outputs.macos_lint == 'true') && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]' }}
       contracts: ${{ steps.scope.outputs.sdk == 'true' }}
       headless: ${{ steps.scope.outputs.headless == 'true' }}
       rust: ${{ steps.scope.outputs.rust == 'true' }}
@@ -496,7 +497,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(needs.changes.outputs.ecs_lint_os) }}
     steps:
       - uses: actions/checkout@v5
         with:
