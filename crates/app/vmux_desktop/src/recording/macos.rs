@@ -1,8 +1,9 @@
-use super::{
-    BgraFrame, GIF_FPS, GIF_MAX_EDGE, GifSampling, PERMISSION_MSG, RecordOutcome, RecordingInfo,
-    WakeFn,
+use super::lifecycle::Source;
+use super::native::{
+    CaptureControl, CaptureHandle, Completion, Encoded, OpenCapture, OpenRequest, Opened,
 };
-use crate::capture_output::{CaptureOutput, CaptureSize, CropRect};
+use super::{BgraFrame, GifSampling, PERMISSION_MSG};
+use crate::capture_output::CaptureSize;
 use bevy::prelude::Entity;
 use block2::RcBlock;
 use crossbeam_channel::Sender;
@@ -11,9 +12,9 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_av_foundation::{
-    AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVFileTypeMPEG4,
-    AVMediaTypeVideo, AVVideoAverageBitRateKey, AVVideoCodecKey, AVVideoCodecTypeH264,
-    AVVideoCompressionPropertiesKey, AVVideoHeightKey, AVVideoWidthKey,
+    AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVAssetWriterStatus,
+    AVFileTypeMPEG4, AVMediaTypeVideo, AVVideoAverageBitRateKey, AVVideoCodecKey,
+    AVVideoCodecTypeH264, AVVideoCompressionPropertiesKey, AVVideoHeightKey, AVVideoWidthKey,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_media::{CMSampleBuffer, CMTime};
@@ -28,10 +29,9 @@ use objc2_screen_capture_kit::{
     SCStreamOutputType,
 };
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak, mpsc};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
-use vmux_input::RecordStartResponse;
+use std::time::Instant;
 
 use bevy::winit::WINIT_WINDOWS;
 use objc2_app_kit::NSView;
@@ -59,6 +59,8 @@ struct EncodeState {
     start: Instant,
     last_gif_ms: Option<u64>,
     gif_tx: Option<Sender<GifMsg>>,
+    gif_fps: u32,
+    gif_max_edge: u32,
     appended: u64,
     paused: bool,
     pause_anchor: Option<CMTime>,
@@ -68,36 +70,20 @@ struct EncodeState {
 struct RecordingState {
     stream: Mutex<Option<SendCell<Retained<SCStream>>>>,
     encode: Mutex<EncodeState>,
-    gif_join: Mutex<Option<JoinHandle<()>>>,
+    gif_join: Mutex<Option<JoinHandle<Result<(), String>>>>,
     _queue: SendCell<DispatchRetained<DispatchQueue>>,
     _delegate: Mutex<Option<SendCell<Retained<StreamOutput>>>>,
-    temp_mp4: PathBuf,
-    temp_gif: Option<PathBuf>,
-    gif: bool,
-    default_dir: PathBuf,
-    deadline: Instant,
-    out: Mutex<FinalizeTarget>,
-    tx: Sender<RecordOutcome>,
-    wake: Option<WakeFn>,
+    attempt: Entity,
+    completion: Completion,
+    finalizing: Mutex<bool>,
 }
 
-#[derive(Default, Clone)]
-struct FinalizeTarget {
-    dir: Option<String>,
-    name: Option<String>,
-    request_id: Option<[u8; 16]>,
-    finalizing: bool,
-}
-
-#[derive(Default)]
-pub(crate) struct CaptureRuntime {
-    active: Option<Arc<RecordingState>>,
-}
+pub(super) struct Backend;
 
 define_class!(
     #[unsafe(super(NSObject))]
     #[name = "VmuxStreamOutput"]
-    #[ivars = Weak<RecordingState>]
+    #[ivars = (vmux_ecs::EntityTarget<Source>, Weak<RecordingState>)]
     struct StreamOutput;
 
     unsafe impl NSObjectProtocol for StreamOutput {}
@@ -113,20 +99,17 @@ define_class!(
             if kind != SCStreamOutputType::Screen {
                 return;
             }
-            let Some(state) = self.ivars().upgrade() else {
+            let (owner, state) = self.ivars();
+            let Some(state) = state.upgrade() else {
                 return;
             };
+            if owner.entity() != state.attempt {
+                return;
+            }
             state.handle_sample(sample);
         }
     }
 );
-
-impl StreamOutput {
-    fn new(state: Weak<RecordingState>) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(state);
-        unsafe { msg_send![super(this), init] }
-    }
-}
 
 impl RecordingState {
     fn handle_sample(&self, sample: &CMSampleBuffer) {
@@ -165,9 +148,9 @@ impl RecordingState {
 
         if let Some(gif_tx) = enc.gif_tx.clone() {
             let elapsed_ms = enc.start.elapsed().as_millis() as u64;
-            if GifSampling::new(elapsed_ms, enc.last_gif_ms, GIF_FPS).should_sample() {
+            if GifSampling::new(elapsed_ms, enc.last_gif_ms, enc.gif_fps).should_sample() {
                 enc.last_gif_ms = Some(elapsed_ms);
-                if let Some(frame) = CaptureFrame::rgba(&image_buffer) {
+                if let Some(frame) = CaptureFrame::rgba(&image_buffer, enc.gif_max_edge) {
                     let _ = gif_tx.try_send(frame);
                 }
             }
@@ -178,7 +161,7 @@ impl RecordingState {
 struct CaptureFrame;
 
 impl CaptureFrame {
-    fn rgba(pixel_buffer: &CVPixelBuffer) -> Option<(Vec<u8>, u32, u32)> {
+    fn rgba(pixel_buffer: &CVPixelBuffer, max_edge: u32) -> Option<(Vec<u8>, u32, u32)> {
         unsafe {
             CVPixelBufferLockBaseAddress(pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
             let width = CVPixelBufferGetWidth(pixel_buffer) as u32;
@@ -200,7 +183,7 @@ impl CaptureFrame {
 
             let rgba = BgraFrame::new(bgra).rgba();
             let image = image::RgbaImage::from_raw(width, height, rgba)?;
-            let size = CaptureSize::new(image.width(), image.height()).downscaled(GIF_MAX_EDGE);
+            let size = CaptureSize::new(image.width(), image.height()).downscaled(max_edge);
             let scaled = if (size.width, size.height) == image.dimensions() {
                 image
             } else {
@@ -220,25 +203,22 @@ impl CaptureFrame {
 struct GifEncoder;
 
 impl GifEncoder {
-    fn run(path: PathBuf, rx: crossbeam_channel::Receiver<GifMsg>) {
+    fn run(path: PathBuf, rx: crossbeam_channel::Receiver<GifMsg>, fps: u32) -> Result<(), String> {
         let mut encoder: Option<gif::Encoder<std::io::BufWriter<std::fs::File>>> = None;
-        let delay = (100 / GIF_FPS.max(1)) as u16;
+        let delay = (100 / fps.max(1)) as u16;
         while let Ok((rgba, width, height)) = rx.recv() {
             if encoder.is_none() {
-                let Ok(file) = std::fs::File::create(&path) else {
-                    return;
-                };
+                let file = std::fs::File::create(&path).map_err(|error| error.to_string())?;
                 let writer = std::io::BufWriter::new(file);
-                match gif::Encoder::new(writer, width as u16, height as u16, &[]) {
-                    Ok(mut value) => {
-                        let _ = value.set_repeat(gif::Repeat::Infinite);
-                        encoder = Some(value);
-                    }
-                    Err(_) => return,
-                }
+                let mut value = gif::Encoder::new(writer, width as u16, height as u16, &[])
+                    .map_err(|error| error.to_string())?;
+                value
+                    .set_repeat(gif::Repeat::Infinite)
+                    .map_err(|error| error.to_string())?;
+                encoder = Some(value);
             }
             let Some(encoder) = encoder.as_mut() else {
-                return;
+                return Err("GIF encoder unavailable".into());
             };
             let quantizer = color_quant::NeuQuant::new(10, 256, &rgba);
             let indices = rgba
@@ -253,8 +233,11 @@ impl GifEncoder {
             };
             frame.buffer = std::borrow::Cow::Owned(indices);
             frame.palette = Some(quantizer.color_map_rgb());
-            let _ = encoder.write_frame(&frame);
+            encoder
+                .write_frame(&frame)
+                .map_err(|error| error.to_string())?;
         }
+        Ok(())
     }
 }
 
@@ -266,6 +249,8 @@ impl EncodeState {
         bitrate: i32,
         start: Instant,
         gif_tx: Option<Sender<GifMsg>>,
+        gif_fps: u32,
+        gif_max_edge: u32,
     ) -> Result<Self, String> {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&temp_mp4.to_string_lossy()));
         let file_type = unsafe { AVFileTypeMPEG4 }.ok_or("AVFileTypeMPEG4 unavailable")?;
@@ -330,6 +315,8 @@ impl EncodeState {
             start,
             last_gif_ms: None,
             gif_tx,
+            gif_fps,
+            gif_max_edge,
             appended: 0,
             paused: false,
             pause_anchor: None,
@@ -338,7 +325,7 @@ impl EncodeState {
     }
 }
 
-impl CaptureRuntime {
+impl Backend {
     fn supported() -> bool {
         let version = NSOperatingSystemVersion {
             majorVersion: 14,
@@ -356,176 +343,22 @@ impl CaptureRuntime {
                 return None;
             };
             let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
-            let window = view.window()?;
-            Some(window.windowNumber() as u32)
+            Some(view.window()?.windowNumber() as u32)
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn start(
-        &mut self,
-        window_entity: Entity,
-        img_w: u32,
-        img_h: u32,
-        crop: Option<CropRect>,
-        request_id: [u8; 16],
-        gif: bool,
-        max_secs: u32,
-        default_dir: PathBuf,
-        scale: f64,
-        tx: Sender<RecordOutcome>,
-        wake: Option<WakeFn>,
-    ) -> RecordStartResponse {
-        let err = |m: String| RecordStartResponse {
-            request_id,
-            result: Err(m),
-        };
-
-        if self.active.is_some() {
-            return err("a recording is already in progress; stop it first".into());
-        }
-        if !Self::supported() {
-            return err("recording requires macOS 14 or later".into());
-        }
-        if !unsafe { CGPreflightScreenCaptureAccess() } {
-            unsafe { CGRequestScreenCaptureAccess() };
-            return err(PERMISSION_MSG.into());
-        }
-        let Some(window_id) = Self::window_number(window_entity) else {
-            return err("cannot resolve native window".into());
-        };
-
-        let (out_w, out_h) = crop.map_or((img_w, img_h), |c| (c.w, c.h));
-        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
-        let rid: String = request_id[..4].iter().map(|b| format!("{b:02x}")).collect();
-        let tmp_dir = vmux_ecs::profile::ProfilePaths::current().recording();
-        if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
-            return err(format!("cannot create {}: {e}", tmp_dir.display()));
-        }
-        let temp_mp4 = tmp_dir.join(format!(".vmux-rec-{ts}-{rid}.mp4"));
-        let temp_gif = gif.then(|| tmp_dir.join(format!(".vmux-rec-{ts}-{rid}.gif")));
-
-        let (done_tx, done_rx) = mpsc::channel::<Result<Arc<RecordingState>, String>>();
-        let handler = RcBlock::new(move |content: *mut SCShareableContent, _e: *mut NSError| {
-            Self::setup(
-                content,
-                window_id,
-                out_w,
-                out_h,
-                crop,
-                scale,
-                gif,
-                max_secs,
-                &temp_mp4,
-                &temp_gif,
-                &default_dir,
-                &tx,
-                &wake,
-                done_tx.clone(),
-            );
-        });
-        unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
-
-        match done_rx.recv_timeout(Duration::from_secs(8)) {
-            Ok(Ok(state)) => {
-                self.active = Some(state);
-                RecordStartResponse {
-                    request_id,
-                    result: Ok(max_secs),
-                }
-            }
-            Ok(Err(m)) => err(m),
-            Err(_) => err("timed out preparing capture".into()),
-        }
-    }
-
-    pub(crate) fn stop(&mut self, request_id: [u8; 16], dir: Option<String>, name: Option<String>) {
-        let Some(state) = self.active.clone() else {
-            return;
-        };
-        {
-            let mut out = state.out.lock().unwrap();
-            if out.finalizing {
-                return;
-            }
-            out.dir = dir;
-            out.name = name;
-            out.request_id = Some(request_id);
-            out.finalizing = true;
-        }
-        state.finalize();
-    }
-
-    pub(crate) fn poll_auto_stop(&mut self) {
-        let Some(state) = self.active.clone() else {
-            return;
-        };
-        if Instant::now() < state.deadline {
-            return;
-        }
-        {
-            let mut out = state.out.lock().unwrap();
-            if out.finalizing {
-                return;
-            }
-            out.request_id = None;
-            out.finalizing = true;
-        }
-        state.finalize();
-    }
-
-    pub(crate) fn pause(&mut self) {
-        if let Some(state) = &self.active {
-            state.encode.lock().unwrap().paused = true;
-        }
-    }
-
-    pub(crate) fn resume(&mut self) {
-        if let Some(state) = &self.active {
-            state.encode.lock().unwrap().paused = false;
-        }
-    }
-
-    pub(crate) fn done(&mut self) {
-        let Some(state) = self.active.clone() else {
-            return;
-        };
-        {
-            let mut out = state.out.lock().unwrap();
-            if out.finalizing {
-                return;
-            }
-            out.request_id = None;
-            out.finalizing = true;
-        }
-        state.finalize();
-    }
-
-    pub(crate) fn complete(&mut self) {
-        self.active = None;
-    }
-}
-
-impl CaptureRuntime {
-    #[allow(clippy::too_many_arguments)]
     fn setup(
         content: *mut SCShareableContent,
         window_id: u32,
-        output_width: u32,
-        output_height: u32,
-        crop: Option<CropRect>,
-        scale: f64,
-        gif: bool,
-        max_secs: u32,
-        temp_mp4: &Path,
-        temp_gif: &Option<PathBuf>,
-        default_dir: &Path,
-        tx: &Sender<RecordOutcome>,
-        wake: &Option<WakeFn>,
-        done_tx: mpsc::Sender<Result<Arc<RecordingState>, String>>,
+        request: &OpenRequest,
+        completion: &Completion,
     ) {
         if content.is_null() {
-            let _ = done_tx.send(Err("SCShareableContent unavailable".into()));
+            completion.opened(Opened {
+                attempt: request.attempt,
+                handle: None,
+                result: Err("SCShareableContent unavailable".into()),
+            });
             return;
         }
         let content = unsafe { &*content };
@@ -534,77 +367,121 @@ impl CaptureRuntime {
             .iter()
             .find(|window| unsafe { window.windowID() } == window_id)
         else {
-            let _ = done_tx.send(Err("vmux window not shareable".into()));
+            completion.opened(Opened {
+                attempt: request.attempt,
+                handle: None,
+                result: Err("vmux window not shareable".into()),
+            });
             return;
         };
-
         let filter = unsafe {
             SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window)
         };
-        let size =
-            CaptureSize::new(output_width, output_height).downscaled(super::RECORDING_MAX_EDGE);
-        let config = unsafe { SCStreamConfiguration::new() };
-        unsafe {
-            config.setWidth(size.width as usize);
-            config.setHeight(size.height as usize);
-            config.setPixelFormat(PIXEL_FORMAT_BGRA);
-            config.setMinimumFrameInterval(CMTime::new(1, 60));
-            config.setShowsCursor(true);
-            config.setQueueDepth(6);
-            if let Some(crop) = crop {
-                config.setSourceRect(CGRect::new(
-                    CGPoint::new(crop.x as f64 / scale, crop.y as f64 / scale),
-                    CGSize::new(crop.w as f64 / scale, crop.h as f64 / scale),
-                ));
-            }
-        }
-
-        let (gif_tx, gif_join) = if let Some(path) = temp_gif.clone() {
-            let (sender, receiver) = crossbeam_channel::bounded::<GifMsg>(8);
-            let join = std::thread::spawn(move || GifEncoder::run(path, receiver));
-            (Some(sender), Some(join))
-        } else {
-            (None, None)
-        };
-
-        let start = Instant::now();
-        let encode = match EncodeState::new(
-            temp_mp4,
-            size.width,
-            size.height,
-            super::RECORDING_BITRATE_BPS,
-            start,
-            gif_tx,
-        ) {
-            Ok(encode) => encode,
+        let config = Self::configuration(request);
+        let state = match RecordingState::prepare(request, completion.clone()) {
+            Ok(state) => state,
             Err(error) => {
-                let _ = done_tx.send(Err(error));
+                completion.opened(Opened {
+                    attempt: request.attempt,
+                    handle: None,
+                    result: Err(error),
+                });
                 return;
             }
         };
-        let queue = DispatchQueue::new("ai.vmux.recording", None);
-        let state = Arc::new(RecordingState {
+        state.attach(&filter, &config);
+    }
+
+    fn configuration(request: &OpenRequest) -> Retained<SCStreamConfiguration> {
+        let config = unsafe { SCStreamConfiguration::new() };
+        unsafe {
+            config.setWidth(request.width as usize);
+            config.setHeight(request.height as usize);
+            config.setPixelFormat(PIXEL_FORMAT_BGRA);
+            config.setMinimumFrameInterval(CMTime::new(1, request.frame_rate as i32));
+            config.setShowsCursor(true);
+            config.setQueueDepth(6);
+            if let Some(crop) = request.crop {
+                config.setSourceRect(CGRect::new(
+                    CGPoint::new(crop.x as f64 / request.scale, crop.y as f64 / request.scale),
+                    CGSize::new(crop.w as f64 / request.scale, crop.h as f64 / request.scale),
+                ));
+            }
+        }
+        config
+    }
+}
+
+impl OpenCapture for Backend {
+    fn open(&self, request: OpenRequest, completion: Completion) -> Result<(), String> {
+        if !Self::supported() {
+            return Err("recording requires macOS 14 or later".into());
+        }
+        if !unsafe { CGPreflightScreenCaptureAccess() } {
+            unsafe { CGRequestScreenCaptureAccess() };
+            return Err(PERMISSION_MSG.into());
+        }
+        let window_id =
+            Self::window_number(request.window).ok_or("cannot resolve native window")?;
+        let handler = RcBlock::new(
+            move |content: *mut SCShareableContent, _error: *mut NSError| {
+                Self::setup(content, window_id, &request, &completion);
+            },
+        );
+        unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
+        Ok(())
+    }
+}
+
+impl RecordingState {
+    fn prepare(request: &OpenRequest, completion: Completion) -> Result<Arc<Self>, String> {
+        let (gif_tx, gif_rx) = match &request.temp_gif {
+            Some(_) => {
+                let (tx, rx) = crossbeam_channel::bounded::<GifMsg>(8);
+                (Some(tx), Some(rx))
+            }
+            None => (None, None),
+        };
+        let encode = EncodeState::new(
+            &request.temp_mp4,
+            request.width,
+            request.height,
+            request.bitrate,
+            Instant::now(),
+            gif_tx,
+            request.gif_fps,
+            request.gif_max_edge,
+        )?;
+        let gif_join = match (request.temp_gif.clone(), gif_rx) {
+            (Some(path), Some(rx)) => {
+                let fps = request.gif_fps;
+                Some(std::thread::spawn(move || GifEncoder::run(path, rx, fps)))
+            }
+            _ => None,
+        };
+        Ok(Arc::new(Self {
             stream: Mutex::new(None),
             encode: Mutex::new(encode),
             gif_join: Mutex::new(gif_join),
-            _queue: SendCell(queue),
+            _queue: SendCell(DispatchQueue::new("ai.vmux.recording", None)),
             _delegate: Mutex::new(None),
-            temp_mp4: temp_mp4.to_path_buf(),
-            temp_gif: temp_gif.clone(),
-            gif,
-            default_dir: default_dir.to_path_buf(),
-            deadline: start + Duration::from_secs(max_secs as u64),
-            out: Mutex::new(FinalizeTarget::default()),
-            tx: tx.clone(),
-            wake: wake.clone(),
-        });
+            attempt: request.attempt,
+            completion,
+            finalizing: Mutex::new(false),
+        }))
+    }
 
-        let delegate = StreamOutput::new(Arc::downgrade(&state));
+    fn attach(self: Arc<Self>, filter: &SCContentFilter, configuration: &SCStreamConfiguration) {
+        let delegate = StreamOutput::alloc().set_ivars((
+            vmux_ecs::EntityTarget::new(self.attempt),
+            Arc::downgrade(&self),
+        ));
+        let delegate: Retained<StreamOutput> = unsafe { msg_send![super(delegate), init] };
         let stream = unsafe {
             SCStream::initWithFilter_configuration_delegate(
                 SCStream::alloc(),
-                &filter,
-                &config,
+                filter,
+                configuration,
                 None,
             )
         };
@@ -612,43 +489,36 @@ impl CaptureRuntime {
             stream.addStreamOutput_type_sampleHandlerQueue_error(
                 ProtocolObject::from_ref(&*delegate),
                 SCStreamOutputType::Screen,
-                Some(&state._queue.0),
+                Some(&self._queue.0),
             )
         } {
-            let _ = done_tx.send(Err(format!("addStreamOutput failed: {error:?}")));
+            self.completion.opened(Opened {
+                attempt: self.attempt,
+                handle: Some(CaptureHandle::new(self.clone())),
+                result: Err(format!("addStreamOutput failed: {error:?}")),
+            });
             return;
         }
-        *state.stream.lock().unwrap() = Some(SendCell(stream.clone()));
-        *state._delegate.lock().unwrap() = Some(SendCell(delegate));
-
-        let start_state = state.clone();
+        *self.stream.lock().unwrap() = Some(SendCell(stream.clone()));
+        *self._delegate.lock().unwrap() = Some(SendCell(delegate));
+        let state = self.clone();
         let start_block = RcBlock::new(move |error: *mut NSError| {
-            if error.is_null() {
-                let _ = done_tx.send(Ok(start_state.clone()));
+            let result = if error.is_null() {
+                Ok(state.encode.lock().unwrap().start)
             } else {
                 let description = unsafe { (*error).localizedDescription() };
-                let _ = done_tx.send(Err(format!("startCapture failed: {description}")));
-            }
+                Err(format!("startCapture failed: {description}"))
+            };
+            state.completion.opened(Opened {
+                attempt: state.attempt,
+                handle: Some(CaptureHandle::new(state.clone())),
+                result,
+            });
         });
         unsafe { stream.startCaptureWithCompletionHandler(Some(&start_block)) };
     }
-}
 
-impl RecordingState {
-    fn finalize(self: Arc<Self>) {
-        let stream = self.stream.lock().unwrap().take();
-        if let Some(stream) = stream {
-            let state = self.clone();
-            let completion = RcBlock::new(move |_error: *mut NSError| {
-                state.clone().finish_writer();
-            });
-            unsafe { stream.0.stopCaptureWithCompletionHandler(Some(&completion)) };
-        } else {
-            self.finish_writer();
-        }
-    }
-
-    fn finish_writer(self: Arc<Self>) {
+    fn finish_writer(self: Arc<Self>, stream_error: Option<String>) {
         let appended = {
             let mut encode = self.encode.lock().unwrap();
             encode.gif_tx = None;
@@ -657,75 +527,88 @@ impl RecordingState {
             }
             encode.appended
         };
-        if let Some(join) = self.gif_join.lock().unwrap().take() {
-            let _ = join.join();
-        }
+        let gif_error = match self.gif_join.lock().unwrap().take() {
+            Some(join) => match join.join() {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(error),
+                Err(_) => Some("GIF encoder worker failed".into()),
+            },
+            None => None,
+        };
+        let writer = self.encode.lock().unwrap().writer.0.clone();
         if appended == 0 {
+            unsafe { writer.cancelWriting() };
             self.deliver(Err(
                 "recording captured no frames (grant Screen Recording permission and retry)".into(),
             ));
             return;
         }
-        let writer = self.encode.lock().unwrap().writer.0.clone();
         let state = self.clone();
+        let observed_writer = writer.clone();
         let completion = RcBlock::new(move || {
-            state.clone().deliver(Ok(()));
+            let result = match stream_error.as_ref().or(gif_error.as_ref()) {
+                Some(error) => Err(error.clone()),
+                None if unsafe { observed_writer.status() } == AVAssetWriterStatus::Completed => {
+                    Ok(())
+                }
+                None => {
+                    let error = unsafe { observed_writer.error() };
+                    Err(match error {
+                        Some(error) => {
+                            format!("recording writer failed: {}", error.localizedDescription())
+                        }
+                        None => "recording writer did not complete".into(),
+                    })
+                }
+            };
+            state.deliver(result);
         });
         unsafe { writer.finishWritingWithCompletionHandler(&completion) };
     }
 
     fn deliver(&self, finish_result: Result<(), String>) {
-        let target = self.out.lock().unwrap().clone();
-        let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
-        let (final_mp4, final_gif) = CaptureOutput::paths(
-            target.dir.as_deref(),
-            target.name.as_deref(),
-            self.gif,
-            &timestamp,
-            &self.default_dir,
-        );
-
-        let result = finish_result.and_then(|()| -> Result<RecordingInfo, String> {
-            if let Some(parent) = final_mp4.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-            }
-            std::fs::rename(&self.temp_mp4, &final_mp4)
-                .map_err(|error| format!("cannot move mp4: {error}"))?;
-            let gif_path = match (&self.temp_gif, &final_gif) {
-                (Some(temp), Some(destination)) => {
-                    std::fs::rename(temp, destination)
-                        .map_err(|error| format!("cannot move gif: {error}"))?;
-                    Some(destination.to_string_lossy().into_owned())
-                }
-                _ => None,
-            };
-            let bytes = std::fs::metadata(&final_mp4)
-                .map(|metadata| metadata.len())
-                .unwrap_or(0);
-            let duration_ms = self.encode.lock().unwrap().start.elapsed().as_millis() as u64;
-            Ok(RecordingInfo {
-                mp4_path: final_mp4.to_string_lossy().into_owned(),
-                gif_path,
-                duration_ms,
-                bytes,
-                auto_stopped: target.request_id.is_none(),
-            })
-        });
-
-        if result.is_err() {
-            let _ = std::fs::remove_file(&self.temp_mp4);
-            if let Some(temp) = &self.temp_gif {
-                let _ = std::fs::remove_file(temp);
-            }
-        }
-
-        let _ = self.tx.send(RecordOutcome {
-            request_id: target.request_id,
+        let result =
+            finish_result.map(|()| self.encode.lock().unwrap().start.elapsed().as_millis() as u64);
+        self.completion.encoded(Encoded {
+            attempt: self.attempt,
             result,
         });
-        if let Some(wake) = &self.wake {
-            wake();
+    }
+}
+
+impl CaptureControl for RecordingState {
+    fn pause(&self) {
+        self.encode.lock().unwrap().paused = true;
+    }
+
+    fn resume(&self) {
+        self.encode.lock().unwrap().paused = false;
+    }
+
+    fn finish(self: Arc<Self>) {
+        {
+            let mut finalizing = self.finalizing.lock().unwrap();
+            if *finalizing {
+                return;
+            }
+            *finalizing = true;
+        }
+        let stream = self.stream.lock().unwrap().take();
+        if let Some(stream) = stream {
+            let state = self.clone();
+            let completion = RcBlock::new(move |error: *mut NSError| {
+                let error = if error.is_null() {
+                    None
+                } else {
+                    Some(format!("stopCapture failed: {}", unsafe {
+                        (*error).localizedDescription()
+                    }))
+                };
+                state.clone().finish_writer(error);
+            });
+            unsafe { stream.0.stopCaptureWithCompletionHandler(Some(&completion)) };
+        } else {
+            self.finish_writer(None);
         }
     }
 }
