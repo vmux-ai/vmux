@@ -1072,7 +1072,11 @@ fn scope_projection(
     };
     commands.entity(target).insert((
         SessionScopeView(cwd.clone()),
-        crate::provider::NativeContext::capture(&profile),
+        crate::provider::NativeContext::capture(
+            profile.entity(),
+            profile.profile(),
+            profile.paths(),
+        ),
     ));
     let state = SessionScopeView::project(cwd, &sources.snapshot());
     commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(

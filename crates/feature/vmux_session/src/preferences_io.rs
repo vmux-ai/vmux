@@ -127,25 +127,27 @@ impl Content {
             Kind::Modes => Self::Modes(BTreeMap::new()),
         }
     }
+}
 
-    fn encode(preferences: &AgentPreferences, file: Entity, kind: Kind) -> Result<Vec<u8>, String> {
+impl AgentPreferences<'_, '_> {
+    fn encode(&self, file: Entity, kind: Kind) -> Result<Vec<u8>, String> {
         let bytes = match kind {
             Kind::Models => {
                 let mut rows = BTreeMap::new();
-                for (entity, agent, selected, url) in preferences.records(file) {
+                for (entity, agent, selected, url) in self.records(file) {
                     rows.insert(
                         agent.0.clone(),
-                        StoredModel::capture(selected, url, preferences.model_options(entity)),
+                        StoredModel::capture(selected, url, self.model_options(entity)),
                     );
                 }
                 serde_json::to_vec_pretty(&rows).map_err(|error| error.to_string())
             }
             Kind::Modes => {
                 let mut rows = BTreeMap::new();
-                for (entity, agent, selected, url) in preferences.records(file) {
+                for (entity, agent, selected, url) in self.records(file) {
                     rows.insert(
                         agent.0.clone(),
-                        StoredMode::capture(selected, url, preferences.mode_options(entity)),
+                        StoredMode::capture(selected, url, self.mode_options(entity)),
                     );
                 }
                 serde_json::to_vec_pretty(&rows).map_err(|error| error.to_string())
@@ -330,7 +332,7 @@ fn write(
         if file.pending.is_some() || !file.retry_allowed || revision.0 == saved.0 {
             continue;
         }
-        let bytes = match Content::encode(&preferences, entity, *kind) {
+        let bytes = match preferences.encode(entity, *kind) {
             Ok(bytes) => bytes,
             Err(error) => {
                 file.retry_allowed = false;
@@ -574,7 +576,7 @@ fn write_exit(
     if revision.0 == saved.0 {
         return;
     }
-    let bytes = match Content::encode(&preferences, request.file, *kind) {
+    let bytes = match preferences.encode(request.file, *kind) {
         Ok(bytes) => bytes,
         Err(error) => {
             tracing::warn!("preference exit encoding failed: {error}");
