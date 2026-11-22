@@ -73,6 +73,7 @@ impl bevy::prelude::Plugin for CommandPlugin {
         app.add_message::<HostHistoryStep>()
             .add_message::<NavigationRequest>()
             .add_message::<OpenRequest>()
+            .add_message::<OpenPageTarget>()
             .add_message::<ZoomRequest>()
             .add_message::<ShowDevToolsRequest>()
             .add_plugins(UiEventPlugin::<(CommandBarPageOpenRequest, InvokeRequest)>::default())
@@ -95,6 +96,10 @@ impl bevy::prelude::Plugin for CommandPlugin {
             .add_observer(hard_reload_notify_header)
             .add_systems(
                 Update,
+                dispatch_open_page_target.before(ReadCommandRequests),
+            )
+            .add_systems(
+                Update,
                 (
                     initialize_gestures,
                     handle_navigation_requests,
@@ -108,17 +113,26 @@ impl bevy::prelude::Plugin for CommandPlugin {
     }
 }
 
-struct PageOpenCommand;
+#[derive(Message, Clone)]
+struct OpenPageTarget {
+    caller: Entity,
+    target: Option<OpenTarget>,
+    url: String,
+}
 
-impl PageOpenCommand {
-    fn for_target(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
-        let (id, arguments) = match target {
+fn dispatch_open_page_target(
+    mut requests: MessageReader<OpenPageTarget>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+) {
+    for request in requests.read() {
+        let (id, arguments) = match request.target {
             Some(OpenTarget::InPlace) | None => {
-                ("open_in_place", serde_json::json!({ "url": url }))
+                ("open_in_place", serde_json::json!({ "url": request.url }))
             }
-            Some(OpenTarget::InNewStack) => {
-                ("open_in_new_stack", serde_json::json!({ "url": url }))
-            }
+            Some(OpenTarget::InNewStack) => (
+                "open_in_new_stack",
+                serde_json::json!({ "url": request.url }),
+            ),
             Some(OpenTarget::InPane {
                 direction,
                 target,
@@ -130,14 +144,18 @@ impl PageOpenCommand {
                     PaneDirection::Bottom => "open_in_pane_bottom",
                     PaneDirection::Left => "open_in_pane_left",
                 },
-                serde_json::json!({ "url": url, "target": target, "mode": mode }),
+                serde_json::json!({ "url": request.url, "target": target, "mode": mode }),
             ),
-            Some(OpenTarget::InNewTab) => ("open_in_new_tab", serde_json::json!({ "url": url })),
-            Some(OpenTarget::InNewSpace) => {
-                ("open_in_new_space", serde_json::json!({ "url": url }))
+            Some(OpenTarget::InNewTab) => {
+                ("open_in_new_tab", serde_json::json!({ "url": request.url }))
             }
+            Some(OpenTarget::InNewSpace) => (
+                "open_in_new_space",
+                serde_json::json!({ "url": request.url }),
+            ),
         };
-        CommandInvocation::new(caller, id).with_arguments(arguments)
+        command_invocations
+            .write(CommandInvocation::new(request.caller, id).with_arguments(arguments));
     }
 }
 
@@ -222,7 +240,7 @@ fn open_from_bar(
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
     mut chosen_writer: MessageWriter<vmux_ecs::ContributedCommandChosen>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    mut command_invocations: MessageWriter<CommandInvocation>,
+    mut open_targets: MessageWriter<OpenPageTarget>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -292,7 +310,11 @@ fn open_from_bar(
                 custom_keyboard_restore = true;
             }
         } else {
-            command_invocations.write(PageOpenCommand::for_target(webview, request.open, url));
+            open_targets.write(OpenPageTarget {
+                caller: webview,
+                target: request.open,
+                url,
+            });
         }
     }
     commands.trigger(CommandBarDismiss::new(webview, !custom_keyboard_restore));
@@ -305,6 +327,7 @@ fn invoke_from_bar(
     workspace: Single<&CommandBarWorkspaceSnapshot>,
     users: Query<Entity, With<vmux_ecs::team::User>>,
     mut chosen: MessageWriter<vmux_ecs::ContributedCommandChosen>,
+    mut open_targets: MessageWriter<OpenPageTarget>,
     mut invocations: MessageWriter<CommandInvocation>,
     mut commands: Commands,
 ) {
@@ -325,7 +348,11 @@ fn invoke_from_bar(
             custom_keyboard_restore = true;
         }
     } else if let Some(url) = contributed_pages.page_url(&request.id) {
-        invocations.write(PageOpenCommand::for_target(webview, request.open, url));
+        open_targets.write(OpenPageTarget {
+            caller: webview,
+            target: request.open,
+            url,
+        });
         custom_keyboard_restore = true;
     } else {
         invocations.write(CommandInvocation::new(caller, &request.id));

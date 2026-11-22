@@ -1,30 +1,5 @@
 use bevy::prelude::Component;
 
-pub(super) struct WindowPointerPolicy;
-
-impl WindowPointerPolicy {
-    pub(super) fn motion_should_wake(
-        dragging: bool,
-        over_windowed_page: bool,
-        was_over_windowed_page: bool,
-        key_window: bool,
-        page_changed: bool,
-    ) -> bool {
-        dragging || page_changed || !over_windowed_page || !was_over_windowed_page || !key_window
-    }
-
-    pub(super) fn scroll_should_wake(
-        layout_pointer_inside: bool,
-        sampled_over_windowed_page: bool,
-        native_webview: bool,
-    ) -> bool {
-        if native_webview {
-            return false;
-        }
-        layout_pointer_inside || !sampled_over_windowed_page
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct WindowFrame {
     pub(super) x: f64,
@@ -35,12 +10,12 @@ pub(super) struct WindowFrame {
 
 impl WindowFrame {
     fn matches(self, other: Self) -> bool {
-        const SLOP: f64 = 1.0;
+        let slop = 1.0_f64;
 
-        (self.x - other.x).abs() <= SLOP
-            && (self.y - other.y).abs() <= SLOP
-            && (self.width - other.width).abs() <= SLOP
-            && (self.height - other.height).abs() <= SLOP
+        (self.x - other.x).abs() <= slop
+            && (self.y - other.y).abs() <= slop
+            && (self.width - other.width).abs() <= slop
+            && (self.height - other.height).abs() <= slop
     }
 
     pub(super) fn resize_edges(self, cursor_x: f64, cursor_y: f64, grip: f64) -> ResizeEdges {
@@ -85,6 +60,27 @@ pub(super) struct WindowResizeDrag {
 impl WindowResizeDrag {
     #[cfg(target_os = "macos")]
     pub(super) const GRIP_PX: f64 = 8.0;
+
+    pub(super) fn motion_should_wake(
+        dragging: bool,
+        over_windowed_page: bool,
+        was_over_windowed_page: bool,
+        key_window: bool,
+        page_changed: bool,
+    ) -> bool {
+        dragging || page_changed || !over_windowed_page || !was_over_windowed_page || !key_window
+    }
+
+    pub(super) fn scroll_should_wake(
+        layout_pointer_inside: bool,
+        sampled_over_windowed_page: bool,
+        native_webview: bool,
+    ) -> bool {
+        if native_webview {
+            return false;
+        }
+        layout_pointer_inside || !sampled_over_windowed_page
+    }
 
     pub(super) fn resized_frame(self, cursor_x: f64, cursor_y: f64) -> WindowFrame {
         if !self.active {
@@ -200,13 +196,13 @@ mod tests {
 
     #[test]
     fn native_pane_drag_wakes_while_ordinary_pointer_motion_stays_asleep() {
-        assert!(WindowPointerPolicy::motion_should_wake(
+        assert!(WindowResizeDrag::motion_should_wake(
             true, true, true, true, false
         ));
-        assert!(!WindowPointerPolicy::motion_should_wake(
+        assert!(!WindowResizeDrag::motion_should_wake(
             false, true, true, true, false
         ));
-        assert!(WindowPointerPolicy::motion_should_wake(
+        assert!(WindowResizeDrag::motion_should_wake(
             false, true, true, true, true
         ));
         for (over, previous, key) in [
@@ -214,7 +210,7 @@ mod tests {
             (true, false, true),
             (true, true, false),
         ] {
-            assert!(WindowPointerPolicy::motion_should_wake(
+            assert!(WindowResizeDrag::motion_should_wake(
                 false, over, previous, key, false
             ));
         }
@@ -309,7 +305,7 @@ mod tests {
             (true, true, true, false),
         ] {
             assert_eq!(
-                WindowPointerPolicy::scroll_should_wake(layout, windowed, native),
+                WindowResizeDrag::scroll_should_wake(layout, windowed, native),
                 wake
             );
         }
@@ -408,44 +404,55 @@ mod tests {
         );
     }
 
-    const WINDOWED: WindowFrame = WindowFrame {
-        x: 240.0,
-        y: 180.0,
-        width: 900.0,
-        height: 600.0,
-    };
-    const VISIBLE: WindowFrame = WindowFrame {
-        x: 0.0,
-        y: 0.0,
-        width: 1512.0,
-        height: 944.0,
-    };
-
     #[test]
     fn zooming_twice_puts_the_window_back_where_it_started() {
+        let windowed = WindowFrame {
+            x: 240.0,
+            y: 180.0,
+            width: 900.0,
+            height: 600.0,
+        };
+        let visible = WindowFrame {
+            x: 0.0,
+            y: 0.0,
+            width: 1512.0,
+            height: 944.0,
+        };
         let mut zoom = WindowZoom::default();
 
-        let zoomed = zoom.toggled(WINDOWED, VISIBLE);
-        let restored = zoom.toggled(zoomed, VISIBLE);
+        let zoomed = zoom.toggled(windowed, visible);
+        let restored = zoom.toggled(zoomed, visible);
 
-        assert_eq!(zoomed, VISIBLE);
-        assert_eq!(restored, WINDOWED);
+        assert_eq!(zoomed, visible);
+        assert_eq!(restored, windowed);
     }
 
     #[test]
     fn moving_a_zoomed_window_makes_the_next_zoom_remember_where_it_was_moved_to() {
+        let windowed = WindowFrame {
+            x: 240.0,
+            y: 180.0,
+            width: 900.0,
+            height: 600.0,
+        };
+        let visible = WindowFrame {
+            x: 0.0,
+            y: 0.0,
+            width: 1512.0,
+            height: 944.0,
+        };
         let mut zoom = WindowZoom::default();
         let moved = WindowFrame {
             x: 40.0,
             y: 60.0,
-            ..VISIBLE
+            ..visible
         };
-        zoom.toggled(WINDOWED, VISIBLE);
+        zoom.toggled(windowed, visible);
 
-        let rezoomed = zoom.toggled(moved, VISIBLE);
-        let restored = zoom.toggled(rezoomed, VISIBLE);
+        let rezoomed = zoom.toggled(moved, visible);
+        let restored = zoom.toggled(rezoomed, visible);
 
-        assert_eq!(rezoomed, VISIBLE);
+        assert_eq!(rezoomed, visible);
         assert_eq!(restored, moved);
     }
 }

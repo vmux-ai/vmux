@@ -419,7 +419,7 @@ fn shift(
     tabs: Query<Entity, With<Tab>>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
-    mut commands: Commands,
+    mut order: SiblingOrder,
 ) {
     for request in requests.read() {
         let Some(active) = active_tab.get() else {
@@ -446,10 +446,8 @@ fn shift(
         } else {
             SiblingOrder::next(active_index, positions.len())
         };
-        if let Some((left, right)) = pair
-            && let Some(order) = SiblingOrder::swapped(parent, children, &positions, left, right)
-        {
-            commands.queue(order);
+        if let Some((left, right)) = pair {
+            order.swap(parent, children, &positions, left, right);
         }
     }
 }
@@ -616,7 +614,7 @@ fn request_reorder(
     targets: TabTargets,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
-    mut commands: Commands,
+    mut order: SiblingOrder,
 ) {
     let request = &trigger.event().payload;
     let Some(source) = targets.resolve(&request.tab_id, trigger.event().webview) else {
@@ -656,9 +654,7 @@ fn request_reorder(
     let destination = request
         .drop_placement
         .destination(from, to, kind_positions.len());
-    if let Some(order) = SiblingOrder::moved(parent, siblings, &kind_positions, from, destination) {
-        commands.queue(order);
-    }
+    order.move_to(parent, siblings, &kind_positions, from, destination);
 }
 
 #[derive(SystemParam)]
