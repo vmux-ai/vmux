@@ -22,6 +22,28 @@ pub(super) struct Reader {
     hints: HashMap<String, i64>,
 }
 
+#[derive(Debug)]
+pub(super) struct ArchiveFailure {
+    pub message: String,
+    pub retryable: bool,
+}
+
+impl ArchiveFailure {
+    fn fatal(message: String) -> Self {
+        Self {
+            message,
+            retryable: false,
+        }
+    }
+    fn sqlite(error: rusqlite::Error) -> Self {
+        let retryable = matches!(&error, rusqlite::Error::SqliteFailure(code, _) if matches!(code.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked));
+        Self {
+            message: error.to_string(),
+            retryable,
+        }
+    }
+}
+
 impl Reader {
     const MAX_SESSION_DEPTH: usize = 8;
     const MAX_SESSION_ENTRIES: usize = 100_000;
@@ -119,24 +141,15 @@ impl Reader {
         Ok(Some(archives))
     }
 
-    pub(super) fn set_archive(&self, sid: &str, archived: bool) -> Result<ArchiveState, String> {
-        let mut delay = 40;
-        for attempt in 0..3 {
-            match self.set_archive_once(sid, archived) {
-                Ok(state) => return Ok(state),
-                Err(error) if attempt < 2 && Self::archive_error_is_transient(&error) => {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
-                    delay *= 2;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        unreachable!()
-    }
-
-    fn set_archive_once(&self, sid: &str, archived: bool) -> Result<ArchiveState, String> {
-        let Some(path) = self.state_database()? else {
-            return Err("Codex state database is unavailable".to_string());
+    pub(super) fn set_archive(
+        &self,
+        sid: &str,
+        archived: bool,
+    ) -> Result<ArchiveState, ArchiveFailure> {
+        let Some(path) = self.state_database().map_err(ArchiveFailure::fatal)? else {
+            return Err(ArchiveFailure::fatal(
+                "Codex state database is unavailable".to_string(),
+            ));
         };
         let connection = Connection::open_with_flags(
             path,
@@ -144,10 +157,10 @@ impl Reader {
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(ArchiveFailure::sqlite)?;
         connection
             .busy_timeout(std::time::Duration::from_millis(500))
-            .map_err(|error| error.to_string())?;
+            .map_err(ArchiveFailure::sqlite)?;
         let now = Utc::now().timestamp();
         let archived_at = archived.then_some(now);
         let changed = connection
@@ -155,9 +168,11 @@ impl Reader {
                 "UPDATE threads SET archived = ?1, archived_at = ?2, updated_at = ?3 WHERE id = ?4",
                 rusqlite::params![archived, archived_at, now, sid],
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(ArchiveFailure::sqlite)?;
         if changed != 1 {
-            return Err(format!("Codex session not found: {sid}"));
+            return Err(ArchiveFailure::fatal(format!(
+                "Codex session not found: {sid}"
+            )));
         }
         let now = Self::milliseconds(now);
         Ok(if archived {
@@ -165,11 +180,6 @@ impl Reader {
         } else {
             ArchiveState::Active(now)
         })
-    }
-
-    fn archive_error_is_transient(error: &str) -> bool {
-        let error = error.to_ascii_lowercase();
-        error.contains("database is locked") || error.contains("database is busy")
     }
 
     fn state_database(&self) -> Result<Option<PathBuf>, String> {

@@ -495,6 +495,7 @@ pub(crate) struct ArchiveWrites<'w, 's> {
             &'static ProviderSessionId,
             &'static SourceUpdatedAt,
             Has<ArchivedAt>,
+            &'static ArchiveWritePending,
         ),
         (With<ProviderArchive>, With<ArchiveWritePending>),
     >,
@@ -524,7 +525,7 @@ impl ArchiveWrites<'_, '_> {
 
     pub(crate) fn archived_at(&self, key: &ProviderSessionKey) -> Option<i64> {
         let mut selected = None;
-        for (kind, id, updated, archived) in &self.pending {
+        for (kind, id, updated, archived, _) in &self.pending {
             if kind != &key.kind || id != &key.id {
                 continue;
             }
@@ -532,6 +533,20 @@ impl ArchiveWrites<'_, '_> {
                 return None;
             }
             selected = Some(if archived { updated.0.max(1) } else { 0 });
+        }
+        selected
+    }
+
+    pub(crate) fn revision(&self, key: &ProviderSessionKey) -> Option<(u64, bool)> {
+        let mut selected = None;
+        for (kind, id, _, archived, pending) in &self.pending {
+            if kind != &key.kind || id != &key.id {
+                continue;
+            }
+            if selected.is_some() {
+                return None;
+            }
+            selected = Some((pending.revision, archived));
         }
         selected
     }

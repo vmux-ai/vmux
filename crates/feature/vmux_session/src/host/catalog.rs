@@ -15,14 +15,9 @@ use vmux_ecs::{
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
-    Created, DescriptionUpdateRequest, ProviderArchiveRequest, ProviderKind, ProviderSessionId,
-    ProviderSessionKey, ProviderSessionRestoreRequest, ProviderStageChangeRequest, RenameRequest,
-    Route, Session, SessionId, SessionSummaryProjection, StageChangeRequest, StageId,
+    AgentId, CatalogSnapshot, CreateRequest, Created, DescriptionUpdateRequest, ProviderKind,
+    ProviderSessionId, RenameRequest, Route, Session, SessionId, SessionSummaryProjection,
 };
-
-#[cfg(test)]
-use crate::SessionSummary;
 
 use super::session::SessionView;
 use crate::event::{
@@ -43,6 +38,7 @@ impl Plugin for CatalogPlugin {
             .init_resource::<DirectoryRevision>()
             .init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
+            .add_plugins(super::manager::ManagerPlugin)
             .add_plugins(UiStatePlugin::<SessionCatalogUiState>::default())
             .add_plugins(UiStatePlugin::<SessionDetailUiState>::default())
             .add_plugins(UiStatePlugin::<SessionScopeUiState>::default())
@@ -64,10 +60,6 @@ impl Plugin for CatalogPlugin {
             .add_observer(open_created)
             .add_observer(rename)
             .add_observer(update_description)
-            .add_observer(change_stage)
-            .add_observer(archive)
-            .add_observer(cleanup)
-            .add_observer(restore_deleted)
             .add_observer(scope_projection)
             .add_observer(ready)
             .add_observer(unpublish)
@@ -137,29 +129,26 @@ fn open(
     let Ok(parent) = views.get(webview) else {
         return;
     };
-    let Some(target) = entities.get(&trigger.event().payload.id) else {
+    if let Some(session) = entities.local(&trigger.event().payload.id) {
+        opens.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(parent.parent()),
+            url: Route::Session(session.id.clone()).url(),
+            request_id: None,
+        });
+        return;
+    }
+    let Some(source) = entities.provider(&trigger.event().payload.id) else {
         return;
     };
-    match target {
-        CatalogTarget::Session { id, .. } => {
-            opens.write(PageOpenRequest {
-                target: PageOpenTarget::Stack(parent.parent()),
-                url: Route::Session(id.clone()).url(),
-                request_id: None,
-            });
-        }
-        CatalogTarget::Provider(source) => {
-            commands.trigger(UiInput {
-                webview,
-                payload: crate::event::ResumeSession {
-                    kind: source.kind.0.clone(),
-                    sid: source.id.0.clone(),
-                    cwd: source.cwd.0.to_string_lossy().into_owned(),
-                    open: Some(vmux_api::open_target::OpenTarget::InPlace),
-                },
-            });
-        }
-    }
+    commands.trigger(UiInput {
+        webview,
+        payload: crate::event::ResumeSession {
+            kind: source.kind.0.clone(),
+            sid: source.id.0.clone(),
+            cwd: source.cwd.0.to_string_lossy().into_owned(),
+            open: Some(vmux_api::open_target::OpenTarget::InPlace),
+        },
+    });
 }
 
 fn address_request(
@@ -423,18 +412,64 @@ impl SessionProject {
 }
 
 #[derive(SystemParam)]
-struct CatalogViews<'w, 's> {
+pub(super) struct CatalogViews<'w, 's> {
+    profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
+    contexts: Query<'w, 's, &'static crate::provider::NativeContext>,
+    bindings: Query<
+        'w,
+        's,
+        (
+            &'static EntityTarget<vmux_ecs::profile::ActiveProfile>,
+            &'static vmux_ecs::ProfileId,
+        ),
+    >,
     managers: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
     chats: Query<'w, 's, &'static PageMetadata, With<SessionView>>,
     scopes: Query<'w, 's, &'static SessionScopeView>,
 }
 
 impl CatalogViews<'_, '_> {
-    fn manager_contains(&self, entity: Entity) -> bool {
+    pub(super) fn context(
+        &self,
+    ) -> Option<(Entity, vmux_ecs::ProfileId, crate::provider::NativeContext)> {
+        let entity = self.profile.entity()?;
+        let profile = self.profile.profile()?;
+        Some((
+            entity,
+            vmux_ecs::ProfileId(profile.id().to_string()),
+            crate::provider::NativeContext::capture(&self.profile),
+        ))
+    }
+
+    pub(super) fn manager_contains(&self, entity: Entity) -> bool {
         self.managers.contains(entity)
     }
 
-    fn can_mutate(&self, entity: Entity, session: Option<&SessionId>, cwd: &Path) -> bool {
+    pub(super) fn can_mutate(
+        &self,
+        entity: Entity,
+        session: Option<&SessionId>,
+        cwd: &Path,
+    ) -> bool {
+        if self
+            .contexts
+            .get(entity)
+            .is_ok_and(|context| !context.matches(&self.profile))
+        {
+            return false;
+        }
+        if let Ok((target, id)) = self.bindings.get(entity) {
+            if self.profile.entity() != Some(target.entity())
+                || self
+                    .profile
+                    .profile()
+                    .is_none_or(|profile| profile.id() != id.0)
+            {
+                return false;
+            }
+        } else if self.manager_contains(entity) {
+            return false;
+        }
         if self.manager_contains(entity) {
             return true;
         }
@@ -456,11 +491,13 @@ impl CatalogViews<'_, '_> {
 }
 
 #[derive(SystemParam)]
-struct CatalogEntities<'w, 's> {
+pub(super) struct CatalogEntities<'w, 's> {
+    definitions: Query<'w, 's, &'static crate::StageId, With<crate::StageDefinition>>,
     sessions: Query<
         'w,
         's,
         (
+            Entity,
             &'static SessionId,
             &'static vmux_ecs::Cwd,
             Option<&'static ProviderKind>,
@@ -471,37 +508,24 @@ struct CatalogEntities<'w, 's> {
     providers: crate::provider::Entries<'w, 's>,
 }
 
-enum CatalogTarget<'a> {
-    Session {
-        id: &'a SessionId,
-        cwd: &'a vmux_ecs::Cwd,
-        kind: Option<&'a ProviderKind>,
-        provider_id: Option<&'a ProviderSessionId>,
-    },
-    Provider(crate::provider::Record<'a>),
-}
-
-impl CatalogTarget<'_> {
-    fn session(&self) -> Option<&SessionId> {
-        match self {
-            Self::Session { id, .. } => Some(id),
-            Self::Provider(_) => None,
-        }
-    }
-
-    fn cwd(&self) -> &Path {
-        match self {
-            Self::Session { cwd, .. } => cwd.0.as_path(),
-            Self::Provider(entry) => entry.cwd.0.as_path(),
-        }
-    }
+pub(super) struct LocalRecord<'a> {
+    pub entity: Entity,
+    pub id: &'a SessionId,
+    pub cwd: &'a vmux_ecs::Cwd,
+    pub kind: Option<&'a ProviderKind>,
+    pub provider_id: Option<&'a ProviderSessionId>,
 }
 
 impl CatalogEntities<'_, '_> {
-    fn get(&self, id: &str) -> Option<CatalogTarget<'_>> {
-        for (session, cwd, kind, provider_id) in &self.sessions {
+    pub(super) fn stage(&self, id: &str) -> Option<&crate::StageId> {
+        self.definitions.iter().find(|stage| stage.0 == id)
+    }
+
+    pub(super) fn local(&self, id: &str) -> Option<LocalRecord<'_>> {
+        for (entity, session, cwd, kind, provider_id) in &self.sessions {
             if session.0 == id {
-                return Some(CatalogTarget::Session {
+                return Some(LocalRecord {
+                    entity,
                     id: session,
                     cwd,
                     kind,
@@ -509,7 +533,15 @@ impl CatalogEntities<'_, '_> {
                 });
             }
         }
-        self.providers.from_catalog(id).map(CatalogTarget::Provider)
+        None
+    }
+
+    pub(super) fn provider(&self, id: &str) -> Option<crate::provider::Record<'_>> {
+        let record = self.providers.from_catalog(id)?;
+        if !self.providers.selected().contains(&record.entity) {
+            return None;
+        }
+        Some(record)
     }
 }
 
@@ -623,13 +655,11 @@ fn rename(
     mut requests: MessageWriter<RenameRequest>,
 ) {
     let request = &trigger.event().payload;
-    let Some(target) = entities.get(&request.id) else {
+    let Some(target) = entities.local(&request.id) else {
         return;
     };
-    let Some(id) = target.session() else {
-        return;
-    };
-    if !views.can_mutate(trigger.event().webview, Some(id), target.cwd()) {
+    let id = target.id;
+    if !views.can_mutate(trigger.event().webview, Some(id), &target.cwd.0) {
         return;
     }
     requests.write(RenameRequest {
@@ -645,13 +675,11 @@ fn update_description(
     mut requests: MessageWriter<DescriptionUpdateRequest>,
 ) {
     let request = &trigger.event().payload;
-    let Some(target) = entities.get(&request.id) else {
+    let Some(target) = entities.local(&request.id) else {
         return;
     };
-    let Some(id) = target.session() else {
-        return;
-    };
-    if !views.can_mutate(trigger.event().webview, Some(id), target.cwd()) {
+    let id = target.id;
+    if !views.can_mutate(trigger.event().webview, Some(id), &target.cwd.0) {
         return;
     }
     requests.write(DescriptionUpdateRequest {
@@ -660,161 +688,29 @@ fn update_description(
     });
 }
 
-fn change_stage(
-    trigger: On<UiInput<SessionsStageChange>>,
-    views: CatalogViews,
-    entities: CatalogEntities,
-    mut requests: MessageWriter<StageChangeRequest>,
-    mut provider_requests: MessageWriter<ProviderStageChangeRequest>,
-) {
-    let request = &trigger.event().payload;
-    let Some(target) = entities.get(&request.id) else {
-        return;
-    };
-    if !views.can_mutate(trigger.event().webview, target.session(), target.cwd()) {
-        return;
-    }
-    match target {
-        CatalogTarget::Provider(source) => {
-            provider_requests.write(ProviderStageChangeRequest {
-                kind: source.kind.clone(),
-                id: source.id.clone(),
-                stage: StageId(request.stage.clone()),
-                source_updated_at: source.source_updated_at(),
-            });
-        }
-        CatalogTarget::Session { id, .. } => {
-            requests.write(StageChangeRequest {
-                id: id.clone(),
-                stage: StageId(request.stage.clone()),
-            });
-        }
-    }
-}
-
-fn archive(
-    trigger: On<UiInput<SessionsArchive>>,
-    views: CatalogViews,
-    entities: CatalogEntities,
-    mut requests: MessageWriter<ArchiveRequest>,
-    mut provider_requests: MessageWriter<ProviderArchiveRequest>,
-) {
-    let request = &trigger.event().payload;
-    let source_updated_at = vmux_ecs::UnixMillis::now().0;
-    for id in &request.ids {
-        let Some(target) = entities.get(id) else {
-            continue;
-        };
-        if !views.can_mutate(trigger.event().webview, target.session(), target.cwd()) {
-            continue;
-        }
-        match target {
-            CatalogTarget::Provider(source) => {
-                provider_requests.write(ProviderArchiveRequest {
-                    kind: source.kind.clone(),
-                    id: source.id.clone(),
-                    archived: request.archived,
-                    source_updated_at,
-                    native: source.archive_observed_at.is_some(),
-                });
-            }
-            CatalogTarget::Session {
-                id,
-                kind,
-                provider_id,
-                ..
-            } => {
-                if let (Some(kind), Some(provider_id)) = (kind, provider_id) {
-                    let native = entities
-                        .providers
-                        .get(&kind.0, &provider_id.0)
-                        .is_some_and(|source| source.archive_observed_at.is_some());
-                    provider_requests.write(ProviderArchiveRequest {
-                        kind: kind.clone(),
-                        id: provider_id.clone(),
-                        archived: request.archived,
-                        source_updated_at,
-                        native,
-                    });
-                }
-                requests.write(ArchiveRequest {
-                    id: id.clone(),
-                    archived_at: request.archived.then_some(source_updated_at),
-                });
-            }
-        }
-    }
-}
-
-fn cleanup(
-    trigger: On<UiInput<SessionsCleanup>>,
-    views: CatalogViews,
-    entities: CatalogEntities,
-    mut requests: MessageWriter<CleanupRequest>,
-) {
-    let mut seen = HashSet::new();
-    let mut targets = Vec::new();
-    for id in &trigger.event().payload.ids {
-        if !seen.insert(id.as_str()) {
-            continue;
-        }
-        let Some(target) = entities.get(id) else {
-            continue;
-        };
-        if !views.can_mutate(trigger.event().webview, target.session(), target.cwd()) {
-            continue;
-        }
-        match target {
-            CatalogTarget::Session { id, .. } => targets.push(CleanupTarget::Session(id.clone())),
-            CatalogTarget::Provider(source) => targets.push(CleanupTarget::Provider(
-                ProviderSessionKey::new(source.kind.clone(), source.id.clone()),
-            )),
-        }
-    }
-    if !targets.is_empty() {
-        requests.write(CleanupRequest { targets });
-    }
-}
-
-fn restore_deleted(
-    trigger: On<UiInput<SessionsRestoreDeleted>>,
-    views: CatalogViews,
-    mut requests: MessageWriter<ProviderSessionRestoreRequest>,
-) {
-    if !views.manager_contains(trigger.event().webview) {
-        return;
-    }
-    let mut keys = trigger
-        .event()
-        .payload
-        .sessions
-        .iter()
-        .filter(|session| !session.kind.is_empty() && !session.sid.is_empty())
-        .map(|session| {
-            ProviderSessionKey::new(
-                ProviderKind(session.kind.clone()),
-                ProviderSessionId(session.sid.clone()),
-            )
-        })
-        .collect::<Vec<_>>();
-    keys.sort_by(|left, right| (&left.kind.0, &left.id.0).cmp(&(&right.kind.0, &right.id.0)));
-    keys.dedup();
-    if !keys.is_empty() {
-        requests.write(ProviderSessionRestoreRequest { keys });
-    }
-}
-
-impl SessionScopeUiState {
-    fn project(root: &Path, catalog: &CatalogSnapshot) -> Self {
-        let sessions = catalog
+impl SessionScopeView {
+    fn project(root: &Path, catalog: &CatalogSnapshot) -> SessionScopeUiState {
+        let sessions: Vec<_> = catalog
             .sessions
             .iter()
             .filter(|session| Path::new(&session.cwd).starts_with(root))
             .cloned()
             .collect();
-        Self {
+        let mut visible = Vec::new();
+        for session in &sessions {
+            if session.archived_at == 0 {
+                visible.push(session.clone());
+            }
+        }
+        let groups = super::manager::ManagerFilters::inbox(
+            &super::manager::ManagerFilters::from_catalog(&catalog.stages, &visible, ""),
+        );
+        let visible_count = groups.iter().map(|group| group.sessions.len()).sum();
+        SessionScopeUiState {
             sessions,
             stages: catalog.stages.clone(),
+            groups,
+            visible_count,
         }
     }
 }
@@ -931,6 +827,7 @@ fn publish(
 
 fn publish_scope(
     catalog: Res<CatalogSnapshot>,
+    sources: crate::catalog::CatalogSources,
     targets: Query<(Entity, &SessionScopeView), (With<PageReady>, With<KeyboardOwner>)>,
     claimed: Query<
         (),
@@ -947,7 +844,7 @@ fn publish_scope(
         return;
     }
     for (target, scope) in &targets {
-        let state = SessionScopeUiState::project(&scope.0, &catalog);
+        let state = SessionScopeView::project(&scope.0, &sources.snapshot());
         commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
             target, &state,
         ));
@@ -999,6 +896,7 @@ fn publish_detail(
 
 fn sync_repositories(
     catalog: Res<CatalogSnapshot>,
+    sources: crate::catalog::CatalogSources,
     projects: vmux_ecs::profile::Projects,
     mut cache: Option<Single<&mut RepoInfoCache>>,
     active: Query<
@@ -1030,6 +928,7 @@ fn sync_repositories(
     if !catalog.is_changed() && !cache_changed && !claimed {
         return;
     }
+    let catalog = sources.snapshot();
     if let Some(cache) = cache.as_mut() {
         let cache = cache.bypass_change_detection();
         let mut paths = Vec::new();
@@ -1098,6 +997,7 @@ fn sync_repositories(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct CatalogContent<'w, 's> {
+    sources: crate::catalog::CatalogSources<'w, 's>,
     catalog: Res<'w, CatalogSnapshot>,
     repositories: Res<'w, SessionRepositories>,
     providers: crate::provider::Entries<'w, 's>,
@@ -1143,7 +1043,7 @@ fn ready(
         ));
     }
     if let Ok(scope) = scopes.get(target) {
-        let state = SessionScopeUiState::project(&scope.0, &content.catalog);
+        let state = SessionScopeView::project(&scope.0, &content.sources.snapshot());
         commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
             target, &state,
         ));
@@ -1153,7 +1053,8 @@ fn ready(
 fn scope_projection(
     trigger: On<ScopeProjectionRequest>,
     owners: Query<(Has<SessionManagerView>, Has<SessionView>)>,
-    catalog: Res<CatalogSnapshot>,
+    sources: crate::catalog::CatalogSources,
+    profile: vmux_ecs::profile::CurrentProfile,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -1169,10 +1070,11 @@ fn scope_projection(
         }
         return;
     };
-    commands
-        .entity(target)
-        .insert(SessionScopeView(cwd.clone()));
-    let state = SessionScopeUiState::project(cwd, &catalog);
+    commands.entity(target).insert((
+        SessionScopeView(cwd.clone()),
+        crate::provider::NativeContext::capture(&profile),
+    ));
+    let state = SessionScopeView::project(cwd, &sources.snapshot());
     commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
         target, &state,
     ));
@@ -1391,6 +1293,16 @@ mod tests {
     fn stage_changes_use_the_canonical_target_instead_of_client_identity_fields() {
         let mut app = App::new();
         app.add_plugins((crate::DomainPlugin, CatalogPlugin));
+        let directory = tempfile::tempdir().unwrap();
+        let profile = vmux_ecs::profile::Profile::named("stage-fixture");
+        app.world_mut().spawn((
+            vmux_ecs::profile::ActiveProfile(profile.clone()),
+            Name::new("Fixture"),
+            vmux_ecs::profile::ProfileDirectories(vmux_ecs::profile::ProfilePaths::at(
+                profile,
+                directory.path().to_path_buf(),
+            )),
+        ));
         let source = app
             .world_mut()
             .spawn((
@@ -1442,110 +1354,14 @@ mod tests {
                 stage: "done".into(),
             },
         });
-        let requests = app
+        app.update();
+        let stages = app
             .world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .drain()
+            .query_filtered::<(&ProviderSessionId, &crate::Stage), With<crate::ProviderStage>>()
+            .iter(app.world())
+            .map(|(id, stage)| (id.0.clone(), stage.0.0.clone()))
             .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].id.0, "inside");
-    }
-
-    #[test]
-    fn cleanup_forwards_one_authorized_model_request() {
-        let mut app = App::new();
-        app.add_plugins(CatalogPlugin)
-            .add_message::<CleanupRequest>();
-        app.world_mut().spawn((
-            Session,
-            SessionId("canonical".into()),
-            vmux_ecs::Cwd::default(),
-        ));
-        let webview = app.world_mut().spawn(SessionManagerView).id();
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: SessionsCleanup {
-                ids: vec!["canonical".into()],
-            },
-        });
-
-        let requests = app
-            .world_mut()
-            .resource_mut::<Messages<CleanupRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(
-            requests[0].targets,
-            vec![CleanupTarget::Session(SessionId("canonical".into()))]
-        );
-    }
-
-    #[test]
-    fn scoped_cleanup_cannot_remove_sessions_outside_its_project() {
-        let mut app = App::new();
-        app.add_plugins(CatalogPlugin)
-            .add_message::<CleanupRequest>();
-        app.world_mut().spawn((
-            Session,
-            SessionId("inside".into()),
-            vmux_ecs::Cwd(PathBuf::from("/projects/vmux/session")),
-        ));
-        app.world_mut().spawn((
-            Session,
-            SessionId("outside".into()),
-            vmux_ecs::Cwd(PathBuf::from("/projects/other/session")),
-        ));
-        let webview = app
-            .world_mut()
-            .spawn(SessionScopeView(PathBuf::from("/projects/vmux")))
-            .id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: SessionsCleanup {
-                ids: vec!["inside".into(), "outside".into()],
-            },
-        });
-
-        let requests = app
-            .world_mut()
-            .resource_mut::<Messages<CleanupRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(
-            requests[0].targets,
-            vec![CleanupTarget::Session(SessionId("inside".into()))]
-        );
-    }
-
-    #[test]
-    fn manager_can_restore_deleted_provider_sessions() {
-        let mut app = App::new();
-        app.add_message::<ProviderSessionRestoreRequest>()
-            .add_observer(restore_deleted);
-        let webview = app.world_mut().spawn(SessionManagerView).id();
-        let target = crate::event::ProviderSessionTarget {
-            kind: "acp:codex".into(),
-            sid: "provider-session".into(),
-        };
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: SessionsRestoreDeleted {
-                sessions: vec![target.clone(), target],
-            },
-        });
-
-        let requests = app
-            .world_mut()
-            .resource_mut::<Messages<ProviderSessionRestoreRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].keys.len(), 1);
-        assert!(requests[0].keys[0].matches("acp:codex", "provider-session"));
+        assert_eq!(stages, vec![("inside".into(), "done".into())]);
     }
 
     #[test]
@@ -1590,12 +1406,10 @@ mod tests {
     #[test]
     fn page_ready_limits_full_catalog_to_manager_views() {
         let mut app = App::new();
-        app.init_resource::<CatalogSnapshot>()
-            .init_resource::<SessionRepositories>()
+        app.add_plugins(CatalogPlugin)
             .init_resource::<Published>()
             .add_observer(Published::record)
-            .add_observer(Published::record_detail)
-            .add_observer(ready);
+            .add_observer(Published::record_detail);
         let manager = app.world_mut().spawn(SessionManagerView).id();
         let session = app
             .world_mut()
@@ -1768,31 +1582,27 @@ mod tests {
 
     #[test]
     fn explicit_scope_projection_excludes_unrelated_sessions() {
-        let mut app = App::new();
-        app.init_resource::<CatalogSnapshot>()
-            .init_resource::<SessionRepositories>()
-            .init_resource::<Published>()
-            .add_observer(Published::record_scope)
-            .add_observer(scope_projection)
-            .add_observer(ready);
-        app.world_mut().resource_mut::<CatalogSnapshot>().sessions = vec![
-            SessionSummary {
-                id: "vmux".into(),
-                cwd: "/projects/vmux".into(),
-                ..Default::default()
-            },
-            SessionSummary {
-                id: "other".into(),
-                cwd: "/projects/other".into(),
-                ..Default::default()
-            },
-        ];
+        let mut fixture = super::super::manager_fixture::ManagerFixture::new();
+        let root = fixture.directory.path().join("projects/vmux");
+        let other_root = fixture.directory.path().join("projects/other");
+        for (id, cwd) in [("vmux", &root), ("other", &other_root)] {
+            let entity = fixture.session(id, id, vmux_ecs::UnixMillis::now().0);
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(entity)
+                .insert(vmux_ecs::Cwd(cwd.clone()));
+        }
+        fixture.app.update();
+        let app = &mut fixture.app;
+        app.init_resource::<Published>()
+            .add_observer(Published::record_scope);
         let index = app.world_mut().spawn_empty().id();
         let detail = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(ScopeProjectionRequest {
             webview: detail,
-            cwd: Some(PathBuf::from("/projects/vmux")),
+            cwd: Some(root),
         });
 
         app.world_mut().trigger(UiInput {

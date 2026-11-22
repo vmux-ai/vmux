@@ -75,6 +75,8 @@ pub mod activity;
 pub mod event;
 #[cfg(feature = "app")]
 pub mod host;
+#[cfg(feature = "app")]
+pub mod manager;
 #[cfg(feature = "preferences")]
 pub mod preferences;
 #[cfg(feature = "preferences")]

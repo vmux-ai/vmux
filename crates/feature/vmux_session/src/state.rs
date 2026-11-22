@@ -10,6 +10,8 @@ use vmux_session::{CatalogSnapshot, SessionSummary, StageSummary};
 
 use crate::event::SessionRepository;
 
+pub use crate::manager::ManagerUiState;
+
 #[vmux_api::ui_state_patch(Default)]
 pub struct SessionCatalogUiStatePatch {
     pub catalog: Option<Box<CatalogSnapshot>>,
@@ -178,6 +180,8 @@ pub struct NavigationSession {
 pub struct SessionScopeUiState {
     pub sessions: Vec<SessionSummary>,
     pub stages: Vec<StageSummary>,
+    pub groups: Vec<crate::manager::StageGroup>,
+    pub visible_count: usize,
 }
 
 #[vmux_api::ui_state_patch(Default)]

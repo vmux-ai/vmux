@@ -287,7 +287,7 @@ type ProviderArchives<'w, 's> = Query<
 
 #[cfg(host)]
 #[derive(SystemParam)]
-struct CatalogSources<'w, 's> {
+pub(crate) struct CatalogSources<'w, 's> {
     sessions: SessionCatalog<'w, 's>,
     linked_sessions: LinkedSessions<'w, 's>,
     stages: StageCatalog<'w, 's>,
@@ -455,153 +455,273 @@ impl CatalogChanges<'_, '_> {
 
 #[cfg(host)]
 fn project(
-    sources: CatalogSources,
+    mut sources: CatalogSources,
     mut changes: CatalogChanges,
     mut catalog: ResMut<CatalogSnapshot>,
 ) {
-    let CatalogSources {
-        sessions,
-        linked_sessions,
-        stages,
-        mut providers,
-        mut operations,
-        provider_stages,
-        provider_archives,
-        provider_tombstones,
-        transcripts,
-    } = sources;
     if !catalog.is_added()
-        && !providers.is_changed()
-        && !operations.is_changed()
-        && !provider_tombstones.is_changed()
+        && !sources.providers.is_changed()
+        && !sources.operations.is_changed()
+        && !sources.provider_tombstones.is_changed()
         && !changes.any()
     {
         return;
     }
-    let mut next = CatalogSnapshot::default();
-    for (id, name, order, terminal) in &stages {
-        next.stages.push(StageSummary {
-            id: id.0.clone(),
-            name: name.as_str().to_string(),
-            order: order.0,
-            terminal,
-        });
+    let next = sources.snapshot();
+    if *catalog != next {
+        *catalog = next;
     }
-    next.stages.sort_by_key(|stage| stage.order);
-    let default_stage = next
-        .stages
-        .iter()
-        .find(|stage| !stage.terminal)
-        .map(|stage| stage.id.clone())
-        .unwrap_or_default();
-    let linked_sessions = linked_sessions
-        .iter()
-        .map(|(entity, kind, id)| (entity, ProviderSessionKey::from_components(kind, id)))
-        .collect::<HashMap<_, _>>();
-    for (
-        entity,
-        id,
-        name,
-        description,
-        cwd,
-        stage,
-        created_at,
-        last_activated_at,
-        stage_changed_at,
-        archived_at,
-        agent,
-        profile,
-        runtime,
-        conversation_title,
-    ) in &sessions
-    {
-        let conversation = transcripts.read(entity, |transcript| {
-            ConversationPreview::from(conversation_title, &transcript.messages)
+}
+
+#[cfg(host)]
+impl CatalogSources<'_, '_> {
+    pub(crate) fn snapshot(&self) -> CatalogSnapshot {
+        self.view_snapshot(&HashSet::new())
+    }
+
+    pub(crate) fn view_snapshot(&self, retained: &HashSet<Entity>) -> CatalogSnapshot {
+        let mut next = self.stages();
+        let linked = self
+            .linked_sessions
+            .iter()
+            .map(|(entity, kind, id)| (entity, ProviderSessionKey::from_components(kind, id)))
+            .collect::<HashMap<_, _>>();
+        next.sessions = self.local_rows(&linked);
+        next.sessions
+            .extend(self.provider_rows(&next.stages, &linked, retained));
+        let mut managed = HashSet::new();
+        for row in &next.sessions {
+            if row.managed && !row.provider_sid.is_empty() {
+                managed.insert((
+                    AgentFamily::of(row.provider_kind.trim_start_matches("acp:")),
+                    row.provider_sid.clone(),
+                ));
+            }
+        }
+        next.sessions.retain(|row| {
+            row.managed || !managed.contains(&(AgentFamily::of(&row.agent), row.sid.clone()))
         });
-        let agent_name = agent
-            .map(|agent| {
-                let fallback = profile
-                    .map(|profile| profile.name.as_str())
-                    .unwrap_or(agent.0.as_str());
-                AgentFamily::of(&agent.0).name(fallback)
-            })
-            .unwrap_or_default();
-        let archived_at = linked_sessions
-            .get(&entity)
-            .and_then(|key| operations.archived_at(key))
-            .unwrap_or_else(|| {
-                archived_at
-                    .map(|archived_at| archived_at.0)
-                    .unwrap_or_default()
+        next.sessions
+            .sort_by_key(|session| std::cmp::Reverse(session.last_activated_at));
+        next
+    }
+
+    pub(crate) fn target(&self, id: &str) -> Option<Entity> {
+        for (entity, session, ..) in &self.sessions {
+            if session.0 == id {
+                return Some(entity);
+            }
+        }
+        self.providers.from_catalog(id).map(|record| record.entity)
+    }
+
+    pub(crate) fn display_target(&self, id: &str, retained: Option<Entity>) -> Option<Entity> {
+        if let Some(target) = self.target(id)
+            && self.id(target).as_deref() == Some(id)
+        {
+            return Some(target);
+        }
+        let target = retained?;
+        if self.id(target).as_deref() == Some(id) {
+            return Some(target);
+        }
+        None
+    }
+
+    pub(crate) fn id(&self, entity: Entity) -> Option<String> {
+        if let Ok((_, id, ..)) = self.sessions.get(entity) {
+            return Some(id.0.clone());
+        }
+        let record = self.providers.record(entity)?;
+        Some(format!("{}:{}", record.kind.0, record.id.0))
+    }
+
+    pub(crate) fn loading(&self) -> bool {
+        self.providers.loading()
+    }
+
+    pub(crate) fn native_archive(&self, kind: &ProviderKind, id: &ProviderSessionId) -> bool {
+        self.providers
+            .get(&kind.0, &id.0)
+            .is_some_and(|record| record.archive_observed_at.is_some())
+    }
+
+    fn stages(&self) -> CatalogSnapshot {
+        let mut next = CatalogSnapshot::default();
+        for (id, name, order, terminal) in &self.stages {
+            next.stages.push(StageSummary {
+                id: id.0.clone(),
+                name: name.as_str().to_string(),
+                order: order.0,
+                terminal,
             });
-        next.sessions.push(SessionSummary {
-            id: id.0.clone(),
-            kind: "session".to_string(),
-            sid: id.0.clone(),
-            provider_kind: linked_sessions
-                .get(&entity)
-                .map(|key| key.kind.0.clone())
-                .unwrap_or_default(),
-            provider_sid: linked_sessions
-                .get(&entity)
-                .map(|key| key.id.0.clone())
-                .unwrap_or_default(),
-            managed: true,
-            name: name.as_str().to_string(),
-            description: description.0.clone(),
-            cwd: cwd.0.to_string_lossy().into_owned(),
-            stage: stage.0.0.clone(),
-            created_at: created_at.0,
-            last_activated_at: last_activated_at.0,
-            stage_changed_at: stage_changed_at.0,
+        }
+        next.stages.sort_by_key(|stage| stage.order);
+        next
+    }
+
+    fn local_rows(
+        &self,
+        linked_sessions: &HashMap<Entity, ProviderSessionKey>,
+    ) -> Vec<SessionSummary> {
+        let mut rows = Vec::new();
+        for (
+            entity,
+            id,
+            name,
+            description,
+            cwd,
+            stage,
+            created_at,
+            last_activated_at,
+            stage_changed_at,
             archived_at,
-            agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
-            agent_name,
-            agent_icon: profile
-                .and_then(|profile| profile.icon.clone())
-                .unwrap_or_default(),
-            agent_color: profile
-                .map(|profile| profile.avatar.color.clone())
-                .unwrap_or_default(),
-            runtime: runtime
-                .map(RunState::status)
-                .unwrap_or("inactive")
-                .to_string(),
-            conversation_title: conversation.title,
-            last_prompt: conversation.last_prompt,
-            last_message: conversation.last_message,
-        });
+            agent,
+            profile,
+            runtime,
+            conversation_title,
+        ) in &self.sessions
+        {
+            let conversation = self.transcripts.read(entity, |transcript| {
+                ConversationPreview::from(conversation_title, &transcript.messages)
+            });
+            let agent_name = agent
+                .map(|agent| {
+                    let fallback = profile
+                        .map(|profile| profile.name.as_str())
+                        .unwrap_or(agent.0.as_str());
+                    AgentFamily::of(&agent.0).name(fallback)
+                })
+                .unwrap_or_default();
+            let archived_at = linked_sessions
+                .get(&entity)
+                .and_then(|key| self.operations.archived_at(key))
+                .unwrap_or_else(|| {
+                    archived_at
+                        .map(|archived_at| archived_at.0)
+                        .unwrap_or_default()
+                });
+            rows.push(SessionSummary {
+                id: id.0.clone(),
+                kind: "session".to_string(),
+                sid: id.0.clone(),
+                provider_kind: linked_sessions
+                    .get(&entity)
+                    .map(|key| key.kind.0.clone())
+                    .unwrap_or_default(),
+                provider_sid: linked_sessions
+                    .get(&entity)
+                    .map(|key| key.id.0.clone())
+                    .unwrap_or_default(),
+                managed: true,
+                name: name.as_str().to_string(),
+                description: description.0.clone(),
+                cwd: cwd.0.to_string_lossy().into_owned(),
+                stage: stage.0.0.clone(),
+                created_at: created_at.0,
+                last_activated_at: last_activated_at.0,
+                stage_changed_at: stage_changed_at.0,
+                archived_at,
+                agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
+                agent_name,
+                agent_icon: profile
+                    .and_then(|profile| profile.icon.clone())
+                    .unwrap_or_default(),
+                agent_color: profile
+                    .map(|profile| profile.avatar.color.clone())
+                    .unwrap_or_default(),
+                runtime: runtime
+                    .map(RunState::status)
+                    .unwrap_or("inactive")
+                    .to_string(),
+                conversation_title: conversation.title,
+                last_prompt: conversation.last_prompt,
+                last_message: conversation.last_message,
+            });
+        }
+        rows
     }
-    let mut linked_families = HashSet::new();
-    for key in linked_sessions.values() {
-        let family = AgentFamily::of(key.kind.0.strip_prefix("acp:").unwrap_or(&key.kind.0));
-        linked_families.insert((family, key.id.0.clone()));
-    }
-    let provider_stages = provider_stages
-        .iter()
-        .map(|(kind, id, stage, changed_at, source_updated_at)| {
-            (
-                ProviderSessionKey::from_components(kind, id),
-                (stage.0.0.clone(), changed_at.0, source_updated_at.0),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    let provider_archives = provider_archives
-        .iter()
-        .map(|(kind, id, source_updated_at, archived_at)| {
-            (
-                ProviderSessionKey::from_components(kind, id),
+
+    fn provider_rows(
+        &self,
+        stages: &[StageSummary],
+        linked_sessions: &HashMap<Entity, ProviderSessionKey>,
+        retained: &HashSet<Entity>,
+    ) -> Vec<SessionSummary> {
+        let default_stage = stages
+            .iter()
+            .find(|stage| !stage.terminal)
+            .map(|stage| stage.id.clone())
+            .unwrap_or_default();
+        let mut linked_families = HashSet::new();
+        for key in linked_sessions.values() {
+            let family = AgentFamily::of(key.kind.0.strip_prefix("acp:").unwrap_or(&key.kind.0));
+            linked_families.insert((family, key.id.0.clone()));
+        }
+        let provider_stages = self
+            .provider_stages
+            .iter()
+            .map(|(kind, id, stage, changed_at, source_updated_at)| {
                 (
-                    source_updated_at.0,
-                    archived_at.map(|archived_at| archived_at.0),
-                ),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    for entity in providers.selected() {
-        let Some(session) = providers.record(entity) else {
-            continue;
-        };
+                    ProviderSessionKey::from_components(kind, id),
+                    (stage.0.0.clone(), changed_at.0, source_updated_at.0),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let provider_archives = self
+            .provider_archives
+            .iter()
+            .map(|(kind, id, source_updated_at, archived_at)| {
+                (
+                    ProviderSessionKey::from_components(kind, id),
+                    (
+                        source_updated_at.0,
+                        archived_at.map(|archived_at| archived_at.0),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let mut rows = Vec::new();
+        let mut selected = self.providers.selected();
+        let mut previews = HashSet::new();
+        if self.providers.loading() {
+            for entity in retained {
+                if !selected.contains(entity) && self.providers.record(*entity).is_some() {
+                    selected.push(*entity);
+                    previews.insert(*entity);
+                }
+            }
+        }
+        let unlinked = HashSet::new();
+        for entity in selected {
+            let Some(session) = self.providers.record(entity) else {
+                continue;
+            };
+            if let Some(row) = self.provider_row(
+                session,
+                &default_stage,
+                if previews.contains(&entity) {
+                    &unlinked
+                } else {
+                    &linked_families
+                },
+                &provider_stages,
+                &provider_archives,
+            ) {
+                rows.push(row);
+            }
+        }
+        rows
+    }
+
+    fn provider_row(
+        &self,
+        session: crate::provider::Record<'_>,
+        default_stage: &str,
+        linked_families: &HashSet<(AgentFamily, String)>,
+        provider_stages: &HashMap<ProviderSessionKey, (String, i64, i64)>,
+        provider_archives: &HashMap<ProviderSessionKey, (i64, Option<i64>)>,
+    ) -> Option<SessionSummary> {
         let archive = session
             .archive_observed_at
             .map(|at| match session.archived_at {
@@ -610,10 +730,11 @@ fn project(
             });
         let key = ProviderSessionKey::new(session.kind.clone(), session.id.clone());
         if linked_families.contains(&(AgentFamily::of(&session.agent.0), session.id.0.clone()))
-            || provider_tombstones
+            || self
+                .provider_tombstones
                 .contains_family(&AgentFamily::of(&session.agent.0), &session.id.0)
         {
-            continue;
+            return None;
         }
         let provider_updated_at = session.source_updated_at();
         let stage_override =
@@ -629,7 +750,7 @@ fn project(
                 });
         let stage = stage_override
             .map(|(stage, _, _)| stage.clone())
-            .unwrap_or_else(|| default_stage.clone());
+            .unwrap_or_else(|| default_stage.to_string());
         let stage_changed_at = stage_override
             .map(|(_, changed_at, _)| *changed_at)
             .unwrap_or(provider_updated_at);
@@ -640,7 +761,7 @@ fn project(
                     || *source_updated_at
                         >= archive.map(ArchiveState::updated_at).unwrap_or_default()
             });
-        let archived_at = if let Some(pending) = operations.archived_at(&key) {
+        let archived_at = if let Some(pending) = self.operations.archived_at(&key) {
             pending
         } else if let Some((_, archived_at)) = archive_override {
             archived_at.unwrap_or_default()
@@ -651,7 +772,7 @@ fn project(
                 Some(ArchiveState::Active(_)) | None => 0,
             }
         };
-        next.sessions.push(SessionSummary {
+        Some(SessionSummary {
             id: format!("{}:{}", session.kind.0, session.id.0),
             kind: session.kind.0.clone(),
             sid: session.id.0.clone(),
@@ -673,12 +794,7 @@ fn project(
             conversation_title: session.conversation_title.0.clone(),
             last_prompt: session.last_prompt.0.clone(),
             ..Default::default()
-        });
-    }
-    next.sessions
-        .sort_by_key(|session| std::cmp::Reverse(session.last_activated_at));
-    if *catalog != next {
-        *catalog = next;
+        })
     }
 }
 

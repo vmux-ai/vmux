@@ -24,6 +24,8 @@ Related Sessions can use different agents. An ongoing task keeps its own working
 
 Open the Project's Sessions to continue a conversation or find a prior result. Keep reusable preferences and decisions in [Knowledge](knowledge.md), and useful websites in [Bookmarks](bookmarks.md).
 
+Archive a Session to keep it in Archived. Deleting a provider Session hides it from the list; use Restore deleted to show it again, even after reopening Sessions. An archive or delete continues when you close the Sessions page.
+
 Closing a page does not necessarily stop its background conversation or process. Use the task or process controls when you want the work to end.
 
 ## Continue selected Profile synchronization
