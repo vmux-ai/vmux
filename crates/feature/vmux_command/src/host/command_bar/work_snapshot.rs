@@ -1,14 +1,11 @@
 use crate::host::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
 use bevy::prelude::*;
-use vmux_api::command_bar::{CommandBarWorkDir, SearchEngine};
-use vmux_ecs::{LastActivatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+use bevy::prelude::{Added, Changed, Commands};
+use std::cmp::Reverse;
+use std::path::Path;
+use vmux_api::command_bar::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
+use vmux_ecs::{LastActivatedAt, LastVisitedAt, PageMetadata, UnixMillis, Url, VisitCount};
 use vmux_feature::manifest::FeatureManifest;
-
-use super::work_snapshot_driver::{RecentFile, WorkDirectories};
-
-const WORK_DIR_ENTRIES_CAP: usize = 40;
-const RECENT_FILES_CAP: usize = 20;
-type RecentPageChange = Or<(Added<Url>, Changed<LastVisitedAt>)>;
 
 pub(super) struct WorkSnapshotPlugin;
 
@@ -21,34 +18,105 @@ impl bevy::app::Plugin for WorkSnapshotPlugin {
     }
 }
 
+#[derive(Component, Default)]
+struct WorkDirectoryCache(Vec<String>);
+
+impl WorkDirectoryCache {
+    const ENTRIES_CAP: usize = 40;
+
+    fn read_entries(cwd: &str) -> Vec<CommandBarWorkDir> {
+        let Ok(read) = std::fs::read_dir(cwd) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for entry in read.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
+            let path = entry.path().to_string_lossy().to_string();
+            rows.push((name, is_dir, path));
+        }
+        rows.sort_by(|a, b| {
+            let a_hidden = a.0.starts_with('.');
+            let b_hidden = b.0.starts_with('.');
+            b.1.cmp(&a.1)
+                .then(a_hidden.cmp(&b_hidden))
+                .then(a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+        });
+        rows.into_iter()
+            .map(|(_, is_dir, path)| CommandBarWorkDir { path, is_dir })
+            .collect()
+    }
+}
+
+#[derive(Component, Default)]
+struct RecentFilesState {
+    initialized: bool,
+}
+
+impl RecentFilesState {
+    const CAP: usize = 20;
+
+    fn score_page(
+        metadata: &PageMetadata,
+        visit_count: VisitCount,
+        last_visited_at: LastVisitedAt,
+        now: i64,
+    ) -> Option<(f32, CommandBarRecentFile)> {
+        let path = metadata.url.strip_prefix("file://")?;
+        if Path::new(path).is_dir() {
+            return None;
+        }
+        let age_hours = ((now - last_visited_at.0).max(0) as f32) / 3_600_000.0;
+        let decay = 1.0 / (1.0 + age_hours / 24.0);
+        Some((
+            (visit_count.0 as f32) * decay,
+            CommandBarRecentFile {
+                url: metadata.url.clone(),
+                title: metadata.title.clone(),
+            },
+        ))
+    }
+}
+
 fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Command bar work"),
         CommandBarWorkSnapshot::default(),
+        WorkDirectoryCache::default(),
+        RecentFilesState::default(),
     ));
 }
 
 fn directories(
     directories: Query<(&CommandBarWorkDirectory, Option<&LastActivatedAt>)>,
-    mut last_cwds: Local<Vec<String>>,
-    mut state: Single<&mut CommandBarWorkSnapshot>,
+    state: Single<(&mut CommandBarWorkSnapshot, &mut WorkDirectoryCache)>,
 ) {
-    let mut current = WorkDirectories::default();
+    let (mut snapshot, mut cache) = state.into_inner();
+    let mut collected: Vec<(String, i64)> = Vec::new();
     for (directory, activated_at) in &directories {
-        current.add(
-            &directory.0,
-            activated_at.map(|activated_at| activated_at.0).unwrap_or(0),
-        );
+        if directory.0.is_empty() {
+            continue;
+        }
+        let at = activated_at.map(|value| value.0).unwrap_or(0);
+        if let Some(existing) = collected
+            .iter_mut()
+            .find(|(candidate, _)| candidate == &directory.0)
+        {
+            existing.1 = existing.1.max(at);
+        } else {
+            collected.push((directory.0.clone(), at));
+        }
     }
-    let cwds = current.paths();
-    if *last_cwds == cwds {
+    collected.sort_by_key(|(_, activated_at)| Reverse(*activated_at));
+    let cwds: Vec<String> = collected.into_iter().map(|(path, _)| path).collect();
+    if cache.0 == cwds {
         return;
     }
-    *last_cwds = cwds.clone();
+    cache.0.clone_from(&cwds);
 
     let mut entries = Vec::new();
     for cwd in &cwds {
-        for entry in CommandBarWorkDirectory(cwd.clone()).entries() {
+        for entry in WorkDirectoryCache::read_entries(cwd) {
             if entries
                 .iter()
                 .any(|existing: &CommandBarWorkDir| existing.path == entry.path)
@@ -56,48 +124,48 @@ fn directories(
                 continue;
             }
             entries.push(entry);
-            if entries.len() >= WORK_DIR_ENTRIES_CAP {
+            if entries.len() >= WorkDirectoryCache::ENTRIES_CAP {
                 break;
             }
         }
-        if entries.len() >= WORK_DIR_ENTRIES_CAP {
+        if entries.len() >= WorkDirectoryCache::ENTRIES_CAP {
             break;
         }
     }
-    if entries != state.work_dirs {
-        state.work_dirs = entries;
+    if entries != snapshot.work_dirs {
+        snapshot.work_dirs = entries;
     }
 }
 
+type RecentPageChanges<'w, 's> = Query<'w, 's, (), Or<(Added<Url>, Changed<LastVisitedAt>)>>;
+
 fn recent(
-    changed: Query<(), RecentPageChange>,
+    changed: RecentPageChanges,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     manifests: Query<Ref<FeatureManifest>>,
-    mut initialized: Local<bool>,
-    mut state: Single<&mut CommandBarWorkSnapshot>,
+    state: Single<(&mut CommandBarWorkSnapshot, &mut RecentFilesState)>,
 ) {
+    let (mut snapshot, mut recent_state) = state.into_inner();
     let catalog_changed = manifests
         .iter()
         .any(|manifest| manifest.is_added() || manifest.is_changed());
-    if *initialized && changed.is_empty() && !catalog_changed {
+    if recent_state.initialized && changed.is_empty() && !catalog_changed {
         return;
     }
-    *initialized = true;
-    let now = vmux_ecs::UnixMillis::now().0;
+    recent_state.initialized = true;
+    let now = UnixMillis::now().0;
     let mut scored = Vec::new();
     for (metadata, visit_count, last_visited_at) in &urls {
-        if let Some(file) = RecentFile::from_page(metadata, *visit_count, *last_visited_at, now) {
+        if let Some(file) =
+            RecentFilesState::score_page(metadata, *visit_count, *last_visited_at, now)
+        {
             scored.push(file);
         }
     }
-    scored.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut recent_files = Vec::new();
-    for file in scored.into_iter().take(RECENT_FILES_CAP) {
-        recent_files.push(file.value);
+    for (_, file) in scored.into_iter().take(RecentFilesState::CAP) {
+        recent_files.push(file);
     }
 
     let mut catalog = Vec::new();
@@ -127,66 +195,43 @@ fn recent(
         }
         engine_recency.push((engine, latest));
     }
-    engine_recency.sort_by_key(|(_, visited)| std::cmp::Reverse(*visited));
+    engine_recency.sort_by_key(|(_, visited)| Reverse(*visited));
     let mut search_engines = Vec::new();
     for (engine, _) in engine_recency {
         search_engines.push(engine);
     }
-    if recent_files != state.recent_files {
-        state.recent_files = recent_files;
+    if recent_files != snapshot.recent_files {
+        snapshot.recent_files = recent_files;
     }
-    if search_engines != state.search_engines {
-        state.search_engines = search_engines;
+    if search_engines != snapshot.search_engines {
+        snapshot.search_engines = search_engines;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
-    use vmux_ecs::CreatedAt;
-
     use super::*;
-
-    struct WorkSnapshot;
-
-    impl WorkSnapshot {
-        fn read(app: &mut App) -> CommandBarWorkSnapshot {
-            let world = app.world_mut();
-            let mut query = world.query::<&CommandBarWorkSnapshot>();
-            query.single(world).unwrap().clone()
-        }
-
-        fn search_manifest() -> FeatureManifest {
-            FeatureManifest::parse(
-                r#"(
-                    search_engines: [
-                        (id: "google", name: "Google", hosts: ["google.com"], query_url: "https://www.google.com/search?q={query}"),
-                        (id: "bing", name: "Bing", hosts: ["bing.com"], query_url: "https://www.bing.com/search?q={query}"),
-                        (id: "duckduckgo", name: "DuckDuckGo", hosts: ["duckduckgo.com"], query_url: "https://duckduckgo.com/?q={query}"),
-                        (id: "brave", name: "Brave Search", hosts: ["search.brave.com"], query_url: "https://search.brave.com/search?q={query}"),
-                        (id: "kagi", name: "Kagi", hosts: ["kagi.com"], query_url: "https://kagi.com/search?q={query}"),
-                    ],
-                )"#,
-            )
-        }
-    }
+    use std::fs;
+    use vmux_ecs::CreatedAt;
 
     #[test]
     fn work_dirs_list_open_pane_dir_contents() {
-        let root = std::env::temp_dir().join(format!("vmux-work-contents-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("a.txt"), "").unwrap();
-        fs::create_dir(root.join("sub")).unwrap();
-        let cwd = root.to_string_lossy().to_string();
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("a.txt"), "").unwrap();
+        fs::create_dir(root.path().join("sub")).unwrap();
+        let cwd = root.path().to_string_lossy().to_string();
 
         let mut app = App::new();
         app.add_plugins(WorkSnapshotPlugin);
         app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
-        let snap = WorkSnapshot::read(&mut app);
+        let snap = app
+            .world_mut()
+            .query::<&CommandBarWorkSnapshot>()
+            .single(app.world())
+            .unwrap()
+            .clone();
         assert!(
             snap.work_dirs
                 .iter()
@@ -199,13 +244,12 @@ mod tests {
                 .any(|e| e.path.ends_with("/sub") && e.is_dir),
             "lists subdirs in the work dir"
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn work_dirs_include_vmux_managed_worktree() {
-        let base = std::env::temp_dir().join(format!("vmux-worktree-{}", std::process::id()));
-        let root = base.join(".vmux/worktrees/repo/task");
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join(".vmux/worktrees/repo/task");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
@@ -213,37 +257,94 @@ mod tests {
         app.world_mut()
             .spawn(CommandBarWorkDirectory(root.to_string_lossy().into_owned()));
         app.update();
-        let snap = WorkSnapshot::read(&mut app);
+        let snap = app
+            .world_mut()
+            .query::<&CommandBarWorkSnapshot>()
+            .single(app.world())
+            .unwrap()
+            .clone();
         assert!(
             snap.work_dirs
                 .iter()
                 .any(|entry| entry.path.ends_with("/changed.rs")),
             "includes files from vmux-managed worktrees"
         );
-        let _ = fs::remove_dir_all(base);
     }
 
     #[test]
     fn work_dirs_list_acp_agent_cwd_contents() {
-        let root = std::env::temp_dir().join(format!("vmux-acp-work-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("notes.md"), "").unwrap();
-        let cwd = root.to_string_lossy().to_string();
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("notes.md"), "").unwrap();
+        let cwd = root.path().to_string_lossy().to_string();
 
         let mut app = App::new();
         app.add_plugins(WorkSnapshotPlugin);
-        app.world_mut().spawn(CommandBarWorkDirectory(cwd.clone()));
+        app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
-        let snap = WorkSnapshot::read(&mut app);
+        let snap = app
+            .world_mut()
+            .query::<&CommandBarWorkSnapshot>()
+            .single(app.world())
+            .unwrap()
+            .clone();
         assert!(
             snap.work_dirs
                 .iter()
                 .any(|e| e.path.ends_with("/notes.md") && !e.is_dir),
             "lists files in the ACP agent's cwd"
         );
-        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn replaced_work_snapshot_entity_rebuilds_directories_and_recent_files() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("fresh.rs"), "").unwrap();
+        let mut app = App::new();
+        app.add_plugins(WorkSnapshotPlugin);
+        app.world_mut().spawn(CommandBarWorkDirectory(
+            root.path().to_string_lossy().into_owned(),
+        ));
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "file:///work/main.rs".into(),
+                title: "main.rs".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(1000),
+            CreatedAt(0),
+        ));
+        app.update();
+
+        let old = app
+            .world_mut()
+            .query_filtered::<Entity, With<CommandBarWorkSnapshot>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().despawn(old);
+        app.world_mut().spawn((
+            Name::new("Command bar work"),
+            CommandBarWorkSnapshot::default(),
+            WorkDirectoryCache::default(),
+            RecentFilesState::default(),
+        ));
+        app.update();
+
+        let snap = app
+            .world_mut()
+            .query::<&CommandBarWorkSnapshot>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert!(
+            snap.work_dirs
+                .iter()
+                .any(|entry| entry.path.ends_with("/fresh.rs"))
+        );
+        assert_eq!(snap.recent_files.len(), 1);
+        assert_eq!(snap.recent_files[0].title, "main.rs");
     }
 
     #[test]
@@ -272,7 +373,12 @@ mod tests {
             CreatedAt(0),
         ));
         app.update();
-        let snap = WorkSnapshot::read(&mut app);
+        let snap = app
+            .world_mut()
+            .query::<&CommandBarWorkSnapshot>()
+            .single(app.world())
+            .unwrap()
+            .clone();
         assert_eq!(snap.recent_files.len(), 1);
         assert_eq!(snap.recent_files[0].title, "main.rs");
     }
@@ -281,7 +387,17 @@ mod tests {
     fn search_engines_are_ordered_by_most_recent_visit() {
         let mut app = App::new();
         app.add_plugins(WorkSnapshotPlugin);
-        app.world_mut().spawn(WorkSnapshot::search_manifest());
+        app.world_mut().spawn(FeatureManifest::parse(
+            r#"(
+                search_engines: [
+                    (id: "google", name: "Google", hosts: ["google.com"], query_url: "https://www.google.com/search?q={query}"),
+                    (id: "bing", name: "Bing", hosts: ["bing.com"], query_url: "https://www.bing.com/search?q={query}"),
+                    (id: "duckduckgo", name: "DuckDuckGo", hosts: ["duckduckgo.com"], query_url: "https://duckduckgo.com/?q={query}"),
+                    (id: "brave", name: "Brave Search", hosts: ["search.brave.com"], query_url: "https://search.brave.com/search?q={query}"),
+                    (id: "kagi", name: "Kagi", hosts: ["kagi.com"], query_url: "https://kagi.com/search?q={query}"),
+                ],
+            )"#,
+        ));
         for (url, visited) in [
             ("https://www.google.com/search?q=old", 1000),
             ("https://kagi.com/search?q=new", 3000),
@@ -300,7 +416,12 @@ mod tests {
         }
         app.update();
 
-        let snapshot = WorkSnapshot::read(&mut app);
+        let snapshot = app
+            .world_mut()
+            .query::<&CommandBarWorkSnapshot>()
+            .single(app.world())
+            .unwrap()
+            .clone();
         let engines = &snapshot.search_engines;
         assert_eq!(engines.len(), 5);
         assert_eq!(

@@ -10,15 +10,12 @@ pub use controller::{
 pub use panel::CommandBarPanelActive;
 
 mod completion;
-mod completion_driver;
 mod controller;
 mod controller_driver;
 mod driver;
 mod palette;
 mod panel;
-mod project_driver;
 mod work_snapshot;
-mod work_snapshot_driver;
 
 #[derive(EntityEvent)]
 pub struct CommandBarDismiss {
