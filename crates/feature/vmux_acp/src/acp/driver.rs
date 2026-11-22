@@ -38,7 +38,7 @@ use super::{
     AcpAgentInfoInbox, AcpApprovalDetailsInbox, AcpApprovalRequestedInbox,
     AcpApprovalResolvedInbox, AcpConfigStateInbox, AcpReplayBeginInbox, AcpReplayFinishInbox,
     AcpSelectedConfigInbox, AcpSelectionSnapshot, AcpSelectionSnapshotInbox, AcpSessionUpdateInbox,
-    AcpSnapshotRequestInbox, AcpStatusInbox,
+    AcpSnapshotRequestInbox, AcpStartupInbox, AcpStatusInbox,
 };
 use vmux_api::protocol::{
     AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ManagedMcpServer,
@@ -218,6 +218,7 @@ pub(super) struct AcpProjectionSenders {
     approval_requested: mpsc::UnboundedSender<RemoteApproval>,
     approval_resolved: mpsc::UnboundedSender<String>,
     selection_snapshot: mpsc::UnboundedSender<oneshot::Sender<AcpSelectionSnapshot>>,
+    startup: mpsc::UnboundedSender<bool>,
     wake: mpsc::UnboundedSender<()>,
 }
 
@@ -243,6 +244,7 @@ impl AcpProjectionSenders {
                 AcpApprovalRequestedInbox,
                 AcpApprovalResolvedInbox,
                 AcpSelectionSnapshotInbox,
+                AcpStartupInbox,
             ),
         ),
     ) {
@@ -258,6 +260,7 @@ impl AcpProjectionSenders {
         let (approval_requested, approval_requested_inbox) = mpsc::unbounded_channel();
         let (approval_resolved, approval_resolved_inbox) = mpsc::unbounded_channel();
         let (selection_snapshot, selection_snapshot_inbox) = mpsc::unbounded_channel();
+        let (startup, startup_inbox) = mpsc::unbounded_channel();
         (
             Self {
                 next_seq: AtomicU64::new(0),
@@ -273,6 +276,7 @@ impl AcpProjectionSenders {
                 approval_requested,
                 approval_resolved,
                 selection_snapshot,
+                startup,
                 wake,
             },
             (
@@ -291,6 +295,7 @@ impl AcpProjectionSenders {
                     AcpApprovalRequestedInbox(approval_requested_inbox),
                     AcpApprovalResolvedInbox(approval_resolved_inbox),
                     AcpSelectionSnapshotInbox(selection_snapshot_inbox),
+                    AcpStartupInbox(startup_inbox),
                 ),
             ),
         )
@@ -362,6 +367,14 @@ impl AcpProjectionSenders {
         );
     }
 
+    fn startup_ready(&self) {
+        self.sent(self.startup.send(true).is_ok());
+    }
+
+    fn startup_failed(&self) {
+        self.sent(self.startup.send(false).is_ok());
+    }
+
     async fn selection_snapshot(&self) -> AcpSelectionSnapshot {
         let (response, receiver) = oneshot::channel();
         self.sent(self.selection_snapshot.send(response).is_ok());
@@ -369,24 +382,22 @@ impl AcpProjectionSenders {
     }
 }
 
-pub enum AcpInput {
-    User {
-        text: String,
-        context: Option<String>,
-        attachments: Vec<AgentAttachment>,
-        preferred_mode: Option<String>,
-    },
-    Approve {
-        call_id: String,
-        decision: ApprovalDecision,
-    },
-    SetConfig {
-        request_id: u64,
-        config_id: Option<String>,
-        value: String,
-    },
-    Cancel,
-    Close,
+pub(super) struct AcpPromptCommand {
+    pub(super) text: String,
+    pub(super) context: Option<String>,
+    pub(super) attachments: Vec<AgentAttachment>,
+    pub(super) preferred_mode: Option<String>,
+}
+
+pub(super) struct AcpApprovalCommand {
+    pub(super) call_id: String,
+    pub(super) decision: ApprovalDecision,
+}
+
+pub(super) struct AcpConfigCommand {
+    pub(super) request_id: u64,
+    pub(super) config_id: Option<String>,
+    pub(super) value: String,
 }
 
 #[derive(Clone, Copy)]
@@ -770,7 +781,7 @@ impl AcpShared {
         processes: impl Into<AcpProcesses>,
     ) -> Self {
         let (wake, _) = mpsc::unbounded_channel();
-        let (projection, _) = AcpProjectionSenders::open(wake);
+        let (projection, _, _) = AcpProjectionSenders::open(wake);
         Self::with_projection(sid, cwd, anchor, stream_tx, processes, projection)
     }
 
@@ -802,19 +813,17 @@ impl AcpShared {
     fn mark_startup_ready(&self) {
         tracing::info!(target: "acp", sid = %self.sid, "session established");
         self.startup_ready.store(true, Ordering::SeqCst);
+        self.projection.startup_ready();
     }
 
     fn startup_ready(&self) -> bool {
         self.startup_ready.load(Ordering::SeqCst)
     }
 
-    pub(super) fn startup_failed(&self) -> bool {
-        self.startup_error.lock().unwrap().is_some()
-    }
-
     fn fail_startup(&self, error: String) {
         let mut failure = self.startup_error.lock().unwrap();
         *failure = Some(error.clone());
+        self.projection.startup_failed();
         self.projection.status(AgentRunStatus::Errored(error));
     }
 
@@ -828,6 +837,7 @@ impl AcpShared {
         }
         let error = format!("agent exited during startup{}", self.stderr_detail());
         *failure = Some(error.clone());
+        self.projection.startup_failed();
         self.projection.status(AgentRunStatus::Errored(error));
     }
 
@@ -1011,6 +1021,7 @@ impl AcpDriver {
         )
     }
 
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub(super) async fn run(
         command: String,
         args: Vec<String>,
@@ -1018,7 +1029,13 @@ impl AcpDriver {
         mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        input_rx: mpsc::UnboundedReceiver<AcpInput>,
+        inputs: (
+            mpsc::UnboundedReceiver<AcpPromptCommand>,
+            mpsc::UnboundedReceiver<AcpApprovalCommand>,
+            mpsc::UnboundedReceiver<AcpConfigCommand>,
+            mpsc::UnboundedReceiver<()>,
+            mpsc::UnboundedReceiver<()>,
+        ),
     ) {
         let agent_cwd = shared.cwd();
         let mut launch = Command::new(&command);
@@ -1033,9 +1050,7 @@ impl AcpDriver {
         ) {
             Ok(child) => child,
             Err(err) => {
-                shared
-                    .projection
-                    .status(AgentRunStatus::Errored(format!("acp spawn failed: {err}")));
+                shared.fail_startup(format!("acp spawn failed: {err}"));
                 return;
             }
         };
@@ -1050,16 +1065,24 @@ impl AcpDriver {
             tokio::spawn(drain_stderr(stderr, shared.clone()));
         }
         let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
-        let result = Self::connect(transport, mcp_servers, resume, shared.clone(), input_rx).await;
+        let result = Self::connect(transport, mcp_servers, resume, shared.clone(), inputs).await;
         if let Err(err) = result {
-            shared.projection.status(AgentRunStatus::Errored(format!(
-                "acp connection ended: {err}{}",
-                shared.stderr_detail()
-            )));
+            if !shared.startup_ready() {
+                shared.fail_startup(format!(
+                    "acp connection ended: {err}{}",
+                    shared.stderr_detail()
+                ));
+            } else {
+                shared.projection.status(AgentRunStatus::Errored(format!(
+                    "acp connection ended: {err}{}",
+                    shared.stderr_detail()
+                )));
+            }
         }
         child.stop().await;
     }
 
+    #[allow(clippy::type_complexity)]
     async fn connect(
         transport: agent_client_protocol::ByteStreams<
             tokio_util::compat::Compat<tokio::process::ChildStdin>,
@@ -1068,7 +1091,13 @@ impl AcpDriver {
         mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        input_rx: mpsc::UnboundedReceiver<AcpInput>,
+        inputs: (
+            mpsc::UnboundedReceiver<AcpPromptCommand>,
+            mpsc::UnboundedReceiver<AcpApprovalCommand>,
+            mpsc::UnboundedReceiver<AcpConfigCommand>,
+            mpsc::UnboundedReceiver<()>,
+            mpsc::UnboundedReceiver<()>,
+        ),
     ) -> Result<(), agent_client_protocol::Error> {
         let perm_shared = shared.clone();
         let update_shared = shared.clone();
@@ -1162,7 +1191,7 @@ impl AcpDriver {
                 agent_client_protocol::on_receive_notification!(),
             )
             .connect_with(transport, async move |cx| {
-                Self::drive_session(cx, mcp_servers, resume, main_shared, input_rx).await
+                Self::drive_session(cx, mcp_servers, resume, main_shared, inputs).await
             })
             .await
     }
@@ -1235,61 +1264,41 @@ impl AcpDriver {
         responder.respond(RequestPermissionResponse::new(outcome))
     }
 
+    #[allow(clippy::type_complexity)]
     async fn drive_session(
         cx: ConnectionTo<Agent>,
         mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
+        inputs: (
+            mpsc::UnboundedReceiver<AcpPromptCommand>,
+            mpsc::UnboundedReceiver<AcpApprovalCommand>,
+            mpsc::UnboundedReceiver<AcpConfigCommand>,
+            mpsc::UnboundedReceiver<()>,
+            mpsc::UnboundedReceiver<()>,
+        ),
     ) -> Result<(), agent_client_protocol::Error> {
+        let (mut prompts, mut approvals, mut configs, mut cancels, mut closes) = inputs;
         let Some((mut session_id, prompt_capabilities, mcp_servers)) =
             Self::initialize_session(&cx, &mcp_servers, resume, &shared).await
         else {
             return Ok(());
         };
         shared.mark_startup_ready();
-        while let Some(input) = input_rx.recv().await {
-            match input {
-                AcpInput::User {
-                    text,
-                    context,
-                    attachments,
-                    preferred_mode,
-                } => {
-                    Self::handle_user_input(
-                        &cx,
-                        &mut session_id,
-                        &mcp_servers,
-                        &prompt_capabilities,
-                        &shared,
-                        text,
-                        context,
-                        attachments,
-                        preferred_mode,
-                    )
-                    .await?;
-                }
-                AcpInput::Approve { call_id, decision } => {
-                    if let Some(tx) = shared.pending_perms.lock().unwrap().remove(&call_id) {
-                        let _ = tx.send(decision);
+        loop {
+            tokio::select! {
+                biased;
+                close = closes.recv() => {
+                    if let Some(sid) = &session_id {
+                        let _ = cx.send_notification(CancelNotification::new(sid.clone()));
                     }
+                    let _ = close;
+                    break;
                 }
-                AcpInput::SetConfig {
-                    request_id,
-                    config_id,
-                    value,
-                } => {
-                    Self::handle_set_config(
-                        &cx,
-                        session_id.as_ref(),
-                        &shared,
-                        request_id,
-                        config_id,
-                        value,
-                    )
-                    .await;
-                }
-                AcpInput::Cancel => {
+                cancel = cancels.recv() => {
+                    if cancel.is_none() {
+                        break;
+                    }
                     shared.cancel_requested.store(true, Ordering::SeqCst);
                     for (_id, tx) in shared.pending_perms.lock().unwrap().drain() {
                         let _ = tx.send(ApprovalDecision::Deny);
@@ -1298,11 +1307,44 @@ impl AcpDriver {
                         let _ = cx.send_notification(CancelNotification::new(sid.clone()));
                     }
                 }
-                AcpInput::Close => {
-                    if let Some(sid) = &session_id {
-                        let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                approval = approvals.recv() => {
+                    let Some(approval) = approval else {
+                        break;
+                    };
+                    if let Some(tx) = shared.pending_perms.lock().unwrap().remove(&approval.call_id) {
+                        let _ = tx.send(approval.decision);
                     }
-                    break;
+                }
+                config = configs.recv() => {
+                    let Some(config) = config else {
+                        break;
+                    };
+                    Self::handle_set_config(
+                        &cx,
+                        session_id.as_ref(),
+                        &shared,
+                        config.request_id,
+                        config.config_id,
+                        config.value,
+                    )
+                    .await;
+                }
+                prompt = prompts.recv() => {
+                    let Some(prompt) = prompt else {
+                        break;
+                    };
+                    Self::handle_user_input(
+                        &cx,
+                        &mut session_id,
+                        &mcp_servers,
+                        &prompt_capabilities,
+                        &shared,
+                        prompt.text,
+                        prompt.context,
+                        prompt.attachments,
+                        prompt.preferred_mode,
+                    )
+                    .await?;
                 }
             }
         }
@@ -1937,6 +1979,7 @@ mod tests {
                 .spawn((
                     vmux_session::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
+                    super::super::AcpSessionCwd(PathBuf::from("/tmp")),
                     super::super::projection::AcpProjectionOrder::default(),
                     projection_inboxes,
                     super::super::AcpAgentName::default(),

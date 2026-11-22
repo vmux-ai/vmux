@@ -16,7 +16,7 @@ use vmux_transport::service::{
     RemoteDriver, RemoteFuture, ServiceProtocolConnection, ServiceProtocolDriver,
 };
 
-use crate::acp::{AcpInput, AcpSessions, CatalogDriver, CatalogRequest};
+use crate::acp::{AcpSessions, CatalogDriver, CatalogRequest};
 use crate::broker_driver::AgentBroker;
 use crate::remote_driver::AgentRemoteDriver;
 
@@ -342,24 +342,20 @@ impl AcpServiceConnection {
                 attachments,
                 preferred_mode,
             } => {
-                let input = AcpInput::User {
-                    text,
-                    context,
-                    attachments,
-                    preferred_mode,
-                };
-                self.service.sessions.input(sid, input).await;
+                self.service
+                    .sessions
+                    .send_prompt(sid, text, context, attachments, preferred_mode)
+                    .await;
             }
             SharedMessage::AgentCancel { sid } => {
-                self.service.sessions.input(sid, AcpInput::Cancel).await;
+                self.service.sessions.cancel(sid).await;
             }
             SharedMessage::AgentApprove {
                 sid,
                 call_id,
                 decision,
             } => {
-                let input = AcpInput::Approve { call_id, decision };
-                self.service.sessions.input(sid, input).await;
+                self.service.sessions.approve(sid, call_id, decision).await;
             }
             other => return Err(other),
         }
@@ -408,12 +404,10 @@ impl AcpServiceConnection {
                 config_id,
                 value,
             } => {
-                let input = AcpInput::SetConfig {
-                    request_id,
-                    config_id,
-                    value,
-                };
-                self.service.sessions.input(sid, input).await;
+                self.service
+                    .sessions
+                    .set_config(sid, request_id, config_id, value)
+                    .await;
             }
             ClientMessage::CloseAgentSession { sid } => {
                 self.service.sessions.close(sid.clone()).await;
