@@ -1,7 +1,6 @@
 use crate::host::editor::EditReadOnly;
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{App, Changed, Commands, Plugin};
 use vmux_ecs::event::{OutlineEvent, OutlineRow};
 
 use super::OutlineDirty;
@@ -93,12 +92,12 @@ impl OutlineRows {
             .get("kind")
             .and_then(|value| value.as_u64())
             .unwrap_or(0) as u8;
-        let span = SymbolSpan::from(item);
+        let (line, end_line) = Self::symbol_span(item);
         rows.push(OutlineRow {
             name,
             kind,
-            line: span.line,
-            end_line: span.end_line,
+            line,
+            end_line,
             depth,
         });
         if let Some(children) = item.get("children").and_then(|value| value.as_array()) {
@@ -107,16 +106,9 @@ impl OutlineRows {
             }
         }
     }
-}
 
-struct SymbolSpan {
-    line: u32,
-    end_line: u32,
-}
-
-impl From<&serde_json::Value> for SymbolSpan {
-    fn from(item: &serde_json::Value) -> Self {
-        let line = Self::pick(
+    fn symbol_span(item: &serde_json::Value) -> (u32, u32) {
+        let line = Self::pick_line(
             item,
             &[
                 "/selectionRange/start/line",
@@ -125,15 +117,13 @@ impl From<&serde_json::Value> for SymbolSpan {
             ],
         )
         .unwrap_or(0);
-        let end_line = Self::pick(item, &["/range/end/line", "/location/range/end/line"])
+        let end_line = Self::pick_line(item, &["/range/end/line", "/location/range/end/line"])
             .filter(|end_line| *end_line >= line)
             .unwrap_or(OutlineRow::OPEN_END);
-        Self { line, end_line }
+        (line, end_line)
     }
-}
 
-impl SymbolSpan {
-    fn pick(item: &serde_json::Value, paths: &[&str]) -> Option<u32> {
+    fn pick_line(item: &serde_json::Value, paths: &[&str]) -> Option<u32> {
         for path in paths {
             if let Some(found) = item.pointer(path).and_then(|value| value.as_u64()) {
                 return Some(found as u32);
@@ -173,7 +163,7 @@ fn emit_markdown(
 
 fn clear_on_file_change(
     query: Query<Entity, (With<FileView>, Changed<FileView>)>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     for entity in &query {
@@ -190,6 +180,7 @@ fn clear_on_file_change(
 mod tests {
     use super::*;
     use crate::edit::highlight_cache::HighlightCache;
+    use bevy_cef::prelude::Browsers;
     use vmux_api::UiState;
     use vmux_ecs::event::{FileDocumentKind, FileMetaEvent, FileUiState};
 

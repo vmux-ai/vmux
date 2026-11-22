@@ -21,6 +21,121 @@ impl ExplorerState {
     }
 }
 
+struct ExplorerApp;
+
+impl ExplorerApp {
+    fn git_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("README.md"), "# hi\n").unwrap();
+        fs::write(tmp.path().join("src").join("lib.rs"), "fn main(){}\n").unwrap();
+        tmp
+    }
+
+    fn toggle(app: &mut App, e: Entity, path: &Path) {
+        app.world_mut().trigger(UiInput {
+            webview: e,
+            payload: ExplorerTreeToggle {
+                path: path.to_string_lossy().to_string(),
+            },
+        });
+    }
+
+    fn tree_entity(app: &App, root: &Path) -> Entity {
+        app.world()
+            .iter_entities()
+            .find_map(|entity| {
+                let tree = entity.get::<ExplorerTree>()?;
+                tree.answers_for(root).then_some(entity.id())
+            })
+            .unwrap_or_else(|| panic!("no explorer tree for {}", root.display()))
+    }
+
+    fn directory_entity(app: &App, root: &Path, path: &Path) -> Option<Entity> {
+        let tree = Self::tree_entity(app, root);
+        app.world().iter_entities().find_map(|entity| {
+            let parent = entity.get::<ChildOf>()?;
+            let dir = entity.get::<ExplorerDirectory>()?;
+            (parent.parent() == tree && dir.path == path).then_some(entity.id())
+        })
+    }
+
+    fn is_expanded(app: &App, root: &Path, path: &Path) -> bool {
+        Self::directory_entity(app, root, path).is_some_and(|entity| {
+            app.world()
+                .get::<ExplorerDirectoryExpanded>(entity)
+                .is_some()
+        })
+    }
+
+    fn expanded_paths(app: &App, root: &Path) -> HashSet<PathBuf> {
+        let tree = Self::tree_entity(app, root);
+        let mut expanded = HashSet::new();
+        for entity in app.world().iter_entities() {
+            if entity.get::<ChildOf>().is_some_and(|p| p.parent() == tree)
+                && entity.get::<ExplorerDirectoryExpanded>().is_some()
+                && let Some(dir) = entity.get::<ExplorerDirectory>()
+            {
+                expanded.insert(dir.path.clone());
+            }
+        }
+        expanded
+    }
+
+    fn entries<'a>(app: &'a App, root: &Path, path: &Path) -> Option<&'a [FileDirEntry]> {
+        let entity = Self::directory_entity(app, root, path)?;
+        app.world()
+            .get::<ExplorerDirectoryEntries>(entity)
+            .map(|entries| entries.0.as_slice())
+    }
+
+    fn any_loading(app: &App, root: &Path) -> bool {
+        let tree = Self::tree_entity(app, root);
+        app.world().iter_entities().any(|entity| {
+            entity.get::<ChildOf>().is_some_and(|p| p.parent() == tree)
+                && entity.get::<ExplorerDirectoryLoading>().is_some()
+        })
+    }
+
+    fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            app.update();
+            let loaded = app.world().iter_entities().any(|entity| {
+                entity
+                    .get::<ExplorerTree>()
+                    .is_some_and(|tree| tree.answers_for(root))
+            }) && Self::entries(app, root, path).is_some()
+                && !Self::any_loading(app, root);
+            if loaded {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("directory load did not finish: {}", path.display());
+    }
+
+    fn hidden() -> App {
+        Self::with(false)
+    }
+
+    fn visible() -> App {
+        Self::with(true)
+    }
+
+    fn with(default_visible: bool) -> App {
+        let mut app = App::new();
+        app.world_mut().spawn(ExplorerPanelDefaults {
+            default_visible,
+            width: 240,
+            loaded: true,
+        });
+        app.add_plugins((MinimalPlugins, TreePlugin));
+        app
+    }
+}
+
 #[test]
 #[cfg(ui)]
 fn editor_page_allows_explorer_section_toggles() {
@@ -108,57 +223,57 @@ fn noting_an_open_editor_deduplicates_and_preserves_order() {
 
 #[test]
 fn explorer_tree_rows_follow_expanded_directories() {
-    let root = PathBuf::from("/r");
-    let source = root.join("src");
-    let tree = ExplorerTree {
-        root: root.clone(),
-        expanded: HashSet::from([source.clone()]),
-        loading: HashSet::from([source.clone()]),
-        children: std::collections::HashMap::from([
-            (
-                root.clone(),
-                vec![
-                    FileDirEntry {
-                        name: "src".into(),
-                        path: source.to_string_lossy().into_owned(),
-                        is_dir: true,
-                    },
-                    FileDirEntry {
-                        name: "a.rs".into(),
-                        path: root.join("a.rs").to_string_lossy().into_owned(),
-                        is_dir: false,
-                    },
-                ],
-            ),
-            (
-                source.clone(),
-                vec![FileDirEntry {
-                    name: "b.rs".into(),
-                    path: source.join("b.rs").to_string_lossy().into_owned(),
-                    is_dir: false,
-                }],
-            ),
-        ]),
-        used: std::time::Instant::now(),
-    };
-    let rows = tree.rows(&root);
-    let actual = rows
+    let tmp = ExplorerApp::git_repo();
+    let src = tmp.path().join("src");
+    let mut app = ExplorerApp::hidden();
+    let view = app
+        .world_mut()
+        .spawn((
+            FileView {
+                path: tmp.path().join("README.md"),
+            },
+            ExplorerState::default(),
+            vmux_ecs::page::PageReady {},
+        ))
+        .id();
+    SentReveals::watch(&mut app, view);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::toggle(&mut app, view, &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
+    app.update();
+    let tree = app
+        .world()
+        .resource::<SentReveals>()
+        .state
+        .as_ref()
+        .unwrap()
+        .explorer
+        .explorer_tree
+        .as_ref()
+        .unwrap();
+    let actual: Vec<(&str, u16)> = tree
+        .rows
         .iter()
         .map(|row| (row.name.as_str(), row.depth))
-        .collect::<Vec<_>>();
-    assert_eq!(actual, vec![("src", 0), ("b.rs", 1), ("a.rs", 0)]);
-    assert!(rows[0].expanded);
-    assert!(rows[0].loading);
+        .collect();
+    assert_eq!(
+        actual,
+        vec![(".git", 0), ("src", 0), ("lib.rs", 1), ("README.md", 0)]
+    );
+    assert!(tree.rows[1].expanded);
+    assert!(!tree.rows[1].loading);
 }
 
 #[test]
 fn a_new_entry_uses_the_selected_directory_or_file_parent() {
     let root = PathBuf::from("/r");
     let source = root.join("src");
-    let mut tree = ExplorerTree::new(root.clone());
-    tree.children.insert(
-        root,
-        vec![
+    let mut app = ExplorerApp::hidden();
+    let tree = app.world_mut().spawn(ExplorerTree::new(root.clone())).id();
+    app.world_mut().spawn((
+        ChildOf(tree),
+        ExplorerDirectory { path: root.clone() },
+        ExplorerDirectoryEntries(vec![
             FileDirEntry {
                 name: "src".into(),
                 path: source.to_string_lossy().into_owned(),
@@ -169,94 +284,37 @@ fn a_new_entry_uses_the_selected_directory_or_file_parent() {
                 path: source.join("lib.rs").to_string_lossy().into_owned(),
                 is_dir: false,
             },
-        ],
+        ]),
+    ));
+    let mut state = bevy::ecs::system::SystemState::<ExplorerTreeLookup>::new(app.world_mut());
+    let lookup = state.get(app.world()).unwrap();
+    assert_eq!(lookup.create_parent(tree, &source), Some(source.clone()));
+    assert_eq!(
+        lookup.create_parent(tree, &source.join("lib.rs")),
+        Some(source)
     );
-    assert_eq!(tree.create_parent(&source), source);
-    assert_eq!(tree.create_parent(&source.join("lib.rs")), source);
 }
 
 #[test]
 fn a_new_entry_uses_the_root_without_a_live_selection() {
     let root = PathBuf::from("/r");
-    let tree = ExplorerTree::new(root.clone());
-    assert_eq!(tree.create_parent(Path::new("")), root);
-    assert_eq!(tree.create_parent(Path::new("/r/dropped")), root);
-}
-
-fn git_repo() -> tempfile::TempDir {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join(".git")).unwrap();
-    fs::create_dir(tmp.path().join("src")).unwrap();
-    fs::write(tmp.path().join("README.md"), "# hi\n").unwrap();
-    fs::write(tmp.path().join("src").join("lib.rs"), "fn main(){}\n").unwrap();
-    tmp
-}
-
-fn toggle(app: &mut App, e: Entity, path: &Path) {
-    app.world_mut().trigger(UiInput {
-        webview: e,
-        payload: ExplorerTreeToggle {
-            path: path.to_string_lossy().to_string(),
-        },
-    });
-}
-
-impl ExplorerTree {
-    fn in_app<'a>(app: &'a App, root: &Path) -> &'a Self {
-        app.world()
-            .iter_entities()
-            .find_map(|entity| {
-                let tree = entity.get::<ExplorerTree>()?;
-                tree.answers_for(root).then_some(tree)
-            })
-            .unwrap_or_else(|| panic!("no explorer tree for {}", root.display()))
-    }
-}
-
-struct ExplorerApp;
-
-impl ExplorerApp {
-    fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            app.update();
-            let loaded = app
-                .world()
-                .iter_entities()
-                .filter_map(|entity| entity.get::<ExplorerTree>())
-                .find(|tree| tree.answers_for(root))
-                .is_some_and(|tree| tree.children.contains_key(path) && tree.loading.is_empty());
-            if loaded {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        panic!("directory load did not finish: {}", path.display());
-    }
-
-    fn hidden() -> App {
-        Self::with(false)
-    }
-
-    fn visible() -> App {
-        Self::with(true)
-    }
-
-    fn with(default_visible: bool) -> App {
-        let mut app = App::new();
-        app.world_mut().spawn(ExplorerPanelDefaults {
-            default_visible,
-            width: 240,
-            loaded: true,
-        });
-        app.add_plugins((MinimalPlugins, TreePlugin));
-        app
-    }
+    let mut app = ExplorerApp::hidden();
+    let tree = app.world_mut().spawn(ExplorerTree::new(root.clone())).id();
+    let mut state = bevy::ecs::system::SystemState::<ExplorerTreeLookup>::new(app.world_mut());
+    let lookup = state.get(app.world()).unwrap();
+    assert_eq!(
+        lookup.create_parent(tree, Path::new("")),
+        Some(root.clone())
+    );
+    assert_eq!(
+        lookup.create_parent(tree, Path::new("/r/dropped")),
+        Some(root)
+    );
 }
 
 #[test]
 fn init_builds_root_listing_and_marks_dirty() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let file = tmp.path().join("src").join("lib.rs");
     let mut app = ExplorerApp::hidden();
     let e = app
@@ -266,14 +324,12 @@ fn init_builds_root_listing_and_marks_dirty() {
     ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     let tree_of = app.world().get::<UsesExplorerTree>(e).unwrap();
     assert_eq!(
-        app.world().get::<ExplorerTree>(tree_of.0).unwrap().root,
+        app.world().get::<ExplorerTree>(tree_of.0).unwrap().root(),
         tmp.path()
     );
-    let tree = ExplorerTree::in_app(&app, tmp.path());
-    assert!(tree.expanded.contains(&tmp.path().to_path_buf()));
+    assert!(ExplorerApp::is_expanded(&app, tmp.path(), tmp.path()));
     assert!(
-        tree.children
-            .get(tmp.path())
+        ExplorerApp::entries(&app, tmp.path(), tmp.path())
             .unwrap()
             .iter()
             .any(|x| x.name == "src")
@@ -283,7 +339,7 @@ fn init_builds_root_listing_and_marks_dirty() {
 
 #[test]
 fn a_second_page_on_a_warm_root_reuses_the_loaded_tree() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let src = tmp.path().join("src");
     let mut app = ExplorerApp::hidden();
     let first = app
@@ -327,7 +383,7 @@ fn a_second_page_on_a_warm_root_reuses_the_loaded_tree() {
 
 #[test]
 fn expansion_outlives_the_page_that_made_it() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let src = tmp.path().join("src");
     let mut app = ExplorerApp::hidden();
     let first = app
@@ -340,14 +396,12 @@ fn expansion_outlives_the_page_that_made_it() {
         ))
         .id();
     ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
-    toggle(&mut app, first, &src);
+    ExplorerApp::toggle(&mut app, first, &src);
     ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     app.world_mut().entity_mut(first).despawn();
     app.update();
     assert!(
-        ExplorerTree::in_app(&app, tmp.path())
-            .expanded
-            .contains(&src),
+        ExplorerApp::is_expanded(&app, tmp.path(), &src),
         "closing a page must not collapse the workspace tree the next one opens on"
     );
 }
@@ -361,14 +415,17 @@ fn pruning_drops_the_stalest_idle_trees_and_never_a_live_one() {
         loaded: true,
     });
     app.add_plugins((MinimalPlugins, TreePlugin));
-    let roots: Vec<PathBuf> = (0..IDLE_TREE_CAPACITY + 2)
+    let roots: Vec<PathBuf> = (0..ExplorerTree::IDLE_CAPACITY + 2)
         .map(|n| PathBuf::from(format!("/project{n}")))
         .collect();
     let mut tree_entities = Vec::new();
     for (index, root) in roots.iter().enumerate() {
         let mut tree = ExplorerTree::new(root.clone());
         tree.used -= std::time::Duration::from_secs((roots.len() - index) as u64);
-        tree_entities.push(app.world_mut().spawn(tree).id());
+        let entity = app.world_mut().spawn(tree).id();
+        app.world_mut()
+            .spawn((ChildOf(entity), ExplorerDirectory { path: root.clone() }));
+        tree_entities.push(entity);
     }
     let live = app
         .world_mut()
@@ -394,6 +451,13 @@ fn pruning_drops_the_stalest_idle_trees_and_never_a_live_one() {
         "the stalest idle root is the one that goes"
     );
     assert!(
+        !app.world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<ExplorerDirectory>())
+            .any(|dir| dir.path == roots[1]),
+        "despawning an idle tree must remove its canonical child directories"
+    );
+    assert!(
         app.world()
             .iter_entities()
             .filter_map(|entity| entity.get::<ExplorerTree>())
@@ -404,14 +468,47 @@ fn pruning_drops_the_stalest_idle_trees_and_never_a_live_one() {
             .iter_entities()
             .filter_map(|entity| entity.get::<ExplorerTree>())
             .count(),
-        IDLE_TREE_CAPACITY + 1
+        ExplorerTree::IDLE_CAPACITY + 1
     );
     assert!(app.world().get_entity(live).is_ok());
 }
 
 #[test]
+fn refreshing_the_root_also_refreshes_expanded_subdirectories() {
+    let tmp = ExplorerApp::git_repo();
+    let src = tmp.path().join("src");
+    let mut app = ExplorerApp::hidden();
+    let view = app
+        .world_mut()
+        .spawn((
+            FileView {
+                path: tmp.path().join("README.md"),
+            },
+            ExplorerState::default(),
+        ))
+        .id();
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::toggle(&mut app, view, &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
+    fs::write(src.join("added.rs"), "pub fn added() {}\n").unwrap();
+    app.world_mut().trigger(UiInput {
+        webview: view,
+        payload: ExplorerTreeRefresh {
+            path: tmp.path().to_string_lossy().into_owned(),
+        },
+    });
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
+    assert!(
+        ExplorerApp::entries(&app, tmp.path(), &src)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.name == "added.rs")
+    );
+}
+
+#[test]
 fn expanding_warms_the_next_level_and_stops_there() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let deep = tmp.path().join("src").join("deep");
     fs::create_dir_all(&deep).unwrap();
     let mut app = ExplorerApp::hidden();
@@ -429,20 +526,19 @@ fn expanding_warms_the_next_level_and_stops_there() {
         app.update();
         std::thread::yield_now();
     }
-    let tree = ExplorerTree::in_app(&app, tmp.path());
     assert!(
-        !tree.expanded.contains(&tmp.path().join("src")),
+        !ExplorerApp::is_expanded(&app, tmp.path(), &tmp.path().join("src")),
         "warming must not expand anything on the user's behalf"
     );
     assert!(
-        !tree.children.contains_key(&deep),
+        ExplorerApp::entries(&app, tmp.path(), &deep).is_none(),
         "a warmed directory must not warm its own children, or a deep tree loads itself"
     );
 }
 
 #[test]
 fn toggle_expands_then_collapses_subdir() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let file = tmp.path().join("README.md");
     let mut app = ExplorerApp::hidden();
     let e = app
@@ -451,28 +547,23 @@ fn toggle_expands_then_collapses_subdir() {
         .id();
     ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     let src = tmp.path().join("src");
-    toggle(&mut app, e, &src);
+    ExplorerApp::toggle(&mut app, e, &src);
     ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
-    let tree = ExplorerTree::in_app(&app, tmp.path());
-    assert!(tree.expanded.contains(&src));
+    assert!(ExplorerApp::is_expanded(&app, tmp.path(), &src));
     assert!(
-        tree.children
-            .get(&src)
+        ExplorerApp::entries(&app, tmp.path(), &src)
             .unwrap()
             .iter()
             .any(|x| x.name == "lib.rs")
     );
-    toggle(&mut app, e, &src);
-    assert!(
-        !ExplorerTree::in_app(&app, tmp.path())
-            .expanded
-            .contains(&src)
-    );
+    ExplorerApp::toggle(&mut app, e, &src);
+    app.update();
+    assert!(!ExplorerApp::is_expanded(&app, tmp.path(), &src));
 }
 
 #[test]
 fn reveal_current_expands_ancestors_and_focuses_file() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let file = tmp.path().join("src").join("lib.rs");
     let mut app = ExplorerApp::hidden();
     let e = app
@@ -486,9 +577,8 @@ fn reveal_current_expands_ancestors_and_focuses_file() {
     });
     let src = tmp.path().join("src");
     ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
-    let tree = ExplorerTree::in_app(&app, tmp.path());
-    assert!(tree.expanded.contains(tmp.path()));
-    assert!(tree.expanded.contains(&src));
+    assert!(ExplorerApp::is_expanded(&app, tmp.path(), tmp.path()));
+    assert!(ExplorerApp::is_expanded(&app, tmp.path(), &src));
     assert_eq!(
         app.world()
             .get::<ExplorerState>(e)
@@ -501,7 +591,7 @@ fn reveal_current_expands_ancestors_and_focuses_file() {
 
 #[test]
 fn repeated_reveal_skips_unchanged_tree_rebuild() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let file = tmp.path().join("src").join("lib.rs");
     let mut app = ExplorerApp::hidden();
     let e = app
@@ -535,7 +625,7 @@ fn repeated_reveal_skips_unchanged_tree_rebuild() {
 
 #[test]
 fn opening_a_file_reveals_it_without_an_explicit_request() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let src = tmp.path().join("src");
     let file = src.join("lib.rs");
     let mut app = ExplorerApp::visible();
@@ -549,18 +639,10 @@ fn opening_a_file_reveals_it_without_an_explicit_request() {
         ))
         .id();
     ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
-    assert!(
-        !ExplorerTree::in_app(&app, tmp.path())
-            .expanded
-            .contains(&src)
-    );
+    assert!(!ExplorerApp::is_expanded(&app, tmp.path(), &src));
     app.world_mut().get_mut::<FileView>(e).unwrap().path = file.clone();
     ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
-    assert!(
-        ExplorerTree::in_app(&app, tmp.path())
-            .expanded
-            .contains(&src)
-    );
+    assert!(ExplorerApp::is_expanded(&app, tmp.path(), &src));
     assert_eq!(
         app.world()
             .get::<ExplorerState>(e)
@@ -573,7 +655,7 @@ fn opening_a_file_reveals_it_without_an_explicit_request() {
 
 #[test]
 fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let src = tmp.path().join("src");
     let mut app = ExplorerApp::hidden();
     let e = app
@@ -591,11 +673,7 @@ fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
         app.update();
         std::thread::yield_now();
     }
-    assert!(
-        !ExplorerTree::in_app(&app, tmp.path())
-            .expanded
-            .contains(&src)
-    );
+    assert!(!ExplorerApp::is_expanded(&app, tmp.path(), &src));
     assert!(
         app.world()
             .get::<ExplorerState>(e)
@@ -670,7 +748,7 @@ impl SentReveals {
 
 #[test]
 fn only_an_asked_for_reveal_may_take_focus_from_the_editor() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let src = tmp.path().join("src");
     let mut app = ExplorerApp::visible();
     let e = app
@@ -705,7 +783,7 @@ fn only_an_asked_for_reveal_may_take_focus_from_the_editor() {
 
 #[test]
 fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let src = tmp.path().join("src");
     let mut app = ExplorerApp::visible();
     let e = app
@@ -718,7 +796,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
         ))
         .id();
     ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
-    assert!(ExplorerTree::in_app(&app, tmp.path()).expanded.len() > 1);
+    assert!(ExplorerApp::expanded_paths(&app, tmp.path()).len() > 1);
     app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
     app.world_mut().trigger(UiInput {
         webview: e,
@@ -726,7 +804,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
     });
     app.update();
     assert_eq!(
-        ExplorerTree::in_app(&app, tmp.path()).expanded,
+        ExplorerApp::expanded_paths(&app, tmp.path()),
         HashSet::from([tmp.path().to_path_buf()]),
         "dropping the root makes the next reveal look like a tree change and re-scroll"
     );
@@ -840,7 +918,7 @@ fn panel_visibility_is_shared_only_within_stack() {
 
 #[test]
 fn panel_open_reveals_current_file() {
-    let tmp = git_repo();
+    let tmp = ExplorerApp::git_repo();
     let file = tmp.path().join("src").join("lib.rs");
     let mut app = ExplorerApp::hidden();
     app.add_plugins(PanelPlugin);

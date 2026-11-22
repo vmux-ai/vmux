@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     ExplorerGoto, ExplorerSearchClear, ExplorerSearchCollapseAll, ExplorerSearchDraftRequest,
     ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchGroupToggle, ExplorerSearchOpen,
@@ -33,7 +34,7 @@ impl Plugin for SearchPlugin {
             .add_observer(clear)
             .add_observer(draft)
             .add_observer(begin)
-            .add_observer(update_form)
+            .add_observer(adopt_completed)
             .add_observer(navigate);
     }
 }
@@ -50,21 +51,99 @@ pub struct GlobalSearchRequest {
     pub capped: bool,
 }
 
-#[derive(Component, Clone)]
-struct GlobalSearchState(ExplorerSearchEvent);
+#[derive(EntityEvent)]
+pub(crate) struct ExplorerSearchRunRequest {
+    #[event_target]
+    pub(crate) entity: Entity,
+    pub(crate) generation: u64,
+    pub(crate) query: String,
+    pub(crate) regex: bool,
+    pub(crate) case_sensitive: bool,
+    pub(crate) whole_word: bool,
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct ExplorerSearchCancelRequest {
+    #[event_target]
+    pub(crate) entity: Entity,
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct ExplorerSearchCompleted {
+    #[event_target]
+    pub(crate) entity: Entity,
+    pub(crate) generation: u64,
+    pub(crate) root: String,
+    pub(crate) query: String,
+    pub(crate) regex: bool,
+    pub(crate) case_sensitive: bool,
+    pub(crate) whole_word: bool,
+    pub(crate) files: Vec<ExplorerSearchFile>,
+    pub(crate) capped: bool,
+}
+
+#[derive(Component, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ExplorerSearchQuery {
+    pub(crate) query: String,
+    pub(crate) regex: bool,
+    pub(crate) case_sensitive: bool,
+    pub(crate) whole_word: bool,
+    pub(crate) generation: u64,
+}
+
+impl ExplorerSearchQuery {
+    fn matches_form(
+        &self,
+        query: &str,
+        regex: bool,
+        case_sensitive: bool,
+        whole_word: bool,
+    ) -> bool {
+        self.query == query
+            && self.regex == regex
+            && self.case_sensitive == case_sensitive
+            && self.whole_word == whole_word
+    }
+
+    fn set_form(
+        &mut self,
+        query: String,
+        regex: bool,
+        case_sensitive: bool,
+        whole_word: bool,
+    ) -> u64 {
+        self.query = query;
+        self.regex = regex;
+        self.case_sensitive = case_sensitive;
+        self.whole_word = whole_word;
+        self.advance()
+    }
+
+    fn clear(&mut self) -> u64 {
+        self.query.clear();
+        self.regex = false;
+        self.case_sensitive = false;
+        self.whole_word = false;
+        self.advance()
+    }
+
+    fn advance(&mut self) -> u64 {
+        self.generation = self.generation.wrapping_add(1).max(1);
+        self.generation
+    }
+}
+
+#[derive(Component, Default, Clone)]
+struct ExplorerSearchResults {
+    root: String,
+    files: Vec<ExplorerSearchFile>,
+    capped: bool,
+    collapsed: Vec<String>,
+    opened: String,
+}
 
 #[derive(Component)]
 struct GlobalSearchDirty;
-
-#[derive(EntityEvent)]
-struct SearchFormChanged {
-    #[event_target]
-    entity: Entity,
-    query: String,
-    regex: bool,
-    case_sensitive: bool,
-    whole_word: bool,
-}
 
 #[derive(Component)]
 struct PendingGlobalSearch {
@@ -73,10 +152,12 @@ struct PendingGlobalSearch {
 }
 
 impl PendingGlobalSearch {
+    const RETRY_LIMIT: u8 = 120;
+
     fn new(request: GlobalSearchRequest) -> Self {
         Self {
             request,
-            retries_left: GLOBAL_SEARCH_RETRY_LIMIT,
+            retries_left: Self::RETRY_LIMIT,
         }
     }
 
@@ -86,13 +167,12 @@ impl PendingGlobalSearch {
     }
 }
 
-const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
-
 type GlobalSearchDirtyReady = (
-    With<GlobalSearchState>,
+    With<ExplorerSearchQuery>,
     With<GlobalSearchDirty>,
     With<vmux_ecs::page::PageReady>,
 );
+
 fn goto(
     trigger: On<UiInput<ExplorerGoto>>,
     views: Query<&FileView>,
@@ -120,7 +200,7 @@ fn queue(mut reader: MessageReader<GlobalSearchRequest>, mut commands: Commands)
 fn apply(
     mut pending: Query<(Entity, &mut PendingGlobalSearch)>,
     views: Query<(Entity, &FileView, Option<&ChildOf>)>,
-    searches: Query<&GlobalSearchState>,
+    mut queries: Query<&mut ExplorerSearchQuery>,
     visibility: Query<&StackExplorerVisibility>,
     panel: Single<&ExplorerPanelDefaults>,
     mut commands: Commands,
@@ -137,11 +217,13 @@ fn apply(
             continue;
         };
         let scope = parent.map(ChildOf::parent).unwrap_or(entity);
-        if let Ok(search) = searches.get(entity)
-            && (search.0.query != request.query
-                || search.0.regex != request.regex
-                || search.0.case_sensitive != request.case_sensitive
-                || search.0.whole_word != request.whole_word)
+        if let Ok(search) = queries.get(entity)
+            && !search.matches_form(
+                &request.query,
+                request.regex,
+                request.case_sensitive,
+                request.whole_word,
+            )
         {
             commands.entity(pending_entity).despawn();
             continue;
@@ -162,106 +244,213 @@ fn apply(
             }
         }
         let request = pending_request.request.clone();
-        commands.entity(entity).insert((
-            GlobalSearchState(ExplorerSearchEvent {
-                root: request.root,
+        if let Ok(mut query) = queries.get_mut(entity) {
+            query.query = request.query;
+            query.regex = request.regex;
+            query.case_sensitive = request.case_sensitive;
+            query.whole_word = request.whole_word;
+        } else {
+            commands.entity(entity).insert(ExplorerSearchQuery {
                 query: request.query,
                 regex: request.regex,
                 case_sensitive: request.case_sensitive,
                 whole_word: request.whole_word,
+                generation: 1,
+            });
+        }
+        commands.entity(entity).insert((
+            ExplorerSearchResults {
+                root: request.root,
                 files: request.files,
                 capped: request.capped,
                 collapsed: Vec::new(),
                 opened: String::new(),
-            }),
+            },
             GlobalSearchDirty,
         ));
         commands.entity(pending_entity).despawn();
     }
 }
 
-fn emit(
-    query: Query<(Entity, &GlobalSearchState), GlobalSearchDirtyReady>,
-    browsers: NonSend<Browsers>,
+fn adopt_completed(
+    trigger: On<ExplorerSearchCompleted>,
+    views: Query<(Entity, Option<&ChildOf>), With<FileView>>,
+    queries: Query<&ExplorerSearchQuery>,
+    visibility: Query<&StackExplorerVisibility>,
+    panel: Option<Single<&ExplorerPanelDefaults>>,
     mut commands: Commands,
 ) {
-    for (entity, search) in &query {
+    let entity = trigger.entity;
+    let Ok(query) = queries.get(entity) else {
+        return;
+    };
+    if query.generation != trigger.generation
+        || !query.matches_form(
+            &trigger.query,
+            trigger.regex,
+            trigger.case_sensitive,
+            trigger.whole_word,
+        )
+    {
+        return;
+    }
+    if let Ok((_, parent)) = views.get(entity) {
+        let scope = parent.map(ChildOf::parent).unwrap_or(entity);
+        let default_visible = panel.is_some_and(|panel| panel.default_visible);
+        let explorer_visible = visibility
+            .get(scope)
+            .map(|state| state.visible)
+            .unwrap_or(default_visible);
+        if !explorer_visible {
+            commands
+                .entity(scope)
+                .insert(StackExplorerVisibility { visible: true });
+            for (view, parent) in &views {
+                let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
+                if view_scope == scope {
+                    commands.entity(view).remove::<ExplorerPanelSent>();
+                }
+            }
+        }
+    }
+    commands.entity(entity).insert((
+        ExplorerSearchResults {
+            root: trigger.root.clone(),
+            files: trigger.files.clone(),
+            capped: trigger.capped,
+            collapsed: Vec::new(),
+            opened: String::new(),
+        },
+        GlobalSearchDirty,
+    ));
+}
+
+fn emit(
+    query: Query<
+        (Entity, &ExplorerSearchQuery, Option<&ExplorerSearchResults>),
+        GlobalSearchDirtyReady,
+    >,
+    browsers: crate::host::delivery::Surface,
+    mut commands: Commands,
+) {
+    if !browsers.available() {
+        return;
+    }
+    for (entity, form, results) in &query {
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &search.0));
+        let event = match results {
+            Some(results) => ExplorerSearchEvent {
+                root: results.root.clone(),
+                query: form.query.clone(),
+                regex: form.regex,
+                case_sensitive: form.case_sensitive,
+                whole_word: form.whole_word,
+                files: results.files.clone(),
+                capped: results.capped,
+                collapsed: results.collapsed.clone(),
+                opened: results.opened.clone(),
+            },
+            None => ExplorerSearchEvent {
+                query: form.query.clone(),
+                regex: form.regex,
+                case_sensitive: form.case_sensitive,
+                whole_word: form.whole_word,
+                ..Default::default()
+            },
+        };
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &event));
         commands.entity(entity).remove::<GlobalSearchDirty>();
     }
 }
 
-fn draft(trigger: On<UiInput<ExplorerSearchDraftRequest>>, mut commands: Commands) {
-    let request = &trigger.event().payload;
-    commands.trigger(SearchFormChanged {
-        entity: trigger.event().webview,
-        query: request.query.clone(),
-        regex: request.regex,
-        case_sensitive: request.case_sensitive,
-        whole_word: request.whole_word,
-    });
-}
-
-fn begin(trigger: On<UiInput<ExplorerSearchRequest>>, mut commands: Commands) {
-    let request = &trigger.event().payload;
-    commands.trigger(SearchFormChanged {
-        entity: trigger.event().webview,
-        query: request.query.clone(),
-        regex: request.regex,
-        case_sensitive: request.case_sensitive,
-        whole_word: request.whole_word,
-    });
-}
-
-fn update_form(
-    trigger: On<SearchFormChanged>,
-    mut searches: Query<&mut GlobalSearchState>,
-    mut commands: Commands,
-) {
-    let event = trigger.event();
-    if let Ok(mut search) = searches.get_mut(event.entity) {
-        if search.0.query == event.query
-            && search.0.regex == event.regex
-            && search.0.case_sensitive == event.case_sensitive
-            && search.0.whole_word == event.whole_word
-        {
-            return;
-        }
-        search.0.root.clear();
-        search.0.query.clone_from(&event.query);
-        search.0.regex = event.regex;
-        search.0.case_sensitive = event.case_sensitive;
-        search.0.whole_word = event.whole_word;
-        search.0.files.clear();
-        search.0.capped = false;
-        search.0.collapsed.clear();
-        search.0.opened.clear();
-    } else {
-        commands
-            .entity(event.entity)
-            .insert(GlobalSearchState(ExplorerSearchEvent {
-                query: event.query.clone(),
-                regex: event.regex,
-                case_sensitive: event.case_sensitive,
-                whole_word: event.whole_word,
-                ..Default::default()
-            }));
-    }
-    commands.entity(event.entity).insert(GlobalSearchDirty);
-}
-
-fn open(
-    trigger: On<UiInput<ExplorerSearchOpen>>,
-    mut searches: Query<&mut GlobalSearchState>,
+fn draft(
+    trigger: On<UiInput<ExplorerSearchDraftRequest>>,
+    mut queries: Query<&mut ExplorerSearchQuery>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
-    if let Ok(mut search) = searches.get_mut(entity) {
-        search.0.opened =
+    if let Ok(mut query) = queries.get_mut(entity) {
+        if query.matches_form(
+            &request.query,
+            request.regex,
+            request.case_sensitive,
+            request.whole_word,
+        ) {
+            return;
+        }
+        query.set_form(
+            request.query.clone(),
+            request.regex,
+            request.case_sensitive,
+            request.whole_word,
+        );
+    } else {
+        commands.entity(entity).insert(ExplorerSearchQuery {
+            query: request.query.clone(),
+            regex: request.regex,
+            case_sensitive: request.case_sensitive,
+            whole_word: request.whole_word,
+            generation: 1,
+        });
+    }
+    commands.trigger(ExplorerSearchCancelRequest { entity });
+    commands
+        .entity(entity)
+        .remove::<ExplorerSearchResults>()
+        .insert(GlobalSearchDirty);
+}
+
+fn begin(
+    trigger: On<UiInput<ExplorerSearchRequest>>,
+    mut queries: Query<&mut ExplorerSearchQuery>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let generation = if let Ok(mut query) = queries.get_mut(entity) {
+        query.set_form(
+            request.query.clone(),
+            request.regex,
+            request.case_sensitive,
+            request.whole_word,
+        )
+    } else {
+        commands.entity(entity).insert(ExplorerSearchQuery {
+            query: request.query.clone(),
+            regex: request.regex,
+            case_sensitive: request.case_sensitive,
+            whole_word: request.whole_word,
+            generation: 1,
+        });
+        1
+    };
+    commands.trigger(ExplorerSearchCancelRequest { entity });
+    commands
+        .entity(entity)
+        .remove::<ExplorerSearchResults>()
+        .insert(GlobalSearchDirty);
+    commands.trigger(ExplorerSearchRunRequest {
+        entity,
+        generation,
+        query: request.query.clone(),
+        regex: request.regex,
+        case_sensitive: request.case_sensitive,
+        whole_word: request.whole_word,
+    });
+}
+
+fn open(
+    trigger: On<UiInput<ExplorerSearchOpen>>,
+    mut results: Query<&mut ExplorerSearchResults>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let request = &trigger.event().payload;
+    if let Ok(mut search) = results.get_mut(entity) {
+        search.opened =
             vmux_ecs::event::ExplorerSearchMatch::key_at(&request.path, request.line, request.col);
         commands.entity(entity).insert(GlobalSearchDirty);
     }
@@ -279,70 +468,75 @@ fn open(
 
 fn toggle_group(
     trigger: On<UiInput<ExplorerSearchGroupToggle>>,
-    mut searches: Query<&mut GlobalSearchState>,
+    mut results: Query<&mut ExplorerSearchResults>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(mut search) = searches.get_mut(entity) else {
+    let Ok(mut search) = results.get_mut(entity) else {
         return;
     };
     let path = &trigger.event().payload.path;
-    if let Some(index) = search.0.collapsed.iter().position(|entry| entry == path) {
-        search.0.collapsed.remove(index);
+    if let Some(index) = search.collapsed.iter().position(|entry| entry == path) {
+        search.collapsed.remove(index);
     } else {
-        search.0.collapsed.push(path.clone());
+        search.collapsed.push(path.clone());
     }
     commands.entity(entity).insert(GlobalSearchDirty);
 }
 
 fn collapse_all(
     trigger: On<UiInput<ExplorerSearchCollapseAll>>,
-    mut searches: Query<&mut GlobalSearchState>,
+    mut results: Query<&mut ExplorerSearchResults>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(mut search) = searches.get_mut(entity) else {
+    let Ok(mut search) = results.get_mut(entity) else {
         return;
     };
-    let mut collapsed = Vec::with_capacity(search.0.files.len());
-    for file in &search.0.files {
+    let mut collapsed = Vec::with_capacity(search.files.len());
+    for file in &search.files {
         collapsed.push(file.path.clone());
     }
-    search.0.collapsed = collapsed;
+    search.collapsed = collapsed;
     commands.entity(entity).insert(GlobalSearchDirty);
 }
 
 fn clear(
     trigger: On<UiInput<ExplorerSearchClear>>,
-    mut searches: Query<&mut GlobalSearchState>,
+    mut queries: Query<&mut ExplorerSearchQuery>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if let Ok(mut search) = searches.get_mut(entity) {
-        search.0 = ExplorerSearchEvent::default();
+    if let Ok(mut query) = queries.get_mut(entity) {
+        query.clear();
     } else {
-        commands
-            .entity(entity)
-            .insert(GlobalSearchState(ExplorerSearchEvent::default()));
+        commands.entity(entity).insert(ExplorerSearchQuery {
+            generation: 1,
+            ..Default::default()
+        });
     }
-    commands.entity(entity).insert(GlobalSearchDirty);
+    commands.trigger(ExplorerSearchCancelRequest { entity });
+    commands
+        .entity(entity)
+        .remove::<ExplorerSearchResults>()
+        .insert(GlobalSearchDirty);
 }
 
 fn navigate(
     trigger: On<FileNavigateRequest>,
-    mut searches: Query<&mut GlobalSearchState>,
+    mut results: Query<&mut ExplorerSearchResults>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let Ok(mut search) = searches.get_mut(entity) else {
+    let Ok(mut search) = results.get_mut(entity) else {
         return;
     };
     let path = trigger.event().path.to_string_lossy();
     let prefix = format!("{path}:");
-    if search.0.opened.starts_with(&prefix) {
+    if search.opened.starts_with(&prefix) {
         return;
     }
-    search.0.opened.clear();
+    search.opened.clear();
     commands.entity(entity).insert(GlobalSearchDirty);
 }
 
@@ -351,6 +545,7 @@ mod tests {
     use super::*;
     use crate::contract::ContractPlugin;
     use bevy::ecs::message::Messages;
+    use bevy_cef::prelude::{BinIpcEventRawBuffer, Browsers};
 
     use crate::lsp::manager::LspGoto;
 
@@ -418,8 +613,8 @@ mod tests {
                 .unwrap()
                 .visible
         );
-        assert!(app.world().get::<GlobalSearchState>(first).is_some());
-        assert!(app.world().get::<GlobalSearchState>(second).is_none());
+        assert!(app.world().get::<ExplorerSearchResults>(first).is_some());
+        assert!(app.world().get::<ExplorerSearchResults>(second).is_none());
         assert_eq!(
             app.world_mut()
                 .query::<&PendingGlobalSearch>()
@@ -473,7 +668,7 @@ mod tests {
             .id();
         app.update();
 
-        assert!(app.world().get::<GlobalSearchState>(view).is_some());
+        assert!(app.world().get::<ExplorerSearchResults>(view).is_some());
         assert_eq!(
             app.world_mut()
                 .query::<&PendingGlobalSearch>()
@@ -481,6 +676,60 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn stale_completed_search_generation_is_refused() {
+        let mut app = App::new();
+        app.world_mut().spawn(ExplorerPanelDefaults {
+            default_visible: false,
+            width: 240,
+            loaded: true,
+        });
+        app.add_plugins((MinimalPlugins, ContractPlugin, SearchPlugin))
+            .init_resource::<BinIpcEventRawBuffer>();
+        app.world_mut().insert_non_send(Browsers::default());
+        let view = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/project/a.rs"),
+            })
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ExplorerSearchRequest {
+                query: "first".to_string(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: false,
+            },
+        });
+        app.world_mut().flush();
+        let first_generation = app
+            .world()
+            .get::<ExplorerSearchQuery>(view)
+            .unwrap()
+            .generation;
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ExplorerSearchClear,
+        });
+        app.world_mut().trigger(ExplorerSearchCompleted {
+            entity: view,
+            generation: first_generation,
+            root: "/project".to_string(),
+            query: "first".to_string(),
+            regex: false,
+            case_sensitive: false,
+            whole_word: false,
+            files: vec![ExplorerSearchFile {
+                path: "/project/a.rs".to_string(),
+                matches: Vec::new(),
+                capped: false,
+            }],
+            capped: false,
+        });
+        assert!(app.world().get::<ExplorerSearchResults>(view).is_none());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{App, Changed, Commands, Plugin};
+use bevy_cef::prelude::UiInput;
 use vmux_ecs::FileUiStateWrite;
 use vmux_ecs::event::{
     ExplorerFilesToggle, ExplorerOpenEditorsToggle, ExplorerOutlineToggle, ExplorerPanelEvent,
@@ -16,10 +17,6 @@ use vmux_setting::{
 
 use super::{ExplorerPanelDefaults, ExplorerPanelSent, RevealCurrent};
 use crate::host::editor::FileView;
-
-const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
-const EDITOR_MIN_WIDTH_PX: u32 = 320;
-const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
 
 pub(super) struct PanelPlugin;
 
@@ -73,6 +70,12 @@ struct ExplorerPanelViewport {
     width: u32,
     visible: bool,
     user_chose: bool,
+}
+
+impl ExplorerPanelViewport {
+    const SQUEEZE_TOLERANCE_PX: u32 = 160;
+    const EDITOR_MIN_WIDTH_PX: u32 = 320;
+    const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
 }
 
 #[derive(Component)]
@@ -159,12 +162,12 @@ fn emit(
     visibility: Query<&StackExplorerVisibility>,
     panel_views: Query<&StackExplorerView>,
     panel: Single<&ExplorerPanelDefaults>,
-    browsers: Option<NonSend<Browsers>>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
-    let Some(browsers) = browsers else {
+    if !browsers.available() {
         return;
-    };
+    }
     for (entity, child_of, viewport) in &views {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -452,13 +455,16 @@ fn reflow(
             .get(scope)
             .map(|state| state.visible)
             .unwrap_or(panel.default_visible);
-        let mut needed = NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(panel.width);
+        let mut needed =
+            ExplorerPanelViewport::NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(panel.width);
         if viewport.visible {
-            needed = needed.saturating_sub(EXPLORER_SQUEEZE_TOLERANCE_PX);
+            needed = needed.saturating_sub(ExplorerPanelViewport::SQUEEZE_TOLERANCE_PX);
         }
         let fits = viewport.width >= needed;
-        let leaves_editor_usable =
-            viewport.width >= panel.width.saturating_add(EDITOR_MIN_WIDTH_PX);
+        let leaves_editor_usable = viewport.width
+            >= panel
+                .width
+                .saturating_add(ExplorerPanelViewport::EDITOR_MIN_WIDTH_PX);
         if auto_show.is_some() && fits {
             preferred = true;
             viewport.visible = true;

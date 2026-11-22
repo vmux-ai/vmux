@@ -1,46 +1,280 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Changed, Commands, Plugin};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::UiInput;
 use vmux_ecs::event::*;
 
 use super::panel::StackExplorerVisibility;
 use super::{
-    ExplorerPanelDefaults, ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty,
-    ExplorerTreeUsers, IDLE_TREE_CAPACITY, RevealCurrent, UsesExplorerTree,
+    ExplorerDirectory, ExplorerDirectoryEntries, ExplorerDirectoryExpanded,
+    ExplorerDirectoryLoading, ExplorerDirsChanged, ExplorerPanelDefaults, ExplorerState,
+    ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, ExplorerTreeUsers, RevealCurrent,
+    UsesExplorerTree,
 };
 use crate::host::editor::FileView;
 use crate::host::file_lifecycle::FileDir;
 
-#[derive(Component)]
-pub(crate) struct ExplorerDirLoadRequest {
-    tree: Entity,
-    path: PathBuf,
+pub(super) struct TreePlugin;
+
+impl Plugin for TreePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ExplorerDirsChanged>()
+            .add_systems(
+                Update,
+                (
+                    init_state,
+                    refresh_changed_dirs,
+                    start_dir_loads,
+                    drain_dir_loads,
+                    reveal_on_file_change,
+                    emit,
+                    prune_idle_trees,
+                )
+                    .chain(),
+            )
+            .add_observer(mark_dirty)
+            .add_observer(request_reveal)
+            .add_observer(reveal_current)
+            .add_observer(collapse_all)
+            .add_observer(toggle)
+            .add_observer(prefetch)
+            .add_observer(refresh)
+            .add_observer(evict_subtree)
+            .add_observer(refresh_directory);
+    }
 }
 
-impl ExplorerDirLoadRequest {
-    pub(crate) fn new(tree: Entity, path: PathBuf) -> Self {
-        Self { tree, path }
-    }
+#[derive(EntityEvent)]
+pub(super) struct ExplorerTreeSubtreeEvict {
+    #[event_target]
+    pub(super) tree: Entity,
+    pub(super) path: PathBuf,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct ExplorerTreeDirRefresh {
+    #[event_target]
+    pub(super) tree: Entity,
+    pub(super) path: PathBuf,
+}
+
+#[derive(Component)]
+struct ExplorerDirLoadRequest {
+    tree: Entity,
+    directory: Entity,
+    path: PathBuf,
+    generation: u64,
 }
 
 #[derive(Component)]
 struct ExplorerDirLoadTask {
     tree: Entity,
-    task: Task<(PathBuf, Vec<FileDirEntry>)>,
+    directory: Entity,
+    path: PathBuf,
+    generation: u64,
+    task: Task<Vec<FileDirEntry>>,
 }
 
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_ecs::page::PageReady>);
 
+type DirectoryQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static ChildOf,
+        &'static ExplorerDirectory,
+        Has<ExplorerDirectoryExpanded>,
+        Option<&'static ExplorerDirectoryEntries>,
+        Option<&'static ExplorerDirectoryLoading>,
+    ),
+>;
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct ExplorerTreeLookup<'w, 's> {
+    trees: Query<'w, 's, &'static ExplorerTree>,
+    directories: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static ExplorerDirectory,
+            Option<&'static ExplorerDirectoryEntries>,
+        ),
+    >,
+}
+
+impl ExplorerTreeLookup<'_, '_> {
+    pub(super) fn create_parent(&self, tree: Entity, selected: &Path) -> Option<PathBuf> {
+        let tree_state = self.trees.get(tree).ok()?;
+        let root = tree_state.root();
+        if selected.as_os_str().is_empty() {
+            return Some(root.to_path_buf());
+        }
+        if selected == root {
+            return Some(selected.to_path_buf());
+        }
+        for (parent, dir, entries) in &self.directories {
+            if parent.parent() != tree {
+                continue;
+            }
+            if dir.path == selected {
+                return Some(selected.to_path_buf());
+            }
+            if let Some(entries) = entries
+                && entries
+                    .0
+                    .iter()
+                    .any(|entry| entry.is_dir && Path::new(&entry.path) == selected)
+            {
+                return Some(selected.to_path_buf());
+            }
+        }
+        let parent = selected
+            .parent()
+            .filter(|parent| parent.starts_with(root))
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| root.to_path_buf());
+        Some(parent)
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct ExplorerTreeActions<'w, 's> {
-    trees: Query<'w, 's, &'static mut ExplorerTree>,
-    browsers: Option<NonSend<'w, Browsers>>,
+    trees: Query<'w, 's, (Entity, &'static mut ExplorerTree)>,
+    directories: DirectoryQuery<'w, 's>,
+    browsers: crate::host::delivery::Surface<'w, 's>,
     commands: Commands<'w, 's>,
 }
 
 impl ExplorerTreeActions<'_, '_> {
+    fn find_directory(
+        &self,
+        tree_entity: Entity,
+        path: &Path,
+    ) -> Option<(Entity, bool, bool, bool)> {
+        for (entity, parent, dir, expanded, entries, loading) in &self.directories {
+            if parent.parent() == tree_entity && dir.path == path {
+                return Some((entity, expanded, entries.is_some(), loading.is_some()));
+            }
+        }
+        None
+    }
+
+    fn ensure_and_load(
+        &mut self,
+        tree_entity: Entity,
+        path: &Path,
+        expand: bool,
+        force: bool,
+    ) -> bool {
+        let existing = self.find_directory(tree_entity, path);
+        let Ok((_, mut tree)) = self.trees.get_mut(tree_entity) else {
+            return false;
+        };
+        tree.use_now();
+        let mut changed = false;
+        match existing {
+            Some((dir_entity, expanded, has_entries, is_loading)) => {
+                if expand && !expanded {
+                    self.commands
+                        .entity(dir_entity)
+                        .insert(ExplorerDirectoryExpanded);
+                    changed = true;
+                }
+                let should_load = force || (!is_loading && !has_entries);
+                if should_load && (!is_loading || force) {
+                    let generation = tree.next_generation();
+                    self.commands
+                        .entity(dir_entity)
+                        .insert(ExplorerDirectoryLoading { generation });
+                    self.commands.spawn(ExplorerDirLoadRequest {
+                        tree: tree_entity,
+                        directory: dir_entity,
+                        path: path.to_path_buf(),
+                        generation,
+                    });
+                    changed = true;
+                }
+            }
+            None => {
+                let generation = tree.next_generation();
+                let mut spawned = self.commands.spawn((
+                    ChildOf(tree_entity),
+                    ExplorerDirectory {
+                        path: path.to_path_buf(),
+                    },
+                    ExplorerDirectoryLoading { generation },
+                ));
+                if expand {
+                    spawned.insert(ExplorerDirectoryExpanded);
+                }
+                let dir_entity = spawned.id();
+                self.commands.spawn(ExplorerDirLoadRequest {
+                    tree: tree_entity,
+                    directory: dir_entity,
+                    path: path.to_path_buf(),
+                    generation,
+                });
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn rows(&self, tree_entity: Entity, root: &Path) -> Vec<TreeRow> {
+        let mut index: HashMap<&Path, (bool, bool, Option<&[FileDirEntry]>)> = HashMap::new();
+        for (_, parent, dir, expanded, entries, loading) in &self.directories {
+            if parent.parent() != tree_entity {
+                continue;
+            }
+            index.insert(
+                dir.path.as_path(),
+                (
+                    expanded,
+                    loading.is_some(),
+                    entries.map(|entries| entries.0.as_slice()),
+                ),
+            );
+        }
+        let mut rows = Vec::new();
+        Self::append_rows(&index, root, 0, &mut rows);
+        rows
+    }
+
+    fn append_rows(
+        index: &HashMap<&Path, (bool, bool, Option<&[FileDirEntry]>)>,
+        directory: &Path,
+        depth: u16,
+        rows: &mut Vec<TreeRow>,
+    ) {
+        let Some((_, _, Some(entries))) = index.get(directory) else {
+            return;
+        };
+        for entry in *entries {
+            let path = Path::new(&entry.path);
+            let (expanded, loading) = match index.get(path) {
+                Some((expanded, loading, _)) => (entry.is_dir && *expanded, *loading),
+                None => (false, false),
+            };
+            rows.push(TreeRow {
+                name: entry.name.clone(),
+                path: entry.path.clone(),
+                depth,
+                is_dir: entry.is_dir,
+                expanded,
+                loading,
+            });
+            if expanded {
+                Self::append_rows(index, path, depth + 1, rows);
+            }
+        }
+    }
+
     fn reveal(
         &mut self,
         entity: Entity,
@@ -48,36 +282,25 @@ impl ExplorerTreeActions<'_, '_> {
         state: &mut ExplorerState,
         tree_entity: Entity,
     ) {
-        let Ok(mut tree) = self.trees.get_mut(tree_entity) else {
-            return;
+        let root = match self.trees.get(tree_entity) {
+            Ok((_, tree)) => tree.root().to_path_buf(),
+            Err(_) => return,
         };
-        let mut tree_changed = false;
         let current_dir = if current.is_dir() {
             current
         } else {
             current.parent().unwrap_or(current)
         };
-        let Ok(relative) = current_dir.strip_prefix(&tree.root) else {
+        let Ok(relative) = current_dir.strip_prefix(&root) else {
             return;
         };
-        let mut dir = tree.root.clone();
-        tree_changed |= tree.expanded.insert(dir.clone());
-        if tree.begin_dir_load(&dir, false) {
-            self.commands
-                .spawn(ExplorerDirLoadRequest::new(tree_entity, dir.clone()));
-            tree_changed = true;
-        }
+        let mut dir = root;
+        let mut tree_changed = self.ensure_and_load(tree_entity, &dir, true, false);
         for component in relative.components() {
             dir.push(component);
-            tree_changed |= tree.expanded.insert(dir.clone());
-            if tree.begin_dir_load(&dir, false) {
-                self.commands
-                    .spawn(ExplorerDirLoadRequest::new(tree_entity, dir.clone()));
-                tree_changed = true;
-            }
+            tree_changed |= self.ensure_and_load(tree_entity, &dir, true, false);
         }
         if tree_changed {
-            tree.use_now();
             self.commands.trigger(ExplorerTreeChanged(tree_entity));
             state.focus_path = Some(current.to_path_buf());
             self.commands.entity(entity).insert(ExplorerTreeDirty);
@@ -91,41 +314,12 @@ impl ExplorerTreeActions<'_, '_> {
         reveal: ExplorerReveal,
         state: &mut ExplorerState,
     ) {
-        let Some(browsers) = self.browsers.as_deref() else {
-            return;
-        };
-        if !browsers.can_emit_to(&entity) {
+        if !self.browsers.can_emit_to(&entity) {
             return;
         }
         let effect = state.focus_effect(current, reveal);
         self.commands
             .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &effect));
-    }
-}
-
-pub(super) struct TreePlugin;
-
-impl Plugin for TreePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                init_state,
-                start_dir_loads,
-                drain_dir_loads,
-                reveal_on_file_change,
-                emit,
-                prune_idle_trees,
-            )
-                .chain(),
-        )
-        .add_observer(mark_dirty)
-        .add_observer(request_reveal)
-        .add_observer(reveal_current)
-        .add_observer(collapse_all)
-        .add_observer(toggle)
-        .add_observer(prefetch)
-        .add_observer(refresh);
     }
 }
 
@@ -136,63 +330,114 @@ fn init_state(
         &mut ExplorerState,
         Option<&UsesExplorerTree>,
     )>,
-    mut trees: Query<(Entity, &mut ExplorerTree)>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     for (entity, view, mut state, tree_of) in &mut query {
         let root = FileDir::project_root(&view.path);
         if let Some(tree_of) = tree_of
-            && let Ok((_, tree)) = trees.get_mut(tree_of.0)
+            && let Ok((_, tree)) = actions.trees.get(tree_of.0)
             && tree.answers_for(&root)
         {
             continue;
         }
         state.focus_path = None;
         let mut selected = None;
-        for (tree_entity, mut tree) in &mut trees {
-            if !tree.answers_for(&root) {
-                continue;
+        for (tree_entity, tree) in &actions.trees {
+            if tree.answers_for(&root) {
+                selected = Some(tree_entity);
+                break;
             }
-            tree.use_now();
-            tree.expanded.insert(root.clone());
-            if tree.begin_dir_load(&root, false) {
-                commands.spawn(ExplorerDirLoadRequest::new(tree_entity, root.clone()));
-            }
-            selected = Some(tree_entity);
-            break;
         }
         let tree_entity = match selected {
-            Some(tree_entity) => tree_entity,
+            Some(tree_entity) => {
+                actions.ensure_and_load(tree_entity, &root, true, false);
+                tree_entity
+            }
             None => {
                 let mut tree = ExplorerTree::new(root.clone());
-                tree.expanded.insert(root.clone());
-                tree.begin_dir_load(&root, false);
-                let tree_entity = commands.spawn(tree).id();
-                commands.spawn(ExplorerDirLoadRequest::new(tree_entity, root));
+                let generation = tree.next_generation();
+                let tree_entity = actions.commands.spawn(tree).id();
+                let dir_entity = actions
+                    .commands
+                    .spawn((
+                        ChildOf(tree_entity),
+                        ExplorerDirectory { path: root.clone() },
+                        ExplorerDirectoryExpanded,
+                        ExplorerDirectoryLoading { generation },
+                    ))
+                    .id();
+                actions.commands.spawn(ExplorerDirLoadRequest {
+                    tree: tree_entity,
+                    directory: dir_entity,
+                    path: root,
+                    generation,
+                });
                 tree_entity
             }
         };
-        commands
+        actions
+            .commands
             .entity(entity)
             .insert((UsesExplorerTree(tree_entity), ExplorerTreeDirty));
     }
 }
 
+fn refresh_changed_dirs(
+    mut changes: MessageReader<ExplorerDirsChanged>,
+    mut actions: ExplorerTreeActions,
+) {
+    let mut changed_dirs = std::collections::HashSet::new();
+    for event in changes.read() {
+        for dir in &event.0 {
+            changed_dirs.insert(dir.clone());
+        }
+    }
+    if changed_dirs.is_empty() {
+        return;
+    }
+    let mut targets = Vec::new();
+    for (_, parent, dir, _, entries, _) in &actions.directories {
+        if entries.is_none() {
+            continue;
+        }
+        let canonical = vmux_path::PathIdentity::resolve(&dir.path).into_path_buf();
+        if changed_dirs.contains(&canonical) {
+            targets.push((parent.parent(), dir.path.clone()));
+        }
+    }
+    let mut notified = std::collections::HashSet::new();
+    for (tree_entity, path) in targets {
+        if actions.ensure_and_load(tree_entity, &path, false, true) && notified.insert(tree_entity)
+        {
+            actions.commands.trigger(ExplorerTreeChanged(tree_entity));
+        }
+    }
+}
+
 fn start_dir_loads(
     requests: Query<(Entity, &ExplorerDirLoadRequest), Added<ExplorerDirLoadRequest>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     for (entity, request) in &requests {
         let path = request.path.clone();
+        let wake = wake.clone();
         let task = IoTaskPool::get().spawn(async move {
             let entries = FileDir::read(&path);
-            (path, entries)
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            entries
         });
         commands
             .entity(entity)
             .remove::<ExplorerDirLoadRequest>()
             .insert(ExplorerDirLoadTask {
                 tree: request.tree,
+                directory: request.directory,
+                path: request.path.clone(),
+                generation: request.generation,
                 task,
             });
     }
@@ -200,41 +445,47 @@ fn start_dir_loads(
 
 fn drain_dir_loads(
     mut tasks: Query<(Entity, &mut ExplorerDirLoadTask)>,
-    mut trees: Query<&mut ExplorerTree>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     for (task_entity, mut pending) in &mut tasks {
-        let Some((path, entries)) = future::block_on(future::poll_once(&mut pending.task)) else {
+        let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        commands.entity(task_entity).despawn();
-        let Ok(mut tree) = trees.get_mut(pending.tree) else {
+        actions.commands.entity(task_entity).despawn();
+        let Ok((_, parent, _, expanded, _, loading)) = actions.directories.get(pending.directory)
+        else {
             continue;
         };
-        if !tree.loading.remove(&path) {
+        if parent.parent() != pending.tree
+            || loading.is_none_or(|state| state.generation != pending.generation)
+        {
             continue;
         }
-        let warm_ahead = tree.expanded.contains(&path);
-        tree.children.insert(path.clone(), entries);
+        let Ok((_, mut tree)) = actions.trees.get_mut(pending.tree) else {
+            continue;
+        };
         tree.use_now();
-        commands.trigger(ExplorerTreeChanged(pending.tree));
-        if !warm_ahead {
-            continue;
-        }
         let mut ahead = Vec::new();
-        for entry in tree.children.get(&path).into_iter().flatten() {
-            if !entry.is_dir {
-                continue;
+        if expanded {
+            for entry in &entries {
+                if !entry.is_dir {
+                    continue;
+                }
+                if ahead.len() == ExplorerTree::WARM_AHEAD {
+                    break;
+                }
+                ahead.push(PathBuf::from(&entry.path));
             }
-            if ahead.len() == EXPLORER_WARM_AHEAD {
-                break;
-            }
-            ahead.push(PathBuf::from(&entry.path));
         }
+        let _ = &pending.path;
+        actions
+            .commands
+            .entity(pending.directory)
+            .remove::<ExplorerDirectoryLoading>()
+            .insert(ExplorerDirectoryEntries(entries));
+        actions.commands.trigger(ExplorerTreeChanged(pending.tree));
         for dir in ahead {
-            if tree.begin_dir_load(&dir, false) {
-                commands.spawn(ExplorerDirLoadRequest::new(pending.tree, dir));
-            }
+            actions.ensure_and_load(pending.tree, &dir, false, false);
         }
     }
 }
@@ -266,11 +517,11 @@ fn prune_idle_trees(
             idle.push((tree.used, entity));
         }
     }
-    if idle.len() <= IDLE_TREE_CAPACITY {
+    if idle.len() <= ExplorerTree::IDLE_CAPACITY {
         return;
     }
     idle.sort_by_key(|(used, _)| *used);
-    let drop_count = idle.len() - IDLE_TREE_CAPACITY;
+    let drop_count = idle.len() - ExplorerTree::IDLE_CAPACITY;
     for (_, entity) in idle.into_iter().take(drop_count) {
         commands.entity(entity).despawn();
     }
@@ -301,23 +552,24 @@ fn emit(
     mut query: Query<(Entity, &FileView, &mut ExplorerState, &UsesExplorerTree), TreeDirtyReady>,
     mut actions: ExplorerTreeActions,
 ) {
-    if actions.browsers.is_none() {
+    if !actions.browsers.available() {
         return;
     }
     for (entity, view, mut state, tree_of) in &mut query {
-        if !actions
-            .browsers
-            .as_deref()
-            .is_some_and(|browsers| browsers.can_emit_to(&entity))
-        {
+        if !actions.browsers.can_emit_to(&entity) {
             continue;
         }
-        let Ok(tree) = actions.trees.get(tree_of.0) else {
+        let Ok((_, tree)) = actions.trees.get(tree_of.0) else {
             continue;
         };
-        let rows = tree.rows(&tree.root);
+        let root = tree.root().to_path_buf();
+        let root_name = tree.root_name();
+        let rows = actions.rows(tree_of.0, &root);
+        let root_loading = actions
+            .find_directory(tree_of.0, &root)
+            .is_some_and(|(_, _, _, loading)| loading);
         let focus_ready = state.focus_path.as_ref().is_some_and(|path| {
-            path == &tree.root || rows.iter().any(|row| Path::new(&row.path) == path)
+            path == &root || rows.iter().any(|row| Path::new(&row.path) == path)
         });
         let focus_path = if focus_ready {
             state.focus_path.take()
@@ -329,10 +581,10 @@ fn emit(
             .trigger(vmux_ecs::FileUiStateWrite::from_event(
                 entity,
                 &ExplorerTreeEvent {
-                    root_name: ExplorerRoot::name(&tree.root),
-                    root_path: tree.root.to_string_lossy().into_owned(),
+                    root_name,
+                    root_path: root.to_string_lossy().into_owned(),
                     current_path: view.path.to_string_lossy().into_owned(),
-                    loading: tree.is_loading(&tree.root),
+                    loading: root_loading,
                     rows,
                 },
             ));
@@ -346,80 +598,117 @@ fn emit(
     }
 }
 
-struct ExplorerRoot;
-
-impl ExplorerRoot {
-    fn name(root: &Path) -> String {
-        root.file_name()
-            .map(|name| name.to_string_lossy().to_uppercase())
-            .unwrap_or_else(|| root.to_string_lossy().to_uppercase())
-    }
-}
-
 fn toggle(
     trigger: On<UiInput<ExplorerTreeToggle>>,
     query: Query<&UsesExplorerTree>,
-    mut trees: Query<&mut ExplorerTree>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
     let Ok(tree_of) = query.get(entity) else {
         return;
     };
-    let Ok(mut tree) = trees.get_mut(tree_of.0) else {
+    let existing = actions.find_directory(tree_of.0, &path);
+    if let Some((dir_entity, true, _, _)) = existing {
+        if let Ok((_, mut tree)) = actions.trees.get_mut(tree_of.0) {
+            tree.use_now();
+        }
+        actions
+            .commands
+            .entity(dir_entity)
+            .remove::<ExplorerDirectoryExpanded>();
+        actions.commands.trigger(ExplorerTreeChanged(tree_of.0));
         return;
-    };
-    if !tree.expanded.remove(&path) {
-        if !tree.allows(&path) {
-            return;
-        }
-        tree.expanded.insert(path.clone());
-        if tree.begin_dir_load(&path, false) {
-            commands.spawn(ExplorerDirLoadRequest::new(tree_of.0, path));
-        }
     }
-    tree.use_now();
-    commands.trigger(ExplorerTreeChanged(tree_of.0));
+    let allowed = actions
+        .trees
+        .get(tree_of.0)
+        .is_ok_and(|(_, tree)| tree.allows(&path));
+    if !allowed {
+        return;
+    }
+    actions.ensure_and_load(tree_of.0, &path, true, false);
+    actions.commands.trigger(ExplorerTreeChanged(tree_of.0));
 }
 
 fn prefetch(
     trigger: On<UiInput<ExplorerTreePrefetch>>,
     query: Query<&UsesExplorerTree>,
-    mut trees: Query<&mut ExplorerTree>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
     let Ok(tree_of) = query.get(entity) else {
         return;
     };
-    let Ok(mut tree) = trees.get_mut(tree_of.0) else {
-        return;
-    };
-    if tree.allows(&path) && tree.begin_dir_load(&path, false) {
-        commands.spawn(ExplorerDirLoadRequest::new(tree_of.0, path));
-        commands.trigger(ExplorerTreeChanged(tree_of.0));
+    let allowed = actions
+        .trees
+        .get(tree_of.0)
+        .is_ok_and(|(_, tree)| tree.allows(&path));
+    if allowed && actions.ensure_and_load(tree_of.0, &path, false, false) {
+        actions.commands.trigger(ExplorerTreeChanged(tree_of.0));
     }
 }
 
 fn refresh(
     trigger: On<UiInput<ExplorerTreeRefresh>>,
     query: Query<&UsesExplorerTree>,
-    mut trees: Query<&mut ExplorerTree>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
     let Ok(tree_of) = query.get(entity) else {
         return;
     };
-    let Ok(mut tree) = trees.get_mut(tree_of.0) else {
+    let allowed = actions
+        .trees
+        .get(tree_of.0)
+        .is_ok_and(|(_, tree)| tree.allows(&path));
+    if !allowed {
+        return;
+    }
+    let mut targets = vec![path.clone()];
+    for (_, parent, dir, expanded, _, _) in &actions.directories {
+        if parent.parent() == tree_of.0
+            && expanded
+            && dir.path != path
+            && dir.path.starts_with(&path)
+        {
+            targets.push(dir.path.clone());
+        }
+    }
+    let mut changed = false;
+    for target in targets {
+        changed |= actions.ensure_and_load(tree_of.0, &target, false, true);
+    }
+    if changed {
+        actions.commands.trigger(ExplorerTreeChanged(tree_of.0));
+    }
+}
+
+fn evict_subtree(trigger: On<ExplorerTreeSubtreeEvict>, mut actions: ExplorerTreeActions) {
+    let tree_entity = trigger.tree;
+    let path = &trigger.path;
+    let Ok((_, mut tree)) = actions.trees.get_mut(tree_entity) else {
         return;
     };
-    if tree.allows(&path) && tree.begin_dir_load(&path, true) {
-        commands.spawn(ExplorerDirLoadRequest::new(tree_of.0, path));
-        commands.trigger(ExplorerTreeChanged(tree_of.0));
+    tree.use_now();
+    let mut to_remove = Vec::new();
+    for (dir_entity, parent, dir, _, _, _) in &actions.directories {
+        if parent.parent() == tree_entity && dir.path.starts_with(path) {
+            to_remove.push(dir_entity);
+        }
+    }
+    for dir_entity in to_remove {
+        actions.commands.entity(dir_entity).despawn();
+    }
+    actions.commands.trigger(ExplorerTreeChanged(tree_entity));
+}
+
+fn refresh_directory(trigger: On<ExplorerTreeDirRefresh>, mut actions: ExplorerTreeActions) {
+    let tree_entity = trigger.tree;
+    if actions.ensure_and_load(tree_entity, &trigger.path, false, true) {
+        actions.commands.trigger(ExplorerTreeChanged(tree_entity));
     }
 }
 
@@ -446,20 +735,30 @@ fn reveal_current(
 fn collapse_all(
     trigger: On<UiInput<ExplorerCollapseAll>>,
     query: Query<&UsesExplorerTree>,
-    mut trees: Query<&mut ExplorerTree>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     let entity = trigger.event().webview;
     let Ok(tree_of) = query.get(entity) else {
         return;
     };
-    let Ok(mut tree) = trees.get_mut(tree_of.0) else {
-        return;
+    let root = match actions.trees.get_mut(tree_of.0) {
+        Ok((_, mut tree)) => {
+            tree.use_now();
+            tree.root().to_path_buf()
+        }
+        Err(_) => return,
     };
-    let root = tree.root.clone();
-    tree.expanded.retain(|path| *path == root);
-    tree.use_now();
-    commands.trigger(ExplorerTreeChanged(tree_of.0));
+    let mut collapsed = Vec::new();
+    for (dir_entity, parent, dir, expanded, _, _) in &actions.directories {
+        if parent.parent() == tree_of.0 && expanded && dir.path != root {
+            collapsed.push(dir_entity);
+        }
+    }
+    for dir_entity in collapsed {
+        actions
+            .commands
+            .entity(dir_entity)
+            .remove::<ExplorerDirectoryExpanded>();
+    }
+    actions.commands.trigger(ExplorerTreeChanged(tree_of.0));
 }
-
-const EXPLORER_WARM_AHEAD: usize = 64;

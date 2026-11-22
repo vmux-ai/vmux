@@ -1,9 +1,9 @@
 use crate::host::editor::EditReadOnly;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+use bevy::prelude::{App, Changed, Commands, Plugin};
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
@@ -383,7 +383,7 @@ fn emit_open_editors(
         let active_dirty = edit.map(|edit| edit.core.revision.dirty).unwrap_or(false);
         let mut name_counts = HashMap::new();
         for path in &state.open_editors {
-            let name = OpenEditorPath::name(path);
+            let name = ExplorerState::editor_name(path);
             *name_counts.entry(name).or_insert(0usize) += 1;
         }
         let mut items = Vec::with_capacity(state.open_editors.len());
@@ -399,9 +399,9 @@ fn emit_open_editors(
                     })
                 }),
             };
-            let name = OpenEditorPath::name(path);
+            let name = ExplorerState::editor_name(path);
             let context = match name_counts.get(&name).copied().unwrap_or_default() > 1 {
-                true => OpenEditorPath::parent(path),
+                true => ExplorerState::editor_parent(path),
                 false => String::new(),
             };
             items.push(OpenEditorItem {
@@ -418,27 +418,6 @@ fn emit_open_editors(
             &OpenEditorsEvent { items },
         ));
         commands.entity(entity).remove::<OpenEditorsDirty>();
-    }
-}
-
-struct OpenEditorPath;
-
-impl OpenEditorPath {
-    fn name(path: &Path) -> String {
-        path.file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string())
-    }
-
-    fn parent(path: &Path) -> String {
-        let Some(parent) = path.parent() else {
-            return String::new();
-        };
-        match parent.file_name() {
-            Some(name) => name.to_string_lossy().into_owned(),
-            None if parent.has_root() => "/".to_string(),
-            None => String::new(),
-        }
     }
 }
 

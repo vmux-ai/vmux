@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use vmux_ecs::{Active, Cwd, JobWake};
 
 use super::editor::FileView;
-use super::explorer::ExplorerTree;
+use super::explorer::{ExplorerDirectory, ExplorerDirectoryExpanded};
 use super::file_lifecycle::FileChangesSet;
 use super::file_watch_io::Transport;
 
@@ -58,7 +58,7 @@ fn wake(transport: Option<NonSend<Transport>>, wake: Option<Res<JobWake>>) {
 
 fn select(
     views: Query<&FileView>,
-    trees: Query<&ExplorerTree>,
+    expanded: Query<&ExplorerDirectory, With<ExplorerDirectoryExpanded>>,
     registrations: Query<(Entity, &Cwd, Has<Active>), With<Watch>>,
     mut commands: Commands,
 ) {
@@ -68,10 +68,8 @@ fn select(
             wanted.insert(vmux_path::PathIdentity::resolve(directory).into_path_buf());
         }
     }
-    for tree in &trees {
-        for directory in tree.expanded_dirs() {
-            wanted.insert(vmux_path::PathIdentity::resolve(directory).into_path_buf());
-        }
+    for directory in &expanded {
+        wanted.insert(vmux_path::PathIdentity::resolve(&directory.path).into_path_buf());
     }
     let mut existing = HashSet::new();
     for (entity, path, active) in &registrations {

@@ -1,13 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Plugin};
 use bevy_cef::prelude::UiEventPlugin;
 use vmux_ecs::event::{
     ExplorerCloseEditor, ExplorerCollapseAll, ExplorerFilesToggle, ExplorerOpenEditorsToggle,
     ExplorerOutlineToggle, ExplorerPanelSetVisible, ExplorerPanelViewSet,
     ExplorerPanelViewportWidth, ExplorerPanelWidth, ExplorerRevealCurrent, ExplorerTreePrefetch,
-    ExplorerTreeRefresh, ExplorerTreeToggle, FileDirEntry, TreeRow,
+    ExplorerTreeRefresh, ExplorerTreeToggle, FileDirEntry,
 };
 
 use entry::ExplorerEntryPlugin;
@@ -18,7 +19,11 @@ pub use panel::StackExplorerVisibility;
 pub(crate) use panel::{ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest};
 pub use search::GlobalSearchRequest;
 use search::SearchPlugin;
-use tree::{ExplorerDirLoadRequest, TreePlugin};
+pub(crate) use search::{
+    ExplorerSearchCancelRequest, ExplorerSearchCompleted, ExplorerSearchQuery,
+    ExplorerSearchRunRequest,
+};
+use tree::{ExplorerTreeDirRefresh, ExplorerTreeLookup, ExplorerTreeSubtreeEvict, TreePlugin};
 
 pub(crate) use tabs::{ArchivedEditorState, RestoreEditors};
 mod entry;
@@ -31,167 +36,6 @@ mod tree;
 
 #[cfg(test)]
 mod tests;
-
-#[derive(EntityEvent)]
-struct RevealCurrent {
-    #[event_target]
-    entity: Entity,
-    reveal: vmux_ecs::event::ExplorerReveal,
-}
-
-#[derive(Component)]
-pub(super) struct OutlineDirty;
-
-#[derive(Component)]
-pub(super) struct ExplorerPanelSent;
-
-#[derive(Component)]
-pub(super) struct OpenEditorsDirty;
-
-#[derive(Component)]
-pub(super) struct ExplorerTreeDirty;
-
-#[derive(Component, Clone, Copy)]
-struct ExplorerPanelDefaults {
-    default_visible: bool,
-    width: u32,
-    loaded: bool,
-}
-
-#[derive(Component)]
-pub(super) struct ExplorerTree {
-    root: PathBuf,
-    expanded: HashSet<PathBuf>,
-    loading: HashSet<PathBuf>,
-    children: HashMap<PathBuf, Vec<FileDirEntry>>,
-    used: std::time::Instant,
-}
-
-impl ExplorerTree {
-    fn new(root: PathBuf) -> Self {
-        Self {
-            root,
-            expanded: HashSet::new(),
-            loading: HashSet::new(),
-            children: HashMap::new(),
-            used: std::time::Instant::now(),
-        }
-    }
-
-    fn answers_for(&self, root: &Path) -> bool {
-        self.root == root
-    }
-
-    fn allows(&self, path: &Path) -> bool {
-        path.starts_with(&self.root)
-    }
-
-    fn create_parent(&self, selected: &Path) -> PathBuf {
-        if selected.as_os_str().is_empty() {
-            return self.root.clone();
-        }
-        if selected == self.root
-            || self
-                .children
-                .values()
-                .flatten()
-                .any(|entry| entry.is_dir && Path::new(&entry.path) == selected)
-        {
-            return selected.to_path_buf();
-        }
-        selected
-            .parent()
-            .filter(|parent| parent.starts_with(&self.root))
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.root.clone())
-    }
-
-    pub(super) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
-        self.expanded.iter()
-    }
-
-    fn use_now(&mut self) {
-        self.used = std::time::Instant::now();
-    }
-
-    fn rows(&self, root: &Path) -> Vec<TreeRow> {
-        let mut rows = Vec::new();
-        self.append_rows(root, 0, &mut rows);
-        rows
-    }
-
-    fn append_rows(&self, directory: &Path, depth: u16, rows: &mut Vec<TreeRow>) {
-        let Some(entries) = self.children.get(directory) else {
-            return;
-        };
-        for entry in entries {
-            let path = PathBuf::from(&entry.path);
-            let expanded = entry.is_dir && self.expanded.contains(&path);
-            rows.push(TreeRow {
-                name: entry.name.clone(),
-                path: entry.path.clone(),
-                depth,
-                is_dir: entry.is_dir,
-                expanded,
-                loading: self.loading.contains(&path),
-            });
-            if expanded {
-                self.append_rows(&path, depth + 1, rows);
-            }
-        }
-    }
-
-    fn is_loading(&self, path: &Path) -> bool {
-        self.loading.contains(path)
-    }
-
-    fn begin_dir_load(&mut self, path: &Path, force: bool) -> bool {
-        self.use_now();
-        if self.loading.contains(path) || !force && self.children.contains_key(path) {
-            return false;
-        }
-        self.loading.insert(path.to_path_buf());
-        true
-    }
-
-    pub(super) fn refresh_changed(
-        &mut self,
-        tree: Entity,
-        changed_dirs: &HashSet<PathBuf>,
-    ) -> Vec<ExplorerDirLoadRequest> {
-        let mut requests = Vec::new();
-        let cached: Vec<PathBuf> = self.children.keys().cloned().collect();
-        for dir in cached {
-            let canonical = vmux_path::PathIdentity::resolve(&dir).into_path_buf();
-            if changed_dirs.contains(&canonical) && self.begin_dir_load(&dir, true) {
-                requests.push(ExplorerDirLoadRequest::new(tree, dir));
-            }
-        }
-        requests
-    }
-
-    fn evict_subtree(&mut self, path: &Path) {
-        self.use_now();
-        self.expanded.retain(|entry| !entry.starts_with(path));
-        self.loading.retain(|entry| !entry.starts_with(path));
-        self.children.retain(|entry, _| !entry.starts_with(path));
-    }
-}
-
-#[derive(Event, Clone, Copy)]
-pub(super) struct ExplorerTreeChanged(pub(super) Entity);
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-#[relationship(relationship_target = ExplorerTreeUsers)]
-struct UsesExplorerTree(Entity);
-
-#[derive(Component, Debug)]
-#[relationship_target(relationship = UsesExplorerTree)]
-struct ExplorerTreeUsers(Vec<Entity>);
-
-const IDLE_TREE_CAPACITY: usize = 4;
-
-pub(super) struct TabsPlugin;
 
 pub(super) struct ExplorerPlugin;
 
@@ -223,6 +67,112 @@ impl Plugin for ExplorerPlugin {
     }
 }
 
+pub(super) struct TabsPlugin;
+
+#[derive(EntityEvent)]
+struct RevealCurrent {
+    #[event_target]
+    entity: Entity,
+    reveal: vmux_ecs::event::ExplorerReveal,
+}
+
+#[derive(Message, Clone)]
+pub(super) struct ExplorerDirsChanged(pub(super) HashSet<PathBuf>);
+
+#[derive(Component)]
+pub(super) struct OutlineDirty;
+
+#[derive(Component)]
+pub(super) struct ExplorerPanelSent;
+
+#[derive(Component)]
+pub(super) struct OpenEditorsDirty;
+
+#[derive(Component)]
+pub(super) struct ExplorerTreeDirty;
+
+#[derive(Component, Clone, Copy)]
+struct ExplorerPanelDefaults {
+    default_visible: bool,
+    width: u32,
+    loaded: bool,
+}
+
+#[derive(Component)]
+pub(super) struct ExplorerTree {
+    root: PathBuf,
+    used: std::time::Instant,
+    generation: u64,
+}
+
+impl ExplorerTree {
+    const IDLE_CAPACITY: usize = 4;
+    const WARM_AHEAD: usize = 64;
+
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            used: std::time::Instant::now(),
+            generation: 0,
+        }
+    }
+
+    pub(super) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn root_name(&self) -> String {
+        self.root
+            .file_name()
+            .map(|name| name.to_string_lossy().to_uppercase())
+            .unwrap_or_else(|| self.root.to_string_lossy().to_uppercase())
+    }
+
+    fn answers_for(&self, root: &Path) -> bool {
+        self.root == root
+    }
+
+    fn allows(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+    }
+
+    fn use_now(&mut self) {
+        self.used = std::time::Instant::now();
+    }
+
+    fn next_generation(&mut self) -> u64 {
+        self.generation = self.generation.wrapping_add(1).max(1);
+        self.generation
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct ExplorerDirectory {
+    pub(crate) path: PathBuf,
+}
+
+#[derive(Component)]
+pub(crate) struct ExplorerDirectoryExpanded;
+
+#[derive(Component)]
+pub(super) struct ExplorerDirectoryEntries(pub(super) Vec<FileDirEntry>);
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ExplorerDirectoryLoading {
+    pub(super) generation: u64,
+}
+
+#[derive(Event, Clone, Copy)]
+pub(super) struct ExplorerTreeChanged(pub(super) Entity);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = ExplorerTreeUsers)]
+struct UsesExplorerTree(Entity);
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = UsesExplorerTree)]
+struct ExplorerTreeUsers(Vec<Entity>);
+
 #[derive(Component, Default)]
 pub(super) struct ExplorerState {
     open_editors: Vec<PathBuf>,
@@ -239,6 +189,7 @@ impl ExplorerState {
         self.active_editor = Some(active.to_path_buf());
         self.active_editor_is_dir = active.is_dir();
     }
+
     fn note_open(&mut self, path: &Path) {
         if !self.open_editors.iter().any(|open| open == path) {
             self.open_editors.push(path.to_path_buf());
@@ -268,5 +219,22 @@ impl ExplorerState {
         self.open_editors.remove(at);
         let neighbour = at.min(self.open_editors.len().saturating_sub(1));
         self.open_editors.get(neighbour).cloned()
+    }
+
+    pub(super) fn editor_name(path: &Path) -> String {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string())
+    }
+
+    pub(super) fn editor_parent(path: &Path) -> String {
+        let Some(parent) = path.parent() else {
+            return String::new();
+        };
+        match parent.file_name() {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None if parent.has_root() => "/".to_string(),
+            None => String::new(),
+        }
     }
 }
