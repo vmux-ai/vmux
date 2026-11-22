@@ -573,7 +573,7 @@ impl RepoInfoCache {
         entry.info.clone()
     }
 
-    pub fn cached_project_root(&self, path: &Path) -> Option<PathBuf> {
+    pub fn cached_main_worktree_root(&self, path: &Path) -> Option<PathBuf> {
         let mut selected = None;
         let mut length = 0;
         for entry in self.entries.values() {
@@ -582,7 +582,7 @@ impl RepoInfoCache {
             };
             if path.starts_with(&info.repo_root) && info.repo_root.as_os_str().len() > length {
                 length = info.repo_root.as_os_str().len();
-                selected = Some(info.project_root().to_path_buf());
+                selected = Some(info.main_worktree_root().to_path_buf());
             }
         }
         selected

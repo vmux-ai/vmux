@@ -1125,7 +1125,6 @@ fn push_pane_tree_emit(mut projection: LayoutProjection<PaneTreeState>, rows: Pa
 struct ProjectRows<'w, 's> {
     focus: FocusedStack<'w, 's>,
     projects: SpaceProjects<'w, 's>,
-    active: Res<'w, vmux_space::ActiveProjectRows>,
     pending: Query<'w, 's, &'static vmux_layout::page_context::PendingWorkspaceSelection>,
     worktrees: Query<'w, 's, &'static vmux_layout::tab::TabWorktree>,
     repos: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
@@ -1142,10 +1141,7 @@ impl ProjectRows<'_, '_> {
     }
 
     fn snapshot(&mut self, layout: Entity) -> TabBoundaryState {
-        let source = self.projects.active_rows();
-        let mut projects = self
-            .active
-            .layout_rows(self.projects.active_space_id(), &source);
+        let mut projects = self.projects.layout_rows();
         for row in &mut projects {
             let path = if row.display_path.is_empty() {
                 &row.path
@@ -1200,7 +1196,7 @@ impl ProjectRows<'_, '_> {
     ) -> Option<TabBoundary> {
         let path = std::path::Path::new(&row.path);
         let relative = path.strip_prefix(&info.repo_root).ok()?;
-        let project_dir = info.project_root().join(relative);
+        let project_dir = info.main_worktree_root().join(relative);
         branches.reserve(info.branches.len());
         for holder in info.branches.iter() {
             let checkout = holder
@@ -1218,7 +1214,7 @@ impl ProjectRows<'_, '_> {
             effective_dir: row.path.clone(),
             project_dir: project_dir.to_string_lossy().into_owned(),
             source: "project".to_string(),
-            repository: info.project_name(),
+            repository: info.main_worktree_name(),
             is_git_repo: true,
             is_worktree: info.is_worktree,
             branch: info.branch.clone(),
@@ -1623,7 +1619,6 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, StatePlugin))
                 .insert_resource(AppSettings::default())
-                .init_resource::<vmux_space::ActiveProjectRows>()
                 .init_non_send::<Browsers>()
                 .init_resource::<ProjectionWrites>()
                 .add_observer(record_projections);
@@ -1985,7 +1980,6 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, StatePlugin))
                 .insert_resource(AppSettings::default())
-                .init_resource::<vmux_space::ActiveProjectRows>()
                 .init_non_send::<Browsers>()
                 .init_resource::<PublishedUpdates>()
                 .add_observer(record_updates);
@@ -2167,7 +2161,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatePlugin))
             .insert_resource(AppSettings::default())
-            .init_resource::<vmux_space::ActiveProjectRows>()
             .init_non_send::<Browsers>();
         app.world_mut().spawn(UpdateState::Idle);
         let layout = app.world_mut().spawn((LayoutCef, PageReady {})).id();
@@ -2301,8 +2294,7 @@ mod tests {
     fn retiring_state_invalidates_layout_projection() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatePlugin))
-            .insert_resource(AppSettings::default())
-            .init_resource::<vmux_space::ActiveProjectRows>();
+            .insert_resource(AppSettings::default());
         app.world_mut().insert_non_send(Browsers::default());
         app.world_mut().spawn(UpdateState::Idle);
         app.update();
@@ -2408,8 +2400,7 @@ mod tests {
     fn pending_workspace_selection_does_not_invalidate_unrelated_projections() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatePlugin))
-            .insert_resource(AppSettings::default())
-            .init_resource::<vmux_space::ActiveProjectRows>();
+            .insert_resource(AppSettings::default());
         app.world_mut().insert_non_send(Browsers::default());
         app.world_mut().spawn(UpdateState::Idle);
         app.update();

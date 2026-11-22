@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::project::{ActiveProjectRows, SpaceProjects};
+use super::project::SpaceProjects;
 use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_api::service::ServiceMessageSet;
@@ -90,7 +90,6 @@ struct ComposerProjection<'w, 's> {
     >,
     repo_info: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
     space_projects: SpaceProjects<'w, 's>,
-    active_project_rows: Res<'w, ActiveProjectRows>,
 }
 
 impl ComposerProjection<'_, '_> {
@@ -112,9 +111,7 @@ impl ComposerProjection<'_, '_> {
         let (_, _, cwd, policy) = self.sessions.get(session).ok()?;
         let observer = active.then_some(webview);
         let mut input = self.input(stack, cwd, policy);
-        input.projects = self
-            .space_projects
-            .selector_rows(stack, &self.active_project_rows);
+        input.projects = self.space_projects.selector_rows(stack);
         let info = if input.cwd.as_os_str().is_empty() {
             if let Some(observer) = observer
                 && let Some(cache) = self.repo_info.as_mut()
@@ -229,12 +226,12 @@ impl ComposerContextInput {
             })
             .unwrap_or_default();
         let directory = info
-            .map(|info| info.project_root().to_string_lossy().into_owned())
+            .map(|info| info.main_worktree_root().to_string_lossy().into_owned())
             .unwrap_or_else(|| self.cwd.to_string_lossy().into_owned());
         let project = ProjectRow::for_directory(&self.projects, &directory);
         let workspace_name = match (project, info) {
             (Some(project), _) => project.label.clone(),
-            (_, Some(info)) => info.project_name(),
+            (_, Some(info)) => info.main_worktree_name(),
             (_, None) => self
                 .cwd
                 .file_name()
@@ -465,7 +462,6 @@ mod tests {
                 SpaceComposerPlugin,
                 vmux_ecs::UiStatePlugin::<vmux_session::state::ChatUiState>::default(),
             ))
-            .init_resource::<ActiveProjectRows>()
             .init_resource::<ContextWrites>()
             .add_observer(ContextWrites::record)
             .add_observer(Self::delivered);

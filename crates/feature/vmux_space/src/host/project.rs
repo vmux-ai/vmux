@@ -28,8 +28,6 @@ impl Plugin for SpaceProjectPlugin {
         }
         app.add_systems(Startup, spawn_repository_roots)
             .init_resource::<vmux_git::GitRuntime>()
-            .init_resource::<ActiveProjectRows>()
-            .init_resource::<ActiveProjectScan>()
             .register_stored::<ExpandedProjectDirs>()
             .add_observer(tree_toggle)
             .add_observer(pick)
@@ -48,12 +46,13 @@ impl Plugin for SpaceProjectPlugin {
                     remember.before(EffectiveStartupSet),
                     start_repo_root_resolutions.after(remember),
                     finish_repo_root_resolutions.after(start_repo_root_resolutions),
-                    refresh_active_projects.after(remember),
+                    start_project_repository_scans.after(remember),
+                    finish_project_repository_scans.after(start_project_repository_scans),
                     publish_roots
                         .in_set(WriteCommandBarSnapshots)
-                        .after(refresh_active_projects),
-                    publish_git_projects.after(refresh_active_projects),
-                    publish_navigation.after(refresh_active_projects),
+                        .after(finish_project_repository_scans),
+                    publish_git_projects.after(finish_project_repository_scans),
+                    publish_navigation.after(finish_project_repository_scans),
                     finish_picks,
                 ),
             );
@@ -347,90 +346,36 @@ fn finish_picks(
     }
 }
 
-#[derive(Resource, Default)]
-pub struct ActiveProjectRows {
-    space: Option<String>,
-    rows: Vec<ProjectRow>,
-    repositories: Vec<ProjectRow>,
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct ProjectRepositoryFact {
+    source: std::path::PathBuf,
+    checkout: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
-impl ActiveProjectRows {
-    fn selector_rows(&self, space: Option<&str>, source: &[ProjectRow]) -> Vec<ProjectRow> {
-        if self.space.as_deref() == space {
-            return self.rows.clone();
-        }
-        source
-            .iter()
-            .find(|row| row.depth == 0 && row.is_active)
-            .cloned()
-            .into_iter()
-            .collect()
-    }
-
-    pub fn layout_rows(&self, space: Option<&str>, source: &[ProjectRow]) -> Vec<ProjectRow> {
-        if self.space.as_deref() != space || self.rows.is_empty() {
-            return Self::active_source_rows(source);
-        }
-        let mut rows = Vec::new();
-        for root in &self.rows {
-            rows.push(root.clone());
-            if !root.is_active {
-                continue;
-            }
-            let root_path = vmux_path::PathIdentity::resolve(&root.path);
-            let Some(index) = source.iter().position(|row| {
-                row.depth == 0 && vmux_path::PathIdentity::resolve(&row.path) == root_path
-            }) else {
-                continue;
-            };
-            rows.extend(
-                source
-                    .iter()
-                    .skip(index + 1)
-                    .take_while(|row| row.depth > 0)
-                    .cloned(),
-            );
-        }
-        rows
-    }
-
-    fn active_source_rows(source: &[ProjectRow]) -> Vec<ProjectRow> {
-        let Some(index) = source
-            .iter()
-            .position(|row| row.depth == 0 && row.is_active)
-        else {
-            return Vec::new();
-        };
-        source
-            .iter()
-            .skip(index)
-            .take_while(|row| row.depth > 0 || row.is_active)
-            .cloned()
-            .collect()
-    }
+#[derive(Component)]
+struct ProjectRepositoryScan {
+    source: std::path::PathBuf,
+    task: vmux_git::GitTask<Option<(std::path::PathBuf, std::path::PathBuf)>>,
 }
-
-type ActiveProjectScanResult = (Option<String>, RepositoryScan);
 
 struct RepositoryScan {
     roots: std::collections::BTreeMap<String, (std::path::PathBuf, std::path::PathBuf)>,
 }
 
 impl RepositoryScan {
+    fn read_path(path: &std::path::Path) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+        let checkout = CheckoutInfo::try_from(path).ok()?;
+        let identity =
+            LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
+        let identity = identity.canonicalize().unwrap_or(identity);
+        Some((checkout.root, identity))
+    }
+
+    #[cfg(test)]
     fn read(rows: &[ProjectRow]) -> Self {
         let mut roots = std::collections::BTreeMap::new();
         for row in rows {
-            let checkout = CheckoutInfo::try_from(std::path::Path::new(&row.path));
-            let metadata = match checkout {
-                Ok(checkout) => {
-                    let identity = LinkedRepoRoot::find(&checkout.root)
-                        .unwrap_or_else(|| checkout.root.clone());
-                    let identity = identity.canonicalize().unwrap_or(identity);
-                    Some((checkout.root, identity))
-                }
-                Err(_) => None,
-            };
-            if let Some(metadata) = metadata {
+            if let Some(metadata) = Self::read_path(std::path::Path::new(&row.path)) {
                 roots.insert(row.path.clone(), metadata);
             }
         }
@@ -438,181 +383,102 @@ impl RepositoryScan {
     }
 }
 
-impl ActiveProjectRows {
-    fn from_rows(rows: &[ProjectRow], scan: &RepositoryScan) -> Self {
-        let mut candidates = Vec::new();
-        for row in rows {
-            if row.depth != 0
-                || row.kind != ProjectRowKind::Project
-                || row.missing
-                || std::path::Path::new(&row.path)
-                    .components()
-                    .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
-            {
-                continue;
-            }
-            let Some((checkout, identity)) = scan.roots.get(&row.path) else {
-                candidates.push((None, row.clone()));
-                continue;
-            };
-            let identity = identity.clone();
-            let mut projected = row.clone();
-            if row.identity.is_empty() || row.identity == row.path {
-                projected.identity = identity.to_string_lossy().into_owned();
-                if row.label
-                    == std::path::Path::new(&row.path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                {
-                    projected.label = identity
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                }
-            }
-            if row.identity.is_empty() || row.identity == row.path {
-                projected.path = checkout.to_string_lossy().into_owned();
-            } else {
-                projected.path = vmux_path::PathIdentity::resolve(&row.path)
-                    .into_path_buf()
-                    .to_string_lossy()
-                    .into_owned();
-            }
-            projected.display_path = vmux_path::DisplayPath::project(&identity);
-            projected.is_worktree = checkout != &identity;
-            candidates.push((Some(identity), projected));
-        }
-        let mut projected = Vec::<(Option<std::path::PathBuf>, ProjectRow)>::new();
-        for (identity, row) in &candidates {
-            if !row.identity.starts_with(vmux_project::ProjectRoute::ROOT)
-                && identity.as_ref().is_some_and(|identity| {
-                    candidates.iter().any(|(other, _)| {
-                        other.as_ref().is_some_and(|other| {
-                            identity != other && std::path::Path::new(&row.path).starts_with(other)
-                        })
-                    })
-                })
-            {
-                continue;
-            }
-            if let Some((_, held)) = projected.iter_mut().find(|(held, held_row)| {
-                if row.identity.starts_with(vmux_project::ProjectRoute::ROOT)
-                    && held_row
-                        .identity
-                        .starts_with(vmux_project::ProjectRoute::ROOT)
-                {
-                    return held_row.identity == row.identity;
-                }
-                match (held, identity) {
-                    (Some(held), Some(identity)) => held == identity,
-                    (None, None) => held_row.path == row.path,
-                    _ => false,
-                }
-            }) {
-                if row.is_active && !held.is_active {
-                    held.clone_from(row);
-                }
-                continue;
-            }
-            projected.push((identity.clone(), row.clone()));
-        }
-        let mut rows = Vec::new();
-        let mut repositories = Vec::new();
-        for (identity, row) in projected {
-            if identity.is_some() {
-                repositories.push(row.clone());
-            }
-            rows.push(row);
-        }
-        Self {
-            space: None,
-            rows,
-            repositories,
-        }
-    }
-}
-
-#[derive(Resource, Default)]
-struct ActiveProjectScan {
-    task: Option<vmux_git::GitTask<ActiveProjectScanResult>>,
-    requested: bool,
-}
-
-fn refresh_active_projects(
-    projects: SpaceProjects,
-    mut active: ResMut<ActiveProjectRows>,
-    mut scan: ResMut<ActiveProjectScan>,
+fn start_project_repository_scans(
+    projects: Query<
+        (Entity, &vmux_ecs::Cwd, Option<&ProjectRepositoryFact>),
+        (
+            With<vmux_project::Registered>,
+            Without<ProjectRepositoryScan>,
+        ),
+    >,
+    spaces: Query<
+        (Entity, &SpaceId, Option<&ProjectRepositoryFact>),
+        (With<Space>, Without<ProjectRepositoryScan>),
+    >,
+    settings: Option<Res<AppSettings>>,
     runtime: Res<vmux_git::GitRuntime>,
     wake: Option<Res<EventLoopProxyWrapper>>,
-    mut changed: MessageReader<vmux_project::ProjectChanged>,
+    mut commands: Commands,
 ) {
-    let space = projects.active_space.id();
-    if let Some(task) = scan.task.as_mut()
-        && let Some(output) = task.poll()
-    {
-        scan.task = None;
-        let Ok((scanned_space, readings)) = output else {
-            scan.requested = true;
-            return;
-        };
-        let current = space
-            .map(|space| projects.projects_of(space))
-            .unwrap_or_default();
-        let catalog = ActiveProjectRows::from_rows(&current, &readings);
-        if scanned_space.as_deref() == space
-            && (active.space != scanned_space
-                || active.rows != catalog.rows
-                || active.repositories != catalog.repositories)
-        {
-            active.space = scanned_space;
-            active.rows = catalog.rows;
-            active.repositories = catalog.repositories;
-        }
-    }
-    scan.requested |= active.space.as_deref() != space
-        || projects.settings_changed()
-        || changed.read().count() > 0;
-    if scan.task.is_some() || !scan.requested {
-        return;
-    }
-    scan.requested = false;
-    let space = space.map(str::to_string);
-    let source = space
-        .as_deref()
-        .map(|space| projects.projects_of(space))
-        .unwrap_or_default();
-    let mut rows = Vec::new();
-    for row in source {
-        if row.depth == 0
-            && row.kind == ProjectRowKind::Project
-            && !row.missing
-            && !std::path::Path::new(&row.path)
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, cwd, fact) in &projects {
+        if cwd.0.as_os_str().is_empty()
+            || cwd
+                .0
                 .components()
                 .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
         {
-            rows.push(row);
+            continue;
         }
+        if fact.is_some_and(|fact| fact.source == cwd.0) {
+            continue;
+        }
+        let path = cwd.0.clone();
+        let scan_path = path.clone();
+        let Some(task) = runtime.spawn(wake.clone(), move || RepositoryScan::read_path(&scan_path))
+        else {
+            return;
+        };
+        commands
+            .entity(entity)
+            .insert(ProjectRepositoryScan { source: path, task });
     }
-    let wake = wake.as_deref().map(|wake| (**wake).clone());
-    let Some(task) = runtime.spawn(wake, move || {
-        let readings = RepositoryScan::read(&rows);
-        (space, readings)
-    }) else {
-        scan.requested = true;
+    let Some(settings) = settings.as_deref() else {
         return;
     };
-    scan.task = Some(task);
+    for (entity, space_id, fact) in &spaces {
+        let Some(active) = settings
+            .space(&space_id.0)
+            .and_then(|space| space.active_dir())
+        else {
+            continue;
+        };
+        let path = std::path::PathBuf::from(active);
+        if path.as_os_str().is_empty()
+            || path
+                .components()
+                .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
+        {
+            continue;
+        }
+        if fact.is_some_and(|fact| fact.source == path) {
+            continue;
+        }
+        let scan_path = path.clone();
+        let Some(task) = runtime.spawn(wake.clone(), move || RepositoryScan::read_path(&scan_path))
+        else {
+            return;
+        };
+        commands
+            .entity(entity)
+            .insert(ProjectRepositoryScan { source: path, task });
+    }
 }
 
-fn publish_roots(projects: Res<ActiveProjectRows>, mut roots: Single<&mut CommandBarProjectRoots>) {
-    if !projects.is_changed() {
-        return;
+fn finish_project_repository_scans(
+    mut scans: Query<(Entity, &mut ProjectRepositoryScan)>,
+    mut commands: Commands,
+) {
+    for (entity, mut scan) in &mut scans {
+        let Some(output) = scan.task.poll() else {
+            continue;
+        };
+        commands.entity(entity).remove::<ProjectRepositoryScan>();
+        let Ok(checkout) = output else {
+            continue;
+        };
+        commands.entity(entity).insert(ProjectRepositoryFact {
+            source: scan.source.clone(),
+            checkout,
+        });
     }
+}
+
+fn publish_roots(projects: SpaceProjects, mut roots: Single<&mut CommandBarProjectRoots>) {
+    let projected = projects.active_selector_rows();
     let mut next = Vec::new();
     let mut active = None;
-    for project in &projects.rows {
+    for project in &projected {
         if project.missing {
             continue;
         }
@@ -652,11 +518,10 @@ impl GitProjectsProjection {
 }
 
 fn publish_git_projects(
-    projects: Res<ActiveProjectRows>,
+    projects: SpaceProjects,
     views: Query<(Entity, &PageMetadata, Option<&GitProjectsProjection>), With<PageReady>>,
     mut commands: Commands,
 ) {
-    let changed = projects.is_changed();
     let mut projection = None;
     for (entity, page, current) in &views {
         if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
@@ -664,11 +529,9 @@ fn publish_git_projects(
         {
             continue;
         }
-        if !changed && current.is_some() {
-            continue;
-        }
-        let rows = projection
-            .get_or_insert_with(|| GitProjectsProjection::from_rows(&projects.repositories));
+        let rows = projection.get_or_insert_with(|| {
+            GitProjectsProjection::from_rows(&projects.active_repository_rows())
+        });
         if current.is_some_and(|current| current.0.as_slice() == rows.0.as_slice()) {
             continue;
         }
@@ -688,7 +551,7 @@ fn publish_git_projects(
 struct ProjectNavigationProjection(Vec<ProjectRow>);
 
 fn publish_navigation(
-    projects: Res<ActiveProjectRows>,
+    projects: SpaceProjects,
     views: Query<(
         Entity,
         &PageMetadata,
@@ -697,17 +560,15 @@ fn publish_navigation(
     )>,
     mut commands: Commands,
 ) {
-    let changed = projects.is_changed();
     let mut projection = None;
     for (entity, page, current, ready) in &views {
         if !page.url.starts_with("file://") && !page.url.starts_with("vmux://knowledge") {
             continue;
         }
-        if !changed && current.is_some() && !ready.is_added() {
-            continue;
-        }
-        let rows = projection.get_or_insert_with(|| projects.rows.clone());
-        if current.is_some_and(|current| current.0.as_slice() == rows.as_slice()) {
+        let rows = projection.get_or_insert_with(|| projects.active_selector_rows());
+        if !ready.is_added()
+            && current.is_some_and(|current| current.0.as_slice() == rows.as_slice())
+        {
             continue;
         }
         commands
@@ -727,6 +588,19 @@ fn publish_navigation(
 pub struct ExpandedProjectDirs(Vec<String>);
 
 impl ExpandedProjectDirs {
+    const UNLISTED_DIRS: &[&str] = &[
+        ".git",
+        "DerivedData",
+        "Pods",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "target",
+        "vendor",
+        "venv",
+    ];
+
     fn toggle(&mut self, path: &str) {
         if let Some(index) = self.0.iter().position(|held| held == path) {
             self.0.remove(index);
@@ -746,7 +620,7 @@ impl ExpandedProjectDirs {
         let mut rows = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if UNLISTED_DIRS.contains(&name.as_str()) {
+            if Self::UNLISTED_DIRS.contains(&name.as_str()) {
                 continue;
             }
             let Ok(kind) = entry.file_type() else {
@@ -789,19 +663,6 @@ impl ExpandedProjectDirs {
     }
 }
 
-const UNLISTED_DIRS: &[&str] = &[
-    ".git",
-    "DerivedData",
-    "Pods",
-    "__pycache__",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "vendor",
-    "venv",
-];
-
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, AppSettings>>,
@@ -809,17 +670,12 @@ pub struct SpaceProjects<'w, 's> {
     hierarchy: SpaceHierarchy<'w, 's>,
     space_ids: Query<'w, 's, &'static SpaceId>,
     expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<Space>>,
+    repository_facts: Query<'w, 's, &'static ProjectRepositoryFact>,
     project_roots: vmux_ecs::profile::Projects<'w, 's>,
     registrations: vmux_project::Registrations<'w, 's>,
 }
 
 impl SpaceProjects<'_, '_> {
-    fn settings_changed(&self) -> bool {
-        self.settings
-            .as_ref()
-            .is_some_and(|settings| settings.is_changed())
-    }
-
     pub fn rows(&self, entity: Entity) -> Vec<ProjectRow> {
         let Some(space) = self.hierarchy.get(entity) else {
             return self.active_rows();
@@ -851,17 +707,182 @@ impl SpaceProjects<'_, '_> {
         self.projects_of(space_id)
     }
 
-    pub fn selector_rows(&self, entity: Entity, catalog: &ActiveProjectRows) -> Vec<ProjectRow> {
-        let Some(space) = self.hierarchy.get(entity) else {
-            let source = self.active_projects();
-            return catalog.selector_rows(self.active_space.id(), &source);
+    fn observed_repositories(&self) -> RepositoryScan {
+        let mut roots = std::collections::BTreeMap::new();
+        for fact in &self.repository_facts {
+            if let Some(checkout) = &fact.checkout {
+                roots.insert(fact.source.to_string_lossy().into_owned(), checkout.clone());
+            }
+        }
+        RepositoryScan { roots }
+    }
+
+    fn project_candidates(
+        rows: &[ProjectRow],
+        scan: &RepositoryScan,
+    ) -> Vec<(Option<std::path::PathBuf>, ProjectRow)> {
+        let mut candidates = Vec::new();
+        for row in rows {
+            if row.depth != 0
+                || row.kind != ProjectRowKind::Project
+                || row.missing
+                || std::path::Path::new(&row.path)
+                    .components()
+                    .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
+            {
+                continue;
+            }
+            let Some((checkout, identity)) = scan.roots.get(&row.path) else {
+                candidates.push((None, row.clone()));
+                continue;
+            };
+            let identity = identity.clone();
+            let mut projected = row.clone();
+            if row.identity.is_empty() || row.identity == row.path {
+                projected.identity = identity.to_string_lossy().into_owned();
+                if row.label
+                    == std::path::Path::new(&row.path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                {
+                    projected.label = identity
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                }
+                projected.path = checkout.to_string_lossy().into_owned();
+            } else {
+                projected.path = vmux_path::PathIdentity::resolve(&row.path)
+                    .into_path_buf()
+                    .to_string_lossy()
+                    .into_owned();
+            }
+            projected.display_path = vmux_path::DisplayPath::project(&identity);
+            projected.is_worktree = checkout != &identity;
+            candidates.push((Some(identity), projected));
+        }
+        candidates
+    }
+
+    fn project_catalog(
+        rows: &[ProjectRow],
+        scan: &RepositoryScan,
+    ) -> (Vec<ProjectRow>, Vec<ProjectRow>) {
+        let candidates = Self::project_candidates(rows, scan);
+        let mut projected = Vec::<(Option<std::path::PathBuf>, ProjectRow)>::new();
+        for (identity, row) in &candidates {
+            if !row.identity.starts_with(vmux_project::ProjectRoute::ROOT)
+                && identity.as_ref().is_some_and(|identity| {
+                    candidates.iter().any(|(other, _)| {
+                        other.as_ref().is_some_and(|other| {
+                            identity != other && std::path::Path::new(&row.path).starts_with(other)
+                        })
+                    })
+                })
+            {
+                continue;
+            }
+            if let Some((_, held)) = projected.iter_mut().find(|(held, held_row)| {
+                if row.identity.starts_with(vmux_project::ProjectRoute::ROOT)
+                    && held_row
+                        .identity
+                        .starts_with(vmux_project::ProjectRoute::ROOT)
+                {
+                    return held_row.identity == row.identity;
+                }
+                match (held, identity) {
+                    (Some(held), Some(identity)) => held == identity,
+                    (None, None) => held_row.path == row.path,
+                    _ => false,
+                }
+            }) {
+                if row.is_active && !held.is_active {
+                    held.clone_from(row);
+                }
+                continue;
+            }
+            projected.push((identity.clone(), row.clone()));
+        }
+        let mut out_rows = Vec::new();
+        let mut repositories = Vec::new();
+        for (identity, row) in projected {
+            if identity.is_some() {
+                repositories.push(row.clone());
+            }
+            out_rows.push(row);
+        }
+        (out_rows, repositories)
+    }
+
+    fn expand_layout_rows(roots: &[ProjectRow], source: &[ProjectRow]) -> Vec<ProjectRow> {
+        if roots.is_empty() {
+            let Some(index) = source
+                .iter()
+                .position(|row| row.depth == 0 && row.is_active)
+            else {
+                return Vec::new();
+            };
+            return source
+                .iter()
+                .skip(index)
+                .take_while(|row| row.depth > 0 || row.is_active)
+                .cloned()
+                .collect();
+        }
+        let mut rows = Vec::new();
+        for root in roots {
+            rows.push(root.clone());
+            if !root.is_active {
+                continue;
+            }
+            let root_path = vmux_path::PathIdentity::resolve(&root.path);
+            let Some(index) = source.iter().position(|row| {
+                row.depth == 0 && vmux_path::PathIdentity::resolve(&row.path) == root_path
+            }) else {
+                continue;
+            };
+            rows.extend(
+                source
+                    .iter()
+                    .skip(index + 1)
+                    .take_while(|row| row.depth > 0)
+                    .cloned(),
+            );
+        }
+        rows
+    }
+
+    pub fn active_selector_rows(&self) -> Vec<ProjectRow> {
+        let source = self.active_projects();
+        let observed = self.observed_repositories();
+        Self::project_catalog(&source, &observed).0
+    }
+
+    pub fn active_repository_rows(&self) -> Vec<ProjectRow> {
+        let source = self.active_projects();
+        let observed = self.observed_repositories();
+        Self::project_catalog(&source, &observed).1
+    }
+
+    pub fn selector_rows(&self, entity: Entity) -> Vec<ProjectRow> {
+        let source = match self
+            .hierarchy
+            .get(entity)
+            .and_then(|space| self.space_ids.get(space).ok())
+        {
+            Some(space_id) => self.projects_of(&space_id.0),
+            None => self.active_projects(),
         };
-        let Ok(space_id) = self.space_ids.get(space) else {
-            let source = self.active_projects();
-            return catalog.selector_rows(self.active_space.id(), &source);
-        };
-        let source = self.projects_of(&space_id.0);
-        catalog.selector_rows(Some(&space_id.0), &source)
+        let observed = self.observed_repositories();
+        Self::project_catalog(&source, &observed).0
+    }
+
+    pub fn layout_rows(&self) -> Vec<ProjectRow> {
+        let source = self.active_rows();
+        let roots = self.active_selector_rows();
+        Self::expand_layout_rows(&roots, &source)
     }
 
     fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {
@@ -1376,8 +1397,7 @@ mod tests {
             fixture.row(&non_repository, false),
         ];
 
-        let projection =
-            ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows)).repositories;
+        let (_, projection) = SpaceProjects::project_catalog(&rows, &RepositoryScan::read(&rows));
 
         assert_eq!(
             projection
@@ -1415,7 +1435,7 @@ mod tests {
         row.identity = "project-identity".into();
         row.label = "Product workspace".into();
         let rows = [row];
-        let projected = ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows)).rows;
+        let (projected, _) = SpaceProjects::project_catalog(&rows, &RepositoryScan::read(&rows));
         assert_eq!(projected[0].identity, "project-identity");
         assert_eq!(projected[0].label, "Product workspace");
         assert_eq!(
@@ -1443,16 +1463,16 @@ mod tests {
         second.label = "Product API".to_string();
 
         let rows = [first, second];
-        let catalog = ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows));
-        assert_eq!(catalog.rows.len(), 2);
-        assert_eq!(catalog.rows[0].label, "Product UI");
+        let (projected, _) = SpaceProjects::project_catalog(&rows, &RepositoryScan::read(&rows));
+        assert_eq!(projected.len(), 2);
+        assert_eq!(projected[0].label, "Product UI");
         assert_eq!(
-            catalog.rows[0].path,
+            projected[0].path,
             frontend.canonicalize().unwrap().display().to_string()
         );
-        assert_eq!(catalog.rows[1].label, "Product API");
+        assert_eq!(projected[1].label, "Product API");
         assert_eq!(
-            catalog.rows[1].path,
+            projected[1].path,
             backend.canonicalize().unwrap().display().to_string()
         );
     }
@@ -1471,25 +1491,24 @@ mod tests {
             fixture.row(&notes, false),
         ];
 
-        let catalog = ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows));
+        let (projected, _) = SpaceProjects::project_catalog(&rows, &RepositoryScan::read(&rows));
 
         assert_eq!(
-            catalog
-                .rows
+            projected
                 .iter()
                 .map(|row| row.label.as_str())
                 .collect::<Vec<_>>(),
             ["vmux-cloud", "dashboard", "notes"]
         );
         assert_eq!(
-            catalog.rows[0].path,
+            projected[0].path,
             fixture
                 .cloud_worktree
                 .canonicalize()
                 .unwrap()
                 .to_string_lossy()
         );
-        assert!(catalog.rows[0].is_active);
+        assert!(projected[0].is_active);
     }
 
     #[test]
@@ -1505,14 +1524,9 @@ mod tests {
         child.depth = 1;
         child.kind = ProjectRowKind::Directory;
         source.insert(1, child.clone());
-        let catalog = ActiveProjectRows::from_rows(&source, &RepositoryScan::read(&source));
-        let active = ActiveProjectRows {
-            space: Some("work".to_string()),
-            rows: catalog.rows,
-            repositories: catalog.repositories,
-        };
+        let (roots, _) = SpaceProjects::project_catalog(&source, &RepositoryScan::read(&source));
 
-        let rows = active.layout_rows(Some("work"), &source);
+        let rows = SpaceProjects::expand_layout_rows(&roots, &source);
 
         assert_eq!(
             rows.iter()
@@ -1848,5 +1862,89 @@ mod tests {
         assert_eq!(work.listed("work"), ["/tmp/alpha"]);
         assert_eq!(play.listed("play"), ["/tmp/beta"]);
         assert!(play.listed("work").is_empty());
+    }
+
+    #[test]
+    fn canonical_project_entities_scan_git_facts_and_project_rows_without_cached_registry() {
+        let git = GitProjectRowsFixture::start();
+        let mut fixture = Fixture::start("work");
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.space)
+            .insert(vmux_ecs::Active);
+        let directory =
+            vmux_ecs::profile::ProjectsDirectory::ensure_at(git._root.path().to_path_buf())
+                .unwrap();
+        let owner = fixture
+            .app
+            .world_mut()
+            .spawn((
+                vmux_ecs::profile::ProjectsRoot(directory.clone()),
+                vmux_project::Root(directory.path().to_path_buf()),
+                vmux_project::Loaded,
+            ))
+            .id();
+        let project = fixture
+            .app
+            .world_mut()
+            .spawn((
+                vmux_project::Project,
+                vmux_project::Registered,
+                vmux_project::ProjectId("vmux://projects/cloud".to_string()),
+                Name::new("Cloud"),
+                vmux_ecs::Cwd(git.cloud_worktree.clone()),
+                vmux_project::Repository(None),
+                vmux_ecs::Revision(1),
+                ChildOf(owner),
+            ))
+            .id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if fixture
+                .app
+                .world()
+                .get::<ProjectRepositoryFact>(project)
+                .is_some()
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        fixture.app.update();
+
+        let (selector, repositories) = fixture
+            .app
+            .world_mut()
+            .run_system_once(move |projects: SpaceProjects| {
+                (
+                    projects.selector_rows(fixture.pane),
+                    projects.active_repository_rows(),
+                )
+            })
+            .unwrap();
+        assert_eq!(selector.len(), 1);
+        assert_eq!(selector[0].label, "Cloud");
+        assert!(selector[0].is_worktree);
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].identity, "vmux://projects/cloud");
+        let roots = fixture
+            .app
+            .world_mut()
+            .query::<&CommandBarProjectRoots>()
+            .single(fixture.app.world())
+            .unwrap();
+        assert_eq!(
+            roots.roots,
+            vec![
+                git.cloud_worktree
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            ]
+        );
     }
 }

@@ -73,7 +73,7 @@ impl CheckoutContext<'_, '_> {
             .info
             .single()
             .ok()
-            .and_then(|info| info.cached_project_root(file.as_path()));
+            .and_then(|info| info.cached_main_worktree_root(file.as_path()));
         if !file.as_path().starts_with(repository.as_path())
             && known_project.as_deref() != Some(repository.as_path())
         {

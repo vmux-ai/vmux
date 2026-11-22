@@ -898,7 +898,7 @@ pub struct RepoInfo {
     pub insertions: u32,
     pub deletions: u32,
     pub repo_root: PathBuf,
-    project_root: PathBuf,
+    main_worktree_root: PathBuf,
     pub(crate) git_dir: PathBuf,
     pub(crate) common_dir: PathBuf,
     pub(crate) worktrees_dir: Option<PathBuf>,
@@ -906,9 +906,9 @@ pub struct RepoInfo {
 }
 
 impl RepoInfo {
-    pub fn project_root(&self) -> &Path {
-        if !self.project_root.as_os_str().is_empty() {
-            return &self.project_root;
+    pub fn main_worktree_root(&self) -> &Path {
+        if !self.main_worktree_root.as_os_str().is_empty() {
+            return &self.main_worktree_root;
         }
         if self
             .common_dir
@@ -920,9 +920,9 @@ impl RepoInfo {
         &self.repo_root
     }
 
-    pub fn project_name(&self) -> String {
+    pub fn main_worktree_name(&self) -> String {
         let named = self
-            .project_root()
+            .main_worktree_root()
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .filter(|name| !name.is_empty());
@@ -1038,7 +1038,7 @@ impl LinkedRepoRoot {
         }
         let checkout = CheckoutInfo::try_from(dir).ok()?;
         Some(
-            ProjectRoot {
+            MainWorktreeRoot {
                 checkout: &checkout.root,
                 common: &common_dir,
             }
@@ -1047,12 +1047,12 @@ impl LinkedRepoRoot {
     }
 }
 
-struct ProjectRoot<'a> {
+struct MainWorktreeRoot<'a> {
     checkout: &'a Path,
     common: &'a Path,
 }
 
-impl ProjectRoot<'_> {
+impl MainWorktreeRoot<'_> {
     fn resolve(&self) -> PathBuf {
         if self.common.file_name().is_some_and(|name| name == ".git") {
             return self.common.parent().unwrap_or(self.checkout).to_path_buf();
@@ -1148,7 +1148,7 @@ impl RepoInfo {
                 .into(),
         };
         let base = BaseRef::resolve(&repo_root);
-        let project_root = ProjectRoot {
+        let main_worktree_root = MainWorktreeRoot {
             checkout: &repo_root,
             common: &common_dir,
         }
@@ -1167,7 +1167,7 @@ impl RepoInfo {
             insertions: 0,
             deletions: 0,
             repo_root,
-            project_root,
+            main_worktree_root,
             git_dir,
             common_dir,
             worktrees_dir,
@@ -1669,7 +1669,7 @@ mod tests {
 
         let info = RepoInfo::read(&wt).unwrap();
         assert_eq!(
-            info.project_name(),
+            info.main_worktree_name(),
             repo.path().file_name().unwrap().to_string_lossy()
         );
         assert_eq!(info.base_ref, "main");
@@ -1863,8 +1863,8 @@ mod tests {
         );
         let checkout = parent.path().join("client").canonicalize().unwrap();
         let info = RepoInfo::read(&checkout).unwrap();
-        assert_eq!(info.project_root(), checkout);
-        assert_eq!(info.project_name(), "client");
+        assert_eq!(info.main_worktree_root(), checkout);
+        assert_eq!(info.main_worktree_name(), "client");
         let linked = parent.path().join("linked-client");
         test_repo::run(
             &checkout,
@@ -1878,7 +1878,7 @@ mod tests {
             ],
         );
         let info = RepoInfo::read(&linked).unwrap();
-        assert_eq!(info.project_root(), checkout);
+        assert_eq!(info.main_worktree_root(), checkout);
         assert_eq!(LinkedRepoRoot::find(&linked).unwrap(), checkout);
     }
 

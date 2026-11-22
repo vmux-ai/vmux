@@ -544,7 +544,6 @@ shape: (
     (key: "crates/feature/vmux_session/src/ui/manager_model.rs||enum:SessionFilterStep", fingerprint: "50059ee9d2d4921c", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_session/src/activity.rs||enum:ActivityIcon", fingerprint: "2c448c4915ea277b", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_session/src/host/transcript.rs||fn:push_to_page", fingerprint: "1019ab517dda8f10", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_session/src/host/resume.rs||impl:ResumeCatalog < \'_ , \'_ >::page", fingerprint: "da0fd5b0fe5add6e", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_session/src/event.rs||enum:ChatListKind", fingerprint: "34edb90069c76763", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_session/src/preferences_io.rs||enum:Content", fingerprint: "96117cb1dab1783b", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_session/src/event.rs||enum:ChatComposerMenuKind", fingerprint: "01723b4c1079282c", issue: "VMX-253", finding: "AU-13"),

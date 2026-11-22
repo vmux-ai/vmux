@@ -73,6 +73,9 @@ struct StartWorkSynced;
 #[derive(Component)]
 struct GitProjection(Option<vmux_git::worktree::RepoInfo>);
 
+#[derive(Component)]
+struct ProjectRowsProjection(Vec<vmux_api::space::ProjectRow>);
+
 #[derive(Component, Default)]
 struct CommandBarFocusRevision(u64);
 
@@ -198,7 +201,7 @@ impl StartPromptContext<'_, '_> {
         let path = Path::new(&cwd);
         let is_git_repo = info.is_some() || path.join(".git").exists();
         let named = match info {
-            Some(info) => info.project_name(),
+            Some(info) => info.main_worktree_name(),
             None => path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -219,6 +222,7 @@ impl StartPromptContext<'_, '_> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn project(
         &self,
         projector: &CommandBarProjector,
@@ -245,7 +249,7 @@ impl StartPromptContext<'_, '_> {
         });
         payload.prompt_context = self.context(webview, active_tab, git);
         let directory = git
-            .map(|info| info.project_root().to_string_lossy().into_owned())
+            .map(|info| info.main_worktree_root().to_string_lossy().into_owned())
             .unwrap_or_else(|| payload.prompt_context.cwd.clone());
         let selected = vmux_api::space::ProjectRow::for_directory(&projects, &directory)
             .map(|project| project.path.clone());
@@ -286,6 +290,7 @@ fn sync_pages(
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
             Option<&GitProjection>,
+            Option<&ProjectRowsProjection>,
         ),
         (
             With<HostsLauncher>,
@@ -295,7 +300,6 @@ fn sync_pages(
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     space_projects: vmux_space::SpaceProjects,
-    active_project_rows: Res<vmux_space::ActiveProjectRows>,
     projector: CommandBarProjector,
     mut commands: Commands,
 ) {
@@ -321,18 +325,25 @@ fn sync_pages(
         || mode_removed;
     let changed = contributions_changed
         || focus_changed
-        || active_project_rows.is_changed()
         || locale.as_ref().is_some_and(|locale| locale.is_changed());
     let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    for (e, meta, synced, keyboard_target, last_git) in &starts {
+    for (e, meta, synced, keyboard_target, last_git, last_projects) in &starts {
         if !meta.url.starts_with(StartPlugin::url()) {
             continue;
         }
         let tab = prompt_context.tab(e);
-        if !keyboard_target && synced && !changed && !prompt_context.changed(e, tab) {
+        let projected_rows = space_projects.selector_rows(e);
+        let projects_changed =
+            last_projects.is_none_or(|projection| projection.0 != projected_rows);
+        if !keyboard_target
+            && synced
+            && !changed
+            && !projects_changed
+            && !prompt_context.changed(e, tab)
+        {
             if let Some(cache) = repo_info.as_mut() {
                 cache.bypass_change_detection().release(e);
             }
@@ -355,18 +366,26 @@ fn sync_pages(
         let git_changed = last_git.is_none_or(|projection| projection.0 != git_info);
         let focus_requested =
             keyboard_target && (!synced || added_keyboard_targets.contains(e) || focus_changed);
-        if !changed && synced && !focus_requested && !git_changed && !prompt_context.changed(e, tab)
+        if !changed
+            && synced
+            && !focus_requested
+            && !git_changed
+            && !projects_changed
+            && !prompt_context.changed(e, tab)
         {
             continue;
         }
-        commands.entity(e).insert(GitProjection(git_info.clone()));
+        commands.entity(e).insert((
+            GitProjection(git_info.clone()),
+            ProjectRowsProjection(projected_rows.clone()),
+        ));
         let payload = prompt_context.project(
             &projector,
             &tab_gather,
             tab,
             e,
             git_info.as_ref(),
-            space_projects.selector_rows(e, &active_project_rows),
+            projected_rows,
             &locale,
         );
         commands.trigger(vmux_ecs::UiStateWrite::<
@@ -461,6 +480,7 @@ fn mark_launcher(
                 vmux_command::CommandBarState,
                 StartWorkSynced,
                 GitProjection,
+                ProjectRowsProjection,
             )>();
         }
     }
@@ -519,19 +539,24 @@ mod tests {
         emitted.0.push(entry);
     }
 
-    fn start_focus_app() -> App {
-        let mut app = App::new();
-        app.init_resource::<EmittedIds>()
-            .add_observer(focus_command_bar)
-            .add_observer(focus_ready)
-            .add_observer(capture_state);
-        app
-    }
+    struct StartFocusFixture(App);
 
-    fn request_start_focus(app: &mut App, webview: Entity) {
-        app.world_mut()
-            .trigger(CommandBarFocusRequested { webview });
-        app.update();
+    impl StartFocusFixture {
+        fn start() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, StartPlugin))
+                .insert_non_send(bevy_cef::prelude::Browsers::default())
+                .init_resource::<EmittedIds>()
+                .add_observer(capture_state);
+            Self(app)
+        }
+
+        fn request_focus(&mut self, webview: Entity) {
+            self.0
+                .world_mut()
+                .trigger(CommandBarFocusRequested { webview });
+            self.0.update();
+        }
     }
 
     #[test]
@@ -646,17 +671,19 @@ mod tests {
 
     #[test]
     fn selected_start_requests_prompt_focus_after_its_document_is_ready() {
-        let mut app = start_focus_app();
+        let mut fixture = StartFocusFixture::start();
         let metadata = PageMetadata {
             url: StartPlugin::url().to_string(),
             ..Default::default()
         };
-        let selected = app
+        let selected = fixture
+            .0
             .world_mut()
             .spawn((HostsLauncher, KeyboardOwner, metadata.clone()))
             .id();
-        let dormant = app.world_mut().spawn((HostsLauncher, metadata)).id();
-        let another = app
+        let dormant = fixture.0.world_mut().spawn((HostsLauncher, metadata)).id();
+        let another = fixture
+            .0
             .world_mut()
             .spawn((
                 HostsLauncher,
@@ -668,35 +695,35 @@ mod tests {
             ))
             .id();
         for webview in [selected, dormant, another] {
-            app.world_mut().trigger(UiInput {
+            fixture.0.world_mut().trigger(UiInput {
                 webview,
                 payload: vmux_ecs::page::PageReady,
             });
         }
-        app.update();
-        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
+        fixture.0.update();
+        assert_eq!(fixture.0.world().resource::<EmittedIds>().0, [("focus", 1)]);
     }
 
     #[test]
     fn first_focus_effect_starts_at_one() {
-        let mut app = start_focus_app();
-        let webview = app.world_mut().spawn_empty().id();
+        let mut fixture = StartFocusFixture::start();
+        let webview = fixture.0.world_mut().spawn_empty().id();
 
-        request_start_focus(&mut app, webview);
+        fixture.request_focus(webview);
 
-        let emitted = &app.world().resource::<EmittedIds>().0;
+        let emitted = &fixture.0.world().resource::<EmittedIds>().0;
         assert_eq!(emitted, &[("focus", 1)]);
     }
 
     #[test]
     fn repeated_focus_effects_advance_the_revision() {
-        let mut app = start_focus_app();
-        let webview = app.world_mut().spawn_empty().id();
+        let mut fixture = StartFocusFixture::start();
+        let webview = fixture.0.world_mut().spawn_empty().id();
 
-        request_start_focus(&mut app, webview);
-        request_start_focus(&mut app, webview);
+        fixture.request_focus(webview);
+        fixture.request_focus(webview);
 
-        let emitted = &app.world().resource::<EmittedIds>().0;
+        let emitted = &fixture.0.world().resource::<EmittedIds>().0;
         assert_eq!(emitted, &[("focus", 1), ("focus", 2)]);
     }
 }
