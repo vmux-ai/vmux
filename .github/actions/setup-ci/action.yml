@@ -45,14 +45,14 @@ runs:
       uses: actions/download-artifact@v7
       with:
         name: ci-runtime-${{ runner.os }}-${{ runner.arch }}
-        path: .build-tools/bootstrap
+        path: .vmux/bootstrap
     - name: Restore identical CI runtime
       id: runtime-cache
       if: env.VMUX_CI_RUNTIME_READY != '1' && (runner.os != 'Linux' || inputs.runtime-sha256 == '')
       uses: actions/cache/restore@v5
       with:
-        path: .build-tools/bootstrap
-        key: ci-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/build_*.rs', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_api/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'patches/**', '.github/actions/setup-ci/action.yml') }}
+        path: .vmux/bootstrap
+        key: ci-runtime-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/build_*.rs', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_api/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'patches/**', '.github/actions/setup-ci/action.yml') }}
     - name: Verify CI runtime checksum
       id: reuse
       if: env.VMUX_CI_RUNTIME_READY != '1'
@@ -60,7 +60,7 @@ runs:
       env:
         EXPECTED_SHA256: ${{ runner.os == 'Linux' && inputs.runtime-sha256 || '' }}
       run: |
-        binary=.build-tools/bootstrap/vmux-ci
+        binary=.vmux/bootstrap/vmux-ci
         expected="$EXPECTED_SHA256"
         if [ -z "$expected" ] && [ -f "$binary.sha256" ] && [ ! -L "$binary.sha256" ]; then
           expected="$(cat "$binary.sha256")"
@@ -85,8 +85,8 @@ runs:
         CARGO_PROFILE_DEV_LTO: "off"
         CARGO_PROFILE_DEV_DEBUG: "0"
       with:
-        workspaces: . -> .build-tools/ci-cargo
-        shared-key: ci-runtime-v2
+        workspaces: . -> .vmux/ci-cargo
+        shared-key: ci-runtime-v3
         cache-workspace-crates: "false"
         cache-on-failure: "true"
         save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -94,28 +94,28 @@ runs:
       if: env.VMUX_CI_RUNTIME_READY != '1' && steps.reuse.outputs.reused != 'true'
       shell: bash
       run: |
-        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS -u VMUX_UPDATE_PUBLIC_KEY RUSTFLAGS="-C opt-level=1 -C codegen-units=16" CARGO_PROFILE_DEV_LTO=off CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked -p vmux_dx --bin vmux-ci --no-default-features --features ci-runtime --target-dir .build-tools/ci-cargo
-        if [ -L .build-tools/bootstrap ]; then
-          rm .build-tools/bootstrap
+        env -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS -u VMUX_UPDATE_PUBLIC_KEY RUSTFLAGS="-C opt-level=1 -C codegen-units=16" CARGO_PROFILE_DEV_LTO=off CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked -p vmux_dx --bin vmux-ci --no-default-features --features ci-runtime --target-dir .vmux/ci-cargo
+        if [ -L .vmux/bootstrap ]; then
+          rm .vmux/bootstrap
         fi
-        mkdir -p .build-tools/bootstrap
-        rm -f .build-tools/bootstrap/vmux-ci .build-tools/bootstrap/vmux-ci.sha256
-        install -m 0755 .build-tools/ci-cargo/debug/vmux-ci .build-tools/bootstrap/vmux-ci
+        mkdir -p .vmux/bootstrap
+        rm -f .vmux/bootstrap/vmux-ci .vmux/bootstrap/vmux-ci.sha256
+        install -m 0755 .vmux/ci-cargo/debug/vmux-ci .vmux/bootstrap/vmux-ci
     - name: Activate CI runtime
       id: activate
       if: env.VMUX_CI_RUNTIME_READY != '1'
       shell: bash
       run: |
-        chmod 0755 .build-tools/bootstrap/vmux-ci
-        checksum="$(shasum -a 256 .build-tools/bootstrap/vmux-ci)"
+        chmod 0755 .vmux/bootstrap/vmux-ci
+        checksum="$(shasum -a 256 .vmux/bootstrap/vmux-ci)"
         checksum="${checksum%% *}"
-        echo "$checksum" > .build-tools/bootstrap/vmux-ci.sha256
+        echo "$checksum" > .vmux/bootstrap/vmux-ci.sha256
         echo "sha256=$checksum" >> "$GITHUB_OUTPUT"
-        echo "$GITHUB_WORKSPACE/.build-tools/bootstrap" >> "$GITHUB_PATH"
+        echo "$GITHUB_WORKSPACE/.vmux/bootstrap" >> "$GITHUB_PATH"
         echo 'VMUX_CI_RUNTIME_READY=1' >> "$GITHUB_ENV"
     - name: Save identical CI runtime
       if: steps.reuse.outputs.reused == 'false' && steps.runtime-cache.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
       uses: actions/cache/save@v5
       with:
-        path: .build-tools/bootstrap
+        path: .vmux/bootstrap
         key: ${{ steps.runtime-cache.outputs.cache-primary-key }}

@@ -7449,7 +7449,13 @@ impl Policy {
                 if matches!(
                     path.file_name().and_then(|name| name.to_str()),
                     Some(
-                        "target" | "node_modules" | ".git" | ".worktrees" | "dist" | ".build-tools"
+                        "target"
+                            | "node_modules"
+                            | ".git"
+                            | ".worktrees"
+                            | "dist"
+                            | ".vmux"
+                            | ".build-tools"
                     )
                 ) {
                     continue;
@@ -7648,6 +7654,7 @@ impl Policy {
                                     | ".git"
                                     | ".worktrees"
                                     | "dist"
+                                    | ".vmux"
                                     | ".build-tools"
                             )
                         )
@@ -11602,7 +11609,13 @@ impl Inventory {
                 if matches!(
                     path.file_name().and_then(|name| name.to_str()),
                     Some(
-                        "target" | "node_modules" | ".git" | ".worktrees" | "dist" | ".build-tools"
+                        "target"
+                            | "node_modules"
+                            | ".git"
+                            | ".worktrees"
+                            | "dist"
+                            | ".vmux"
+                            | ".build-tools"
                     )
                 ) {
                     continue;

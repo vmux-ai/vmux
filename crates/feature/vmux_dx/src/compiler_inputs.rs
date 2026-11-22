@@ -141,7 +141,14 @@ impl CompilerInputs {
             {
                 if matches!(
                     path.file_name().and_then(|name| name.to_str()),
-                    Some("target" | ".git" | ".worktrees" | ".build-tools" | "node_modules")
+                    Some(
+                        "target"
+                            | ".git"
+                            | ".worktrees"
+                            | ".vmux"
+                            | ".build-tools"
+                            | "node_modules"
+                    )
                 ) {
                     continue;
                 }

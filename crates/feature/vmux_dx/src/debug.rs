@@ -5885,17 +5885,13 @@ exit 0
             let fields: Vec<_> = line.split('|').collect();
             assert_eq!(
                 fields[2],
-                fixture.root.join(".build-tools/lints").to_str().unwrap()
+                fixture.root.join(".vmux/lints").to_str().unwrap()
             );
             assert_eq!(fields[3], "");
             assert_eq!(fields[4], "");
             assert_eq!(
                 fields[5],
-                fixture
-                    .root
-                    .join(".build-tools/dylint-drivers")
-                    .to_str()
-                    .unwrap()
+                fixture.root.join(".vmux/dylint-drivers").to_str().unwrap()
             );
         }
     }
@@ -5916,8 +5912,7 @@ exit 0
                 "cache" => {
                     let outside = fixture.root.join("outside");
                     fs::create_dir(&outside).unwrap();
-                    std::os::unix::fs::symlink(&outside, fixture.root.join(".build-tools"))
-                        .unwrap();
+                    std::os::unix::fs::symlink(&outside, fixture.root.join(".vmux")).unwrap();
                 }
                 "install" => fixture
                     .app
@@ -5976,7 +5971,7 @@ exit 0
             assert!(
                 crate::target_lock::TargetLock::try_acquire(
                     &fixture.root,
-                    &fixture.root.join(".build-tools/lints")
+                    &fixture.root.join(".vmux/lints")
                 )
                 .unwrap()
                 .is_some()

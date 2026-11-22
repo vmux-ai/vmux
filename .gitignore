@@ -1,4 +1,5 @@
 /target
+.vmux/
 .build-tools/
 patches/**/target/
 .DS_Store

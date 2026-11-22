@@ -577,7 +577,7 @@ fn resolve(requests: Incoming, providers: Query<&workspace::Provider>, mut comma
             Some(provider) => {
                 let target = provider
                     .root
-                    .join(".build-tools/providers")
+                    .join(".vmux/providers")
                     .join(&provider.package);
                 let mut path = provider.root.clone();
                 let mut refused = false;
@@ -665,7 +665,7 @@ fn configure_target(
                 "CARGO_TARGET_DIR",
                 checkout
                     .tools_root(environment)
-                    .join(".build-tools/standalone")
+                    .join(".vmux/standalone")
                     .as_os_str(),
             );
         }

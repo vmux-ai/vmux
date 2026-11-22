@@ -70,7 +70,7 @@ impl Native {
         let binary = self
             .checkout
             .tools_root(&self.environment)
-            .join(".build-tools/bin/vmux");
+            .join(".vmux/bin/vmux");
         self.copy(&std::env::current_exe()?, &binary)?;
         let path = self.text(
             "git",
@@ -95,7 +95,7 @@ impl Native {
         let target = self
             .checkout
             .tools_root(&self.environment)
-            .join(".build-tools/cargo");
+            .join(".vmux/cargo");
         self.environment.set("CARGO_TARGET_DIR", target.as_os_str());
         for args in [
             vec!["test", "-p", "vmux_dx", "--features", "ci-syntax", "--lib"],

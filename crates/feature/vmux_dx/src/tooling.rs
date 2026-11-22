@@ -240,9 +240,7 @@ fn accept(event: On<Requested>, existing: Query<(), With<Waiting>>, mut commands
         }
     };
     let mut checkout = event.checkout.clone();
-    checkout.target = checkout
-        .tools_root(&event.environment)
-        .join(".build-tools/cargo");
+    checkout.target = checkout.tools_root(&event.environment).join(".vmux/cargo");
     checkout.build_target = None;
     let root = commands
         .spawn((

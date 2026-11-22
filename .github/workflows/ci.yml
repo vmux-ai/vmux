@@ -61,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ci-runtime-${{ runner.os }}-${{ runner.arch }}
-          path: .build-tools/bootstrap/vmux-ci
+          path: .vmux/bootstrap/vmux-ci
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
@@ -300,14 +300,14 @@ jobs:
 
       - name: Record the CLI identity
         if: steps.rust.outcome == 'success'
-        run: vmux-ci artifact-publish .build-tools/bin/vmux .build-tools/artifact
+        run: vmux-ci artifact-publish .vmux/bin/vmux .vmux/artifact
       - uses: actions/upload-artifact@v6
         if: steps.rust.outcome == 'success'
         with:
           name: dx-cli-${{ runner.os }}-${{ runner.arch }}
           overwrite: true
           include-hidden-files: true
-          path: .build-tools/artifact
+          path: .vmux/artifact
           if-no-files-found: error
           retention-days: 1
 
@@ -525,10 +525,10 @@ jobs:
       - uses: ./.github/actions/cache-ecs-lints
       - name: Check typed registration fixtures
         if: runner.os == 'Linux' && needs.changes.outputs.tooling == 'true'
-        run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
+        run: vmux internal --root .vmux/compiler-checkout ecs-lint -- --test
       - name: Lint registered systems
         if: needs.changes.outputs.lint_args != ''
-        run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
+        run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
       - name: Lint standalone framework consumers
         if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.tooling == 'true'
         env:
@@ -537,14 +537,14 @@ jobs:
           VMUX_HOST_NAME: Vmux
           VMUX_HOST_NAMESPACE: ai.vmux
         run: |
-          VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --manifest-path examples/framework-consumer/Cargo.toml --all-targets
-          VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --manifest-path examples/host-consumer/Cargo.toml --all-targets
+          VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --manifest-path examples/framework-consumer/Cargo.toml --all-targets
+          VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --manifest-path examples/host-consumer/Cargo.toml --all-targets
       - uses: ./.github/actions/save-sources
         if: github.ref == 'refs/heads/main'
         with:
-          workspace: .build-tools/compiler-checkout
-          snapshot: .build-tools/lints-sources.json
-          target: .build-tools/lints
+          workspace: .vmux/compiler-checkout
+          snapshot: .vmux/lints-sources.json
+          target: .vmux/lints
       - uses: ./.github/actions/save-workspace
         with:
           cache-key: lint-ecs
@@ -771,18 +771,18 @@ jobs:
           fast-rust: "true"
       - name: Test DX lifecycle and platform adapters
         if: needs.changes.outputs.macos_tooling == 'true'
-        run: cargo test --locked -p vmux_dx --features ci-syntax --lib --target-dir .build-tools/cargo
+        run: cargo test --locked -p vmux_dx --features ci-syntax --lib --target-dir .vmux/cargo
       - name: Test native CLI resource and signing contracts
         if: needs.changes.outputs.macos_tooling == 'true'
-        run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --target-dir .build-tools/cargo
+        run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --target-dir .vmux/cargo
       - name: Record the CLI identity
-        run: vmux-ci artifact-publish .build-tools/bin/vmux .build-tools/artifact
+        run: vmux-ci artifact-publish .vmux/bin/vmux .vmux/artifact
       - uses: actions/upload-artifact@v6
         with:
           name: dx-cli-${{ runner.os }}-${{ runner.arch }}
           overwrite: true
           include-hidden-files: true
-          path: .build-tools/artifact
+          path: .vmux/artifact
           if-no-files-found: error
           retention-days: 1
 
@@ -1065,8 +1065,8 @@ jobs:
             "target/release/${BINARY_ARCHIVE_NAME}"
             "target/release/${APP_ARCHIVE_NAME}"
             "target/release/${APP_SIGNATURE_NAME}"
-            ".build-tools/standalone/release/${CLI_ARCHIVE_NAME}"
-            ".build-tools/standalone/release/${CLI_SIGNATURE_NAME}"
+            ".vmux/standalone/release/${CLI_ARCHIVE_NAME}"
+            ".vmux/standalone/release/${CLI_SIGNATURE_NAME}"
           )
           if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
             is_draft=$(jq -r .isDraft /tmp/r.json)

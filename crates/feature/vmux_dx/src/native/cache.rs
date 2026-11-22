@@ -17,7 +17,7 @@ impl Native {
             let name = entry.file_name();
             if matches!(
                 name.to_str(),
-                Some(".git" | ".worktrees" | ".build-tools" | "target")
+                Some(".git" | ".worktrees" | ".vmux" | ".build-tools" | "target")
             ) {
                 continue;
             }

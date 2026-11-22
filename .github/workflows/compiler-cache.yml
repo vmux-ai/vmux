@@ -81,14 +81,14 @@ jobs:
       - uses: ./.github/actions/cache-ecs-lints
       - name: Validate compiler fixtures
         if: runner.os == 'Linux'
-        run: vmux internal --root .build-tools/compiler-checkout ecs-lint -- --test
+        run: vmux internal --root .vmux/compiler-checkout ecs-lint -- --test
       - name: Warm nightly workspace dependencies
-        run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --workspace --all-targets
+        run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --workspace --all-targets
       - uses: ./.github/actions/save-sources
         with:
-          workspace: .build-tools/compiler-checkout
-          snapshot: .build-tools/lints-sources.json
-          target: .build-tools/lints
+          workspace: .vmux/compiler-checkout
+          snapshot: .vmux/lints-sources.json
+          target: .vmux/lints
       - name: Publish successful compiler workspace snapshot
         uses: ./.github/actions/save-workspace
         with:

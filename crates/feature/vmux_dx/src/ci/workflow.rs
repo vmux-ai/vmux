@@ -126,10 +126,10 @@ mod tests {
         ] {
             let fixture = Fixture::new();
             if let Some(binary) = binary {
-                fixture.write(".build-tools/bootstrap/vmux-ci", binary);
+                fixture.write(".vmux/bootstrap/vmux-ci", binary);
             }
             if let Some(cached) = cached {
-                fixture.write(".build-tools/bootstrap/vmux-ci.sha256", cached);
+                fixture.write(".vmux/bootstrap/vmux-ci.sha256", cached);
             }
             let output = fixture.bootstrap("Verify CI runtime checksum", expected);
             assert_eq!(
@@ -149,8 +149,8 @@ mod tests {
     #[test]
     fn downloaded_runtime_activation_restores_execution_and_reusable_checksum() {
         let fixture = Fixture::new();
-        let binary = fixture.root().join(".build-tools/bootstrap/vmux-ci");
-        fixture.write(".build-tools/bootstrap/vmux-ci", "current runtime");
+        let binary = fixture.root().join(".vmux/bootstrap/vmux-ci");
+        fixture.write(".vmux/bootstrap/vmux-ci", "current runtime");
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o600)).unwrap();
         let output = fixture.bootstrap("Activate CI runtime", "");
         assert!(
@@ -174,14 +174,14 @@ mod tests {
             let fixture = Fixture::new();
             fixture.write("foreign/vmux-ci", "foreign runtime");
             fixture.write("foreign/vmux-ci.sha256", "foreign checksum");
-            fixture.write("bin/cargo", "#!/bin/sh\nmkdir -p .build-tools/ci-cargo/debug\nprintf 'fresh runtime' > .build-tools/ci-cargo/debug/vmux-ci\n");
+            fixture.write("bin/cargo", "#!/bin/sh\nmkdir -p .vmux/ci-cargo/debug\nprintf 'fresh runtime' > .vmux/ci-cargo/debug/vmux-ci\n");
             std::fs::set_permissions(
                 fixture.root().join("bin/cargo"),
                 std::fs::Permissions::from_mode(0o755),
             )
             .unwrap();
-            std::fs::create_dir_all(fixture.root().join(".build-tools")).unwrap();
-            let cache = fixture.root().join(".build-tools/bootstrap");
+            std::fs::create_dir_all(fixture.root().join(".vmux")).unwrap();
+            let cache = fixture.root().join(".vmux/bootstrap");
             if directory_link {
                 std::os::unix::fs::symlink(fixture.root().join("foreign"), &cache).unwrap();
             } else {

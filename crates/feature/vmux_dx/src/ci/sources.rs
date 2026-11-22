@@ -702,13 +702,13 @@ impl Inputs {
         }
         let profiles = Self::profiles(manifest)?;
         let paths = self.artifacts(metadata, &profiles)?;
-        let snapshot = format!(".build-tools/source-cache-{}.json", self.partition);
+        let snapshot = format!(".vmux/source-cache-{}.json", self.partition);
         Ok(Configuration {
             key: format!("{prefix}-{sha}"),
             prefix,
             restore_prefix,
             artifacts: Self::ordered(paths).lines().map(str::to_owned).collect(),
-            paths: format!(".build-tools/workspace-cache-{}", self.partition),
+            paths: format!(".vmux/workspace-cache-{}", self.partition),
             receipt: format!("{snapshot}.{}.restore", Snapshot::now()),
             snapshot,
             target: self
@@ -1197,8 +1197,7 @@ fn checkpoint_start(mut requests: CheckpointStartRequests<'_, '_>, mut io: Io) {
                 entity,
                 &mut sequence,
                 ReadFile {
-                    location: scope
-                        .location(format!(".build-tools/source-cache-{partition}.json.inputs")),
+                    location: scope.location(format!(".vmux/source-cache-{partition}.json.inputs")),
                     limit: 1024 * 1024,
                 },
                 CheckpointConfigurationSlot,
@@ -1392,9 +1391,9 @@ fn validate(mut requests: ValidateRequests<'_, '_>, mut io: Io) {
         }
         let mut paths = BTreeSet::from([
             "target".to_owned(),
-            ".build-tools/cargo".into(),
-            ".build-tools/ci-cargo".into(),
-            ".build-tools/lints".into(),
+            ".vmux/cargo".into(),
+            ".vmux/ci-cargo".into(),
+            ".vmux/lints".into(),
         ]);
         if let Some(target) = settings.0.get("VMUX_CACHE_TARGET").and_then(OsStr::to_str)
             && !target.is_empty()
@@ -1599,7 +1598,7 @@ mod tests {
         fixture.write("src/input.rs", "initial");
         fixture.commit();
         for (key, value) in [
-            ("INPUT_SNAPSHOT", ".build-tools/snapshot.json"),
+            ("INPUT_SNAPSHOT", ".vmux/snapshot.json"),
             ("INPUT_TARGET", "target"),
             ("INPUT_SAVE", "true"),
         ] {
@@ -1629,14 +1628,9 @@ mod tests {
                 .mtime()
                 > 1
         );
-        fixture.write(".build-tools/snapshot.json.restore", "corrupt");
+        fixture.write(".vmux/snapshot.json.restore", "corrupt");
         assert!(fixture.run("cache-checkpoint", &[]).is_err());
-        assert!(
-            fixture
-                .root()
-                .join(".build-tools/snapshot.json.restore")
-                .exists()
-        );
+        assert!(fixture.root().join(".vmux/snapshot.json.restore").exists());
         fixture.run("cache-restore", &[]).unwrap();
         fixture.environment.set("INPUT_TARGET", "other-target");
         assert!(
