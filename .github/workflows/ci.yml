@@ -91,7 +91,7 @@ jobs:
       website: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.website == 'true') }}
       macos: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' || (github.event_name == 'push' && steps.filter.outputs.macos_main == 'true')) && steps.native.outputs.native != 'false') }}
       macos_tooling: ${{ needs.plan.outputs.presentation_only != 'true' && (steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false') }}
-      ios: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false') }}
+      ios: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'pull_request' && github.event_name != 'push' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false') }}
       code: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true') }}
       compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' || steps.scope.outputs.sdk == 'true' }}
       contracts: ${{ steps.scope.outputs.sdk == 'true' }}
@@ -752,7 +752,7 @@ jobs:
   dx-macos:
     name: Prepare macOS
     needs: [plan, changes]
-    if: (github.event_name != 'pull_request' || needs.plan.outputs.release == 'true') && (needs.changes.outputs.macos == 'true' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos_tooling == 'true')
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.plan.outputs.release == 'true')) && (needs.changes.outputs.macos == 'true' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos_tooling == 'true')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -795,7 +795,7 @@ jobs:
     name: Build iOS
     runs-on: macos-latest
     needs: [plan, changes, dx-macos]
-    if: github.event_name != 'pull_request' && needs.changes.outputs.ios == 'true'
+    if: github.event_name != 'pull_request' && github.event_name != 'push' && needs.changes.outputs.ios == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -872,7 +872,7 @@ jobs:
   build-mac:
     name: Build macOS
     needs: [plan, changes, dx-macos]
-    if: needs.changes.outputs.macos == 'true' && (github.event_name != 'pull_request' || needs.plan.outputs.release == 'true')
+    if: needs.changes.outputs.macos == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.plan.outputs.release == 'true'))
     runs-on: macos-latest
     permissions:
       contents: write
@@ -1123,7 +1123,7 @@ jobs:
       - name: Verify selected checks
         env:
           VMUX_CI_RESULTS: ${{ toJSON(needs) }}
-          VMUX_CI_DISTRIBUTION: ${{ github.event_name != 'pull_request' || needs.plan.outputs.release == 'true' }}
+          VMUX_CI_DISTRIBUTION: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.plan.outputs.release == 'true') }}
         run: vmux-ci checks-gate
       - uses: ./.github/actions/report-compiler-cache
         if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
