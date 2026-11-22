@@ -237,34 +237,9 @@ fn request_dismissal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::prelude::{
-        Added, App, ChildOf, Commands, Entity, Last, Plugin, Query, ResMut, Resource, Window, With,
-    };
+    use bevy::prelude::{App, ChildOf, Entity, Window, With};
     use std::sync::{Arc, mpsc};
     use std::task::{Wake, Waker};
-
-    #[derive(Resource, Default)]
-    struct Receipts(Vec<Entity>);
-
-    struct ReceiptPlugin;
-
-    impl Plugin for ReceiptPlugin {
-        fn build(&self, app: &mut App) {
-            app.init_resource::<Receipts>()
-                .add_systems(Last, receive.after(SplashRequestSet));
-        }
-    }
-
-    fn receive(
-        requests: Query<Entity, Added<Dismissal>>,
-        mut receipts: ResMut<Receipts>,
-        mut commands: Commands,
-    ) {
-        for owner in &requests {
-            receipts.0.push(owner);
-            commands.entity(owner).insert(Closed);
-        }
-    }
 
     struct WakeProbe(mpsc::SyncSender<()>);
 
@@ -285,11 +260,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins((
-                bevy::app::TaskPoolPlugin::default(),
-                BootStatusPlugin,
-                ReceiptPlugin,
-            ));
+            app.add_plugins((bevy::app::TaskPoolPlugin::default(), BootStatusPlugin));
             let (sender, wake) = mpsc::sync_channel(1);
             app.insert_resource(vmux_ecs::JobWake(Waker::from(Arc::new(WakeProbe(sender)))));
             let restore = app.world_mut().spawn(WorkspaceRestore::default()).id();
@@ -326,8 +297,17 @@ mod tests {
             (pages.ready, pages.total)
         }
 
-        fn receipts(&self) -> &[Entity] {
-            &self.app.world().resource::<Receipts>().0
+        fn requested(&self) -> bool {
+            self.app.world().get::<Dismissal>(self.status).is_some()
+        }
+
+        fn acknowledge(&mut self) {
+            assert!(self.requested());
+            self.app
+                .world_mut()
+                .entity_mut(self.status)
+                .insert(Closed)
+                .remove::<Dismissal>();
         }
     }
 
@@ -421,7 +401,7 @@ mod tests {
             .entity_mut(fixture.status)
             .insert(PresentedAt(Instant::now()));
         fixture.app.update();
-        assert!(fixture.receipts().is_empty());
+        assert!(!fixture.requested());
         fixture
             .app
             .world_mut()
@@ -429,10 +409,12 @@ mod tests {
             .unwrap()
             .visible = true;
         fixture.app.update();
-        assert_eq!(fixture.receipts(), &[fixture.status]);
+        assert!(fixture.requested());
         fixture.app.update();
+        assert!(fixture.requested());
+        fixture.acknowledge();
         fixture.app.update();
-        assert_eq!(fixture.receipts(), &[fixture.status]);
+        assert!(!fixture.requested());
     }
 
     #[test]
@@ -444,9 +426,10 @@ mod tests {
             .entity_mut(fixture.status)
             .insert(PresentedAt(Instant::now() - Duration::from_secs(21)));
         fixture.app.update();
-        assert_eq!(fixture.receipts(), &[fixture.status]);
+        assert!(fixture.requested());
+        fixture.acknowledge();
         fixture.app.update();
-        assert_eq!(fixture.receipts(), &[fixture.status]);
+        assert!(!fixture.requested());
     }
 
     #[test]
@@ -458,12 +441,13 @@ mod tests {
             .entity_mut(fixture.status)
             .insert(PresentedAt(Instant::now() - Duration::from_secs(19)));
         fixture.app.update();
-        assert!(fixture.receipts().is_empty());
+        assert!(!fixture.requested());
         fixture.wake.recv_timeout(Duration::from_secs(3)).unwrap();
         fixture.app.update();
-        assert_eq!(fixture.receipts(), &[fixture.status]);
+        assert!(fixture.requested());
+        fixture.acknowledge();
         fixture.app.update();
-        assert_eq!(fixture.receipts(), &[fixture.status]);
+        assert!(!fixture.requested());
     }
 
     #[test]
@@ -483,6 +467,6 @@ mod tests {
             .unwrap()
             .visible = true;
         fixture.app.update();
-        assert!(fixture.receipts().is_empty());
+        assert!(!fixture.requested());
     }
 }
