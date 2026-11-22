@@ -57,6 +57,7 @@ impl Scope {
                     workspace.previous(&self.root, &base, &files)?;
                     let mut selection = workspace.select(&files)?;
                     workspace.variants(&self.root, &mut selection)?;
+                    workspace.macos_lint(&self.root, &base, &files, &mut selection)?;
                     selection
                 }
             }
@@ -394,8 +395,71 @@ impl Workspace {
             records: true,
             render_free: true,
             tooling: true,
+            macos_lint: true,
             inputs: BTreeMap::new(),
         }
+    }
+
+    fn macos_lint(
+        &self,
+        root: &Path,
+        base: &str,
+        files: &[PathBuf],
+        selection: &mut Selection,
+    ) -> Result<()> {
+        if selection.macos_lint || selection.workspace {
+            selection.macos_lint = true;
+            return Ok(());
+        }
+        for file in files {
+            if Selection::documentation(file)
+                || Scope::policy(file)
+                || Selection::auxiliary_workflow(file)
+            {
+                continue;
+            }
+            if Selection::macos_path(file) {
+                selection.macos_lint = true;
+                return Ok(());
+            }
+            let current = root.join(file);
+            if current.is_file() {
+                let bytes = std::fs::read(&current)?;
+                if Selection::mentions_macos_cfg(&bytes) {
+                    selection.macos_lint = true;
+                    return Ok(());
+                }
+            }
+            if let Some(previous) = Self::historical_blob(root, base, file)?
+                && Selection::mentions_macos_cfg(&previous)
+            {
+                selection.macos_lint = true;
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    fn historical_blob(root: &Path, base: &str, file: &Path) -> Result<Option<Vec<u8>>> {
+        let mut command = Command::new("git");
+        command
+            .args(["ls-tree", "-z", base, "--"])
+            .arg(file)
+            .current_dir(root);
+        let output = Execution::new(command).output(None)?;
+        if output.stdout.is_empty() {
+            return Ok(None);
+        }
+        if !matches!(output.stdout.get(..6), Some(b"100644" | b"100755")) {
+            return Ok(None);
+        }
+        let path = file.to_str().ok_or("Invalid historical CI input path")?;
+        let mut command = Command::new("git");
+        command
+            .args(["show", &format!("{base}:{path}")])
+            .current_dir(root);
+        let output = Execution::new(command).output(None)?;
+        Ok(Some(output.stdout))
     }
 
     fn select(&self, files: &[PathBuf]) -> Result<Selection> {
@@ -489,6 +553,10 @@ impl Workspace {
                 lint.insert(package.name.clone());
             }
         }
+        let macos_lint = lean
+            || tooling
+            || selected.contains("vmux_native")
+            || files.iter().any(|file| Selection::macos_path(file));
         Selection {
             packages,
             lint,
@@ -499,6 +567,7 @@ impl Workspace {
             records,
             render_free,
             tooling,
+            macos_lint,
             inputs: BTreeMap::new(),
         }
     }
@@ -577,10 +646,47 @@ struct Selection {
     records: bool,
     render_free: bool,
     tooling: bool,
+    macos_lint: bool,
     inputs: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Selection {
+    fn macos_path(path: &Path) -> bool {
+        for component in path.components() {
+            let std::path::Component::Normal(part) = component else {
+                continue;
+            };
+            let Some(name) = part.to_str() else {
+                continue;
+            };
+            let stem = name.strip_suffix(".rs").unwrap_or(name);
+            if matches!(stem, "macos" | "darwin")
+                || stem.starts_with("macos_")
+                || stem.ends_with("_macos")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn mentions_macos_cfg(bytes: &[u8]) -> bool {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return false;
+        };
+        for needle in [
+            "target_os = \"macos\"",
+            "target_os=\"macos\"",
+            "target_os = \"ios\"",
+            "target_os=\"ios\"",
+        ] {
+            if text.contains(needle) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn framework(path: &Path) -> bool {
         if path == Path::new("crates/util/vmux_ecs/src/cli.rs")
             || path.starts_with("crates/util/vmux_ecs/src/cli")
@@ -699,6 +805,7 @@ impl Selection {
         println!("records={}", self.records);
         println!("render_free={}", self.render_free);
         println!("tooling={}", self.tooling);
+        println!("macos_lint={}", self.macos_lint);
         let mut paths = BTreeMap::new();
         for (key, names) in &self.inputs {
             paths.insert(key.clone(), self.paths(workspace, names));
@@ -1442,5 +1549,73 @@ mod tests {
         assert_eq!(selection.packages, BTreeSet::from(["owned".into()]));
         assert_eq!(selection.lint, BTreeSet::from(["owned".into()]));
         assert_eq!(workspace.full().lint, BTreeSet::from(["owned".into()]));
+    }
+
+    #[test]
+    fn macos_ecs_lint_runs_only_for_macos_relevant_changes() {
+        let repository = Scope::fixture();
+        let root = repository.root.clone();
+        repository.git(&["init"]);
+        let base = repository.snapshot();
+
+        repository.write(
+            "crates/util/unrelated/src/lib.rs",
+            "pub fn value() -> u32 { 2 }\n",
+        );
+        repository.snapshot();
+        let comparison = Comparison::parse(&["--base".into(), base.clone().into()]).unwrap();
+        let (merge_base, files) = comparison.files(&root).unwrap().unwrap();
+        let workspace = Workspace::load(&root).unwrap();
+        let mut selection = workspace.select(&files).unwrap();
+        workspace
+            .macos_lint(&root, &merge_base, &files, &mut selection)
+            .unwrap();
+        assert!(!selection.macos_lint);
+
+        repository.write(
+            "crates/util/unrelated/src/macos.rs",
+            "pub fn helper() -> u32 { 1 }\n",
+        );
+        let before_cfg = repository.snapshot();
+        let (merge_base, files) = comparison.files(&root).unwrap().unwrap();
+        let mut selection = workspace.select(&files).unwrap();
+        workspace
+            .macos_lint(&root, &merge_base, &files, &mut selection)
+            .unwrap();
+        assert!(selection.macos_lint);
+
+        repository.write(
+            "crates/util/portable/src/lib.rs",
+            "#[cfg(target_os = \"macos\")]\npub fn mac() -> u32 { 1 }\npub fn value() -> u32 { 1 }\n",
+        );
+        let with_cfg = repository.snapshot();
+        let added = Comparison::parse(&["--base".into(), before_cfg.into()]).unwrap();
+        let (merge_base, files) = added.files(&root).unwrap().unwrap();
+        let mut selection = workspace.select(&files).unwrap();
+        workspace
+            .macos_lint(&root, &merge_base, &files, &mut selection)
+            .unwrap();
+        assert!(selection.macos_lint);
+
+        repository.write(
+            "crates/util/portable/src/lib.rs",
+            "pub fn value() -> u32 { 1 }\n",
+        );
+        repository.snapshot();
+        let removed = Comparison::parse(&["--base".into(), with_cfg.into()]).unwrap();
+        let (merge_base, files) = removed.files(&root).unwrap().unwrap();
+        let mut selection = workspace.select(&files).unwrap();
+        workspace
+            .macos_lint(&root, &merge_base, &files, &mut selection)
+            .unwrap();
+        assert!(selection.macos_lint);
+
+        assert!(
+            workspace
+                .select(&["crates/app/vmux_desktop/src/lib.rs".into()])
+                .unwrap()
+                .macos_lint
+        );
+        assert!(workspace.full().macos_lint);
     }
 }
