@@ -13,7 +13,7 @@ runs:
         CACHE_READER: ${{ env.CI_CACHE_READER_ACCOUNT }}
         CACHE_WRITER: ${{ env.CI_CACHE_WRITER_ACCOUNT }}
         CACHE_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        SCCACHE_GHA_RW_MODE: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'READ_WRITE' || 'READ_ONLY' }}
+        SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'READ_WRITE' || 'READ_ONLY' }}
         SCCACHE_GCS_RW_MODE: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'READ_WRITE' || 'READ_ONLY' }}
       run: |
         gcs=false
