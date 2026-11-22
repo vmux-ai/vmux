@@ -540,6 +540,7 @@ jobs:
           VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --manifest-path examples/framework-consumer/Cargo.toml --all-targets
           VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --manifest-path examples/host-consumer/Cargo.toml --all-targets
       - uses: ./.github/actions/save-sources
+        if: github.ref == 'refs/heads/main'
         with:
           workspace: .build-tools/compiler-checkout
           snapshot: .build-tools/lints-sources.json

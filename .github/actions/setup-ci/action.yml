@@ -52,7 +52,7 @@ runs:
       uses: actions/cache/restore@v5
       with:
         path: .build-tools/bootstrap
-        key: ci-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/**', 'patches/**', 'scripts/**', '.github/actions/setup-ci/action.yml') }}
+        key: ci-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/build_*.rs', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_api/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'patches/**', '.github/actions/setup-ci/action.yml') }}
     - name: Verify CI runtime checksum
       id: reuse
       if: env.VMUX_CI_RUNTIME_READY != '1'
@@ -89,7 +89,7 @@ runs:
         shared-key: ci-runtime-v2
         cache-workspace-crates: "false"
         cache-on-failure: "true"
-        save-if: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Build CI runtime
       if: env.VMUX_CI_RUNTIME_READY != '1' && steps.reuse.outputs.reused != 'true'
       shell: bash

@@ -645,11 +645,14 @@ fn key_capture(mut requests: KeyCaptureRequests<'_, '_>, mut io: Io, results: Re
     }
 }
 impl Key {
+    fn excluded(name: &str) -> bool {
+        name.starts_with("crates/feature/vmux_dx/lints/")
+    }
     fn paths(listed: &str, graph: &str, context: &Context) -> Result<Vec<PathBuf>, String> {
         let directories = Self::directories(graph, context)?;
         let mut paths = Vec::new();
         for name in listed.split('\0') {
-            if name.is_empty() {
+            if name.is_empty() || Self::excluded(name) {
                 continue;
             }
             if matches!(
@@ -771,6 +774,9 @@ impl Key {
             return Err("CLI compile inputs contain links".into());
         }
         for file in &facts.files {
+            if Self::excluded(&file.name) {
+                continue;
+            }
             let shared = required.contains(file.name.as_str())
                 || file.name.starts_with(".cargo/")
                 || file.name.starts_with("crates/build") && file.name.ends_with(".rs")
@@ -1505,6 +1511,52 @@ mod tests {
         fixture.commit();
         assert_ne!(
             first,
+            Fixture::outputs(&fixture.run("cli-key", &[]).unwrap())["key"]
+        );
+    }
+
+    #[test]
+    fn cli_cache_key_ignores_separate_dylint_workspace_under_vmux_dx() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/app/vmux_cli\", \"crates/feature/vmux_dx\"]\n[workspace.package]\nversion = \"1.0.0\"\n",
+        );
+        fixture.write(
+            "crates/feature/vmux_dx/Cargo.toml",
+            "[package]\nname = \"vmux_dx\"\nversion = \"1.0.0\"\nedition = \"2021\"\n",
+        );
+        fixture.write(
+            "crates/feature/vmux_dx/src/lib.rs",
+            "pub fn marker() -> u8 { 1 }\n",
+        );
+        fixture.write(
+            "crates/app/vmux_cli/Cargo.toml",
+            "[package]\nname = \"vmux_cli\"\nversion = \"1.0.0\"\nedition = \"2021\"\n[features]\ndx = [\"dep:vmux_dx\"]\nci-syntax = []\n[dependencies]\nvmux_dx = { path = \"../../feature/vmux_dx\", optional = true }\n",
+        );
+        fixture.write(
+            "crates/app/vmux_cli/src/main.rs",
+            "fn main() { let _ = vmux_dx::marker(); }\n",
+        );
+        fixture.execute("cargo", &["generate-lockfile", "--offline"]);
+        fixture.commit();
+        let initial = Fixture::outputs(&fixture.run("cli-key", &[]).unwrap())["key"].clone();
+        fixture.write(
+            "crates/feature/vmux_dx/lints/src/lib.rs",
+            "pub fn lint() {}\n",
+        );
+        fixture.commit();
+        assert_eq!(
+            initial,
+            Fixture::outputs(&fixture.run("cli-key", &[]).unwrap())["key"]
+        );
+        fixture.write(
+            "crates/feature/vmux_dx/src/lib.rs",
+            "pub fn marker() -> u8 { 2 }\n",
+        );
+        fixture.commit();
+        assert_ne!(
+            initial,
             Fixture::outputs(&fixture.run("cli-key", &[]).unwrap())["key"]
         );
     }

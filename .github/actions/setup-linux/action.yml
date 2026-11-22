@@ -87,7 +87,7 @@ runs:
         shared-key: ${{ inputs.dependency-cache-key || inputs.cache-key }}
         cache-workspace-crates: "false"
         cache-on-failure: "true"
-        save-if: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - uses: ./.github/actions/cache-workspace
       with:
@@ -113,8 +113,15 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Cache Linux CEF SDK
-      if: inputs.desktop == 'true'
+      if: inputs.desktop == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache@v5
+      with:
+        path: ~/.cache/vmux/cef-sdk
+        key: cef-sdk-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-v1
+
+    - name: Restore Linux CEF SDK
+      if: inputs.desktop == 'true' && github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
       with:
         path: ~/.cache/vmux/cef-sdk
         key: cef-sdk-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-v1

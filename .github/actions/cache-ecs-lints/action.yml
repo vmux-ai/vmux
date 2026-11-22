@@ -20,6 +20,7 @@ runs:
         echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
     - name: Cache pinned compiler and Dylint tools
+      if: github.ref == 'refs/heads/main'
       uses: actions/cache@v5
       with:
         path: |
@@ -29,8 +30,32 @@ runs:
           ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
         key: ecs-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('rust-toolchain.toml', 'crates/feature/vmux_dx/lints/rust-toolchain.toml', 'crates/feature/vmux_dx/lints/tool-versions.toml') }}
 
+    - name: Restore pinned compiler and Dylint tools
+      if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          .build-tools/compiler-checkout/.build-tools/dylint
+          .build-tools/compiler-checkout/.build-tools/dylint-cargo
+          .build-tools/compiler-checkout/.build-tools/dylint-drivers
+          ~/.rustup/toolchains/${{ steps.compiler.outputs.channel }}-*
+        key: ecs-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('rust-toolchain.toml', 'crates/feature/vmux_dx/lints/rust-toolchain.toml', 'crates/feature/vmux_dx/lints/tool-versions.toml') }}
+
     - name: Cache ECS lint compiler artifacts
+      if: github.ref == 'refs/heads/main'
       uses: actions/cache@v5
+      with:
+        path: |
+          .build-tools/compiler-checkout/.build-tools/lints
+          .build-tools/compiler-checkout/.build-tools/lints-sources.json
+        key: ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+        restore-keys: |
+          ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
+          ecs-lints-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
+
+    - name: Restore ECS lint compiler artifacts
+      if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v5
       with:
         path: |
           .build-tools/compiler-checkout/.build-tools/lints
@@ -45,4 +70,4 @@ runs:
         workspace: .build-tools/compiler-checkout
         snapshot: .build-tools/lints-sources.json
         target: .build-tools/lints
-        save: "true"
+        save: ${{ github.ref == 'refs/heads/main' }}
