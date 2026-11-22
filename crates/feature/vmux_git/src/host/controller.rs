@@ -20,8 +20,9 @@ use crate::event::{
     GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest,
 };
 use crate::state::{
-    GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageControllerState,
-    GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState, GitWorkspaceChanged,
+    GitBranchCheckout, GitBranchCollection, GitBranchPrompt, GitOperationEligibility,
+    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
+    GitWorkspaceChanged,
 };
 
 use super::directory::GitDirectoryNavigation;
@@ -337,8 +338,114 @@ impl GitPageControllerState {
         self.branch_collection = collection;
     }
 
+    fn collection_contains(
+        collection: GitBranchCollection,
+        repository: &GitRepositorySnapshot,
+        reference: &str,
+    ) -> bool {
+        match collection {
+            GitBranchCollection::Local => repository
+                .branches
+                .iter()
+                .any(|entry| entry.name == reference),
+            GitBranchCollection::Remote => repository
+                .remote_branches
+                .iter()
+                .any(|entry| entry.name == reference),
+            GitBranchCollection::Tags => {
+                repository.tags.iter().any(|entry| entry.name == reference)
+            }
+        }
+    }
+
+    fn containing_collection(
+        repository: &GitRepositorySnapshot,
+        reference: &str,
+    ) -> Option<GitBranchCollection> {
+        if reference.is_empty() {
+            return None;
+        }
+        [
+            GitBranchCollection::Local,
+            GitBranchCollection::Remote,
+            GitBranchCollection::Tags,
+        ]
+        .into_iter()
+        .find(|&collection| Self::collection_contains(collection, repository, reference))
+    }
+
+    fn selected_reference(
+        collection: GitBranchCollection,
+        repository: &GitRepositorySnapshot,
+        selected: &str,
+    ) -> String {
+        if Self::collection_contains(collection, repository, selected) {
+            return selected.to_string();
+        }
+        if collection == GitBranchCollection::Local
+            && let Some(current) = repository.branches.iter().find(|entry| entry.current)
+        {
+            return current.name.clone();
+        }
+        if collection == GitBranchCollection::Local && !repository.branch.is_empty() {
+            return repository.branch.clone();
+        }
+        match collection {
+            GitBranchCollection::Local => {
+                repository.branches.first().map(|entry| entry.name.clone())
+            }
+            GitBranchCollection::Remote => repository
+                .remote_branches
+                .first()
+                .map(|entry| entry.name.clone()),
+            GitBranchCollection::Tags => repository.tags.first().map(|entry| entry.name.clone()),
+        }
+        .unwrap_or_default()
+    }
+
+    fn eligible_branch_checkout(
+        collection: GitBranchCollection,
+        repository: &GitRepositorySnapshot,
+        reference: &str,
+    ) -> Option<GitBranchCheckout> {
+        if reference.is_empty() || collection == GitBranchCollection::Tags {
+            return None;
+        }
+        let branch = match collection {
+            GitBranchCollection::Local => repository
+                .branches
+                .iter()
+                .find(|branch| branch.name == reference),
+            GitBranchCollection::Remote => repository
+                .branches
+                .iter()
+                .find(|branch| branch.upstream == reference),
+            GitBranchCollection::Tags => None,
+        };
+        if let Some(branch) = branch {
+            if branch.current {
+                return None;
+            }
+            return Some(GitBranchCheckout {
+                branch: branch.name.clone(),
+                checkout: branch.checkout.clone(),
+                start_point: String::new(),
+            });
+        }
+        let branch = reference
+            .split_once('/')
+            .map(|(_, branch)| branch)
+            .unwrap_or(reference)
+            .to_string();
+        Some(GitBranchCheckout {
+            branch,
+            checkout: String::new(),
+            start_point: reference.to_string(),
+        })
+    }
+
     fn select_branch(&mut self, reference: &str, repository: &GitRepositorySnapshot) -> bool {
-        if !self.branch_collection.contains(repository, reference) {
+        if !Self::collection_contains(self.branch_collection, repository, reference) {
             return false;
         }
         self.select_panel(GitPanel::Branches);
@@ -544,6 +651,322 @@ impl GitPageControllerState {
             None
         }
     }
+
+    fn reconcile_branch_selection(
+        &mut self,
+        repository: &GitRepositorySnapshot,
+        snapshot: &crate::state::GitPageSnapshot,
+    ) {
+        if !Self::collection_contains(
+            self.selected_branch_collection,
+            repository,
+            &self.selected_branch,
+        ) {
+            match Self::containing_collection(repository, &self.selected_branch) {
+                Some(collection) => self.selected_branch_collection = collection,
+                None if self.selected_branch.is_empty() || snapshot.references_complete() => {
+                    self.selected_branch = Self::selected_reference(
+                        GitBranchCollection::Local,
+                        repository,
+                        &self.selected_branch,
+                    );
+                    self.selected_branch_collection = GitBranchCollection::Local;
+                }
+                None => {}
+            }
+        }
+        let matching_branch = snapshot.branch_files_reference == self.selected_branch;
+        let retained_branch_path = matching_branch
+            && snapshot
+                .branch_diff_paths
+                .iter()
+                .any(|path| path.as_bytes() == self.selected_branch_path_bytes);
+        let mut next_branch_file = if matching_branch {
+            snapshot
+                .branch_files
+                .iter()
+                .find(|entry| entry.path_bytes == self.selected_branch_path_bytes)
+        } else {
+            None
+        };
+        if next_branch_file.is_none() && !retained_branch_path && matching_branch {
+            next_branch_file = snapshot.branch_files.first();
+        }
+        if let Some(entry) = next_branch_file {
+            self.selected_branch_path.clone_from(&entry.path);
+            self.selected_branch_path_bytes
+                .clone_from(&entry.path_bytes);
+        } else if !retained_branch_path {
+            self.selected_branch_path.clear();
+            self.selected_branch_path_bytes.clear();
+        }
+    }
+}
+
+#[derive(SystemParam)]
+struct GitKeyDispatcher<'w, 's> {
+    pages: Query<
+        'w,
+        's,
+        (
+            &'static GitState,
+            &'static mut GitPageControllerState,
+            &'static mut SelectionRevealRevision,
+        ),
+    >,
+    commands: Commands<'w, 's>,
+}
+
+impl GitKeyDispatcher<'_, '_> {
+    fn dispatch_file_key(
+        controller: &mut GitPageControllerState,
+        webview: Entity,
+        key: &str,
+        repository: &GitRepositorySnapshot,
+        commands: &mut Commands,
+    ) {
+        match key {
+            "a" if controller.operations.stage_all => commands.trigger(UiInput {
+                webview,
+                payload: GitStageAllRequest {
+                    path: repository.repo_root.clone(),
+                },
+            }),
+            "s" if controller.operations.stash => commands.trigger(UiInput {
+                webview,
+                payload: GitStashPushRequest {
+                    repo_root: repository.repo_root.clone(),
+                },
+            }),
+            "A" if controller.operations.amend => commands.trigger(UiInput {
+                webview,
+                payload: GitAmendRequest {
+                    repo_root: repository.repo_root.clone(),
+                },
+            }),
+            " " | "Space" if controller.operations.toggle_stage => {
+                let Some(entry) = repository
+                    .files
+                    .iter()
+                    .find(|entry| entry.path_bytes == controller.selected_path_bytes)
+                else {
+                    return;
+                };
+                let path = Path::new(&repository.repo_root)
+                    .join(&entry.path)
+                    .to_string_lossy()
+                    .into_owned();
+                if entry.unstaged {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: GitStageRequest {
+                            repo_root: repository.repo_root.clone(),
+                            path,
+                            path_bytes: entry.path_bytes.clone(),
+                        },
+                    });
+                } else if entry.staged {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: GitUnstageRequest {
+                            repo_root: repository.repo_root.clone(),
+                            path,
+                            path_bytes: entry.path_bytes.clone(),
+                        },
+                    });
+                }
+            }
+            "x" if controller.operations.discard => {
+                let selected = controller.selected_path_bytes.clone();
+                if let Some(payload) = controller.discard_file(&selected, repository) {
+                    commands.trigger(UiInput { webview, payload });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_branch_key(
+        controller: &mut GitPageControllerState,
+        webview: Entity,
+        key: &str,
+        repository: &GitRepositorySnapshot,
+        commands: &mut Commands,
+    ) {
+        match key {
+            "c" if controller.operations.checkout_branch => {
+                let Some(checkout) = controller.operations.branch_checkout.clone() else {
+                    return;
+                };
+                if checkout.start_point.is_empty() {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: ProjectActivateRequest {
+                            path: repository.repo_root.clone(),
+                            branch: checkout.branch,
+                            checkout: checkout.checkout,
+                            pane_id: None,
+                        },
+                    });
+                } else {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: GitCreateBranchRequest {
+                            repo_root: repository.repo_root.clone(),
+                            branch: checkout.branch,
+                            start_point: checkout.start_point,
+                        },
+                    });
+                }
+            }
+            "r" if controller.operations.rebase => commands.trigger(UiInput {
+                webview,
+                payload: GitRebaseRequest {
+                    repo_root: repository.repo_root.clone(),
+                    branch: controller.selected_branch.clone(),
+                },
+            }),
+            "M" if controller.operations.merge => commands.trigger(UiInput {
+                webview,
+                payload: GitMergeRequest {
+                    repo_root: repository.repo_root.clone(),
+                    branch: controller.selected_branch.clone(),
+                },
+            }),
+            "f" if controller.operations.fast_forward => commands.trigger(UiInput {
+                webview,
+                payload: GitFastForwardRequest {
+                    repo_root: repository.repo_root.clone(),
+                    branch: controller.selected_branch.clone(),
+                },
+            }),
+            "n" if controller.operations.create_branch => {
+                controller.open_branch_prompt(GitBranchPrompt::Create {
+                    base: controller.selected_branch.clone(),
+                });
+            }
+            "d" if controller.operations.delete_branch => {
+                controller.open_branch_prompt(GitBranchPrompt::Delete {
+                    branch: controller.selected_branch.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_commit_or_stash_key(
+        controller: &GitPageControllerState,
+        webview: Entity,
+        key: &str,
+        repository: &GitRepositorySnapshot,
+        commands: &mut Commands,
+    ) {
+        match (controller.focused_panel, key) {
+            (GitPanel::Commits, " " | "Space") if controller.operations.checkout_commit => commands
+                .trigger(UiInput {
+                    webview,
+                    payload: GitCheckoutCommitRequest {
+                        repo_root: repository.repo_root.clone(),
+                        commit: controller.selected_commit.clone(),
+                    },
+                }),
+            (GitPanel::Commits, "C" | "V") if controller.operations.cherry_pick => commands
+                .trigger(UiInput {
+                    webview,
+                    payload: GitCherryPickRequest {
+                        repo_root: repository.repo_root.clone(),
+                        commit: controller.selected_commit.clone(),
+                    },
+                }),
+            (GitPanel::Commits, "t") if controller.operations.revert_commit => {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitRevertRequest {
+                        repo_root: repository.repo_root.clone(),
+                        commit: controller.selected_commit.clone(),
+                    },
+                })
+            }
+            (GitPanel::Stash, "g") if controller.operations.stash_pop => {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitStashPopRequest {
+                        repo_root: repository.repo_root.clone(),
+                        reference: controller.selected_stash.clone(),
+                    },
+                })
+            }
+            (GitPanel::Stash, "d") if controller.operations.stash_drop => {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitStashDropRequest {
+                        repo_root: repository.repo_root.clone(),
+                        reference: controller.selected_stash.clone(),
+                    },
+                })
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch(&mut self, webview: Entity, request: &GitKeyRequest) {
+        let Ok((state, mut controller, mut revision)) = self.pages.get_mut(webview) else {
+            return;
+        };
+        let previous = controller.clone();
+        let current = controller.bypass_change_detection();
+        if let Some(direction) = SelectionDirection::from_key(request) {
+            if let Some(effect) = current.move_selection(direction, state, &mut revision) {
+                self.commands
+                    .trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
+            }
+            if *controller != previous {
+                controller.set_changed();
+            }
+            return;
+        }
+        if request.repeat
+            || request.modifiers.ctrl
+            || request.modifiers.alt
+            || request.modifiers.super_key
+        {
+            return;
+        }
+        if request.key == "?" {
+            current.shortcut_help_visible = !current.shortcut_help_visible;
+        } else if request.key == "Tab" {
+            current.select_panel(current.focused_panel.next(request.modifiers.shift));
+        } else if let Some(panel) = GitPanel::from_key(&request.key) {
+            current.select_panel(panel);
+        } else if let Some(repository) = state.repository() {
+            match current.focused_panel {
+                GitPanel::Files => Self::dispatch_file_key(
+                    current,
+                    webview,
+                    &request.key,
+                    repository,
+                    &mut self.commands,
+                ),
+                GitPanel::Branches => Self::dispatch_branch_key(
+                    current,
+                    webview,
+                    &request.key,
+                    repository,
+                    &mut self.commands,
+                ),
+                GitPanel::Commits | GitPanel::Stash => Self::dispatch_commit_or_stash_key(
+                    current,
+                    webview,
+                    &request.key,
+                    repository,
+                    &mut self.commands,
+                ),
+            }
+        }
+        if *controller != previous {
+            controller.set_changed();
+        }
+    }
 }
 
 type OperationPage<'a> = (
@@ -560,204 +983,6 @@ type ChangedOperationPage = Or<(
 #[derive(SystemParam)]
 struct OperationPages<'w, 's> {
     values: Query<'w, 's, OperationPage<'static>, ChangedOperationPage>,
-}
-
-fn dispatch_git_key(
-    controller: &mut GitPageControllerState,
-    revision: &mut SelectionRevealRevision,
-    webview: Entity,
-    request: &GitKeyRequest,
-    state: &GitState,
-    commands: &mut Commands,
-) {
-    if let Some(direction) = SelectionDirection::from_key(request) {
-        if let Some(effect) = controller.move_selection(direction, state, revision) {
-            commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
-        }
-        return;
-    }
-    if request.repeat
-        || request.modifiers.ctrl
-        || request.modifiers.alt
-        || request.modifiers.super_key
-    {
-        return;
-    }
-    if request.key == "?" {
-        controller.shortcut_help_visible = !controller.shortcut_help_visible;
-        return;
-    }
-    if request.key == "Tab" {
-        controller.select_panel(controller.focused_panel.next(request.modifiers.shift));
-        return;
-    }
-    if let Some(panel) = GitPanel::from_key(&request.key) {
-        controller.select_panel(panel);
-        return;
-    }
-    let Some(repository) = state.repository() else {
-        return;
-    };
-    match (controller.focused_panel, request.key.as_str()) {
-        (GitPanel::Files, "a") if controller.operations.stage_all => commands.trigger(UiInput {
-            webview,
-            payload: GitStageAllRequest {
-                path: repository.repo_root.clone(),
-            },
-        }),
-        (GitPanel::Files, "s") if controller.operations.stash => commands.trigger(UiInput {
-            webview,
-            payload: GitStashPushRequest {
-                repo_root: repository.repo_root.clone(),
-            },
-        }),
-        (GitPanel::Files, "A") if controller.operations.amend => commands.trigger(UiInput {
-            webview,
-            payload: GitAmendRequest {
-                repo_root: repository.repo_root.clone(),
-            },
-        }),
-        (GitPanel::Files, " " | "Space") if controller.operations.toggle_stage => {
-            let Some(entry) = repository
-                .files
-                .iter()
-                .find(|entry| entry.path_bytes == controller.selected_path_bytes)
-            else {
-                return;
-            };
-            let path = Path::new(&repository.repo_root)
-                .join(&entry.path)
-                .to_string_lossy()
-                .into_owned();
-            if entry.unstaged {
-                commands.trigger(UiInput {
-                    webview,
-                    payload: GitStageRequest {
-                        repo_root: repository.repo_root.clone(),
-                        path,
-                        path_bytes: entry.path_bytes.clone(),
-                    },
-                });
-            } else if entry.staged {
-                commands.trigger(UiInput {
-                    webview,
-                    payload: GitUnstageRequest {
-                        repo_root: repository.repo_root.clone(),
-                        path,
-                        path_bytes: entry.path_bytes.clone(),
-                    },
-                });
-            }
-        }
-        (GitPanel::Files, "x") if controller.operations.discard => {
-            let selected = controller.selected_path_bytes.clone();
-            if let Some(payload) = controller.discard_file(&selected, repository) {
-                commands.trigger(UiInput { webview, payload });
-            }
-        }
-        (GitPanel::Branches, "c") if controller.operations.checkout_branch => {
-            let Some(checkout) = controller
-                .selected_branch_collection
-                .checkout(repository, &controller.selected_branch)
-            else {
-                return;
-            };
-            if checkout.start_point.is_empty() {
-                commands.trigger(UiInput {
-                    webview,
-                    payload: ProjectActivateRequest {
-                        path: repository.repo_root.clone(),
-                        branch: checkout.branch,
-                        checkout: checkout.checkout,
-                        pane_id: None,
-                    },
-                });
-            } else {
-                commands.trigger(UiInput {
-                    webview,
-                    payload: GitCreateBranchRequest {
-                        repo_root: repository.repo_root.clone(),
-                        branch: checkout.branch,
-                        start_point: checkout.start_point,
-                    },
-                });
-            }
-        }
-        (GitPanel::Branches, "r") if controller.operations.rebase => commands.trigger(UiInput {
-            webview,
-            payload: GitRebaseRequest {
-                repo_root: repository.repo_root.clone(),
-                branch: controller.selected_branch.clone(),
-            },
-        }),
-        (GitPanel::Branches, "M") if controller.operations.merge => commands.trigger(UiInput {
-            webview,
-            payload: GitMergeRequest {
-                repo_root: repository.repo_root.clone(),
-                branch: controller.selected_branch.clone(),
-            },
-        }),
-        (GitPanel::Branches, "f") if controller.operations.fast_forward => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitFastForwardRequest {
-                    repo_root: repository.repo_root.clone(),
-                    branch: controller.selected_branch.clone(),
-                },
-            })
-        }
-        (GitPanel::Branches, "n") if controller.operations.create_branch => {
-            controller.open_branch_prompt(GitBranchPrompt::Create {
-                base: controller.selected_branch.clone(),
-            });
-        }
-        (GitPanel::Branches, "d") if controller.operations.delete_branch => {
-            controller.open_branch_prompt(GitBranchPrompt::Delete {
-                branch: controller.selected_branch.clone(),
-            });
-        }
-        (GitPanel::Commits, " " | "Space") if controller.operations.checkout_commit => commands
-            .trigger(UiInput {
-                webview,
-                payload: GitCheckoutCommitRequest {
-                    repo_root: repository.repo_root.clone(),
-                    commit: controller.selected_commit.clone(),
-                },
-            }),
-        (GitPanel::Commits, "C" | "V") if controller.operations.cherry_pick => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitCherryPickRequest {
-                    repo_root: repository.repo_root.clone(),
-                    commit: controller.selected_commit.clone(),
-                },
-            })
-        }
-        (GitPanel::Commits, "t") if controller.operations.revert_commit => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitRevertRequest {
-                    repo_root: repository.repo_root.clone(),
-                    commit: controller.selected_commit.clone(),
-                },
-            })
-        }
-        (GitPanel::Stash, "g") if controller.operations.stash_pop => commands.trigger(UiInput {
-            webview,
-            payload: GitStashPopRequest {
-                repo_root: repository.repo_root.clone(),
-                reference: controller.selected_stash.clone(),
-            },
-        }),
-        (GitPanel::Stash, "d") if controller.operations.stash_drop => commands.trigger(UiInput {
-            webview,
-            payload: GitStashDropRequest {
-                repo_root: repository.repo_root.clone(),
-                reference: controller.selected_stash.clone(),
-            },
-        }),
-        _ => {}
-    }
 }
 
 type Sources<'w, 's> = Query<
@@ -809,50 +1034,7 @@ fn reconcile(mut pages: Sources) {
         {
             next.selected_commit.clear();
         }
-        if !next
-            .selected_branch_collection
-            .contains(repository, &next.selected_branch)
-        {
-            match GitBranchCollection::containing(repository, &next.selected_branch) {
-                Some(collection) => next.selected_branch_collection = collection,
-                None if next.selected_branch.is_empty() || state.snapshot.references_complete() => {
-                    next.selected_branch = GitBranchCollection::Local
-                        .selected_reference(repository, &next.selected_branch);
-                    next.selected_branch_collection = GitBranchCollection::Local;
-                }
-                None => {}
-            }
-        }
-        let retained_branch_path = state.snapshot.branch_files_reference == next.selected_branch
-            && state
-                .snapshot
-                .branch_diff_paths
-                .iter()
-                .any(|path| path.as_bytes() == next.selected_branch_path_bytes);
-        let mut next_branch_file = if state.snapshot.branch_files_reference == next.selected_branch
-        {
-            state
-                .snapshot
-                .branch_files
-                .iter()
-                .find(|entry| entry.path_bytes == next.selected_branch_path_bytes)
-        } else {
-            None
-        };
-        if next_branch_file.is_none()
-            && !retained_branch_path
-            && state.snapshot.branch_files_reference == next.selected_branch
-        {
-            next_branch_file = state.snapshot.branch_files.first();
-        }
-        if let Some(entry) = next_branch_file {
-            next.selected_branch_path.clone_from(&entry.path);
-            next.selected_branch_path_bytes
-                .clone_from(&entry.path_bytes);
-        } else if !retained_branch_path {
-            next.selected_branch_path.clear();
-            next.selected_branch_path_bytes.clear();
-        }
+        next.reconcile_branch_selection(repository, &state.snapshot);
         if state.snapshot.stashes.loaded {
             next.selected_stash = repository
                 .stashes
@@ -970,9 +1152,11 @@ fn operations(mut pages: OperationPages) {
                 .iter()
                 .any(|entry| entry.reference == controller.selected_stash);
         let staged = repository.files.iter().any(|entry| entry.staged);
-        let checkout = controller
-            .selected_branch_collection
-            .checkout(repository, &controller.selected_branch);
+        let branch_checkout = GitPageControllerState::eligible_branch_checkout(
+            controller.selected_branch_collection,
+            repository,
+            &controller.selected_branch,
+        );
         let branch_selected = branch.is_some();
         let branch_mutable = branch.is_some_and(|branch| !branch.current);
         let next = GitOperationEligibility {
@@ -983,7 +1167,8 @@ fn operations(mut pages: OperationPages) {
             discard: file.is_some_and(|entry| entry.can_discard()),
             commit: staged,
             push: !repository.branch.is_empty(),
-            checkout_branch: checkout.is_some_and(|checkout| !checkout.current),
+            checkout_branch: branch_checkout.is_some(),
+            branch_checkout,
             create_branch: branch_selected,
             delete_branch: branch
                 .is_some_and(|branch| !branch.current && branch.checkout.is_empty()),
@@ -1196,6 +1381,7 @@ fn repository_context(
     )>,
     mut states: super::state::GitStates,
     mut cache: RetainedPages,
+    branch_diffs: super::diff::BranchDiffs,
     mut watch: Option<NonSendMut<super::watch::GitWatch>>,
     mut commands: Commands,
 ) {
@@ -1225,14 +1411,18 @@ fn repository_context(
     if states.repository_loaded_at(webview, path) || states.repository_loading_at(webview, path) {
         if controller.apply_url(page_url) {
             states.clear_diff(webview);
-            commands
-                .entity(webview)
-                .remove::<(super::diff::GitDiffQuery, super::diff::GitBranchFilesQuery)>();
+            commands.entity(webview).remove::<(
+                super::diff::GitDiffQuery,
+                super::diff::GitBranchFilesQuery,
+                super::diff::BranchDiffCursor,
+                super::diff::BranchDiffPriority,
+                super::diff::PrefetchBudget,
+            )>();
         }
         return;
     }
     match cache.restore(path) {
-        Some((mut cached, diff, branch_files)) => {
+        Some((cached_entity, mut cached, diff, branch_files)) => {
             let changed_selection = cached.apply_url(page_url);
             let CachedGitPage {
                 snapshot,
@@ -1245,11 +1435,13 @@ fn repository_context(
                 return;
             }
             *controller = cached_controller;
+            let mut page = commands.entity(webview);
             if let Some(source) = source {
-                commands.entity(webview).insert(source);
+                page.insert(source);
             }
             if !changed_selection && let Some(diff) = diff {
-                commands.entity(webview).insert(diff);
+                page.insert((diff, super::diff::PrefetchBudget::default()));
+                branch_diffs.park_to(cached_entity, webview, &mut commands);
             }
             if !changed_selection && let Some(branch_files) = branch_files {
                 commands.entity(webview).insert(branch_files);
@@ -1455,31 +1647,8 @@ fn deliver_repository_probes(
     }
 }
 
-fn key_request(
-    trigger: On<UiInput<GitKeyRequest>>,
-    mut pages: Query<(
-        &GitState,
-        &mut GitPageControllerState,
-        &mut SelectionRevealRevision,
-    )>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok((state, mut controller, mut revision)) = pages.get_mut(webview) else {
-        return;
-    };
-    let previous = controller.clone();
-    dispatch_git_key(
-        controller.bypass_change_detection(),
-        &mut revision,
-        webview,
-        &trigger.event().payload,
-        state,
-        &mut commands,
-    );
-    if *controller != previous {
-        controller.set_changed();
-    }
+fn key_request(trigger: On<UiInput<GitKeyRequest>>, mut dispatcher: GitKeyDispatcher) {
+    dispatcher.dispatch(trigger.event().webview, &trigger.event().payload);
 }
 
 fn panel_select_request(
@@ -2639,6 +2808,168 @@ mod tests {
         assert_eq!(
             app.world().get::<vmux_ecs::PageMetadata>(page).unwrap().url,
             "vmux://projects/"
+        );
+    }
+
+    #[test]
+    fn remote_checkout_eligibility_reuses_tracking_branch_or_creates_missing_branch() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ControllerPlugin));
+        let repository = GitRepositorySnapshot {
+            path: "/tmp/repo".to_string(),
+            repo_root: "/tmp/repo".to_string(),
+            repo_name: "repo".to_string(),
+            is_worktree: false,
+            branch: "main".to_string(),
+            base_ref: "main".to_string(),
+            upstream: "origin/main".to_string(),
+            ahead: 0,
+            behind: 0,
+            files: Vec::new(),
+            commits: Vec::new(),
+            branches: vec![
+                crate::event::GitBranchEntry {
+                    name: "main".to_string(),
+                    current: true,
+                    upstream: "origin/main".to_string(),
+                    checkout: "/tmp/repo".to_string(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+                crate::event::GitBranchEntry {
+                    name: "feature".to_string(),
+                    current: false,
+                    upstream: "origin/feature".to_string(),
+                    checkout: String::new(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+            ],
+            remote_branches: vec![
+                crate::event::GitBranchEntry {
+                    name: "origin/main".to_string(),
+                    current: false,
+                    upstream: String::new(),
+                    checkout: String::new(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+                crate::event::GitBranchEntry {
+                    name: "origin/feature".to_string(),
+                    current: false,
+                    upstream: String::new(),
+                    checkout: String::new(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+                crate::event::GitBranchEntry {
+                    name: "upstream/topic/nested".to_string(),
+                    current: false,
+                    upstream: String::new(),
+                    checkout: String::new(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+            ],
+            tags: Vec::new(),
+            stashes: Vec::new(),
+        };
+        let page = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: "/tmp/repo".to_string(),
+                        repository: Some(repository),
+                        loading: false,
+                        local_branches: crate::state::GitCatalogProgress {
+                            loaded: true,
+                            ..Default::default()
+                        },
+                        remote_branches: crate::state::GitCatalogProgress {
+                            loaded: true,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState {
+                    focused_panel: GitPanel::Branches,
+                    branch_collection: GitBranchCollection::Remote,
+                    selected_branch_collection: GitBranchCollection::Remote,
+                    selected_branch: "origin/feature".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+        let ops = &app
+            .world()
+            .get::<GitPageControllerState>(page)
+            .unwrap()
+            .operations;
+        assert!(ops.checkout_branch);
+        assert_eq!(
+            ops.branch_checkout,
+            Some(GitBranchCheckout {
+                branch: "feature".to_string(),
+                checkout: String::new(),
+                start_point: String::new(),
+            })
+        );
+
+        app.world_mut()
+            .get_mut::<GitPageControllerState>(page)
+            .unwrap()
+            .selected_branch = "origin/main".to_string();
+        app.update();
+        let ops = &app
+            .world()
+            .get::<GitPageControllerState>(page)
+            .unwrap()
+            .operations;
+        assert!(!ops.checkout_branch);
+        assert_eq!(ops.branch_checkout, None);
+
+        app.world_mut()
+            .get_mut::<GitPageControllerState>(page)
+            .unwrap()
+            .selected_branch = "upstream/topic/nested".to_string();
+        app.update();
+        let ops = &app
+            .world()
+            .get::<GitPageControllerState>(page)
+            .unwrap()
+            .operations;
+        assert!(ops.checkout_branch);
+        assert_eq!(
+            ops.branch_checkout,
+            Some(GitBranchCheckout {
+                branch: "topic/nested".to_string(),
+                checkout: String::new(),
+                start_point: "upstream/topic/nested".to_string(),
+            })
         );
     }
 }

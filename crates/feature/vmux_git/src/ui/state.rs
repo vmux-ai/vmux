@@ -5,7 +5,7 @@ use vmux_ui::scroll::{ScrollIntoView, ScrollRetention};
 use crate::event::GitRepositoryRequest;
 use crate::event::{GitDiffRow, GitDiffViewport};
 use crate::state::{
-    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitPanel, GitProjects, GitUiState,
+    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState,
 };
 
 #[derive(Clone, Copy)]
@@ -17,60 +17,23 @@ pub(super) struct GitPageState {
     pub(super) diff: GitDiffState,
     pub(super) location: Signal<vmux_api::page_location::PageLocationUiState>,
     pub(super) active_branch_file: Signal<String>,
-    pending_repository: Signal<Option<PendingRepository>>,
     repository_request_sequence: Signal<u64>,
     handled_selection_reveal: Signal<u64>,
-}
-
-#[derive(Clone)]
-struct PendingRepository {
-    request: GitRepositoryRequest,
-}
-
-impl PendingRepository {
-    fn waiting_for(&self, snapshot: &GitPageSnapshot) -> bool {
-        snapshot.repository_request_id < self.request.request_id
-    }
 }
 
 impl GitPageState {
     pub(super) fn use_state() -> Self {
         let binding = UiStateBinding::<GitUiState>::use_context();
         let root = binding.state;
-        let pending_repository = use_signal(|| None::<PendingRepository>);
         let state = Self {
             root,
-            snapshot: use_memo(move || {
-                let root = root.read();
-                let pending = pending_repository.read();
-                let Some(request) = pending.as_ref() else {
-                    return root.snapshot.clone();
-                };
-                if root.snapshot.repository_request_id == request.request.request_id {
-                    return root.snapshot.clone();
-                }
-                GitPageSnapshot::loading(
-                    &request.request,
-                    root.snapshot.nonce.wrapping_add(1).max(1),
-                )
-            }),
-            controller: use_memo(move || {
-                let root = root.read();
-                let pending = pending_repository.read();
-                let Some(request) = pending.as_ref() else {
-                    return root.controller.clone();
-                };
-                if root.snapshot.repository_request_id == request.request.request_id {
-                    return root.controller.clone();
-                }
-                GitPageControllerState::for_repository(request.request.branch.clone())
-            }),
+            snapshot: binding.use_selector(|state| state.snapshot.clone()),
+            controller: binding.use_selector(|state| state.controller.clone()),
             projects: binding.use_selector(|state| state.projects.clone()),
             diff: GitDiffState::new(root),
             location: UiStateBinding::<vmux_api::page_location::PageLocationUiState>::use_context()
                 .state,
             active_branch_file: use_signal(String::new),
-            pending_repository,
             repository_request_sequence: use_signal(|| 0),
             handled_selection_reveal: use_signal(|| 0),
         };
@@ -79,38 +42,20 @@ impl GitPageState {
     }
 
     pub(super) fn request_repository(mut self, mut request: GitRepositoryRequest) {
-        let root = self.root.peek();
-        let retained = root.snapshot.repository_request_id;
+        let retained = self.root.peek().snapshot.repository_request_id;
         let request_id = (*self.repository_request_sequence.peek())
             .max(retained)
             .wrapping_add(1)
             .max(1);
         request.request_id = request_id;
         self.repository_request_sequence.set(request_id);
-        self.pending_repository.set(Some(PendingRepository {
-            request: request.clone(),
-        }));
-        self.diff.begin_repository(&request.path);
-        if send(&request).is_err() {
-            self.pending_repository.set(None);
-            let root = self.root.peek();
-            self.diff.synchronize(&root.snapshot, &root.controller);
-        }
+        let _ = send(&request);
     }
 
     fn subscribe(self, mut root: Signal<GitUiState>) {
         use_effect(move || {
             let snapshot = root.read().snapshot.clone();
-            let controller = root.read().controller.clone();
-            let pending = self.pending_repository.peek().clone();
-            if let Some(pending) = pending {
-                if pending.waiting_for(&snapshot) {
-                    return;
-                }
-                let mut pending_repository = self.pending_repository;
-                pending_repository.set(None);
-            }
-            self.diff.synchronize(&snapshot, &controller);
+            self.diff.synchronize(&snapshot);
             let updates = if root.read().diff_updates.is_empty() {
                 Vec::new()
             } else {
@@ -135,41 +80,11 @@ impl GitPageState {
 
 #[derive(Clone, Copy)]
 pub(super) struct GitDiffState {
-    workspace: Signal<String>,
-    selection: Signal<DiffSelection>,
     pub(super) viewport: Signal<Option<GitDiffViewport>>,
     pub(super) rows: Signal<Vec<GitDiffRow>>,
     pub(super) rows_from: Signal<Option<u32>>,
     pub(super) loading: Signal<bool>,
     update_cursor: Signal<DiffUpdateCursor>,
-}
-
-#[derive(Clone, PartialEq)]
-enum DiffSelection {
-    None,
-    File { path: String, bytes: Vec<u8> },
-    Branch(String),
-    Commit(String),
-    Stash(String),
-}
-
-impl DiffSelection {
-    fn of(controller: &GitPageControllerState) -> Self {
-        match controller.focused_panel {
-            GitPanel::Files if !controller.selected_abs_path.is_empty() => Self::File {
-                path: controller.selected_abs_path.clone(),
-                bytes: controller.selected_path_bytes.clone(),
-            },
-            GitPanel::Branches if !controller.selected_branch.is_empty() => {
-                Self::Branch(controller.selected_branch.clone())
-            }
-            GitPanel::Commits => Self::Commit(controller.selected_commit.clone()),
-            GitPanel::Stash if !controller.selected_stash.is_empty() => {
-                Self::Stash(controller.selected_stash.clone())
-            }
-            _ => Self::None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -205,8 +120,6 @@ impl DiffUpdateCursor {
 impl GitDiffState {
     fn new(root: Signal<GitUiState>) -> Self {
         Self {
-            workspace: use_signal(move || root.peek().snapshot.workspace.clone()),
-            selection: use_signal(move || DiffSelection::of(&root.peek().controller)),
             viewport: use_signal(move || root.peek().snapshot.diff_viewport.clone()),
             rows: use_signal(move || root.peek().snapshot.diff_rows.clone()),
             rows_from: use_signal(|| None),
@@ -215,13 +128,7 @@ impl GitDiffState {
         }
     }
 
-    fn synchronize(self, snapshot: &GitPageSnapshot, controller: &GitPageControllerState) {
-        let selection = DiffSelection::of(controller);
-        if *self.workspace.peek() != snapshot.workspace || *self.selection.peek() != selection {
-            self.begin_repository(&snapshot.workspace);
-            let mut current = self.selection;
-            current.set(selection);
-        }
+    fn synchronize(self, snapshot: &GitPageSnapshot) {
         let mut loading = self.loading;
         if *loading.peek() != snapshot.diff_loading {
             loading.set(snapshot.diff_loading);
@@ -256,15 +163,6 @@ impl GitDiffState {
         update_cursor.set(DiffUpdateCursor::default());
     }
 
-    fn begin_repository(mut self, workspace: &str) {
-        self.workspace.set(workspace.to_string());
-        self.viewport.set(None);
-        self.rows.set(Vec::new());
-        self.rows_from.set(None);
-        self.loading.set(true);
-        self.update_cursor.set(DiffUpdateCursor::default());
-    }
-
     fn replaces(
         current: Option<&GitDiffViewport>,
         current_rows: &[GitDiffRow],
@@ -272,9 +170,8 @@ impl GitDiffState {
     ) -> bool {
         let incoming = snapshot.diff_viewport.as_ref();
         match (current, incoming) {
-            (None, None) => snapshot.diff_loading,
-            (None, Some(_)) => true,
-            (Some(_), None) => !snapshot.diff_loading,
+            (None, None) => false,
+            (None, Some(_)) | (Some(_), None) => true,
             (Some(current), Some(incoming)) => {
                 if incoming.generation != current.generation
                     || incoming.first_line != current.first_line
@@ -440,7 +337,7 @@ mod tests {
     fn diff_chunks_survive_other_updates_before_the_next_document_frame() {
         let mut preview = DiffPreview::new();
         let controller = GitPageControllerState {
-            focused_panel: GitPanel::Branches,
+            focused_panel: crate::state::GitPanel::Branches,
             selected_branch: "feature".to_string(),
             ..Default::default()
         };
@@ -534,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_changes_clear_old_diff_while_refresh_and_file_seek_keep_it() {
+    fn host_diff_snapshots_control_whether_the_mounted_diff_stays_visible_or_clears() {
         let mut preview = DiffPreview::new();
         let loaded = GitUiState {
             snapshot: GitPageSnapshot {
@@ -553,23 +450,24 @@ mod tests {
                 ..Default::default()
             },
             controller: GitPageControllerState {
-                focused_panel: GitPanel::Branches,
+                focused_panel: crate::state::GitPanel::Branches,
                 selected_branch: "feature".to_string(),
                 ..Default::default()
             },
             ..Default::default()
         };
         assert!(preview.publish(loaded.clone()).contains("populated diff"));
-        let mut pending = loaded.clone();
-        pending.snapshot.diff_viewport = None;
-        pending.snapshot.diff_rows.clear();
-        pending.snapshot.diff_loading = true;
-        assert!(!preview.publish(pending.clone()).contains("empty diff"));
-        pending.controller.selected_branch_path = "second.rs".to_string();
-        pending.controller.selected_branch_path_bytes = b"second.rs".to_vec();
-        assert!(!preview.publish(pending.clone()).contains("empty diff"));
-        pending.controller.selected_branch = "main".to_string();
-        assert!(preview.publish(pending).contains("empty diff"));
+        let mut refreshing = loaded.clone();
+        refreshing.snapshot.diff_loading = true;
+        refreshing.controller.selected_branch_path = "second.rs".to_string();
+        refreshing.controller.selected_branch_path_bytes = b"second.rs".to_vec();
+        assert!(preview.publish(refreshing).contains("populated diff"));
+        let mut cleared = loaded.clone();
+        cleared.snapshot.diff_viewport = None;
+        cleared.snapshot.diff_rows.clear();
+        cleared.snapshot.diff_loading = true;
+        cleared.controller.selected_branch = "main".to_string();
+        assert!(preview.publish(cleared).contains("empty diff"));
         let mut incoming = loaded;
         incoming.controller.selected_branch = "main".to_string();
         assert!(preview.publish(incoming).contains("populated diff"));
@@ -600,36 +498,6 @@ mod tests {
             rows_from: 0,
             rows: Vec::new(),
         }
-    }
-
-    #[test]
-    fn pending_repository_waits_until_acknowledged_or_superseded() {
-        let pending = PendingRepository {
-            request: GitRepositoryRequest {
-                request_id: 7,
-                ..GitRepositoryRequest::at("/repo")
-            },
-        };
-
-        assert!(pending.waiting_for(&GitPageSnapshot {
-            nonce: 4,
-            ..Default::default()
-        }));
-        assert!(!pending.waiting_for(&GitPageSnapshot {
-            repository_request_id: 7,
-            nonce: 5,
-            ..Default::default()
-        }));
-        assert!(pending.waiting_for(&GitPageSnapshot {
-            repository_request_id: 0,
-            nonce: 5,
-            ..Default::default()
-        }));
-        assert!(!pending.waiting_for(&GitPageSnapshot {
-            repository_request_id: 8,
-            nonce: 5,
-            ..Default::default()
-        }));
     }
 
     #[test]

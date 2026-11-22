@@ -17,27 +17,35 @@ pub(super) struct SummaryPlugin;
 impl Plugin for SummaryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GitRuntime>()
-            .init_resource::<SummaryCache>()
             .add_plugins(vmux_ecs::UiStatePlugin::<RepositorySummaryUiState>::default())
             .add_plugins(UiEventPlugin::<(RepositorySummaryRequest,)>::default())
             .add_observer(subscribe)
-            .add_systems(Update, (start, finish, publish).chain());
+            .add_systems(
+                Update,
+                (start, bevy::ecs::schedule::ApplyDeferred, finish, publish).chain(),
+            );
     }
 }
 
 #[derive(Component)]
 struct Subscription(Vec<String>);
 
-#[derive(Resource, Default)]
-struct SummaryCache(HashMap<String, Entry>);
+#[derive(Component, Default)]
+struct PublishedSummary(Vec<RepositorySummaryResult>);
 
-struct Entry {
+#[derive(Component)]
+struct SummaryRoot(String);
+
+#[derive(Component)]
+struct SummaryState {
     result: RepositorySummaryResult,
-    pending: Option<GitTask<Result<RepositorySummary, String>>>,
     checked: Option<Instant>,
 }
 
-impl Entry {
+#[derive(Component)]
+struct SummaryTask(GitTask<Result<RepositorySummary, String>>);
+
+impl SummaryState {
     fn new(root: String, retained: Option<RepositorySummaryResult>) -> Self {
         Self {
             result: retained.unwrap_or(RepositorySummaryResult {
@@ -45,7 +53,6 @@ impl Entry {
                 loading: true,
                 ..Default::default()
             }),
-            pending: None,
             checked: None,
         }
     }
@@ -76,33 +83,27 @@ fn subscribe(event: On<UiInput<RepositorySummaryRequest>>, mut commands: Command
     commands.entity(event.webview).insert(Subscription(roots));
 }
 
-type SubscribedPages<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static Subscription,
-        Option<&'static vmux_ecs::UiState<RepositorySummaryUiState>>,
-    ),
-    Or<(
-        With<vmux_ecs::PagePresented>,
-        With<vmux_ecs::PageTransition>,
-    )>,
->;
-
+#[allow(clippy::type_complexity)]
 fn start(
-    subscriptions: SubscribedPages,
-    mut cache: ResMut<SummaryCache>,
+    subscriptions: Query<
+        (Entity, &Subscription, Option<&PublishedSummary>),
+        Or<(
+            With<vmux_ecs::PagePresented>,
+            With<vmux_ecs::PageTransition>,
+        )>,
+    >,
+    entries: Query<(Entity, &SummaryRoot, &SummaryState, Has<SummaryTask>)>,
     runtime: Res<GitRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
 ) {
     let now = Instant::now();
     let mut roots = HashSet::new();
     let mut retained = HashMap::new();
     for (_, subscription, state) in &subscriptions {
         roots.extend(subscription.0.iter().cloned());
-        if let Some(state) = state.and_then(vmux_ecs::UiState::current) {
-            for result in &state.repositories {
+        if let Some(state) = state {
+            for result in &state.0 {
                 if subscription.0.contains(&result.root) && !result.loading {
                     retained
                         .entry(result.root.clone())
@@ -111,65 +112,110 @@ fn start(
             }
         }
     }
-    cache.0.retain(|root, _| roots.contains(root));
-    for root in roots {
-        let entry = cache
-            .0
-            .entry(root.clone())
-            .or_insert_with(|| Entry::new(root.clone(), retained.remove(&root)));
-        if entry.pending.is_some()
-            || entry
+    let mut existing = HashSet::new();
+    for (entity, root, state, running) in &entries {
+        if !roots.contains(&root.0) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        existing.insert(root.0.clone());
+        if running
+            || state
                 .checked
                 .is_some_and(|checked| now.duration_since(checked) < Duration::from_secs(5))
         {
             continue;
         }
-        entry.pending = runtime
+        let path = root.0.clone();
+        if let Some(task) = runtime
             .spawn_background(proxy.as_deref().map(|proxy| (**proxy).clone()), move || {
-                RepositorySummary::read(root)
-            });
+                RepositorySummary::read(path)
+            })
+        {
+            commands.entity(entity).insert(SummaryTask(task));
+        }
+    }
+    for root in roots {
+        if existing.contains(&root) {
+            continue;
+        }
+        let state = SummaryState::new(root.clone(), retained.remove(&root));
+        let path = root.clone();
+        let mut entity = commands.spawn((
+            Name::new("git.repository.summary"),
+            SummaryRoot(root),
+            state,
+        ));
+        if let Some(task) = runtime
+            .spawn_background(proxy.as_deref().map(|proxy| (**proxy).clone()), move || {
+                RepositorySummary::read(path)
+            })
+        {
+            entity.insert(SummaryTask(task));
+        }
     }
 }
 
-fn finish(mut cache: ResMut<SummaryCache>) {
-    for entry in cache.0.values_mut() {
-        let Some(task) = entry.pending.as_mut() else {
+fn finish(
+    mut entries: Query<(Entity, &mut SummaryState, &mut SummaryTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut state, mut task) in &mut entries {
+        let Some(result) = task.0.poll() else {
             continue;
         };
-        let Some(result) = task.poll() else {
-            continue;
-        };
-        entry.pending = None;
-        entry.checked = Some(Instant::now());
-        entry.result.loading = false;
+        commands.entity(entity).remove::<SummaryTask>();
+        state.checked = Some(Instant::now());
+        state.result.loading = false;
         match result {
             Ok(Ok(summary)) => {
-                entry.result.summary = Some(summary);
-                entry.result.error.clear();
+                state.result.summary = Some(summary);
+                state.result.error.clear();
             }
             Ok(Err(error)) => {
-                entry.result.error = error;
+                state.result.error = error;
             }
             Err(_) => {
-                entry.result.error = "repository summary worker failed".to_string();
+                state.result.error = "repository summary worker failed".to_string();
             }
         }
     }
 }
 
-fn publish(subscriptions: SubscribedPages, cache: Res<SummaryCache>, mut commands: Commands) {
+#[allow(clippy::type_complexity)]
+fn publish(
+    subscriptions: Query<
+        (Entity, &Subscription, Option<&PublishedSummary>),
+        Or<(
+            With<vmux_ecs::PagePresented>,
+            With<vmux_ecs::PageTransition>,
+        )>,
+    >,
+    entries: Query<(&SummaryRoot, &SummaryState)>,
+    mut commands: Commands,
+) {
+    let results = entries
+        .iter()
+        .map(|(root, state)| (root.0.as_str(), &state.result))
+        .collect::<HashMap<_, _>>();
     for (owner, subscription, current) in &subscriptions {
-        let mut state = RepositorySummaryUiState::default();
+        let mut repositories = Vec::new();
         for root in &subscription.0 {
-            if let Some(entry) = cache.0.get(root) {
-                state.repositories.push(entry.result.clone());
+            if let Some(result) = results.get(root.as_str()) {
+                repositories.push((*result).clone());
             }
         }
-        if current.and_then(vmux_ecs::UiState::current) == Some(&state) {
+        if current.is_some_and(|published| published.0 == repositories) {
             continue;
         }
+        let state = RepositorySummaryUiState {
+            repositories: repositories.clone(),
+        };
         commands
             .trigger(vmux_ecs::UiStateWrite::<RepositorySummaryUiState>::from_event(owner, &state));
+        commands
+            .entity(owner)
+            .insert(PublishedSummary(repositories));
     }
 }
 
@@ -266,7 +312,15 @@ mod tests {
         let summary = result.summary.unwrap();
         assert_eq!(summary.branch, "main");
         assert_eq!(summary.changed_files, 1);
-        assert_eq!(pages.0.world().resource::<SummaryCache>().0.len(), 1);
+        assert_eq!(
+            pages
+                .0
+                .world_mut()
+                .query::<&SummaryRoot>()
+                .iter(pages.0.world())
+                .count(),
+            1
+        );
         let empty = tempfile::tempdir().unwrap();
         let non_repository = pages.request(empty.path());
         let result = pages.finish(non_repository);
@@ -283,13 +337,14 @@ mod tests {
             .entity_mut(second)
             .remove::<vmux_ecs::PagePresented>();
         pages.0.update();
+        let expected_root = repo.path().to_string_lossy().into_owned();
         assert!(
             !pages
                 .0
-                .world()
-                .resource::<SummaryCache>()
-                .0
-                .contains_key(&repo.path().to_string_lossy().into_owned())
+                .world_mut()
+                .query::<&SummaryRoot>()
+                .iter(pages.0.world())
+                .any(|root| root.0 == expected_root)
         );
         pages
             .0

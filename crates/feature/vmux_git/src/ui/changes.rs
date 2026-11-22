@@ -56,52 +56,15 @@ pub(super) fn ChangesCard(
         .saturating_sub(staged_total)
         .min(unstaged_total);
     let has_unstaged = !unstaged.is_empty();
-    let file_operations = rsx! {
-        div { class: "flex shrink-0 items-center gap-0.5",
-            if has_unstaged {
-                HeaderOperationButton {
-                    icon: LineIcon::Plus,
-                    shortcut: "",
-                    label: translate("git-stage-all"),
-                    disabled: !operations.stage_all,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        move |_| {
-                            let _ = send(&GitStageAllRequest { path: repo_root.clone() });
-                        }
-                    },
-                }
-            }
-            HeaderOperationButton {
-                icon: LineIcon::Package,
-                shortcut: "s",
-                label: translate("git-stash"),
-                disabled: !operations.stash,
-                danger: false,
-                onpress: {
-                    let repo_root = repository.repo_root.clone();
-                    move |_| GitOperation::StashPush.send(repo_root.clone())
-                },
-            }
-            HeaderOperationButton {
-                icon: LineIcon::Pencil,
-                shortcut: "A",
-                label: translate("git-amend"),
-                disabled: !operations.amend,
-                danger: false,
-                onpress: {
-                    let repo_root = repository.repo_root.clone();
-                    move |_| GitOperation::Amend.send(repo_root.clone())
-                },
-            }
-        }
-    };
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
             div { class: "flex h-10 shrink-0 items-center justify-end px-3",
-                {file_operations}
+                FileOperationsBar {
+                    repo_root: repository.repo_root.clone(),
+                    has_unstaged,
+                    operations: operations.clone(),
+                }
             }
             div {
                 class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
@@ -143,6 +106,55 @@ pub(super) fn ChangesCard(
                 commit_pending,
                 can_commit: operations.commit,
             }
+            }
+        }
+    }
+}
+
+#[component]
+fn FileOperationsBar(
+    repo_root: String,
+    has_unstaged: bool,
+    operations: GitOperationEligibility,
+) -> Element {
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-0.5",
+            if has_unstaged {
+                HeaderOperationButton {
+                    icon: LineIcon::Plus,
+                    shortcut: "",
+                    label: translate("git-stage-all"),
+                    disabled: !operations.stage_all,
+                    danger: false,
+                    onpress: {
+                        let repo_root = repo_root.clone();
+                        move |_| {
+                            let _ = send(&GitStageAllRequest { path: repo_root.clone() });
+                        }
+                    },
+                }
+            }
+            HeaderOperationButton {
+                icon: LineIcon::Package,
+                shortcut: "s",
+                label: translate("git-stash"),
+                disabled: !operations.stash,
+                danger: false,
+                onpress: {
+                    let repo_root = repo_root.clone();
+                    move |_| GitOperation::StashPush.send(repo_root.clone())
+                },
+            }
+            HeaderOperationButton {
+                icon: LineIcon::Pencil,
+                shortcut: "A",
+                label: translate("git-amend"),
+                disabled: !operations.amend,
+                danger: false,
+                onpress: {
+                    let repo_root = repo_root.clone();
+                    move |_| GitOperation::Amend.send(repo_root.clone())
+                },
             }
         }
     }

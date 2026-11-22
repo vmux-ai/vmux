@@ -9,9 +9,6 @@ use super::job::{CatalogJob, GitForegroundRead};
 use super::job_runner::GitJob;
 use super::repository::GitRepository;
 
-const CATALOG_PAGE_SIZE: usize = 40;
-const AUTO_COMMIT_LIMIT: usize = 400;
-
 pub(super) struct CatalogPlugin;
 
 #[derive(Component, Clone, PartialEq, Eq)]
@@ -22,12 +19,108 @@ struct CatalogContext {
 }
 
 impl CatalogContext {
+    const PAGE_SIZE: usize = 40;
+    const AUTO_COMMIT_LIMIT: usize = 400;
+
     fn from_controller(controller: &GitPageControllerState) -> Self {
         Self {
             panel: controller.focused_panel,
             branch_collection: controller.branch_collection,
             selected_commit: controller.selected_commit.clone(),
         }
+    }
+
+    fn requested_catalogs(
+        controller: &GitPageControllerState,
+        has_staged: bool,
+    ) -> Vec<GitCatalog> {
+        let mut catalogs = vec![GitCatalog::LocalBranches];
+        if !controller.selected_commit.is_empty() || has_staged {
+            catalogs.push(GitCatalog::Commits);
+        }
+        match controller.focused_panel {
+            GitPanel::Branches => catalogs.push(controller.branch_collection.into()),
+            GitPanel::Commits => catalogs.push(GitCatalog::Commits),
+            GitPanel::Stash => catalogs.push(GitCatalog::Stashes),
+            GitPanel::Files => {}
+        }
+        catalogs.dedup();
+        catalogs
+    }
+
+    fn retry_failed(
+        controller: &GitPageControllerState,
+        state: &mut super::state::GitState,
+        patches: &mut Vec<GitCatalogPatch>,
+    ) {
+        let mut retried = false;
+        let mut retries = vec![GitCatalog::LocalBranches];
+        match controller.focused_panel {
+            GitPanel::Branches => retries.push(controller.branch_collection.into()),
+            GitPanel::Commits => retries.push(GitCatalog::Commits),
+            GitPanel::Stash => retries.push(GitCatalog::Stashes),
+            GitPanel::Files => {}
+        }
+        retries.dedup();
+        for catalog in retries {
+            if !state.snapshot.catalog(catalog).failed {
+                continue;
+            }
+            let progress = crate::state::GitCatalogProgress::default();
+            *state.snapshot.catalog_mut(catalog) = progress;
+            patches.push(GitCatalogPatch {
+                catalog,
+                offset: 0,
+                entries: None,
+                progress,
+                message: None,
+            });
+            retried = true;
+        }
+        if retried && !state.snapshot.has_failed_catalog() {
+            state.snapshot.message.clear();
+            if let Some(patch) = patches.last_mut() {
+                patch.message = Some(String::new());
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn queue_catalog(
+        entity: Entity,
+        catalog: GitCatalog,
+        offset: usize,
+        repo_root: &str,
+        current_branch: &str,
+        state: &mut super::state::GitState,
+        revision: &mut super::state::GitCatalogRevision,
+        patches: &mut Vec<GitCatalogPatch>,
+    ) -> (GitJob, GitForegroundRead, GitRepository, CatalogJob) {
+        let progress = crate::state::GitCatalogProgress {
+            loading: true,
+            ..state.snapshot.catalog(catalog)
+        };
+        *state.snapshot.catalog_mut(catalog) = progress;
+        patches.push(GitCatalogPatch {
+            catalog,
+            offset: u32::try_from(offset).unwrap_or(u32::MAX),
+            entries: None,
+            progress,
+            message: None,
+        });
+        (
+            GitJob::new(entity),
+            GitForegroundRead,
+            GitRepository::at(repo_root.to_string()),
+            CatalogJob {
+                catalog,
+                current_branch: current_branch.to_string(),
+                offset,
+                limit: Self::PAGE_SIZE,
+                revision: state.snapshot.nonce,
+                generation: revision.start(catalog),
+            },
+        )
     }
 }
 
@@ -56,11 +149,7 @@ type ChangedCatalogPages<'w, 's> = Query<
     )>,
 >;
 
-fn sync_catalogs(
-    mut pages: ChangedCatalogPages,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
-    mut commands: Commands,
-) {
+fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
     for (entity, mut state, controller, mut revision, context) in &mut pages {
         let mut patches = Vec::new();
         let (current_branch, repo_root, commit_offset, selected_commit_missing, has_staged) = {
@@ -81,39 +170,11 @@ fn sync_catalogs(
         };
         let next_context = CatalogContext::from_controller(&controller);
         if context != Some(&next_context) {
-            let mut retried = false;
-            let mut retries = vec![GitCatalog::LocalBranches];
-            match controller.focused_panel {
-                GitPanel::Branches => retries.push(controller.branch_collection.into()),
-                GitPanel::Commits => retries.push(GitCatalog::Commits),
-                GitPanel::Stash => retries.push(GitCatalog::Stashes),
-                GitPanel::Files => {}
-            }
-            retries.dedup();
-            for catalog in retries {
-                let progress = state.snapshot.catalog(catalog);
-                if progress.failed {
-                    let progress = crate::state::GitCatalogProgress::default();
-                    *state
-                        .bypass_change_detection()
-                        .snapshot
-                        .catalog_mut(catalog) = progress;
-                    patches.push(GitCatalogPatch {
-                        catalog,
-                        offset: 0,
-                        entries: None,
-                        progress,
-                        message: None,
-                    });
-                    retried = true;
-                }
-            }
-            if retried && !state.snapshot.has_failed_catalog() {
-                state.bypass_change_detection().snapshot.message.clear();
-                if let Some(patch) = patches.last_mut() {
-                    patch.message = Some(String::new());
-                }
-            }
+            CatalogContext::retry_failed(
+                &controller,
+                state.bypass_change_detection(),
+                &mut patches,
+            );
             commands.entity(entity).insert(next_context);
         }
         let branch_files_pending = controller.focused_panel == GitPanel::Branches
@@ -122,120 +183,65 @@ fn sync_catalogs(
             && state.snapshot.branch_files_reference != controller.selected_branch;
         if branch_files_pending {
             for patch in patches {
-                ui_state.push(entity, patch);
+                commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                    entity, &patch,
+                ));
             }
             continue;
         }
         let local_branches = state.snapshot.local_branches;
         if !local_branches.loaded && !local_branches.loading && !local_branches.failed {
-            let progress = crate::state::GitCatalogProgress {
-                loading: true,
-                ..local_branches
-            };
-            state.bypass_change_detection().snapshot.local_branches = progress;
-            patches.push(GitCatalogPatch {
-                catalog: GitCatalog::LocalBranches,
-                offset: 0,
-                entries: None,
-                progress,
-                message: None,
-            });
-            commands.spawn((
-                GitJob::new(entity),
-                GitForegroundRead,
-                GitRepository::at(repo_root.clone()),
-                CatalogJob {
-                    catalog: GitCatalog::LocalBranches,
-                    current_branch: current_branch.clone(),
-                    offset: 0,
-                    limit: CATALOG_PAGE_SIZE,
-                    revision: state.snapshot.nonce,
-                    generation: revision.start(GitCatalog::LocalBranches),
-                },
+            commands.spawn(CatalogContext::queue_catalog(
+                entity,
+                GitCatalog::LocalBranches,
+                0,
+                &repo_root,
+                &current_branch,
+                state.bypass_change_detection(),
+                &mut revision,
+                &mut patches,
             ));
         }
         let commits = state.snapshot.commits;
         if selected_commit_missing
             && controller.selected_commit_is_object_id()
-            && commit_offset < AUTO_COMMIT_LIMIT
+            && commit_offset < CatalogContext::AUTO_COMMIT_LIMIT
             && commits.loaded
             && commits.has_more
             && !commits.loading
             && !commits.failed
         {
-            let progress = crate::state::GitCatalogProgress {
-                loading: true,
-                ..commits
-            };
-            state.bypass_change_detection().snapshot.commits = progress;
-            patches.push(GitCatalogPatch {
-                catalog: GitCatalog::Commits,
-                offset: u32::try_from(commit_offset).unwrap_or(u32::MAX),
-                entries: None,
-                progress,
-                message: None,
-            });
-            commands.spawn((
-                GitJob::new(entity),
-                GitForegroundRead,
-                GitRepository::at(repo_root.clone()),
-                CatalogJob {
-                    catalog: GitCatalog::Commits,
-                    current_branch: current_branch.clone(),
-                    offset: commit_offset,
-                    limit: CATALOG_PAGE_SIZE,
-                    revision: state.snapshot.nonce,
-                    generation: revision.start(GitCatalog::Commits),
-                },
+            commands.spawn(CatalogContext::queue_catalog(
+                entity,
+                GitCatalog::Commits,
+                commit_offset,
+                &repo_root,
+                &current_branch,
+                state.bypass_change_detection(),
+                &mut revision,
+                &mut patches,
             ));
         }
-        let mut catalogs = vec![GitCatalog::LocalBranches];
-        if !controller.selected_commit.is_empty() || has_staged {
-            catalogs.push(GitCatalog::Commits);
-        }
-        match controller.focused_panel {
-            GitPanel::Branches => catalogs.push(controller.branch_collection.into()),
-            GitPanel::Commits => catalogs.push(GitCatalog::Commits),
-            GitPanel::Stash => catalogs.push(GitCatalog::Stashes),
-            GitPanel::Files => {}
-        }
-        catalogs.dedup();
-        for catalog in catalogs {
+        for catalog in CatalogContext::requested_catalogs(&controller, has_staged) {
             let progress = state.snapshot.catalog(catalog);
             if progress.loaded || progress.loading || progress.failed {
                 continue;
             }
-            let progress = crate::state::GitCatalogProgress {
-                loading: true,
-                ..progress
-            };
-            *state
-                .bypass_change_detection()
-                .snapshot
-                .catalog_mut(catalog) = progress;
-            patches.push(GitCatalogPatch {
+            commands.spawn(CatalogContext::queue_catalog(
+                entity,
                 catalog,
-                offset: 0,
-                entries: None,
-                progress,
-                message: None,
-            });
-            commands.spawn((
-                GitJob::new(entity),
-                GitForegroundRead,
-                GitRepository::at(repo_root.clone()),
-                CatalogJob {
-                    catalog,
-                    current_branch: current_branch.clone(),
-                    offset: 0,
-                    limit: CATALOG_PAGE_SIZE,
-                    revision: state.snapshot.nonce,
-                    generation: revision.start(catalog),
-                },
+                0,
+                &repo_root,
+                &current_branch,
+                state.bypass_change_detection(),
+                &mut revision,
+                &mut patches,
             ));
         }
         for patch in patches {
-            ui_state.push(entity, patch);
+            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                entity, &patch,
+            ));
         }
     }
 }
@@ -246,7 +252,6 @@ fn load_next(
         &mut super::state::GitState,
         &mut super::state::GitCatalogRevision,
     )>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -272,16 +277,16 @@ fn load_next(
         .bypass_change_detection()
         .snapshot
         .catalog_mut(catalog) = progress;
-    ui_state.push(
-        webview,
-        GitCatalogPatch {
-            catalog,
-            offset: u32::try_from(offset).unwrap_or(u32::MAX),
-            entries: None,
-            progress,
-            message: None,
-        },
-    );
+    let patch = GitCatalogPatch {
+        catalog,
+        offset: u32::try_from(offset).unwrap_or(u32::MAX),
+        entries: None,
+        progress,
+        message: None,
+    };
+    commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+        webview, &patch,
+    ));
     commands.spawn((
         GitJob::new(webview),
         GitRepository::at(repo_root),
@@ -289,7 +294,7 @@ fn load_next(
             catalog,
             current_branch,
             offset,
-            limit: CATALOG_PAGE_SIZE,
+            limit: CatalogContext::PAGE_SIZE,
             revision: state.snapshot.nonce,
             generation: revision.start(catalog),
         },
@@ -433,7 +438,7 @@ mod tests {
             CatalogPlugin,
         ));
         let mut repository = repository();
-        repository.commits = (0..AUTO_COMMIT_LIMIT).map(commit).collect();
+        repository.commits = (0..CatalogContext::AUTO_COMMIT_LIMIT).map(commit).collect();
         let controller = GitPageControllerState {
             selected_commit: "f".repeat(40),
             focused_panel: GitPanel::Commits,

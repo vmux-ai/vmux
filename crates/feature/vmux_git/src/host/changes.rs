@@ -35,12 +35,6 @@ struct MutationAuthority<'w, 's> {
     files: Query<'w, 's, &'static super::status::FileGit>,
 }
 
-#[derive(Clone, Copy)]
-enum FileMutation {
-    ToggleStage,
-    Discard,
-}
-
 impl MutationAuthority<'_, '_> {
     fn root(&self, entity: Entity) -> Option<PathBuf> {
         if let Ok((state, _)) = self.pages.get(entity) {
@@ -59,12 +53,34 @@ impl MutationAuthority<'_, '_> {
         (!state.snapshot.loading).then_some((state, controller))
     }
 
-    fn file(
+    fn stage_file(
         &self,
         entity: Entity,
         display: &str,
         bytes: &[u8],
-        mutation: FileMutation,
+    ) -> Option<(PathBuf, PathBuf)> {
+        self.resolve_file(entity, display, bytes, |controller| {
+            controller.operations.toggle_stage
+        })
+    }
+
+    fn discard_file(
+        &self,
+        entity: Entity,
+        display: &str,
+        bytes: &[u8],
+    ) -> Option<(PathBuf, PathBuf)> {
+        self.resolve_file(entity, display, bytes, |controller| {
+            controller.operations.discard
+        })
+    }
+
+    fn resolve_file(
+        &self,
+        entity: Entity,
+        display: &str,
+        bytes: &[u8],
+        eligible: impl FnOnce(&GitPageControllerState) -> bool,
     ) -> Option<(PathBuf, PathBuf)> {
         let root = self.root(entity)?;
         let requested = RequestPath::new(display, bytes).resolve(&root);
@@ -74,11 +90,7 @@ impl MutationAuthority<'_, '_> {
             return (PathIdentity::resolve(file.path()) == identity).then_some((root, path));
         }
         let (state, controller) = self.pages.get(entity).ok()?;
-        let eligible = match mutation {
-            FileMutation::ToggleStage => controller.operations.toggle_stage,
-            FileMutation::Discard => controller.operations.discard,
-        };
-        if !eligible {
+        if !eligible(controller) {
             return None;
         }
         let repository = state.repository()?;
@@ -138,12 +150,9 @@ fn stage_request(
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some((repo_root, path)) = authority.file(
-        trigger.event().webview,
-        &request.path,
-        &request.path_bytes,
-        FileMutation::ToggleStage,
-    ) else {
+    let Some((repo_root, path)) =
+        authority.stage_file(trigger.event().webview, &request.path, &request.path_bytes)
+    else {
         return;
     };
     commands.spawn((
@@ -159,12 +168,9 @@ fn unstage_request(
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some((repo_root, path)) = authority.file(
-        trigger.event().webview,
-        &request.path,
-        &request.path_bytes,
-        FileMutation::ToggleStage,
-    ) else {
+    let Some((repo_root, path)) =
+        authority.stage_file(trigger.event().webview, &request.path, &request.path_bytes)
+    else {
         return;
     };
     commands.spawn((
@@ -180,12 +186,9 @@ fn discard_request(
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some((repo_root, path)) = authority.file(
-        trigger.event().webview,
-        &request.path,
-        &request.path_bytes,
-        FileMutation::Discard,
-    ) else {
+    let Some((repo_root, path)) =
+        authority.discard_file(trigger.event().webview, &request.path, &request.path_bytes)
+    else {
         return;
     };
     commands.spawn((
@@ -615,16 +618,12 @@ fn hunk_request(
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some((repo_root, path)) = authority.file(
-        trigger.event().webview,
-        &request.path,
-        &request.path_bytes,
-        if request.accept {
-            FileMutation::ToggleStage
-        } else {
-            FileMutation::Discard
-        },
-    ) else {
+    let target = if request.accept {
+        authority.stage_file(trigger.event().webview, &request.path, &request.path_bytes)
+    } else {
+        authority.discard_file(trigger.event().webview, &request.path, &request.path_bytes)
+    };
+    let Some((repo_root, path)) = target else {
         return;
     };
     commands.spawn((

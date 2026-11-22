@@ -13,7 +13,7 @@ use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
 use super::status::RepositoryHeader;
 use crate::event::{GitBranchFileEntry, GitRepositorySnapshot};
-use crate::state::{GitBranchCollection, GitCatalogProgress, GitOperationEligibility, GitPanel};
+use crate::state::{GitCatalogProgress, GitOperationEligibility, GitPanel};
 
 #[component]
 pub(super) fn GitDashboard() -> Element {
@@ -123,9 +123,9 @@ struct HeaderState {
     repository: Option<GitRepositorySnapshot>,
     focused_panel: GitPanel,
     selected_branch: String,
-    selected_branch_collection: GitBranchCollection,
     selected_commit: String,
     can_push: bool,
+    branch_checkout: Option<crate::state::GitBranchCheckout>,
     commits_progress: GitCatalogProgress,
     viewed_total: u32,
 }
@@ -142,9 +142,9 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
             repository: snapshot.repository.clone(),
             focused_panel: controller.focused_panel,
             selected_branch: controller.selected_branch.clone(),
-            selected_branch_collection: controller.selected_branch_collection,
             selected_commit: controller.selected_commit.clone(),
             can_push: controller.operations.push,
+            branch_checkout: controller.operations.branch_checkout.clone(),
             commits_progress: snapshot.commits,
             viewed_total: snapshot.branch_files_total,
         }
@@ -158,9 +158,9 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
             repository,
             focused_panel: header.focused_panel,
             selected_branch: header.selected_branch,
-            selected_branch_collection: header.selected_branch_collection,
             selected_commit: header.selected_commit,
             can_push: header.can_push,
+            branch_checkout: header.branch_checkout,
             commits_progress: header.commits_progress,
             viewed_count: viewed_count(),
             viewed_total: header.viewed_total,

@@ -85,12 +85,11 @@ pub enum GitBranchCollection {
     Tags,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BranchCheckout {
+#[vmux_api::contract(Eq)]
+pub struct GitBranchCheckout {
     pub branch: String,
     pub checkout: String,
     pub start_point: String,
-    pub current: bool,
 }
 
 impl From<GitBranchCollection> for GitCatalog {
@@ -100,131 +99,6 @@ impl From<GitBranchCollection> for GitCatalog {
             GitBranchCollection::Remote => Self::RemoteBranches,
             GitBranchCollection::Tags => Self::Tags,
         }
-    }
-}
-
-impl GitBranchCollection {
-    pub fn len(self, repository: &GitRepositorySnapshot) -> usize {
-        match self {
-            Self::Local => repository.branches.len(),
-            Self::Remote => repository.remote_branches.len(),
-            Self::Tags => repository.tags.len(),
-        }
-    }
-
-    pub fn references(self, repository: &GitRepositorySnapshot) -> Vec<String> {
-        match self {
-            Self::Local => repository
-                .branches
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect(),
-            Self::Remote => repository
-                .remote_branches
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect(),
-            Self::Tags => repository
-                .tags
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect(),
-        }
-    }
-
-    pub fn contains(self, repository: &GitRepositorySnapshot, reference: &str) -> bool {
-        match self {
-            Self::Local => repository
-                .branches
-                .iter()
-                .any(|entry| entry.name == reference),
-            Self::Remote => repository
-                .remote_branches
-                .iter()
-                .any(|entry| entry.name == reference),
-            Self::Tags => repository.tags.iter().any(|entry| entry.name == reference),
-        }
-    }
-
-    pub fn selected_reference(self, repository: &GitRepositorySnapshot, selected: &str) -> String {
-        if self.contains(repository, selected) {
-            return selected.to_string();
-        }
-        if self == Self::Local
-            && let Some(current) = repository.branches.iter().find(|entry| entry.current)
-        {
-            return current.name.clone();
-        }
-        if self == Self::Local && !repository.branch.is_empty() {
-            return repository.branch.clone();
-        }
-        match self {
-            Self::Local => repository.branches.first().map(|entry| entry.name.clone()),
-            Self::Remote => repository
-                .remote_branches
-                .first()
-                .map(|entry| entry.name.clone()),
-            Self::Tags => repository.tags.first().map(|entry| entry.name.clone()),
-        }
-        .unwrap_or_default()
-    }
-
-    pub fn contains_any(repository: &GitRepositorySnapshot, reference: &str) -> bool {
-        Self::containing(repository, reference).is_some()
-    }
-
-    pub fn containing(repository: &GitRepositorySnapshot, reference: &str) -> Option<Self> {
-        if reference.is_empty() {
-            return None;
-        }
-        [Self::Local, Self::Remote, Self::Tags]
-            .into_iter()
-            .find(|collection| collection.contains(repository, reference))
-    }
-
-    pub fn checkout(
-        self,
-        repository: &GitRepositorySnapshot,
-        reference: &str,
-    ) -> Option<BranchCheckout> {
-        if reference.is_empty() || self == Self::Tags {
-            return None;
-        }
-        let branch = match self {
-            Self::Local => repository
-                .branches
-                .iter()
-                .find(|branch| branch.name == reference),
-            Self::Remote => repository
-                .branches
-                .iter()
-                .find(|branch| branch.upstream == reference),
-            Self::Tags => None,
-        };
-        if let Some(branch) = branch {
-            return Some(BranchCheckout {
-                branch: branch.name.clone(),
-                checkout: branch.checkout.clone(),
-                start_point: String::new(),
-                current: branch.current,
-            });
-        }
-        let branch = reference
-            .split_once('/')
-            .map(|(_, branch)| branch)
-            .unwrap_or(reference)
-            .to_string();
-        Some(BranchCheckout {
-            branch,
-            checkout: String::new(),
-            start_point: reference.to_string(),
-            current: false,
-        })
-    }
-
-    pub fn is_checked_out(self, repository: &GitRepositorySnapshot, reference: &str) -> bool {
-        self.checkout(repository, reference)
-            .is_some_and(|checkout| checkout.current)
     }
 }
 
@@ -244,6 +118,7 @@ pub struct GitOperationEligibility {
     pub commit: bool,
     pub push: bool,
     pub checkout_branch: bool,
+    pub branch_checkout: Option<GitBranchCheckout>,
     pub create_branch: bool,
     pub delete_branch: bool,
     pub rebase: bool,
@@ -809,7 +684,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 16)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 17)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
@@ -1132,33 +1007,6 @@ mod tests {
             tags: Vec::new(),
             stashes: Vec::new(),
         }
-    }
-
-    #[test]
-    fn remote_checkout_reuses_its_tracking_branch() {
-        let repository = repository_with_branches();
-
-        let checkout = GitBranchCollection::Remote
-            .checkout(&repository, "origin/feature")
-            .unwrap();
-
-        assert_eq!(checkout.branch, "feature");
-        assert!(checkout.start_point.is_empty());
-        assert!(!checkout.current);
-        assert!(GitBranchCollection::Remote.is_checked_out(&repository, "origin/main"));
-    }
-
-    #[test]
-    fn remote_checkout_creates_a_tracking_branch_when_missing() {
-        let repository = repository_with_branches();
-
-        let checkout = GitBranchCollection::Remote
-            .checkout(&repository, "upstream/topic/nested")
-            .unwrap();
-
-        assert_eq!(checkout.branch, "topic/nested");
-        assert_eq!(checkout.start_point, "upstream/topic/nested");
-        assert!(!checkout.current);
     }
 
     fn diff_line(number: u32) -> crate::event::DiffLine {
