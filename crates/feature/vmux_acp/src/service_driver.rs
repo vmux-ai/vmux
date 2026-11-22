@@ -175,7 +175,12 @@ impl AcpServiceConnection {
         }));
     }
 
-    fn forward_agent_request(&self, request_id: u64, anchor: vmux_ecs::ProcessId, request: String) {
+    fn forward_agent_request(
+        &self,
+        request_id: AgentRequestId,
+        anchor: Option<vmux_ecs::ProcessId>,
+        request: AgentRequest,
+    ) {
         let broker = self.service.broker.clone();
         let outbound = self.outbound.clone();
         tokio::spawn(async move {
@@ -187,7 +192,7 @@ impl AcpServiceConnection {
         });
     }
 
-    fn forward_agent_query(&self, request_id: u64, query: vmux_api::protocol::AgentQuery) {
+    fn forward_agent_query(&self, request_id: AgentRequestId, query: AgentRequest) {
         let service = self.service.clone();
         let broker = self.service.broker.clone();
         let outbound = self.outbound.clone();
@@ -221,7 +226,11 @@ impl AcpServiceConnection {
         }
     }
 
-    async fn resolve_command_response(&self, request_id: u64, result: AgentCommandResult) {
+    async fn resolve_command_response(
+        &self,
+        request_id: AgentRequestId,
+        result: AgentCommandResult,
+    ) {
         if !self
             .service
             .broker
