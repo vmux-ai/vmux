@@ -547,6 +547,14 @@ fn FeaturesHistory(state: FeaturesUiState) -> Element {
                     }
                 }
             }
+            if let Some(before) = state.audit_before {
+                div { class:"p-4",
+                    ManagerButton { disabled:state.busy || !state.can_audit,
+                        onclick:move |_| { let _=send(&FlagAuditRequest {before}); },
+                        {translate("features-history-older")}
+                    }
+                }
+            }
         }
     }
 }

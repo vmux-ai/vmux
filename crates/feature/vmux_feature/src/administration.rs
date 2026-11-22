@@ -245,6 +245,8 @@ pub struct Rollback {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Component))]
+#[cfg_attr(feature = "ecs", component(immutable))]
 pub struct ListAudit {
     pub before: Option<u64>,
     pub limit: u16,
@@ -256,6 +258,45 @@ pub struct AuditPage {
     pub environment: String,
     pub publications: Vec<Publication>,
     pub next: Option<u64>,
+}
+
+impl AuditPage {
+    pub fn decode(bytes: &[u8], environment: &str, request: &ListAudit) -> Result<Self, String> {
+        if bytes.len() > 2 * 1024 * 1024 || request.limit == 0 || request.limit > 128 {
+            return Err("invalid audit response bounds".into());
+        }
+        let page: Self = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        if page.environment != environment || page.publications.len() > request.limit as usize {
+            return Err("invalid audit environment or page size".into());
+        }
+        let mut previous = request.before;
+        for entry in &page.publications {
+            if entry.revision == 0
+                || previous.is_some_and(|revision| entry.revision >= revision)
+                || entry.operation_id.is_empty()
+                || entry.operation_id.len() > 128
+                || entry.draft_id.is_empty()
+                || entry.draft_id.len() > 128
+                || entry.draft_revision == 0
+                || entry.actor.is_empty()
+                || entry.actor.len() > 128
+                || !Snapshot::valid_values(&entry.flags)
+            {
+                return Err("invalid audit publication".into());
+            }
+            previous = Some(entry.revision);
+        }
+        if let Some(next) = page.next
+            && (page.publications.len() != request.limit as usize
+                || page
+                    .publications
+                    .last()
+                    .is_none_or(|entry| entry.revision != next))
+        {
+            return Err("invalid audit continuation cursor".into());
+        }
+        Ok(page)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,5 +346,44 @@ mod tests {
             ]
         });
         assert!(Snapshot::decode(&serde_json::to_vec(&value).unwrap(), "development").is_err());
+    }
+
+    #[test]
+    fn audit_decode_rejects_foreign_reordered_or_inconsistent_cursor_pages() {
+        let request = ListAudit {
+            before: Some(10),
+            limit: 2,
+        };
+        let valid = serde_json::json!({"environment":"development","next":8,"publications":[
+            {"operation_id":"nine","draft_id":"nine","draft_revision":1,"revision":9,"actor":"operator","created_at":1,"flags":{}},
+            {"operation_id":"eight","draft_id":"eight","draft_revision":1,"revision":8,"actor":"operator","created_at":1,"flags":{}}
+        ]});
+        assert!(
+            AuditPage::decode(
+                &serde_json::to_vec(&valid).unwrap(),
+                "development",
+                &request
+            )
+            .is_ok()
+        );
+        for fault in 0..5 {
+            let mut value = valid.clone();
+            match fault {
+                0 => value["environment"] = serde_json::json!("foreign"),
+                1 => value["publications"][1]["revision"] = serde_json::json!(9),
+                2 => value["publications"][0]["revision"] = serde_json::json!(10),
+                3 => value["next"] = serde_json::json!(7),
+                4 => value["publications"][0]["actor"] = serde_json::json!(""),
+                _ => unreachable!(),
+            }
+            assert!(
+                AuditPage::decode(
+                    &serde_json::to_vec(&value).unwrap(),
+                    "development",
+                    &request
+                )
+                .is_err()
+            );
+        }
     }
 }

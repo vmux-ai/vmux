@@ -1,3 +1,4 @@
+features-history-older = Älteren Verlauf laden
 features-configuration = Konfiguration
 features-configuration-help = Bearbeiten Sie Wert, Variante, geordnete Regeln und Generation. Der Rollout-Anteil verwendet 0–10000.
 features-configuration-stage = Konfiguration vormerken

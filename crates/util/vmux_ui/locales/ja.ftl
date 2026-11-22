@@ -1,3 +1,4 @@
+features-history-older = 古い履歴を読み込む
 features-configuration = 設定内容
 features-configuration-help = 型付きの値、バリアント、順序付きルール、実験の世代を編集します。rollout percent は 0–10000 です。
 features-configuration-stage = 下書きに反映

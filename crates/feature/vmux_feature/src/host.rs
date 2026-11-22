@@ -47,11 +47,13 @@ impl Plugin for FeatureHostPlugin {
                 DraftPublishRequest,
                 DraftDiscardRequest,
                 FlagRollbackRequest,
+                FlagAuditRequest,
             )>::default(),
         ))
         .add_plugins(UiEventPlugin::<(DraftConfigurationEditRequest,)>::default())
         .add_message::<Received>()
         .add_message::<ReadRequested>()
+        .add_message::<AuditReceived>()
         .add_systems(Update, load.before(JobSet::Submit))
         .add_observer(page_ready)
         .add_observer(open)
@@ -65,6 +67,7 @@ impl Plugin for FeatureHostPlugin {
         .add_observer(discard)
         .add_observer(rollback)
         .add_observer(restore)
+        .add_observer(audit)
         .add_systems(
             Update,
             (
@@ -75,7 +78,9 @@ impl Plugin for FeatureHostPlugin {
                 receive::<native::Publish>,
                 receive::<native::Discard>,
                 receive::<native::Rollback>,
+                receive_audit,
                 adopt,
+                adopt_audit,
                 emit,
             )
                 .chain()
@@ -95,6 +100,7 @@ struct Context {
     capabilities: Capabilities,
     pending: Option<Entity>,
     error: String,
+    audit_before: Option<u64>,
 }
 
 #[derive(Component, Default)]
@@ -281,6 +287,7 @@ fn load(
             context.loaded = false;
             context.revision = 0;
             context.capabilities = Capabilities::default();
+            context.audit_before = None;
         }
         context.configuration = endpoint.fingerprint();
         context.environment = endpoint.environment.clone();
@@ -381,6 +388,16 @@ struct Received {
     configuration: [u8; 32],
     preserve: bool,
     snapshot: Snapshot,
+}
+
+#[derive(Message)]
+struct AuditReceived {
+    page: Entity,
+    endpoint: Entity,
+    generation: u64,
+    configuration: [u8; 32],
+    before: u64,
+    snapshot: crate::administration::AuditPage,
 }
 
 #[derive(SystemParam)]
@@ -484,6 +501,21 @@ impl Context {
             self.capabilities.edit
         }
     }
+    fn read_snapshot_metadata(&mut self, snapshot: &Snapshot, endpoint: Option<&Endpoint>) {
+        self.revision = snapshot.revision;
+        self.loaded = true;
+        self.capabilities = snapshot.capabilities.clone();
+        self.error.clear();
+        self.audit_before = None;
+        if snapshot.capabilities.audit
+            && snapshot.history.len() == 128
+            && endpoint.is_some_and(Endpoint::typed)
+            && let Some(first) = snapshot.history.first()
+            && first.revision > 1
+        {
+            self.audit_before = Some(first.revision);
+        }
+    }
 }
 
 fn open(
@@ -545,7 +577,10 @@ fn filter(trigger: On<UiInput<FeaturesFilterRequest>>, mut selections: Query<&mu
 fn select(trigger: On<UiInput<FeatureSelectRequest>>, mut selections: Query<&mut Selection>) {
     if let Ok(mut selection) = selections.get_mut(trigger.event().webview) {
         let request = &trigger.event().payload;
-        if matches!(request.tab.as_str(), "overview" | "changes" | "history") {
+        if matches!(
+            request.tab.as_str(),
+            "overview" | "changes" | "history" | "assignments"
+        ) {
             selection.tab = request.tab.clone();
         }
         selection.key = request.key.clone();
@@ -1103,6 +1138,170 @@ fn receive<J: Job<Output = Result<Snapshot, String>>>(
     }
 }
 
+fn audit(
+    trigger: On<UiInput<FlagAuditRequest>>,
+    mut contexts: Query<&mut Context>,
+    endpoints: Query<&Endpoint>,
+    access: crate::access::Access,
+    mut commands: Commands,
+) {
+    let page = trigger.event().webview;
+    let Ok(mut context) = contexts.get_mut(page) else {
+        return;
+    };
+    let Some(provider) = context.endpoint else {
+        return;
+    };
+    let Ok(endpoint) = endpoints.get(provider) else {
+        return;
+    };
+    let before = trigger.event().payload.before;
+    if !context.loaded
+        || !context.capabilities.audit
+        || context.pending.is_some()
+        || context.audit_before != Some(before)
+        || !endpoint.typed()
+        || !context.matches(endpoint)
+    {
+        return;
+    }
+    let captured = match access.capture(provider, endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            context.error = error;
+            return;
+        }
+    };
+    let request = crate::administration::ListAudit {
+        before: Some(before),
+        limit: 128,
+    };
+    let operation = commands
+        .spawn((
+            Pending::read(page, provider, &context),
+            request.clone(),
+            JobRequest(native::Audit {
+                endpoint: captured,
+                request,
+            }),
+        ))
+        .id();
+    context.pending = Some(operation);
+    context.error.clear();
+}
+
+fn receive_audit(
+    mut results: Completions<'_, '_, native::Audit>,
+    mut contexts: Query<&mut Context>,
+    requests: Query<&crate::administration::ListAudit>,
+    endpoints: Query<&Endpoint>,
+    access: crate::access::Access,
+    mut received: MessageWriter<AuditReceived>,
+    mut commands: Commands,
+) {
+    for (operation, owner, pending, job_owner, mut result) in &mut results {
+        let page = owner.parent();
+        let Ok(mut context) = contexts.get_mut(page) else {
+            commands.entity(operation).despawn();
+            continue;
+        };
+        if !job_owner.accepts(Some(owner))
+            || context.pending != Some(operation)
+            || context.generation != pending.generation
+            || context.endpoint != Some(pending.endpoint)
+        {
+            commands.entity(operation).despawn();
+            continue;
+        }
+        context.pending = None;
+        let before = requests
+            .get(operation)
+            .ok()
+            .and_then(|request| request.before);
+        if before != context.audit_before
+            || !context.capabilities.audit
+            || !endpoints.get(pending.endpoint).is_ok_and(|endpoint| {
+                endpoint.fingerprint() == pending.configuration
+                    && access.current(pending.endpoint, endpoint)
+            })
+        {
+            context.error = "features-invalid-snapshot".into();
+            commands.entity(operation).despawn();
+            continue;
+        }
+        match std::mem::replace(&mut result.0, Err("audit receipt consumed".into())) {
+            Ok(Ok(snapshot)) => {
+                if let Some(before) = before {
+                    received.write(AuditReceived {
+                        page,
+                        endpoint: pending.endpoint,
+                        generation: pending.generation,
+                        configuration: pending.configuration,
+                        before,
+                        snapshot,
+                    });
+                }
+            }
+            Ok(Err(error)) | Err(error) => {
+                context.error = error;
+            }
+        }
+        commands.entity(operation).despawn();
+    }
+}
+
+fn adopt_audit(
+    mut received: MessageReader<AuditReceived>,
+    mut contexts: Query<&mut Context>,
+    endpoints: Query<&Endpoint>,
+    history: Query<(&ChildOf, &History)>,
+    access: crate::access::Access,
+    mut commands: Commands,
+) {
+    for receipt in received.read() {
+        let Ok(mut context) = contexts.get_mut(receipt.page) else {
+            continue;
+        };
+        if context.endpoint != Some(receipt.endpoint)
+            || context.generation != receipt.generation
+            || !context.capabilities.audit
+            || context.audit_before != Some(receipt.before)
+            || receipt.snapshot.environment != context.environment
+            || !endpoints.get(receipt.endpoint).is_ok_and(|endpoint| {
+                endpoint.fingerprint() == receipt.configuration
+                    && access.current(receipt.endpoint, endpoint)
+            })
+        {
+            continue;
+        }
+        let conflict = receipt.snapshot.publications.iter().any(|entry| {
+            history.iter().any(|(parent, existing)| {
+                parent.parent() == receipt.page
+                    && existing.0.revision == entry.revision
+                    && existing.0 != *entry
+            })
+        });
+        if conflict {
+            context.error = "features-invalid-snapshot".into();
+            continue;
+        }
+        for publication in &receipt.snapshot.publications {
+            if history.iter().any(|(parent, existing)| {
+                parent.parent() == receipt.page && existing.0.revision == publication.revision
+            }) {
+                continue;
+            }
+            commands.spawn((
+                Name::new(publication.operation_id.clone()),
+                ChildOf(receipt.page),
+                History(publication.clone()),
+            ));
+        }
+        context.audit_before = receipt.snapshot.next;
+        context.error.clear();
+    }
+}
+
 fn inspect(
     mut results: Completions<'_, '_, native::Inspect>,
     mut contexts: Query<&mut Context>,
@@ -1218,10 +1417,8 @@ fn adopt(
                 commands.entity(entity).despawn();
             }
         }
-        context.revision = snapshot.revision;
-        context.loaded = true;
-        context.capabilities = snapshot.capabilities.clone();
-        context.error.clear();
+        context
+            .read_snapshot_metadata(snapshot, declarations.endpoints.get(received.endpoint).ok());
         let mut values = snapshot.flags.clone();
         if let Some(draft) = &snapshot.draft {
             values.extend(draft.flags.clone());
@@ -1343,6 +1540,8 @@ fn emit(
             can_edit: valid && context.capabilities.edit,
             can_review: valid && context.capabilities.review,
             can_publish: valid && context.capabilities.publish,
+            can_audit: valid && context.capabilities.audit,
+            audit_before: if valid { context.audit_before } else { None },
             can_rollback: valid
                 && context
                     .endpoint
@@ -1446,6 +1645,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
+    use vmux_api::BinEvent;
 
     struct Server {
         url: String,
@@ -1606,6 +1806,99 @@ mod tests {
                 },
                 captured,
             )
+        }
+
+        fn audit_script() -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let (send, started) = mpsc::channel();
+            let (release, receive) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                for index in 0..2 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut headers = Vec::new();
+                    while !headers.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        stream.read_exact(&mut byte).unwrap();
+                        headers.push(byte[0]);
+                        assert!(headers.len() <= 16384);
+                    }
+                    let headers = String::from_utf8(headers).unwrap();
+                    if index == 0 {
+                        assert!(
+                            headers.starts_with("GET /v1/flag-environments/development HTTP/1.1")
+                        );
+                    } else {
+                        assert!(headers.starts_with("GET /v1/flag-environments/development/audit?limit=128&before=3 HTTP/1.1"));
+                    }
+                    send.send(()).unwrap();
+                    receive.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let mut publications = Vec::new();
+                    let range = if index == 0 { 3..=130 } else { 1..=2 };
+                    for revision in range {
+                        publications.push(Publication {
+                            operation_id: format!("publication-{revision}"),
+                            draft_id: format!("draft-{revision}"),
+                            draft_revision: 1,
+                            revision,
+                            actor: "operator".into(),
+                            created_at: revision,
+                            flags: BTreeMap::from([(
+                                "published.flag".into(),
+                                Configuration::boolean(revision >= 3),
+                            )]),
+                        });
+                    }
+                    let body = if index == 0 {
+                        serde_json::to_vec(&Snapshot {
+                            schema_version: 2,
+                            environment: "development".into(),
+                            revision: 130,
+                            capabilities: Capabilities {
+                                edit: true,
+                                review: true,
+                                publish: true,
+                                audit: true,
+                            },
+                            flags: BTreeMap::from([(
+                                "published.flag".into(),
+                                Configuration::boolean(true),
+                            )]),
+                            draft: Some(crate::administration::Draft {
+                                id: "editable".into(),
+                                revision: 1,
+                                base_revision: 130,
+                                reviewed_revision: None,
+                                flags: BTreeMap::from([(
+                                    "published.flag".into(),
+                                    Configuration::boolean(false),
+                                )]),
+                            }),
+                            history: publications,
+                        })
+                        .unwrap()
+                    } else {
+                        publications.reverse();
+                        serde_json::to_vec(&crate::administration::AuditPage {
+                            environment: "development".into(),
+                            publications,
+                            next: None,
+                        })
+                        .unwrap()
+                    };
+                    write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).unwrap();
+                    stream.write_all(&body).unwrap();
+                }
+            });
+            Self {
+                url,
+                started,
+                release,
+                worker: Some(worker),
+            }
         }
     }
 
@@ -2010,5 +2303,158 @@ mod tests {
                 .value,
             Value::Boolean(false)
         );
+    }
+
+    #[test]
+    fn older_audit_pages_append_without_changing_published_or_editable_values() {
+        let server = Server::audit_script();
+        let mut fixture = Fixture::with_schema(&server, 2);
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .audit_before,
+            Some(3)
+        );
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FlagAuditRequest { before: 4 },
+        });
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Context>(fixture.page)
+                .unwrap()
+                .pending
+                .is_none()
+        );
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FlagAuditRequest { before: 3 },
+        });
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        let context = fixture.app.world().get::<Context>(fixture.page).unwrap();
+        assert_eq!(context.revision, 130);
+        assert!(context.audit_before.is_none());
+        let world = fixture.app.world_mut();
+        let entries = world
+            .query::<(&ChildOf, &History)>()
+            .iter(world)
+            .filter(|(parent, _)| parent.parent() == fixture.page)
+            .count();
+        assert_eq!(entries, 130);
+        let flag = world.query::<&Flag>().single(world).unwrap();
+        assert_eq!(flag.published.as_ref().unwrap().value, Value::Boolean(true));
+        assert_eq!(flag.desired.value, Value::Boolean(false));
+        let draft = world
+            .query_filtered::<(&Name, &Revision), With<Draft>>()
+            .single(world)
+            .unwrap();
+        assert_eq!(draft.0.as_str(), "editable");
+        assert_eq!(draft.1.0, 1);
+    }
+
+    #[test]
+    fn an_audit_completion_cannot_cross_a_replaced_credential_source() {
+        let server = Server::audit_script();
+        let mut fixture = Fixture::with_schema(&server, 2);
+        fixture.wait_for_request(&server);
+        server.release.send(()).unwrap();
+        fixture.drain();
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.page,
+            payload: FlagAuditRequest { before: 3 },
+        });
+        fixture.wait_for_request(&server);
+        fixture.app.world_mut().entity_mut(fixture.endpoint).insert(
+            Endpoint::new(
+                &server.url,
+                "development",
+                Some("replacement-credential".into()),
+            )
+            .unwrap()
+            .schema(2)
+            .unwrap(),
+        );
+        server.release.send(()).unwrap();
+        fixture.drain();
+        let world = fixture.app.world_mut();
+        assert_eq!(world.query::<&History>().iter(world).count(), 128);
+        assert_eq!(
+            world.get::<Context>(fixture.page).unwrap().error,
+            "features-invalid-snapshot"
+        );
+    }
+
+    #[test]
+    fn the_assignments_navigation_intent_selects_its_page_surface() {
+        let mut app = App::new();
+        app.add_plugins(FeatureHostPlugin);
+        let page = app.world_mut().spawn(Selection::default()).id();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: FeatureSelectRequest {
+                key: String::new(),
+                tab: "assignments".into(),
+            },
+        });
+        assert_eq!(
+            app.world().get::<Selection>(page).unwrap().tab,
+            "assignments"
+        );
+    }
+
+    #[test]
+    fn the_registered_features_page_permits_its_typed_intents_only_for_its_route() {
+        let mut app = App::new();
+        app.add_plugins(crate::ui::FeaturesPage::plugin());
+        app.update();
+        let mut query = app.world_mut().query::<&vmux_api::UiEventPermissions>();
+        let permissions = query.iter(app.world()).copied().collect::<Vec<_>>();
+        assert!(
+            !permissions.is_empty(),
+            "the production page plugin must register IPC permissions"
+        );
+        for event in [
+            FeaturesOpenRequest::PERMISSION,
+            FeaturesFilterRequest::PERMISSION,
+            FeatureSelectRequest::PERMISSION,
+            DraftEditRequest::PERMISSION,
+            DraftSaveRequest::PERMISSION,
+            DraftReviewRequest::PERMISSION,
+            DraftPublishRequest::PERMISSION,
+            DraftDiscardRequest::PERMISSION,
+            DraftConfigurationEditRequest::PERMISSION,
+            FlagRollbackRequest::PERMISSION,
+            FlagAuditRequest::PERMISSION,
+            FeatureOverrideRequest::PERMISSION,
+            FeatureOverrideClearRequest::PERMISSION,
+            FeatureAssignmentRetireRequest::PERMISSION,
+        ] {
+            assert!(
+                vmux_api::UiEventPermissions::allows_page(
+                    permissions.iter(),
+                    "vmux://features/",
+                    event
+                ),
+                "{event}"
+            );
+            assert!(
+                !vmux_api::UiEventPermissions::allows_page(
+                    permissions.iter(),
+                    "vmux://settings/",
+                    event
+                ),
+                "{event}"
+            );
+        }
     }
 }

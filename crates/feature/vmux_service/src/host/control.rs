@@ -796,7 +796,10 @@ mod tests {
                 installation: fixture.installation,
                 environment: "development".into(),
             };
-            let ready = match fixture.request(ClientMessage::ControlHello(hello)).await {
+            let ready = match fixture
+                .request(ClientMessage::ControlHello(Box::new(hello)))
+                .await
+            {
                 ServiceMessage::ControlReady(ready) => ready,
                 other => panic!("unexpected Control hello reply: {other:?}"),
             };
@@ -831,7 +834,7 @@ mod tests {
                 lease: lease.clone(),
             };
             let installed = match fixture
-                .request(ClientMessage::CredentialOffer(offer.clone()))
+                .request(ClientMessage::CredentialOffer(Box::new(offer.clone())))
                 .await
             {
                 ServiceMessage::CredentialReply(reply) => reply,
@@ -840,7 +843,7 @@ mod tests {
             assert_eq!(installed.outcome, CredentialOutcome::Applied);
             assert_eq!(fixture.installed(), Some(lease.clone()));
             let repeated = match fixture
-                .request(ClientMessage::CredentialOffer(offer.clone()))
+                .request(ClientMessage::CredentialOffer(Box::new(offer.clone())))
                 .await
             {
                 ServiceMessage::CredentialReply(reply) => reply,
@@ -851,7 +854,7 @@ mod tests {
             let mut altered = offer.clone();
             altered.lease.token = ControlToken::new("altered-fixture-credential".into()).unwrap();
             let rejected = match fixture
-                .request(ClientMessage::CredentialOffer(altered))
+                .request(ClientMessage::CredentialOffer(Box::new(altered)))
                 .await
             {
                 ServiceMessage::CredentialReply(reply) => reply,
@@ -869,7 +872,7 @@ mod tests {
                 source_revision: 2,
             };
             let withdrawn = match fixture
-                .request(ClientMessage::CredentialWithdraw(withdrawal))
+                .request(ClientMessage::CredentialWithdraw(Box::new(withdrawal)))
                 .await
             {
                 ServiceMessage::CredentialReply(reply) => reply,
@@ -881,6 +884,7 @@ mod tests {
             fixture.stop().await;
         }
     }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn connection_replacement_and_invalid_contexts_cannot_reuse_an_old_credential_offer() {
         let mut fixture = Fixture::new(true).await;
@@ -891,7 +895,7 @@ mod tests {
             environment: "development".into(),
         };
         let unsupported = fixture
-            .request(ClientMessage::ControlHello(hello.clone()))
+            .request(ClientMessage::ControlHello(Box::new(hello.clone())))
             .await;
         assert!(matches!(
             unsupported,
@@ -903,7 +907,7 @@ mod tests {
         hello.version = 1;
         hello.operation_id = Uuid::new_v4();
         let nonce = match fixture
-            .request(ClientMessage::ControlHello(hello.clone()))
+            .request(ClientMessage::ControlHello(Box::new(hello.clone())))
             .await
         {
             ServiceMessage::ControlReady(ready) => ready.nonce.unwrap(),
@@ -950,7 +954,7 @@ mod tests {
                 }
             };
             let reply = fixture
-                .request(ClientMessage::CredentialOffer(invalid))
+                .request(ClientMessage::CredentialOffer(Box::new(invalid)))
                 .await;
             assert!(
                 matches!(reply, ServiceMessage::CredentialReply(reply) if reply.outcome == expected)
@@ -958,14 +962,17 @@ mod tests {
             assert!(fixture.installed().is_none());
         }
         let accepted = fixture
-            .request(ClientMessage::CredentialOffer(offer.clone()))
+            .request(ClientMessage::CredentialOffer(Box::new(offer.clone())))
             .await;
         assert!(
             matches!(accepted, ServiceMessage::CredentialReply(reply) if reply.outcome == CredentialOutcome::Applied)
         );
         let old = fixture.replace_connection().await;
         hello.operation_id = Uuid::new_v4();
-        let next_nonce = match fixture.request(ClientMessage::ControlHello(hello)).await {
+        let next_nonce = match fixture
+            .request(ClientMessage::ControlHello(Box::new(hello)))
+            .await
+        {
             ServiceMessage::ControlReady(ready) => ready.nonce.unwrap(),
             other => panic!("unexpected replacement hello: {other:?}"),
         };
@@ -974,7 +981,9 @@ mod tests {
         let mut stale = offer.clone();
         stale.operation_id = Uuid::new_v4();
         stale.source_revision = 2;
-        let rejected = fixture.request(ClientMessage::CredentialOffer(stale)).await;
+        let rejected = fixture
+            .request(ClientMessage::CredentialOffer(Box::new(stale)))
+            .await;
         assert!(
             matches!(rejected, ServiceMessage::CredentialReply(reply) if reply.outcome == CredentialOutcome::Stale)
         );
@@ -985,7 +994,9 @@ mod tests {
         fresh.nonce = next_nonce;
         fresh.lease.token = ControlToken::new("replacement-fixture-credential".into()).unwrap();
         let expected = fresh.lease.clone();
-        let replaced = fixture.request(ClientMessage::CredentialOffer(fresh)).await;
+        let replaced = fixture
+            .request(ClientMessage::CredentialOffer(Box::new(fresh)))
+            .await;
         assert!(
             matches!(replaced, ServiceMessage::CredentialReply(reply) if reply.outcome == CredentialOutcome::Applied)
         );

@@ -106,7 +106,7 @@ impl ServiceProtocolConnection for Connection {
                     let (reply, result) = oneshot::channel();
                     let input = HelloInput {
                         client: self.client,
-                        request: Some(request),
+                        request: Some(*request),
                         reply: Some(reply),
                     };
                     if self.driver.hello.send(input).await.is_ok() {
@@ -120,7 +120,7 @@ impl ServiceProtocolConnection for Connection {
                     let (reply, result) = oneshot::channel();
                     let input = OfferInput {
                         client: self.client,
-                        request: Some(request),
+                        request: Some(*request),
                         reply: Some(reply),
                     };
                     if self.driver.offer.send(input).await.is_ok() {
@@ -134,7 +134,7 @@ impl ServiceProtocolConnection for Connection {
                     let (reply, result) = oneshot::channel();
                     let input = WithdrawInput {
                         client: self.client,
-                        request: Some(request),
+                        request: Some(*request),
                         reply: Some(reply),
                     };
                     if self.driver.withdraw.send(input).await.is_ok() {

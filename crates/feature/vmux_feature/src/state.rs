@@ -65,7 +65,7 @@ pub struct AssignmentRow {
     pub active: bool,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 2)]
+#[vmux_api::ui_state(Default, Eq, version = 3)]
 pub struct FeaturesUiState {
     pub assignments: Vec<AssignmentRow>,
     pub inspection: Vec<InspectionRow>,
@@ -79,6 +79,8 @@ pub struct FeaturesUiState {
     pub can_review: bool,
     pub can_publish: bool,
     pub can_rollback: bool,
+    pub can_audit: bool,
+    pub audit_before: Option<u64>,
     pub revision: u64,
     pub flags: Vec<FlagRow>,
     pub query: String,
@@ -143,6 +145,11 @@ pub struct DraftDiscardRequest {
 #[vmux_api::ui_event(Eq)]
 pub struct FlagRollbackRequest {
     pub revision: u64,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FlagAuditRequest {
+    pub before: u64,
 }
 
 #[vmux_api::ui_event(Default, Eq)]

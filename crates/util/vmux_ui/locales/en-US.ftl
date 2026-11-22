@@ -1,3 +1,4 @@
+features-history-older = Load older history
 features-configuration = Configuration
 features-configuration-help = Edit the typed value, variant, ordered rules and experiment generation. Rollout percent uses 0–10000.
 features-configuration-stage = Stage configuration

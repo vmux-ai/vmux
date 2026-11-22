@@ -105,9 +105,9 @@ values: [
     (key: "crates/util/vmux_profile/src/service.rs||struct:ServicePaths", owner: "crates/feature/vmux_service/src/host/daemon.rs||struct:DaemonBinary", lifetime: "immutable OS service paths used by the selected daemon binary"),
     (key: "crates/util/vmux_profile/src/mcp_credentials/access.rs||struct:McpCredentialAccess", owner: "crates/util/vmux_ecs/src/profile.rs||struct:McpCredentials", lifetime: "profile-owned credential access configuration"),
 ],
-debt: [
+shape: (
+  debt: [
     (key: "crates/util/vmux_profile/src/safe_storage.rs||enum:SafeStorageError", fingerprint: "7ef873c4f4d66020", issue: "VMX-253", finding: "AU-13"),
   ],
-shape: (
 ),
 )

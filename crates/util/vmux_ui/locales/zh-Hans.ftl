@@ -1,3 +1,4 @@
+features-history-older = 加载更早的历史记录
 features-configuration = 配置
 features-configuration-help = 编辑类型值、变体、有序规则和实验代次。发布比例使用 0–10000。
 features-configuration-stage = 暂存配置

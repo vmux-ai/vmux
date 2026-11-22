@@ -1,3 +1,4 @@
+features-history-older = Завантажити давнішу історію
 features-configuration = Конфігурація
 features-configuration-help = Змініть значення, варіант, упорядковані правила й покоління. Частка розгортання задається в межах 0–10000.
 features-configuration-stage = Підготувати конфігурацію

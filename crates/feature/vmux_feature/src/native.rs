@@ -357,14 +357,7 @@ impl Job for Audit {
             path.push_str(&format!("&before={before}"));
         }
         let bytes = self.endpoint.request(reqwest::Method::GET, &path, None)?;
-        let page: administration::AuditPage =
-            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-        if page.environment != self.endpoint.environment
-            || page.publications.len() > self.request.limit as usize
-        {
-            return Err("invalid audit response".into());
-        }
-        Ok(page)
+        administration::AuditPage::decode(&bytes, &self.endpoint.environment, &self.request)
     }
 }
 

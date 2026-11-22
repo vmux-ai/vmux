@@ -1,3 +1,4 @@
+features-history-older = Wczytaj starszą historię
 features-configuration = Konfiguracja
 features-configuration-help = Edytuj wartość, wariant, uporządkowane reguły i generację. Udział wdrożenia używa 0–10000.
 features-configuration-stage = Przygotuj konfigurację

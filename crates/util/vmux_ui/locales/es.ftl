@@ -1,3 +1,4 @@
+features-history-older = Cargar historial anterior
 features-configuration = Configuración
 features-configuration-help = Edita el valor tipado, la variante, las reglas ordenadas y la generación. El porcentaje usa 0–10000.
 features-configuration-stage = Preparar configuración

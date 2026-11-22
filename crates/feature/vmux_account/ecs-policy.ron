@@ -83,14 +83,15 @@ values: [
     (key: "crates/feature/vmux_account/src/mutations.rs||enum:WriteFailure", owner: "crates/feature/vmux_account/src/mutations.rs||struct:WriteCompleted", lifetime: "Immutable SQLite generation conflict or IO refusal owned by one write completion"),
     (key: "crates/feature/vmux_account/src/profile.rs||enum:FailureKind", owner: "crates/feature/vmux_account/src/connection.rs||struct:ConnectionError", lifetime: "Canonical scalar classification of the owned Account error, projected without its native diagnostic text"),
 ],
-debt: [
+shape: (
+  debt: [
     (key: "crates/feature/vmux_account/src/account.rs||enum:Set", fingerprint: "a9ac5cdbeb7790de", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_account/src/mutations.rs||enum:WriteFailure", fingerprint: "faa8ea4daa07e66b", issue: "VMX-253", finding: "AU-13"),
   ],
-bodies: [
+  bodies: [
     (key: "crates/feature/vmux_account/src/local.rs||impl:Database::write", fingerprint: "6bebcd068928b502", boundary: "crates/feature/vmux_account/src/local.rs||impl:Database", reason: "One bounded SQLite record/receipt/outbox/checkpoint transaction and requested profile-directory IO; generation/idempotency guards and rollback are native atomicity, while all value selection and reconciliation remain in registered systems."),
   ],
-enums: [
+  enums: [
     (key: "crates/feature/vmux_account/src/connection.rs||enum:Flow", fingerprint: "25a4b7057de4baba", role: Boundary, owner: "crates/feature/vmux_account/src/connection.rs||struct:ConnectionPlugin", reason: "Actual Bevy SystemSet labels order typed connection intent and progress schedules; they carry no retained workflow."),
     (key: "crates/feature/vmux_account/src/connection.rs||enum:Phase", fingerprint: "867c4e4eb2b25cea", role: Phase, owner: "crates/feature/vmux_account/src/connection.rs||struct:Connection", reason: "The required phase of one accepted connection advances through TLS, authorization, proof and durable binding."),
     (key: "crates/feature/vmux_account/src/profile.rs||enum:FailureKind", fingerprint: "2c60d46d0da086e4", role: Scalar, owner: "crates/feature/vmux_account/src/connection.rs||struct:ConnectionError", reason: "Canonical error classification read from ConnectionError; diagnostic detail stays in its owned Failure value."),
@@ -98,6 +99,5 @@ enums: [
     (key: "crates/feature/vmux_account/src/wire.rs||enum:Response", fingerprint: "e1293037d9d75dfa", role: Boundary, owner: "crates/feature/vmux_account/src/wire.rs||enum:Response", reason: "Externally tagged serde Account JSON response vocabulary decoded into owned native facts before connection systems adopt it."),
     (key: "crates/feature/vmux_account/src/control.rs||enum:Step", fingerprint: "a6bcc29966af4905", role: Phase, owner: "crates/feature/vmux_account/src/control.rs||struct:Peer", reason: "Required unit phase of one accepted enrolled-device authentication/lease-renewal attempt; typed requests and operation owners remain separate."),
   ],
-shape: (
 ),
 )

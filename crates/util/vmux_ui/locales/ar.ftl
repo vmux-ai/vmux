@@ -1,3 +1,4 @@
+features-history-older = تحميل السجل الأقدم
 features-configuration = الإعداد
 features-configuration-help = عدّل القيمة والنوع والمتغير والقواعد المرتبة وجيل التجربة. نسبة النشر تستخدم 0–10000.
 features-configuration-stage = تحضير الإعداد

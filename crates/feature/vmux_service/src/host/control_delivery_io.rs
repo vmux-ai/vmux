@@ -97,10 +97,10 @@ impl Job for Hello {
     type Output = Result<ControlReady, String>;
 
     fn run(self) -> Self::Output {
-        match self
-            .connection
-            .exchange(ClientMessage::ControlHello(self.request), self.timeout)?
-        {
+        match self.connection.exchange(
+            ClientMessage::ControlHello(Box::new(self.request)),
+            self.timeout,
+        )? {
             ServiceMessage::ControlReady(reply) => Ok(reply),
             _ => Err("unexpected Control hello response".into()),
         }
@@ -123,10 +123,10 @@ impl Job for Offer {
     type Output = Result<CredentialReply, String>;
 
     fn run(self) -> Self::Output {
-        match self
-            .connection
-            .exchange(ClientMessage::CredentialOffer(self.request), self.timeout)?
-        {
+        match self.connection.exchange(
+            ClientMessage::CredentialOffer(Box::new(self.request)),
+            self.timeout,
+        )? {
             ServiceMessage::CredentialReply(reply) => Ok(reply),
             _ => Err("unexpected Control credential response".into()),
         }
@@ -150,7 +150,7 @@ impl Job for Withdraw {
 
     fn run(self) -> Self::Output {
         match self.connection.exchange(
-            ClientMessage::CredentialWithdraw(self.request),
+            ClientMessage::CredentialWithdraw(Box::new(self.request)),
             self.timeout,
         )? {
             ServiceMessage::CredentialReply(reply) => Ok(reply),

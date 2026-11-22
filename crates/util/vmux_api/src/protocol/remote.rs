@@ -195,15 +195,14 @@ pub enum ClientMessage {
         cwd: String,
     },
     SpawnAcpAgentWithMcp(Box<AcpSpawnWithMcp>),
-    ControlHello(crate::control::ControlHello),
-    CredentialOffer(crate::control::CredentialOffer),
-    CredentialWithdraw(crate::control::CredentialWithdraw),
+    ControlHello(Box<crate::control::ControlHello>),
+    CredentialOffer(Box<crate::control::CredentialOffer>),
+    CredentialWithdraw(Box<crate::control::CredentialWithdraw>),
     SubscribeRemoteObservations,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceMessage {
-    RemoteObserved(crate::remote::Observation),
     ProcessCreated {
         process_id: ProcessId,
         pid: u32,
@@ -353,6 +352,7 @@ pub enum ServiceMessage {
     },
     ControlReady(crate::control::ControlReady),
     CredentialReply(crate::control::CredentialReply),
+    RemoteObserved(crate::remote::Observation),
 }
 
 #[vmux_api::contract(Eq)]

@@ -1,3 +1,4 @@
+features-history-older = Загрузить более раннюю историю
 features-configuration = Конфигурация
 features-configuration-help = Измените значение, вариант, упорядоченные правила и поколение. Доля внедрения задаётся в диапазоне 0–10000.
 features-configuration-stage = Подготовить конфигурацию

@@ -1,3 +1,4 @@
+features-history-older = Oudere geschiedenis laden
 features-configuration = Configuratie
 features-configuration-help = Bewerk waarde, variant, geordende regels en generatie. Het uitrolpercentage gebruikt 0–10000.
 features-configuration-stage = Configuratie klaarzetten

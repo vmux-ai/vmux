@@ -1,3 +1,4 @@
+features-history-older = 이전 기록 불러오기
 features-configuration = 구성
 features-configuration-help = 유형별 값, 변형, 순서가 있는 규칙 및 실험 세대를 편집합니다. 배포 비율은 0–10000입니다.
 features-configuration-stage = 구성 반영

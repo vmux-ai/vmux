@@ -13,6 +13,9 @@
             "FeaturesUiState", "FeaturesOpenRequest", "FeaturesFilterRequest", "FeatureSelectRequest",
             "DraftEditRequest", "DraftSaveRequest", "DraftReviewRequest", "DraftPublishRequest",
             "DraftDiscardRequest", "FlagRollbackRequest",
+            "FlagAuditRequest",
+            "DraftConfigurationEditRequest", "FeatureOverrideRequest", "FeatureOverrideClearRequest",
+            "FeatureAssignmentRetireRequest",
         ],
     )],
 )
