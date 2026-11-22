@@ -1,0 +1,341 @@
+name: Distribution
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'Casks/**'
+      - 'website/public/updates.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  DX_HOME: ${{ github.workspace }}/.dx
+  VMUX_CI_PREBUILT_DX: "1"
+  VMUX_CI_FAST_RUST: "1"
+  VMUX_CI_VALIDATION: "1"
+  VMUX_CI_GCS_ENABLED: "1"
+  CI_CACHE_BUCKET: ${{ vars.CI_CACHE_BUCKET }}
+  CI_CACHE_WIF_PROVIDER: ${{ vars.CI_CACHE_WIF_PROVIDER }}
+  CI_CACHE_READER_ACCOUNT: ${{ vars.CI_CACHE_READER_ACCOUNT }}
+  CI_CACHE_WRITER_ACCOUNT: ${{ vars.CI_CACHE_WRITER_ACCOUNT }}
+
+jobs:
+  plan:
+    name: Plan Distribution
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      cef: ${{ steps.resolve.outputs.version }}
+      macos: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' || steps.filter.outputs.macos_main == 'true' }}
+      macos_tooling: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos_tooling == 'true' }}
+      ios: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Resolve cef crate version from Cargo.lock
+        id: resolve
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^name = "cef"$/{getline; print $2; exit}' Cargo.lock)
+          if [ -z "${version:-}" ]; then
+            echo "::error file=Cargo.lock::could not resolve 'cef' crate version"
+            exit 1
+          fi
+          echo "Resolved CEF version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dorny/paths-filter@v4
+        if: github.event_name == 'push'
+        id: filter
+        with:
+          base: ${{ github.event.before != '0000000000000000000000000000000000000000' && github.event.before || github.event.repository.default_branch }}
+          predicate-quantifier: 'some-with-excludes'
+          filters: |
+            macos:
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
+              - 'crates/**'
+              - 'cef/**'
+              - 'patches/**'
+              - 'packaging/**'
+              - 'scripts/**'
+              - '.github/actions/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'tool-versions.env'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/distribution.yml'
+              - '.github/workflows/nightly.yml'
+              - '.github/workflows/build-cef.yml'
+              - '.github/workflows/release.yml'
+              - '!crates/app/vmux_mobile/**'
+              - '!packaging/ios/**'
+              - '!crates/feature/vmux_dx/src/native/ios.rs'
+              - '!crates/app/vmux_cli/tests/dx.rs'
+            macos_main:
+              - 'crates/feature/vmux_dx/src/native/ios.rs'
+              - 'crates/app/vmux_cli/tests/dx.rs'
+            macos_tooling:
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
+              - 'crates/app/vmux_cli/**'
+              - 'crates/feature/vmux_dx/**'
+              - 'crates/build_product.rs'
+              - 'crates/util/vmux_profile/**'
+              - 'crates/**/Cargo.toml'
+              - 'crates/**/build.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'tool-versions.env'
+              - '.github/actions/setup-rust/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/distribution.yml'
+            ios:
+              - '.cargo/**'
+              - '.gitattributes'
+              - '.env'
+              - '.env.*'
+              - 'crates/**'
+              - 'packaging/ios/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'tool-versions.env'
+              - 'crates/feature/vmux_dx/src/native/ios.rs'
+              - '.github/actions/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/distribution.yml'
+              - '!crates/app/vmux_desktop/**'
+              - '!crates/util/vmux_native/**'
+              - '!crates/app/vmux_cli/tests/dx.rs'
+              - '!patches/**'
+
+  dx-macos:
+    name: Prepare macOS
+    needs: [plan]
+    if: needs.plan.outputs.macos == 'true' || needs.plan.outputs.ios == 'true' || needs.plan.outputs.macos_tooling == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/setup-rust
+        with:
+          cli: build
+          fast-rust: "true"
+      - name: Test DX lifecycle and platform adapters
+        if: needs.plan.outputs.macos_tooling == 'true'
+        run: cargo test --locked -p vmux_dx --features ci-syntax --lib --target-dir .build-tools/cargo
+      - name: Test native CLI resource and signing contracts
+        if: needs.plan.outputs.macos_tooling == 'true'
+        run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --target-dir .build-tools/cargo
+      - name: Record the CLI identity
+        run: vmux-ci artifact-publish .build-tools/bin/vmux .build-tools/artifact
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dx-cli-${{ runner.os }}-${{ runner.arch }}
+          overwrite: true
+          include-hidden-files: true
+          path: .build-tools/artifact
+          if-no-files-found: error
+          retention-days: 1
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: distribution-${{ github.job }}
+
+  ios-build:
+    name: Build iOS
+    runs-on: macos-latest
+    needs: [plan, dx-macos]
+    if: needs.plan.outputs.ios == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: ./.github/actions/setup-ios
+        with:
+          cache-key: ios
+          tailwind: "true"
+
+      - name: Generate the tailwind bundle dx would
+        run: |
+          tailwindcss \
+            -i crates/app/vmux_mobile/assets/tailwind.css \
+            -o crates/app/vmux_mobile/assets/tailwind.out.css
+
+      - name: Build the phone app
+        run: cargo build --locked -p vmux_mobile --target aarch64-apple-ios --features mobile --bin vmux_mobile
+
+      - name: Test the phone app
+        run: cargo test --locked -p vmux_mobile --target aarch64-apple-darwin --features mobile --bin vmux_mobile
+
+      - name: Check the pages that ship on the phone
+        run: |
+          cargo check --locked --target aarch64-apple-ios \
+            -p vmux_acp -p vmux_session -p vmux_command -p vmux_editor -p vmux_history -p vmux_shortcut \
+            -p vmux_layout -p vmux_setting -p vmux_space -p vmux_start -p vmux_team \
+            -p vmux_terminal -p vmux_ui
+
+      - name: The phone links no desktop-only crate
+        run: |
+          set -euo pipefail
+
+          reaches() {
+            cargo tree --locked --target aarch64-apple-ios -p "$1" -i "$2" 2>/dev/null
+          }
+
+          while read -r forbidden control_package control_crate; do
+            [ -n "$forbidden" ] || continue
+            if [ -z "$(reaches "$control_package" "$control_crate")" ]; then
+              echo "::error::positive control failed: $control_crate not found in $control_package, so this job is asserting nothing about $forbidden"
+              exit 1
+            fi
+            found="$(reaches vmux_mobile "$forbidden")"
+            if [ -n "$found" ]; then
+              echo "::error::$forbidden reaches the phone:"
+              echo "$found"
+              exit 1
+            fi
+            echo "ok: vmux_mobile does not link $forbidden (control: $control_package links $control_crate)"
+          done <<'FORBIDDEN'
+          dioxus-web vmux_mobile dioxus
+          bevy_cef vmux_desktop bevy_cef
+          FORBIDDEN
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: ios
+
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: distribution-${{ github.job }}
+
+  build-mac:
+    name: Build macOS
+    needs: [plan, dx-macos]
+    if: needs.plan.outputs.macos == 'true'
+    runs-on: macos-latest
+    env:
+      CEF_VERSION: ${{ needs.plan.outputs.cef }}
+      VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          fast-rust: "false"
+
+      - name: Resolve release artifact names
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          vmux internal release-artifacts -- "$VERSION" > "$RUNNER_TEMP/dx-release.env"
+          while IFS="=" read -r key value; do export "$key=$value"; done < "$RUNNER_TEMP/dx-release.env"
+          echo "DMG_NAME=$VMUX_DMG_NAME" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-macos
+        with:
+          cache-key: build-mac
+          cef-version: ${{ needs.plan.outputs.cef }}
+          fast-rust: "false"
+
+      - name: Check lean macOS desktop features
+        run: env VMUX_SKIP_DX_BUILD=1 vmux internal cargo -- check -p vmux_desktop --no-default-features --features dev
+
+      - name: Build, sign, and package DMG
+        env:
+          SKIP_NOTARIZE: "1"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
+        run: vmux build -p release
+
+      - name: Smoke test bundled app
+        run: |
+          set -uo pipefail
+          app="target/release/Vmux.app"
+          bin="$app/Contents/MacOS/vmux_desktop"
+          plist="$app/Contents/Frameworks/Chromium Embedded Framework.framework/Resources/Info.plist"
+
+          want="${CEF_VERSION##*+}"
+          got=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist" 2>/dev/null || true)
+          echo "Bundled CEF framework: ${got:-<none>} | cef crate: $CEF_VERSION (expect prefix $want)"
+          case "$got" in
+            "$want" | "$want".*) ;;
+            *)
+              echo "::error::Bundled CEF (${got:-<none>}) does not match cef crate ($CEF_VERSION)"
+              exit 1
+              ;;
+          esac
+
+          VMUX_DATA_DIR="$(mktemp -d)"
+          export VMUX_DATA_DIR
+          log="$(mktemp)"
+          "$bin" >"$log" 2>&1 &
+          pid=$!
+          rc=0
+          sleep 25
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "Vmux survived the 25s startup window — OK"
+          else
+            wait "$pid"
+            code=$?
+            echo "::error::Vmux exited during startup (exit $code) — startup crash"
+            rc=1
+          fi
+
+          kill "$pid" 2>/dev/null || true
+          pkill -f "Vmux.app/Contents/MacOS/vmux_desktop" 2>/dev/null || true
+          pkill -f "vmux_service" 2>/dev/null || true
+          pkill -f "Chromium Embedded Framework" 2>/dev/null || true
+
+          echo "----- startup log -----"
+          cat "$log" || true
+          exit $rc
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Vmux-${{ github.sha }}.dmg
+          path: target/release/${{ env.DMG_NAME }}
+          retention-days: 7
+
+      - name: Save validated compiler artifacts
+        uses: ./.github/actions/save-workspace
+        with:
+          cache-key: build-mac
+
+      - uses: ./.github/actions/report-compiler-cache
+        if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
+        with:
+          name: distribution-${{ github.job }}
