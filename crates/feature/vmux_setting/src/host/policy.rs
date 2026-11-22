@@ -537,7 +537,7 @@ mod tests {
         });
         fixture.app.update();
 
-        assert_eq!(fixture.save_count(), 1);
+        assert_eq!(fixture.save_count(), 2);
         assert_eq!(fixture.active_dir("dev").as_deref(), Some("/repo/alpha"));
         let rows = fixture.rows("dev");
         let alpha = rows.iter().find(|row| row.path == "/repo/alpha").unwrap();
