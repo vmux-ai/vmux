@@ -13,7 +13,7 @@ pub use plugin::{
 };
 pub use process_control::TerminalGridSize;
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};
-pub use theme::{TerminalFontSizeCommand, TerminalThemePlugin};
+pub use theme::{TerminalFontSizeChange, TerminalFontSizeCommand, TerminalThemePlugin};
 pub use tool::TerminalToolPlugin;
 
 mod agent;

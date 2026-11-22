@@ -1412,201 +1412,199 @@ fn should_close_terminal_stack_on_exit(retain_on_exit: bool) -> bool {
     !retain_on_exit
 }
 
-#[cfg(test)]
-fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<CopyModeKey> {
-    map_copy_mode_key_from_input(CopyModeKeyInput {
-        key,
-        key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
-        ctrl,
-        shift: false,
-    })
-}
-
-fn map_copy_mode_key_from_input(input: CopyModeKeyInput<'_>) -> Option<CopyModeKey> {
-    match (input.key, input.ctrl) {
-        (Key::ArrowLeft, _) => Some(K::Left),
-        (Key::ArrowRight, _) => Some(K::Right),
-        (Key::ArrowUp, _) => Some(K::Up),
-        (Key::ArrowDown, _) => Some(K::Down),
-        (Key::Enter, _) => Some(K::Copy),
-        (Key::Escape, _) => Some(K::Exit),
-        (Key::Home, _) => Some(K::LineStart),
-        (Key::End, _) => Some(K::LineEnd),
-        (Key::PageUp, _) => Some(K::PageUp),
-        (Key::PageDown, _) => Some(K::PageDown),
-        _ if input.ctrl && key_char_eq(input, 'u') => Some(K::PageUp),
-        _ if input.ctrl && key_char_eq(input, 'd') => Some(K::PageDown),
-        _ if input.ctrl && key_char_eq(input, 'e') => Some(K::Down),
-        _ if input.ctrl && key_char_eq(input, 'y') => Some(K::Up),
-        _ if input.ctrl && key_char_eq(input, 'b') => Some(K::PageUp),
-        _ if input.ctrl && key_char_eq(input, 'f') => Some(K::PageDown),
-        _ if input.ctrl && key_char_eq(input, 'c') => Some(K::Exit),
-        _ if key_char_eq(input, 'h') => Some(K::Left),
-        _ if key_char_eq(input, 'j') => Some(K::Down),
-        _ if key_char_eq(input, 'k') => Some(K::Up),
-        _ if key_char_eq(input, 'l') => Some(K::Right),
-        _ if key_char_eq(input, '0') => Some(K::LineStart),
-        _ if key_char_eq(input, '$') => Some(K::LineEnd),
-        _ if key_char_eq(input, '^') => Some(K::FirstNonBlank),
-        _ if key_char_eq(input, 'w') => Some(K::WordForward),
-        _ if key_char_eq(input, 'W') => Some(K::BigWordForward),
-        _ if key_char_eq(input, 'b') => Some(K::WordBackward),
-        _ if key_char_eq(input, 'B') => Some(K::BigWordBackward),
-        _ if key_char_eq(input, 'e') => Some(K::WordEndForward),
-        _ if key_char_eq(input, 'E') => Some(K::BigWordEndForward),
-        _ if key_char_eq(input, 'G') => Some(K::Bottom),
-        _ if key_char_eq(input, 'H') => Some(K::ScreenTop),
-        _ if key_char_eq(input, 'M') => Some(K::ScreenMiddle),
-        _ if key_char_eq(input, 'L') => Some(K::ScreenBottom),
-        _ if key_char_eq(input, '{') => Some(K::PrevParagraph),
-        _ if key_char_eq(input, '}') => Some(K::NextParagraph),
-        _ if key_char_eq(input, ';') => Some(K::RepeatFind),
-        _ if key_char_eq(input, ',') => Some(K::RepeatFindReverse),
-        _ if key_char_eq(input, 'o') => Some(K::SwapSelectionEnds),
-        _ if key_char_eq(input, 'v') => Some(K::StartSelection),
-        _ if key_char_eq(input, 'V') => Some(K::StartLineSelection),
-        _ if key_char_eq(input, 'y') => Some(K::Copy),
-        _ if key_char_eq(input, 'q') => Some(K::Exit),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-fn map_copy_mode_key_with_state(
-    copy_mode: &mut TerminalCopyMode,
-    key: &Key,
-    ctrl: bool,
-) -> Option<CopyModeKey> {
-    map_copy_mode_keys_with_state(
-        copy_mode,
-        CopyModeKeyInput {
+impl TerminalCopyMode {
+    #[cfg(test)]
+    fn map_key(key: &Key, ctrl: bool) -> Option<CopyModeKey> {
+        Self::map_key_from_input(CopyModeKeyInput {
             key,
             key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
             ctrl,
             shift: false,
-        },
-    )
-    .into_iter()
-    .next()
-}
+        })
+    }
 
-fn map_copy_mode_keys_with_state(
-    copy_mode: &mut TerminalCopyMode,
-    input: CopyModeKeyInput<'_>,
-) -> Vec<CopyModeKey> {
-    let state = &mut copy_mode.input;
-    if let Some(pending) = state.pending_key.take() {
-        let key = match pending {
-            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, '_') => {
-                Some(K::LastNonBlank)
-            }
-            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, 'g') => Some(K::Top),
-            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, 'e') => {
-                Some(K::WordEndBackward)
-            }
-            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, 'E') => {
-                Some(K::BigWordEndBackward)
-            }
-            CopyModePendingKey::FindForward => input_char(input).map(K::FindForward),
-            CopyModePendingKey::FindBackward => input_char(input).map(K::FindBackward),
-            CopyModePendingKey::TillForward => input_char(input).map(K::TillForward),
-            CopyModePendingKey::TillBackward => input_char(input).map(K::TillBackward),
+    fn map_key_from_input(input: CopyModeKeyInput<'_>) -> Option<CopyModeKey> {
+        match (input.key, input.ctrl) {
+            (Key::ArrowLeft, _) => Some(K::Left),
+            (Key::ArrowRight, _) => Some(K::Right),
+            (Key::ArrowUp, _) => Some(K::Up),
+            (Key::ArrowDown, _) => Some(K::Down),
+            (Key::Enter, _) => Some(K::Copy),
+            (Key::Escape, _) => Some(K::Exit),
+            (Key::Home, _) => Some(K::LineStart),
+            (Key::End, _) => Some(K::LineEnd),
+            (Key::PageUp, _) => Some(K::PageUp),
+            (Key::PageDown, _) => Some(K::PageDown),
+            _ if input.ctrl && Self::key_char_eq(input, 'u') => Some(K::PageUp),
+            _ if input.ctrl && Self::key_char_eq(input, 'd') => Some(K::PageDown),
+            _ if input.ctrl && Self::key_char_eq(input, 'e') => Some(K::Down),
+            _ if input.ctrl && Self::key_char_eq(input, 'y') => Some(K::Up),
+            _ if input.ctrl && Self::key_char_eq(input, 'b') => Some(K::PageUp),
+            _ if input.ctrl && Self::key_char_eq(input, 'f') => Some(K::PageDown),
+            _ if input.ctrl && Self::key_char_eq(input, 'c') => Some(K::Exit),
+            _ if Self::key_char_eq(input, 'h') => Some(K::Left),
+            _ if Self::key_char_eq(input, 'j') => Some(K::Down),
+            _ if Self::key_char_eq(input, 'k') => Some(K::Up),
+            _ if Self::key_char_eq(input, 'l') => Some(K::Right),
+            _ if Self::key_char_eq(input, '0') => Some(K::LineStart),
+            _ if Self::key_char_eq(input, '$') => Some(K::LineEnd),
+            _ if Self::key_char_eq(input, '^') => Some(K::FirstNonBlank),
+            _ if Self::key_char_eq(input, 'w') => Some(K::WordForward),
+            _ if Self::key_char_eq(input, 'W') => Some(K::BigWordForward),
+            _ if Self::key_char_eq(input, 'b') => Some(K::WordBackward),
+            _ if Self::key_char_eq(input, 'B') => Some(K::BigWordBackward),
+            _ if Self::key_char_eq(input, 'e') => Some(K::WordEndForward),
+            _ if Self::key_char_eq(input, 'E') => Some(K::BigWordEndForward),
+            _ if Self::key_char_eq(input, 'G') => Some(K::Bottom),
+            _ if Self::key_char_eq(input, 'H') => Some(K::ScreenTop),
+            _ if Self::key_char_eq(input, 'M') => Some(K::ScreenMiddle),
+            _ if Self::key_char_eq(input, 'L') => Some(K::ScreenBottom),
+            _ if Self::key_char_eq(input, '{') => Some(K::PrevParagraph),
+            _ if Self::key_char_eq(input, '}') => Some(K::NextParagraph),
+            _ if Self::key_char_eq(input, ';') => Some(K::RepeatFind),
+            _ if Self::key_char_eq(input, ',') => Some(K::RepeatFindReverse),
+            _ if Self::key_char_eq(input, 'o') => Some(K::SwapSelectionEnds),
+            _ if Self::key_char_eq(input, 'v') => Some(K::StartSelection),
+            _ if Self::key_char_eq(input, 'V') => Some(K::StartLineSelection),
+            _ if Self::key_char_eq(input, 'y') => Some(K::Copy),
+            _ if Self::key_char_eq(input, 'q') => Some(K::Exit),
             _ => None,
-        };
-        if let Some(key) = key {
-            return repeat_copy_mode_key(state, key);
         }
     }
 
-    if let Some(digit) = input_digit(input)
-        && (!matches!(digit, 0) || state.count.is_some())
-        && !input.ctrl
-    {
-        let current = state.count.unwrap_or(0);
-        state.count = Some(current.saturating_mul(10).saturating_add(digit).min(999));
-        return Vec::new();
+    #[cfg(test)]
+    fn map_key_with_state(&mut self, key: &Key, ctrl: bool) -> Option<CopyModeKey> {
+        self.map_keys(CopyModeKeyInput {
+            key,
+            key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+            ctrl,
+            shift: false,
+        })
+        .into_iter()
+        .next()
     }
 
-    if !input.ctrl && key_char_eq(input, 'g') {
-        state.pending_key = Some(CopyModePendingKey::G);
-        return Vec::new();
+    fn map_keys(&mut self, input: CopyModeKeyInput<'_>) -> Vec<CopyModeKey> {
+        let state = &mut self.input;
+        if let Some(pending) = state.pending_key.take() {
+            let key = match pending {
+                CopyModePendingKey::G if !input.ctrl && Self::key_char_eq(input, '_') => {
+                    Some(K::LastNonBlank)
+                }
+                CopyModePendingKey::G if !input.ctrl && Self::key_char_eq(input, 'g') => {
+                    Some(K::Top)
+                }
+                CopyModePendingKey::G if !input.ctrl && Self::key_char_eq(input, 'e') => {
+                    Some(K::WordEndBackward)
+                }
+                CopyModePendingKey::G if !input.ctrl && Self::key_char_eq(input, 'E') => {
+                    Some(K::BigWordEndBackward)
+                }
+                CopyModePendingKey::FindForward => Self::input_char(input).map(K::FindForward),
+                CopyModePendingKey::FindBackward => Self::input_char(input).map(K::FindBackward),
+                CopyModePendingKey::TillForward => Self::input_char(input).map(K::TillForward),
+                CopyModePendingKey::TillBackward => Self::input_char(input).map(K::TillBackward),
+                _ => None,
+            };
+            if let Some(key) = key {
+                return Self::repeat_key(state, key);
+            }
+        }
+
+        if let Some(digit) = Self::input_digit(input)
+            && (!matches!(digit, 0) || state.count.is_some())
+            && !input.ctrl
+        {
+            let current = state.count.unwrap_or(0);
+            state.count = Some(current.saturating_mul(10).saturating_add(digit).min(999));
+            return Vec::new();
+        }
+
+        if !input.ctrl && Self::key_char_eq(input, 'g') {
+            state.pending_key = Some(CopyModePendingKey::G);
+            return Vec::new();
+        }
+        if !input.ctrl && Self::key_char_eq(input, 'f') {
+            state.pending_key = Some(CopyModePendingKey::FindForward);
+            return Vec::new();
+        }
+        if !input.ctrl && Self::key_char_eq(input, 'F') {
+            state.pending_key = Some(CopyModePendingKey::FindBackward);
+            return Vec::new();
+        }
+        if !input.ctrl && Self::key_char_eq(input, 't') {
+            state.pending_key = Some(CopyModePendingKey::TillForward);
+            return Vec::new();
+        }
+        if !input.ctrl && Self::key_char_eq(input, 'T') {
+            state.pending_key = Some(CopyModePendingKey::TillBackward);
+            return Vec::new();
+        }
+
+        Self::map_key_from_input(input)
+            .map(|key| Self::repeat_key(state, key))
+            .unwrap_or_default()
     }
 
-    if !input.ctrl && key_char_eq(input, 'f') {
-        state.pending_key = Some(CopyModePendingKey::FindForward);
-        return Vec::new();
+    fn key_exits(key: CopyModeKey) -> bool {
+        matches!(key, K::Copy | K::Exit)
     }
 
-    if !input.ctrl && key_char_eq(input, 'F') {
-        state.pending_key = Some(CopyModePendingKey::FindBackward);
-        return Vec::new();
+    fn is_active_with(&self, mode: &TerminalMode) -> bool {
+        mode.copy_mode || self.active
     }
 
-    if !input.ctrl && key_char_eq(input, 't') {
-        state.pending_key = Some(CopyModePendingKey::TillForward);
-        return Vec::new();
+    fn repeat_key(state: &mut CopyModeInputState, key: CopyModeKey) -> Vec<CopyModeKey> {
+        let repeat = if Self::key_uses_count(key) {
+            state.count.take().unwrap_or(1)
+        } else {
+            state.count = None;
+            1
+        };
+        vec![key; repeat as usize]
     }
 
-    if !input.ctrl && key_char_eq(input, 'T') {
-        state.pending_key = Some(CopyModePendingKey::TillBackward);
-        return Vec::new();
+    fn key_uses_count(key: CopyModeKey) -> bool {
+        !matches!(
+            key,
+            K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
+        )
     }
 
-    map_copy_mode_key_from_input(input)
-        .map(|key| repeat_copy_mode_key(state, key))
-        .unwrap_or_default()
-}
-
-fn repeat_copy_mode_key(state: &mut CopyModeInputState, key: CopyModeKey) -> Vec<CopyModeKey> {
-    let repeat = if copy_mode_key_uses_count(key) {
-        state.count.take().unwrap_or(1)
-    } else {
-        state.count = None;
-        1
-    };
-    vec![key; repeat as usize]
-}
-
-fn copy_mode_key_uses_count(key: CopyModeKey) -> bool {
-    !matches!(
-        key,
-        K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
-    )
-}
-
-fn input_char(input: CopyModeKeyInput<'_>) -> Option<char> {
-    match input.key {
-        Key::Character(s) => s.chars().next(),
-        _ => None,
+    fn input_char(input: CopyModeKeyInput<'_>) -> Option<char> {
+        match input.key {
+            Key::Character(s) => s.chars().next(),
+            _ => None,
+        }
     }
-}
 
-fn input_digit(input: CopyModeKeyInput<'_>) -> Option<u16> {
-    let c = input_char(input)?;
-    c.to_digit(10).map(|d| d as u16)
-}
-
-fn key_char_eq(input: CopyModeKeyInput<'_>, expected: char) -> bool {
-    if input_char(input) == Some(expected) {
-        return true;
+    fn input_digit(input: CopyModeKeyInput<'_>) -> Option<u16> {
+        let c = Self::input_char(input)?;
+        c.to_digit(10).map(|d| d as u16)
     }
-    match expected {
-        '_' => input.shift && input.key_code == KeyCode::Minus,
-        '$' => input.shift && input.key_code == KeyCode::Digit4,
-        '^' => input.shift && input.key_code == KeyCode::Digit6,
-        '{' => input.shift && input.key_code == KeyCode::BracketLeft,
-        '}' => input.shift && input.key_code == KeyCode::BracketRight,
-        'W' => input.shift && input.key_code == KeyCode::KeyW,
-        'B' => input.shift && input.key_code == KeyCode::KeyB,
-        'E' => input.shift && input.key_code == KeyCode::KeyE,
-        'G' => input.shift && input.key_code == KeyCode::KeyG,
-        'H' => input.shift && input.key_code == KeyCode::KeyH,
-        'M' => input.shift && input.key_code == KeyCode::KeyM,
-        'L' => input.shift && input.key_code == KeyCode::KeyL,
-        'F' => input.shift && input.key_code == KeyCode::KeyF,
-        'T' => input.shift && input.key_code == KeyCode::KeyT,
-        'V' => input.shift && input.key_code == KeyCode::KeyV,
-        _ => false,
+
+    fn key_char_eq(input: CopyModeKeyInput<'_>, expected: char) -> bool {
+        if Self::input_char(input) == Some(expected) {
+            return true;
+        }
+        match expected {
+            '_' => input.shift && input.key_code == KeyCode::Minus,
+            '$' => input.shift && input.key_code == KeyCode::Digit4,
+            '^' => input.shift && input.key_code == KeyCode::Digit6,
+            '{' => input.shift && input.key_code == KeyCode::BracketLeft,
+            '}' => input.shift && input.key_code == KeyCode::BracketRight,
+            'W' => input.shift && input.key_code == KeyCode::KeyW,
+            'B' => input.shift && input.key_code == KeyCode::KeyB,
+            'E' => input.shift && input.key_code == KeyCode::KeyE,
+            'G' => input.shift && input.key_code == KeyCode::KeyG,
+            'H' => input.shift && input.key_code == KeyCode::KeyH,
+            'M' => input.shift && input.key_code == KeyCode::KeyM,
+            'L' => input.shift && input.key_code == KeyCode::KeyL,
+            'F' => input.shift && input.key_code == KeyCode::KeyF,
+            'T' => input.shift && input.key_code == KeyCode::KeyT,
+            'V' => input.shift && input.key_code == KeyCode::KeyV,
+            _ => false,
+        }
     }
 }
 
@@ -1761,17 +1759,10 @@ impl TerminalInput {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TerminalWebShortcutResolution {
-    Command(String),
-    Consume,
-    PassThrough,
-}
-
 impl TerminalShortcutState {
-    fn resolve(&mut self, event: &KeyStroke, map: &Keymap) -> TerminalWebShortcutResolution {
+    fn resolve(&mut self, event: &KeyStroke, map: &Keymap) -> (bool, Option<String>) {
         let Some(combo) = TerminalInput::shortcut(event) else {
-            return TerminalWebShortcutResolution::PassThrough;
+            return (false, None);
         };
         let now = Instant::now();
         if let Some((_, started)) = self.pending_prefix.as_ref()
@@ -1783,7 +1774,7 @@ impl TerminalShortcutState {
         if let Some((prefix, _)) = self.pending_prefix.clone() {
             if let Some(cmd) = map.chord(&prefix, &combo) {
                 self.pending_prefix = None;
-                return TerminalWebShortcutResolution::Command(cmd);
+                return (true, Some(cmd));
             }
             self.pending_prefix = None;
         }
@@ -1791,15 +1782,15 @@ impl TerminalShortcutState {
         if let Some(cmd) = map.direct(&combo)
             && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
         {
-            return TerminalWebShortcutResolution::Command(cmd);
+            return (true, Some(cmd));
         }
 
         if map.has_chord_prefix(&combo) {
             self.pending_prefix = Some((combo, now));
-            return TerminalWebShortcutResolution::Consume;
+            return (true, None);
         }
 
-        TerminalWebShortcutResolution::PassThrough
+        (false, None)
     }
 }
 
@@ -1935,17 +1926,17 @@ fn term_key(
     let Ok((pid, mode, mut copy_mode, mut shortcuts)) = terminals.get_mut(entity) else {
         return;
     };
-    match shortcuts.resolve(event, &keymap) {
-        TerminalWebShortcutResolution::Command(id) => {
-            let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-            command_invocations.write(CommandInvocation::new(caller, id));
-            if let Some(proxy) = proxy.as_ref() {
-                let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
-            }
-            return;
+    let (consumed, command) = shortcuts.resolve(event, &keymap);
+    if let Some(id) = command {
+        let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
+        command_invocations.write(CommandInvocation::new(caller, id));
+        if let Some(proxy) = proxy.as_ref() {
+            let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
         }
-        TerminalWebShortcutResolution::Consume => return,
-        TerminalWebShortcutResolution::PassThrough => {}
+        return;
+    }
+    if consumed {
+        return;
     }
     if event.is_modifier_key() {
         return;
@@ -1973,19 +1964,16 @@ fn term_key(
         }
     }
 
-    if is_copy_mode_active(mode, &copy_mode) {
+    if copy_mode.is_active_with(mode) {
         let key = TerminalInput::key(event);
-        let mapped = map_copy_mode_keys_with_state(
-            &mut copy_mode,
-            CopyModeKeyInput {
-                key: &key,
-                key_code: TerminalInput::key_code(&event.code),
-                ctrl: event.mods.ctrl,
-                shift: event.mods.shift,
-            },
-        );
+        let mapped = copy_mode.map_keys(CopyModeKeyInput {
+            key: &key,
+            key_code: TerminalInput::key_code(&event.code),
+            ctrl: event.mods.ctrl,
+            shift: event.mods.shift,
+        });
         for k in mapped {
-            if copy_mode_key_exits(k) {
+            if TerminalCopyMode::key_exits(k) {
                 copy_mode.set(false);
             }
             service_requests.write(ServiceRequest(ClientMessage::CopyModeKey {
@@ -2163,14 +2151,6 @@ fn clear(
             data: vec![0x0c],
         });
     }
-}
-
-fn is_copy_mode_active(mode: &TerminalMode, copy_mode: &TerminalCopyMode) -> bool {
-    mode.copy_mode || copy_mode.active
-}
-
-fn copy_mode_key_exits(key: CopyModeKey) -> bool {
-    matches!(key, K::Copy | K::Exit)
 }
 
 #[derive(Message, Debug, Clone)]
@@ -3059,7 +3039,7 @@ mod tests {
 
         assert_eq!(
             state.resolve(&event, &keymap),
-            TerminalWebShortcutResolution::Command("command_bar_edit_page".to_string())
+            (true, Some("command_bar_edit_page".to_string()))
         );
     }
 
@@ -3086,7 +3066,7 @@ mod tests {
 
         assert_eq!(
             state.resolve(&event, &keymap),
-            TerminalWebShortcutResolution::Command("toggle_layout".to_string())
+            (true, Some("toggle_layout".to_string()))
         );
     }
 
@@ -3110,27 +3090,27 @@ mod tests {
     #[test]
     fn vim_visual_keys_map_to_copy_mode_actions() {
         assert_eq!(
-            map_copy_mode_key(&Key::Character("v".into()), false),
+            TerminalCopyMode::map_key(&Key::Character("v".into()), false),
             Some(K::StartSelection)
         );
         assert_eq!(
-            map_copy_mode_key(&Key::Character("V".into()), false),
+            TerminalCopyMode::map_key(&Key::Character("V".into()), false),
             Some(K::StartLineSelection)
         );
         assert_eq!(
-            map_copy_mode_key(&Key::Character("e".into()), true),
+            TerminalCopyMode::map_key(&Key::Character("e".into()), true),
             Some(K::Down)
         );
         assert_eq!(
-            map_copy_mode_key(&Key::Character("y".into()), true),
+            TerminalCopyMode::map_key(&Key::Character("y".into()), true),
             Some(K::Up)
         );
         assert_eq!(
-            map_copy_mode_key(&Key::Character("y".into()), false),
+            TerminalCopyMode::map_key(&Key::Character("y".into()), false),
             Some(K::Copy)
         );
         assert_eq!(
-            map_copy_mode_key(&Key::Character("c".into()), true),
+            TerminalCopyMode::map_key(&Key::Character("c".into()), true),
             Some(K::Exit)
         );
     }
@@ -3140,11 +3120,11 @@ mod tests {
         let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
-            map_copy_mode_key_with_state(&mut copy_mode, &Key::Character("g".into()), false),
+            copy_mode.map_key_with_state(&Key::Character("g".into()), false),
             None
         );
         assert_eq!(
-            map_copy_mode_key_with_state(&mut copy_mode, &Key::Character("_".into()), false),
+            copy_mode.map_key_with_state(&Key::Character("_".into()), false),
             Some(K::LastNonBlank)
         );
     }
@@ -3154,61 +3134,61 @@ mod tests {
         let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("w".into()),
+                KeyCode::KeyW
+            )),
             vec![K::WordForward]
         );
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::shift(&Key::Character("W".into()), KeyCode::KeyW)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::shift(
+                &Key::Character("W".into()),
+                KeyCode::KeyW
+            )),
             vec![K::BigWordForward]
         );
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("b".into()), KeyCode::KeyB)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("b".into()),
+                KeyCode::KeyB
+            )),
             vec![K::WordBackward]
         );
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("e".into()),
+                KeyCode::KeyE
+            )),
             vec![K::WordEndForward]
         );
 
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("g".into()),
+                KeyCode::KeyG
+            )),
             Vec::<K>::new()
         );
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("e".into()),
+                KeyCode::KeyE
+            )),
             vec![K::WordEndBackward]
         );
 
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("3".into()), KeyCode::Digit3)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("3".into()),
+                KeyCode::Digit3
+            )),
             Vec::<K>::new()
         );
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("w".into()),
+                KeyCode::KeyW
+            )),
             vec![K::WordForward, K::WordForward, K::WordForward]
         );
     }
@@ -3218,17 +3198,17 @@ mod tests {
         let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::new(
+                &Key::Character("g".into()),
+                KeyCode::KeyG
+            )),
             Vec::<K>::new()
         );
         assert_eq!(
-            map_copy_mode_keys_with_state(
-                &mut copy_mode,
-                CopyModeKeyInput::shift(&Key::Character("-".into()), KeyCode::Minus)
-            ),
+            copy_mode.map_keys(CopyModeKeyInput::shift(
+                &Key::Character("-".into()),
+                KeyCode::Minus
+            )),
             vec![K::LastNonBlank]
         );
     }
@@ -3238,11 +3218,11 @@ mod tests {
         let mode = TerminalMode::default();
         let mut copy_mode = TerminalCopyMode::default();
 
-        assert!(!is_copy_mode_active(&mode, &copy_mode));
+        assert!(!copy_mode.is_active_with(&mode));
 
         copy_mode.set(true);
 
-        assert!(is_copy_mode_active(&mode, &copy_mode));
+        assert!(copy_mode.is_active_with(&mode));
     }
 
     #[test]
@@ -3253,7 +3233,7 @@ mod tests {
         copy_mode.set(true);
         copy_mode.set(false);
 
-        assert!(!is_copy_mode_active(&mode, &copy_mode));
+        assert!(!copy_mode.is_active_with(&mode));
     }
 
     #[test]
@@ -3261,7 +3241,7 @@ mod tests {
         let mut copy_mode = TerminalCopyMode::default();
         copy_mode.set(true);
 
-        if copy_mode_key_exits(K::Exit) {
+        if TerminalCopyMode::key_exits(K::Exit) {
             copy_mode.set(false);
         }
 
