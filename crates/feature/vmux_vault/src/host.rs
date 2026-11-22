@@ -13,6 +13,8 @@ use crate::state::{
     VaultSnapshot, VaultUiState, VaultWorkflowState,
 };
 
+pub(crate) mod key;
+mod key_io;
 mod operation;
 mod runtime;
 mod workflow;
@@ -25,7 +27,7 @@ struct WorkflowPlugin;
 struct OperationSet;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct RuntimeSet;
+pub(crate) struct RuntimeSet;
 
 #[vmux_page::page]
 pub struct VaultPlugin;
@@ -45,6 +47,7 @@ impl Plugin for VaultPlugin {
         app.add_plugins((
             crate::agent::VaultAgentPlugin,
             UiStatePlugin::<VaultUiState>::default(),
+            key::KeyAuthorityPlugin,
             RuntimePlugin,
             OperationPlugin,
             WorkflowPlugin,
@@ -53,7 +56,7 @@ impl Plugin for VaultPlugin {
 }
 
 #[derive(Component)]
-struct VaultRegistry {
+pub(crate) struct VaultRegistry {
     dirty: bool,
     loaded: bool,
     load_repositories: bool,
@@ -78,7 +81,7 @@ impl Default for VaultRegistry {
 #[derive(Component)]
 struct VaultScanTask {
     generation: u64,
-    task: Task<VaultSnapshot>,
+    task: Task<(VaultSnapshot, crate::storage::VaultStatus)>,
 }
 
 #[derive(Component, Default)]
@@ -263,5 +266,27 @@ impl VaultRecoveryState {
 
     fn retain(&mut self, key: GeneratedRecoveryKey) {
         self.pending_key = Some(key);
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct VaultStatusProjection(pub(crate) vmux_api::vault::VaultStatusSnapshot);
+
+impl VaultRegistry {
+    pub(crate) fn publish(&mut self, snapshot: VaultSnapshot) {
+        self.snapshot = snapshot;
+        self.dirty = false;
+        self.loaded = true;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub(crate) fn invalidate(&mut self) {
+        self.dirty = true;
+        self.loaded = false;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub(crate) fn current(&self) -> bool {
+        self.loaded && !self.dirty
     }
 }

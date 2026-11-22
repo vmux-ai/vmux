@@ -1,21 +1,39 @@
 use zeroize::Zeroizing;
 
-use super::LOCKED;
+use super::super::snapshot::VaultCrypto;
+use super::{KeyWriteReceipt, LOCKED, NativeKeyAccess};
 
-impl super::DeviceKeys {
-    pub(super) fn load(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+impl NativeKeyAccess {
+    pub(crate) fn read(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.read(_vault_id);
+        }
         Err(LOCKED.to_string())
     }
 
-    pub(super) fn load_silent(_vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    pub(crate) fn observe(&self, _vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.observe(_vault_id);
+        }
         Ok(None)
     }
 
-    pub(super) fn create() -> Result<Zeroizing<Vec<u8>>, String> {
+    pub(crate) fn generate(&self) -> Result<Zeroizing<Vec<u8>>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.generate();
+        }
         Err("Encrypted Vault key storage is not available on this platform".to_string())
     }
 
-    pub(super) fn store(_vault_id: &str, _key: &[u8]) -> Result<(), String> {
-        Ok(())
+    pub(crate) fn write(&self, _vault_id: &str, key: &[u8]) -> Result<KeyWriteReceipt, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.write(_vault_id, key);
+        }
+        VaultCrypto::new(key)?;
+        Ok(KeyWriteReceipt { created: false })
     }
 }

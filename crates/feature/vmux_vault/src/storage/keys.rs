@@ -1,19 +1,15 @@
-use super::snapshot::VaultCrypto;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::fmt::Write;
+use std::path::PathBuf;
 use zeroize::Zeroizing;
+
+pub(crate) mod port;
 
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(not(target_os = "macos"))]
 mod other;
 
-const LOCKED: &str = "This Vault is locked on this device. Unlock it with a passkey.";
-
-static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
-static SESSION_KEY_LOAD: OnceLock<Mutex<()>> = OnceLock::new();
-
-struct DeviceKeys;
+pub(crate) const LOCKED: &str = "This Vault is locked on this device. Unlock it with a passkey.";
 
 pub(super) trait KeyStore {
     fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
@@ -21,125 +17,69 @@ pub(super) trait KeyStore {
     fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String>;
 }
 
-pub(super) struct SystemKeyStore;
-
-pub(super) struct SilentSystemKeyStore;
-
-impl KeyStore for SystemKeyStore {
-    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        load_or_store_session_key(vault_id, || DeviceKeys::load(vault_id))
-    }
-
-    fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        let key = DeviceKeys::create()?;
-        self.store(vault_id, &key)?;
-        Ok(key)
-    }
-
-    fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String> {
-        DeviceKeys::store(vault_id, key)?;
-        store_session_key(vault_id, key)
-    }
+#[derive(Clone)]
+pub(crate) struct NativeKeyAccess {
+    directory: PathBuf,
+    #[cfg(target_os = "macos")]
+    context: vmux_profile::safe_storage::SafeStorageContext,
+    #[cfg(test)]
+    fixture: Option<std::sync::Arc<dyn NativeKeyFixture>>,
 }
 
-impl KeyStore for SilentSystemKeyStore {
-    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        if let Some(key) = load_session_key(vault_id)? {
-            return Ok(key);
+impl NativeKeyAccess {
+    pub(crate) fn current() -> Self {
+        let application_data = vmux_profile::ProfilePaths::current().application_data();
+        let directory = application_data.join(
+            if cfg!(debug_assertions) && vmux_profile::SessionEnvironment::is_test() {
+                "safe-storage-test"
+            } else {
+                "safe-storage"
+            },
+        );
+        Self {
+            directory,
+            #[cfg(target_os = "macos")]
+            context: vmux_profile::safe_storage::SafeStorageContext::at(application_data),
+            #[cfg(test)]
+            fixture: None,
         }
-        let Some(key) = DeviceKeys::load_silent(vault_id)? else {
-            return Err(LOCKED.to_string());
-        };
-        store_session_key(vault_id, &key)?;
-        Ok(key)
     }
 
-    fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        Err(LOCKED.to_string())
+    pub(crate) fn path(&self, vault_id: &str) -> PathBuf {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.path(vault_id);
+        }
+        let mut name = String::with_capacity(vault_id.len() * 2);
+        for byte in vault_id.as_bytes() {
+            let _ = write!(name, "{byte:02x}");
+        }
+        self.directory.join("vault").join(format!("{name}.bin"))
     }
 
-    fn store(&self, _vault_id: &str, _key: &[u8]) -> Result<(), String> {
-        Err(LOCKED.to_string())
+    #[cfg(test)]
+    pub(crate) fn fixture(
+        directory: PathBuf,
+        fixture: std::sync::Arc<dyn NativeKeyFixture>,
+    ) -> Self {
+        Self {
+            #[cfg(target_os = "macos")]
+            context: vmux_profile::safe_storage::SafeStorageContext::at(directory.clone()),
+            directory,
+            fixture: Some(fixture),
+        }
     }
 }
 
-fn load_session_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    Ok(SESSION_KEYS
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(vault_id)
-        .map(|key| Zeroizing::new(key.to_vec())))
-}
-
-fn store_session_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
-    VaultCrypto::new(key)?;
-    SESSION_KEYS
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?
-        .insert(vault_id.to_string(), Zeroizing::new(key.to_vec()));
-    Ok(())
-}
-
-fn load_or_store_session_key<F>(vault_id: &str, load: F) -> Result<Zeroizing<Vec<u8>>, String>
-where
-    F: FnOnce() -> Result<Zeroizing<Vec<u8>>, String>,
-{
-    if let Some(key) = load_session_key(vault_id)? {
-        return Ok(key);
-    }
-    let _load = SESSION_KEY_LOAD
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?;
-    if let Some(key) = load_session_key(vault_id)? {
-        return Ok(key);
-    }
-    let key = load()?;
-    store_session_key(vault_id, &key)?;
-    Ok(key)
+pub(crate) struct KeyWriteReceipt {
+    pub(crate) created: bool,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::storage::snapshot::KEY_LEN;
-    use std::sync::Arc;
-    use std::sync::Barrier;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::thread;
-    use std::time::Duration;
-
-    #[test]
-    fn concurrent_vault_key_loads_prompt_once_per_session() {
-        let vault_id = "test-concurrent-vault-key-load";
-        SESSION_KEYS
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap()
-            .remove(vault_id);
-        let loads = Arc::new(AtomicUsize::new(0));
-        let barrier = Arc::new(Barrier::new(8));
-        let threads = (0..8)
-            .map(|_| {
-                let loads = loads.clone();
-                let barrier = barrier.clone();
-                thread::spawn(move || {
-                    barrier.wait();
-                    load_or_store_session_key(vault_id, || {
-                        loads.fetch_add(1, Ordering::SeqCst);
-                        thread::sleep(Duration::from_millis(10));
-                        Ok(Zeroizing::new(vec![7; KEY_LEN]))
-                    })
-                    .unwrap()
-                })
-            })
-            .collect::<Vec<_>>();
-
-        for thread in threads {
-            assert_eq!(*thread.join().unwrap(), vec![7; KEY_LEN]);
-        }
-        assert_eq!(loads.load(Ordering::SeqCst), 1);
-    }
+pub(crate) trait NativeKeyFixture: Send + Sync {
+    fn path(&self, vault_id: &str) -> PathBuf;
+    fn read(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
+    fn observe(&self, vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String>;
+    fn generate(&self) -> Result<Zeroizing<Vec<u8>>, String>;
+    fn write(&self, vault_id: &str, key: &[u8]) -> Result<KeyWriteReceipt, String>;
 }

@@ -33,7 +33,13 @@ impl Plugin for VaultAgentPlugin {
         app.add_plugins(VaultToolPlugin)
             .add_message::<VaultStatusRequest>()
             .add_systems(Update, route_queries.in_set(ToolQueryRouteSet))
-            .add_systems(Update, answer_queries.after(ToolQueryRouteSet));
+            .add_systems(
+                Update,
+                (collect_queries, answer_queries)
+                    .chain()
+                    .after(ToolQueryRouteSet)
+                    .after(crate::host::RuntimeSet),
+            );
     }
 }
 
@@ -131,15 +137,173 @@ fn route_queries(
     }
 }
 
-fn answer_queries(
+#[derive(Component)]
+struct PendingVaultStatus(AgentRequestId);
+
+fn collect_queries(
     mut requests: MessageReader<VaultStatusRequest>,
+    registry: Query<
+        (Entity, &crate::host::key::NamespaceGeneration),
+        With<crate::host::VaultRegistry>,
+    >,
     mut service_requests: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
-        let snapshot = crate::storage::VaultStatus::current().snapshot();
-        let result = serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string());
+        let Ok((namespace, generation)) = registry.single() else {
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                AgentQueryResult::text(
+                    request.request_id,
+                    Err("Vault status is unavailable".to_string()),
+                ),
+            )));
+            continue;
+        };
+        commands.spawn((
+            PendingVaultStatus(request.request_id),
+            vmux_ecs::OperationTargetRevision(generation.0),
+            vmux_ecs::EntityTarget::<crate::host::VaultRegistry>::new(namespace),
+        ));
+    }
+}
+
+fn answer_queries(
+    requests: Query<(
+        Entity,
+        &PendingVaultStatus,
+        &vmux_ecs::EntityTarget<crate::host::VaultRegistry>,
+        &vmux_ecs::OperationTargetRevision,
+    )>,
+    registry: Query<(
+        &crate::host::VaultRegistry,
+        Option<&crate::host::VaultStatusProjection>,
+        &crate::host::key::NamespaceGeneration,
+    )>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
+) {
+    for (entity, request, target, accepted) in &requests {
+        let result = match registry.get(target.entity()) {
+            Ok((_, _, generation)) if accepted.0 != generation.0 => {
+                Err("Vault status owner replaced".to_string())
+            }
+            Ok((state, Some(status), _)) if state.current() => {
+                serde_json::to_string_pretty(&status.0).map_err(|error| error.to_string())
+            }
+            Ok(_) => continue,
+            Err(_) => Err("Vault status owner retired".to_string()),
+        };
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
-            AgentQueryResult::text(request.request_id, result),
+            AgentQueryResult::text(request.0, result),
         )));
+        commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::key::NamespaceGeneration;
+    use crate::host::{VaultRegistry, VaultStatusProjection};
+    use bevy::ecs::message::Messages;
+
+    struct StatusScenario {
+        app: App,
+        namespace: Entity,
+    }
+
+    impl StatusScenario {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(VaultAgentPlugin);
+            let namespace = app
+                .world_mut()
+                .spawn((VaultRegistry::default(), NamespaceGeneration(0)))
+                .id();
+            Self { app, namespace }
+        }
+
+        fn query(&mut self, id: u8) {
+            self.app.world_mut().write_message(VaultStatusRequest {
+                request_id: AgentRequestId([id; 16]),
+            });
+            self.app.update();
+        }
+
+        fn publish(&mut self) {
+            let observed = crate::storage::VaultStatus {
+                root: std::path::PathBuf::from("/isolated/vault"),
+                initialized: true,
+                encrypted: true,
+                unlocked: true,
+                remote: "https://example.invalid/vault.git".to_string(),
+                dirty: 2,
+                ..Default::default()
+            };
+            let snapshot = crate::state::VaultSnapshot {
+                initialized: true,
+                encrypted: true,
+                unlocked: true,
+                dirty: 2,
+                ..Default::default()
+            };
+            self.app
+                .world_mut()
+                .get_mut::<VaultRegistry>(self.namespace)
+                .unwrap()
+                .publish(snapshot);
+            self.app
+                .world_mut()
+                .entity_mut(self.namespace)
+                .insert(VaultStatusProjection(observed.snapshot()));
+        }
+
+        fn replies(&mut self) -> Vec<AgentQueryResult> {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .filter_map(|request| match request.0 {
+                    ClientMessage::AgentQueryResult(result) => Some(result),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    #[test]
+    fn status_queries_wait_for_a_current_canonical_observation() {
+        let mut scenario = StatusScenario::new();
+        scenario.query(1);
+        assert!(scenario.replies().is_empty());
+        scenario.publish();
+        scenario.app.update();
+        let replies = scenario.replies();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].request_id, AgentRequestId([1; 16]));
+        assert!(!replies[0].is_error);
+        let data: serde_json::Value = serde_json::from_str(&replies[0].content).unwrap();
+        assert_eq!(data["connected"], true);
+        assert_eq!(data["localChanges"], 2);
+        assert_eq!(data["syncNeeded"], true);
+    }
+
+    #[test]
+    fn a_replaced_namespace_cannot_answer_an_old_query() {
+        let mut scenario = StatusScenario::new();
+        scenario.query(2);
+        assert!(scenario.replies().is_empty());
+        scenario
+            .app
+            .world_mut()
+            .get_mut::<NamespaceGeneration>(scenario.namespace)
+            .unwrap()
+            .0 += 1;
+        scenario.publish();
+        scenario.app.update();
+        let replies = scenario.replies();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].request_id, AgentRequestId([2; 16]));
+        assert!(replies[0].is_error);
     }
 }

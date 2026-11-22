@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 mod connect;
 mod files;
-mod keys;
+pub(crate) mod keys;
 mod recovery;
 mod repository;
 mod snapshot;

@@ -2,46 +2,43 @@ use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
 use super::super::snapshot::{KEY_LEN, VaultCrypto};
-use super::LOCKED;
-use vmux_profile::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, SafeStorageName};
+use super::{KeyWriteReceipt, LOCKED, NativeKeyAccess};
+use vmux_profile::safe_storage::{SafeStorage, SafeStorageName};
 
-struct VaultKeyFile {
-    context: SafeStorageContext,
-    vault_id: String,
-    file: ProtectedFile,
-}
-
-impl VaultKeyFile {
-    fn new(vault_id: &str) -> Self {
-        let context = SafeStorageContext::current();
-        let file = context.protected_file(
+impl NativeKeyAccess {
+    pub(crate) fn read(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.read(vault_id);
+        }
+        let file = self.context.protected_file(
             std::path::PathBuf::from("vault")
                 .join(format!("{}.bin", SafeStorageName::of(vault_id))),
         );
-        Self {
-            context,
-            vault_id: vault_id.to_string(),
-            file,
-        }
-    }
-
-    fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        let Some(envelope) = self.file.read().map_err(|error| error.to_string())? else {
-            return Ok(None);
-        };
-        let key = SafeStorage::unwrap_vault_key(&self.context, &self.vault_id, &envelope)
+        let envelope = file
+            .read()
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| LOCKED.to_string())?;
+        let key = SafeStorage::unwrap_vault_key(&self.context, vault_id, &envelope)
             .map_err(|error| error.to_string())?;
         VaultCrypto::new(&key)?;
-        Ok(Some(key))
+        Ok(key)
     }
 
-    fn load_silent(&self) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        let Some(envelope) = self.file.read().map_err(|error| error.to_string())? else {
+    pub(crate) fn observe(&self, vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.observe(vault_id);
+        }
+        let file = self.context.protected_file(
+            std::path::PathBuf::from("vault")
+                .join(format!("{}.bin", SafeStorageName::of(vault_id))),
+        );
+        let Some(envelope) = file.read().map_err(|error| error.to_string())? else {
             return Ok(None);
         };
-        let Some(key) =
-            SafeStorage::unwrap_vault_key_silent(&self.context, &self.vault_id, &envelope)
-                .map_err(|error| error.to_string())?
+        let Some(key) = SafeStorage::unwrap_vault_key_silent(&self.context, vault_id, &envelope)
+            .map_err(|error| error.to_string())?
         else {
             return Ok(None);
         };
@@ -49,28 +46,11 @@ impl VaultKeyFile {
         Ok(Some(key))
     }
 
-    fn store(&self, key: &[u8]) -> Result<(), String> {
-        VaultCrypto::new(key)?;
-        let envelope = SafeStorage::wrap_vault_key(&self.context, &self.vault_id, key)
-            .map_err(|error| error.to_string())?;
-        self.file
-            .write(&envelope)
-            .map_err(|error| error.to_string())
-    }
-}
-
-impl super::DeviceKeys {
-    pub(super) fn load(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        VaultKeyFile::new(vault_id)
-            .load()?
-            .ok_or_else(|| LOCKED.to_string())
-    }
-
-    pub(super) fn load_silent(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        VaultKeyFile::new(vault_id).load_silent()
-    }
-
-    pub(super) fn create() -> Result<Zeroizing<Vec<u8>>, String> {
+    pub(crate) fn generate(&self) -> Result<Zeroizing<Vec<u8>>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.generate();
+        }
         let mut key = Zeroizing::new(vec![0_u8; KEY_LEN]);
         SystemRandom::new()
             .fill(&mut key)
@@ -78,7 +58,20 @@ impl super::DeviceKeys {
         Ok(key)
     }
 
-    pub(super) fn store(vault_id: &str, key: &[u8]) -> Result<(), String> {
-        VaultKeyFile::new(vault_id).store(key)
+    pub(crate) fn write(&self, vault_id: &str, key: &[u8]) -> Result<KeyWriteReceipt, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.write(vault_id, key);
+        }
+        VaultCrypto::new(key)?;
+        let file = self.context.protected_file(
+            std::path::PathBuf::from("vault")
+                .join(format!("{}.bin", SafeStorageName::of(vault_id))),
+        );
+        let created = file.read().map_err(|error| error.to_string())?.is_none();
+        let envelope = SafeStorage::wrap_vault_key(&self.context, vault_id, key)
+            .map_err(|error| error.to_string())?;
+        file.write(&envelope).map_err(|error| error.to_string())?;
+        Ok(KeyWriteReceipt { created })
     }
 }

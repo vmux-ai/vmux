@@ -27,6 +27,7 @@ impl Plugin for RuntimePlugin {
                     receive,
                     drain_watch,
                     start_scan,
+                    launch_scan,
                     drain_scan,
                     queue_auto_sync,
                 )
@@ -158,7 +159,14 @@ impl VaultWatch {
 }
 
 fn spawn(mut commands: Commands) {
+    let storage = VaultStorage::current();
     commands.spawn((
+        vmux_ecs::Cwd(storage.root().to_path_buf()),
+        super::key::RepositoryDirectory(storage.repository().to_path_buf()),
+        super::key::AcceptedStorage(storage),
+        super::key::KeyNamespace(crate::storage::keys::NativeKeyAccess::current()),
+        super::key::NamespaceGeneration::default(),
+        super::key::KeyAdmission::default(),
         Name::new("Vault"),
         VaultRegistry::default(),
         VaultOperationSequence::default(),
@@ -168,54 +176,158 @@ fn spawn(mut commands: Commands) {
 }
 
 fn start_scan(
-    mut registries: Query<&mut VaultRegistry>,
+    mut registries: Query<(
+        Entity,
+        &mut VaultRegistry,
+        &super::key::KeyNamespace,
+        &super::key::NamespaceGeneration,
+        &mut super::key::KeyAdmission,
+        &super::key::AcceptedStorage,
+    )>,
     scans: Query<(), With<VaultScanTask>>,
+    requests: Query<(), With<VaultScanRequest>>,
     tasks: Query<(), With<VaultOperationTask>>,
     ready: Query<(), With<ReadyVaultOperation>>,
     pending: Query<(), With<PendingVaultOperation>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Ok(mut state) = registries.single_mut() else {
+    let Ok((namespace, mut state, access, namespace_generation, mut admission, storage)) =
+        registries.single_mut()
+    else {
         return;
     };
     if !state.dirty
         || !scans.is_empty()
+        || !requests.is_empty()
         || !tasks.is_empty()
         || !ready.is_empty()
         || !pending.is_empty()
     {
         return;
     }
-    let generation = state.generation;
-    let load_repositories = state.load_repositories;
-    let previous = state.snapshot.clone();
+    let entity = commands
+        .spawn((
+            vmux_ecs::Operation::bundle("vault.scan").unwrap().running(),
+            vmux_ecs::OperationRetained,
+            vmux_ecs::OperationTarget::new(namespace),
+            vmux_ecs::OperationTargetRevision(namespace_generation.0),
+        ))
+        .id();
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let (keys, ingress) = access.port(
+        namespace,
+        namespace_generation.0,
+        &mut admission,
+        entity,
+        wake,
+    );
+    commands.entity(entity).insert((
+        keys,
+        ingress,
+        super::key::AcceptedStorage(storage.0.clone()),
+        super::key::KeyCanceled(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        ))),
+        super::key::KeyPermissions {
+            load: false,
+            observe: true,
+            create: false,
+            store: false,
+        },
+        VaultScanRequest {
+            generation: state.generation,
+            load_repositories: state.load_repositories,
+            previous: state.snapshot.clone(),
+        },
+    ));
+    commands
+        .entity(namespace)
+        .remove::<super::VaultStatusProjection>();
     state.dirty = false;
+    state.loaded = false;
     state.load_repositories = false;
-    let task =
-        IoTaskPool::get().spawn(async move { VaultSnapshot::scan(load_repositories, previous) });
-    commands.spawn(VaultScanTask { generation, task });
+}
+
+#[derive(Component)]
+struct VaultScanRequest {
+    generation: u64,
+    load_repositories: bool,
+    previous: VaultSnapshot,
+}
+
+fn launch_scan(
+    requests: Query<
+        (
+            Entity,
+            &VaultScanRequest,
+            &super::key::KeyPort,
+            &super::key::AcceptedStorage,
+        ),
+        Added<VaultScanRequest>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, request, keys, storage) in &requests {
+        let keys = keys.clone();
+        let storage = storage.0.clone();
+        let generation = request.generation;
+        let load_repositories = request.load_repositories;
+        let previous = request.previous.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = VaultSnapshot::scan(&storage, &keys, load_repositories, previous);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(entity)
+            .remove::<VaultScanRequest>()
+            .insert(VaultScanTask { generation, task });
+    }
 }
 
 fn drain_scan(
-    mut scans: Query<(Entity, &mut VaultScanTask)>,
-    mut registries: Query<(&mut VaultRegistry, &mut VaultAutoSync)>,
+    mut scans: Query<(
+        Entity,
+        &vmux_ecs::OperationTarget,
+        &vmux_ecs::OperationTargetRevision,
+        &mut VaultScanTask,
+    )>,
+    mut registries: Query<(
+        &mut VaultRegistry,
+        &mut VaultAutoSync,
+        &super::key::NamespaceGeneration,
+    )>,
     mut commands: Commands,
 ) {
-    let Ok((mut state, mut auto_sync)) = registries.single_mut() else {
-        return;
-    };
-    for (entity, mut scan) in &mut scans {
-        let Some(snapshot) = future::block_on(future::poll_once(&mut scan.task)) else {
+    for (entity, target, accepted, mut scan) in &mut scans {
+        let Some((snapshot, status)) = future::block_on(future::poll_once(&mut scan.task)) else {
             continue;
         };
         commands.entity(entity).despawn();
+        let Ok((mut state, mut auto_sync, namespace_generation)) =
+            registries.get_mut(target.entity())
+        else {
+            continue;
+        };
+        if accepted.0 != namespace_generation.0 {
+            continue;
+        }
         if scan.generation != state.generation {
             state.dirty = true;
             continue;
         }
-        state.snapshot = snapshot;
-        state.loaded = true;
-        state.revision = state.revision.wrapping_add(1);
+        commands
+            .entity(target.entity())
+            .insert(super::key::KeyManifest(snapshot.vault_id.clone()));
+        state.publish(snapshot);
+        commands
+            .entity(target.entity())
+            .insert(super::VaultStatusProjection(status.snapshot()));
         if !state.snapshot.github_owner.is_empty()
             && (!state.snapshot.initialized || state.snapshot.remote.is_empty())
             && !state.snapshot.repositories_loaded
@@ -344,12 +456,19 @@ fn queue_auto_sync(
 }
 
 impl VaultSnapshot {
-    fn scan(load_repositories: bool, previous: Self) -> Self {
+    fn scan(
+        storage: &VaultStorage,
+        keys: &super::key::KeyPort,
+        load_repositories: bool,
+        previous: Self,
+    ) -> (Self, crate::storage::VaultStatus) {
+        let keys = keys.observation();
         let status = if load_repositories {
-            crate::storage::VaultStatus::current_with_repositories()
+            crate::storage::VaultStatus::current_with_repositories(storage, &keys)
         } else {
-            crate::storage::VaultStatus::current()
+            crate::storage::VaultStatus::current(storage, &keys)
         };
+        let observation = status.clone();
         let mut snapshot = Self {
             root: status.root.to_string_lossy().into_owned(),
             initialized: status.initialized,
@@ -385,7 +504,7 @@ impl VaultSnapshot {
             snapshot.repositories_loaded = previous.repositories_loaded;
             snapshot.error = previous.error;
         }
-        snapshot
+        (snapshot, observation)
     }
 }
 
