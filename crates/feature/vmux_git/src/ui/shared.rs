@@ -188,6 +188,616 @@ pub fn GitFooter(
     }
 }
 
+#[derive(Clone)]
+struct DiffViewState {
+    collapsed_files: Signal<HashSet<String>>,
+    viewed_files: Signal<ViewedFiles>,
+    scroll_container: Signal<Option<Rc<MountedData>>>,
+    render_window: Signal<DiffRenderWindow>,
+    revealed_file: Signal<String>,
+    active_file: Signal<String>,
+    next_request: Rc<DiffNextRequest>,
+    derived_cache: Rc<RefCell<DiffDerivedCache>>,
+    layout_cache: Rc<RefCell<DiffLayoutCache>>,
+    geometry_cache: Rc<RefCell<DiffGeometryCache>>,
+    scroll_position: Rc<Cell<f64>>,
+    viewport_height: Rc<Cell<f64>>,
+    geometry_window: Rc<Cell<Option<DiffRenderWindow>>>,
+    pending_anchor: Rc<RefCell<Option<ScrollAnchor>>>,
+}
+
+impl DiffViewState {
+    fn use_state() -> Self {
+        Self {
+            collapsed_files: use_signal(HashSet::<String>::new),
+            viewed_files: use_signal(ViewedFiles::default),
+            scroll_container: use_signal(|| None::<Rc<MountedData>>),
+            render_window: use_signal(DiffRenderWindow::default),
+            revealed_file: use_signal(String::new),
+            active_file: use_signal(String::new),
+            next_request: use_hook(|| Rc::new(DiffNextRequest::default())),
+            derived_cache: use_hook(|| Rc::new(RefCell::new(DiffDerivedCache::default()))),
+            layout_cache: use_hook(|| Rc::new(RefCell::new(DiffLayoutCache::default()))),
+            geometry_cache: use_hook(|| Rc::new(RefCell::new(DiffGeometryCache::default()))),
+            scroll_position: use_hook(|| Rc::new(Cell::new(0.0))),
+            viewport_height: use_hook(|| Rc::new(Cell::new(0.0))),
+            geometry_window: use_hook(|| Rc::new(Cell::new(None::<DiffRenderWindow>))),
+            pending_anchor: use_hook(|| Rc::new(RefCell::new(None::<ScrollAnchor>))),
+        }
+    }
+
+    fn use_derived(
+        &self,
+        viewport: ReadSignal<Option<GitDiffViewport>>,
+        rows_from: ReadSignal<Option<u32>>,
+    ) -> Memo<DiffDerived> {
+        let derived_cache = Rc::clone(&self.derived_cache);
+        use_memo(move || {
+            let viewport = viewport.read();
+            let mut cache = derived_cache.borrow_mut();
+            cache.update(viewport.as_ref(), *rows_from.read())
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn use_layout_revision(
+        &self,
+        derived: Memo<DiffDerived>,
+        viewport: ReadSignal<Option<GitDiffViewport>>,
+        display_rows: ReadSignal<Vec<GitDiffRow>>,
+        rows_from: ReadSignal<Option<u32>>,
+        path: ReadSignal<String>,
+        expected_paths: Vec<String>,
+        identity: String,
+    ) -> Memo<DiffLayoutRevision> {
+        let derived_cache = Rc::clone(&self.derived_cache);
+        let layout_cache = Rc::clone(&self.layout_cache);
+        let geometry_cache = Rc::clone(&self.geometry_cache);
+        let scroll_position = Rc::clone(&self.scroll_position);
+        let pending_anchor = Rc::clone(&self.pending_anchor);
+        use_memo(use_reactive!(|(expected_paths, identity)| {
+            derived.read();
+            let viewport = viewport.read();
+            let rows = display_rows.read();
+            let derived = derived_cache.borrow();
+            let anchor = {
+                let layout = layout_cache.borrow();
+                let geometry = geometry_cache.borrow();
+                if layout.has_viewport
+                    && viewport
+                        .as_ref()
+                        .is_some_and(|viewport| viewport.generation == layout.generation)
+                    && geometry.identity == *identity
+                {
+                    ScrollAnchor::capture(&layout.layout, &geometry.geometry, scroll_position.get())
+                } else {
+                    None
+                }
+            };
+            let mut layout = layout_cache.borrow_mut();
+            let previous = layout.version;
+            let revision = layout.update(
+                viewport.as_ref(),
+                &rows,
+                &expected_paths,
+                &derived.fingerprints,
+                *rows_from.read(),
+                !path.read().is_empty(),
+            );
+            if revision.version != previous {
+                *pending_anchor.borrow_mut() = anchor;
+            }
+            revision
+        }))
+    }
+
+    fn use_geometry_revision(
+        &self,
+        layout_revision: Memo<DiffLayoutRevision>,
+        identity: String,
+    ) -> Memo<u64> {
+        let layout_cache = Rc::clone(&self.layout_cache);
+        let geometry_cache = Rc::clone(&self.geometry_cache);
+        let scroll_position = Rc::clone(&self.scroll_position);
+        let pending_anchor = Rc::clone(&self.pending_anchor);
+        let geometry_window = Rc::clone(&self.geometry_window);
+        let collapsed_files = self.collapsed_files;
+        let render_window = self.render_window;
+        use_memo(use_reactive!(|(identity,)| {
+            layout_revision.read();
+            let layout = layout_cache.borrow();
+            let mut geometry = geometry_cache.borrow_mut();
+            let same_document = geometry.identity == *identity;
+            let revision = geometry.update(&layout, &identity, &collapsed_files.read());
+            if !same_document {
+                geometry_window.set(None);
+            }
+            if let Some(anchor) = pending_anchor.borrow_mut().take()
+                && same_document
+                && let Some(top) = anchor.restore(&layout.layout, &geometry.geometry)
+            {
+                scroll_position.set(top);
+                geometry_window.set(Some(DiffRenderWindow::at(top, render_window.peek().height)));
+            }
+            revision
+        }))
+    }
+
+    fn use_reveal_effect(
+        &self,
+        layout_revision: Memo<DiffLayoutRevision>,
+        geometry_revision: Memo<u64>,
+        reveal_path: Option<ReadSignal<Target>>,
+        identity: String,
+    ) {
+        let layout_cache = Rc::clone(&self.layout_cache);
+        let geometry_cache = Rc::clone(&self.geometry_cache);
+        let mut revealed_file = self.revealed_file;
+        let mut render_window = self.render_window;
+        use_effect(use_reactive!(|(identity,)| {
+            layout_revision.read();
+            geometry_revision.read();
+            let Some(reveal_path) = reveal_path else {
+                return;
+            };
+            let request = reveal_path();
+            let path = request.target;
+            if path.is_empty() {
+                return;
+            }
+            let key = format!("{identity}\0{}\0{path}", request.revision);
+            if *revealed_file.peek() == key {
+                return;
+            }
+            let layout = layout_cache.borrow();
+            let geometry = geometry_cache.borrow();
+            let Some(offset) = geometry.geometry.file_offset(&layout.layout, &path) else {
+                return;
+            };
+            revealed_file.set(key);
+            if request.behavior == ScrollBehavior::Smooth {
+                ScrollIntoView::element_to_smooth("git-diff-viewport", offset);
+            } else {
+                let height = render_window.peek().height;
+                render_window.set(DiffRenderWindow::at(offset, height));
+                ScrollIntoView::element_to("git-diff-viewport", offset);
+            }
+        }));
+    }
+
+    fn use_viewed_effect(
+        &self,
+        layout_revision: Memo<DiffLayoutRevision>,
+        onviewedchange: Option<EventHandler<usize>>,
+        identity: String,
+    ) {
+        let layout_cache = Rc::clone(&self.layout_cache);
+        let mut viewed_files = self.viewed_files;
+        let mut collapsed_files = self.collapsed_files;
+        use_effect(use_reactive!(|(identity,)| {
+            layout_revision.read();
+            let layout = layout_cache.borrow();
+            let mut viewed = viewed_files.write();
+            let mut collapsed = collapsed_files.write();
+            viewed.reconcile(&identity, &layout.layout, &mut collapsed);
+            if let Some(handler) = onviewedchange {
+                handler.call(viewed.count(&identity, layout.layout.file_paths()));
+            }
+        }));
+    }
+
+    fn use_prefetch_effect(
+        &self,
+        layout_revision: Memo<DiffLayoutRevision>,
+        geometry_revision: Memo<u64>,
+        viewport: ReadSignal<Option<GitDiffViewport>>,
+        loading: bool,
+    ) {
+        let next_request = Rc::clone(&self.next_request);
+        let layout_cache = Rc::clone(&self.layout_cache);
+        let geometry_cache = Rc::clone(&self.geometry_cache);
+        let scroll_position = Rc::clone(&self.scroll_position);
+        let viewport_height = Rc::clone(&self.viewport_height);
+        let scroll_container = self.scroll_container;
+        use_effect(move || {
+            layout_revision.read();
+            geometry_revision.read();
+            let viewport = viewport.read();
+            let has_more = viewport.as_ref().is_some_and(|viewport| viewport.has_more);
+            let next_request_key = viewport.as_ref().map(DiffNextRequestKey::from);
+            let row_count = viewport
+                .as_ref()
+                .map(|viewport| viewport.lines.len())
+                .unwrap_or_default();
+            let next_request = Rc::clone(&next_request);
+            let placeholder = {
+                let layout = layout_cache.borrow();
+                let geometry = geometry_cache.borrow();
+                layout.layout.placeholder_path(
+                    &geometry.geometry,
+                    DiffRenderWindow {
+                        top: scroll_position.get(),
+                        height: viewport_height.get(),
+                    },
+                )
+            };
+            if let Some(path) = placeholder
+                && next_request_key.is_some()
+            {
+                next_request.send_seek(next_request_key, path);
+                return;
+            }
+            if loading || !has_more || row_count == 0 {
+                return;
+            }
+            spawn(async move {
+                let Some(container) = scroll_container.peek().clone() else {
+                    return;
+                };
+                let Ok(size) = container.get_scroll_size().await else {
+                    return;
+                };
+                let Ok(rect) = container.get_client_rect().await else {
+                    return;
+                };
+                if size.height <= rect.size.height * 4.0 {
+                    next_request.send_key(next_request_key);
+                }
+            });
+        });
+    }
+
+    fn handle_mounted(&self, event: Event<MountedData>) {
+        self.scroll_position.set(0.0);
+        self.geometry_window.set(None);
+        let element = event.data();
+        let mut scroll_container = self.scroll_container;
+        scroll_container.set(Some(element.clone()));
+        let position = Rc::clone(&self.scroll_position);
+        let height = Rc::clone(&self.viewport_height);
+        let mut render_window = self.render_window;
+        spawn(async move {
+            let Ok(rect) = element.get_client_rect().await else {
+                return;
+            };
+            let top = element
+                .get_scroll_offset()
+                .await
+                .map(|offset| offset.y)
+                .unwrap_or_default();
+            position.set(top);
+            height.set(rect.size.height);
+            render_window.set(DiffRenderWindow::at(top, rect.size.height));
+        });
+    }
+
+    fn handle_scroll(
+        &self,
+        event: Event<ScrollData>,
+        next_request_key: Option<DiffNextRequestKey>,
+        has_more: bool,
+        loading: bool,
+        onactivefile: Option<EventHandler<String>>,
+    ) {
+        self.scroll_position.set(event.scroll_top());
+        self.viewport_height.set(f64::from(event.client_height()));
+        let had_geometry_window = self.geometry_window.replace(None).is_some();
+        let viewport_window =
+            DiffRenderWindow::from_scroll(event.scroll_top(), f64::from(event.client_height()));
+        let current_window = *self.render_window.peek();
+        if had_geometry_window
+            || !current_window.covers(event.scroll_top(), f64::from(event.client_height()))
+                && current_window != viewport_window
+        {
+            let mut render_window = self.render_window;
+            render_window.set(viewport_window);
+        }
+        let layout = self.layout_cache.borrow();
+        let geometry = self.geometry_cache.borrow();
+        let placeholder = layout.layout.placeholder_path(
+            &geometry.geometry,
+            DiffRenderWindow {
+                top: event.scroll_top(),
+                height: f64::from(event.client_height()),
+            },
+        );
+        let mut active_file = self.active_file;
+        if let Some(path) = geometry
+            .geometry
+            .file_at(&layout.layout, event.scroll_top() + 1.0)
+            && *active_file.peek() != path
+        {
+            active_file.set(path.clone());
+            if let Some(handler) = onactivefile {
+                handler.call(path);
+            }
+        }
+        if let Some(path) = placeholder {
+            self.next_request.send_seek(next_request_key, path);
+        } else if has_more && !loading && ScrollPreload::DOCUMENT.reached(&event) {
+            self.next_request.send_key(next_request_key);
+        }
+    }
+
+    fn visible_layout(
+        &self,
+        identity: &str,
+        collapsed: &HashSet<String>,
+        initial_loading: bool,
+    ) -> VisibleDiffLayout {
+        if initial_loading {
+            return VisibleDiffLayout {
+                top_spacer: 0.0,
+                bottom_spacer: 0.0,
+                sections: Vec::new(),
+            };
+        }
+        let layout = self.layout_cache.borrow();
+        let geometry = self.geometry_cache.borrow();
+        layout.layout.visible(
+            identity,
+            collapsed,
+            &geometry.geometry,
+            self.geometry_window
+                .get()
+                .unwrap_or(*self.render_window.read()),
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_section(
+        &self,
+        section: VisibleDiffSection,
+        identity: &str,
+        repo_root: ReadSignal<String>,
+        path: ReadSignal<String>,
+        path_bytes: &[u8],
+        rows: &[DiffLine],
+        generation: u64,
+        revision: u64,
+        total_rows: u32,
+        gutter_width: usize,
+        collapsed_snapshot: &HashSet<String>,
+        viewed_snapshot: &ViewedFiles,
+        onviewedchange: Option<EventHandler<usize>>,
+    ) -> Element {
+        let file_path = section.file_path.clone();
+        let placeholder = section.placeholder;
+        let collapse_key = file_path
+            .as_ref()
+            .map(|file_path| format!("{identity}\0{file_path}"));
+        let collapsed = collapse_key
+            .as_ref()
+            .is_some_and(|key| collapsed_snapshot.contains(key));
+        let viewed = collapse_key
+            .as_ref()
+            .is_some_and(|key| viewed_snapshot.contains(key, section.fingerprint));
+        let reveal_path = file_path.clone().unwrap_or_default();
+        let height_element = format!(
+            "git-diff-section-{}",
+            crate::GitUrl::file_hash(reveal_path.as_bytes())
+        );
+        let section_class = if file_path.is_some() && section.index > 0 {
+            "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
+        } else if file_path.is_some() {
+            "w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
+        } else {
+            "contents"
+        };
+        let scroll_anchor_id = if file_path.is_some() {
+            height_element.clone()
+        } else {
+            format!("git-diff-scroll-anchor-{}", section.index)
+        };
+        let header = file_path.as_ref().map(|file_path| {
+            self.render_section_header(
+                file_path,
+                identity,
+                repo_root,
+                placeholder,
+                collapsed,
+                viewed,
+                section.fingerprint,
+                collapse_key.unwrap_or_default(),
+                height_element,
+                onviewedchange,
+            )
+        });
+        let body = self.render_section_body(
+            section,
+            placeholder,
+            collapsed,
+            rows,
+            repo_root,
+            path,
+            path_bytes,
+            generation,
+            revision,
+            total_rows,
+            gutter_width,
+        );
+        rsx! {
+            section {
+                key: "section-{scroll_anchor_id}-{file_path:?}",
+                id: scroll_anchor_id,
+                class: section_class,
+                aria_busy: placeholder,
+                style: "overflow-anchor:none;",
+                "data-vmux-scroll-anchor": reveal_path,
+                if let Some(header) = header {
+                    {header}
+                }
+                {body}
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_section_header(
+        &self,
+        file_path: &str,
+        identity: &str,
+        repo_root: ReadSignal<String>,
+        placeholder: bool,
+        collapsed: bool,
+        viewed: bool,
+        fingerprint: Option<DiffFingerprint>,
+        collapse_key: String,
+        height_element: String,
+        onviewedchange: Option<EventHandler<usize>>,
+    ) -> Element {
+        let file_url = vmux_path::FileUrl::from_path(
+            &Path::new(&repo_root()).join(file_path),
+            None,
+            None,
+            None,
+        );
+        let viewed_key = collapse_key.clone();
+        let viewed_height = height_element.clone();
+        let viewed_identity = identity.to_string();
+        let collapse_identity = identity.to_string();
+        let viewed_reveal = file_path.to_string();
+        let collapse_reveal = file_path.to_string();
+        let viewed_layout = Rc::clone(&self.layout_cache);
+        let collapse_layout = Rc::clone(&self.layout_cache);
+        let mut viewed_files = self.viewed_files;
+        let mut collapsed_files = self.collapsed_files;
+        let mut collapse_toggle_files = self.collapsed_files;
+        let render_window = self.render_window;
+        rsx! {
+            div {
+                id: crate::GitUrl::file_hash(file_path.as_bytes()),
+                class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-inherit px-3 font-sans text-[11px] font-semibold text-foreground backdrop-blur-xl",
+                TypeIcon { path: file_path.to_string(), is_dir: false, class: "size-3.5 shrink-0" }
+                button {
+                    r#type: "button",
+                    class: "min-w-0 flex-1 truncate text-left font-mono transition-colors hover:text-primary hover:underline",
+                    title: file_path.to_string(),
+                    onclick: move |_| {
+                        PageNavigation::stack(file_url.clone());
+                    },
+                    "{file_path}"
+                }
+                if !placeholder {
+                    label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
+                        Checkbox {
+                            checked: viewed,
+                            tone: CheckboxTone::Neutral,
+                            aria_label: translate("git-viewed"),
+                            on_checked_change: move |checked| {
+                                vmux_ui::animation::Height::transition(&viewed_height);
+                                let mut viewed = viewed_files.write();
+                                let mut collapsed = collapsed_files.write();
+                                if checked {
+                                    viewed.insert(viewed_key.clone(), fingerprint);
+                                    collapsed.insert(viewed_key.clone());
+                                } else {
+                                    viewed.remove(&viewed_key);
+                                    collapsed.remove(&viewed_key);
+                                }
+                                if let Some(handler) = onviewedchange {
+                                    handler.call(viewed.count(
+                                        &viewed_identity,
+                                        viewed_layout.borrow().layout.file_paths(),
+                                    ));
+                                }
+                                viewed_layout.borrow().layout.reveal(
+                                    &viewed_identity,
+                                    &collapsed,
+                                    &viewed_reveal,
+                                    render_window,
+                                );
+                            },
+                        }
+                        {translate("git-viewed")}
+                    }
+                    SheetHeaderChevron {
+                        expanded: !collapsed,
+                        label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
+                        onclick: move |_| {
+                            vmux_ui::animation::Height::transition(&height_element);
+                            let mut files = collapse_toggle_files.write();
+                            if !files.remove(&collapse_key) {
+                                files.insert(collapse_key.clone());
+                            }
+                            collapse_layout.borrow().layout.reveal(
+                                &collapse_identity,
+                                &files,
+                                &collapse_reveal,
+                                render_window,
+                            );
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_section_body(
+        &self,
+        section: VisibleDiffSection,
+        placeholder: bool,
+        collapsed: bool,
+        rows: &[DiffLine],
+        repo_root: ReadSignal<String>,
+        path: ReadSignal<String>,
+        path_bytes: &[u8],
+        generation: u64,
+        revision: u64,
+        total_rows: u32,
+        gutter_width: usize,
+    ) -> Element {
+        let show_hunk_actions = !path().is_empty();
+        rsx! {
+            div { "data-vmux-height-body": "",
+                if placeholder {
+                    DiffPlaceholderLines {}
+                } else if !collapsed {
+                    if section.top_spacer > 0.0 {
+                        DiffVirtualRows { height: section.top_spacer }
+                    }
+                    for display_row in section.rows {
+                        match display_row {
+                            GitDiffRow::Line(index) => {
+                                let index = index as usize;
+                                let line = &rows[index];
+                                let hunk = hunk_end(rows, index).filter(|_| show_hunk_actions);
+                                rsx! {
+                                    DiffLineRow {
+                                        key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
+                                        line: line.clone(),
+                                        gutter_width,
+                                        hunk,
+                                        repo_root,
+                                        path,
+                                        path_bytes: path_bytes.to_vec(),
+                                    }
+                                }
+                            }
+                            GitDiffRow::Gap { start, end, .. } => rsx! {
+                                DiffGap {
+                                    key: "gap-{start}-{end}",
+                                    generation,
+                                    revision,
+                                    start,
+                                    end,
+                                    total: total_rows,
+                                    gutter_width,
+                                }
+                            },
+                        }
+                    }
+                    if section.bottom_spacer > 0.0 {
+                        DiffVirtualRows { height: section.bottom_spacer }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn DiffView(
     repo_root: ReadSignal<String>,
@@ -204,316 +814,60 @@ pub fn DiffView(
     loading: bool,
     visible: bool,
 ) -> Element {
-    let mut collapsed_files = use_signal(HashSet::<String>::new);
-    let mut viewed_files = use_signal(ViewedFiles::default);
-    let mut scroll_container = use_signal(|| None::<Rc<MountedData>>);
-    let mut render_window = use_signal(DiffRenderWindow::default);
-    let mut revealed_file = use_signal(String::new);
-    let mut active_file = use_signal(String::new);
-    let next_request = use_hook(|| Rc::new(DiffNextRequest::default()));
-    let derived_cache = use_hook(|| Rc::new(RefCell::new(DiffDerivedCache::default())));
-    let layout_cache = use_hook(|| Rc::new(RefCell::new(DiffLayoutCache::default())));
-    let geometry_cache = use_hook(|| Rc::new(RefCell::new(DiffGeometryCache::default())));
-    let scroll_position = use_hook(|| Rc::new(Cell::new(0.0)));
-    let viewport_height = use_hook(|| Rc::new(Cell::new(0.0)));
-    let geometry_window = use_hook(|| Rc::new(Cell::new(None::<DiffRenderWindow>)));
-    let pending_anchor = use_hook(|| Rc::new(RefCell::new(None::<ScrollAnchor>)));
+    let state = DiffViewState::use_state();
     let expected_path_count = expected_paths.len();
-    let layout_expected_paths = expected_paths.clone();
-    let derived_rows_from = rows_from;
-    let derived_state_cache = Rc::clone(&derived_cache);
-    let derived = use_memo(move || {
-        let viewport = viewport.read();
-        let mut cache = derived_state_cache.borrow_mut();
-        cache.update(viewport.as_ref(), *derived_rows_from.read())
-    });
-    let layout_derived_cache = Rc::clone(&derived_cache);
-    let layout_state_cache = Rc::clone(&layout_cache);
-    let layout_identity = identity.clone();
-    let layout_geometry_cache = Rc::clone(&geometry_cache);
-    let layout_scroll_position = Rc::clone(&scroll_position);
-    let layout_pending_anchor = Rc::clone(&pending_anchor);
-    let layout_revision = use_memo(use_reactive!(|(layout_expected_paths, layout_identity)| {
-        derived.read();
-        let viewport = viewport.read();
-        let rows = display_rows.read();
-        let derived = layout_derived_cache.borrow();
-        let anchor = {
-            let layout = layout_state_cache.borrow();
-            let geometry = layout_geometry_cache.borrow();
-            if layout.has_viewport
-                && viewport
-                    .as_ref()
-                    .is_some_and(|viewport| viewport.generation == layout.generation)
-                && geometry.identity == *layout_identity
-            {
-                ScrollAnchor::capture(
-                    &layout.layout,
-                    &geometry.geometry,
-                    layout_scroll_position.get(),
-                )
-            } else {
-                None
-            }
-        };
-        let mut layout = layout_state_cache.borrow_mut();
-        let previous = layout.version;
-        let revision = layout.update(
-            viewport.as_ref(),
-            &rows,
-            &layout_expected_paths,
-            &derived.fingerprints,
-            *rows_from.read(),
-            !path.read().is_empty(),
-        );
-        if revision.version != previous {
-            *layout_pending_anchor.borrow_mut() = anchor;
-        }
-        revision
-    }));
-    let geometry_identity = identity.clone();
-    let geometry_layout_cache = Rc::clone(&layout_cache);
-    let geometry_state_cache = Rc::clone(&geometry_cache);
-    let geometry_scroll_position = Rc::clone(&scroll_position);
-    let geometry_pending_anchor = Rc::clone(&pending_anchor);
-    let geometry_render_window = Rc::clone(&geometry_window);
-    let geometry_revision = use_memo(use_reactive!(|(geometry_identity,)| {
-        layout_revision.read();
-        let layout = geometry_layout_cache.borrow();
-        let mut geometry = geometry_state_cache.borrow_mut();
-        let same_document = geometry.identity == *geometry_identity;
-        let revision = geometry.update(&layout, &geometry_identity, &collapsed_files.read());
-        if !same_document {
-            geometry_render_window.set(None);
-        }
-        if let Some(anchor) = geometry_pending_anchor.borrow_mut().take()
-            && same_document
-            && let Some(top) = anchor.restore(&layout.layout, &geometry.geometry)
-        {
-            geometry_scroll_position.set(top);
-            geometry_render_window
-                .set(Some(DiffRenderWindow::at(top, render_window.peek().height)));
-        }
-        revision
-    }));
-    let reveal_identity = identity.clone();
-    let reveal_layout_cache = Rc::clone(&layout_cache);
-    let reveal_geometry_cache = Rc::clone(&geometry_cache);
-    use_effect(use_reactive!(|(reveal_identity,)| {
-        layout_revision.read();
-        geometry_revision.read();
-        let Some(reveal_path) = reveal_path else {
-            return;
-        };
-        let request = reveal_path();
-        let path = request.target;
-        if path.is_empty() {
-            return;
-        }
-        let key = format!("{reveal_identity}\0{}\0{path}", request.revision);
-        if *revealed_file.peek() == key {
-            return;
-        }
-        let layout = reveal_layout_cache.borrow();
-        let geometry = reveal_geometry_cache.borrow();
-        let Some(offset) = geometry.geometry.file_offset(&layout.layout, &path) else {
-            return;
-        };
-        revealed_file.set(key);
-        if request.behavior == ScrollBehavior::Smooth {
-            ScrollIntoView::element_to_smooth("git-diff-viewport", offset);
-        } else {
-            let height = render_window.peek().height;
-            render_window.set(DiffRenderWindow::at(offset, height));
-            ScrollIntoView::element_to("git-diff-viewport", offset);
-        }
-    }));
-    let viewed_identity = identity.clone();
-    let viewed_layout_cache = Rc::clone(&layout_cache);
-    use_effect(use_reactive!(|(viewed_identity,)| {
-        layout_revision.read();
-        let layout = viewed_layout_cache.borrow();
-        let mut viewed = viewed_files.write();
-        let mut collapsed = collapsed_files.write();
-        viewed.reconcile(&viewed_identity, &layout.layout, &mut collapsed);
-        if let Some(handler) = onviewedchange {
-            handler.call(viewed.count(&viewed_identity, layout.layout.file_paths()));
-        }
-    }));
+    let derived = state.use_derived(viewport, rows_from);
+    let layout_revision = state.use_layout_revision(
+        derived,
+        viewport,
+        display_rows,
+        rows_from,
+        path,
+        expected_paths,
+        identity.clone(),
+    );
+    let geometry_revision = state.use_geometry_revision(layout_revision, identity.clone());
+    state.use_reveal_effect(
+        layout_revision,
+        geometry_revision,
+        reveal_path,
+        identity.clone(),
+    );
+    state.use_viewed_effect(layout_revision, onviewedchange, identity.clone());
+    state.use_prefetch_effect(layout_revision, geometry_revision, viewport, loading);
+
     let viewport_state = viewport.read();
-    let rows = viewport_state
-        .as_ref()
-        .map(|viewport| viewport.lines.as_slice())
-        .unwrap_or_default();
-    let error = viewport_state
-        .as_ref()
-        .map(|viewport| viewport.error.as_str())
-        .unwrap_or_default();
-    let has_more = viewport_state
-        .as_ref()
-        .is_some_and(|viewport| viewport.has_more);
-    let (generation, revision) = viewport_state
-        .as_ref()
-        .map(|viewport| (viewport.generation, viewport.revision))
-        .unwrap_or_default();
-    let next_request_key = viewport_state.as_ref().map(DiffNextRequestKey::from);
-    let derived_snapshot = derived.read();
-    let gw = derived_snapshot.gutter_width;
+    let vp = viewport_state.as_ref();
+    let rows = vp.map_or(&[][..], |vp| vp.lines.as_slice());
+    let error = vp.map_or("", |vp| vp.error.as_str());
+    let has_more = vp.is_some_and(|vp| vp.has_more);
+    let (generation, revision) = vp.map_or((0, 0), |vp| (vp.generation, vp.revision));
+    let next_request_key = vp.map(DiffNextRequestKey::from);
+    let gw = derived.read().gutter_width;
     let total_rows = u32::try_from(rows.len()).unwrap_or(u32::MAX);
-    let collapsed_snapshot = collapsed_files();
-    let viewed_snapshot = viewed_files();
+    let collapsed_snapshot = (state.collapsed_files)();
+    let viewed_snapshot = (state.viewed_files)();
     layout_revision.read();
     geometry_revision.read();
-    let visible_layout = {
-        let layout = layout_cache.borrow();
-        let geometry = geometry_cache.borrow();
-        layout.layout.visible(
-            &identity,
-            &collapsed_snapshot,
-            &geometry.geometry,
-            geometry_window.get().unwrap_or(*render_window.read()),
-            true,
-        )
-    };
+    let initial_loading = loading && vp.is_none() && expected_path_count == 0;
     let VisibleDiffLayout {
         top_spacer,
         bottom_spacer,
         sections,
-    } = visible_layout;
-    let initial_next_request = Rc::clone(&next_request);
-    let initial_layout_cache = Rc::clone(&layout_cache);
-    let initial_geometry_cache = Rc::clone(&geometry_cache);
-    let initial_scroll_position = Rc::clone(&scroll_position);
-    let initial_viewport_height = Rc::clone(&viewport_height);
-    use_effect(move || {
-        layout_revision.read();
-        geometry_revision.read();
-        let viewport = viewport.read();
-        let has_more = viewport.as_ref().is_some_and(|viewport| viewport.has_more);
-        let next_request_key = viewport.as_ref().map(DiffNextRequestKey::from);
-        let row_count = viewport
-            .as_ref()
-            .map(|viewport| viewport.lines.len())
-            .unwrap_or_default();
-        let next_request = Rc::clone(&initial_next_request);
-        let placeholder = {
-            let layout = initial_layout_cache.borrow();
-            let geometry = initial_geometry_cache.borrow();
-            layout.layout.placeholder_path(
-                &geometry.geometry,
-                DiffRenderWindow {
-                    top: initial_scroll_position.get(),
-                    height: initial_viewport_height.get(),
-                },
-            )
-        };
-        if let Some(path) = placeholder
-            && next_request_key.is_some()
-        {
-            next_request.send_seek(next_request_key, path);
-            return;
-        }
-        if loading || !has_more || row_count == 0 {
-            return;
-        }
-        spawn(async move {
-            let Some(container) = scroll_container.peek().clone() else {
-                return;
-            };
-            let Ok(size) = container.get_scroll_size().await else {
-                return;
-            };
-            let Ok(rect) = container.get_client_rect().await else {
-                return;
-            };
-            if size.height <= rect.size.height * 4.0 {
-                next_request.send_key(next_request_key);
-            }
-        });
-    });
-    let scroll_next_request = Rc::clone(&next_request);
-    let scroll_layout_cache = Rc::clone(&layout_cache);
-    let scroll_geometry_cache = Rc::clone(&geometry_cache);
-    let mounted_scroll_position = Rc::clone(&scroll_position);
-    let mounted_viewport_height = Rc::clone(&viewport_height);
-    let mounted_geometry_window = Rc::clone(&geometry_window);
-    let event_scroll_position = Rc::clone(&scroll_position);
-    let event_viewport_height = Rc::clone(&viewport_height);
-    let event_geometry_window = Rc::clone(&geometry_window);
-
-    let initial_loading = loading && viewport.read().is_none() && expected_path_count == 0;
-    let (top_spacer, bottom_spacer, sections) = if initial_loading {
-        (0.0, 0.0, Vec::new())
-    } else {
-        (top_spacer, bottom_spacer, sections)
-    };
+    } = state.visible_layout(&identity, &collapsed_snapshot, initial_loading);
+    let mount_state = state.clone();
+    let scroll_state = state.clone();
     rsx! {
         div {
             key: "{identity}",
             id: "git-diff-viewport",
             "data-vmux-preserve-scroll": "",
-            onmounted: move |event: Event<MountedData>| {
-                mounted_scroll_position.set(0.0);
-                mounted_geometry_window.set(None);
-                let element = event.data();
-                scroll_container.set(Some(element.clone()));
-                let position = Rc::clone(&mounted_scroll_position);
-                let height = Rc::clone(&mounted_viewport_height);
-                spawn(async move {
-                    let Ok(rect) = element.get_client_rect().await else {
-                        return;
-                    };
-                    let top = element.get_scroll_offset().await.map(|offset| offset.y).unwrap_or_default();
-                    position.set(top);
-                    height.set(rect.size.height);
-                    render_window.set(DiffRenderWindow::at(top, rect.size.height));
-                });
-            },
+            onmounted: move |event: Event<MountedData>| mount_state.handle_mounted(event),
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             style: "overflow-anchor:none;scrollbar-gutter:stable;",
-            onscroll: move |event| {
-                event_scroll_position.set(event.scroll_top());
-                event_viewport_height.set(f64::from(event.client_height()));
-                let had_geometry_window = event_geometry_window.replace(None).is_some();
-                let viewport_window = DiffRenderWindow::from_scroll(
-                    event.scroll_top(),
-                    f64::from(event.client_height()),
-                );
-                let current_window = *render_window.peek();
-                if had_geometry_window || !current_window.covers(
-                    event.scroll_top(),
-                    f64::from(event.client_height()),
-                ) && current_window != viewport_window
-                {
-                    render_window.set(viewport_window);
-                }
-                let layout = scroll_layout_cache.borrow();
-                let geometry = scroll_geometry_cache.borrow();
-                let placeholder = layout
-                    .layout
-                    .placeholder_path(&geometry.geometry, DiffRenderWindow {
-                        top: event.scroll_top(),
-                        height: f64::from(event.client_height()),
-                    });
-                if let Some(path) = geometry
-                    .geometry
-                    .file_at(&layout.layout, event.scroll_top() + 1.0)
-                    && *active_file.peek() != path
-                {
-                    active_file.set(path.clone());
-                    if let Some(handler) = onactivefile {
-                        handler.call(path);
-                    }
-                }
-                if let Some(path) = placeholder {
-                    scroll_next_request.send_seek(next_request_key, path);
-                } else if has_more && !loading && ScrollPreload::DOCUMENT.reached(&event) {
-                    scroll_next_request.send_key(next_request_key);
-                }
-            },
-
+            onscroll: move |event| scroll_state.handle_scroll(event, next_request_key, has_more, loading, onactivefile),
             if initial_loading {
-                DiffLoadingSurface { height: render_window.read().height.max(360.0) }
+                DiffLoadingSurface { height: state.render_window.read().height.max(360.0) }
             } else if !error.is_empty() {
                 ErrorState {
                     class: "min-h-64 font-sans".to_string(),
@@ -525,240 +879,121 @@ pub fn DiffView(
             } else if rows.is_empty() && expected_path_count == 0 {
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }
-
             if top_spacer > 0.0 {
                 DiffVirtualSpacer { height: top_spacer }
             }
             for section in sections {
-                {
-                    let file_path = section.file_path.clone();
-                    let placeholder = section.placeholder;
-                    let collapse_key = file_path
-                        .as_ref()
-                        .map(|file_path| format!("{identity}\0{file_path}"));
-                    let collapsed = collapse_key
-                        .as_ref()
-                        .is_some_and(|key| collapsed_snapshot.contains(key));
-                    let viewed = collapse_key
-                        .as_ref()
-                        .is_some_and(|key| viewed_snapshot.contains(key, section.fingerprint));
-                    let viewed_key = collapse_key.clone();
-                    let viewed_fingerprint = section.fingerprint;
-                    let viewed_count_identity = identity.clone();
-                    let viewed_count_layout = Rc::clone(&layout_cache);
-                    let viewed_reveal_path = file_path.clone().unwrap_or_default();
-                    let collapse_reveal_path = viewed_reveal_path.clone();
-                    let collapse_identity = identity.clone();
-                    let collapse_layout = Rc::clone(&layout_cache);
-                    let height_element = format!("git-diff-section-{}", crate::GitUrl::file_hash(viewed_reveal_path.as_bytes()));
-                    let viewed_height_element = height_element.clone();
-                    let collapse_height_element = height_element.clone();
-                    let file_url = file_path
-                        .as_ref()
-                        .map(|file_path| {
-                            vmux_path::FileUrl::from_path(
-                                &Path::new(&repo_root()).join(file_path),
-                                None,
-                                None,
-                                None,
-                            )
-                        })
-                        .unwrap_or_default();
-                    let section_class = if file_path.is_some() && section.index > 0 {
-                        "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
-                    } else if file_path.is_some() {
-                        "w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
-                    } else {
-                        "contents"
-                    };
-                    let scroll_anchor_key = file_path.clone().unwrap_or_default();
-                    let scroll_anchor_id = if file_path.is_some() { height_element } else { format!("git-diff-scroll-anchor-{}", section.index) };
-                    rsx! {
-                        section {
-                            key: "section-{section.index}-{file_path:?}",
-                            id: scroll_anchor_id,
-                            class: section_class,
-                            aria_busy: placeholder,
-                            style: "overflow-anchor:none;",
-                            "data-vmux-scroll-anchor": scroll_anchor_key,
-                            if let Some(file_path) = file_path {
-                                div {
-                                    id: crate::GitUrl::file_hash(file_path.as_bytes()),
-                                    class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-inherit px-3 font-sans text-[11px] font-semibold text-foreground backdrop-blur-xl",
-                                    TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
-                                    button {
-                                        r#type: "button",
-                                        class: "min-w-0 flex-1 truncate text-left font-mono transition-colors hover:text-primary hover:underline",
-                                        title: file_path.clone(),
-                                        onclick: move |_| {
-                                            PageNavigation::stack(file_url.clone());
-                                        },
-                                        "{file_path}"
-                                    }
-                                    if !placeholder {
-                                        label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
-                                            Checkbox {
-                                                checked: viewed,
-                                                tone: CheckboxTone::Neutral,
-                                                aria_label: translate("git-viewed"),
-                                                on_checked_change: move |checked| {
-                                                    let Some(key) = viewed_key.as_ref() else {
-                                                        return;
-                                                    };
-                                                    vmux_ui::animation::Height::transition(&viewed_height_element);
-                                                    let mut viewed = viewed_files.write();
-                                                    let mut collapsed = collapsed_files.write();
-                                                    if checked {
-                                                        viewed.insert(key.clone(), viewed_fingerprint);
-                                                        collapsed.insert(key.clone());
-                                                    } else {
-                                                        viewed.remove(key);
-                                                        collapsed.remove(key);
-                                                    }
-                                                    if let Some(handler) = onviewedchange {
-                                                        handler.call(viewed.count(
-                                                            &viewed_count_identity,
-                                                            viewed_count_layout.borrow().layout.file_paths(),
-                                                        ));
-                                                    }
-                                                    viewed_count_layout.borrow().layout.reveal(
-                                                        &viewed_count_identity,
-                                                        &collapsed,
-                                                        &viewed_reveal_path,
-                                                        render_window,
-                                                    );
-                                                },
-                                            }
-                                            {translate("git-viewed")}
-                                        }
-                                        SheetHeaderChevron {
-                                            expanded: !collapsed,
-                                            label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
-                                            onclick: move |_| {
-                                                let Some(key) = collapse_key.as_ref() else {
-                                                    return;
-                                                };
-                                                vmux_ui::animation::Height::transition(&collapse_height_element);
-                                                let mut files = collapsed_files.write();
-                                                if !files.remove(key) {
-                                                    files.insert(key.clone());
-                                                }
-                                                collapse_layout.borrow().layout.reveal(
-                                                    &collapse_identity,
-                                                    &files,
-                                                    &collapse_reveal_path,
-                                                    render_window,
-                                                );
-                                            },
-                                        }
-                                    }
-                                }
-                            }
-                            div { "data-vmux-height-body": "",
-                            if placeholder {
-                                DiffPlaceholderLines {}
-                            } else if !collapsed {
-                                if section.top_spacer > 0.0 {
-                                    DiffVirtualRows { height: section.top_spacer }
-                                }
-                                for display_row in section.rows {
-                                    match display_row {
-                                        GitDiffRow::Line(index) => {
-                                            let index = index as usize;
-                                            let line = &rows[index];
-                                            rsx! {
-                                                div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                                                    div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
-                                                        span { class: "flex shrink-0 select-none {DiffPresentation::from(line.kind).gutter_class()}",
-                                                            span {
-                                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
-                                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
-                                                                "{opt_no(line.old_no)}"
-                                                            }
-                                                            span {
-                                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
-                                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
-                                                                "{opt_no(line.new_no)}"
-                                                            }
-                                                            span {
-                                                                class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
-                                                                "{DiffPresentation::from(line.kind).sign()}"
-                                                            }
-                                                        }
-                                                        span { class: "min-w-0 px-2 pr-8",
-                                                            for (j, styled) in line.spans.iter().enumerate() {
-                                                                span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
-                                                            }
-                                                        }
-                                                    }
-                                                    if let Some(h) = hunk_end(rows, index).filter(|_| !path().is_empty()) {
-                                                            {
-                                                                let accept_path_bytes = path_bytes.clone();
-                                                                let reject_path_bytes = path_bytes.clone();
-                                                                rsx! {
-                                                                    div {
-                                                                        class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
-                                                                        Button {
-                                                                            variant: ButtonVariant::Ghost,
-                                                                            class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
-                                                                            onclick: move |_| {
-                                                                                let _ = send(&GitHunkRequest {
-                                                                                    repo_root: repo_root(),
-                                                                                    path: path(),
-                                                                                    path_bytes: accept_path_bytes.clone(),
-                                                                                    hunk: h,
-                                                                                    accept: true,
-                                                                                });
-                                                                            },
-                                                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
-                                                                            {translate("git-stage")}
-                                                                        }
-                                                                        Button {
-                                                                            variant: ButtonVariant::Ghost,
-                                                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
-                                                                            onclick: move |_| {
-                                                                                let _ = send(&GitHunkRequest {
-                                                                                    repo_root: repo_root(),
-                                                                                    path: path(),
-                                                                                    path_bytes: reject_path_bytes.clone(),
-                                                                                    hunk: h,
-                                                                                    accept: false,
-                                                                                });
-                                                                            },
-                                                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
-                                                                            {translate("git-revert")}
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                            }
-                                        },
-                                        GitDiffRow::Gap { start, end, .. } => rsx! {
-                                            DiffGap {
-                                                key: "gap-{start}-{end}",
-                                                generation,
-                                                revision,
-                                                start,
-                                                end,
-                                                total: total_rows,
-                                                gutter_width: gw,
-                                            }
-                                        },
-                                    }
-                                }
-                                if section.bottom_spacer > 0.0 {
-                                    DiffVirtualRows { height: section.bottom_spacer }
-                                }
-                            }
-                            }
-                        }
-                    }
-                }
+                {state.render_section(
+                    section,
+                    &identity,
+                    repo_root,
+                    path,
+                    &path_bytes,
+                    rows,
+                    generation,
+                    revision,
+                    total_rows,
+                    gw,
+                    &collapsed_snapshot,
+                    &viewed_snapshot,
+                    onviewedchange,
+                )}
             }
             if bottom_spacer > 0.0 {
                 DiffVirtualSpacer { height: bottom_spacer }
+            }
+        }
+    }
+}
+
+#[component]
+fn DiffLineRow(
+    line: DiffLine,
+    gutter_width: usize,
+    hunk: Option<u32>,
+    repo_root: ReadSignal<String>,
+    path: ReadSignal<String>,
+    path_bytes: Vec<u8>,
+) -> Element {
+    let presentation = DiffPresentation::from(line.kind);
+    rsx! {
+        div {
+            div { class: "group flex min-w-max whitespace-pre transition-colors {presentation.row_class()}",
+                span { class: "flex shrink-0 select-none {presentation.gutter_class()}",
+                    span {
+                        class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
+                        style: "width:calc(var(--cw, 1ch) * {gutter_width} + 1rem);",
+                        "{opt_no(line.old_no)}"
+                    }
+                    span {
+                        class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
+                        style: "width:calc(var(--cw, 1ch) * {gutter_width} + 1rem);",
+                        "{opt_no(line.new_no)}"
+                    }
+                    span {
+                        class: "flex w-6 shrink-0 items-center justify-center font-semibold {presentation.text_class()}",
+                        "{presentation.sign()}"
+                    }
+                }
+                span { class: "min-w-0 px-2 pr-8",
+                    for (j, styled) in line.spans.iter().enumerate() {
+                        span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
+                    }
+                }
+            }
+            if let Some(h) = hunk {
+                DiffHunkActions {
+                    hunk: h,
+                    repo_root,
+                    path,
+                    path_bytes,
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DiffHunkActions(
+    hunk: u32,
+    repo_root: ReadSignal<String>,
+    path: ReadSignal<String>,
+    path_bytes: Vec<u8>,
+) -> Element {
+    let accept_path_bytes = path_bytes.clone();
+    let reject_path_bytes = path_bytes;
+    rsx! {
+        div {
+            class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
+            Button {
+                variant: ButtonVariant::Ghost,
+                class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
+                onclick: move |_| {
+                    let _ = send(&GitHunkRequest {
+                        repo_root: repo_root(),
+                        path: path(),
+                        path_bytes: accept_path_bytes.clone(),
+                        hunk,
+                        accept: true,
+                    });
+                },
+                LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
+                {translate("git-stage")}
+            }
+            Button {
+                variant: ButtonVariant::Ghost,
+                class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
+                onclick: move |_| {
+                    let _ = send(&GitHunkRequest {
+                        repo_root: repo_root(),
+                        path: path(),
+                        path_bytes: reject_path_bytes.clone(),
+                        hunk,
+                        accept: false,
+                    });
+                },
+                LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
+                {translate("git-revert")}
             }
         }
     }
