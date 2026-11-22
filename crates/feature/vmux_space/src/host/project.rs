@@ -46,13 +46,13 @@ impl Plugin for SpaceProjectPlugin {
                     remember.before(EffectiveStartupSet),
                     start_repo_root_resolutions.after(remember),
                     finish_repo_root_resolutions.after(start_repo_root_resolutions),
-                    start_project_repository_scans.after(remember),
-                    finish_project_repository_scans.after(start_project_repository_scans),
+                    start_repository_scans.after(remember),
+                    finish_repository_scans.after(start_repository_scans),
                     publish_roots
                         .in_set(WriteCommandBarSnapshots)
-                        .after(finish_project_repository_scans),
-                    publish_git_projects.after(finish_project_repository_scans),
-                    publish_navigation.after(finish_project_repository_scans),
+                        .after(finish_repository_scans),
+                    publish_git_projects.after(finish_repository_scans),
+                    publish_navigation.after(finish_repository_scans),
                     finish_picks,
                 ),
             );
@@ -383,7 +383,7 @@ impl RepositoryScan {
     }
 }
 
-fn start_project_repository_scans(
+fn start_repository_scans(
     projects: Query<
         (Entity, &vmux_ecs::Cwd, Option<&ProjectRepositoryFact>),
         (
@@ -455,7 +455,7 @@ fn start_project_repository_scans(
     }
 }
 
-fn finish_project_repository_scans(
+fn finish_repository_scans(
     mut scans: Query<(Entity, &mut ProjectRepositoryScan)>,
     mut commands: Commands,
 ) {
