@@ -197,7 +197,7 @@ impl ScanSnapshot {
                         }
                     }
                     "mcp" => {
-                        item.managed = committed.mcp.servers.contains_key(&item.id);
+                        item.managed |= committed.mcp.servers.contains_key(&item.id);
                         if !item.managed {
                             item.operations
                                 .retain(|operation| *operation != ToolOperationKind::Forget);
@@ -648,6 +648,7 @@ fn project_observations(
             &crate::observation::Operations,
             Option<&crate::observation::Removable>,
             Has<crate::observation::Package>,
+            Has<crate::observation::Managed>,
         ),
         With<crate::observation::Item>,
     >,
@@ -662,15 +663,26 @@ fn project_observations(
             continue;
         };
         let mut items = Vec::new();
-        for (owner, id, name, version, icon, detail, status, operations, removable, package) in
-            &facts
+        for (
+            owner,
+            id,
+            name,
+            version,
+            icon,
+            detail,
+            status,
+            operations,
+            removable,
+            package,
+            observed_managed,
+        ) in &facts
         {
             if owner.parent() != entity {
                 continue;
             }
             let managed = match provider.id.0.id() {
                 "dotfiles" => manifest.desired.dotfiles.packages.contains(&id.0),
-                "mcp" => manifest.desired.mcp.servers.contains_key(&id.0),
+                "mcp" => observed_managed || manifest.desired.mcp.servers.contains_key(&id.0),
                 _ => manifest.desired.contains(provider.id.0.id(), &id.0),
             };
             let operations = if package {

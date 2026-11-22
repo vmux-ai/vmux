@@ -7,10 +7,10 @@ use crate::inventory::{
 };
 use crate::presentation::{Context as ToolOperationContext, State as ToolPageState};
 use crate::state::{
-    ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
-    ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
-    ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest,
-    ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
+    McpRegisterRequest, ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest,
+    ToolInstallRequest, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
+    ToolOperationNotice, ToolProvider, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
+    ToolsFilterRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
 use bevy::prelude::*;
 use bevy::prelude::{Commands, On, Query};
@@ -58,6 +58,7 @@ impl Plugin for ToolHostPlugin {
                 ToolOpenRequest,
                 ToolsFilterRequest,
                 ToolsNavigateRequest,
+                McpRegisterRequest,
             )>::default(),
         ))
         .configure_sets(Update, ProjectionSet)
@@ -75,6 +76,8 @@ impl Plugin for ToolHostPlugin {
         .add_observer(operation_request::<ToolUnlinkRequest>)
         .add_observer(operation_request::<ToolApplyRequest>)
         .add_observer(operation_request::<ToolImportRequest>)
+        .add_observer(register_mcp)
+        .add_observer(forget_mcp_config)
         .add_systems(Update, cancel.in_set(crate::ToolOperationCancelSet))
         .add_observer(complete)
         .add_systems(
@@ -89,6 +92,7 @@ impl Plugin for ToolHostPlugin {
                 )
                     .in_set(ToolTaskSet::Start),
                 finish_external_operations.in_set(ToolTaskSet::Apply),
+                drain_mcp_mutations,
                 drain_succeeded_operations,
                 drain_failed_operations,
                 drain_canceled_operations,
@@ -121,6 +125,188 @@ fn wake(
 
 #[derive(Component)]
 struct ExternalWorker;
+
+#[derive(Component)]
+struct McpPageMutation {
+    target: Entity,
+    generation: u64,
+    registry: Entity,
+    store: ToolStore,
+    id: String,
+    kind: ToolOperationKind,
+}
+
+fn register_mcp(
+    trigger: On<UiInput<McpRegisterRequest>>,
+    mut registries: Query<(Entity, &ToolStore, &mut OperationRequestSequence), With<ToolRegistry>>,
+    mut pages: Query<&mut ToolPageState>,
+    metadata: Query<&PageMetadata>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok(metadata) = metadata.get(target) else {
+        return;
+    };
+    let Some(route) = crate::route::ToolRoute::parse(&metadata.url) else {
+        return;
+    };
+    let Ok((registry, store, mut sequence)) = registries.single_mut() else {
+        return;
+    };
+    let payload = &trigger.event().payload;
+    let operation_id = sequence.next();
+    let generation = match pages.get_mut(target) {
+        Ok(mut page) => {
+            page.bind(registry, store, operation_id);
+            page.navigate(&route);
+            page.begin();
+            page.generation
+        }
+        Err(_) => {
+            let mut page = ToolPageState::new(operation_id);
+            page.bind(registry, store, operation_id);
+            page.navigate(&route);
+            commands.entity(target).insert(page);
+            operation_id
+        }
+    };
+    let id = payload.id.trim().to_string();
+    let target_value = payload.target.trim().to_string();
+    let args = payload
+        .args
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let bearer = (!payload.bearer_token_env_var.trim().is_empty())
+        .then(|| payload.bearer_token_env_var.trim().to_string());
+    let spec = match payload.transport.trim().to_ascii_lowercase().as_str() {
+        "http" => crate::McpServerSpec::Http {
+            url: target_value,
+            headers: Default::default(),
+            header_env: Default::default(),
+            bearer_token_env_var: bearer,
+            auth: crate::McpAuthSpec::None,
+            enabled: true,
+            agents: Vec::new(),
+        },
+        "sse" => crate::McpServerSpec::Sse {
+            url: target_value,
+            headers: Default::default(),
+            header_env: Default::default(),
+            bearer_token_env_var: bearer,
+            auth: crate::McpAuthSpec::None,
+            enabled: true,
+            agents: Vec::new(),
+        },
+        _ => crate::McpServerSpec::Stdio {
+            command: target_value,
+            args,
+            env: Default::default(),
+            cwd: None,
+            enabled: true,
+            agents: Vec::new(),
+        },
+    };
+    commands.spawn((
+        McpPageMutation {
+            target,
+            generation,
+            registry,
+            store: store.clone(),
+            id: id.clone(),
+            kind: ToolOperationKind::Adopt,
+        },
+        crate::McpSaveEntry {
+            path: store.mcp_config_path(),
+            id: id.clone(),
+            entry: crate::McpServerOverride::Define(spec),
+            summary: format!("{id} registered in mcp.ron"),
+        },
+    ));
+}
+
+fn forget_mcp_config(
+    trigger: On<UiInput<ToolForgetRequest>>,
+    registries: Query<&ToolStore, With<ToolRegistry>>,
+    metadata: Query<&PageMetadata>,
+    mut commands: Commands,
+) {
+    let payload = &trigger.event().payload;
+    if !payload.provider.is("mcp") {
+        return;
+    }
+    let Ok(metadata) = metadata.get(trigger.event().webview) else {
+        return;
+    };
+    if crate::route::ToolRoute::parse(&metadata.url).is_none() {
+        return;
+    }
+    let Ok(store) = registries.single() else {
+        return;
+    };
+    commands.spawn(crate::McpDeleteEntry {
+        path: store.mcp_config_path(),
+        id: payload.id.clone(),
+        summary: format!("{} removed from mcp.ron", payload.id),
+        ignore_missing: true,
+    });
+}
+
+fn drain_mcp_mutations(
+    mutations: Query<(Entity, Option<&McpPageMutation>, &crate::McpMutationResult)>,
+    mut registry: Query<(Entity, &ToolStore, &mut ToolRegistry)>,
+    mut pages: Query<&mut ToolPageState>,
+    mut commands: Commands,
+) {
+    let Ok((registry_entity, store, mut state)) = registry.single_mut() else {
+        for (entity, _, _) in &mutations {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    for (entity, page_mutation, result) in &mutations {
+        let mut refresh = false;
+        if let Some(mutation) = page_mutation {
+            let (success, message) = match &result.0 {
+                Ok(message) => {
+                    refresh = true;
+                    (true, message.clone())
+                }
+                Err(error) => (false, error.clone()),
+            };
+            if let Ok(mut page) = pages.get_mut(mutation.target) {
+                let context = ToolOperationContext {
+                    operation_id: 0,
+                    target: mutation.target,
+                    generation: mutation.generation,
+                    operation: ToolOperationKey::new(
+                        ToolProvider::new("mcp"),
+                        mutation.kind,
+                        mutation.id.clone(),
+                    ),
+                    registry: mutation.registry,
+                    store: mutation.store.clone(),
+                };
+                page.complete(
+                    &context,
+                    ToolOperationNotice {
+                        operation: context.operation.clone(),
+                        success,
+                        message,
+                    },
+                );
+            }
+            if refresh && mutation.registry == registry_entity && &mutation.store == store {
+                state.dirty = true;
+                state.generation = state.generation.wrapping_add(1);
+            }
+        } else if result.0.is_ok() {
+            state.dirty = true;
+            state.generation = state.generation.wrapping_add(1);
+        }
+        commands.entity(entity).despawn();
+    }
+}
 
 type ToolProviderOperationTask = AsyncTask<Result<String, String>>;
 

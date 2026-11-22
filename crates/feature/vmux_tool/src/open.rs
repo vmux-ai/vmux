@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -58,7 +59,8 @@ fn accept(
     let Ok(url) = url::Url::from_file_path(&path) else {
         return;
     };
-    if path != store.brewfile_path() {
+    let mcp_config = path == store.mcp_config_path();
+    if path != store.brewfile_path() && !mcp_config {
         requests.write(PageOpenRequest {
             target: PageOpenTarget::NewStack,
             url: url.to_string(),
@@ -66,6 +68,14 @@ fn accept(
         });
         return;
     }
+    let initial = if mcp_config {
+        crate::mcp_config::McpConfigFile::default()
+            .encode()
+            .unwrap_or_default()
+            .into_bytes()
+    } else {
+        Vec::new()
+    };
     commands.spawn((
         Operation::bundle("tool.file.open").unwrap().running(),
         OperationRetained,
@@ -76,7 +86,7 @@ fn accept(
             store: store.clone(),
             path: path.clone(),
         },
-        JobRequest(CreateEmptyFile { path }),
+        JobRequest(CreateEmptyFile { path, initial }),
     ));
 }
 
@@ -143,6 +153,7 @@ fn finish(
 #[derive(Clone)]
 struct CreateEmptyFile {
     path: PathBuf,
+    initial: Vec<u8>,
 }
 
 impl Job for CreateEmptyFile {
@@ -165,8 +176,11 @@ impl Job for CreateEmptyFile {
             .create_new(true)
             .open(self.path)
         {
-            Ok(file) => {
-                drop(file);
+            Ok(mut file) => {
+                if !self.initial.is_empty() {
+                    file.write_all(&self.initial)
+                        .map_err(|error| error.to_string())?;
+                }
                 Ok(PathChanged(true))
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {

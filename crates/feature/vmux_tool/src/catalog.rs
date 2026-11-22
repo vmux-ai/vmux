@@ -126,6 +126,13 @@ impl Inventory<'_, '_> {
             .providers
             .iter()
             .any(|provider| provider.route == route && provider.brewfile);
+        if route == "mcp" && !catalog.root.is_empty() {
+            let mcp_path = std::path::Path::new(&catalog.root)
+                .parent()
+                .map(|dir| dir.join("mcp.ron"))
+                .unwrap_or_else(|| std::path::PathBuf::from(&catalog.root).join("mcp.ron"));
+            view.mcp_config = mcp_path.to_string_lossy().into_owned();
+        }
         let query = query.trim().to_ascii_lowercase();
         for id in &catalog.categories {
             let Some(metadata) = catalog

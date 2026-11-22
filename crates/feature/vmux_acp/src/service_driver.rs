@@ -459,6 +459,45 @@ impl AcpServiceConnection {
 impl ServiceProtocolConnection for AcpServiceConnection {
     fn dispatch(&mut self, message: ClientMessage) -> RemoteFuture<'_, Result<(), ClientMessage>> {
         match message {
+            ClientMessage::SpawnAcpAgentWithMcp(spawn) => Box::pin(async move {
+                let vmux_api::protocol::AcpSpawnWithMcp {
+                    sid,
+                    agent_id,
+                    command,
+                    args,
+                    env,
+                    cwd,
+                    anchor,
+                    mcp_command,
+                    mcp_args,
+                    managed_mcp_servers,
+                    resume_acp_session_id,
+                } = *spawn;
+                if let Err(message) = self
+                    .service
+                    .sessions
+                    .spawn_with_mcp(
+                        sid.clone(),
+                        agent_id,
+                        command,
+                        args,
+                        env,
+                        PathBuf::from(cwd),
+                        anchor,
+                        self.service.processes.clone(),
+                        mcp_command,
+                        mcp_args,
+                        managed_mcp_servers,
+                        resume_acp_session_id,
+                    )
+                    .await
+                {
+                    let _ = self.outbound.send(ServiceMessage::Error { message });
+                    return Ok(());
+                }
+                self.attach(sid, false).await;
+                Ok(())
+            }),
             ClientMessage::RebindAcpWorkspaceWithReply {
                 request_id,
                 sid,

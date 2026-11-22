@@ -125,6 +125,7 @@ pub struct ToolsView {
     pub visible_count: u32,
     pub apply_provider: Option<ToolProvider>,
     pub show_brewfile: bool,
+    pub mcp_config: String,
 }
 
 impl ToolsSnapshot {
@@ -163,7 +164,7 @@ pub struct ToolOperationNotice {
     pub message: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 9)]
+#[vmux_api::ui_state(Default, Eq, version = 10)]
 pub struct ToolsUiState {
     pub snapshot: ToolsSnapshot,
     pub view: ToolsView,
@@ -243,6 +244,15 @@ pub struct ToolApplyRequest {
 pub struct ToolImportRequest {
     pub provider: ToolProvider,
     pub value: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct McpRegisterRequest {
+    pub id: String,
+    pub transport: String,
+    pub target: String,
+    pub args: String,
+    pub bearer_token_env_var: String,
 }
 
 impl From<ToolInstallRequest> for ToolOperationKey {

@@ -254,6 +254,14 @@ impl ToolStore {
         }
     }
 
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
+    pub fn mcp_config_path(&self) -> PathBuf {
+        self.config_dir.join("mcp.ron")
+    }
+
     pub fn root(&self) -> PathBuf {
         self.config_dir.join("tools")
     }

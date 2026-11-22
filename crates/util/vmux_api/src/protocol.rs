@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn acp_protocol_messages_roundtrip() {
-        let client = ClientMessage::SpawnAcpAgent {
+        let client = ClientMessage::SpawnAcpAgentWithMcp(Box::new(AcpSpawnWithMcp {
             sid: "s1".into(),
             agent_id: "vibe-acp".into(),
             command: "uv".into(),
@@ -536,25 +536,39 @@ mod tests {
             anchor: ProcessId::new(),
             mcp_command: Some("vmux".into()),
             mcp_args: vec!["mcp".into(), "--anchor".into()],
+            managed_mcp_servers: vec![ManagedMcpServer {
+                name: "linear-vmx".into(),
+                transport: ManagedMcpTransport::Http,
+                command: None,
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+                url: Some("https://mcp.linear.app/mcp".into()),
+                headers: vec![("Authorization".into(), "Bearer token".into())],
+            }],
             resume_acp_session_id: Some("prev-session".into()),
-        };
+        }));
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        let ClientMessage::SpawnAcpAgent {
+        let ClientMessage::SpawnAcpAgentWithMcp(spawn) = decoded else {
+            panic!("expected SpawnAcpAgentWithMcp");
+        };
+        let AcpSpawnWithMcp {
             sid,
             agent_id,
             mcp_command,
             mcp_args,
+            managed_mcp_servers,
             resume_acp_session_id,
             ..
-        } = decoded
-        else {
-            panic!("expected SpawnAcpAgent");
-        };
+        } = *spawn;
         assert_eq!(sid, "s1");
         assert_eq!(agent_id, "vibe-acp");
         assert_eq!(mcp_command.as_deref(), Some("vmux"));
         assert_eq!(mcp_args, ["mcp", "--anchor"]);
+        assert_eq!(managed_mcp_servers.len(), 1);
+        assert_eq!(managed_mcp_servers[0].name, "linear-vmx");
+        assert_eq!(managed_mcp_servers[0].transport, ManagedMcpTransport::Http);
         assert_eq!(resume_acp_session_id.as_deref(), Some("prev-session"));
 
         let services = [

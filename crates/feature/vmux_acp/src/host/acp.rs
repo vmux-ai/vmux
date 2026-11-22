@@ -432,4 +432,113 @@ mod tests {
         ));
         assert!(app.world().get_entity(job).is_err());
     }
+
+    #[test]
+    fn deliver_injects_resolved_profile_and_project_mcp_servers_into_spawn_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = ProfilePaths::at(Profile::named("test"), dir.path().join("data"));
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join(".vmux")).unwrap();
+        std::fs::create_dir_all(paths.profile()).unwrap();
+        std::fs::write(
+            paths.profile().join("mcp.ron"),
+            "(version: 1, servers: {\n    \"profile-http\": Define(Http(url: \"https://mcp.example.com/mcp\")),\n    \"disabled-here\": Define(Stdio(command: \"npx\")),\n})\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join(".vmux/mcp.ron"),
+            "(version: 1, servers: {\n    \"disabled-here\": Disable,\n    \"untrusted-project\": Define(Stdio(command: \"./evil\")),\n})\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.add_plugins((bevy::app::TaskPoolPlugin::default(), install::InstallPlugin))
+            .add_message::<ServiceRequest>()
+            .add_message::<vmux_ecs::agent::SwapStackSession>();
+        app.world_mut().spawn((
+            Name::new("Test"),
+            ActiveProfile(Profile::named("test")),
+            ProfileDirectories(paths),
+        ));
+        app.world_mut().spawn(ServiceConnected);
+        let job = app
+            .world_mut()
+            .spawn((
+                AcpInstallKey::fixture("claude-acp"),
+                InstallState::preparing(),
+                AcpInstallJob {
+                    package: None,
+                    task: None,
+                    outcome: Some(AcpInstallOutcome {
+                        launch: Ok(AcpLaunch {
+                            command: "/bin/claude-acp".into(),
+                            args: Vec::new(),
+                            env: Vec::new(),
+                        }),
+                    }),
+                },
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("s-mcp".into()),
+                AgentId("claude-acp".into()),
+                Cwd(repo),
+                ProcessAnchor(vmux_ecs::ProcessId::new()),
+                AcpLaunchStarted,
+                AcpInstallWaiter {
+                    job,
+                    sid: "s-mcp".into(),
+                    agent_id: "claude-acp".into(),
+                },
+                RunState::Idle,
+            ))
+            .id();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let request = loop {
+            app.update();
+            let mut requests = app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            if let Some(request) = requests.pop() {
+                break request;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "ACP deliver did not emit SpawnAcpAgent after MCP resolution"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        let vmux_api::protocol::ClientMessage::SpawnAcpAgentWithMcp(spawn) = request.0 else {
+            panic!("expected SpawnAcpAgentWithMcp");
+        };
+        let managed_mcp_servers = spawn.managed_mcp_servers;
+        assert!(
+            managed_mcp_servers
+                .iter()
+                .any(|server| server.name == "profile-http")
+        );
+        assert!(
+            !managed_mcp_servers
+                .iter()
+                .any(|server| server.name == "disabled-here")
+        );
+        assert!(
+            !managed_mcp_servers
+                .iter()
+                .any(|server| server.name == "untrusted-project")
+        );
+        assert!(app.world().get::<AcpSpawnQueued>(stack).is_some());
+        assert!(
+            app.world()
+                .get::<vmux_tool::McpResolveResult>(stack)
+                .is_none()
+        );
+    }
 }

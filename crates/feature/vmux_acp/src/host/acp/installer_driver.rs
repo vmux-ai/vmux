@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use vmux_api::protocol::ClientMessage;
+use vmux_api::protocol::{AcpSpawnWithMcp, ClientMessage};
 use vmux_ecs::event::InstallPhase;
 use vmux_ecs::{Cwd, ProcessAnchor};
 use vmux_editor::lsp::archive::ArchiveKind;
@@ -52,6 +52,7 @@ impl AcpInstallWaiter {
 }
 
 impl AcpLaunch {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn message_for(
         &self,
         session_id: &SessionId,
@@ -60,6 +61,7 @@ impl AcpLaunch {
         anchor: &ProcessAnchor,
         resume: Option<&AcpSessionId>,
         settings: Option<&AppSettings>,
+        managed_mcp_servers: Vec<vmux_api::protocol::ManagedMcpServer>,
     ) -> ClientMessage {
         let shell = settings
             .map(AppSettings::shell)
@@ -72,7 +74,7 @@ impl AcpLaunch {
                 );
             })
             .ok();
-        ClientMessage::SpawnAcpAgent {
+        ClientMessage::SpawnAcpAgentWithMcp(Box::new(AcpSpawnWithMcp {
             sid: session_id.0.clone(),
             agent_id: agent_id.0.clone(),
             command: self.command.clone(),
@@ -82,8 +84,9 @@ impl AcpLaunch {
             anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
+            managed_mcp_servers,
             resume_acp_session_id: resume.map(|resume| resume.0.clone()),
-        }
+        }))
     }
 }
 

@@ -4,6 +4,41 @@ use super::{
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ManagedMcpTransport {
+    #[default]
+    Stdio,
+    Http,
+    Sse,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ManagedMcpServer {
+    pub name: String,
+    pub transport: ManagedMcpTransport,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub headers: Vec<(String, String)>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpSpawnWithMcp {
+    pub sid: String,
+    pub agent_id: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub cwd: String,
+    pub anchor: ProcessId,
+    pub mcp_command: Option<String>,
+    pub mcp_args: Vec<String>,
+    pub managed_mcp_servers: Vec<ManagedMcpServer>,
+    pub resume_acp_session_id: Option<String>,
+}
+
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
     CreateProcess {
@@ -158,6 +193,7 @@ pub enum ClientMessage {
         sid: String,
         cwd: String,
     },
+    SpawnAcpAgentWithMcp(Box<AcpSpawnWithMcp>),
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
