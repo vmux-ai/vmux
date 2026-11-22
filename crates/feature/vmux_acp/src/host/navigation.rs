@@ -773,7 +773,9 @@ fn swap(
                 .commands
                 .entity(session_entity)
                 .insert((imported, pending));
-            ImportedConversation::spawn_messages(&mut runtime.commands, session_entity, messages);
+            for event in ImportedConversation::events(session_entity, messages) {
+                runtime.commands.spawn(event);
+            }
         }
     }
 }

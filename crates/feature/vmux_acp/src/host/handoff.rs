@@ -219,7 +219,9 @@ fn apply_load(
                 truncated: record.truncated,
                 first_prompt: record.first_prompt.clone(),
             });
-            ImportedConversation::spawn_messages(&mut commands, session, record.messages.clone());
+            for event in ImportedConversation::events(session, record.messages.clone()) {
+                commands.spawn(event);
+            }
         }
         commands.entity(operation).despawn();
     }
@@ -328,17 +330,9 @@ mod tests {
                     imported,
                 ))
                 .id();
-            let mut pending_messages = Some(messages);
-            self.app
-                .world_mut()
-                .run_system_once(move |mut commands: Commands| {
-                    ImportedConversation::spawn_messages(
-                        &mut commands,
-                        session,
-                        pending_messages.take().unwrap(),
-                    );
-                })
-                .unwrap();
+            for event in ImportedConversation::events(session, messages) {
+                self.app.world_mut().spawn(event);
+            }
             self.app
                 .world_mut()
                 .write_message(crate::host::event::AcpSessionCreated {

@@ -1296,15 +1296,12 @@ mod tests {
                 },
             ))
             .id();
-        app.world_mut()
-            .run_system_once(move |mut commands: Commands| {
-                ImportedConversation::spawn_messages(
-                    &mut commands,
-                    session,
-                    vec![vmux_api::session::Message::user("retained history")],
-                );
-            })
-            .unwrap();
+        for event in ImportedConversation::events(
+            session,
+            vec![vmux_api::session::Message::user("retained history")],
+        ) {
+            app.world_mut().spawn(event);
+        }
         app.world_mut()
             .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
                 queues.enqueue(session, "seed".into(), Vec::new(), false);
@@ -1553,17 +1550,14 @@ mod tests {
                 },
             ))
             .id();
-        app.world_mut()
-            .run_system_once(move |mut commands: Commands| {
-                ImportedConversation::spawn_messages(
-                    &mut commands,
-                    session,
-                    (0..40)
-                        .map(|index| vmux_api::session::Message::user(format!("message {index}")))
-                        .collect(),
-                );
-            })
-            .unwrap();
+        for event in ImportedConversation::events(
+            session,
+            (0..40)
+                .map(|index| vmux_api::session::Message::user(format!("message {index}")))
+                .collect(),
+        ) {
+            app.world_mut().spawn(event);
+        }
         app.world_mut().spawn(ChildOf(session));
         let stack = app
             .world_mut()
@@ -1613,16 +1607,9 @@ mod tests {
                 },
             ))
             .id();
-        let mut pending_messages = Some(messages);
-        app.world_mut()
-            .run_system_once(move |mut commands: Commands| {
-                ImportedConversation::spawn_messages(
-                    &mut commands,
-                    session,
-                    pending_messages.take().unwrap(),
-                );
-            })
-            .unwrap();
+        for event in ImportedConversation::events(session, messages) {
+            app.world_mut().spawn(event);
+        }
         let stack = app.world_mut().spawn_empty().id();
         let view = app
             .world_mut()
@@ -1750,17 +1737,14 @@ mod tests {
                 },
             ))
             .id();
-        app.world_mut()
-            .run_system_once(move |mut commands: Commands| {
-                ImportedConversation::spawn_messages(
-                    &mut commands,
-                    session,
-                    (0..40)
-                        .map(|index| vmux_api::session::Message::user(format!("message {index}")))
-                        .collect(),
-                );
-            })
-            .unwrap();
+        for event in ImportedConversation::events(
+            session,
+            (0..40)
+                .map(|index| vmux_api::session::Message::user(format!("message {index}")))
+                .collect(),
+        ) {
+            app.world_mut().spawn(event);
+        }
         app.world_mut().spawn(ChildOf(session));
         let stack = app
             .world_mut()

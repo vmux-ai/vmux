@@ -14,16 +14,21 @@ pub struct ImportedConversation {
 }
 
 impl ImportedConversation {
-    pub fn spawn_messages(commands: &mut Commands, session: Entity, messages: Vec<Message>) {
+    pub fn events(
+        session: Entity,
+        messages: Vec<Message>,
+    ) -> Vec<(HandoffEvent, Order, MessageContent, ChildOf)> {
+        let mut events = Vec::with_capacity(messages.len());
         for (index, message) in messages.into_iter().enumerate() {
             let order = u32::try_from(index).unwrap_or(u32::MAX);
-            commands.spawn((
+            events.push((
                 HandoffEvent,
                 Order(order),
                 MessageContent(message),
                 ChildOf(session),
             ));
         }
+        events
     }
 }
 
