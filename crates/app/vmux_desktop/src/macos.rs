@@ -30,7 +30,7 @@ impl Plugin for RuntimePlatformPlugin {
             .add_systems(Startup, seed)
             .add_message::<vmux_ecs::overlay::PopupDismissRequest>()
             .add_message::<KeyWindowRequest>()
-            .add_systems(Update, activate_app_during_boot)
+            .add_systems(Update, activate)
             .add_systems(Update, (grab_key_window_on_pane_hover, key).chain())
             .add_systems(
                 Startup,
@@ -266,7 +266,28 @@ impl MacWindow {
     }
 }
 
-const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
+#[derive(Component, Default)]
+pub(super) struct Activation {
+    started_at: Option<Instant>,
+    confirmed: bool,
+}
+
+fn activate(
+    mut activations: Query<&mut Activation, With<crate::boot_status::SplashStatus>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    for mut activation in &mut activations {
+        if activation.confirmed {
+            continue;
+        }
+        let started = *activation.started_at.get_or_insert_with(Instant::now);
+        if activate_app() || started.elapsed() >= Duration::from_secs(10) {
+            activation.confirmed = true;
+        } else if let Some(proxy) = &proxy {
+            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        }
+    }
+}
 
 fn activate_app() -> bool {
     if app_is_frontmost() {
@@ -278,22 +299,6 @@ fn activate_app() -> bool {
     #[allow(deprecated)]
     NSApp(mtm).activateIgnoringOtherApps(true);
     false
-}
-
-fn activate_app_during_boot(
-    mut confirmed: Local<bool>,
-    mut started_at: Local<Option<Instant>>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-) {
-    if *confirmed {
-        return;
-    }
-    let started = *started_at.get_or_insert_with(Instant::now);
-    if activate_app() || started.elapsed() >= APP_ACTIVATION_BUDGET {
-        *confirmed = true;
-    } else if let Some(proxy) = proxy {
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
-    }
 }
 
 type WakeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;

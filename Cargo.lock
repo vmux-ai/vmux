@@ -10567,6 +10567,7 @@ dependencies = [
 name = "vmux_desktop"
 version = "0.0.35"
 dependencies = [
+ "async-io",
  "bevy",
  "bevy_cef",
  "bevy_cef_core",

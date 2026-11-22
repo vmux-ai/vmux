@@ -1,5 +1,6 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use std::time::{Duration, Instant};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::store::WorkspaceRestore;
 use vmux_layout::cef::LayoutCef;
@@ -11,7 +12,14 @@ pub(crate) struct BootStatusPlugin;
 impl Plugin for BootStatusPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
-            .add_systems(Update, update.after(vmux_layout::stack::ComputeFocusSet));
+            .add_systems(Update, update.after(vmux_layout::stack::ComputeFocusSet))
+            .add_systems(
+                Last,
+                (arm_deadline, request_dismissal)
+                    .chain()
+                    .in_set(SplashRequestSet)
+                    .after(WindowRevealSet),
+            );
     }
 }
 
@@ -69,23 +77,12 @@ pub enum BootPhase {
     Starting,
     RestoringSpace,
     LoadingInterface,
-    LoadingPages { ready: usize, total: usize },
-}
-
-impl BootPhase {
-    pub fn display(self) -> String {
-        match self {
-            BootPhase::Starting => "Starting...".to_string(),
-            BootPhase::RestoringSpace => "Restoring space...".to_string(),
-            BootPhase::LoadingInterface => "Loading interface...".to_string(),
-            BootPhase::LoadingPages { ready, total } => {
-                format!("Loading page {ready}/{total}...")
-            }
-        }
-    }
+    LoadingPages,
 }
 
 #[derive(Component)]
+#[require(PageCounts)]
+#[cfg_attr(target_os = "macos", require(crate::macos::Activation))]
 pub struct SplashStatus {
     pub phase: BootPhase,
     #[cfg_attr(
@@ -104,204 +101,372 @@ impl Default for SplashStatus {
     }
 }
 
-pub struct BootInputs {
-    pub space_present: bool,
-    pub restore_complete: bool,
-    pub layout_ready: bool,
-    pub total_pages: usize,
-    pub ready_pages: usize,
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SplashRequestSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct WindowRevealSet;
+
+#[derive(Component)]
+pub(super) struct PresentedAt(pub(super) Instant);
+
+#[derive(Component)]
+pub(super) struct Dismissal;
+
+#[derive(Component)]
+pub(super) struct Closed;
+
+#[derive(Component)]
+struct Deadline {
+    _timer: bevy::tasks::Task<()>,
 }
 
-impl BootInputs {
-    pub fn status(self) -> SplashStatus {
-        let phase = if self.layout_ready && self.total_pages > 0 {
-            BootPhase::LoadingPages {
-                ready: self.ready_pages,
-                total: self.total_pages,
-            }
-        } else if self.layout_ready || self.restore_complete {
+#[derive(Component, Default)]
+pub(super) struct PageCounts {
+    ready: usize,
+    total: usize,
+}
+
+impl PageCounts {
+    fn refresh(&mut self, total: usize, ready: usize) -> bool {
+        let changed = self.total != total || self.ready != ready;
+        self.total = total;
+        self.ready = ready;
+        changed
+    }
+}
+
+impl SplashStatus {
+    pub(super) fn display(&self, pages: &PageCounts) -> String {
+        match self.phase {
+            BootPhase::Starting => "Starting...".to_string(),
+            BootPhase::RestoringSpace => "Restoring space...".to_string(),
+            BootPhase::LoadingInterface => "Loading interface...".to_string(),
+            BootPhase::LoadingPages => format!("Loading page {}/{}...", pages.ready, pages.total),
+        }
+    }
+
+    fn refresh(
+        &mut self,
+        restore: &WorkspaceRestore,
+        layout_ready: bool,
+        pages: &PageCounts,
+        progress_changed: bool,
+    ) {
+        let phase = if layout_ready && pages.total > 0 {
+            BootPhase::LoadingPages
+        } else if layout_ready || restore.complete {
             BootPhase::LoadingInterface
-        } else if self.space_present {
+        } else if restore.store_present {
             BootPhase::RestoringSpace
         } else {
             BootPhase::Starting
         };
-
-        SplashStatus {
-            phase,
-            reveal_ready: self.layout_ready,
+        let changed = self.phase != phase || progress_changed;
+        self.phase = phase;
+        self.reveal_ready = layout_ready;
+        if changed {
+            info!("boot: {}", self.display(pages));
         }
     }
 }
 
 fn update(
-    mut status: Single<&mut SplashStatus>,
+    state: Single<(&mut SplashStatus, &mut PageCounts)>,
     restore: Single<&WorkspaceRestore>,
     layout: BootLayout,
 ) {
-    let layout_ready = layout.ready();
-    let (total_pages, ready_pages) = layout.page_counts();
+    let (mut status, mut pages) = state.into_inner();
+    let (total, ready) = layout.page_counts();
+    let changed = pages.refresh(total, ready);
+    status.refresh(&restore, layout.ready(), &pages, changed);
+}
 
-    let next = BootInputs {
-        space_present: restore.store_present,
-        restore_complete: restore.complete,
-        layout_ready,
-        total_pages,
-        ready_pages,
+fn arm_deadline(
+    panels: Query<
+        (Entity, &PresentedAt),
+        (
+            With<SplashStatus>,
+            Without<Deadline>,
+            Without<Dismissal>,
+            Without<Closed>,
+        ),
+    >,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+    mut commands: Commands,
+) {
+    let Some(wake) = wake else {
+        return;
+    };
+    for (owner, presented) in &panels {
+        let deadline = presented.0 + Duration::from_secs(20);
+        let wake = wake.0.clone();
+        commands.entity(owner).insert(Deadline {
+            _timer: bevy::tasks::IoTaskPool::get().spawn(async move {
+                async_io::Timer::at(deadline).await;
+                wake.wake();
+            }),
+        });
     }
-    .status();
+}
 
-    if status.phase != next.phase {
-        info!("boot: {}", next.phase.display());
+fn request_dismissal(
+    panels: Query<
+        (Entity, &PresentedAt),
+        (With<SplashStatus>, Without<Dismissal>, Without<Closed>),
+    >,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut commands: Commands,
+) {
+    let visible = windows.single().is_ok_and(|window| window.visible);
+    for (owner, presented) in &panels {
+        let forced = !visible && presented.0.elapsed() >= Duration::from_secs(20);
+        if !visible && !forced {
+            continue;
+        }
+        if forced {
+            warn!("splash: window did not reveal within timeout; dismissing splash");
+        }
+        commands
+            .entity(owner)
+            .insert(Dismissal)
+            .remove::<Deadline>();
     }
-    **status = next;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::{App, ChildOf, Entity, Window, With};
+    use std::sync::{Arc, mpsc};
+    use std::task::{Wake, Waker};
 
-    fn inputs() -> BootInputs {
-        BootInputs {
-            space_present: false,
-            restore_complete: false,
-            layout_ready: false,
-            total_pages: 0,
-            ready_pages: 0,
+    struct WakeProbe(mpsc::SyncSender<()>);
+
+    impl Wake for WakeProbe {
+        fn wake(self: Arc<Self>) {
+            let _ = self.0.try_send(());
+        }
+    }
+
+    struct Fixture {
+        app: App,
+        wake: mpsc::Receiver<()>,
+        status: Entity,
+        restore: Entity,
+        window: Entity,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((bevy::app::TaskPoolPlugin::default(), BootStatusPlugin));
+            let (sender, wake) = mpsc::sync_channel(1);
+            app.insert_resource(vmux_ecs::JobWake(Waker::from(Arc::new(WakeProbe(sender)))));
+            let restore = app.world_mut().spawn(WorkspaceRestore::default()).id();
+            let window = app
+                .world_mut()
+                .spawn((
+                    Window {
+                        visible: false,
+                        ..Default::default()
+                    },
+                    bevy::window::PrimaryWindow,
+                ))
+                .id();
+            app.update();
+            let mut statuses = app
+                .world_mut()
+                .query_filtered::<Entity, With<SplashStatus>>();
+            let status = statuses.single(app.world()).unwrap();
+            Self {
+                app,
+                wake,
+                status,
+                restore,
+                window,
+            }
+        }
+
+        fn status(&self) -> &SplashStatus {
+            self.app.world().get::<SplashStatus>(self.status).unwrap()
+        }
+
+        fn counts(&self) -> (usize, usize) {
+            let pages = self.app.world().get::<PageCounts>(self.status).unwrap();
+            (pages.ready, pages.total)
+        }
+
+        fn requested(&self) -> bool {
+            self.app.world().get::<Dismissal>(self.status).is_some()
+        }
+
+        fn acknowledge(&mut self) {
+            assert!(self.requested());
+            self.app
+                .world_mut()
+                .entity_mut(self.status)
+                .insert(Closed)
+                .remove::<Dismissal>();
         }
     }
 
     #[test]
-    fn starting_when_nothing_ready() {
-        let status = inputs().status();
-        assert_eq!(status.phase, BootPhase::Starting);
-        assert!(!status.reveal_ready);
+    fn production_boot_owner_tracks_restore_layout_and_pending_pages() {
+        let mut fixture = Fixture::new();
+        assert_eq!(fixture.status().phase, BootPhase::Starting);
+        assert!(!fixture.status().reveal_ready);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<WorkspaceRestore>(fixture.restore)
+            .unwrap()
+            .store_present = true;
+        fixture.app.update();
+        assert_eq!(fixture.status().phase, BootPhase::RestoringSpace);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<WorkspaceRestore>(fixture.restore)
+            .unwrap()
+            .complete = true;
+        fixture.app.update();
+        assert_eq!(fixture.status().phase, BootPhase::LoadingInterface);
+        fixture.app.world_mut().spawn((LayoutCef, PageReady {}));
+        let stack = fixture.app.world_mut().spawn(Stack::default()).id();
+        let page = fixture.app.world_mut().spawn(ChildOf(stack)).id();
+        fixture.app.update();
+        assert_eq!(fixture.status().phase, BootPhase::LoadingPages);
+        assert_eq!(fixture.counts(), (0, 1));
+        assert!(fixture.status().reveal_ready);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(page)
+            .insert(PageReady {});
+        fixture.app.update();
+        assert_eq!(fixture.status().phase, BootPhase::LoadingPages);
+        assert_eq!(fixture.counts(), (1, 1));
     }
 
     #[test]
-    fn restoring_space_when_present_and_not_complete() {
-        let status = BootInputs {
-            space_present: true,
-            ..inputs()
-        }
-        .status();
-        assert_eq!(status.phase, BootPhase::RestoringSpace);
+    fn production_counts_only_the_active_space_and_uses_its_current_pages() {
+        let mut fixture = Fixture::new();
+        fixture.app.world_mut().spawn((LayoutCef, PageReady {}));
+        let first = fixture
+            .app
+            .world_mut()
+            .spawn((Space, vmux_ecs::Active))
+            .id();
+        let second = fixture.app.world_mut().spawn(Space).id();
+        let first_stack = fixture
+            .app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(first)))
+            .id();
+        let second_stack = fixture
+            .app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(second)))
+            .id();
+        fixture.app.world_mut().spawn(ChildOf(first_stack));
+        fixture
+            .app
+            .world_mut()
+            .spawn((PageReady {}, ChildOf(second_stack)));
+        fixture.app.update();
+        assert_eq!(fixture.status().phase, BootPhase::LoadingPages);
+        assert_eq!(fixture.counts(), (0, 1));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .remove::<vmux_ecs::Active>();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(second)
+            .insert(vmux_ecs::Active);
+        fixture.app.update();
+        assert_eq!(fixture.status().phase, BootPhase::LoadingPages);
+        assert_eq!(fixture.counts(), (1, 1));
     }
 
     #[test]
-    fn loading_interface_after_restore_complete() {
-        let status = BootInputs {
-            space_present: true,
-            restore_complete: true,
-            ..inputs()
-        }
-        .status();
-        assert_eq!(status.phase, BootPhase::LoadingInterface);
+    fn visible_window_requests_one_fade_without_waiting_for_page_readiness() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.status)
+            .insert(PresentedAt(Instant::now()));
+        fixture.app.update();
+        assert!(!fixture.requested());
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.window)
+            .unwrap()
+            .visible = true;
+        fixture.app.update();
+        assert!(fixture.requested());
+        fixture.app.update();
+        assert!(fixture.requested());
+        fixture.acknowledge();
+        fixture.app.update();
+        assert!(!fixture.requested());
     }
 
     #[test]
-    fn loading_interface_on_fresh_boot_once_complete() {
-        let status = BootInputs {
-            restore_complete: true,
-            ..inputs()
-        }
-        .status();
-        assert_eq!(status.phase, BootPhase::LoadingInterface);
+    fn hidden_window_requests_one_forced_dismissal_after_the_native_show_deadline() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.status)
+            .insert(PresentedAt(Instant::now() - Duration::from_secs(21)));
+        fixture.app.update();
+        assert!(fixture.requested());
+        fixture.acknowledge();
+        fixture.app.update();
+        assert!(!fixture.requested());
     }
 
     #[test]
-    fn loading_pages_counts_when_layout_ready() {
-        let status = BootInputs {
-            layout_ready: true,
-            total_pages: 5,
-            ready_pages: 2,
-            ..inputs()
-        }
-        .status();
-        assert_eq!(status.phase, BootPhase::LoadingPages { ready: 2, total: 5 });
+    fn an_idle_boot_owner_wakes_at_its_native_presentation_deadline() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.status)
+            .insert(PresentedAt(Instant::now() - Duration::from_secs(19)));
+        fixture.app.update();
+        assert!(!fixture.requested());
+        fixture.wake.recv_timeout(Duration::from_secs(3)).unwrap();
+        fixture.app.update();
+        assert!(fixture.requested());
+        fixture.acknowledge();
+        fixture.app.update();
+        assert!(!fixture.requested());
     }
 
     #[test]
-    fn not_revealed_until_layout_ready() {
-        let status = BootInputs {
-            layout_ready: false,
-            ..inputs()
-        }
-        .status();
-        assert!(!status.reveal_ready);
-    }
-
-    #[test]
-    fn revealed_when_layout_ready() {
-        let status = BootInputs {
-            layout_ready: true,
-            ..inputs()
-        }
-        .status();
-        assert!(status.reveal_ready);
-    }
-
-    #[test]
-    fn revealed_when_layout_ready_even_while_pages_pending() {
-        let status = BootInputs {
-            layout_ready: true,
-            total_pages: 3,
-            ready_pages: 0,
-            ..inputs()
-        }
-        .status();
-        assert!(status.reveal_ready);
-    }
-
-    #[test]
-    fn display_strings() {
-        assert_eq!(BootPhase::Starting.display(), "Starting...");
-        assert_eq!(BootPhase::RestoringSpace.display(), "Restoring space...");
-        assert_eq!(
-            BootPhase::LoadingInterface.display(),
-            "Loading interface..."
-        );
-        assert_eq!(
-            BootPhase::LoadingPages { ready: 2, total: 5 }.display(),
-            "Loading page 2/5..."
-        );
-    }
-
-    #[test]
-    fn system_reports_loading_pages_and_reveals_on_layout_ready() {
-        let mut app = App::new();
-        let status = app.world_mut().spawn(SplashStatus::default()).id();
-        app.world_mut().spawn(WorkspaceRestore {
-            store_present: true,
-            complete: false,
-        });
-        app.add_plugins(MinimalPlugins).add_systems(Update, update);
-
-        app.world_mut().spawn((LayoutCef, PageReady {}));
-        let stack = app.world_mut().spawn(Stack::default()).id();
-        app.world_mut().spawn((PageReady {}, ChildOf(stack)));
-
-        app.update();
-
-        let status = app.world().get::<SplashStatus>(status).unwrap();
-        assert_eq!(status.phase, BootPhase::LoadingPages { ready: 1, total: 1 });
-        assert!(status.reveal_ready);
-    }
-
-    #[test]
-    fn system_reports_restoring_space_before_layout_ready() {
-        let mut app = App::new();
-        let status = app.world_mut().spawn(SplashStatus::default()).id();
-        app.world_mut().spawn(WorkspaceRestore {
-            store_present: true,
-            complete: false,
-        });
-        app.add_plugins(MinimalPlugins).add_systems(Update, update);
-
-        app.update();
-
-        let status = app.world().get::<SplashStatus>(status).unwrap();
-        assert_eq!(status.phase, BootPhase::RestoringSpace);
-        assert!(!status.reveal_ready);
+    fn replacement_boot_owner_cannot_inherit_an_old_panel_timestamp() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.status)
+            .insert(PresentedAt(Instant::now() - Duration::from_secs(21)));
+        fixture.app.world_mut().despawn(fixture.status);
+        fixture.status = fixture.app.world_mut().spawn(SplashStatus::default()).id();
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.window)
+            .unwrap()
+            .visible = true;
+        fixture.app.update();
+        assert!(!fixture.requested());
     }
 }
