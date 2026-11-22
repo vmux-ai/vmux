@@ -663,7 +663,10 @@ fn configure_target(
             environment.remove("CARGO_BUILD_TARGET");
             environment.set(
                 "CARGO_TARGET_DIR",
-                checkout.root.join(".build-tools/standalone").as_os_str(),
+                checkout
+                    .tools_root(environment)
+                    .join(".build-tools/standalone")
+                    .as_os_str(),
             );
         }
         if platform == Some("web") && !environment.present("CARGO_TARGET_DIR") {

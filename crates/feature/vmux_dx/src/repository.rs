@@ -79,6 +79,115 @@ impl Checkout {
             .map(OsStr::to_owned);
         Ok(())
     }
+
+    pub fn tools_root(&self, environment: &crate::environment::Environment) -> PathBuf {
+        if environment.get("CI") == Some(OsStr::new("true")) {
+            return self.root.clone();
+        }
+        let dot_git = self.root.join(".git");
+        let Ok(metadata) = fs::symlink_metadata(&dot_git) else {
+            return self.root.clone();
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return self.root.clone();
+        }
+        let Ok(text) = fs::read_to_string(&dot_git) else {
+            return self.root.clone();
+        };
+        let Some(gitdir) = text.trim().strip_prefix("gitdir:").map(str::trim) else {
+            return self.root.clone();
+        };
+        let gitdir = if Path::new(gitdir).is_absolute() {
+            PathBuf::from(gitdir)
+        } else {
+            self.root.join(gitdir)
+        };
+        let Ok(gitdir) = gitdir.canonicalize() else {
+            return self.root.clone();
+        };
+        let commondir_file = gitdir.join("commondir");
+        let Ok(commondir_meta) = fs::symlink_metadata(&commondir_file) else {
+            return self.root.clone();
+        };
+        if !commondir_meta.is_file() || commondir_meta.file_type().is_symlink() {
+            return self.root.clone();
+        }
+        let Ok(commondir) = fs::read_to_string(&commondir_file) else {
+            return self.root.clone();
+        };
+        let commondir = commondir.trim();
+        let common = if Path::new(commondir).is_absolute() {
+            PathBuf::from(commondir)
+        } else {
+            gitdir.join(commondir)
+        };
+        let Ok(common) = common.canonicalize() else {
+            return self.root.clone();
+        };
+        let Some(primary) = Self::primary_root(&common) else {
+            return self.root.clone();
+        };
+        if primary.join("Cargo.toml").is_file()
+            || primary.join("crates/app/vmux_cli/Cargo.toml").is_file()
+        {
+            primary
+        } else {
+            self.root.clone()
+        }
+    }
+
+    fn primary_root(common: &Path) -> Option<PathBuf> {
+        if common.file_name() == Some(OsStr::new(".git")) {
+            let parent = common.parent()?;
+            let metadata = fs::symlink_metadata(parent).ok()?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                return parent.canonicalize().ok();
+            }
+            return None;
+        }
+        for name in ["config.worktree", "config"] {
+            let Ok(text) = fs::read_to_string(common.join(name)) else {
+                continue;
+            };
+            let mut in_core = false;
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                    let section = trimmed[1..trimmed.len() - 1].trim();
+                    in_core = section.eq_ignore_ascii_case("core");
+                    continue;
+                }
+                if !in_core {
+                    continue;
+                }
+                let Some((key, value)) = trimmed.split_once('=') else {
+                    continue;
+                };
+                if !key.trim().eq_ignore_ascii_case("worktree") {
+                    continue;
+                }
+                let value = value.trim().trim_matches('"');
+                if value.is_empty() {
+                    continue;
+                }
+                let candidate = if Path::new(value).is_absolute() {
+                    PathBuf::from(value)
+                } else {
+                    common.join(value)
+                };
+                let Ok(metadata) = fs::symlink_metadata(&candidate) else {
+                    continue;
+                };
+                if metadata.is_dir()
+                    && !metadata.file_type().is_symlink()
+                    && let Ok(canonical) = candidate.canonicalize()
+                {
+                    return Some(canonical);
+                }
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -520,5 +629,22 @@ mod tests {
             fixture.resolve(&fixture.root, None).unwrap().root,
             fixture.root.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn linked_worktree_shares_primary_tools_root_except_in_ci() {
+        let fixture = Fixture::new();
+        let primary = fixture.root.canonicalize().unwrap();
+        let worktree = fixture.worktree("feature-tools", "linked-tools");
+        let checkout = Checkout {
+            root: worktree.clone(),
+            target: worktree.join("target"),
+            build_target: None,
+        };
+        let mut local = crate::environment::Environment::current();
+        local.remove("CI");
+        assert_eq!(checkout.tools_root(&local), primary);
+        local.set("CI", "true");
+        assert_eq!(checkout.tools_root(&local), worktree);
     }
 }

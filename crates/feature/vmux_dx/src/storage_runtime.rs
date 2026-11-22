@@ -250,10 +250,16 @@ struct Cache;
 struct Incremental;
 
 #[derive(Component)]
+struct Deps;
+
+#[derive(Component)]
 struct Increment;
 
 #[derive(Component)]
 struct IncrementalUsage(u64);
+
+#[derive(Component)]
+struct DepsUsage(u64);
 
 #[derive(Component)]
 struct Checked;
@@ -423,6 +429,8 @@ type TaggedRoots<'w, 's> = Query<'w, 's, (), With<Tagged>>;
 
 type IncrementalValues<'w, 's> = Query<'w, 's, &'static IncrementalUsage>;
 
+type DepsValues<'w, 's> = Query<'w, 's, &'static DepsUsage>;
+
 type Revisions<'w, 's> = Query<'w, 's, &'static Current>;
 
 type ChoosingRoots<'w, 's> = Query<'w, 's, (), With<Choosing>>;
@@ -494,6 +502,7 @@ type MeasurementRows<'w, 's> = Query<
         &'static Cwd,
         Has<Cache>,
         Has<Incremental>,
+        Has<Deps>,
         Option<&'static Usage>,
     ),
     Or<(With<Cache>, With<Increment>)>,
@@ -541,6 +550,7 @@ struct Retention<'w, 's> {
     pruning: PruningRoots<'w, 's>,
     tagged: TaggedRoots<'w, 's>,
     incremental: IncrementalValues<'w, 's>,
+    deps: DepsValues<'w, 's>,
     currents: Revisions<'w, 's>,
     choosing: ChoosingRoots<'w, 's>,
     seed_checked: SeedChecks<'w, 's>,
@@ -1202,15 +1212,17 @@ fn scan_caches(
                         .entity(*candidate)
                         .insert((Cache, Metadata(metadata.clone())))
                         .remove::<Candidate>();
-                    if let Ok(path) = scan.paths.get(*candidate)
-                        && path.0.file_name() == Some(OsStr::new("incremental"))
-                    {
-                        io.commands.entity(*candidate).insert(Incremental);
-                        io.request(
-                            ReadDirectory(path.0.clone()),
-                            entity,
-                            Purpose::targeted(PurposeKind::Increments, *candidate),
-                        );
+                    if let Ok(path) = scan.paths.get(*candidate) {
+                        if path.0.file_name() == Some(OsStr::new("incremental")) {
+                            io.commands.entity(*candidate).insert(Incremental);
+                            io.request(
+                                ReadDirectory(path.0.clone()),
+                                entity,
+                                Purpose::targeted(PurposeKind::Increments, *candidate),
+                            );
+                        } else if path.0.file_name() == Some(OsStr::new("deps")) {
+                            io.commands.entity(*candidate).insert(Deps);
+                        }
                     }
                 }
                 _ => {
@@ -1386,7 +1398,7 @@ fn collect_usage(
                     break;
                 };
                 let mut found = false;
-                for (row, root, cwd, _, _, _) in &metering.paths {
+                for (row, root, cwd, _, _, _, _) in &metering.paths {
                     if root.0 != entity
                         || metering.removed.contains(row)
                         || !expected_paths.contains(&cwd.0)
@@ -1433,12 +1445,10 @@ fn usage(
         if receipts.pending.iter().any(|(root, _)| root.0 == entity) {
             continue;
         }
-        let mut total = 0u64;
-        let mut incremental = 0u64;
+        let (mut total, mut incremental, mut deps) = (0u64, 0u64, 0u64);
         let mut arguments = vec![OsString::from("-skl")];
-        let mut measured = true;
-        let mut overflow = false;
-        for (row, root, path, cache, is_incremental, size) in &metering.paths {
+        let (mut measured, mut overflow) = (true, false);
+        for (row, root, path, cache, is_incremental, is_deps, size) in &metering.paths {
             if root.0 != entity || metering.removed.contains(row) {
                 continue;
             }
@@ -1453,23 +1463,21 @@ fn usage(
                 }
                 continue;
             };
-            if cache {
-                match total.checked_add(size.0) {
-                    Some(value) => total = value,
-                    None => {
+            for (enabled, sum) in [
+                (cache, &mut total),
+                (is_incremental, &mut incremental),
+                (is_deps, &mut deps),
+            ] {
+                if enabled {
+                    let Some(value) = sum.checked_add(size.0) else {
                         overflow = true;
                         break;
-                    }
+                    };
+                    *sum = value;
                 }
             }
-            if is_incremental {
-                match incremental.checked_add(size.0) {
-                    Some(value) => incremental = value,
-                    None => {
-                        overflow = true;
-                        break;
-                    }
-                }
+            if overflow {
+                break;
             }
         }
         if overflow {
@@ -1489,9 +1497,11 @@ fn usage(
             );
             continue;
         }
-        io.commands
-            .entity(entity)
-            .insert((Usage(total), IncrementalUsage(incremental)));
+        io.commands.entity(entity).insert((
+            Usage(total),
+            IncrementalUsage(incremental),
+            DepsUsage(deps),
+        ));
         if metering.processed.contains(entity) {
             *phase = Phase::FinalCapacity;
             continue;
@@ -1563,6 +1573,10 @@ fn locks(
                 .incremental
                 .get(entity)
                 .is_ok_and(|usage| usage.0 > storage.policy().incremental_limit)
+            && !retention
+                .deps
+                .get(entity)
+                .is_ok_and(|usage| usage.0 > storage.policy().deps_limit)
         {
             *phase = Phase::Select;
             continue;
@@ -1681,7 +1695,7 @@ fn select(
         if *phase != Phase::Select {
             continue;
         }
-        let Ok((checkout, settings, _storage, _)) = facts.get(captured.root) else {
+        let Ok((checkout, settings, storage, _)) = facts.get(captured.root) else {
             continue;
         };
         if !retention.choosing.contains(entity) {
@@ -1737,18 +1751,20 @@ fn select(
                 continue;
             };
 
-            for (path, metadata) in entries {
-                if path
-                    .extension()
-                    .is_some_and(|extension| extension == "dylib" || extension == "so")
-                {
-                    continue;
-                }
+            let selected = if retention.pruning.contains(entity) {
+                storage.policy().prunable_deps(entries)
+            } else {
+                let current = retention.deps.get(entity).map(|usage| usage.0).unwrap_or(0);
+                let (stale, remaining) = storage.policy().stale_deps(entries, current);
+                io.commands.entity(entity).insert(DepsUsage(remaining));
+                stale
+            };
+            for (path, metadata) in selected {
                 io.commands.spawn((
                     Selected,
                     Root(entity),
-                    Cwd(path.clone()),
-                    Metadata(metadata.clone()),
+                    Cwd(path),
+                    Metadata(metadata),
                     ChildOf(*cache),
                 ));
             }
@@ -1769,16 +1785,14 @@ fn select_caches(
         if *phase != Phase::Select {
             continue;
         }
-        let Ok((_checkout, _settings, _storage, _)) = facts.get(captured.root) else {
+        let Ok((_checkout, _settings, storage, _)) = facts.get(captured.root) else {
             continue;
         };
-        let mut _planned = false;
         if retention.pruning.contains(entity) {
             for (cache, root, path, parent) in &candidates.caches {
                 if root.0 != entity {
                     continue;
                 }
-                _planned = true;
                 io.commands.entity(cache).insert(Expanded);
                 if profiles.locks.get(parent.parent()).is_err() || profiles.active.contains(cache) {
                     continue;
@@ -1797,6 +1811,25 @@ fn select_caches(
                 } else {
                     io.commands.entity(cache).insert(Selected);
                 }
+            }
+        } else if retention
+            .deps
+            .get(entity)
+            .is_ok_and(|usage| usage.0 > storage.policy().deps_limit)
+        {
+            for (cache, root, path, parent) in &candidates.caches {
+                if root.0 != entity || path.0.file_name() != Some(OsStr::new("deps")) {
+                    continue;
+                }
+                io.commands.entity(cache).insert(Expanded);
+                if profiles.locks.get(parent.parent()).is_err() || profiles.active.contains(cache) {
+                    continue;
+                }
+                io.request(
+                    ReadDirectory(path.0.clone()),
+                    entity,
+                    Purpose::targeted(PurposeKind::CacheEntries, cache),
+                );
             }
         }
     }
@@ -2317,6 +2350,7 @@ mod tests {
                 warning: 0,
                 cache_limit: u64::MAX,
                 incremental_limit: u64::MAX,
+                deps_limit: u64::MAX,
                 local_keep: 3,
             });
             let fixture = Self {
@@ -2822,5 +2856,74 @@ mod tests {
         fixture.checkout.target = fixture.checkout.root.clone();
         assert_ne!(fixture.run(Request::clean(true)), 0);
         assert_eq!(fs::read_to_string(file).unwrap(), "source code");
+    }
+
+    #[test]
+    fn deps_budget_evicts_superseded_hashes_while_keeping_latest_and_running_app() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.deps_limit = 768 * 1024;
+        let deps = fixture.checkout.target.join("debug/deps");
+        fs::create_dir_all(&deps).unwrap();
+        let old = deps.join("vmux_dx-0000000000000001");
+        let old_dep = deps.join("vmux_dx-0000000000000001.d");
+        let latest = deps.join("vmux_dx-0000000000000002");
+        let runtime = deps.join("libvmux_core-0000000000000001.dylib");
+        let runtime_new = deps.join("libvmux_core-0000000000000002.dylib");
+        for (path, size, timestamp) in [
+            (&old, 512 * 1024, 1u64),
+            (&old_dep, 1024, 1),
+            (&latest, 512 * 1024, 2),
+            (&runtime, 64 * 1024, 1),
+            (&runtime_new, 64 * 1024, 2),
+        ] {
+            fs::write(path, vec![b'x'; size]).unwrap();
+            File::open(path)
+                .unwrap()
+                .set_times(
+                    FileTimes::new()
+                        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp)),
+                )
+                .unwrap();
+        }
+        let app = fixture.write(
+            "debug/Vmux Dev.app/Contents/MacOS/vmux_desktop",
+            "ready app",
+        );
+        fixture.observe("12 vmux_desktop", &format!("p12\nn{}\n", app.display()));
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
+        assert!(!old.exists());
+        assert!(!old_dep.exists());
+        assert!(latest.is_file());
+        assert!(runtime.is_file());
+        assert!(runtime_new.is_file());
+        assert_eq!(fs::read_to_string(app).unwrap(), "ready app");
+    }
+
+    #[test]
+    fn deps_budget_respects_cargo_lock_and_open_deps_files() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.deps_limit = 1;
+        let deps = fixture.checkout.target.join("debug/deps");
+        fs::create_dir_all(&deps).unwrap();
+        let old = deps.join("policy-0000000000000001");
+        let latest = deps.join("policy-0000000000000002");
+        for (path, timestamp) in [(&old, 1u64), (&latest, 2)] {
+            fs::write(path, vec![b'x'; 512 * 1024]).unwrap();
+            File::open(path)
+                .unwrap()
+                .set_times(
+                    FileTimes::new()
+                        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp)),
+                )
+                .unwrap();
+        }
+        let lock = File::create(fixture.checkout.target.join("debug/.cargo-lock")).unwrap();
+        lock.lock().unwrap();
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
+        assert!(old.is_file());
+        drop(lock);
+        fixture.observe("12 policy", &format!("p12\nn{}\n", old.display()));
+        assert_eq!(fixture.run(Request::finish("dev".into())), 0);
+        assert!(old.is_file());
     }
 }

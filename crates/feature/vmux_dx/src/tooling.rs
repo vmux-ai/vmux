@@ -240,7 +240,9 @@ fn accept(event: On<Requested>, existing: Query<(), With<Waiting>>, mut commands
         }
     };
     let mut checkout = event.checkout.clone();
-    checkout.target = checkout.root.join(".build-tools/cargo");
+    checkout.target = checkout
+        .tools_root(&event.environment)
+        .join(".build-tools/cargo");
     checkout.build_target = None;
     let root = commands
         .spawn((
@@ -517,7 +519,7 @@ fn prepare_input(mut requests: AdvanceRequests, scope: Scope, mut commands: Comm
                 commands.spawn((
                     Io,
                     Owner(entity),
-                    Inspect(checkout.root.join(".build-tools")),
+                    Inspect(checkout.target.parent().unwrap().to_path_buf()),
                     Operation::bundle("dx.bootstrap.io").unwrap(),
                     ChildOf(entity),
                 ));
@@ -526,7 +528,7 @@ fn prepare_input(mut requests: AdvanceRequests, scope: Scope, mut commands: Comm
                 commands.spawn((
                     Io,
                     Owner(entity),
-                    CreateDirectory(checkout.root.join(".build-tools")),
+                    CreateDirectory(checkout.target.parent().unwrap().to_path_buf()),
                     Operation::bundle("dx.bootstrap.io").unwrap(),
                     ChildOf(entity),
                 ));

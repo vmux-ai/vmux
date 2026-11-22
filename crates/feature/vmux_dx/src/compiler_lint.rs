@@ -295,7 +295,8 @@ fn configure(
         ] {
             settings.0.remove(name);
         }
-        let mut paths = vec![checkout.root.join(".build-tools/dylint/bin")];
+        let tools = checkout.tools_root(&settings.0);
+        let mut paths = vec![tools.join(".build-tools/dylint/bin")];
         let path = match settings.0.required("PATH") {
             Ok(path) => path,
             Err(error) => {
@@ -318,11 +319,11 @@ fn configure(
         settings.0.set("PATH", path);
         settings
             .0
-            .set("CARGO_TARGET_DIR", checkout.root.join(".build-tools/lints"));
+            .set("CARGO_TARGET_DIR", tools.join(".build-tools/lints"));
         settings.0.set("CARGO_INCREMENTAL", "0");
         settings.0.set(
             "DYLINT_DRIVER_PATH",
-            checkout.root.join(".build-tools/dylint-drivers"),
+            tools.join(".build-tools/dylint-drivers"),
         );
         let policy = match Policy::configured(&settings.0) {
             Ok(policy) => policy,
@@ -342,7 +343,7 @@ fn configure(
 }
 
 fn prepare(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
-    for (entity, _, checkout, _, mut phase, mut sequence) in &mut requests {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
         if *phase != Phase::Prepare {
             continue;
         }
@@ -351,7 +352,7 @@ fn prepare(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
             entity,
             &mut None,
             Prepare {
-                root: checkout.root.clone(),
+                root: checkout.tools_root(&settings.0),
             },
             Directories,
             false,
@@ -375,6 +376,7 @@ fn guard(
         if !outputs.prepared(entity) {
             continue;
         }
+        let tools = checkout.tools_root(&settings.0);
         io.request(
             &mut sequence,
             entity,
@@ -385,7 +387,7 @@ fn guard(
                 "df".into(),
                 vec![
                     "-Pk".into(),
-                    checkout.root.join(".build-tools/lints").into_os_string(),
+                    tools.join(".build-tools/lints").into_os_string(),
                 ],
             ),
             CapacitySlot,
@@ -458,17 +460,18 @@ fn capacity(
 }
 
 fn acquire(mut requests: Requests, mut io: IoWriter, wake: Res<JobWake>) {
-    for (entity, _, checkout, _, mut phase, mut sequence) in &mut requests {
+    for (entity, _, checkout, settings, mut phase, mut sequence) in &mut requests {
         if *phase != Phase::Acquire {
             continue;
         }
+        let tools = checkout.tools_root(&settings.0);
         io.request(
             &mut sequence,
             entity,
             &mut None,
             AcquireTarget {
                 root: checkout.root.clone(),
-                target: checkout.root.join(".build-tools/lints"),
+                target: tools.join(".build-tools/lints"),
             },
             Lock,
             false,
@@ -492,20 +495,20 @@ fn adopt(
         let Some((child, lock)) = outputs.lock(entity) else {
             continue;
         };
+        let tools = checkout.tools_root(&settings.0);
         io.commands
             .entity(entity)
             .insert(Lease(Some(lock.0.clone())));
         io.commands.entity(child).remove::<AcquiredLock>();
-        settings.0.set(
-            "VMUX_TARGET_LOCK_TARGET",
-            checkout.root.join(".build-tools/lints"),
-        );
+        settings
+            .0
+            .set("VMUX_TARGET_LOCK_TARGET", tools.join(".build-tools/lints"));
         settings
             .0
             .set("VMUX_TARGET_LOCK_OWNER_PID", std::process::id().to_string());
         settings.0.set(
             "VMUX_BUILD_STORAGE_TARGET",
-            checkout.root.join(".build-tools/lints"),
+            tools.join(".build-tools/lints"),
         );
         settings
             .0
@@ -514,9 +517,7 @@ fn adopt(
             &mut sequence,
             entity,
             &mut None,
-            Prepare {
-                root: checkout.root.clone(),
-            },
+            Prepare { root: tools },
             Directories,
             false,
         );
@@ -586,6 +587,7 @@ fn install(
         let Ok(configuration) = configs.get(entity) else {
             continue;
         };
+        let tools = checkout.tools_root(&settings.0);
         let args = vec![
             format!("+{}", configuration.channel).into(),
             "install".into(),
@@ -595,12 +597,9 @@ fn install(
             configuration.version.clone().into(),
             "--locked".into(),
             "--root".into(),
-            checkout.root.join(".build-tools/dylint").into_os_string(),
+            tools.join(".build-tools/dylint").into_os_string(),
             "--target-dir".into(),
-            checkout
-                .root
-                .join(".build-tools/dylint-cargo")
-                .into_os_string(),
+            tools.join(".build-tools/dylint-cargo").into_os_string(),
         ];
         io.request(
             &mut sequence,
