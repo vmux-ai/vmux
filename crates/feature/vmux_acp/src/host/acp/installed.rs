@@ -80,11 +80,12 @@ impl Checked {
         }
     }
 
-    pub(in crate::host) fn profile_matches(&self, profile: &CurrentProfile) -> bool {
-        profile.entity() == Some(self.profile)
-            && profile
-                .paths()
-                .is_some_and(|paths| paths.agents() == self.path)
+    pub(in crate::host) fn profile_matches(
+        &self,
+        entity: Option<Entity>,
+        paths: Option<&vmux_ecs::profile::ProfilePaths>,
+    ) -> bool {
+        entity == Some(self.profile) && paths.is_some_and(|paths| paths.agents() == self.path)
     }
 
     pub(super) fn scopes(&self, launch: &InstalledLaunch, name: &PackageName) -> Vec<PathBuf> {
