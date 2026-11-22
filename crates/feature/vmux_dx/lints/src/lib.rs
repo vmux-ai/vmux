@@ -29,7 +29,7 @@ rustc_session::declare_lint! {
 
 rustc_session::declare_lint! {
     pub VMUX_ECS_OWNERSHIP,
-    Warn,
+    Allow,
     "Vmux state must have a resolved registered ECS owner"
 }
 

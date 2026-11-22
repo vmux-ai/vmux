@@ -85,7 +85,9 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.dependency-cache-key || inputs.cache-key }}
-        save-if: ${{ github.ref == 'refs/heads/main' }}
+        cache-workspace-crates: "false"
+        cache-on-failure: "true"
+        save-if: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
 
     - uses: ./.github/actions/cache-workspace
       with:

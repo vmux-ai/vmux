@@ -99,7 +99,10 @@ impl Fixture {
                 continue;
             }
             let message = &event["message"];
-            if message["level"] != "error" {
+            if message["level"] != "error"
+                && !(message["level"] == "warning"
+                    && message["code"]["code"] == "vmux_ecs_ownership")
+            {
                 continue;
             }
             let code = if ownership {
@@ -229,6 +232,17 @@ fn compiler_resolves_registered_systems_and_ignores_other_contracts() {
     ] {
         fixture.check(name, source, expected, false);
     }
+}
+
+#[test]
+fn ownership_diagnostics_require_an_explicit_audit_request() {
+    let fixture = Fixture::new();
+    fixture.check(
+        "ownership_default",
+        "struct Detached(u32); fn main() {}\n",
+        &[],
+        false,
+    );
 }
 
 #[test]

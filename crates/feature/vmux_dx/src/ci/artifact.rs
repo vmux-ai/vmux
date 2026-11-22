@@ -536,12 +536,6 @@ fn key_start(mut requests: KeyStartRequests<'_, '_>, mut io: Io) {
         io.request(
             entity,
             &mut sequence,
-            context.process(&settings.0, "cargo", &["-V"]),
-            CargoSlot,
-        );
-        io.request(
-            entity,
-            &mut sequence,
             context.git(&settings.0, &["ls-files", "-z"]),
             FilesSlot,
         );
@@ -574,7 +568,12 @@ fn key_capture(mut requests: KeyCaptureRequests<'_, '_>, mut io: Io, results: Re
                 io.fail(entity, "Missing Rust compiler host");
                 continue;
             };
-            let host = host.to_owned();
+            io.request(
+                entity,
+                &mut sequence,
+                context.process(&settings.0, "cargo", &["-V"]),
+                CargoSlot,
+            );
             io.request(
                 entity,
                 &mut sequence,
@@ -590,7 +589,7 @@ fn key_capture(mut requests: KeyCaptureRequests<'_, '_>, mut io: Io, results: Re
                         "--features",
                         "dx,ci-syntax",
                         "--target",
-                        &host,
+                        host,
                         "--edges",
                         "normal,build",
                         "--prefix",
@@ -1364,6 +1363,31 @@ type CachePublishFinishRequests<'w, 's> =
 mod tests {
     use crate::ci::testing::Fixture;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn cli_identity_waits_for_compiler_toolchain_installation_before_cargo_probes() {
+        let mut fixture = Fixture::new();
+        fixture.cli();
+        let compiler = fixture.execute("rustc", &["-vV"]).stdout;
+        fixture.write("compiler-version", compiler);
+        let root = fixture.root().to_path_buf();
+        fixture.environment.set("VMUX_TEST_ROOT", root.as_os_str());
+        for (name, variable) in [("rustc", "VMUX_TEST_RUSTC"), ("cargo", "VMUX_TEST_CARGO")] {
+            let output = fixture.execute("rustup", &["which", name]);
+            let path = String::from_utf8(output.stdout).unwrap();
+            fixture.environment.set(variable, path.trim());
+        }
+        fixture.mock_tool("rustc", "#!/bin/sh\nif [ \"$1\" = '-vV' ]; then\n  sleep 0.2\n  touch \"$VMUX_TEST_ROOT/compiler-ready\"\n  cat \"$VMUX_TEST_ROOT/compiler-version\"\nelse\n  exec \"$VMUX_TEST_RUSTC\" \"$@\"\nfi\n");
+        fixture.mock_tool("cargo", "#!/bin/sh\nif [ ! -f \"$VMUX_TEST_ROOT/compiler-ready\" ]; then\n  echo 'Cargo started before compiler toolchain installation completed' >&2\n  exit 1\nfi\nexec \"$VMUX_TEST_CARGO\" \"$@\"\n");
+        fixture.mock_tool("compiler-wrapper", "#!/bin/sh\ncd /\nexec \"$@\"\n");
+        fixture.environment.set(
+            "RUSTC_WRAPPER",
+            fixture.root().join("bin/compiler-wrapper").as_os_str(),
+        );
+        fixture
+            .run("cli-key", &[])
+            .expect("Cargo probes must wait for compiler completion");
+    }
     #[test]
     fn artifact_provenance_and_checksum_refusals_preserve_the_installed_binary() {
         let mut fixture = Fixture::new();

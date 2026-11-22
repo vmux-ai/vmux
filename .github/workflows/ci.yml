@@ -45,16 +45,27 @@ jobs:
       cef: ${{ steps.resolve.outputs.version }}
       release: ${{ steps.plan.outputs.release }}
       presentation_only: ${{ steps.plan.outputs.presentation_only }}
+      runtime_sha256: ${{ steps.runtime.outputs.runtime-sha256 }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-ci
+        id: runtime
       - name: Verify merge
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
         run: vmux-ci plan >> "$GITHUB_OUTPUT"
+      - name: Publish verified CI runtime
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-runtime-${{ runner.os }}-${{ runner.arch }}
+          path: .build-tools/bootstrap/vmux-ci
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
       - name: Resolve cef crate version from Cargo.lock
         id: resolve
         run: |
@@ -111,7 +122,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
 
       - uses: ./.github/actions/prepare-ci
         id: prepared
@@ -119,6 +130,7 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
       - uses: dorny/paths-filter@v4
         if: github.event_name != 'schedule'
         id: filter
@@ -316,7 +328,7 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
 
       - uses: ./.github/actions/prepare-ci
         if: needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
@@ -324,6 +336,7 @@ jobs:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
 
       - name: Record validation inputs
         if: needs.changes.outputs.check_lint != '' && needs.changes.outputs.code == 'true' && !needs.changes.outputs.reuse_lint
@@ -478,12 +491,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
       - uses: ./.github/actions/prepare-ci
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: lint-ecs
@@ -572,13 +586,14 @@ jobs:
         if: matrix.reuse == ''
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
       - uses: ./.github/actions/prepare-ci
         if: matrix.reuse == ''
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
       - name: Record validation inputs
         if: matrix.reuse == '' && matrix.claim != ''
         env:
@@ -631,7 +646,11 @@ jobs:
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_desktop --lib --no-default-features disabled_features::tests
       - name: ECS composition
         if: matrix.reuse == '' && matrix.key == 'test-ecs'
-        run: cargo test --locked -p vmux_dx --test policy --test conventions
+        env:
+          VMUX_POLICY_BASE: ${{ needs.plan.outputs.base || needs.plan.outputs.head }}
+        run: |
+          git update-ref refs/remotes/origin/main "$VMUX_POLICY_BASE"
+          cargo test --locked -p vmux_dx --test policy --test conventions
       - name: Save validated compiler artifacts
         if: matrix.reuse == ''
         uses: ./.github/actions/save-workspace
@@ -652,13 +671,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
 
       - uses: ./.github/actions/prepare-ci
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
 
       - name: Record validation inputs
         if: needs.changes.outputs.check_website != ''
@@ -704,12 +724,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
       - uses: ./.github/actions/prepare-ci
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
       - uses: ./.github/actions/setup-rust
         with:
           cli: build
@@ -745,13 +766,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
 
       - uses: ./.github/actions/prepare-ci
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
 
       - uses: ./.github/actions/setup-ios
         with:
@@ -828,13 +850,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head }}
+          ref: ${{ github.sha }}
 
       - uses: ./.github/actions/prepare-ci
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -1052,14 +1075,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.head || github.sha }}
+          ref: ${{ github.sha }}
       - uses: ./.github/actions/setup-ci
+        with:
+          runtime-sha256: ${{ needs.plan.result == 'success' && needs.plan.outputs.runtime_sha256 || '' }}
       - uses: ./.github/actions/prepare-ci
         if: needs.plan.result == 'success' && needs.changes.result == 'success'
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
+          runtime-sha256: ${{ needs.plan.outputs.runtime_sha256 }}
       - name: Verify selected checks
         env:
           VMUX_CI_RESULTS: ${{ toJSON(needs) }}
