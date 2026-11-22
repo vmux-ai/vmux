@@ -42,11 +42,6 @@ impl Fixture {
     }
 
     fn check(&self, name: &str, source: &str, expected: &[&str], code: &str) {
-        let source = if code == "vmux_ecs_runtime" {
-            source.to_string()
-        } else {
-            format!("#![allow(vmux_ecs_runtime)]{source}")
-        };
         std::fs::write(
             self.directory
                 .path()
@@ -56,6 +51,7 @@ impl Fixture {
         )
         .unwrap();
         let output = Command::new("cargo")
+            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime")
             .current_dir(self.directory.path())
             .args([
                 "dylint",

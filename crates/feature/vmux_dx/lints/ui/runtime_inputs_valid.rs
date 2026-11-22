@@ -1,3 +1,5 @@
+#![deny(vmux_ecs_runtime)]
+
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
