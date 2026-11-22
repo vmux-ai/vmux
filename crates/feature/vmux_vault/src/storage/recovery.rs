@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use super::VaultStorage;
-use super::keys::{KeyStore, SystemKeyStore};
+use super::keys::KeyStore;
 use super::repository::VaultRepositoryPath;
 use super::snapshot::{Hex, KEY_LEN, VaultCrypto};
 use super::sync::{VaultLocalState, VaultReconcile};
@@ -102,12 +102,17 @@ impl VaultRecovery {
     pub fn create(
         &self,
         recovery_key: GeneratedRecoveryKey,
+        keys: &crate::host::key::KeyPort,
     ) -> Result<RecoveryKeyCreation, String> {
-        self.create_with(&SystemKeyStore, recovery_key.as_bytes())
+        self.create_with(keys, recovery_key.as_bytes())
     }
 
-    pub fn unlock(&self, recovery_key: &str) -> Result<String, String> {
-        self.unlock_with(&SystemKeyStore, recovery_key)
+    pub fn unlock(
+        &self,
+        recovery_key: &str,
+        keys: &crate::host::key::KeyPort,
+    ) -> Result<String, String> {
+        self.unlock_with(keys, recovery_key)
     }
 
     #[cfg(test)]

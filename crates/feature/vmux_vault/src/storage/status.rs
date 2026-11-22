@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::VaultStorage;
 use super::connect::{GitHubAuthorization, VaultRepository};
-use super::keys::{KeyStore, SilentSystemKeyStore};
+use super::keys::KeyStore;
 use super::recovery::RecoveryEnvelope;
 use super::repository::VaultRepositoryPath;
 use super::sync::VaultLocalState;
@@ -30,13 +30,15 @@ pub struct VaultStatus {
 }
 
 impl VaultStatus {
-    pub fn current() -> Self {
-        let storage = VaultStorage::current();
-        Self::at(storage.root(), storage.repository(), &SilentSystemKeyStore)
+    pub fn current(storage: &VaultStorage, keys: &super::keys::port::KeyObservation<'_>) -> Self {
+        Self::at(storage.root(), storage.repository(), keys)
     }
 
-    pub fn current_with_repositories() -> Self {
-        let mut status = Self::current();
+    pub fn current_with_repositories(
+        storage: &VaultStorage,
+        keys: &super::keys::port::KeyObservation<'_>,
+    ) -> Self {
+        let mut status = Self::current(storage, keys);
         if !status.initialized || status.remote.is_empty() {
             match GitHubAuthorization::identity_and_repositories() {
                 Ok((owner, owners, repositories)) => {

@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::VaultStorage;
-use super::keys::{KeyStore, SystemKeyStore};
+use super::keys::KeyStore;
 use super::repository::{GitHubCli, OutputText, VaultRepositoryPath};
 use super::sync::{VaultLocalState, VaultReconcile, VaultSync};
 
@@ -230,26 +230,29 @@ impl VaultStorage {
             .success_text()
     }
 
-    pub fn connect_folder(&self, folder: &Path) -> Result<String, String> {
-        VaultConnection::folder(&self.root, &self.repository, folder, &SystemKeyStore)
+    pub fn connect_folder(
+        &self,
+        folder: &Path,
+        keys: &crate::host::key::KeyPort,
+    ) -> Result<String, String> {
+        VaultConnection::folder(&self.root, &self.repository, folder, keys)
     }
 
     pub fn create_remote(
         &self,
         repository: &str,
         visibility: RepositoryVisibility,
+        keys: &crate::host::key::KeyPort,
     ) -> Result<String, String> {
-        VaultConnection::create(
-            &self.root,
-            &self.repository,
-            repository,
-            visibility,
-            &SystemKeyStore,
-        )
+        VaultConnection::create(&self.root, &self.repository, repository, visibility, keys)
     }
 
-    pub fn connect_remote(&self, repository: &str) -> Result<String, String> {
-        VaultConnection::remote(&self.root, &self.repository, repository, &SystemKeyStore)
+    pub fn connect_remote(
+        &self,
+        repository: &str,
+        keys: &crate::host::key::KeyPort,
+    ) -> Result<String, String> {
+        VaultConnection::remote(&self.root, &self.repository, repository, keys)
     }
 }
 

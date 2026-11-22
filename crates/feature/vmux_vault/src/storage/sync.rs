@@ -4,7 +4,7 @@ use std::process::Command;
 
 use super::VaultStorage;
 use super::files::FileAttributes;
-use super::keys::{KeyStore, SystemKeyStore};
+use super::keys::KeyStore;
 use super::recovery::RepositoryKey;
 use super::repository::VaultRepositoryPath;
 use super::snapshot::{
@@ -78,8 +78,8 @@ pub(super) struct LocalPath<'a>(pub(super) &'a Path);
 pub(super) struct RonMap<'a>(pub(super) &'a ron::value::Map);
 
 impl VaultStorage {
-    pub fn sync(&self) -> Result<String, String> {
-        VaultSync::run(&self.root, &self.repository, &SystemKeyStore)
+    pub fn sync(&self, keys: &crate::host::key::KeyPort) -> Result<String, String> {
+        VaultSync::run(&self.root, &self.repository, keys)
     }
 }
 

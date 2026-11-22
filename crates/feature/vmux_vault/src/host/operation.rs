@@ -1,6 +1,4 @@
-use std::future::Future;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -19,6 +17,12 @@ use crate::state::{
     VaultGenerateRecoveryKeyRequest, VaultOperationKind, VaultSyncRequest,
     VaultUnlockRecoveryKeyRequest,
 };
+
+use super::key::{
+    AcceptedStorage, KeyAdmission, KeyCanceled, KeyNamespace, KeyPermissions, KeyPort,
+    NamespaceGeneration,
+};
+use vmux_ecs::{Operation, OperationRetained, OperationTarget};
 
 use super::{
     OperationPlugin, OperationSet, PendingVaultOperation, ReadyVaultOperation, RuntimeSet,
@@ -42,20 +46,38 @@ impl Plugin for OperationPlugin {
             VaultCreateCloudFolderRequest,
             VaultChooseCloudFolderRequest,
         )>::default())
-            .add_observer(create)
-            .add_observer(connect)
-            .add_observer(sync)
-            .add_observer(connect_github)
-            .add_observer(connect_folder)
-            .add_observer(generate_recovery_key)
-            .add_observer(create_recovery_key)
-            .add_observer(unlock_recovery_key)
-            .add_observer(connect_cloud)
-            .add_observer(create_cloud_folder)
-            .add_observer(choose_cloud_folder)
+            .add_observer(on_create)
+            .add_observer(on_connect)
+            .add_observer(on_sync)
+            .add_observer(on_connect_github)
+            .add_observer(on_connect_folder)
+            .add_observer(on_generate_recovery_key)
+            .add_observer(on_create_recovery_key)
+            .add_observer(on_unlock_recovery_key)
+            .add_observer(on_connect_cloud)
+            .add_observer(on_create_cloud_folder)
+            .add_observer(on_choose_cloud_folder)
             .add_systems(
                 Update,
-                (start, launch, drain)
+                (
+                    cancel_superseded,
+                    start,
+                    (
+                        create,
+                        connect,
+                        sync,
+                        connect_github,
+                        connect_folder,
+                        generate_recovery_key,
+                        create_recovery_key,
+                        unlock_recovery_key,
+                        connect_cloud,
+                        create_cloud_folder,
+                        choose_cloud_folder,
+                    )
+                        .chain(),
+                    drain,
+                )
                     .chain()
                     .after(RuntimeSet)
                     .in_set(OperationSet),
@@ -72,11 +94,6 @@ impl VaultOperationTarget {
     }
 }
 
-type VaultOperationFuture =
-    Pin<Box<dyn Future<Output = Result<VaultOperationOutput, String>> + Send>>;
-type VaultProgress = Box<dyn Fn(VaultAuthorization) + Send>;
-type VaultCancellation = Box<dyn Fn() -> bool + Send>;
-
 impl VaultOperationOutput {
     fn message(message: String) -> Self {
         Self {
@@ -87,242 +104,19 @@ impl VaultOperationOutput {
     }
 }
 
-fn create_vault(
-    request: VaultCreateRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let visibility = if request.private {
-            crate::storage::RepositoryVisibility::Private
-        } else {
-            crate::storage::RepositoryVisibility::Public
-        };
-        let message = VaultStorage::current().create_remote(&request.repository, visibility)?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn connect_vault(
-    request: VaultConnectRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let message = VaultStorage::current().connect_remote(&request.repository)?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn sync_vault(
-    _request: VaultSyncRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let message = VaultStorage::current().sync()?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn connect_vault_github(
-    _request: VaultConnectGithubRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    progress: VaultProgress,
-    canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let message = VaultStorage::current().connect_github_with_progress(
-            |code| {
-                progress(VaultAuthorization {
-                    code,
-                    url: "https://github.com/login/device".to_string(),
-                });
-            },
-            canceled,
-        )?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn connect_vault_folder(
-    _request: VaultConnectFolderRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let initial_dir = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .map(|home| home.join("Library/CloudStorage"))
-            .filter(|path| path.is_dir())
-            .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
-        let mut dialog = rfd::AsyncFileDialog::new();
-        if let Some(initial_dir) = initial_dir {
-            dialog = dialog.set_directory(initial_dir);
-        }
-        let Some(folder) = dialog.pick_folder().await else {
-            return Err(String::new());
-        };
-        let message = VaultStorage::current().connect_folder(folder.path())?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn generate_vault_recovery_key(
-    _request: VaultGenerateRecoveryKeyRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let key = GeneratedRecoveryKey::generate()?;
-        Ok(VaultOperationOutput {
-            message: key.display().to_string(),
-            pending_upload: false,
-            generated_recovery_key: Some(key),
-        })
-    })
-}
-
-fn create_vault_recovery_key(
-    _request: VaultCreateRecoveryKeyRequest,
-    recovery: VaultRecovery,
-    generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let key = generated_recovery_key
-            .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
-        let result = recovery.create(key)?;
-        Ok(VaultOperationOutput {
-            message: String::new(),
-            pending_upload: result.pending_upload,
-            generated_recovery_key: None,
-        })
-    })
-}
-
-fn unlock_vault_recovery_key(
-    request: VaultUnlockRecoveryKeyRequest,
-    recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let message = recovery.unlock(&request.recovery_key)?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn connect_vault_cloud(
-    request: VaultConnectCloudRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let message = connect_cloud_storage(&request.provider).await?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn create_vault_cloud_folder(
-    request: VaultCreateCloudFolderRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let folder = Path::new(&request.root).join(&request.folder_name);
-        let message = VaultStorage::current().connect_folder(&folder)?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
-fn choose_vault_cloud_folder(
-    request: VaultChooseCloudFolderRequest,
-    _recovery: VaultRecovery,
-    _generated_recovery_key: Option<GeneratedRecoveryKey>,
-    _progress: VaultProgress,
-    _canceled: VaultCancellation,
-) -> VaultOperationFuture {
-    Box::pin(async move {
-        let mut dialog = rfd::AsyncFileDialog::new();
-        let root = Path::new(&request.root);
-        if root.is_dir() {
-            dialog = dialog.set_directory(root);
-        }
-        let Some(folder) = dialog.pick_folder().await else {
-            return Err(String::new());
-        };
-        let remote = if folder
-            .path()
-            .extension()
-            .is_some_and(|extension| extension == "git")
-        {
-            folder.path().to_path_buf()
-        } else {
-            folder.path().join("vmux-vault.git")
-        };
-        if !remote.exists() {
-            return Err("selected folder does not contain a Vault".to_string());
-        }
-        let message = VaultStorage::current().connect_folder(folder.path())?;
-        Ok(VaultOperationOutput::message(message))
-    })
-}
-
 #[derive(SystemParam)]
 struct VaultOperationQueue<'w, 's> {
     sequences: Query<'w, 's, &'static mut VaultOperationSequence, With<VaultRegistry>>,
-    pending: Query<'w, 's, Entity, With<PendingVaultOperation>>,
-    pending_github: Query<
-        'w,
-        's,
-        Entity,
-        (
-            With<PendingVaultOperation>,
-            With<VaultOperationRequest<VaultConnectGithubRequest>>,
-        ),
-    >,
-    active_github: Query<
-        'w,
-        's,
-        (Entity, Option<&'static VaultOperationTask>),
-        (
-            With<VaultOperationRequest<VaultConnectGithubRequest>>,
-            Without<PendingVaultOperation>,
-        ),
-    >,
     subscribers: Query<'w, 's, &'static mut VaultSubscriber>,
     commands: Commands<'w, 's>,
 }
 
 impl VaultOperationQueue<'_, '_> {
-    fn push<R: Send + Sync + 'static>(
-        &mut self,
-        target: Entity,
-        request: R,
-        kind: VaultOperationKind,
-    ) {
-        let Ok(mut sequence) = self.sequences.single_mut() else {
-            return;
-        };
-        let operation_id = sequence.next();
+    fn next(&mut self) -> Option<u64> {
+        Some(self.sequences.single_mut().ok()?.next())
+    }
+
+    fn begin(&mut self, target: Entity, operation_id: u64, kind: VaultOperationKind) {
         if let Ok(mut subscriber) = self.subscribers.get_mut(target) {
             subscriber.begin_operation(operation_id, kind);
         } else {
@@ -330,137 +124,271 @@ impl VaultOperationQueue<'_, '_> {
                 .entity(target)
                 .insert(VaultSubscriber::pending(operation_id, kind));
         }
-        let mut connecting = false;
-        for (entity, task) in &self.active_github {
-            connecting = true;
-            if let Some(task) = task {
-                task.canceled.store(true, Ordering::Relaxed);
-            } else {
-                self.commands.entity(entity).despawn();
-            }
-        }
-        if connecting {
-            for entity in &self.pending {
-                self.commands.entity(entity).despawn();
-            }
-        } else if kind == VaultOperationKind::ConnectGithub {
-            for entity in &self.pending_github {
-                self.commands.entity(entity).despawn();
-            }
-        }
-        self.commands.spawn((
-            PendingVaultOperation,
-            VaultOperationContext {
-                operation_id,
-                target: VaultOperationTarget::Webview(target),
-                kind,
-            },
-            VaultOperationRequest::new(request),
-        ));
     }
 }
 
-fn create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperationQueue) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload.clone(),
-        VaultOperationKind::Create,
-    );
+fn cancel_superseded(
+    incoming: Query<
+        (
+            Entity,
+            &VaultOperationContext,
+            Has<VaultOperationRequest<VaultConnectGithubRequest>>,
+        ),
+        Added<PendingVaultOperation>,
+    >,
+    pending: Query<
+        (
+            Entity,
+            Has<VaultOperationRequest<VaultConnectGithubRequest>>,
+        ),
+        With<PendingVaultOperation>,
+    >,
+    active: Query<
+        (Entity, Option<&VaultOperationTask>),
+        (
+            With<VaultOperationRequest<VaultConnectGithubRequest>>,
+            Without<PendingVaultOperation>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    let mut latest = None;
+    for (entity, context, github) in &incoming {
+        if latest.is_none_or(|(_, id, _)| context.operation_id > id) {
+            latest = Some((entity, context.operation_id, github));
+        }
+    }
+    let Some((latest, _, github)) = latest else {
+        return;
+    };
+    let connecting = !active.is_empty();
+    for (entity, task) in &active {
+        if let Some(task) = task {
+            task.canceled.store(true, Ordering::Release);
+        } else {
+            commands.entity(entity).despawn();
+        }
+    }
+    for (entity, queued_github) in &pending {
+        if entity != latest && (connecting || (github && queued_github)) {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
-fn connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOperationQueue) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload.clone(),
-        VaultOperationKind::Connect,
-    );
+fn on_create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperationQueue) {
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::Create);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::Create,
+        },
+        VaultOperationRequest::new(trigger.event().payload.clone()),
+    ));
 }
 
-fn sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload,
-        VaultOperationKind::Sync,
-    );
+fn on_connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOperationQueue) {
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::Connect);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::Connect,
+        },
+        VaultOperationRequest::new(trigger.event().payload.clone()),
+    ));
 }
 
-fn connect_github(trigger: On<UiInput<VaultConnectGithubRequest>>, mut queue: VaultOperationQueue) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload,
-        VaultOperationKind::ConnectGithub,
-    );
+fn on_sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::Sync);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::Sync,
+        },
+        VaultOperationRequest::new(trigger.event().payload),
+    ));
 }
 
-fn connect_folder(trigger: On<UiInput<VaultConnectFolderRequest>>, mut queue: VaultOperationQueue) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload,
-        VaultOperationKind::ConnectFolder,
-    );
+fn on_connect_github(
+    trigger: On<UiInput<VaultConnectGithubRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::ConnectGithub);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::ConnectGithub,
+        },
+        VaultOperationRequest::new(trigger.event().payload),
+    ));
 }
 
-fn generate_recovery_key(
+fn on_connect_folder(
+    trigger: On<UiInput<VaultConnectFolderRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::ConnectFolder);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::ConnectFolder,
+        },
+        VaultOperationRequest::new(trigger.event().payload),
+    ));
+}
+
+fn on_generate_recovery_key(
     trigger: On<UiInput<VaultGenerateRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload,
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(
+        target,
+        operation_id,
         VaultOperationKind::GenerateRecoveryKey,
     );
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::GenerateRecoveryKey,
+        },
+        VaultOperationRequest::new(trigger.event().payload),
+    ));
 }
 
-fn create_recovery_key(
+fn on_create_recovery_key(
     trigger: On<UiInput<VaultCreateRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload,
-        VaultOperationKind::CreateRecoveryKey,
-    );
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::CreateRecoveryKey);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::CreateRecoveryKey,
+        },
+        VaultOperationRequest::new(trigger.event().payload),
+    ));
 }
 
-fn unlock_recovery_key(
+fn on_unlock_recovery_key(
     trigger: On<UiInput<VaultUnlockRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload.clone(),
-        VaultOperationKind::UnlockRecoveryKey,
-    );
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::UnlockRecoveryKey);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::UnlockRecoveryKey,
+        },
+        VaultOperationRequest::new(trigger.event().payload.clone()),
+    ));
 }
 
-fn connect_cloud(trigger: On<UiInput<VaultConnectCloudRequest>>, mut queue: VaultOperationQueue) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload.clone(),
-        VaultOperationKind::ConnectCloud,
-    );
+fn on_connect_cloud(
+    trigger: On<UiInput<VaultConnectCloudRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::ConnectCloud);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::ConnectCloud,
+        },
+        VaultOperationRequest::new(trigger.event().payload.clone()),
+    ));
 }
 
-fn create_cloud_folder(
+fn on_create_cloud_folder(
     trigger: On<UiInput<VaultCreateCloudFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload.clone(),
-        VaultOperationKind::CreateCloudFolder,
-    );
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::CreateCloudFolder);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::CreateCloudFolder,
+        },
+        VaultOperationRequest::new(trigger.event().payload.clone()),
+    ));
 }
 
-fn choose_cloud_folder(
+fn on_choose_cloud_folder(
     trigger: On<UiInput<VaultChooseCloudFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
-    queue.push(
-        trigger.event().webview,
-        trigger.event().payload.clone(),
-        VaultOperationKind::ChooseCloudFolder,
-    );
+    let Some(operation_id) = queue.next() else {
+        return;
+    };
+    let target = trigger.event().webview;
+    queue.begin(target, operation_id, VaultOperationKind::ChooseCloudFolder);
+    queue.commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+            kind: VaultOperationKind::ChooseCloudFolder,
+        },
+        VaultOperationRequest::new(trigger.event().payload.clone()),
+    ));
 }
 
 fn start(
@@ -489,216 +417,44 @@ fn start(
         .insert(ReadyVaultOperation);
 }
 
-type ReadyVaultOperations<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static VaultOperationContext,
-        Option<&'static VaultOperationRequest<VaultCreateRequest>>,
-        Option<&'static VaultOperationRequest<VaultConnectRequest>>,
-        Option<&'static VaultOperationRequest<VaultSyncRequest>>,
-        Option<&'static VaultOperationRequest<VaultConnectGithubRequest>>,
-        Option<&'static VaultOperationRequest<VaultConnectFolderRequest>>,
-        Option<&'static VaultOperationRequest<VaultGenerateRecoveryKeyRequest>>,
-        Option<&'static VaultOperationRequest<VaultCreateRecoveryKeyRequest>>,
-        Option<&'static VaultOperationRequest<VaultUnlockRecoveryKeyRequest>>,
-        Option<&'static VaultOperationRequest<VaultConnectCloudRequest>>,
-        Option<&'static VaultOperationRequest<VaultCreateCloudFolderRequest>>,
-        Option<&'static VaultOperationRequest<VaultChooseCloudFolderRequest>>,
-    ),
-    Added<ReadyVaultOperation>,
->;
-
-fn launch(
-    operations: ReadyVaultOperations,
-    mut recoveries: Query<&mut VaultRecoveryState, With<VaultRegistry>>,
+fn create(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultCreateRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Ok(mut recovery) = recoveries.single_mut() else {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
         return;
     };
-    for (
-        entity,
-        context,
-        create,
-        connect,
-        sync,
-        connect_github,
-        connect_folder,
-        generate_recovery_key,
-        create_recovery_key,
-        unlock_recovery_key,
-        connect_cloud,
-        create_cloud_folder,
-        choose_cloud_folder,
-    ) in &operations
-    {
-        let service = recovery.service();
-        let generated_recovery_key = if context.kind == VaultOperationKind::CreateRecoveryKey {
-            recovery.take_pending_key()
-        } else {
-            None
-        };
-        let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let progress_wake = completion_wake.clone();
-        let (progress_sender, progress_receiver) = mpsc::channel();
+    for (entity, request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
         let canceled = Arc::new(AtomicBool::new(false));
-        let task_canceled = canceled.clone();
-        let progress = Box::new(move |authorization| {
-            if progress_sender.send(authorization).is_ok()
-                && let Some(wake) = &progress_wake
-            {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        });
-        let cancellation = Box::new(move || task_canceled.load(Ordering::Relaxed));
-        let operation = match context.kind {
-            VaultOperationKind::Create => {
-                let Some(request) = create else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                create_vault(
-                    request.0.clone(),
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::Connect => {
-                let Some(request) = connect else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                connect_vault(
-                    request.0.clone(),
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::Sync => {
-                let Some(request) = sync else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                sync_vault(
-                    request.0,
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::ConnectGithub => {
-                let Some(request) = connect_github else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                connect_vault_github(
-                    request.0,
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::ConnectFolder => {
-                let Some(request) = connect_folder else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                connect_vault_folder(
-                    request.0,
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::GenerateRecoveryKey => {
-                let Some(request) = generate_recovery_key else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                generate_vault_recovery_key(
-                    request.0,
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::CreateRecoveryKey => {
-                let Some(request) = create_recovery_key else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                create_vault_recovery_key(
-                    request.0,
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::UnlockRecoveryKey => {
-                let Some(request) = unlock_recovery_key else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                unlock_vault_recovery_key(
-                    request.0.clone(),
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::ConnectCloud => {
-                let Some(request) = connect_cloud else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                connect_vault_cloud(
-                    request.0.clone(),
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::CreateCloudFolder => {
-                let Some(request) = create_cloud_folder else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                create_vault_cloud_folder(
-                    request.0.clone(),
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-            VaultOperationKind::ChooseCloudFolder => {
-                let Some(request) = choose_cloud_folder else {
-                    commands.entity(entity).despawn();
-                    continue;
-                };
-                choose_vault_cloud_folder(
-                    request.0.clone(),
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                )
-            }
-        };
+        let operation = create_vault(worker_storage, worker_keys, request.0.clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = operation.await;
             if let Some(wake) = completion_wake {
@@ -707,44 +463,1019 @@ fn launch(
             result
         });
         commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
             .entity(entity)
             .remove::<ReadyVaultOperation>()
-            .insert(VaultOperationTask {
-                task,
-                progress: Mutex::new(progress_receiver),
-                canceled,
-            });
+            .insert((
+                Operation::bundle("vault.create").unwrap().running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: true,
+                    store: true,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
     }
 }
 
+async fn create_vault(
+    storage: VaultStorage,
+    keys: KeyPort,
+    request: VaultCreateRequest,
+) -> Result<VaultOperationOutput, String> {
+    let visibility = if request.private {
+        crate::storage::RepositoryVisibility::Private
+    } else {
+        crate::storage::RepositoryVisibility::Public
+    };
+    let message = storage.create_remote(&request.repository, visibility, &keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn connect(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = connect_vault(worker_storage, worker_keys, request.0.clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.connect").unwrap().running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: true,
+                    store: true,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn connect_vault(
+    storage: VaultStorage,
+    keys: KeyPort,
+    request: VaultConnectRequest,
+) -> Result<VaultOperationOutput, String> {
+    let message = storage.connect_remote(&request.repository, &keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn sync(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultSyncRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, _request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = sync_vault(worker_storage, worker_keys);
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.sync").unwrap().running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: false,
+                    store: false,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn sync_vault(storage: VaultStorage, keys: KeyPort) -> Result<VaultOperationOutput, String> {
+    let message = storage.sync(&keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn connect_github(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectGithubRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, _request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let worker_canceled = canceled.clone();
+        let progress = move |authorization| {
+            if sender.send(authorization).is_ok()
+                && let Some(wake) = &wake
+            {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        };
+        let cancellation = move || worker_canceled.load(Ordering::Acquire);
+        let operation = connect_vault_github(worker_storage, progress, cancellation);
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.connect_github").unwrap().running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: false,
+                    observe: false,
+                    create: false,
+                    store: false,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn connect_vault_github<F, C>(
+    storage: VaultStorage,
+    progress: F,
+    canceled: C,
+) -> Result<VaultOperationOutput, String>
+where
+    F: Fn(VaultAuthorization) + Send,
+    C: Fn() -> bool + Send,
+{
+    let message = storage.connect_github_with_progress(
+        |code| {
+            progress(VaultAuthorization {
+                code,
+                url: "https://github.com/login/device".to_string(),
+            });
+        },
+        canceled,
+    )?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn connect_folder(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectFolderRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, _request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = connect_vault_folder(worker_storage, worker_keys);
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.connect_folder").unwrap().running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: true,
+                    store: true,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn connect_vault_folder(
+    storage: VaultStorage,
+    keys: KeyPort,
+) -> Result<VaultOperationOutput, String> {
+    let initial_dir = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .map(|home| home.join("Library/CloudStorage"))
+        .filter(|path| path.is_dir())
+        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if let Some(initial_dir) = initial_dir {
+        dialog = dialog.set_directory(initial_dir);
+    }
+    let Some(folder) = dialog.pick_folder().await else {
+        return Err(String::new());
+    };
+    let message = storage.connect_folder(folder.path(), &keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn generate_recovery_key(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultGenerateRecoveryKeyRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, _request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = generate_vault_recovery_key();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.generate_recovery_key")
+                    .unwrap()
+                    .running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: false,
+                    observe: false,
+                    create: false,
+                    store: false,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn generate_vault_recovery_key() -> Result<VaultOperationOutput, String> {
+    let key = GeneratedRecoveryKey::generate()?;
+    Ok(VaultOperationOutput {
+        message: key.display().to_string(),
+        pending_upload: false,
+        generated_recovery_key: Some(key),
+    })
+}
+
+fn create_recovery_key(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultCreateRecoveryKeyRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &mut VaultRecoveryState,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, mut recovery, captured)) =
+        namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, _request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation =
+            create_vault_recovery_key(worker_keys, recovery.service(), recovery.take_pending_key());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.create_recovery_key")
+                    .unwrap()
+                    .running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: false,
+                    store: false,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn create_vault_recovery_key(
+    keys: KeyPort,
+    recovery: VaultRecovery,
+    generated_recovery_key: Option<GeneratedRecoveryKey>,
+) -> Result<VaultOperationOutput, String> {
+    let key = generated_recovery_key
+        .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
+    let result = recovery.create(key, &keys)?;
+    Ok(VaultOperationOutput {
+        message: String::new(),
+        pending_upload: result.pending_upload,
+        generated_recovery_key: None,
+    })
+}
+
+fn unlock_recovery_key(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultUnlockRecoveryKeyRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &VaultRecoveryState,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, recovery, captured)) =
+        namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation =
+            unlock_vault_recovery_key(worker_keys, recovery.service(), request.0.clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.unlock_recovery_key")
+                    .unwrap()
+                    .running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: false,
+                    observe: false,
+                    create: false,
+                    store: true,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn unlock_vault_recovery_key(
+    keys: KeyPort,
+    recovery: VaultRecovery,
+    request: VaultUnlockRecoveryKeyRequest,
+) -> Result<VaultOperationOutput, String> {
+    let message = recovery.unlock(&request.recovery_key, &keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn connect_cloud(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectCloudRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = connect_vault_cloud(request.0.clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.connect_cloud").unwrap().running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: false,
+                    observe: false,
+                    create: false,
+                    store: false,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn connect_vault_cloud(
+    request: VaultConnectCloudRequest,
+) -> Result<VaultOperationOutput, String> {
+    let message = connect_cloud_storage(&request.provider).await?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn create_cloud_folder(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultCreateCloudFolderRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = create_vault_cloud_folder(worker_storage, worker_keys, request.0.clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.create_cloud_folder")
+                    .unwrap()
+                    .running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: true,
+                    store: true,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn create_vault_cloud_folder(
+    storage: VaultStorage,
+    keys: KeyPort,
+    request: VaultCreateCloudFolderRequest,
+) -> Result<VaultOperationOutput, String> {
+    let folder = Path::new(&request.root).join(&request.folder_name);
+    let message = storage.connect_folder(&folder, &keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
+fn choose_cloud_folder(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultChooseCloudFolderRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut namespaces: Query<
+        (
+            Entity,
+            &KeyNamespace,
+            &NamespaceGeneration,
+            &mut KeyAdmission,
+            &AcceptedStorage,
+        ),
+        With<VaultRegistry>,
+    >,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok((namespace, access, generation, mut admission, captured)) = namespaces.single_mut()
+    else {
+        return;
+    };
+    for (entity, request) in &operations {
+        let storage = captured.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let (keys, ingress) = access.port(
+            namespace,
+            generation.0,
+            &mut admission,
+            entity,
+            wake.clone(),
+        );
+        let worker_keys = keys.clone();
+        let worker_storage = storage.clone();
+        let completion_wake = wake.clone();
+        let (_sender, receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let operation = choose_vault_cloud_folder(worker_storage, worker_keys, request.0.clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(namespace)
+            .remove::<super::VaultStatusProjection>();
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert((
+                Operation::bundle("vault.choose_cloud_folder")
+                    .unwrap()
+                    .running(),
+                OperationRetained,
+                OperationTarget::new(namespace),
+                vmux_ecs::OperationTargetRevision(generation.0),
+                AcceptedStorage(storage),
+                keys,
+                ingress,
+                KeyCanceled(canceled.clone()),
+                KeyPermissions {
+                    load: true,
+                    observe: false,
+                    create: true,
+                    store: true,
+                },
+                VaultOperationTask {
+                    task,
+                    progress: Mutex::new(receiver),
+                    canceled,
+                },
+            ));
+    }
+}
+
+async fn choose_vault_cloud_folder(
+    storage: VaultStorage,
+    keys: KeyPort,
+    request: VaultChooseCloudFolderRequest,
+) -> Result<VaultOperationOutput, String> {
+    let mut dialog = rfd::AsyncFileDialog::new();
+    let root = Path::new(&request.root);
+    if root.is_dir() {
+        dialog = dialog.set_directory(root);
+    }
+    let Some(folder) = dialog.pick_folder().await else {
+        return Err(String::new());
+    };
+    let remote = if folder
+        .path()
+        .extension()
+        .is_some_and(|extension| extension == "git")
+    {
+        folder.path().to_path_buf()
+    } else {
+        folder.path().join("vmux-vault.git")
+    };
+    if !remote.exists() {
+        return Err("selected folder does not contain a Vault".to_string());
+    }
+    let message = storage.connect_folder(folder.path(), &keys)?;
+    Ok(VaultOperationOutput::message(message))
+}
+
 fn drain(
-    mut operations: Query<(Entity, &VaultOperationContext, &mut VaultOperationTask)>,
-    mut registry: Query<(&mut VaultRegistry, &mut VaultRecoveryState)>,
+    mut operations: Query<(
+        Entity,
+        &VaultOperationContext,
+        &vmux_ecs::OperationTarget,
+        &vmux_ecs::OperationTargetRevision,
+        &mut VaultOperationTask,
+        Has<VaultOperationRequest<VaultSyncRequest>>,
+        Has<VaultOperationRequest<VaultConnectGithubRequest>>,
+    )>,
+    mut registry: Query<(
+        &mut VaultRegistry,
+        &mut VaultRecoveryState,
+        &NamespaceGeneration,
+    )>,
     mut subscribers: Query<&mut VaultSubscriber>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut commands: Commands,
 ) {
-    let Ok((mut state, mut recovery)) = registry.single_mut() else {
-        return;
-    };
-    for (entity, context, mut task) in &mut operations {
-        let target = context.target.webview();
+    for (entity, context, target, accepted, mut task, is_sync, is_github) in &mut operations {
+        let valid = registry
+            .get(target.entity())
+            .is_ok_and(|(_, _, g)| g.0 == accepted.0)
+            && !task.canceled.load(Ordering::Acquire);
+        let webview = context.target.webview();
         while let Ok(progress) = task.progress.get_mut().try_recv() {
-            if let Some(target) = target {
+            if valid
+                && let Some(webview) = webview
+                && let Ok(mut subscriber) = subscribers.get_mut(webview)
+                && subscriber
+                    .state
+                    .operation
+                    .as_ref()
+                    .is_some_and(|o| o.operation_id == context.operation_id)
+            {
                 stack_requests.write(vmux_layout::stack::OpenRequest {
                     url: Some(progress.url.clone()),
                     policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
                 });
-                if let Ok(mut subscriber) = subscribers.get_mut(target) {
-                    subscriber.authorize(context.operation_id, progress);
-                }
+                subscriber.authorize(context.operation_id, progress);
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
         commands.entity(entity).despawn();
-        if task.canceled.load(Ordering::Relaxed) {
+        if !valid {
+            continue;
+        }
+        let Ok((mut state, mut recovery, generation)) = registry.get_mut(target.entity()) else {
+            continue;
+        };
+        if generation.0 != accepted.0 {
             continue;
         }
         let (success, message, pending_upload, generated_recovery_key) = match result {
@@ -764,21 +1495,18 @@ fn drain(
             message,
             pending_upload,
         };
-        if context.kind == VaultOperationKind::Sync {
+        if is_sync {
             state.snapshot.sync_failed = !success;
             state.revision = state.revision.wrapping_add(1);
-            if context.target == VaultOperationTarget::Automatic && !success {
-                continue;
-            }
         }
-        if let Some(target) = target
-            && let Ok(mut subscriber) = subscribers.get_mut(target)
+        if let Some(webview) = webview
+            && let Ok(mut subscriber) = subscribers.get_mut(webview)
         {
             subscriber.complete_operation(context.operation_id, context.kind, completion);
         }
         state.dirty = true;
         state.loaded = false;
-        state.load_repositories |= context.kind == VaultOperationKind::ConnectGithub;
+        state.load_repositories |= is_github;
         state.generation = state.generation.wrapping_add(1);
     }
 }
