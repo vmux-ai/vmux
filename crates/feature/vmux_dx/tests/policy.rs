@@ -8363,7 +8363,7 @@ impl ShapePolicy {
             }
             if let Some(shape) = &entry.enum_shape
                 && !covered.contains(&entry.key)
-                && !inventory.automatic_enum_purpose(entry)
+                && !inventory.automatic_enum_purpose(entry, policy)
             {
                 errors.push(format!(
                     "{}: declare its enum purpose ({} variants) [fingerprint: {}]",
@@ -9798,6 +9798,8 @@ struct Inventory {
     shadowed_roots: RefCell<Option<BTreeSet<String>>>,
     automatic_boundary_keys: RefCell<Option<Vec<String>>>,
     renderer_graph: RefCell<Option<(BTreeSet<String>, BTreeSet<String>)>>,
+    job_adapters: RefCell<Option<BTreeSet<String>>>,
+    enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     implementation_index: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     generated_ready: bool,
     generated_collisions: BTreeSet<String>,
@@ -10966,6 +10968,8 @@ impl Inventory {
         *self.shadowed_roots.get_mut() = None;
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
+        *self.job_adapters.get_mut() = None;
+        *self.enum_owner_candidates.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         let keys: Vec<_> = self
             .entries
@@ -11702,6 +11706,8 @@ impl Inventory {
         *self.shadowed_roots.get_mut() = None;
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
+        *self.job_adapters.get_mut() = None;
+        *self.enum_owner_candidates.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         if !path.ends_with(".rs") {
             self.script(path, source);
@@ -11766,6 +11772,8 @@ impl Inventory {
         *self.shadowed_roots.get_mut() = None;
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
+        *self.job_adapters.get_mut() = None;
+        *self.enum_owner_candidates.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         let key = format!("{path}||script");
         self.entries.insert(
@@ -12216,23 +12224,307 @@ impl Inventory {
             || self.manifest_source(entry)
             || self.typed_page(entry)
             || self.automatic_renderer(entry)
+            || self.automatic_job_adapter(entry)
     }
 
-    fn automatic_enum_purpose(&self, entry: &Declaration) -> bool {
+    fn automatic_job_adapter(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_job_adapters();
+        self.job_adapters
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn ensure_job_adapters(&self) {
+        if self.job_adapters.borrow().is_some() {
+            return;
+        }
+        let mut jobs = BTreeSet::new();
+        if let Some(contexts) = self
+            .generic_usage
+            .owners
+            .get("crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin")
+        {
+            for (plugin_key, bindings) in contexts {
+                let Some(plugin) = self.entries.get(plugin_key) else {
+                    continue;
+                };
+                for (name, value) in bindings {
+                    if name != "J" {
+                        continue;
+                    }
+                    let Ok(syn::GenericArgument::Type(ty)) =
+                        syn::parse_str::<syn::GenericArgument>(value)
+                    else {
+                        continue;
+                    };
+                    self.collect_registered_jobs(&plugin.namespace, &ty, &mut jobs);
+                }
+            }
+        }
+        let mut keys = BTreeSet::new();
+        for job_key in jobs {
+            self.record_job_adapter(&self.entries[&job_key], &mut keys);
+        }
+        *self.job_adapters.borrow_mut() = Some(keys);
+    }
+
+    fn collect_registered_jobs(&self, namespace: &str, ty: &Type, jobs: &mut BTreeSet<String>) {
+        let Type::Path(path) = ty else {
+            return;
+        };
+        if path.qself.is_some() {
+            return;
+        }
+        let Some(target) = self.resolve(
+            namespace,
+            &References::path(&path.path),
+            &mut BTreeSet::new(),
+        ) else {
+            return;
+        };
+        if !self.valid_job_struct(target) {
+            return;
+        }
+        jobs.insert(target.key.clone());
+        let Some(segment) = path.path.segments.last() else {
+            return;
+        };
+        let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+            return;
+        };
+        for argument in &arguments.args {
+            if let syn::GenericArgument::Type(inner) = argument {
+                self.collect_registered_jobs(namespace, inner, jobs);
+            }
+        }
+    }
+
+    fn valid_job_struct(&self, entry: &Declaration) -> bool {
+        entry.production
+            && matches!(entry.kind, Kind::Struct)
+            && !entry.local
+            && !entry.dynamic
+            && !entry.opaque
+            && !entry.ecs
+            && !entry.projection
+            && !self.has_bevy_runtime_access(entry)
+            && self
+                .implementations(entry)
+                .into_iter()
+                .any(|implementation| self.real_job_impl(implementation))
+    }
+
+    fn real_job_impl(&self, implementation: &Declaration) -> bool {
+        if !implementation.production
+            || !matches!(implementation.kind, Kind::Impl)
+            || implementation.local
+            || implementation.dynamic
+            || implementation.opaque
+            || self.has_bevy_runtime_access(implementation)
+        {
+            return false;
+        }
+        let Some(interface) = implementation.implemented_trait.as_deref() else {
+            return false;
+        };
+        self.resolve(&implementation.namespace, interface, &mut BTreeSet::new())
+            .is_some_and(|target| target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job")
+            && implementation
+                .bodies
+                .iter()
+                .any(|body| body.production && body.name == "run")
+    }
+
+    fn job_subtrait_marker_impl(&self, implementation: &Declaration) -> bool {
+        if !implementation.production
+            || !matches!(implementation.kind, Kind::Impl)
+            || implementation.local
+            || implementation.dynamic
+            || implementation.opaque
+            || !implementation.bodies.is_empty()
+            || self.has_bevy_runtime_access(implementation)
+        {
+            return false;
+        }
+        let Some(interface) = implementation.implemented_trait.as_deref() else {
+            return false;
+        };
+        let Some(trait_decl) =
+            self.resolve(&implementation.namespace, interface, &mut BTreeSet::new())
+        else {
+            return false;
+        };
+        matches!(trait_decl.kind, Kind::Trait)
+            && trait_decl.reference_paths.iter().any(|path| {
+                self.resolve(&trait_decl.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|target| {
+                        target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                    })
+            })
+    }
+
+    fn record_job_adapter(&self, job: &Declaration, keys: &mut BTreeSet<String>) {
+        keys.insert(job.key.clone());
+        for implementation in self.implementations(job) {
+            if !implementation.production
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                continue;
+            }
+            let standard_trait = implementation
+                .implemented_trait
+                .as_deref()
+                .is_some_and(|name| {
+                    matches!(
+                        name.rsplit("::").next().unwrap_or(name),
+                        "Clone" | "Debug" | "PartialEq" | "Eq" | "Default"
+                    )
+                });
+            if self.real_job_impl(implementation)
+                || self.job_subtrait_marker_impl(implementation)
+                || implementation.implemented_trait.is_none()
+                || standard_trait
+            {
+                keys.insert(implementation.key.clone());
+            }
+        }
+    }
+
+    fn ensure_enum_owner_candidates(&self) {
+        if self.enum_owner_candidates.borrow().is_some() {
+            return;
+        }
+        let mut by_name: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for entry in self.entries.values() {
+            if !entry.production || !matches!(entry.kind, Kind::Struct) {
+                continue;
+            }
+            let mut names = BTreeSet::new();
+            for path in entry
+                .field_paths
+                .iter()
+                .chain(entry.reference_paths.iter())
+                .chain(entry.required_components.iter())
+            {
+                for segment in path.split("::") {
+                    names.insert(segment);
+                }
+            }
+            for implementation in self.implementations(entry) {
+                if !implementation.production {
+                    continue;
+                }
+                for path in implementation
+                    .field_paths
+                    .iter()
+                    .chain(implementation.reference_paths.iter())
+                {
+                    for segment in path.split("::") {
+                        names.insert(segment);
+                    }
+                }
+            }
+            for name in names {
+                by_name
+                    .entry(name.to_string())
+                    .or_default()
+                    .push(entry.key.clone());
+            }
+        }
+        *self.enum_owner_candidates.borrow_mut() = Some(by_name);
+    }
+
+    fn automatic_enum_purpose(&self, entry: &Declaration, policy: &Policy) -> bool {
         if !entry.production || !matches!(entry.kind, Kind::Enum) {
             return false;
         }
         let Some(shape) = &entry.enum_shape else {
             return false;
         };
-        if shape.payloads > 0 || shape.component || shape.signal || self.enum_job(entry) {
+        if shape.signal {
             return false;
         }
-        self.ensure_renderer_graph();
-        let graph = self.renderer_graph.borrow();
-        graph
-            .as_ref()
-            .is_some_and(|(_, helpers)| helpers.contains(&entry.key))
+        if shape.payloads == 0 && !shape.component && !self.enum_job(entry) {
+            let system_set = entry.derive_paths.iter().any(|path| {
+                self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("SystemSet")
+            });
+            if system_set && self.used(entry) {
+                return true;
+            }
+            self.ensure_renderer_graph();
+            if self
+                .renderer_graph
+                .borrow()
+                .as_ref()
+                .is_some_and(|(_, helpers)| helpers.contains(&entry.key))
+            {
+                return true;
+            }
+        }
+        if entry.contract_paths.iter().any(|path| {
+            self.contract_kind(&entry.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+                == Some("ui_event_variants")
+        }) && self.automatic_boundary_keys().iter().any(|owner_key| {
+            let owner = &self.entries[owner_key];
+            owner.production && self.owner_references(owner, entry)
+        }) {
+            return true;
+        }
+        self.automatic_enum_struct_owner(entry, shape, policy)
+    }
+
+    fn automatic_enum_struct_owner(
+        &self,
+        entry: &Declaration,
+        shape: &EnumShape,
+        policy: &Policy,
+    ) -> bool {
+        self.ensure_enum_owner_candidates();
+        let index = self.enum_owner_candidates.borrow();
+        let Some(owners) = index.as_ref().and_then(|map| map.get(&entry.name)) else {
+            return false;
+        };
+        for owner_key in owners {
+            let owner = &self.entries[owner_key];
+            if owner.key == entry.key {
+                continue;
+            }
+            if !entry.ecs
+                && owner.projection
+                && self.owner_references(owner, entry)
+                && self.canonical(owner, policy, &mut BTreeSet::new())
+            {
+                return true;
+            }
+            if shape.payloads > 0 {
+                continue;
+            }
+            if owner.ecs
+                && self.used(owner)
+                && (self.owner_references(owner, entry) || self.required_component(owner, entry))
+                && self.canonical(owner, policy, &mut BTreeSet::new())
+            {
+                return true;
+            }
+            if !shape.component
+                && !self.enum_job(entry)
+                && self.automatic_boundary(owner)
+                && self.owner_references(owner, entry)
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn automatic_renderer(&self, entry: &Declaration) -> bool {
@@ -12273,7 +12565,7 @@ impl Inventory {
             && !self.renderer_has_forbidden_access(entry)
     }
 
-    fn renderer_has_forbidden_access(&self, entry: &Declaration) -> bool {
+    fn has_bevy_runtime_access(&self, entry: &Declaration) -> bool {
         for path in entry.field_paths.iter().chain(entry.reference_paths.iter()) {
             if self
                 .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
@@ -12304,6 +12596,15 @@ impl Inventory {
             {
                 return true;
             }
+        }
+        false
+    }
+
+    fn renderer_has_forbidden_access(&self, entry: &Declaration) -> bool {
+        if self.has_bevy_runtime_access(entry) {
+            return true;
+        }
+        for path in entry.field_paths.iter().chain(entry.reference_paths.iter()) {
             if self
                 .external_path(&entry.namespace, path, &mut BTreeSet::new())
                 .is_some_and(|target| {
@@ -15479,6 +15780,8 @@ impl Inventory {
         *self.shadowed_roots.get_mut() = None;
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
+        *self.job_adapters.get_mut() = None;
+        *self.enum_owner_candidates.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         self.resolve_components();
         self.generate_queries();
@@ -20102,7 +20405,8 @@ fn automatic_renderer_helpers_enforce_ui_only_presentation_bounds() {
         );
     }
     assert!(inventory.automatic_enum_purpose(
-        &inventory.entries["crates/feature/example/src/lib.rs||enum:SidebarView"]
+        &inventory.entries["crates/feature/example/src/lib.rs||enum:SidebarView"],
+        &Policy::default(),
     ));
     for key in [
         "crates/feature/example/src/lib.rs||enum:PayloadChoice",
@@ -20115,6 +20419,75 @@ fn automatic_renderer_helpers_enforce_ui_only_presentation_bounds() {
         );
     }
     assert!(!inventory.automatic_enum_purpose(
-        &inventory.entries["crates/feature/example/src/lib.rs||enum:PayloadChoice"]
+        &inventory.entries["crates/feature/example/src/lib.rs||enum:PayloadChoice"],
+        &Policy::default(),
     ));
+}
+
+#[test]
+fn automatic_job_adapters_require_registered_job_plugin_and_concrete_struct() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_ecs/src/jobs.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; use bevy_ecs::prelude::*; pub trait Job { type Output; fn run(self) -> Self::Output; } pub struct JobPlugin<J: Job>(PhantomData<fn() -> J>); impl<J: Job> Default for JobPlugin<J> { fn default() -> Self { Self(PhantomData) } } impl<J: Job> Plugin for JobPlugin<J> { fn build(&self, app: &mut App) { let _ = app; } }",
+    );
+    inventory.source(
+        "crates/feature/worker/src/lib.rs",
+        "use bevy_app::{App, Plugin}; use vmux_ecs::jobs::{Job, JobPlugin}; pub trait IoJob: Job<Output = Result<Self::Data, String>> { type Data; } pub struct Tracked<J: IoJob>(J); impl<J: IoJob> Job for Tracked<J> { type Output = Result<J::Data, String>; fn run(self) -> Self::Output { self.0.run() } } pub struct IoPlugin<J: IoJob>(std::marker::PhantomData<fn() -> J>); impl<J: IoJob> Default for IoPlugin<J> { fn default() -> Self { Self(std::marker::PhantomData) } } impl<J: IoJob> Plugin for IoPlugin<J> { fn build(&self, app: &mut App) { app.add_plugins(JobPlugin::<Tracked<J>>::default()); } } struct ReadDirect; impl Job for ReadDirect { type Output = u32; fn run(self) -> u32 { 1 } } struct ReadWrapped; impl IoJob for ReadWrapped { type Data = u32; } impl Job for ReadWrapped { type Output = Result<u32, String>; fn run(self) -> Result<u32, String> { Ok(1) } } struct UnregisteredJob; impl Job for UnregisteredJob { type Output = u32; fn run(self) -> u32 { 0 } } enum EnumJob { A, B } impl Job for EnumJob { type Output = u32; fn run(self) -> u32 { 0 } } struct BadBevyJob; impl Job for BadBevyJob { type Output = u32; fn run(self) -> u32 { let _: Option<bevy_ecs::prelude::World> = None; 0 } } struct RootPlugin; impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_plugins((JobPlugin::<ReadDirect>::default(), IoPlugin::<ReadWrapped>::default(), JobPlugin::<EnumJob>::default(), JobPlugin::<BadBevyJob>::default())); } }",
+    );
+    inventory.resolve_usage();
+    for key in [
+        "crates/feature/worker/src/lib.rs||struct:ReadDirect",
+        "crates/feature/worker/src/lib.rs||impl:Job for ReadDirect",
+        "crates/feature/worker/src/lib.rs||struct:Tracked",
+        "crates/feature/worker/src/lib.rs||impl:Job for Tracked < J >",
+        "crates/feature/worker/src/lib.rs||struct:ReadWrapped",
+        "crates/feature/worker/src/lib.rs||impl:Job for ReadWrapped",
+        "crates/feature/worker/src/lib.rs||impl:IoJob for ReadWrapped",
+    ] {
+        assert!(
+            inventory.automatic_boundary(&inventory.entries[key]),
+            "expected proved job adapter: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/worker/src/lib.rs||struct:UnregisteredJob",
+        "crates/feature/worker/src/lib.rs||impl:Job for UnregisteredJob",
+        "crates/feature/worker/src/lib.rs||enum:EnumJob",
+        "crates/feature/worker/src/lib.rs||impl:Job for EnumJob",
+        "crates/feature/worker/src/lib.rs||struct:BadBevyJob",
+        "crates/feature/worker/src/lib.rs||impl:Job for BadBevyJob",
+    ] {
+        assert!(
+            !inventory.automatic_boundary(&inventory.entries[key]),
+            "expected rejected job adapter: {key}"
+        );
+    }
+}
+
+#[test]
+fn automatic_enum_purposes_prove_unit_canonical_and_system_set_enums() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)] enum WorkSet { Prepare, Apply } #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)] enum UnusedSet { A } #[derive(Component, Default)] enum LifecyclePhase { #[default] Pending, Done } #[derive(Component)] #[require(LifecyclePhase)] struct Task; #[derive(Clone, Copy)] enum Tone { Quiet, Loud } #[derive(Component)] struct Banner { tone: Tone } #[derive(Message)] enum BadSignal { Go, Stop } #[derive(Component)] enum BadPayload { One(u32), Two } fn run(tasks: Query<(&Task, &LifecyclePhase)>, banners: Query<&Banner>) { let _ = (tasks, banners); } struct RootPlugin; impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_message::<BadSignal>().add_systems(Update, run.in_set(WorkSet::Apply)); } }",
+    );
+    let policy = Policy {
+        values: vec![ValueOwner {
+            key: inventory.key("enum:Tone"),
+            owner: inventory.key("struct:Banner"),
+            lifetime: "One banner tone".into(),
+        }],
+        ..Default::default()
+    };
+    for name in ["enum:WorkSet", "enum:LifecyclePhase", "enum:Tone"] {
+        assert!(
+            inventory.automatic_enum_purpose(&inventory.entries[&inventory.key(name)], &policy),
+            "expected proved enum purpose: {name}"
+        );
+    }
+    for name in ["enum:UnusedSet", "enum:BadSignal", "enum:BadPayload"] {
+        assert!(
+            !inventory.automatic_enum_purpose(&inventory.entries[&inventory.key(name)], &policy),
+            "expected rejected enum purpose: {name}"
+        );
+    }
 }

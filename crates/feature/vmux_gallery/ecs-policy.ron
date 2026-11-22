@@ -31,13 +31,4 @@
 
 
 ],
-    shape: (
-        enums: [(
-            key: "crates/feature/vmux_gallery/src/catalog.rs||enum:Story",
-            fingerprint: "9c97adb7d95bc552",
-            role: Scalar,
-            owner: "crates/feature/vmux_gallery/src/host.rs||struct:Preview",
-            reason: "One selected component example on a canonical hosted preview; separate typed UI events express each interaction.",
-        )],
-    ),
 )
