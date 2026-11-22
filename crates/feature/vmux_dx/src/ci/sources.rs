@@ -640,8 +640,6 @@ impl Inputs {
         for (partition, consumer) in [
             ("framework", "framework-consumer"),
             ("framework", "host-consumer"),
-            ("framework", "framework-git-consumer"),
-            ("framework", "host-git-consumer"),
         ] {
             if self.partition == partition {
                 paths.insert(format!("{target}/{consumer}/**"));
