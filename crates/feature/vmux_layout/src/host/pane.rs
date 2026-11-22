@@ -22,10 +22,10 @@ pub use focus::{PaneHoverCooldown, PendingCursorWarp};
 use identity::IdentityPlugin;
 pub use identity::{PaneId, SpawnCounter, SpawnSeq};
 use moonshine_save::prelude::*;
+pub use open::OpenBesideRequest;
 use open::OpenPlugin;
 #[cfg(test)]
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
-pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
 pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, ResizeGrip, ResizeGripMasks};
 pub(crate) use tree::PaneHierarchy;
@@ -1996,10 +1996,10 @@ mod tests {
 
     fn split_anchor_test_sys(
         input: Res<SplitAnchorInput>,
-        ctx: PanePlacement,
+        ctx: crate::placement::PlacementQuery,
         mut out: ResMut<SplitAnchorOut>,
     ) {
-        out.0 = Some(ctx.split_anchor(input.anchor));
+        out.0 = Some(ctx.primary(input.anchor));
     }
 
     #[derive(Resource)]
@@ -2011,41 +2011,76 @@ mod tests {
     #[derive(Resource, Default)]
     struct SpiralOut(Option<Entity>);
 
-    fn spiral_test_sys(
-        input: Res<SpiralInput>,
-        mut ctx: PanePlacement,
-        mut out: ResMut<SpiralOut>,
-    ) {
-        let mut batch = std::collections::HashSet::new();
-        out.0 = Some(ctx.resolve_spiral(input.anchor, &input.url, false, &mut batch));
+    fn spiral_test_sys(input: Res<SpiralInput>, mut commands: Commands) {
+        let stack = commands
+            .spawn((Stack::bundle(), LastActivatedAt(0)))
+            .insert(PageMetadata {
+                url: input.url.clone(),
+                ..Default::default()
+            })
+            .id();
+        let operation = commands
+            .spawn(vmux_ecs::Operation::bundle("test.placement.spiral").unwrap())
+            .id();
+        commands.trigger(crate::placement::PlaceStackRequest {
+            operation,
+            stack,
+            anchor: input.anchor,
+            url: input.url.clone(),
+            direction: None,
+            automatic: true,
+            primary_anchor: false,
+            focus: false,
+        });
     }
 
-    fn spiral_app(anchor_url: &str, other: Option<(&str, u64, Vec2)>) -> (App, Entity) {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SpiralOut>()
-            .add_systems(Update, spiral_test_sys);
-        register_placement_pages(&mut app);
-        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
-        let tab = app
-            .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
-            .id();
-        let agent = place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 900.0), anchor_url);
-        if let Some((url, seq, size)) = other {
-            place_pane_with_url(&mut app, tab, seq, size, url);
+    fn spiral_placed(
+        event: On<crate::placement::StackPlaced>,
+        mut out: ResMut<SpiralOut>,
+        mut commands: Commands,
+    ) {
+        out.0 = event.result.as_ref().ok().copied();
+        commands.entity(event.operation).despawn();
+    }
+
+    struct SpiralFixture {
+        app: App,
+        agent: Entity,
+    }
+
+    impl SpiralFixture {
+        fn new(anchor_url: &str, other: Option<(&str, u64, Vec2)>) -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<SpiralOut>()
+                .add_plugins(crate::placement::PlacementPlugin)
+                .add_observer(spiral_placed)
+                .add_systems(
+                    Update,
+                    spiral_test_sys.before(crate::placement::PlacementCommitSet),
+                );
+            register_placement_pages(&mut app);
+            let space = app.world_mut().spawn((crate::space::Space, Active)).id();
+            let tab = app
+                .world_mut()
+                .spawn((
+                    Tab::default(),
+                    Active,
+                    LastActivatedAt::now(),
+                    ChildOf(space),
+                ))
+                .id();
+            let agent = place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 900.0), anchor_url);
+            if let Some((url, seq, size)) = other {
+                place_pane_with_url(&mut app, tab, seq, size, url);
+            }
+            Self { app, agent }
         }
-        (app, agent)
     }
 
     #[test]
     fn run_terminal_spirals_off_newest_nonagent_leaf() {
-        let (mut app, agent) = spiral_app(
+        let SpiralFixture { mut app, agent } = SpiralFixture::new(
             "vmux://sessions/vibe/x",
             Some(("https://a.com", 9, Vec2::new(1600.0, 900.0))),
         );
@@ -2080,7 +2115,7 @@ mod tests {
 
     #[test]
     fn run_terminal_adds_tab_to_existing_terminal_stack() {
-        let (mut app, agent) = spiral_app(
+        let SpiralFixture { mut app, agent } = SpiralFixture::new(
             "vmux://sessions/vibe/x",
             Some(("vmux://terminal/7", 9, Vec2::new(1600.0, 900.0))),
         );
