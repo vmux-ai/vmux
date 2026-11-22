@@ -17,7 +17,7 @@ use super::file_lifecycle::{
 };
 use super::file_loading_io::{Bytes, Directory, Inspect};
 use super::highlight::{FILE_VIEW_MAX_BYTES, HIGHLIGHT_MAX_BYTES};
-use super::keymap::KeymapConfig;
+use super::keymap::{EditorKeymap, KeymapConfig};
 use super::markdown::ParsedNote;
 use super::media::FileMedia;
 use super::note::NoteSent;
@@ -466,11 +466,12 @@ fn loaded(
             folds.set_indented(&core.buffer.rope);
         }
         core.viewport.fold_view = folds.view(core.buffer.len_lines() as u32);
+        let editor_keymap: EditorKeymap = keymap.keymap();
         commands
             .entity(view)
             .insert((
                 crate::host::editor::EditorBundle::new(core, highlight, folds),
-                keymap.keymap(),
+                editor_keymap,
                 vmux_git::GitDiffSource {
                     content: text.0.text.clone(),
                     dirty: false,
