@@ -244,7 +244,7 @@ impl ArchiveEditorFixture {
             .unwrap()
     }
 
-    fn reopen(&mut self) {
+    fn reopen(&mut self) -> usize {
         let mut cursor = self
             .app
             .world()
@@ -273,6 +273,7 @@ impl ArchiveEditorFixture {
             )
             .cloned()
             .collect::<Vec<_>>();
+        let count = requests.len();
         for request in requests {
             let vmux_ecs::PageOpenTarget::Stack(stack) = request.target else {
                 panic!("archive must emit an explicit Stack target");
@@ -313,6 +314,7 @@ impl ArchiveEditorFixture {
             }
         }
         self.app.update();
+        count
     }
 }
 
@@ -408,7 +410,7 @@ fn retired_restore_window_preserves_the_real_archived_editor_content() {
     fixture
         .app
         .insert_resource(RefuseWindow(Some(fixture.window)));
-    fixture.reopen();
+    assert_eq!(fixture.reopen(), 0);
     assert!(fixture.app.world().get::<ArchivedPage>(archive).is_some());
     fixture.window = fixture
         .app
@@ -426,7 +428,7 @@ fn retired_restore_window_preserves_the_real_archived_editor_content() {
         .world_mut()
         .entity_mut(space)
         .insert(HostWindow(fixture.window));
-    fixture.reopen();
+    assert_eq!(fixture.reopen(), 1);
     let reopened = fixture.ready();
     assert_eq!(fixture.text(reopened).unwrap(), edited);
     let metadata = fixture.app.world().get::<PageMetadata>(reopened).unwrap();

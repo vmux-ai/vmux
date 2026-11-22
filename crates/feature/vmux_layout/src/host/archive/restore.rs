@@ -15,6 +15,7 @@ pub(super) struct RestoreIntent {
     pub(super) space: Entity,
     pub(super) window: Entity,
     pub(super) origin_matches: bool,
+    pub(super) window_bound: bool,
 }
 
 #[derive(Component)]
@@ -55,6 +56,7 @@ pub(super) struct RestoreRequest {
     pub(super) space: Entity,
     pub(super) window: Entity,
     pub(super) origin_matches: bool,
+    pub(super) window_bound: bool,
 }
 
 pub(super) struct RestorePlugin;
@@ -239,12 +241,7 @@ impl Topology<'_, '_> {
                 .get::<Origin>(intent.root)
                 .and_then(|origin| origin.tab_index)
         {
-            let length = world
-                .get::<Children>(intent.space)
-                .map_or(0, |children| children.len());
-            world
-                .entity_mut(intent.space)
-                .insert_children(index.min(length), &[tab]);
+            Self::insert_at::<crate::tab::Tab>(world, intent.space, tab, index);
         }
         let mut pending = vec![(intent.root, tab)];
         while let Some((archive_parent, live_parent)) = pending.pop() {
@@ -279,11 +276,10 @@ impl Topology<'_, '_> {
                         .id()
                 };
                 let weight = world.get::<Weight>(archive).map_or(1.0, |weight| weight.0);
-                world.entity_mut(live).insert((
-                    crate::pane::PaneId(id),
-                    crate::pane::PaneSize { flex_grow: weight },
-                    vmux_ecs::LastActivatedAt(0),
-                ));
+                world
+                    .entity_mut(live)
+                    .insert((crate::pane::PaneId(id), vmux_ecs::LastActivatedAt(0)));
+                Self::apply_weight(world, live, weight);
                 if archive_parent == intent.root {
                     world
                         .entity_mut(live)
@@ -542,10 +538,13 @@ fn admit(request: On<RestoreRequest>, topology: Topology, mut commands: Commands
         .get(request.root)
         .map_or(true, |claimed| claimed.is_some())
     {
-        commands.entity(request.operation).insert((
-            vmux_ecs::OperationState::Failed,
-            vmux_ecs::OperationError::new("archive is unavailable or already claimed").unwrap(),
-        ));
+        commands
+            .entity(request.operation)
+            .remove::<vmux_ecs::OperationRetained>()
+            .insert((
+                vmux_ecs::OperationState::Failed,
+                vmux_ecs::OperationError::new("archive is unavailable or already claimed").unwrap(),
+            ));
         return;
     }
     commands.entity(request.operation).insert((
@@ -554,6 +553,7 @@ fn admit(request: On<RestoreRequest>, topology: Topology, mut commands: Commands
             space: request.space,
             window: request.window,
             origin_matches: request.origin_matches,
+            window_bound: request.window_bound,
         },
         EntityTarget::<Root>::new(request.root),
         Pending,
@@ -664,22 +664,26 @@ impl Topology<'_, '_> {
                 }
                 let axis = world.get::<Split>(archive).map(Split::axis);
                 let weight = world.get::<Weight>(archive).map_or(1.0, |weight| weight.0);
-                let child = world
-                    .spawn((
-                        crate::pane::Pane::bundle(),
-                        crate::pane::PaneId(id),
-                        ChildOf(live),
-                        ScaffoldOwner(operation),
-                    ))
-                    .id();
-                world
-                    .entity_mut(child)
-                    .insert(crate::pane::PaneSize { flex_grow: weight });
-                if let Some(axis) = axis {
+                let child = if let Some(axis) = axis {
                     world
-                        .entity_mut(child)
-                        .insert(crate::pane::Pane::split_bundle(Self::direction(axis)));
-                }
+                        .spawn((
+                            crate::pane::Pane::split_bundle(Self::direction(axis)),
+                            crate::pane::PaneId(id),
+                            ChildOf(live),
+                            ScaffoldOwner(operation),
+                        ))
+                        .id()
+                } else {
+                    world
+                        .spawn((
+                            crate::pane::Pane::bundle(),
+                            crate::pane::PaneId(id),
+                            ChildOf(live),
+                            ScaffoldOwner(operation),
+                        ))
+                        .id()
+                };
+                Self::apply_weight(world, child, weight);
                 let index = world
                     .get::<vmux_ecs::Order>(archive)
                     .map_or(usize::MAX, |order| order.0 as usize);
@@ -691,6 +695,14 @@ impl Topology<'_, '_> {
                 .insert(RestoreBinding { operation, live });
         }
         Self::first_leaf(world, live)
+    }
+
+    fn apply_weight(world: &mut World, entity: Entity, weight: f32) {
+        let mut entity = world.entity_mut(entity);
+        entity.insert(crate::pane::PaneSize { flex_grow: weight });
+        if let Some(mut node) = entity.get_mut::<vmux_flex::Node>() {
+            node.flex_grow = weight;
+        }
     }
 
     fn direction(axis: vmux_ecs::SplitAxis) -> crate::pane::PaneSplitDirection {
@@ -755,18 +767,20 @@ impl Topology<'_, '_> {
             let weight = slot
                 .and_then(|slot| world.get::<Weight>(slot))
                 .map_or(1.0, |weight| weight.0);
-            world
-                .entity_mut(survivor)
-                .insert(crate::pane::PaneSize { flex_grow: weight });
+            Self::apply_weight(world, survivor, weight);
             Self::insert_at::<crate::pane::Pane>(
                 world,
                 live,
                 survivor,
                 if target_order == 0 { 1 } else { 0 },
             );
+            let live_weight = world
+                .get::<crate::pane::PaneSize>(live)
+                .map_or(1.0, |size| size.flex_grow);
             world
                 .entity_mut(live)
                 .insert(crate::pane::Pane::split_bundle(Self::direction(axis)));
+            Self::apply_weight(world, live, live_weight);
             world.entity_mut(archive).remove::<Promotion>();
         }
     }
@@ -886,13 +900,16 @@ impl Topology<'_, '_> {
         for _ in 0..128 {
             if let Some(host) = world.get::<bevy_cef::prelude::HostWindow>(current) {
                 window = Some(host.0);
+                break;
             }
             let Some(parent) = world.get::<ChildOf>(current) else {
                 break;
             };
             current = parent.parent();
         }
-        if window.is_some_and(|window| window != intent.window) {
+        if window.is_some_and(|window| window != intent.window)
+            || (intent.window_bound && window.is_none())
+        {
             return Err("archive restore Space changed windows".into());
         }
         Self::validate_topology(intent.root, world, nodes)
@@ -1027,12 +1044,18 @@ mod tests {
                 .world_mut()
                 .spawn(vmux_ecs::Operation::bundle("archive.restore").unwrap())
                 .id();
+            let window_bound = self
+                .app
+                .world()
+                .get::<bevy_cef::prelude::HostWindow>(self.space)
+                .is_some();
             self.app.world_mut().trigger(RestoreRequest {
                 operation,
                 root,
                 space: self.space,
                 window: self.window,
                 origin_matches: true,
+                window_bound,
             });
             self.app.update();
         }

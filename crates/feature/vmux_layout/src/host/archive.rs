@@ -343,7 +343,12 @@ fn capture_tab(world: &mut World, tab: Entity) {
         return;
     };
     let mut state = bevy::ecs::system::SystemState::<TabArchiveLayout>::new(world);
+    let selected_stack = state
+        .get(world)
+        .ok()
+        .and_then(|layout| layout.focus.resolve(Some(tab)).2);
     let mut pending = vec![(tab, root)];
+    let mut selected_page = None;
     let mut active = None;
     while let Some((live_parent, archive_parent)) = pending.pop() {
         if live_parent != tab && world.get::<PaneSplit>(live_parent).is_none() {
@@ -353,6 +358,8 @@ fn capture_tab(world: &mut World, tab: Entity) {
                 root,
                 live_parent,
                 archive_parent,
+                selected_stack,
+                &mut selected_page,
                 &mut active,
             );
             continue;
@@ -396,7 +403,7 @@ fn capture_tab(world: &mut World, tab: Entity) {
             pending.push((live, archive));
         }
     }
-    if let Some((page, _)) = active {
+    if let Some(page) = selected_page.or_else(|| active.map(|(page, _)| page)) {
         world.entity_mut(page).insert(Active);
     } else {
         world.despawn(root);
@@ -440,6 +447,8 @@ fn capture_tab_pages(
     root: Entity,
     live: Entity,
     archive: Entity,
+    selected_stack: Option<Entity>,
+    selected_page: &mut Option<Entity>,
     active: &mut Option<(Entity, i64)>,
 ) {
     let stacks = world
@@ -471,6 +480,9 @@ fn capture_tab_pages(
                 ChildOf(archive),
             ))
             .id();
+        if selected_stack == Some(stack) {
+            *selected_page = Some(page);
+        }
         if active.is_none_or(|(_, time)| activated >= time) {
             *active = Some((page, activated));
         }
@@ -506,6 +518,7 @@ fn maintain(roots: Query<(Entity, &CreatedAt), With<topology::Root>>, mut comman
 
 #[derive(SystemParam)]
 pub(super) struct TabArchiveLayout<'w, 's> {
+    focus: crate::stack::LayoutFocus<'w, 's>,
     surfaces: crate::hosted_page::StackSurface<'w, 's>,
     surface_metadata: Query<'w, 's, &'static PageMetadata, With<crate::Browser>>,
     stack_pages: Query<
@@ -831,9 +844,8 @@ impl ReopenLayout<'_, '_> {
                     .find(|entity| self.any_space.contains(*entity))
             })
             .or_else(|| self.any_space.iter().next())?;
-        let window = self
-            .window_hierarchy
-            .get(space)
+        let bound_window = self.window_hierarchy.get(space);
+        let window = bound_window
             .or(focused_window)
             .or_else(|| self.primary_window.single().ok())?;
         Some(restore::RestoreIntent {
@@ -841,59 +853,90 @@ impl ReopenLayout<'_, '_> {
             space,
             origin_matches: origin_space == Some(space),
             window,
+            window_bound: bound_window.is_some(),
         })
     }
 }
 
-fn handle_reopen_closed_page(
-    mut reader: MessageReader<ReopenClosedPage>,
+#[derive(SystemParam)]
+struct ReopenRequest<'w, 's> {
+    reader: MessageReader<'w, 's, ReopenClosedPage>,
     archived: Query<
-        (Entity, &CreatedAt, &topology::Origin),
+        'w,
+        's,
+        (Entity, &'static CreatedAt, &'static topology::Origin),
         (
             With<topology::Root>,
             Without<restore::Claimed>,
             Without<topology::InvalidTopology>,
         ),
     >,
-    layout: ReopenLayout,
-    mut commands: Commands,
+    layout: ReopenLayout<'w, 's>,
+}
+
+fn handle_reopen_closed_page(
+    world: &mut World,
+    state: &mut bevy::ecs::system::SystemState<ReopenRequest>,
 ) {
-    if reader.read().count() == 0 {
-        return;
+    let (candidate, latest, item_page) = {
+        let Ok(mut params) = state.get_mut(world) else {
+            return;
+        };
+        if params.reader.read().count() == 0 {
+            return;
+        }
+        let candidate = params
+            .archived
+            .iter()
+            .max_by_key(|(root, closed_at, _)| (closed_at.0, root.to_bits()))
+            .map(|(root, closed_at, origin)| (root, closed_at.0, origin.space_id.clone()));
+        let latest = candidate.as_ref().map_or(0, |(_, closed_at, _)| *closed_at);
+        let (_, _, stack) = params.layout.focus.resolve(params.layout.active_tab.get());
+        let item_page = stack
+            .and_then(|stack| params.layout.surfaces.current(stack))
+            .filter(|page| {
+                params
+                    .layout
+                    .item_history
+                    .get(*page)
+                    .is_ok_and(|history| history.closed_at >= latest)
+            });
+        (candidate, latest, item_page)
+    };
+    if let Some(page) = item_page {
+        let request = vmux_ecs::page::ReopenItemRequest::new(page, latest);
+        world.trigger(request.clone());
+        world.flush();
+        if request.handled() {
+            return;
+        }
     }
-    let Some((root, closed_at, origin)) = archived
-        .iter()
-        .max_by_key(|(root, closed_at, _)| (closed_at.0, root.to_bits()))
-    else {
+    let Some((root, _, space_id)) = candidate else {
         return;
     };
-    let (_, _, stack) = layout.focus.resolve(layout.active_tab.get());
-    if let Some(page) = stack.and_then(|stack| layout.surfaces.current(stack))
-        && layout
-            .item_history
-            .get(page)
-            .is_ok_and(|history| history.closed_at >= closed_at.0)
-    {
-        commands.trigger(vmux_ecs::page::ReopenItemRequest::new(page, closed_at.0));
-        return;
-    }
-    let Some(target) = layout.target(root, &origin.space_id) else {
+    let target = state
+        .get(world)
+        .ok()
+        .and_then(|params| params.layout.target(root, &space_id));
+    let Some(target) = target else {
         return;
     };
-    let operation = commands
+    let operation = world
         .spawn((
             Name::new("Restore archived layout"),
             vmux_ecs::Operation::bundle("archive.restore").unwrap(),
             vmux_ecs::OperationRetained,
         ))
         .id();
-    commands.trigger(restore::RestoreRequest {
+    world.trigger(restore::RestoreRequest {
         operation,
         root,
         space: target.space,
         window: target.window,
         origin_matches: target.origin_matches,
+        window_bound: target.window_bound,
     });
+    world.flush();
 }
 
 #[cfg(test)]
@@ -1147,13 +1190,14 @@ mod tests {
         restored.dispatch_reopen();
         let panes = restored
             .world_mut()
-            .query::<(Entity, &PaneId, &PaneSize)>()
+            .query::<(Entity, &PaneId, &PaneSize, &vmux_flex::Node)>()
             .iter(restored.world())
-            .map(|(entity, id, size)| (entity, id.0.clone(), size.flex_grow))
+            .map(|(entity, id, size, node)| (entity, id.0.clone(), size.flex_grow, node.flex_grow))
             .collect::<Vec<_>>();
         assert_eq!(panes.len(), 5);
-        let empty = panes.iter().find(|(_, id, _)| id == "empty").unwrap();
+        let empty = panes.iter().find(|(_, id, _, _)| id == "empty").unwrap();
         assert_eq!(empty.2, 3.0);
+        assert_eq!(empty.3, 3.0);
         assert!(
             restored
                 .world()
@@ -1163,7 +1207,7 @@ mod tests {
         assert!(
             panes
                 .iter()
-                .any(|(_, id, weight)| id == "nested" && *weight == 2.0)
+                .any(|(_, id, weight, node)| id == "nested" && *weight == 2.0 && *node == 2.0)
         );
         let selected = restored
             .world_mut()
