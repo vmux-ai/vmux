@@ -47,14 +47,14 @@ pub(super) struct RepositoryReadRequest {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(super) struct SourceIdentity {
+pub struct SourceIdentity {
     path: PathIdentity,
     directory: Option<(u64, u64)>,
     marker: Option<(u64, u64, u64, i64, i64)>,
 }
 
 impl SourceIdentity {
-    pub(super) fn capture(path: &Path) -> Self {
+    pub fn capture(path: &Path) -> Self {
         let path = PathIdentity::resolve(path);
         Self {
             directory: Self::metadata(path.as_path()),
@@ -82,8 +82,12 @@ impl SourceIdentity {
         Some((metadata.dev(), metadata.ino(), 0, 0, 0))
     }
 
-    pub(super) fn matches(&self, path: &Path) -> bool {
+    pub fn matches(&self, path: &Path) -> bool {
         *self == Self::capture(path)
+    }
+
+    pub fn path(&self) -> &Path {
+        self.path.as_path()
     }
 
     fn valid(&self) -> bool {

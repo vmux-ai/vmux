@@ -156,12 +156,16 @@ pub struct StartSelectWorkspace {
 #[vmux_api::ui_event(Default)]
 pub struct StartBranchesRequest {
     pub project: String,
+    #[serde(default)]
+    pub request_id: u64,
 }
 
 #[vmux_api::contract(Default)]
 pub struct StartProjectBranches {
     pub project: String,
     pub branches: Vec<crate::space::ProjectBranch>,
+    #[serde(default)]
+    pub request_id: u64,
 }
 
 #[vmux_api::ui_event(Default)]

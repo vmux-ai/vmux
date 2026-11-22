@@ -19,6 +19,7 @@ use bevy::prelude::*;
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 pub use diff::GitDiffSource;
+pub use read::SourceIdentity as RepositorySource;
 pub use repository::{GitError, GitRepository};
 pub use repository_provision::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,

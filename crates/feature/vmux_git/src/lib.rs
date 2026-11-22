@@ -4,7 +4,7 @@ use sha2::Digest;
 pub use host::{
     FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
     GitRuntime, GitTask, RepoInfoCache, RepositoryProvisionCompleted, RepositoryProvisionOperation,
-    RepositoryProvisionRequest, worktree,
+    RepositoryProvisionRequest, RepositorySource, worktree,
 };
 
 pub(crate) struct Feature;
