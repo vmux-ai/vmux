@@ -3881,7 +3881,7 @@ fn canonical_components_and_registered_systems_share_one_owner() {
 #[test]
 fn entity_events_resolve_through_module_aliases_and_barrel_exports() {
     let inventory = Inventory::fixture(
-        "mod events { #[derive(EntityEvent)] pub struct Received { entity: Entity } } mod bridge { pub use crate::events::*; } pub use bridge as input; fn receive(event: On<crate::input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_observer(receive); } }",
+        "use bevy_app::{App,Plugin};use bevy_ecs::prelude::On;mod events { use bevy_ecs::prelude::{EntityEvent,Entity};#[derive(EntityEvent)] pub struct Received { entity: Entity } } mod bridge { pub use crate::events::*; } pub use bridge as input; fn receive(event: On<crate::input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_observer(receive); } }",
     );
     let event = inventory.key("events|struct:Received");
     let system = inventory.key("fn:receive");
@@ -3895,7 +3895,7 @@ fn entity_events_resolve_through_module_aliases_and_barrel_exports() {
     let mut shadowed = Inventory::default();
     shadowed.source(
         "crates/feature/input/src/lib.rs",
-        "extern crate self as input; #[derive(EntityEvent)] pub struct Received { entity:Entity }",
+        "extern crate self as input;use bevy_ecs::prelude::{EntityEvent,Entity}; #[derive(EntityEvent)] pub struct Received { entity:Entity }",
     );
     shadowed.source(
         "crates/feature/consumer/src/lib.rs",
@@ -3903,7 +3903,7 @@ fn entity_events_resolve_through_module_aliases_and_barrel_exports() {
     );
     shadowed.source(
         "crates/feature/client/src/lib.rs",
-        "fn accepted(event:On<input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(accepted); } }",
+        "use bevy_app::{App,Plugin};use bevy_ecs::prelude::On;fn accepted(event:On<input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(accepted); } }",
     );
     shadowed.resolve_usage();
     let accepted = shadowed.key("fn:accepted");
@@ -3952,13 +3952,13 @@ fn entity_events_resolve_through_module_aliases_and_barrel_exports() {
 
 #[test]
 fn shallow_barrel_probes_do_not_consume_the_recursion_budget() {
-    let mut source = String::from("mod bag {");
+    let mut source = String::from("use bevy_app::{App,Plugin};use bevy_ecs::prelude::On;mod bag {");
     for index in 0..200 {
         source.push_str(&format!(
             "mod a{index:03} {{}} pub use self::a{index:03}::*;"
         ));
     }
-    source.push_str("mod zed { #[derive(EntityEvent)] pub struct Received { entity:Entity } } pub use self::zed::*; } use bag::*; fn receive(event:On<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }");
+    source.push_str("mod zed { use bevy_ecs::prelude::{EntityEvent,Entity};#[derive(EntityEvent)] pub struct Received { entity:Entity } } pub use self::zed::*; } use bag::*; fn receive(event:On<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }");
     let inventory = Inventory::fixture(&source);
     let system = inventory.key("fn:receive");
     assert!(inventory.canonical(
@@ -4251,6 +4251,741 @@ fn query_data_fields_are_valid_registered_boundary_endpoints() {
         boundary.input = format!("ECS: {}", inventory.key("struct:Position"));
         boundary.output = "external: observed positions".into();
         assert!(!boundary.references_from(&inventory, &Policy::default(), &mut BTreeSet::new()));
+    }
+}
+
+#[test]
+fn bundle_ownership_requires_actual_installation_and_flattened_canonical_fields() {
+    for (extra, installation, expected) in [
+        (
+            "",
+            "commands.spawn(Outer { inner:Inner { left:Left(1) }, right:Right(2) });",
+            true,
+        ),
+        (
+            "",
+            "commands.entity(Entity::PLACEHOLDER).insert(Outer { inner:Inner { left:Left(1) }, right:Right(2) });",
+            true,
+        ),
+        (
+            "",
+            "commands.spawn((ChildOf(Entity::PLACEHOLDER),Outer { inner:Inner { left:Left(1) }, right:Right(2) }));",
+            true,
+        ),
+        (
+            "struct ChildOf(Entity);",
+            "commands.spawn((ChildOf(Entity::PLACEHOLDER),Outer { inner:Inner { left:Left(1) }, right:Right(2) }));",
+            false,
+        ),
+        (
+            "",
+            "let value=Outer { inner:Inner { left:Left(1) }, right:Right(2) }; drop(value);",
+            false,
+        ),
+        (
+            "struct Fake; impl Fake { fn spawn<T>(&mut self,value:T){} }",
+            "let mut fake=Fake; fake.spawn(Outer { inner:Inner { left:Left(1) }, right:Right(2) });",
+            false,
+        ),
+        (
+            "",
+            "if false { commands.spawn(Outer { inner:Inner { left:Left(1) }, right:Right(2) }); }",
+            false,
+        ),
+        (
+            "",
+            "#[cfg(any())] commands.spawn(Outer { inner:Inner { left:Left(1) }, right:Right(2) });",
+            false,
+        ),
+        (
+            "",
+            "let closure=|| { commands.spawn(Outer { inner:Inner { left:Left(1) }, right:Right(2) }); };",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; #[derive(Component)] struct Left(i32); #[derive(Component)] struct Right(i32); #[derive(Bundle)] struct Inner{{left:Left}} #[derive(Bundle)] struct Outer{{inner:Inner,right:Right}} {extra} fn install(mut commands:Commands){{{installation}}} struct OwnerPlugin; impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,install);}}}}"
+        );
+        let inventory = Inventory::fixture(&source);
+        for key in ["struct:Inner", "struct:Outer"] {
+            assert_eq!(
+                inventory.canonical(
+                    &inventory.entries[&inventory.key(key)],
+                    &Policy::default(),
+                    &mut BTreeSet::new()
+                ),
+                expected,
+                "{key}: {installation}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bundle_constructors_and_aliases_preserve_the_actual_component_graph() {
+    for source in [
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Bundle as Group,Component,Commands}; #[derive(Component)] struct State(u32);type Leaf=State; #[derive(Group)] struct Inner{state:Leaf} impl Inner{fn new()->Self{Self{state:State(1)}}} #[derive(Group)] struct Outer{inner:Inner} impl Outer{fn new(inner:Inner)->Self{Self{inner}}} type Alias=Outer; fn install(mut commands:Commands){commands.spawn(Alias::new(Inner::new()));} struct OwnerPlugin; impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){app.add_systems(Update,install);}}",
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Bundle as Group,Component,Commands}; use bevy_ecs::system::SystemParam; #[derive(Component)] struct State(u32);type Leaf=State; #[derive(Group)] struct Inner{state:Leaf} impl Inner{fn new()->Self{Self{state:State(1)}}} #[derive(Group)] struct Outer{inner:Inner} impl Outer{fn new(inner:Inner)->Self{Self{inner}}} type Alias=Outer; #[derive(SystemParam)] struct Transfer<'w,'s>{commands:Commands<'w,'s>} impl Transfer<'_,'_>{fn spawn(&mut self){self.commands.spawn(Alias::new(Inner::new()));}} fn install(mut transfer:Transfer){transfer.spawn();} struct OwnerPlugin; impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){app.add_systems(Update,install);}}",
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Bundle as Group,Component,Commands}; use bevy_ecs::system::SystemParam; #[derive(Component)] struct State(u32);type Leaf=State; #[derive(Group)] struct Inner{state:Leaf} impl Inner{fn new()->Self{Self{state:State(1)}}} #[derive(Group)] struct Outer{inner:Inner} impl Outer{fn new(inner:Inner)->Self{Self{inner}}} type Alias=Outer; #[derive(SystemParam)] struct Transfer<'w,'s>{commands:Commands<'w,'s>} fn install(mut transfer:Transfer){transfer.commands.spawn(Alias::new(Inner::new()));} struct OwnerPlugin; impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){app.add_systems(Update,install);}}",
+    ] {
+        let inventory = Inventory::fixture(source);
+        for key in [
+            "struct:Inner",
+            "struct:Outer",
+            "impl:Inner",
+            "impl:Outer",
+            "alias:Alias",
+            "alias:Leaf",
+        ] {
+            assert!(
+                inventory.canonical(
+                    &inventory.entries[&inventory.key(key)],
+                    &Policy::default(),
+                    &mut BTreeSet::new()
+                ),
+                "{key}: {source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bundle_ignored_or_unowned_fields_and_fake_derives_are_not_owners() {
+    for declaration in [
+        "struct Row{value:u32} #[derive(Component)] struct State{rows:Vec<Row>} #[derive(Bundle)] struct Outer{state:State}",
+        "struct Engine{rows:Vec<u32>} #[derive(Component)] struct State(u32); #[derive(Bundle)] struct Outer{state:State,#[bundle(ignore)] engine:Engine}",
+        "struct Bundle; #[derive(Component)] struct State(u32); #[derive(Bundle)] struct Outer{state:State}",
+        "mod fake{pub struct Bundle;} #[derive(Component)] struct State(u32); #[derive(fake::Bundle)] struct Outer{state:State}",
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; {declaration} fn install(mut commands:Commands){{commands.entity(Entity::PLACEHOLDER).remove::<Outer>();}} struct OwnerPlugin; impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,install);}}}}"
+        ));
+        assert!(!inventory.canonical(
+            &inventory.entries[&inventory.key("struct:Outer")],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+    }
+}
+
+#[test]
+fn event_registration_resolves_concrete_traits_and_keeps_fixture_scope_separate() {
+    let source = "use bevy_app::{App as Host,Plugin,Update}; use bevy_ecs::prelude::*; trait Intent:EntityEvent {fn value(&self)->u32;} #[derive(EntityEvent)] struct Request{entity:Entity,value:u32} impl Intent for Request{fn value(&self)->u32{self.value}} #[cfg(test)] #[derive(EntityEvent)] struct FixtureRequest{entity:Entity,value:u32} #[cfg(test)] impl Intent for FixtureRequest{fn value(&self)->u32{self.value}} fn receive<T:Intent>(input:On<T>){} struct OwnerPlugin; impl Plugin for OwnerPlugin{fn build(&self,app:&mut Host){app.add_observer(receive::<Request>); #[cfg(test)] app.add_observer(receive::<FixtureRequest>);}}";
+    let inventory = Inventory::fixture(source);
+    for key in [
+        "struct:Request",
+        "struct:FixtureRequest",
+        "impl:Intent for FixtureRequest",
+        "trait:Intent",
+        "fn:receive",
+    ] {
+        assert!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key(key)],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "{key}"
+        );
+    }
+    let fixture = &inventory.entries[&inventory.key("struct:FixtureRequest")];
+    assert!(!inventory.event_used_keys.contains(&fixture.key));
+    assert!(inventory.fixture_event_used_keys.contains(&fixture.key));
+}
+
+#[test]
+fn event_trait_proof_refuses_fake_unused_and_unowned_implementors() {
+    for (extra, event, registration) in [
+        (
+            "",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "",
+        ),
+        (
+            "struct EntityEvent;",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "app.add_observer(receive::<Request>);",
+        ),
+        (
+            "",
+            "#[derive(Event)] struct Request{entity:Entity,value:u32}",
+            "app.add_observer(receive::<Request>);",
+        ),
+        (
+            "struct Engine{value:u32}",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:Engine}",
+            "app.add_observer(receive::<Request>);",
+        ),
+        (
+            "",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "app.observe(receive::<Request>);",
+        ),
+        (
+            "struct Fake;impl Fake{fn add_observer<T>(&mut self,value:T){}}",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "let mut app=Fake;app.add_observer(receive::<Request>);",
+        ),
+        (
+            "struct Fake;impl Fake{fn add_observer<T>(&mut self,value:T){}}",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "let (mut app,_)= (Fake,0);app.add_observer(receive::<Request>);",
+        ),
+        (
+            "",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "if false {app.add_observer(receive::<Request>);}",
+        ),
+        (
+            "",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "#[cfg(any())] app.add_observer(receive::<Request>);",
+        ),
+        (
+            "",
+            "#[derive(EntityEvent)] struct Request{entity:Entity,value:u32}",
+            "let closure=||{app.add_observer(receive::<Request>);};",
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin}}; use bevy_ecs::prelude::*; {extra} trait Intent:EntityEvent{{fn value(&self)->u32;}} {event} impl Intent for Request{{fn value(&self)->u32{{1}}}} fn receive<T:Intent>(input:On<T>){{}} struct OwnerPlugin; impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{{registration}}}}}"
+        ));
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key("trait:Intent")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "{event}: {registration}"
+        );
+    }
+}
+
+#[test]
+fn event_fixture_registration_does_not_authorize_production_event_ownership() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; #[derive(EntityEvent)] struct Request{entity:Entity} fn receive<T:EntityEvent>(input:On<T>){} struct OwnerPlugin; impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){#[cfg(test)] app.add_observer(receive::<Request>);}}",
+    );
+    let event = &inventory.entries[&inventory.key("struct:Request")];
+    assert!(!inventory.event_used_keys.contains(&event.key));
+    assert!(inventory.fixture_event_used_keys.contains(&event.key));
+    assert!(!inventory.canonical(event, &Policy::default(), &mut BTreeSet::new()));
+}
+
+#[test]
+fn bundle_generic_storage_checks_concrete_retained_fields_and_scope() {
+    for (value, installation, expected) in [
+        (
+            "u32",
+            "commands.spawn(Outer::<u32,4>{state:State(1)});",
+            true,
+        ),
+        (
+            "Engine",
+            "commands.entity(Entity::PLACEHOLDER).remove::<Outer<Engine,4>>();",
+            false,
+        ),
+        (
+            "Box<Engine>",
+            "commands.entity(Entity::PLACEHOLDER).remove::<Outer<Box<Engine>,4>>();",
+            false,
+        ),
+        (
+            "u32",
+            "#[cfg(test)] commands.entity(Entity::PLACEHOLDER).remove::<Outer<u32,4>>();",
+            false,
+        ),
+        (
+            "u32",
+            "#[cfg(any())] let ignored=commands.entity(Entity::PLACEHOLDER).remove::<Outer<u32,4>>();",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "use bevy_app::{{App,Plugin,Update}};use bevy_ecs::prelude::*;struct Engine{{value:u32}} #[derive(Component)] struct State<T>(T); #[derive(Bundle)] struct Outer<T:Send+Sync+'static,const N:usize>{{state:State<T>}} fn install(mut commands:Commands){{{installation}}} struct OwnerPlugin;impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,install);}}}}"
+        );
+        let inventory = Inventory::fixture(&source);
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("struct:Outer")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{value}: {installation}"
+        );
+    }
+}
+
+#[test]
+fn bundle_receiver_identity_survives_aliases_but_not_shadow_or_dead_locals() {
+    for (installation, expected) in [
+        (
+            "let mut world=World::new(); let value:Outer=Outer{state:State(1)};world.spawn(value);",
+            true,
+        ),
+        (
+            "let mut entity=commands.entity(Entity::PLACEHOLDER);entity.insert(Outer{state:State(1)});",
+            true,
+        ),
+        (
+            "let mut commands=Fake;commands.spawn(Outer{state:State(1)});",
+            false,
+        ),
+        (
+            "struct Plain<'w,'s>{commands:Commands<'w,'s>} let mut plain=Plain{commands};plain.commands.spawn(Outer{state:State(1)});",
+            false,
+        ),
+        (
+            "#[cfg(any())] let ignored=commands.spawn(Outer{state:State(1)});",
+            false,
+        ),
+        (
+            "#[cfg(test)] let ignored=commands.spawn(Outer{state:State(1)});",
+            false,
+        ),
+        (
+            "let future=async {commands.spawn(Outer{state:State(1)});};",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}};use bevy_ecs::prelude::*;#[derive(Component)]struct State(u32);#[derive(Bundle)]struct Outer{{state:State}}struct Fake;impl Fake{{fn spawn<T>(&mut self,value:T){{}}}}fn install(mut commands:Commands){{{installation}}}struct OwnerPlugin;impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,install);}}}}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("struct:Outer")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{installation}"
+        );
+    }
+}
+
+#[test]
+fn event_open_plugin_parameters_do_not_resolve_same_named_concrete_types() {
+    for (argument, expected) in [("S", false), ("self::S", true)] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin}};use bevy_ecs::prelude::*;trait Intent:EntityEvent{{}}#[derive(EntityEvent)]struct S{{entity:Entity,value:u32}}impl Intent for S{{}}fn receive<T:Intent>(event:On<T>){{}}struct BridgePlugin<S>(std::marker::PhantomData<S>);impl<S:Intent>Plugin for BridgePlugin<S>{{fn build(&self,app:&mut App){{app.add_observer(receive::<{argument}>);}}}}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("trait:Intent")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{argument}"
+        );
+    }
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin};use bevy_ecs::prelude::*;trait State:Send+Sync+'static{type Update:Send+Sync+'static;}struct Input;impl State for Input{type Update=u32;}trait Intent:EntityEvent{}#[derive(EntityEvent)]struct Request<S:State>{entity:Entity,value:S::Update}impl Intent for Request<Input>{}fn receive<T:Intent>(event:On<T>){}struct OwnerPlugin;impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){app.add_observer(receive::<Request<Input>>);}}",
+    );
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("trait:Intent")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn event_generic_instances_refuse_wrong_impl_patterns_and_hidden_payloads() {
+    for (payload, implementation, registration, expected) in [
+        (
+            "u32",
+            "impl Intent for Request<u32,4>{}",
+            "app.add_observer(receive::<Request<u32,4>>);",
+            true,
+        ),
+        (
+            "u32",
+            "impl Intent for Request<u32,4>{}",
+            "app.add_observer(receive::<Alias>);",
+            true,
+        ),
+        (
+            "u32",
+            "impl Intent for Request<u32,4>{}",
+            "app.add_observer(receive::<Request<u32,5>>);",
+            false,
+        ),
+        (
+            "u32",
+            "impl Intent for Request<u32,4>{}",
+            "app.add_observer(receive::<Request<String,4>>);",
+            false,
+        ),
+        (
+            "(u32,u32)",
+            "impl<T:Send+Sync+'static>Intent for Request<(T,T),4>{}",
+            "app.add_observer(receive::<Request<(u32,u32),4>>);",
+            true,
+        ),
+        (
+            "(u32,String)",
+            "impl<T:Send+Sync+'static>Intent for Request<(T,T),4>{}",
+            "app.add_observer(receive::<Request<(u32,String),4>>);",
+            false,
+        ),
+        (
+            "std::result::Result<u32,String>",
+            "impl Intent for Request<std::result::Result<u32,String>,4>{}",
+            "app.add_observer(receive::<Request<std::result::Result<u32,String>,4>>);",
+            true,
+        ),
+        (
+            "Engine",
+            "impl Intent for Request<Engine,4>{}",
+            "app.add_observer(receive::<Request<Engine,4>>);",
+            false,
+        ),
+        (
+            "Box<Engine>",
+            "impl Intent for Request<Box<Engine>,4>{}",
+            "app.add_observer(receive::<Request<Box<Engine>,4>>);",
+            false,
+        ),
+        (
+            "u32",
+            "#[cfg(test)]impl Intent for Request<u32,4>{}",
+            "app.add_observer(receive::<Request<u32,4>>);",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin}};use bevy_ecs::prelude::*;struct Engine{{value:u32}}mod unrelated{{pub struct Result<T>{{value:T}}}}trait Intent:EntityEvent{{}}#[derive(EntityEvent)]struct Request<T:Send+Sync+'static,const N:usize>{{entity:Entity,value:T}}type Alias=Request<u32,4>;{implementation}fn receive<T:Intent>(input:On<T>){{}}struct OwnerPlugin;impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{{registration}}}}}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("trait:Intent")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{payload}: {registration}"
+        );
+        if expected && registration.contains("::<Alias>") {
+            assert!(inventory.canonical(
+                &inventory.entries[&inventory.key("alias:Alias")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ));
+        }
+    }
+}
+
+#[test]
+fn event_registration_cfg_on_local_and_block_preserves_execution_scope() {
+    for (registration, production, fixture) in [
+        ("app.add_observer(receive::<Request>);", true, false),
+        (
+            "#[cfg(test)]let installed=app.add_observer(receive::<Request>);",
+            false,
+            true,
+        ),
+        (
+            "#[cfg(test)]{app.add_observer(receive::<Request>);}",
+            false,
+            true,
+        ),
+        (
+            "#[cfg_attr(not(test),cfg(test))]app.add_observer(receive::<Request>);",
+            false,
+            true,
+        ),
+        (
+            "#[cfg_attr(all(),cfg(any()))]app.add_observer(receive::<Request>);",
+            false,
+            false,
+        ),
+        (
+            "#[cfg_attr(test,cfg(any()))]app.add_observer(receive::<Request>);",
+            true,
+            false,
+        ),
+        (
+            "#[cfg(any())]let installed=app.add_observer(receive::<Request>);",
+            false,
+            false,
+        ),
+        (
+            "#[cfg(any())]{app.add_observer(receive::<Request>);}",
+            false,
+            false,
+        ),
+        (
+            "let future=async{app.add_observer(receive::<Request>);};",
+            false,
+            false,
+        ),
+        (
+            "if false{app.add_observer(receive::<Request>);}",
+            false,
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin}};use bevy_ecs::prelude::*;#[derive(EntityEvent)]struct Request{{entity:Entity}}fn receive<T:EntityEvent>(input:On<T>){{}}struct OwnerPlugin;impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{{registration}}}}}"
+        ));
+        let event = &inventory.entries[&inventory.key("struct:Request")];
+        assert_eq!(
+            inventory.event_used_keys.contains(&event.key),
+            production,
+            "{registration}"
+        );
+        assert_eq!(
+            inventory.fixture_event_used_keys.contains(&event.key),
+            fixture,
+            "{registration}"
+        );
+    }
+}
+
+#[test]
+fn event_trait_signatures_cannot_authorize_unowned_capability_engines() {
+    for (signature, expected) in [
+        ("fn value(&self)->u32;", true),
+        ("type Output;fn value(&self)->Self::Output;", false),
+        ("fn value<T>(&self,input:T)->T;", false),
+        ("fn engine(&self)->&Engine;", false),
+        ("fn create(&self)->Engine{Engine{value:1}}", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin}};use bevy_ecs::prelude::*;struct Engine{{value:u32}}trait Intent:EntityEvent{{{signature}}}#[derive(EntityEvent)]struct Request{{entity:Entity}}impl Intent for Request{{}}fn receive<T:Intent>(input:On<T>){{}}struct OwnerPlugin;impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{app.add_observer(receive::<Request>);}}}}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("trait:Intent")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{signature}"
+        );
+    }
+}
+
+#[test]
+fn event_fixture_callbacks_propagate_real_query_data_without_production_credit() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin};use bevy_ecs::prelude::*;use bevy_ecs::query::QueryData;#[cfg(test)]#[derive(Component)]struct Position(u32);#[cfg(test)]#[derive(QueryData)]struct View{position:&'static Position}#[cfg(test)]#[derive(EntityEvent)]struct Request{entity:Entity}fn receive<T:EntityEvent,V:QueryData>(input:On<T>,values:Query<V>){}struct OwnerPlugin;impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){#[cfg(test)]app.add_observer(receive::<Request,View>);}}",
+    );
+    let view = &inventory.entries[&inventory.key("struct:View")];
+    assert!(!inventory.query_used_keys.contains(&view.key));
+    assert!(inventory.fixture_query_used_keys.contains(&view.key));
+    assert!(inventory.canonical(view, &Policy::default(), &mut BTreeSet::new()));
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("struct:Position")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let callback = &inventory.entries[&inventory.key("fn:receive")];
+    assert!(!inventory.registered(callback));
+}
+
+#[test]
+fn event_nested_envelopes_validate_each_retained_specialization() {
+    for (argument, expected) in [("u32", true), ("Engine", false)] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin}};use bevy_ecs::prelude::*;struct Engine{{value:u32}}#[derive(Event)]struct Payload<T:Send+Sync+'static>{{value:T}}#[derive(Event)]struct Envelope<T:Send+Sync+'static>{{payload:Option<Payload<T>>}}fn receive(input:On<Envelope<{argument}>>){{}}struct OwnerPlugin;impl Plugin for OwnerPlugin{{fn build(&self,app:&mut App){{app.add_observer(receive);}}}}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("struct:Envelope")],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{argument}"
+        );
+    }
+}
+
+#[test]
+fn event_generic_callbacks_refuse_generated_query_items_instead_of_descriptors() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin};use bevy_ecs::prelude::*;use bevy_ecs::query::QueryData;#[derive(Component)]struct Position(u32);#[derive(QueryData)]struct View{position:&'static Position}trait Intent:EntityEvent{}#[derive(EntityEvent)]struct Request{entity:Entity}impl Intent for Request{}fn receive<T:Intent>(input:On<T>,values:Query<ViewItem<'_, '_>>){}struct OwnerPlugin;impl Plugin for OwnerPlugin{fn build(&self,app:&mut App){app.add_observer(receive::<Request>);}}",
+    );
+    let event = &inventory.entries[&inventory.key("struct:Request")];
+    assert!(!inventory.event_used_keys.contains(&event.key));
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("trait:Intent")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[cfg(test)]
+mod ecs_interface_behavior_oracle {
+    use bevy_app::{App, Plugin};
+    use bevy_ecs::prelude::{Bundle, Component, World};
+    use bevy_ecs::prelude::{Commands, Entity, EntityEvent, Event, On, Query};
+
+    #[derive(Component)]
+    struct Counter(i32);
+
+    #[derive(Component)]
+    struct Label(String);
+
+    #[derive(Bundle)]
+    struct Inner {
+        counter: Counter,
+    }
+
+    #[derive(Bundle)]
+    struct Document {
+        inner: Inner,
+        label: Label,
+    }
+
+    #[derive(Component)]
+    struct Epoch(u64);
+
+    trait Intent: EntityEvent {
+        fn epoch(&self) -> u64;
+        fn delta(&self) -> i32;
+    }
+
+    #[derive(EntityEvent)]
+    struct Increase {
+        entity: Entity,
+        epoch: u64,
+        amount: i32,
+    }
+
+    impl Intent for Increase {
+        fn epoch(&self) -> u64 {
+            self.epoch
+        }
+        fn delta(&self) -> i32 {
+            self.amount
+        }
+    }
+
+    #[derive(EntityEvent)]
+    struct Decrease {
+        entity: Entity,
+        epoch: u64,
+        amount: i32,
+    }
+
+    impl Intent for Decrease {
+        fn epoch(&self) -> u64 {
+            self.epoch
+        }
+        fn delta(&self) -> i32 {
+            -self.amount
+        }
+    }
+
+    #[cfg(test)]
+    #[derive(EntityEvent)]
+    struct FixtureIncrease {
+        entity: Entity,
+    }
+
+    #[cfg(test)]
+    impl Intent for FixtureIncrease {
+        fn epoch(&self) -> u64 {
+            7
+        }
+        fn delta(&self) -> i32 {
+            4
+        }
+    }
+
+    #[derive(Event)]
+    struct Forward<E: Event> {
+        event: Option<E>,
+    }
+
+    fn apply<T: Intent>(input: On<T>, mut counters: Query<(&mut Counter, &Epoch)>) {
+        let Ok((mut counter, epoch)) = counters.get_mut(input.event_target()) else {
+            return;
+        };
+        if epoch.0 != input.epoch() {
+            return;
+        }
+        counter.0 += input.delta();
+    }
+
+    fn forward<E: Event>(mut input: On<Forward<E>>, mut commands: Commands)
+    where
+        for<'a> E::Trigger<'a>: Default,
+    {
+        if let Some(event) = input.event_mut().event.take() {
+            commands.trigger(event);
+        }
+    }
+
+    struct EventOwnerPlugin;
+
+    impl Plugin for EventOwnerPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_observer(apply::<Increase>)
+                .add_observer(apply::<Decrease>)
+                .add_observer(forward::<Decrease>);
+            #[cfg(test)]
+            app.add_observer(apply::<FixtureIncrease>);
+        }
+    }
+
+    #[test]
+    fn event_observers_bind_concrete_payloads_and_refuse_stale_target_epochs() {
+        let mut app = App::new();
+        app.add_plugins(EventOwnerPlugin);
+        let target = app.world_mut().spawn((Counter(10), Epoch(7))).id();
+        app.world_mut().trigger(Increase {
+            entity: target,
+            epoch: 7,
+            amount: 5,
+        });
+        app.world_mut().trigger(Decrease {
+            entity: target,
+            epoch: 8,
+            amount: 50,
+        });
+        app.world_mut().trigger(Forward {
+            event: Some(Decrease {
+                entity: target,
+                epoch: 7,
+                amount: 3,
+            }),
+        });
+        app.world_mut().trigger(FixtureIncrease { entity: target });
+        app.update();
+        assert_eq!(app.world().get::<Counter>(target).unwrap().0, 16);
+        app.world_mut().get_mut::<Epoch>(target).unwrap().0 = 8;
+        app.world_mut().trigger(Increase {
+            entity: target,
+            epoch: 7,
+            amount: 100,
+        });
+        app.update();
+        assert_eq!(app.world().get::<Counter>(target).unwrap().0, 16);
+    }
+
+    #[test]
+    fn bundle_move_preserves_mutated_canonical_components_and_removes_source() {
+        let mut world = World::new();
+        let source = world
+            .spawn(Document {
+                inner: Inner {
+                    counter: Counter(10),
+                },
+                label: Label("buffer".into()),
+            })
+            .id();
+        world.get_mut::<Counter>(source).unwrap().0 += 6;
+        let document = world.entity_mut(source).take::<Document>().unwrap();
+        assert!(world.get::<Counter>(source).is_none());
+        assert!(world.get::<Label>(source).is_none());
+        let target = world.spawn(document).id();
+        world.get_mut::<Counter>(target).unwrap().0 += 3;
+        assert_eq!(world.get::<Counter>(target).unwrap().0, 19);
+        assert_eq!(world.get::<Label>(target).unwrap().0, "buffer");
     }
 }
 
@@ -8729,6 +9464,11 @@ enum Kind {
 
 #[derive(Clone)]
 struct Declaration {
+    registrations: BTreeSet<Registration>,
+    generic_traits: BTreeMap<String, BTreeSet<String>>,
+    syntax: Option<Item>,
+    bundle_options: Option<bool>,
+    bundle_derive: Option<String>,
     key: String,
     path: String,
     namespace: String,
@@ -8792,6 +9532,81 @@ struct Declaration {
 }
 
 impl Declaration {
+    fn generic_traits(item: &Item) -> BTreeMap<String, BTreeSet<String>> {
+        let generics = match item {
+            Item::Fn(value) => &value.sig.generics,
+            Item::Struct(value) => &value.generics,
+            Item::Impl(value) => &value.generics,
+            _ => return BTreeMap::new(),
+        };
+        let mut result: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for parameter in &generics.params {
+            let syn::GenericParam::Type(value) = parameter else {
+                continue;
+            };
+            for bound in &value.bounds {
+                if let syn::TypeParamBound::Trait(bound) = bound {
+                    result
+                        .entry(value.ident.unraw().to_string())
+                        .or_default()
+                        .insert(References::path(&bound.path));
+                }
+            }
+        }
+        if let Some(clause) = &generics.where_clause {
+            for predicate in &clause.predicates {
+                let syn::WherePredicate::Type(value) = predicate else {
+                    continue;
+                };
+                let Type::Path(path) = &value.bounded_ty else {
+                    continue;
+                };
+                if path.qself.is_some() || path.path.segments.len() != 1 {
+                    continue;
+                }
+                for bound in &value.bounds {
+                    if let syn::TypeParamBound::Trait(bound) = bound {
+                        result
+                            .entry(References::path(&path.path))
+                            .or_default()
+                            .insert(References::path(&bound.path));
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    fn bundle_attributes(attributes: &[Attribute], fields: &syn::Fields) -> Option<bool> {
+        let mut reconstruction = true;
+        for attribute in Declarations::metadata(attributes, false) {
+            if !attribute.path().is_ident("bundle") {
+                continue;
+            }
+            let syn::Meta::List(list) = attribute else {
+                return None;
+            };
+            let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+            for option in parser.parse2(list.tokens).ok()? {
+                match option {
+                    syn::Meta::Path(path) if path.is_ident("ignore_from_components") => {
+                        reconstruction = false;
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        for field in fields {
+            if Declarations::metadata(&field.attrs, false)
+                .iter()
+                .any(|attribute| attribute.path().is_ident("bundle"))
+            {
+                return None;
+            }
+        }
+        Some(reconstruction)
+    }
+
     fn query_attributes(attributes: &[Attribute]) -> Option<bool> {
         let mut mutable = false;
         for attribute in Declarations::metadata(attributes, false) {
@@ -8908,6 +9723,12 @@ impl Instantiations {
 
 #[derive(Default)]
 struct Inventory {
+    interface_fields: BTreeMap<String, Vec<(bool, Vec<Type>)>>,
+    event_used_keys: BTreeSet<String>,
+    fixture_event_used_keys: BTreeSet<String>,
+    event_instantiations: Vec<(String, bool, BTreeMap<String, syn::GenericArgument>)>,
+    bundle_used_keys: BTreeSet<String>,
+    fixture_bundle_used_keys: BTreeSet<String>,
     sources: BTreeMap<String, String>,
     parsed: BTreeMap<String, (String, Rc<syn::File>)>,
     resolved_namespaces: BTreeMap<String, BTreeSet<String>>,
@@ -8946,6 +9767,1062 @@ struct DeclarationLookup {
 }
 
 impl Inventory {
+    fn concrete_interface_fields(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        production: bool,
+        records: &mut BTreeMap<String, Vec<(bool, Vec<Type>)>>,
+        visited: &mut BTreeSet<String>,
+    ) {
+        let Type::Path(path) = value else {
+            if let Type::Tuple(value) = value {
+                for field in &value.elems {
+                    self.concrete_interface_fields(caller, field, production, records, visited);
+                }
+            }
+            return;
+        };
+        let Some(owner) = self.resolve(
+            &caller.namespace,
+            &References::path(&path.path),
+            &mut BTreeSet::new(),
+        ) else {
+            for argument in References::arguments(&path.path) {
+                if let Ok(field) = syn::parse_str::<Type>(&argument) {
+                    self.concrete_interface_fields(caller, &field, production, records, visited);
+                }
+            }
+            return;
+        };
+        if !visited.insert(owner.key.clone()) {
+            return;
+        }
+        if matches!(owner.kind, Kind::Alias) {
+            if let Some(value) = self.query_alias(caller, path, owner) {
+                self.concrete_interface_fields(owner, &value, production, records, visited);
+            }
+            visited.remove(&owner.key);
+            return;
+        }
+        if owner.bundle_derive.is_none()
+            && self.event_interface(owner).is_none()
+            && !self.query_component(caller, value)
+        {
+            visited.remove(&owner.key);
+            return;
+        }
+        let Some(bindings) = self.type_bindings(
+            &caller.namespace,
+            &owner.generic_parameters,
+            &owner.generic_bindings,
+            &References::arguments(&path.path),
+            &BTreeMap::new(),
+        ) else {
+            return;
+        };
+        let mut fields = Vec::new();
+        for field in &owner.field_types {
+            let field = Bindings::apply(self, &owner.namespace, &bindings, field);
+            self.concrete_interface_fields(owner, &field, production, records, visited);
+            fields.push(field);
+        }
+        records
+            .entry(owner.key.clone())
+            .or_default()
+            .push((production, fields));
+        visited.remove(&owner.key);
+    }
+
+    fn canonical_interface_fields(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        let Some(instances) = self.interface_fields.get(&entry.key) else {
+            return false;
+        };
+        let mut matched = false;
+        for (production, fields) in instances {
+            if *production != entry.production {
+                continue;
+            }
+            matched = true;
+            let mut references = References::default();
+            for field in fields {
+                if !self.phantom_marker_type(&entry.namespace, field, &mut BTreeSet::new()) {
+                    references.visit_type(field);
+                }
+            }
+            if references.local || references.dynamic || references.opaque {
+                return false;
+            }
+            for path in references.paths {
+                if entry
+                    .generic_bindings
+                    .contains(path.split("::").next().unwrap())
+                {
+                    return false;
+                }
+                if let Some(owner) = self.resolve(&entry.namespace, &path, &mut BTreeSet::new()) {
+                    if entry.production && !owner.production
+                        || !self.canonical(owner, policy, &mut visited.clone())
+                    {
+                        return false;
+                    }
+                    if !owner.generic_bindings.is_empty()
+                        && owner.component_path.is_some()
+                        && !self.canonical_interface_fields(owner, policy, &mut visited.clone())
+                    {
+                        return false;
+                    }
+                } else if self.names.contains_key(path.rsplit("::").next().unwrap())
+                    && !self.standard_result(entry, &path)
+                    && !self.external_type(entry, &path)
+                {
+                    return false;
+                }
+            }
+        }
+        matched
+    }
+
+    fn event_interface(&self, entry: &Declaration) -> Option<bool> {
+        let Some(Item::Struct(value)) = &entry.syntax else {
+            return None;
+        };
+        let mut entity = None;
+        for path in &entry.derive_paths {
+            match self
+                .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+            {
+                Some("EntityEvent") => entity = Some(true),
+                Some("Event") if entity.is_none() => entity = Some(false),
+                _ => {}
+            }
+        }
+        let entity = entity?;
+        for attribute in Declarations::metadata(&value.attrs, false) {
+            if !matches!(
+                attribute
+                    .path()
+                    .get_ident()
+                    .map(|value| value.to_string())
+                    .as_deref(),
+                Some("event" | "entity_event")
+            ) {
+                continue;
+            }
+            let syn::Meta::List(list) = attribute else {
+                return None;
+            };
+            let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+            for option in parser.parse2(list.tokens).ok()? {
+                match option {
+                    syn::Meta::Path(path)
+                        if entity
+                            && matches!(
+                                path.get_ident().map(|value| value.to_string()).as_deref(),
+                                Some("propagate" | "auto_propagate")
+                            ) => {}
+                    _ => return None,
+                }
+            }
+        }
+        if !entity {
+            return Some(false);
+        }
+        let field = match &value.fields {
+            syn::Fields::Named(fields) => fields.named.iter().find(|field| {
+                field.ident.as_ref().is_some_and(|name| name == "entity")
+                    || field
+                        .attrs
+                        .iter()
+                        .any(|attribute| attribute.path().is_ident("event_target"))
+            }),
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => fields.unnamed.first(),
+            syn::Fields::Unnamed(fields) => fields.unnamed.iter().find(|field| {
+                field
+                    .attrs
+                    .iter()
+                    .any(|attribute| attribute.path().is_ident("event_target"))
+            }),
+            _ => None,
+        }?;
+        let Type::Path(value) = &field.ty else {
+            return None;
+        };
+        (self
+            .framework_handle(
+                &entry.namespace,
+                &References::path(&value.path),
+                &mut BTreeSet::new(),
+            )
+            .as_deref()
+            == Some("Entity"))
+        .then_some(true)
+    }
+
+    fn event_trait_interface(
+        &self,
+        entry: &Declaration,
+        visited: &mut BTreeSet<String>,
+    ) -> Option<bool> {
+        if !visited.insert(entry.key.clone()) {
+            return None;
+        }
+        let Some(Item::Trait(value)) = &entry.syntax else {
+            return None;
+        };
+        let mut result = None;
+        for bound in &value.supertraits {
+            let syn::TypeParamBound::Trait(bound) = bound else {
+                continue;
+            };
+            let path = References::path(&bound.path);
+            let kind = match self
+                .framework_handle(&entry.namespace, &path, &mut BTreeSet::new())
+                .as_deref()
+            {
+                Some("EntityEvent") => Some(true),
+                Some("Event") => Some(false),
+                _ => self
+                    .resolve(&entry.namespace, &path, &mut BTreeSet::new())
+                    .and_then(|entry| self.event_trait_interface(entry, visited)),
+            };
+            if kind == Some(true) || result.is_none() {
+                result = kind;
+            }
+        }
+        visited.remove(&entry.key);
+        result
+    }
+
+    fn event_fields(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        visited: &mut BTreeSet<String>,
+    ) -> Option<BTreeSet<String>> {
+        if let Type::Tuple(value) = value {
+            let mut fields = BTreeSet::new();
+            for value in &value.elems {
+                fields.extend(
+                    self.event_fields(caller, value, visited)
+                        .unwrap_or_default(),
+                );
+            }
+            return Some(fields);
+        }
+        let Type::Path(value) = value else {
+            return None;
+        };
+        if value.qself.is_some() {
+            return None;
+        }
+        if self
+            .framework_handle(
+                &caller.namespace,
+                &References::path(&value.path),
+                &mut BTreeSet::new(),
+            )
+            .as_deref()
+            == Some("Option")
+        {
+            let arguments = References::arguments(&value.path);
+            return self.event_fields(
+                caller,
+                &syn::parse_str::<Type>(arguments.first()?).ok()?,
+                visited,
+            );
+        }
+        let owner = self.resolve(
+            &caller.namespace,
+            &References::path(&value.path),
+            &mut BTreeSet::new(),
+        )?;
+        if !visited.insert(owner.key.clone()) {
+            return None;
+        }
+        if matches!(owner.kind, Kind::Alias) {
+            let value = self.query_alias(caller, value, owner)?;
+            let mut fields = self.event_fields(owner, &value, visited)?;
+            fields.insert(owner.key.clone());
+            visited.remove(&owner.key);
+            return Some(fields);
+        }
+        self.event_interface(owner)?;
+        let bindings = self.type_bindings(
+            &caller.namespace,
+            &owner.generic_parameters,
+            &owner.generic_bindings,
+            &References::arguments(&value.path),
+            &BTreeMap::new(),
+        )?;
+        let mut fields = BTreeSet::from([owner.key.clone()]);
+        for field in &owner.field_types {
+            let field = Bindings::apply(self, &owner.namespace, &bindings, field);
+            if let Some(nested) = self.event_fields(owner, &field, visited) {
+                fields.extend(nested);
+            }
+        }
+        visited.remove(&owner.key);
+        Some(fields)
+    }
+
+    fn event_parameter(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        visited: &mut BTreeSet<String>,
+    ) -> Option<BTreeSet<String>> {
+        match value {
+            Type::Tuple(value) => {
+                let mut fields = BTreeSet::new();
+                for field in &value.elems {
+                    fields.extend(
+                        self.event_parameter(caller, field, visited)
+                            .unwrap_or_default(),
+                    );
+                }
+                Some(fields)
+            }
+            Type::Path(value) if value.qself.is_none() => {
+                let name = References::path(&value.path);
+                let handle = self.framework_handle(&caller.namespace, &name, &mut BTreeSet::new());
+                if handle.as_deref() == Some("On") {
+                    let arguments = References::arguments(&value.path);
+                    let event = syn::parse_str::<Type>(arguments.first()?).ok()?;
+                    return self.event_fields(caller, &event, &mut BTreeSet::new());
+                }
+                if handle.as_deref() == Some("Option") {
+                    let arguments = References::arguments(&value.path);
+                    return self.event_parameter(
+                        caller,
+                        &syn::parse_str::<Type>(arguments.first()?).ok()?,
+                        visited,
+                    );
+                }
+                let owner = self.resolve(&caller.namespace, &name, &mut BTreeSet::new())?;
+                if !visited.insert(owner.key.clone()) {
+                    return None;
+                }
+                if matches!(owner.kind, Kind::Alias) {
+                    let field = self.query_alias(caller, value, owner)?;
+                    let fields = self.event_parameter(owner, &field, visited);
+                    visited.remove(&owner.key);
+                    return fields;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn event_parameter_fields(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        production: bool,
+        records: &mut BTreeMap<String, Vec<(bool, Vec<Type>)>>,
+    ) {
+        let Type::Path(value) = value else {
+            if let Type::Tuple(value) = value {
+                for field in &value.elems {
+                    self.event_parameter_fields(caller, field, production, records);
+                }
+            }
+            return;
+        };
+        let name = References::path(&value.path);
+        let handle = self.framework_handle(&caller.namespace, &name, &mut BTreeSet::new());
+        if matches!(handle.as_deref(), Some("On" | "Option")) {
+            let arguments = References::arguments(&value.path);
+            let Some(field) = arguments
+                .first()
+                .and_then(|value| syn::parse_str::<Type>(value).ok())
+            else {
+                return;
+            };
+            if handle.as_deref() == Some("On") {
+                self.concrete_interface_fields(
+                    caller,
+                    &field,
+                    production,
+                    records,
+                    &mut BTreeSet::new(),
+                );
+            } else {
+                self.event_parameter_fields(caller, &field, production, records);
+            }
+        } else if let Some(owner) = self.resolve(&caller.namespace, &name, &mut BTreeSet::new())
+            && matches!(owner.kind, Kind::Alias)
+            && let Some(field) = self.query_alias(caller, value, owner)
+        {
+            self.event_parameter_fields(owner, &field, production, records);
+        }
+    }
+
+    fn event_callback_query(
+        &self,
+        function: &Declaration,
+        bindings: &BTreeMap<String, syn::GenericArgument>,
+    ) -> bool {
+        let mut references = References {
+            parameter_inventory: Some(self),
+            parameter_namespace: &function.namespace,
+            valid: true,
+            ..Default::default()
+        };
+        for field in &function.field_types {
+            let value = Bindings::apply(self, &function.namespace, bindings, field);
+            references.visit_type(&value);
+        }
+        !references.invalid_query
+    }
+
+    fn resolve_event_usage(&mut self) {
+        let mut production = BTreeSet::new();
+        let mut fixtures = BTreeSet::new();
+        let mut instances = Vec::new();
+        let mut records = BTreeMap::new();
+        for implementation in self.entries.values() {
+            if !implementation.plugin
+                || implementation
+                    .plugin_path
+                    .as_deref()
+                    .and_then(|path| {
+                        self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+                    })
+                    .as_deref()
+                    != Some("Plugin")
+            {
+                continue;
+            }
+            for registration in &implementation.registrations {
+                if !registration.observer
+                    || self
+                        .framework_handle(
+                            &implementation.namespace,
+                            &registration.app,
+                            &mut BTreeSet::new(),
+                        )
+                        .as_deref()
+                        != Some("App")
+                {
+                    continue;
+                }
+                let Some(function) = self.function_reference(
+                    &implementation.namespace,
+                    &registration.callback,
+                    &mut BTreeSet::new(),
+                ) else {
+                    continue;
+                };
+                if !function.private || registration.production && !function.production {
+                    continue;
+                }
+                let Some(bindings) = self.observer_bindings(implementation, function, registration)
+                else {
+                    continue;
+                };
+                if !self.event_bounds(function, &bindings, registration.production)
+                    || !self.event_callback_query(function, &bindings)
+                {
+                    continue;
+                }
+                let mut fields = BTreeSet::new();
+                let mut concrete = BTreeMap::new();
+                if !self.event_callback_fields(
+                    function,
+                    &bindings,
+                    registration.production,
+                    &mut fields,
+                    &mut concrete,
+                ) {
+                    continue;
+                }
+                if registration.production && fields.iter().any(|key| !self.entries[key].production)
+                {
+                    continue;
+                }
+                if registration.production {
+                    production.extend(fields);
+                } else {
+                    fixtures.extend(fields);
+                }
+                for (key, fields) in concrete {
+                    records.entry(key).or_insert_with(Vec::new).extend(fields);
+                }
+                instances.push((function.key.clone(), registration.production, bindings));
+            }
+        }
+        for key in production.iter().chain(&fixtures) {
+            if self.event_interface(&self.entries[key]).is_some() {
+                self.entries.get_mut(key).unwrap().ecs = true;
+            }
+        }
+        self.event_used_keys = production;
+        self.fixture_event_used_keys = fixtures;
+        self.used_keys.extend(self.event_used_keys.iter().cloned());
+        self.fixture_used_keys
+            .extend(self.fixture_event_used_keys.iter().cloned());
+        self.event_instantiations = instances;
+        for (key, fields) in records {
+            self.interface_fields.entry(key).or_default().extend(fields);
+        }
+    }
+
+    fn observer_bindings(
+        &self,
+        caller: &Declaration,
+        function: &Declaration,
+        registration: &Registration,
+    ) -> Option<BTreeMap<String, syn::GenericArgument>> {
+        for argument in &registration.arguments {
+            let value = syn::parse_str::<syn::GenericArgument>(argument).ok()?;
+            let mut references = References::default();
+            references.visit_generic_argument(&value);
+            if references.paths.iter().any(|path| {
+                caller
+                    .generic_bindings
+                    .contains(path.split("::").next().unwrap())
+            }) {
+                return None;
+            }
+        }
+        self.type_bindings(
+            &caller.namespace,
+            &function.generic_parameters,
+            &function.generic_bindings,
+            &registration.arguments,
+            &BTreeMap::new(),
+        )
+    }
+
+    fn event_callback_fields(
+        &self,
+        function: &Declaration,
+        bindings: &BTreeMap<String, syn::GenericArgument>,
+        production: bool,
+        fields: &mut BTreeSet<String>,
+        records: &mut BTreeMap<String, Vec<(bool, Vec<Type>)>>,
+    ) -> bool {
+        for parameter in &function.field_types {
+            let value = Bindings::apply(self, &function.namespace, bindings, parameter);
+            fields.extend(
+                self.event_parameter(function, &value, &mut BTreeSet::new())
+                    .unwrap_or_default(),
+            );
+            self.event_parameter_fields(function, &value, production, records);
+        }
+        if fields.is_empty() {
+            return false;
+        }
+        for (key, instances) in records {
+            let owner = &self.entries[key];
+            for (_, fields) in instances {
+                for field in fields {
+                    if self.phantom_marker_type(&owner.namespace, field, &mut BTreeSet::new()) {
+                        continue;
+                    }
+                    let mut references = References::default();
+                    references.visit_type(field);
+                    if references.paths.iter().any(|path| {
+                        owner
+                            .generic_bindings
+                            .contains(path.split("::").next().unwrap())
+                    }) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn register_event_callbacks(&mut self) {
+        for (key, production, _) in &self.event_instantiations {
+            if *production {
+                self.registered_keys.insert(key.clone());
+            } else if !self.entries[key].production {
+                self.fixture_registered_keys.insert(key.clone());
+            }
+        }
+    }
+
+    fn resolve_event_query_usage(&mut self) {
+        for (key, production, bindings) in &self.event_instantiations {
+            let function = &self.entries[key];
+            let mut references = References {
+                parameter_inventory: Some(self),
+                parameter_namespace: &function.namespace,
+                valid: true,
+                ..Default::default()
+            };
+            for parameter in &function.field_types {
+                let value = Bindings::apply(self, &function.namespace, bindings, parameter);
+                references.visit_type(&value);
+            }
+            if !references.valid || references.invalid_query || references.query_owners.is_empty() {
+                continue;
+            }
+            let queries = references.query_owners;
+            let mut components = BTreeSet::new();
+            for key in references.retained {
+                let owner = &self.entries[&key];
+                if owner
+                    .component_path
+                    .as_deref()
+                    .and_then(|path| {
+                        self.framework_handle(&owner.namespace, path, &mut BTreeSet::new())
+                    })
+                    .as_deref()
+                    == Some("Component")
+                {
+                    components.insert(key);
+                }
+            }
+            if *production {
+                self.query_used_keys.extend(queries);
+                self.used_keys.extend(components);
+            } else {
+                self.fixture_query_used_keys.extend(queries);
+                self.fixture_used_keys.extend(components);
+            }
+        }
+    }
+
+    fn event_concrete(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        visited: &mut BTreeSet<String>,
+    ) -> Option<Type> {
+        let Type::Path(path) = value else {
+            return None;
+        };
+        let owner = self.resolve(
+            &caller.namespace,
+            &References::path(&path.path),
+            &mut BTreeSet::new(),
+        )?;
+        if !visited.insert(owner.key.clone()) {
+            return None;
+        }
+        if matches!(owner.kind, Kind::Alias) {
+            let value = self.query_alias(caller, path, owner)?;
+            return self.event_concrete(owner, &value, visited);
+        }
+        self.event_interface(owner)?;
+        Some(Bindings::apply(
+            self,
+            &caller.namespace,
+            &BTreeMap::new(),
+            value,
+        ))
+    }
+
+    fn event_implementation(
+        &self,
+        required: &Declaration,
+        concrete: &Type,
+        production: bool,
+    ) -> Option<&Declaration> {
+        let mut matched = None;
+        for implementation in self.entries.values() {
+            if production && !implementation.production
+                || implementation
+                    .implemented_trait
+                    .as_deref()
+                    .and_then(|path| {
+                        self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                    })
+                    .is_none_or(|owner| owner.key != required.key)
+            {
+                continue;
+            }
+            let Some(pattern) = &implementation.implemented_type else {
+                continue;
+            };
+            if !self.bind_type(
+                &implementation.namespace,
+                pattern,
+                concrete,
+                &implementation.generic_bindings,
+                &mut BTreeMap::new(),
+            ) {
+                continue;
+            }
+            if matched.is_some() {
+                return None;
+            }
+            matched = Some(implementation);
+        }
+        matched
+    }
+
+    fn event_trait_signature(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        let Some(Item::Trait(value)) = &entry.syntax else {
+            return false;
+        };
+        if !value.generics.params.is_empty() {
+            return false;
+        }
+        for item in &value.items {
+            if matches!(item, syn::TraitItem::Type(_))
+                || matches!(item,syn::TraitItem::Fn(value) if !value.sig.generics.params.is_empty())
+            {
+                return false;
+            }
+        }
+        for path in &entry.reference_paths {
+            if let Some(owner) = self.resolve(&entry.namespace, path, &mut BTreeSet::new()) {
+                if owner.key != entry.key && !self.canonical(owner, policy, &mut visited.clone()) {
+                    return false;
+                }
+            } else if let Some(function) =
+                self.function_reference(&entry.namespace, path, &mut BTreeSet::new())
+                && !self.canonical(function, policy, &mut visited.clone())
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn event_bounds(
+        &self,
+        function: &Declaration,
+        bindings: &BTreeMap<String, syn::GenericArgument>,
+        production: bool,
+    ) -> bool {
+        for (parameter, bounds) in &function.generic_traits {
+            let Some(syn::GenericArgument::Type(value)) = bindings.get(parameter) else {
+                continue;
+            };
+            for bound in bounds {
+                let required = self.resolve(&function.namespace, bound, &mut BTreeSet::new());
+                let kind = match self
+                    .framework_handle(&function.namespace, bound, &mut BTreeSet::new())
+                    .as_deref()
+                {
+                    Some("EntityEvent") => Some(true),
+                    Some("Event") => Some(false),
+                    _ => required
+                        .and_then(|owner| self.event_trait_interface(owner, &mut BTreeSet::new())),
+                };
+                let Some(entity) = kind else {
+                    continue;
+                };
+                let Some(concrete) = self.event_concrete(function, value, &mut BTreeSet::new())
+                else {
+                    return false;
+                };
+                let Type::Path(path) = &concrete else {
+                    return false;
+                };
+                let owner = self
+                    .resolve(
+                        &function.namespace,
+                        &References::path(&path.path),
+                        &mut BTreeSet::new(),
+                    )
+                    .unwrap();
+                if entity && self.event_interface(owner) != Some(true) {
+                    return false;
+                }
+                if let Some(required) = required
+                    && self
+                        .event_implementation(required, &concrete, production)
+                        .is_none()
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    fn event_trait_owner(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        let Some(entity) = self.event_trait_interface(entry, &mut BTreeSet::new()) else {
+            return false;
+        };
+        if !self.event_trait_signature(entry, policy, visited) {
+            return false;
+        }
+        let mut owners = 0;
+        for implementation in self.entries.values() {
+            let Some(path) = &implementation.implemented_trait else {
+                continue;
+            };
+            if self
+                .resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                .is_none_or(|owner| owner.key != entry.key)
+            {
+                continue;
+            }
+            if entry.production && !implementation.production {
+                continue;
+            }
+            let Some(owner) = implementation.owner.as_deref().and_then(|path| {
+                self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+            }) else {
+                return false;
+            };
+            let Some(interface) = self.event_interface(owner) else {
+                return false;
+            };
+            if entity && !interface || !self.canonical(owner, policy, &mut visited.clone()) {
+                return false;
+            }
+            let mut used = false;
+            for (callback, production, bindings) in &self.event_instantiations {
+                if *production != entry.production {
+                    continue;
+                }
+                let function = &self.entries[callback];
+                for (parameter, bounds) in &function.generic_traits {
+                    if !bounds.iter().any(|path| {
+                        self.resolve(&function.namespace, path, &mut BTreeSet::new())
+                            .is_some_and(|value| value.key == entry.key)
+                    }) {
+                        continue;
+                    }
+                    let Some(syn::GenericArgument::Type(Type::Path(value))) =
+                        bindings.get(parameter)
+                    else {
+                        continue;
+                    };
+                    if self
+                        .event_concrete(function, &Type::Path(value.clone()), &mut BTreeSet::new())
+                        .and_then(|concrete| {
+                            self.event_implementation(entry, &concrete, *production)
+                        })
+                        .is_some_and(|actual| actual.key == implementation.key)
+                    {
+                        used = true;
+                    }
+                }
+            }
+            if !used {
+                return false;
+            }
+            owners += 1;
+        }
+        owners > 0
+    }
+
+    fn resolve_bundle_interfaces(&mut self) {
+        let mut paths = Vec::new();
+        for entry in self.entries.values() {
+            if !matches!(entry.kind, Kind::Struct) || entry.generated_query.is_some() {
+                continue;
+            }
+            let path = entry.derive_paths.iter().find(|path| {
+                self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("Bundle")
+            });
+            paths.push((entry.key.clone(), path.cloned()));
+        }
+        for (key, path) in paths {
+            self.entries.get_mut(&key).unwrap().bundle_derive = path;
+        }
+    }
+
+    fn bundle_fields(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        take: bool,
+        visited: &mut BTreeSet<String>,
+    ) -> Option<BTreeSet<String>> {
+        if let Type::Tuple(tuple) = value {
+            let mut fields = BTreeSet::new();
+            for field in &tuple.elems {
+                fields.extend(self.bundle_fields(caller, field, take, visited)?);
+            }
+            return Some(fields);
+        }
+        if let Type::Paren(value) = value {
+            return self.bundle_fields(caller, &value.elem, take, visited);
+        }
+        let Type::Path(path) = value else {
+            return None;
+        };
+        if path.qself.is_some() {
+            return None;
+        }
+        let name = References::path(&path.path);
+        let owner = self.resolve(&caller.namespace, &name, &mut BTreeSet::new());
+        if let Some(owner) = owner
+            && matches!(owner.kind, Kind::Alias)
+        {
+            if !visited.insert(owner.key.clone()) {
+                return None;
+            }
+            let value = self.query_alias(caller, path, owner)?;
+            let mut result = self.bundle_fields(owner, &value, take, visited)?;
+            result.insert(owner.key.clone());
+            visited.remove(&owner.key);
+            return Some(result);
+        }
+        if self.query_component(caller, value) {
+            return Some(owner.into_iter().map(|value| value.key.clone()).collect());
+        }
+        let owner = owner?;
+        if !visited.insert(owner.key.clone()) {
+            return None;
+        }
+        if owner.bundle_derive.is_none()
+            || owner.bundle_options.is_none()
+            || take && owner.bundle_options == Some(false)
+        {
+            return None;
+        }
+        let bindings = self.type_bindings(
+            &caller.namespace,
+            &owner.generic_parameters,
+            &owner.generic_bindings,
+            &References::arguments(&path.path),
+            &BTreeMap::new(),
+        )?;
+        let mut fields = BTreeSet::from([owner.key.clone()]);
+        for field in &owner.field_types {
+            let field = Bindings::apply(self, &owner.namespace, &bindings, field);
+            fields.extend(self.bundle_fields(owner, &field, take, visited)?);
+        }
+        visited.remove(&owner.key);
+        Some(fields)
+    }
+
+    fn resolve_bundle_usage(&mut self) {
+        self.resolve_bundle_interfaces();
+        let registered = self.real_query_registrations();
+        let mut production = BTreeSet::new();
+        let mut fixtures = BTreeSet::new();
+        let mut records = BTreeMap::new();
+        for entry in self.entries.values() {
+            let Some(syntax) = &entry.syntax else {
+                continue;
+            };
+            let mut access = EcsAccess::new(self, entry);
+            match syntax {
+                Item::Fn(function) if registered.contains(&entry.key) || entry.test => {
+                    access.production = entry.production && !entry.test;
+                    access.parameters(&function.sig);
+                    access.visit_block(&function.block);
+                }
+                Item::Impl(implementation)
+                    if entry.plugin
+                        && entry
+                            .plugin_path
+                            .as_deref()
+                            .and_then(|path| {
+                                self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                            })
+                            .as_deref()
+                            == Some("Plugin") =>
+                {
+                    for item in &implementation.items {
+                        let syn::ImplItem::Fn(function) = item else {
+                            continue;
+                        };
+                        if function.sig.ident != "build" {
+                            continue;
+                        }
+                        access.parameters(&function.sig);
+                        access.visit_block(&function.block);
+                    }
+                }
+                Item::Impl(implementation)
+                    if entry
+                        .owner
+                        .as_deref()
+                        .and_then(|path| self.resolve(&entry.namespace, path, &mut BTreeSet::new()))
+                        .is_some_and(|owner| {
+                            owner.parameter
+                                && self.used(owner)
+                                && owner
+                                    .parameter_path
+                                    .as_deref()
+                                    .and_then(|path| {
+                                        self.framework_handle(
+                                            &owner.namespace,
+                                            path,
+                                            &mut BTreeSet::new(),
+                                        )
+                                    })
+                                    .as_deref()
+                                    == Some("SystemParam")
+                        }) =>
+                {
+                    for item in &implementation.items {
+                        let syn::ImplItem::Fn(function) = item else {
+                            continue;
+                        };
+                        access.parameters(&function.sig);
+                        access.visit_block(&function.block);
+                    }
+                }
+                _ => continue,
+            }
+            for (value, take, active) in access.bundles {
+                let Some(fields) = self.bundle_fields(entry, &value, take, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                self.concrete_interface_fields(
+                    entry,
+                    &value,
+                    active,
+                    &mut records,
+                    &mut BTreeSet::new(),
+                );
+                if active {
+                    production.extend(fields);
+                } else {
+                    fixtures.extend(fields);
+                }
+            }
+        }
+        self.interface_fields = records;
+        self.bundle_used_keys = production;
+        self.fixture_bundle_used_keys = fixtures;
+        self.used_keys.extend(self.bundle_used_keys.iter().cloned());
+        self.fixture_used_keys
+            .extend(self.fixture_bundle_used_keys.iter().cloned());
+    }
+
+    fn canonical_bundle(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        if entry.bundle_derive.is_none()
+            || entry.bundle_options.is_none()
+            || !self.bundle_used_keys.contains(&entry.key)
+                && (entry.production || !self.fixture_bundle_used_keys.contains(&entry.key))
+        {
+            return false;
+        }
+        self.canonical_interface_fields(entry, policy, visited)
+    }
+
     fn clear_generated_queries(&mut self) {
         if !self.generated_ready {
             return;
@@ -9830,6 +11707,12 @@ impl Inventory {
     fn source(&mut self, path: &str, source: &str) {
         self.lookup_ready = false;
         self.local_bindings.get_mut().clear();
+        self.interface_fields.clear();
+        self.bundle_used_keys.clear();
+        self.fixture_bundle_used_keys.clear();
+        self.event_used_keys.clear();
+        self.fixture_event_used_keys.clear();
+        self.event_instantiations.clear();
         self.clear_generated_queries();
         self.sources.insert(path.into(), source.into());
         if path.ends_with(".rs") {
@@ -9904,6 +11787,11 @@ impl Inventory {
         self.entries.insert(
             key.clone(),
             Declaration {
+                registrations: BTreeSet::new(),
+                generic_traits: BTreeMap::new(),
+                syntax: None,
+                bundle_options: None,
+                bundle_derive: None,
                 key,
                 path: path.into(),
                 namespace: String::new(),
@@ -10035,6 +11923,33 @@ impl Inventory {
         if entry.local || entry.dynamic || entry.opaque {
             return false;
         }
+        if matches!(entry.kind, Kind::Trait) {
+            return self.event_trait_owner(entry, policy, visiting);
+        }
+        if entry.bundle_derive.is_some() {
+            return self.canonical_bundle(entry, policy, visiting);
+        }
+        for path in &entry.derive_paths {
+            if path.rsplit("::").next() == Some("Bundle")
+                && self
+                    .resolve(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some()
+            {
+                return false;
+            }
+        }
+        if self
+            .interface_fields
+            .get(&entry.key)
+            .is_some_and(|instances| {
+                instances
+                    .iter()
+                    .any(|(production, _)| *production == entry.production)
+            })
+            && self.event_interface(entry).is_some()
+        {
+            return self.used(entry) && self.canonical_interface_fields(entry, policy, visiting);
+        }
         if entry.query_derive.is_some() {
             return self.canonical_query_data(entry, policy, visiting);
         }
@@ -10063,6 +11978,7 @@ impl Inventory {
                 return false;
             }
             if !declaration.ecs
+                && declaration.bundle_derive.is_none()
                 && declaration.generated_query.is_none()
                 && !policy
                     .values
@@ -10255,7 +12171,7 @@ impl Inventory {
             return false;
         };
         owner.key != entry.key
-            && (owner.ecs || owner.generated_query.is_some())
+            && (owner.ecs || owner.bundle_derive.is_some() || owner.generated_query.is_some())
             && self.used(owner)
             && self.canonical(owner, policy, visiting)
     }
@@ -11688,6 +13604,42 @@ impl Inventory {
                         | "bevy::ecs::prelude"
                         | "bevy::prelude"
                 ),
+                "Bundle" => matches!(
+                    prefix,
+                    "bevy_ecs::bundle"
+                        | "bevy_ecs::prelude"
+                        | "bevy_ecs_macros"
+                        | "bevy::ecs::bundle"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "Event" | "EntityEvent" => matches!(
+                    prefix,
+                    "bevy_ecs::event"
+                        | "bevy_ecs::prelude"
+                        | "bevy_ecs_macros"
+                        | "bevy::ecs::event"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "World" | "EntityWorldMut" => matches!(
+                    prefix,
+                    "bevy_ecs::world"
+                        | "bevy_ecs::prelude"
+                        | "bevy::ecs::world"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "Commands" | "EntityCommands" => matches!(
+                    prefix,
+                    "bevy_ecs::system"
+                        | "bevy_ecs::system::commands"
+                        | "bevy_ecs::prelude"
+                        | "bevy::ecs::system"
+                        | "bevy::ecs::system::commands"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
                 "SystemSet" => matches!(
                     prefix,
                     "bevy_ecs::schedule"
@@ -12708,6 +14660,10 @@ impl Inventory {
         self.registered_keys = registered;
         self.resolve_fixture_usage();
         self.resolve_query_usage();
+        self.resolve_bundle_usage();
+        self.resolve_event_usage();
+        self.register_event_callbacks();
+        self.resolve_event_query_usage();
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
         self.root_declarations.get_mut().clear();
@@ -14318,6 +16274,15 @@ impl Declarations<'_> {
             ordinal += 1;
         }
         let parsed_item = syn::parse2::<Item>(tokens.to_token_stream()).ok();
+        let mut scoped = References {
+            include_tests: true,
+            scoped_registration: true,
+            registration_production: self.production && !Usage::test_only(attrs),
+            ..Default::default()
+        };
+        if let Some(item) = &parsed_item {
+            scoped.visit_item(item);
+        }
         let mut component_attributes = BTreeSet::new();
         if matches!(&parsed_item, Some(Item::Struct(value)) if matches!(value.fields, syn::Fields::Unit) && value.generics.params.is_empty())
         {
@@ -14334,6 +16299,19 @@ impl Declarations<'_> {
             }
         }
         let declaration = Declaration {
+            registrations: scoped.registrations,
+            generic_traits: parsed_item
+                .as_ref()
+                .map(Declaration::generic_traits)
+                .unwrap_or_default(),
+            syntax: parsed_item.clone(),
+            bundle_options: match &parsed_item {
+                Some(Item::Struct(value)) => {
+                    Declaration::bundle_attributes(&value.attrs, &value.fields)
+                }
+                _ => None,
+            },
+            bundle_derive: None,
             key: key.clone(),
             path: self.path.into(),
             namespace: self.inventory.namespace(self.path, &self.scope).0,
@@ -14741,6 +16719,10 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 
 #[derive(Default)]
 struct References<'a> {
+    registrations: BTreeSet<Registration>,
+    scoped_registration: bool,
+    registration_production: bool,
+    registration_observer: bool,
     query_owners: BTreeSet<String>,
     invalid_query: bool,
     parameter_inventory: Option<&'a Inventory>,
@@ -14972,14 +16954,59 @@ impl<'ast> Visit<'ast> for References<'_> {
         visit::visit_type_bare_fn(self, value);
     }
 
+    fn visit_block(&mut self, value: &'ast syn::Block) {
+        let app = self.build_app.clone();
+        visit::visit_block(self, value);
+        if self.scoped_registration {
+            self.build_app = app;
+        }
+    }
+
+    fn visit_expr_assign(&mut self, value: &'ast syn::ExprAssign) {
+        visit::visit_expr_assign(self, value);
+        if self.scoped_registration
+            && self.inside_build
+            && let Some((name, _)) = &self.build_app
+            && matches!(value.left.as_ref(),syn::Expr::Path(path) if path.path.is_ident(name))
+        {
+            self.build_app = None;
+        }
+    }
+
     fn visit_local(&mut self, local: &'ast syn::Local) {
-        if self.include_tests || !Usage::test_only(&local.attrs) {
+        if self.scoped_registration {
+            let production = self.registration_production;
+            let Some(scope) = Registration::scope(&local.attrs, production) else {
+                return;
+            };
+            self.registration_production = scope;
+            visit::visit_local(self, local);
+            self.registration_production = production;
+            if self.inside_build
+                && let Some((name, _)) = &self.build_app
+                && Registration::binds(&local.pat, name)
+                && local
+                    .init
+                    .as_ref()
+                    .is_none_or(|value| !self.app_receiver(&value.expr))
+            {
+                self.build_app = None;
+            }
+        } else if self.include_tests || !Usage::test_only(&local.attrs) {
             visit::visit_local(self, local);
         }
     }
 
     fn visit_arm(&mut self, arm: &'ast syn::Arm) {
-        if self.include_tests || !Usage::test_only(&arm.attrs) {
+        if self.scoped_registration {
+            let production = self.registration_production;
+            let Some(scope) = Registration::scope(&arm.attrs, production) else {
+                return;
+            };
+            self.registration_production = scope;
+            visit::visit_arm(self, arm);
+            self.registration_production = production;
+        } else if self.include_tests || !Usage::test_only(&arm.attrs) {
             visit::visit_arm(self, arm);
         }
     }
@@ -14992,7 +17019,15 @@ impl<'ast> Visit<'ast> for References<'_> {
             syn::ImplItem::Macro(value) => &value.attrs,
             _ => &[],
         };
-        if self.include_tests || !Usage::test_only(attributes) {
+        if self.scoped_registration {
+            let production = self.registration_production;
+            let Some(scope) = Registration::scope(attributes, production) else {
+                return;
+            };
+            self.registration_production = scope;
+            visit::visit_impl_item(self, item);
+            self.registration_production = production;
+        } else if self.include_tests || !Usage::test_only(attributes) {
             visit::visit_impl_item(self, item);
         }
     }
@@ -15003,7 +17038,18 @@ impl<'ast> Visit<'ast> for References<'_> {
     }
 
     fn visit_expr(&mut self, expression: &'ast syn::Expr) {
-        if self.include_tests || !Usage::test_only(Usage::expression_attributes(expression)) {
+        if self.scoped_registration {
+            let production = self.registration_production;
+            let Some(scope) =
+                Registration::scope(Usage::expression_attributes(expression), production)
+            else {
+                return;
+            };
+            self.registration_production = scope;
+            visit::visit_expr(self, expression);
+            self.registration_production = production;
+        } else if self.include_tests || !Usage::test_only(Usage::expression_attributes(expression))
+        {
             visit::visit_expr(self, expression);
         }
     }
@@ -15040,11 +17086,12 @@ impl<'ast> Visit<'ast> for References<'_> {
                         continue;
                     };
                     if reference.mutability.is_some()
-                        && value
-                            .path
-                            .segments
-                            .last()
-                            .is_some_and(|segment| segment.ident == "App")
+                        && (self.scoped_registration
+                            || value
+                                .path
+                                .segments
+                                .last()
+                                .is_some_and(|segment| segment.ident == "App"))
                     {
                         self.build_app = Some((
                             name.ident.unraw().to_string(),
@@ -15125,7 +17172,11 @@ impl<'ast> Visit<'ast> for References<'_> {
                 _ => None,
             };
             if let Some(argument) = argument {
+                let observer = self.registration_observer;
+                self.registration_observer = value.method == "add_observer"
+                    || !self.scoped_registration && value.method == "observe";
                 self.system_values(argument);
+                self.registration_observer = observer;
             }
         }
         visit::visit_expr_method_call(self, value);
@@ -15388,6 +17439,21 @@ impl References<'_> {
     }
 
     fn system_values(&mut self, value: &syn::Expr) {
+        if self.scoped_registration {
+            let production = self.registration_production;
+            let Some(scope) = Registration::scope(Usage::expression_attributes(value), production)
+            else {
+                return;
+            };
+            self.registration_production = scope;
+            self.registered_system_values(value);
+            self.registration_production = production;
+        } else {
+            self.registered_system_values(value);
+        }
+    }
+
+    fn registered_system_values(&mut self, value: &syn::Expr) {
         if !self.include_tests && Usage::test_only(Usage::expression_attributes(value)) {
             return;
         }
@@ -15401,6 +17467,15 @@ impl References<'_> {
                     .collect::<Vec<_>>()
                     .join("::");
                 if let Some((_, app_type)) = &self.build_app {
+                    if self.scoped_registration {
+                        self.registrations.insert(Registration {
+                            app: app_type.clone(),
+                            callback: path.clone(),
+                            arguments: Self::arguments(&value.path),
+                            production: self.registration_production,
+                            observer: self.registration_observer,
+                        });
+                    }
                     self.registered_systems
                         .insert((app_type.clone(), path.clone()));
                     self.system_arguments.insert((
@@ -15647,9 +17722,552 @@ struct Usage {
     references: BTreeSet<(String, String)>,
 }
 
+struct EcsAccess<'a> {
+    inventory: &'a Inventory,
+    entry: &'a Declaration,
+    production: bool,
+    variables: BTreeMap<String, Type>,
+    bundles: Vec<(Type, bool, bool)>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Registration {
+    app: String,
+    callback: String,
+    arguments: Vec<String>,
+    production: bool,
+    observer: bool,
+}
+
+impl Registration {
+    fn binds(pattern: &syn::Pat, name: &str) -> bool {
+        match pattern {
+            syn::Pat::Ident(value) => {
+                value.ident.unraw() == name
+                    || value
+                        .subpat
+                        .as_ref()
+                        .is_some_and(|(_, pattern)| Self::binds(pattern, name))
+            }
+            syn::Pat::Type(value) => Self::binds(&value.pat, name),
+            syn::Pat::Reference(value) => Self::binds(&value.pat, name),
+            syn::Pat::Paren(value) => Self::binds(&value.pat, name),
+            syn::Pat::Tuple(value) => {
+                for pattern in &value.elems {
+                    if Self::binds(pattern, name) {
+                        return true;
+                    }
+                }
+                false
+            }
+            syn::Pat::TupleStruct(value) => {
+                for pattern in &value.elems {
+                    if Self::binds(pattern, name) {
+                        return true;
+                    }
+                }
+                false
+            }
+            syn::Pat::Slice(value) => {
+                for pattern in &value.elems {
+                    if Self::binds(pattern, name) {
+                        return true;
+                    }
+                }
+                false
+            }
+            syn::Pat::Struct(value) => {
+                for field in &value.fields {
+                    if Self::binds(&field.pat, name) {
+                        return true;
+                    }
+                }
+                false
+            }
+            syn::Pat::Or(value) => {
+                for pattern in &value.cases {
+                    if Self::binds(pattern, name) {
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn scope(attributes: &[Attribute], production: bool) -> Option<bool> {
+        if production && Self::enabled(attributes, true) {
+            return Some(true);
+        }
+        Self::enabled(attributes, false).then_some(false)
+    }
+
+    fn enabled(attributes: &[Attribute], production: bool) -> bool {
+        let mut pending: Vec<_> = attributes
+            .iter()
+            .map(|attribute| attribute.meta.clone())
+            .collect();
+        while let Some(meta) = pending.pop() {
+            if meta.path().is_ident("test") && production {
+                return false;
+            }
+            let syn::Meta::List(list) = meta else {
+                continue;
+            };
+            if list.path.is_ident("cfg") {
+                let Ok(expression) = syn::parse2::<syn::Expr>(list.tokens) else {
+                    return false;
+                };
+                if Configuration(&expression).in_scope(production) == Some(false) {
+                    return false;
+                }
+            } else if list.path.is_ident("cfg_attr") {
+                let parser =
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+                let Ok(items) = parser.parse2(list.tokens) else {
+                    return false;
+                };
+                let Some(condition) = items.first() else {
+                    return false;
+                };
+                let Ok(expression) = syn::parse2::<syn::Expr>(condition.to_token_stream()) else {
+                    return false;
+                };
+                match Configuration(&expression).in_scope(production) {
+                    Some(false) => {}
+                    Some(true) => pending.extend(items.into_iter().skip(1)),
+                    None => return false,
+                }
+            }
+        }
+        true
+    }
+}
+
+impl<'a> EcsAccess<'a> {
+    fn new(inventory: &'a Inventory, entry: &'a Declaration) -> Self {
+        Self {
+            inventory,
+            entry,
+            production: entry.production,
+            variables: BTreeMap::new(),
+            bundles: Vec::new(),
+        }
+    }
+
+    fn parameters(&mut self, signature: &syn::Signature) {
+        self.variables.clear();
+        for parameter in &signature.inputs {
+            let syn::FnArg::Typed(parameter) = parameter else {
+                continue;
+            };
+            let syn::Pat::Ident(name) = parameter.pat.as_ref() else {
+                continue;
+            };
+            self.variables
+                .insert(name.ident.unraw().to_string(), *parameter.ty.clone());
+        }
+    }
+
+    fn handle(&self, value: &Type) -> Option<String> {
+        match value {
+            Type::Reference(value) => self.handle(&value.elem),
+            Type::Path(value) if value.qself.is_none() => self.inventory.framework_handle(
+                &self.entry.namespace,
+                &References::path(&value.path),
+                &mut BTreeSet::new(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn receiver(&self, value: &syn::Expr) -> Option<String> {
+        match value {
+            syn::Expr::Path(value) if value.path.segments.len() == 1 => self.handle(
+                self.variables
+                    .get(&value.path.segments[0].ident.unraw().to_string())?,
+            ),
+            syn::Expr::Reference(value) => self.receiver(&value.expr),
+            syn::Expr::Paren(value) => self.receiver(&value.expr),
+            syn::Expr::Group(value) => self.receiver(&value.expr),
+            syn::Expr::Try(value) => self.receiver(&value.expr),
+            syn::Expr::Field(value) => {
+                let owner = self.field_owner(&value.base)?;
+                let namespace = &owner.namespace;
+                let Some(Item::Struct(owner)) = &owner.syntax else {
+                    return None;
+                };
+                for (index, field) in owner.fields.iter().enumerate() {
+                    let matches = match &value.member {
+                        syn::Member::Named(name) => {
+                            field.ident.as_ref().is_some_and(|field| field == name)
+                        }
+                        syn::Member::Unnamed(value) => index == value.index as usize,
+                    };
+                    if matches {
+                        let value =
+                            Bindings::apply(self.inventory, namespace, &BTreeMap::new(), &field.ty);
+                        return self.handle(&value);
+                    }
+                }
+                None
+            }
+            syn::Expr::Call(value) => {
+                let syn::Expr::Path(path) = value.func.as_ref() else {
+                    return None;
+                };
+                let mut path = path.path.clone();
+                if path.segments.pop()?.value().ident != "new" {
+                    return None;
+                }
+                path.segments.pop_punct();
+                let handle = self.inventory.framework_handle(
+                    &self.entry.namespace,
+                    &References::path(&path),
+                    &mut BTreeSet::new(),
+                )?;
+                (handle == "World" || handle == "App").then_some(handle)
+            }
+            syn::Expr::MethodCall(value) => {
+                let receiver = self.receiver(&value.receiver)?;
+                match (receiver.as_str(), value.method.to_string().as_str()) {
+                    ("App", "world_mut") => Some("World".into()),
+                    ("World", "entity_mut" | "get_entity_mut" | "spawn") => {
+                        Some("EntityWorldMut".into())
+                    }
+                    ("Commands", "entity" | "get_entity" | "spawn") => {
+                        Some("EntityCommands".into())
+                    }
+                    (_, "unwrap" | "expect" | "ok") => Some(receiver),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn field_owner(&self, value: &syn::Expr) -> Option<&'a Declaration> {
+        let syn::Expr::Path(value) = value else {
+            return None;
+        };
+        if value.path.is_ident("self") {
+            let name = self.entry.owner.as_deref()?;
+            return self
+                .inventory
+                .resolve(&self.entry.namespace, name, &mut BTreeSet::new());
+        }
+        let name = value.path.get_ident()?.unraw().to_string();
+        let mut value = self.variables.get(&name)?;
+        while let Type::Reference(reference) = value {
+            value = &reference.elem;
+        }
+        let Type::Path(value) = value else {
+            return None;
+        };
+        if value.qself.is_some() {
+            return None;
+        }
+        let owner = self.inventory.resolve(
+            &self.entry.namespace,
+            &References::path(&value.path),
+            &mut BTreeSet::new(),
+        )?;
+        let owner = self.inventory.nominal(owner).unwrap_or(owner);
+        if !owner.parameter {
+            return None;
+        }
+        let interface = owner.parameter_path.as_deref()?;
+        if self
+            .inventory
+            .framework_handle(&owner.namespace, interface, &mut BTreeSet::new())
+            .as_deref()
+            != Some("SystemParam")
+        {
+            return None;
+        }
+        Some(owner)
+    }
+
+    fn bundle_value(&self, value: &syn::Expr) -> Option<Type> {
+        match value {
+            syn::Expr::Struct(value) => Some(Type::Path(syn::TypePath {
+                qself: value.qself.clone(),
+                path: value.path.clone(),
+            })),
+            syn::Expr::Path(value) if value.qself.is_none() => {
+                if let Some(value) = self.variables.get(&References::path(&value.path)) {
+                    return Some(value.clone());
+                }
+                Some(Type::Path(syn::TypePath {
+                    qself: None,
+                    path: value.path.clone(),
+                }))
+            }
+            syn::Expr::Paren(value) => self.bundle_value(&value.expr),
+            syn::Expr::Group(value) => self.bundle_value(&value.expr),
+            syn::Expr::Tuple(value) => {
+                let mut tuple: syn::TypeTuple = syn::parse_quote!(());
+                for value in &value.elems {
+                    tuple.elems.push(self.bundle_value(value)?);
+                }
+                Some(Type::Tuple(tuple))
+            }
+            syn::Expr::Call(value) => {
+                let syn::Expr::Path(value) = value.func.as_ref() else {
+                    return None;
+                };
+                let mut path = value.path.clone();
+                if self
+                    .inventory
+                    .framework_handle(
+                        &self.entry.namespace,
+                        &References::path(&path),
+                        &mut BTreeSet::new(),
+                    )
+                    .as_deref()
+                    == Some("ChildOf")
+                {
+                    return Some(Type::Path(syn::TypePath {
+                        qself: value.qself.clone(),
+                        path,
+                    }));
+                }
+                if self
+                    .inventory
+                    .resolve(
+                        &self.entry.namespace,
+                        &References::path(&path),
+                        &mut BTreeSet::new(),
+                    )
+                    .is_some()
+                {
+                    return Some(Type::Path(syn::TypePath {
+                        qself: value.qself.clone(),
+                        path,
+                    }));
+                }
+                let method = path.segments.pop()?.value().ident.unraw().to_string();
+                path.segments.pop_punct();
+                let owner = self.inventory.resolve(
+                    &self.entry.namespace,
+                    &References::path(&path),
+                    &mut BTreeSet::new(),
+                )?;
+                if !self.constructor(owner, &method) {
+                    return None;
+                }
+                Some(Type::Path(syn::TypePath {
+                    qself: value.qself.clone(),
+                    path,
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    fn constructor(&self, owner: &Declaration, method: &str) -> bool {
+        let owner = self.inventory.nominal(owner).unwrap_or(owner);
+        for implementation in self.inventory.entries.values() {
+            let Some(Item::Impl(syntax)) = &implementation.syntax else {
+                continue;
+            };
+            let Type::Path(value) = syntax.self_ty.as_ref() else {
+                continue;
+            };
+            if self
+                .inventory
+                .resolve(
+                    &implementation.namespace,
+                    &References::path(&value.path),
+                    &mut BTreeSet::new(),
+                )
+                .is_none_or(|value| value.key != owner.key)
+            {
+                continue;
+            }
+            for item in &syntax.items {
+                let syn::ImplItem::Fn(value) = item else {
+                    continue;
+                };
+                if value.sig.ident != method {
+                    continue;
+                }
+                let syn::ReturnType::Type(_, output) = &value.sig.output else {
+                    continue;
+                };
+                if matches!(output.as_ref(), Type::Path(value) if value.path.is_ident("Self")) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn visit_operation(&mut self, value: &syn::ExprMethodCall) {
+        let Some(receiver) = self.receiver(&value.receiver) else {
+            return;
+        };
+        let method = value.method.to_string();
+        if matches!(receiver.as_str(), "World" | "Commands") && method == "spawn"
+            || matches!(receiver.as_str(), "EntityWorldMut" | "EntityCommands")
+                && method == "insert"
+        {
+            for value in &value.args {
+                if let Some(value) = self.bundle_value(value) {
+                    self.bundles.push((value, false, self.production));
+                }
+            }
+        }
+        if matches!(receiver.as_str(), "EntityWorldMut" | "EntityCommands")
+            && matches!(method.as_str(), "take" | "remove")
+            && let Some(arguments) = &value.turbofish
+        {
+            for argument in &arguments.args {
+                if let syn::GenericArgument::Type(value) = argument {
+                    self.bundles
+                        .push((value.clone(), method == "take", self.production));
+                }
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for EcsAccess<'_> {
+    fn visit_block(&mut self, value: &'ast syn::Block) {
+        let variables = self.variables.clone();
+        visit::visit_block(self, value);
+        self.variables = variables;
+    }
+
+    fn visit_expr(&mut self, value: &'ast syn::Expr) {
+        let production = self.production;
+        let Some(scope) = Registration::scope(Usage::expression_attributes(value), production)
+        else {
+            return;
+        };
+        self.production = scope;
+        visit::visit_expr(self, value);
+        self.production = production;
+    }
+
+    fn visit_local(&mut self, value: &'ast syn::Local) {
+        let production = self.production;
+        let Some(scope) = Registration::scope(&value.attrs, production) else {
+            return;
+        };
+        self.production = scope;
+        visit::visit_local(self, value);
+        self.production = production;
+        let (key, annotation) = match &value.pat {
+            syn::Pat::Ident(name) => (name.ident.unraw().to_string(), None),
+            syn::Pat::Type(value) => {
+                let syn::Pat::Ident(name) = value.pat.as_ref() else {
+                    return;
+                };
+                (name.ident.unraw().to_string(), Some(*value.ty.clone()))
+            }
+            _ => return,
+        };
+        let bundle = annotation.or_else(|| {
+            value
+                .init
+                .as_ref()
+                .and_then(|value| self.bundle_value(&value.expr))
+        });
+        let handle = value
+            .init
+            .as_ref()
+            .and_then(|value| self.receiver(&value.expr));
+        self.variables.remove(&key);
+        if let Some(value) = bundle {
+            self.variables.insert(key.clone(), value);
+        }
+        if let Some(handle) = handle {
+            let value = match handle.as_str() {
+                "World" => syn::parse_quote!(bevy_ecs::world::World),
+                "App" => syn::parse_quote!(bevy_app::App),
+                "EntityWorldMut" => syn::parse_quote!(bevy_ecs::world::EntityWorldMut),
+                "EntityCommands" => syn::parse_quote!(bevy_ecs::system::EntityCommands),
+                _ => return,
+            };
+            self.variables.insert(key, value);
+        }
+    }
+
+    fn visit_arm(&mut self, value: &'ast syn::Arm) {
+        let production = self.production;
+        let Some(scope) = Registration::scope(&value.attrs, production) else {
+            return;
+        };
+        self.production = scope;
+        visit::visit_arm(self, value);
+        self.production = production;
+    }
+
+    fn visit_expr_assign(&mut self, value: &'ast syn::ExprAssign) {
+        if let syn::Expr::Path(path) = value.left.as_ref() {
+            self.variables.remove(&References::path(&path.path));
+        }
+        visit::visit_expr_assign(self, value);
+    }
+
+    fn visit_expr_method_call(&mut self, value: &'ast syn::ExprMethodCall) {
+        self.visit_operation(value);
+        visit::visit_expr_method_call(self, value);
+    }
+
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+
+    fn visit_expr_if(&mut self, value: &'ast syn::ExprIf) {
+        if let syn::Expr::Lit(literal) = value.cond.as_ref()
+            && let syn::Lit::Bool(literal) = &literal.lit
+        {
+            if literal.value {
+                self.visit_block(&value.then_branch);
+            } else if let Some((_, branch)) = &value.else_branch {
+                self.visit_expr(branch);
+            }
+            return;
+        }
+        visit::visit_expr_if(self, value);
+    }
+}
+
 struct Configuration<'a>(&'a syn::Expr);
 
 impl Configuration<'_> {
+    fn in_scope(&self, production: bool) -> Option<bool> {
+        match self.0 {
+            syn::Expr::Path(value) if value.path.is_ident("test") => Some(!production),
+            syn::Expr::Call(call) => {
+                let syn::Expr::Path(function) = call.func.as_ref() else {
+                    return None;
+                };
+                if function.path.is_ident("not") && call.args.len() == 1 {
+                    return Self(call.args.first().unwrap())
+                        .in_scope(production)
+                        .map(|value| !value);
+                }
+                let all = function.path.is_ident("all");
+                if !all && !function.path.is_ident("any") {
+                    return None;
+                }
+                let mut unknown = false;
+                for argument in &call.args {
+                    match Self(argument).in_scope(production) {
+                        Some(value) if value != all => return Some(!all),
+                        Some(_) => {}
+                        None => unknown = true,
+                    }
+                }
+                if unknown { None } else { Some(all) }
+            }
+            _ => None,
+        }
+    }
+
     fn production(&self) -> bool {
         self.definite() != Some(false)
     }
