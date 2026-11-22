@@ -64,6 +64,10 @@ const STDERR_TAIL_SHOWN: usize = 8;
 pub(super) struct AcpMcpServers {
     builtin: Option<McpServer>,
     managed: Vec<ManagedMcpServer>,
+    proxy_command: Option<String>,
+    proxy_prefix_args: Vec<String>,
+    profile: Option<String>,
+    cwd: Option<PathBuf>,
 }
 
 impl AcpMcpServers {
@@ -71,7 +75,17 @@ impl AcpMcpServers {
         mcp_command: Option<String>,
         mcp_args: Vec<String>,
         managed_mcp_servers: Vec<ManagedMcpServer>,
+        cwd: PathBuf,
     ) -> Self {
+        let profile = mcp_args
+            .windows(2)
+            .find_map(|pair| (pair[0] == "--profile").then(|| pair[1].clone()));
+        let proxy_prefix_args = mcp_args
+            .iter()
+            .position(|arg| arg == "mcp")
+            .map(|index| mcp_args[..index].to_vec())
+            .unwrap_or_default();
+        let proxy_command = mcp_command.clone();
         let builtin = mcp_command.map(|command| {
             McpServer::Stdio(McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args))
         });
@@ -79,7 +93,33 @@ impl AcpMcpServers {
             .into_iter()
             .filter(|server| !server.name.trim().is_empty() && server.name != "vmux")
             .collect();
-        Self { builtin, managed }
+        Self {
+            builtin,
+            managed,
+            proxy_command,
+            proxy_prefix_args,
+            profile,
+            cwd: Some(cwd),
+        }
+    }
+
+    fn proxy_server(&self, name: &str) -> Option<McpServer> {
+        let command = self.proxy_command.as_ref()?;
+        let mut args = self.proxy_prefix_args.clone();
+        args.push("mcp-proxy".to_string());
+        args.push("--server".to_string());
+        args.push(name.to_string());
+        if let Some(profile) = &self.profile {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
+        if let Some(cwd) = &self.cwd {
+            args.push("--cwd".to_string());
+            args.push(cwd.to_string_lossy().into_owned());
+        }
+        Some(McpServer::Stdio(
+            McpServerStdio::new(name.to_string(), PathBuf::from(command)).args(args),
+        ))
     }
 
     pub(super) fn for_capabilities(&self, capabilities: &McpCapabilities) -> Vec<McpServer> {
@@ -88,16 +128,24 @@ impl AcpMcpServers {
             servers.push(builtin.clone());
         }
         for server in &self.managed {
+            let needs_proxy = server.oauth
+                || (server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some())
+                || (server.transport == ManagedMcpTransport::Http && !capabilities.http)
+                || (server.transport == ManagedMcpTransport::Sse && !capabilities.sse);
+            if needs_proxy {
+                if let Some(proxied) = self.proxy_server(&server.name) {
+                    servers.push(proxied);
+                } else {
+                    tracing::warn!(
+                        target: "acp",
+                        server = %server.name,
+                        "skipping MCP server requiring vmux mcp-proxy; sidecar unavailable"
+                    );
+                }
+                continue;
+            }
             match server.transport {
                 ManagedMcpTransport::Stdio => {
-                    if server.cwd.is_some() {
-                        tracing::warn!(
-                            target: "acp",
-                            server = %server.name,
-                            "skipping stdio MCP server with cwd; ACP v1 does not support stdio cwd"
-                        );
-                        continue;
-                    }
                     let Some(command) = &server.command else {
                         continue;
                     };
@@ -113,14 +161,6 @@ impl AcpMcpServers {
                     ));
                 }
                 ManagedMcpTransport::Http => {
-                    if !capabilities.http {
-                        tracing::warn!(
-                            target: "acp",
-                            server = %server.name,
-                            "skipping HTTP MCP server; agent does not advertise mcp_capabilities.http"
-                        );
-                        continue;
-                    }
                     let Some(url) = &server.url else {
                         continue;
                     };
@@ -134,14 +174,6 @@ impl AcpMcpServers {
                     ));
                 }
                 ManagedMcpTransport::Sse => {
-                    if !capabilities.sse {
-                        tracing::warn!(
-                            target: "acp",
-                            server = %server.name,
-                            "skipping SSE MCP server; agent does not advertise mcp_capabilities.sse"
-                        );
-                        continue;
-                    }
                     let Some(url) = &server.url else {
                         continue;
                     };
@@ -3070,10 +3102,10 @@ mod tests {
     }
 
     #[test]
-    fn capability_filtering_reserves_vmux_and_honors_agent_mcp_capabilities() {
+    fn capability_filtering_reserves_vmux_and_routes_oauth_cwd_and_fallbacks_through_proxy() {
         let servers = AcpMcpServers::from_sources(
             Some("/bin/vmux".into()),
-            vec!["mcp".into()],
+            vec!["mcp".into(), "--profile".into(), "work".into()],
             vec![
                 ManagedMcpServer {
                     name: "vmux".into(),
@@ -3100,6 +3132,13 @@ mod tests {
                     name: "linear-vmx".into(),
                     transport: ManagedMcpTransport::Http,
                     url: Some("https://mcp.linear.app/mcp".into()),
+                    oauth: true,
+                    ..Default::default()
+                },
+                ManagedMcpServer {
+                    name: "static-http".into(),
+                    transport: ManagedMcpTransport::Http,
+                    url: Some("https://docs.example.com/mcp".into()),
                     headers: vec![("Authorization".into(), "Bearer tok".into())],
                     ..Default::default()
                 },
@@ -3110,16 +3149,34 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            PathBuf::from("/repo"),
         );
 
         let stdio_only = servers.for_capabilities(&McpCapabilities::default());
-        assert_eq!(stdio_only.len(), 2);
+        assert_eq!(stdio_only.len(), 6);
         assert!(matches!(&stdio_only[0], McpServer::Stdio(s) if s.name == "vmux"));
-        assert!(matches!(&stdio_only[1], McpServer::Stdio(s) if s.name == "stdio-ok"));
+        assert!(
+            matches!(&stdio_only[1], McpServer::Stdio(s) if s.name == "stdio-ok" && s.command == PathBuf::from("npx"))
+        );
+        assert!(
+            matches!(&stdio_only[2], McpServer::Stdio(s) if s.name == "stdio-cwd" && s.command == PathBuf::from("/bin/vmux") && s.args[0] == "mcp-proxy")
+        );
+        assert!(
+            matches!(&stdio_only[3], McpServer::Stdio(s) if s.name == "linear-vmx" && s.args.contains(&"work".to_string()))
+        );
+        assert!(
+            matches!(&stdio_only[4], McpServer::Stdio(s) if s.name == "static-http" && s.args[0] == "mcp-proxy")
+        );
+        assert!(
+            matches!(&stdio_only[5], McpServer::Stdio(s) if s.name == "legacy-sse" && s.args[0] == "mcp-proxy")
+        );
 
         let http_and_sse = servers.for_capabilities(&McpCapabilities::new().http(true).sse(true));
-        assert_eq!(http_and_sse.len(), 4);
-        assert!(matches!(&http_and_sse[2], McpServer::Http(s) if s.name == "linear-vmx"));
-        assert!(matches!(&http_and_sse[3], McpServer::Sse(s) if s.name == "legacy-sse"));
+        assert_eq!(http_and_sse.len(), 6);
+        assert!(
+            matches!(&http_and_sse[3], McpServer::Stdio(s) if s.name == "linear-vmx" && s.args[0] == "mcp-proxy")
+        );
+        assert!(matches!(&http_and_sse[4], McpServer::Http(s) if s.name == "static-http"));
+        assert!(matches!(&http_and_sse[5], McpServer::Sse(s) if s.name == "legacy-sse"));
     }
 }

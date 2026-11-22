@@ -545,6 +545,7 @@ mod tests {
                 cwd: None,
                 url: Some("https://mcp.linear.app/mcp".into()),
                 headers: vec![("Authorization".into(), "Bearer token".into())],
+                oauth: true,
             }],
             resume_acp_session_id: Some("prev-session".into()),
         }));

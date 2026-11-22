@@ -47,6 +47,9 @@ impl Plugin for ToolCliPlugin {
                         route,
                         route_mcp_read,
                         route_mcp_write,
+                        route_mcp_auth,
+                        route_mcp_ops,
+                        route_mcp_proxy,
                         execute_status,
                         status_cancelled,
                         status_discovered,
@@ -67,6 +70,9 @@ impl Plugin for ToolCliPlugin {
                         complete_imports,
                         complete_mcp_list,
                         advance_mcp_trust,
+                        complete_mcp_auth,
+                        complete_mcp_doctor,
+                        complete_mcp_sync,
                         complete_mcp_mutation,
                     )
                         .chain(),
@@ -149,6 +155,29 @@ struct WaitingMcpTrust {
 struct WaitingMcpMutation;
 
 #[derive(Component)]
+struct WaitingMcpAuth {
+    id: String,
+    profile: vmux_profile::Profile,
+    paths: vmux_profile::ProfilePaths,
+}
+
+#[derive(Component)]
+struct WaitingMcpDoctor {
+    home: PathBuf,
+    profile: vmux_profile::Profile,
+    paths: vmux_profile::ProfilePaths,
+}
+
+#[derive(Component)]
+struct WaitingMcpSync {
+    agent: crate::McpSyncAgent,
+    home: PathBuf,
+    profile_name: String,
+    cwd: Option<PathBuf>,
+    dry_run: bool,
+}
+
+#[derive(Component)]
 struct McpCliTarget;
 
 impl McpCliTarget {
@@ -186,6 +215,15 @@ impl McpCliTarget {
         }
         if let Some(url) = invocation.value("url") {
             let bearer = invocation.value("bearer_env").map(str::to_string);
+            let auth = if invocation.flag("oauth") {
+                let scopes = invocation
+                    .value("scopes")
+                    .map(|raw| raw.split_whitespace().map(str::to_string).collect())
+                    .unwrap_or_default();
+                crate::McpAuthSpec::OAuth { scopes }
+            } else {
+                crate::McpAuthSpec::None
+            };
             let transport = invocation
                 .value("transport")
                 .unwrap_or("http")
@@ -196,7 +234,7 @@ impl McpCliTarget {
                     headers: Default::default(),
                     header_env: Default::default(),
                     bearer_token_env_var: bearer,
-                    auth: crate::McpAuthSpec::None,
+                    auth,
                     enabled: true,
                     agents: Vec::new(),
                 }),
@@ -205,7 +243,7 @@ impl McpCliTarget {
                     headers: Default::default(),
                     header_env: Default::default(),
                     bearer_token_env_var: bearer,
-                    auth: crate::McpAuthSpec::None,
+                    auth,
                     enabled: true,
                     agents: Vec::new(),
                 }),
@@ -344,6 +382,165 @@ fn route_mcp_write(
             }
             _ => {}
         }
+    }
+}
+
+fn route_mcp_auth(
+    invocations: Query<(Entity, &CliInvocation, Option<&ToolStore>), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, store) in &invocations {
+        let store = store.cloned().unwrap_or_else(ToolStore::current);
+        let paths = vmux_profile::ProfilePaths::current();
+        let profile = vmux_profile::Profile::current();
+        let profile_dir = paths.profile();
+        let mut target = commands.entity(entity);
+        match invocation.command.as_str() {
+            "tool.mcp.auth" => {
+                let Some(id) = invocation.value("id") else {
+                    target.insert(CliResult(Err("MCP server ID is required".into())));
+                    continue;
+                };
+                let cwd = invocation
+                    .value_os("cwd")
+                    .map(PathBuf::from)
+                    .or_else(|| std::env::current_dir().ok());
+                target.insert((
+                    WaitingMcpAuth {
+                        id: id.to_string(),
+                        profile,
+                        paths,
+                    },
+                    crate::McpResolveRequest {
+                        config_dir: store.config_dir().to_path_buf(),
+                        profile_dir,
+                        cwd,
+                        agent_id: None,
+                        env: Vec::new(),
+                    },
+                ));
+            }
+            "tool.mcp.logout" => {
+                let Some(id) = invocation.value("id") else {
+                    target.insert(CliResult(Err("MCP server ID is required".into())));
+                    continue;
+                };
+                let result = crate::McpOauthFlow::for_profile(profile, paths)
+                    .and_then(|flow| flow.logout(id))
+                    .map(|()| {
+                        println!("logged out MCP server {id}");
+                        0
+                    });
+                target.insert(CliResult(result));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn route_mcp_ops(
+    invocations: Query<(Entity, &CliInvocation, Option<&ToolStore>), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, store) in &invocations {
+        let store = store.cloned().unwrap_or_else(ToolStore::current);
+        let paths = vmux_profile::ProfilePaths::current();
+        let profile = vmux_profile::Profile::current();
+        let profile_dir = paths.profile();
+        let profile_name = profile.id().to_string();
+        let mut target = commands.entity(entity);
+        match invocation.command.as_str() {
+            "tool.mcp.doctor" => {
+                let cwd = invocation
+                    .value_os("cwd")
+                    .map(PathBuf::from)
+                    .or_else(|| std::env::current_dir().ok());
+                target.insert((
+                    WaitingMcpDoctor {
+                        home: store.home().to_path_buf(),
+                        profile,
+                        paths,
+                    },
+                    crate::McpResolveRequest {
+                        config_dir: store.config_dir().to_path_buf(),
+                        profile_dir,
+                        cwd,
+                        agent_id: None,
+                        env: Vec::new(),
+                    },
+                ));
+            }
+            "tool.mcp.sync" => {
+                let Some(agent_raw) = invocation.value("agent") else {
+                    target.insert(CliResult(Err("--agent is required".into())));
+                    continue;
+                };
+                let agent = match crate::McpSyncAgent::parse(agent_raw) {
+                    Ok(agent) => agent,
+                    Err(error) => {
+                        target.insert(CliResult(Err(error)));
+                        continue;
+                    }
+                };
+                let cwd = invocation.value_os("cwd").map(PathBuf::from);
+                target.insert((
+                    WaitingMcpSync {
+                        agent,
+                        home: store.home().to_path_buf(),
+                        profile_name,
+                        cwd: cwd.clone(),
+                        dry_run: invocation.flag("dry_run"),
+                    },
+                    crate::McpResolveRequest {
+                        config_dir: store.config_dir().to_path_buf(),
+                        profile_dir,
+                        cwd,
+                        agent_id: None,
+                        env: Vec::new(),
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn route_mcp_proxy(
+    invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation) in &invocations {
+        if invocation.command != "mcp.proxy" {
+            continue;
+        }
+        let Some(server_id) = invocation.value("server") else {
+            commands
+                .entity(entity)
+                .insert(CliResult(Err("--server is required".into())));
+            continue;
+        };
+        let active_profile = invocation
+            .value("profile")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(vmux_profile::Profile::named)
+            .unwrap_or_else(vmux_profile::Profile::current);
+        let base_paths = vmux_profile::ProfilePaths::current();
+        let active_paths =
+            vmux_profile::ProfilePaths::at(active_profile.clone(), base_paths.shared_data());
+        let cwd = invocation.value_os("cwd").map(PathBuf::from);
+        let result = crate::McpProxy::resolve_server(
+            &active_paths.config(),
+            &active_paths.profile(),
+            cwd.as_deref(),
+            server_id,
+        )
+        .and_then(|(server, workspace_root)| {
+            crate::McpProxy::new(server, active_profile, active_paths, workspace_root)
+        })
+        .and_then(crate::McpProxy::run_stdio)
+        .map(|()| 0);
+        commands.entity(entity).insert(CliResult(result));
     }
 }
 
@@ -1062,6 +1259,98 @@ fn advance_mcp_trust(
                     digest: digest.clone(),
                 },
             ));
+    }
+}
+
+fn complete_mcp_auth(
+    requests: Query<(Entity, &WaitingMcpAuth, &crate::McpResolveResult), Without<CliResult>>,
+    mut commands: Commands,
+) {
+    for (entity, auth, result) in &requests {
+        let outcome = crate::McpOauthFlow::for_profile(auth.profile.clone(), auth.paths.clone())
+            .and_then(|flow| {
+                flow.authorize_resolved(result, &auth.id, |authorize_url| {
+                    println!("Open to authenticate {}: {authorize_url}", auth.id);
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open")
+                        .arg(authorize_url)
+                        .status();
+                    #[cfg(target_os = "linux")]
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(authorize_url)
+                        .status();
+                    Ok(())
+                })
+            })
+            .map(|()| {
+                println!("authenticated MCP server {}", auth.id);
+                0
+            });
+        commands
+            .entity(entity)
+            .insert(CliResult(outcome))
+            .remove::<(WaitingMcpAuth, crate::McpResolveResult)>();
+    }
+}
+
+fn complete_mcp_doctor(
+    requests: Query<(Entity, &WaitingMcpDoctor, &crate::McpResolveResult), Without<CliResult>>,
+    mut commands: Commands,
+) {
+    for (entity, doctor, result) in &requests {
+        let oauth =
+            crate::McpOauthFlow::for_profile(doctor.profile.clone(), doctor.paths.clone()).ok();
+        let report = crate::McpDoctor::report(
+            &doctor.home,
+            &result.servers,
+            &result.diagnostics,
+            oauth.as_ref(),
+        );
+        for line in report {
+            println!("{line}");
+        }
+        commands
+            .entity(entity)
+            .insert(CliResult::default())
+            .remove::<(WaitingMcpDoctor, crate::McpResolveResult)>();
+    }
+}
+
+fn complete_mcp_sync(
+    requests: Query<(Entity, &WaitingMcpSync, &crate::McpResolveResult), Without<CliResult>>,
+    mut commands: Commands,
+) {
+    for (entity, sync, result) in &requests {
+        let target_path = sync.agent.config_path(&sync.home);
+        let existing = std::fs::read_to_string(&target_path).ok();
+        let proxy_binary = std::env::current_exe()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "vmux".to_string());
+        let outcome = crate::McpSync::render(
+            sync.agent,
+            existing.as_deref(),
+            result,
+            &proxy_binary,
+            &sync.profile_name,
+            sync.cwd.as_deref(),
+        )
+        .and_then(|rendered| {
+            if sync.dry_run {
+                println!("{rendered}");
+                return Ok(0);
+            }
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            vmux_path::AtomicFile::write(&target_path, rendered.as_bytes())
+                .map_err(|error| error.to_string())?;
+            println!("synced MCP servers to {}", target_path.display());
+            Ok(0)
+        });
+        commands
+            .entity(entity)
+            .insert(CliResult(outcome))
+            .remove::<(WaitingMcpSync, crate::McpResolveResult)>();
     }
 }
 

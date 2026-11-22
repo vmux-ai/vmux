@@ -97,6 +97,8 @@
                                     (id: "url", long: Some("url"), value_name: Some("URL")),
                                     (id: "transport", long: Some("transport"), value_name: Some("TRANSPORT")),
                                     (id: "bearer_env", long: Some("bearer-env"), value_name: Some("ENV_VAR")),
+                                    (id: "oauth", long: Some("oauth"), flag: true),
+                                    (id: "scopes", long: Some("scopes"), value_name: Some("SCOPES")),
                                     (id: "project", long: Some("project"), value_name: Some("DIRECTORY")),
                                     (id: "local", long: Some("local"), value_name: Some("DIRECTORY")),
                                 ],
@@ -134,6 +136,37 @@
                                 arguments: [
                                     (id: "id", index: Some(1), required: true, value_name: Some("ID")),
                                     (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.auth",
+                                name: "auth",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.logout",
+                                name: "logout",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.doctor",
+                                name: "doctor",
+                                arguments: [
+                                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.sync",
+                                name: "sync",
+                                arguments: [
+                                    (id: "agent", long: Some("agent"), required: true, value_name: Some("AGENT")),
+                                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                    (id: "dry_run", long: Some("dry-run"), flag: true),
                                 ],
                             ),
                         ],
@@ -181,6 +214,16 @@
                             (id: "package", index: Some(1), required: true, value_name: Some("PACKAGE")),
                         ],
                     ),
+                ],
+            ),
+            (
+                id: "mcp.proxy",
+                name: "mcp-proxy",
+                about: Some("Bridge an MCP server over stdio with Vmux auth and transport translation"),
+                arguments: [
+                    (id: "server", long: Some("server"), required: true, value_name: Some("SERVER_ID")),
+                    (id: "profile", long: Some("profile"), value_name: Some("PROFILE")),
+                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
                 ],
             ),
         ],
