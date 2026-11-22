@@ -1,3 +1,4 @@
+use crate::Uuid;
 pub use bevy_app::App;
 use bevy_app::{Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -218,6 +219,26 @@ pub struct WorkspaceRestore {
 #[derive(Message, Clone)]
 pub struct WorkspaceSaveRequest {
     pub path: PathBuf,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceCommitRequest {
+    pub request_id: Uuid,
+    pub requester: Entity,
+    pub profile: Entity,
+    pub path: PathBuf,
+    pub required: Entity,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceCommitCompleted {
+    pub request_id: Uuid,
+    pub requester: Entity,
+    pub profile: Entity,
+    pub store: Entity,
+    pub path: PathBuf,
+    pub revision: u64,
+    pub result: Result<(), String>,
 }
 
 #[derive(Component)]
