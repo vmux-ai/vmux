@@ -1,14 +1,14 @@
 use crate::catalog::ProjectionSet;
-use crate::inventory::{
-    InventorySet, PendingToolOperation, Registry as ToolRegistry, Scan,
-    Sequence as OperationRequestSequence,
-};
 use crate::presentation::{Context as ToolOperationContext, State as ToolPageState};
 use crate::state::{
     McpRegisterRequest, ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest,
     ToolInstallRequest, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
     ToolsFilterRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
+};
+use crate::tool_inventory::{
+    InventorySet, PendingToolOperation, Registry as ToolRegistry, Scan,
+    Sequence as OperationRequestSequence,
 };
 use bevy::prelude::*;
 use bevy::prelude::{Commands, On, Query};

@@ -70,12 +70,7 @@ pub fn Page() -> Element {
             ));
             toolbar.push(
                 ToolbarControl::button(translate("tools-apply"), move |_| {
-                    send_operation(
-                        provider.clone(),
-                        ToolOperationKind::Apply,
-                        String::new(),
-                        String::new(),
-                    );
+                    ToolOperationKind::Apply.send(provider.clone(), String::new(), String::new());
                 })
                 .disabled(pending),
             );
@@ -443,7 +438,7 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
                                 "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                             },
                             if result.success {
-                                {operation_result_message(&result)}
+                                {result.result_message()}
                             } else {
                                 "{result.message}"
                             }
@@ -558,7 +553,7 @@ fn McpRegistryCard(config_path: String) -> Element {
                 ManagerButton {
                     variant: ManagerButtonVariant::Secondary,
                     disabled: config_path.is_empty(),
-                    onclick: move |_| open_tool_file(open_path.clone()),
+                    onclick: move |_| ToolOpenRequest::send_path(open_path.clone()),
                     {translate("common-open")}
                 }
             }
@@ -661,7 +656,7 @@ fn HomebrewSourceCard(root: String) -> Element {
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 disabled: root.is_empty(),
-                onclick: move |_| open_tool_file(open_brewfile.clone()),
+                onclick: move |_| ToolOpenRequest::send_path(open_brewfile.clone()),
                 {translate("tools-open-brewfile")}
             }
         }
@@ -761,12 +756,7 @@ fn ToolQuickInstall(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Elem
             disabled,
             onclick: move |event| {
                 event.stop_propagation();
-                send_operation(
-                    provider.clone(),
-                    ToolOperationKind::Install,
-                    id.clone(),
-                    String::new(),
-                );
+                ToolOperationKind::Install.send(provider.clone(), id.clone(), String::new());
             },
             LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
         }
@@ -823,8 +813,8 @@ fn ToolMeta(item: ToolItem, provider: ToolProviderMetadata) -> Element {
             span { class: "shrink-0 text-[10px] text-muted-foreground/60", {format!("· {}", translate("tools-managed"))} }
         }
         span { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70",
-            span { class: "size-1.5 rounded-full {status_dot_class(item.status)}" }
-            {status_label(item.status)}
+            span { class: "size-1.5 rounded-full {item.status.dot_class()}" }
+            {item.status.label()}
         }
     }
 }
@@ -843,17 +833,16 @@ fn ToolActions(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
                 rsx! {
                     ManagerButton {
                         key: "{key}",
-                        variant: operation_variant(kind),
+                        variant: kind.variant(),
                         disabled: pending.contains(&operation),
                         onclick: move |_| {
-                            send_operation(
+                            kind.send(
                                 operation_provider.clone(),
-                                kind,
                                 operation_id.clone(),
                                 String::new(),
                             );
                         },
-                        {operation_label(kind)}
+                        {kind.label()}
                     }
                 }
             }
@@ -861,92 +850,98 @@ fn ToolActions(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
     }
 }
 
-fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, value: String) {
-    let _ = match kind {
-        ToolOperationKind::Install => send(&ToolInstallRequest { provider, id }),
-        ToolOperationKind::Update => send(&ToolUpdateRequest { provider, id }),
-        ToolOperationKind::Uninstall => send(&ToolUninstallRequest { provider, id }),
-        ToolOperationKind::Forget => send(&ToolForgetRequest { provider, id }),
-        ToolOperationKind::Adopt => send(&ToolAdoptRequest {
-            provider,
-            id,
-            value,
-        }),
-        ToolOperationKind::Link => send(&ToolLinkRequest { provider, id }),
-        ToolOperationKind::Unlink => send(&ToolUnlinkRequest { provider, id }),
-        ToolOperationKind::Apply => send(&ToolApplyRequest { provider }),
-        ToolOperationKind::Import => send(&ToolImportRequest { provider, value }),
-    };
-}
-
-fn status_label(status: ToolStatus) -> String {
-    translate(match status {
-        ToolStatus::Available => "tools-status-available",
-        ToolStatus::Installed => "common-installed",
-        ToolStatus::Outdated => "lsp-status-outdated",
-        ToolStatus::Missing => "tools-status-missing",
-        ToolStatus::Conflict => "tools-status-conflict",
-        ToolStatus::Failed => "common-failed",
-    })
-}
-
-fn status_dot_class(status: ToolStatus) -> &'static str {
-    match status {
-        ToolStatus::Installed => "bg-success",
-        ToolStatus::Outdated => "bg-amber-500",
-        ToolStatus::Conflict | ToolStatus::Failed => "bg-rose-500",
-        ToolStatus::Missing => "bg-muted-foreground/40",
-        ToolStatus::Available => "bg-primary/70",
+impl ToolOperationKind {
+    fn send(self, provider: ToolProvider, id: String, value: String) {
+        let _ = match self {
+            Self::Install => send(&ToolInstallRequest { provider, id }),
+            Self::Update => send(&ToolUpdateRequest { provider, id }),
+            Self::Uninstall => send(&ToolUninstallRequest { provider, id }),
+            Self::Forget => send(&ToolForgetRequest { provider, id }),
+            Self::Adopt => send(&ToolAdoptRequest {
+                provider,
+                id,
+                value,
+            }),
+            Self::Link => send(&ToolLinkRequest { provider, id }),
+            Self::Unlink => send(&ToolUnlinkRequest { provider, id }),
+            Self::Apply => send(&ToolApplyRequest { provider }),
+            Self::Import => send(&ToolImportRequest { provider, value }),
+        };
     }
-}
 
-fn operation_label(kind: ToolOperationKind) -> String {
-    translate(match kind {
-        ToolOperationKind::Install => "common-install",
-        ToolOperationKind::Update => "common-update",
-        ToolOperationKind::Uninstall => "common-uninstall",
-        ToolOperationKind::Forget => "tools-forget",
-        ToolOperationKind::Adopt => "tools-manage",
-        ToolOperationKind::Link => "tools-link",
-        ToolOperationKind::Unlink => "tools-unlink",
-        ToolOperationKind::Apply => "tools-apply",
-        ToolOperationKind::Import => "tools-import",
-    })
-}
-
-fn operation_result_message(result: &ToolOperationNotice) -> String {
-    let id = result.operation.item_id.as_str();
-    match result.operation.kind {
-        ToolOperationKind::Apply => translate("tools-result-applied"),
-        ToolOperationKind::Import => translate("tools-result-imported"),
-        kind => translate_with(
-            match kind {
-                ToolOperationKind::Install => "tools-result-installed",
-                ToolOperationKind::Update => "tools-result-updated",
-                ToolOperationKind::Uninstall => "tools-result-uninstalled",
-                ToolOperationKind::Forget => "tools-result-forgotten",
-                ToolOperationKind::Adopt => "tools-result-managed",
-                ToolOperationKind::Link => "tools-result-linked",
-                ToolOperationKind::Unlink => "tools-result-unlinked",
-                ToolOperationKind::Apply | ToolOperationKind::Import => unreachable!(),
-            },
-            &[("name", TranslationValue::String(id))],
-        ),
+    fn label(self) -> String {
+        translate(match self {
+            Self::Install => "common-install",
+            Self::Update => "common-update",
+            Self::Uninstall => "common-uninstall",
+            Self::Forget => "tools-forget",
+            Self::Adopt => "tools-manage",
+            Self::Link => "tools-link",
+            Self::Unlink => "tools-unlink",
+            Self::Apply => "tools-apply",
+            Self::Import => "tools-import",
+        })
     }
-}
 
-fn operation_variant(kind: ToolOperationKind) -> ManagerButtonVariant {
-    match kind {
-        ToolOperationKind::Install | ToolOperationKind::Link => ManagerButtonVariant::Primary,
-        ToolOperationKind::Uninstall | ToolOperationKind::Forget | ToolOperationKind::Unlink => {
-            ManagerButtonVariant::Danger
+    fn variant(self) -> ManagerButtonVariant {
+        match self {
+            Self::Install | Self::Link => ManagerButtonVariant::Primary,
+            Self::Uninstall | Self::Forget | Self::Unlink => ManagerButtonVariant::Danger,
+            _ => ManagerButtonVariant::Secondary,
         }
-        _ => ManagerButtonVariant::Secondary,
     }
 }
 
-fn open_tool_file(path: String) {
-    let _ = send(&ToolOpenRequest { path });
+impl ToolStatus {
+    fn label(self) -> String {
+        translate(match self {
+            Self::Available => "tools-status-available",
+            Self::Installed => "common-installed",
+            Self::Outdated => "lsp-status-outdated",
+            Self::Missing => "tools-status-missing",
+            Self::Conflict => "tools-status-conflict",
+            Self::Failed => "common-failed",
+        })
+    }
+
+    fn dot_class(self) -> &'static str {
+        match self {
+            Self::Installed => "bg-success",
+            Self::Outdated => "bg-amber-500",
+            Self::Conflict | Self::Failed => "bg-rose-500",
+            Self::Missing => "bg-muted-foreground/40",
+            Self::Available => "bg-primary/70",
+        }
+    }
+}
+
+impl ToolOperationNotice {
+    fn result_message(&self) -> String {
+        let id = self.operation.item_id.as_str();
+        match self.operation.kind {
+            ToolOperationKind::Apply => translate("tools-result-applied"),
+            ToolOperationKind::Import => translate("tools-result-imported"),
+            kind => translate_with(
+                match kind {
+                    ToolOperationKind::Install => "tools-result-installed",
+                    ToolOperationKind::Update => "tools-result-updated",
+                    ToolOperationKind::Uninstall => "tools-result-uninstalled",
+                    ToolOperationKind::Forget => "tools-result-forgotten",
+                    ToolOperationKind::Adopt => "tools-result-managed",
+                    ToolOperationKind::Link => "tools-result-linked",
+                    ToolOperationKind::Unlink => "tools-result-unlinked",
+                    ToolOperationKind::Apply | ToolOperationKind::Import => unreachable!(),
+                },
+                &[("name", TranslationValue::String(id))],
+            ),
+        }
+    }
+}
+
+impl ToolOpenRequest {
+    fn send_path(path: String) {
+        let _ = send(&Self { path });
+    }
 }
 
 #[cfg(test)]
@@ -983,8 +978,21 @@ mod tests {
 
     #[test]
     fn tool_routes_are_data_driven() {
-        assert_eq!(ToolRoute::from("vmux://tools/").id(), "acp");
-        assert_eq!(ToolRoute::from("vmux://tools/acp").id(), "acp");
-        assert_eq!(ToolRoute::from("vmux://tools/lsp/").id(), "lsp");
+        assert_eq!(
+            ToolRoute::parse("vmux://tools/").unwrap_or_default().id(),
+            "acp"
+        );
+        assert_eq!(
+            ToolRoute::parse("vmux://tools/acp")
+                .unwrap_or_default()
+                .id(),
+            "acp"
+        );
+        assert_eq!(
+            ToolRoute::parse("vmux://tools/lsp/")
+                .unwrap_or_default()
+                .id(),
+            "lsp"
+        );
     }
 }

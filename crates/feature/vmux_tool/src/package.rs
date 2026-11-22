@@ -536,7 +536,7 @@ fn finish<R: Clone + Send + Sync + 'static>(
     sources: Sources,
     native: Query<&OperationTarget>,
     mut registry: Query<(
-        &mut crate::inventory::Registry,
+        &mut crate::tool_inventory::Registry,
         &ToolStore,
         &mut ToolsManifest,
     )>,
@@ -645,11 +645,11 @@ mod tests {
             let source = app
                 .world_mut()
                 .spawn((
-                    crate::inventory::Registry::default(),
+                    crate::tool_inventory::Registry::default(),
                     crate::catalog::Catalog::default(),
                     store.clone(),
                     manifest,
-                    crate::inventory::Sequence::default(),
+                    crate::tool_inventory::Sequence::default(),
                 ))
                 .id();
             app.update();
@@ -911,11 +911,11 @@ mod tests {
             let source = app
                 .world_mut()
                 .spawn((
-                    crate::inventory::Registry::default(),
+                    crate::tool_inventory::Registry::default(),
                     crate::catalog::Catalog::default(),
                     store.clone(),
                     manifest,
-                    crate::inventory::Sequence::default(),
+                    crate::tool_inventory::Sequence::default(),
                 ))
                 .id();
             let id = ToolProvider::new(provider);

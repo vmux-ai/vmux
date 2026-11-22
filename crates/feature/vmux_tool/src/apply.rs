@@ -3,9 +3,9 @@ use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget, Or
 
 use crate::catalog::Inventory;
 use crate::dotfiles::{AppliedEnabledDotfiles, ApplyEnabledDotfiles};
-use crate::inventory::Registry;
 use crate::observation::PackageProvider;
 use crate::state::{ToolApplyRequest, ToolInstallRequest, ToolStatus};
+use crate::tool_inventory::Registry;
 use crate::{
     ExternalToolOperation, ToolOperationFailed, ToolOperationFinished, ToolOperationRequest,
     ToolOperationRouteSet, ToolOperationSucceeded, ToolProviderId, ToolProviderTarget, ToolStore,

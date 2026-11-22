@@ -3,12 +3,12 @@ use bevy_cef::prelude::UiInput;
 use vmux_ecs::{PageMetadata, UiState, UiStateWrite};
 
 use crate::catalog::{Catalog, Inventory, ProjectionSet};
-use crate::inventory::{Registry, Sequence};
 use crate::route::ToolRoute;
 use crate::state::{
     ToolOperationKey, ToolOperationNotice, ToolsFilterRequest, ToolsNavigateRequest,
     ToolsRefreshRequest, ToolsUiState,
 };
+use crate::tool_inventory::{Registry, Sequence};
 
 pub(crate) struct ToolPagePlugin;
 
@@ -196,7 +196,7 @@ fn refresh(
         state.navigate(&route);
         commands.entity(trigger.event().webview).insert(state);
     }
-    commands.trigger(crate::inventory::RefreshRequest {
+    commands.trigger(crate::tool_inventory::RefreshRequest {
         entity: registry,
         refresh_catalogs: trigger.event().payload.refresh,
     });

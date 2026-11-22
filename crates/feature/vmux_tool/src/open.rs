@@ -9,11 +9,11 @@ use vmux_ecs::{
 };
 
 use crate::ToolStore;
-use crate::inventory::Registry;
 use crate::io::PathChanged;
 use crate::presentation::State;
 use crate::route::ToolRoute;
 use crate::state::ToolOpenRequest;
+use crate::tool_inventory::Registry;
 
 pub(crate) struct ToolOpenPlugin;
 

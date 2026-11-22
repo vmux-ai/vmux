@@ -2,7 +2,10 @@ use bevy::ecs::lifecycle::Remove;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use bevy::prelude::{
+    Added, App, Changed, ChildOf, Commands, Component, Entity, EntityEvent, Has,
+    IntoScheduleConfigs, Name, On, Or, Plugin, Query, SystemSet, Update, With,
+};
 use vmux_ecs::RegistrationOrder;
 
 use crate::ToolProviderId;
@@ -15,7 +18,7 @@ use crate::state::{
 
 pub(crate) struct CatalogPlugin;
 
-impl bevy::prelude::Plugin for CatalogPlugin {
+impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(replace)
             .add_observer(remove)
@@ -357,30 +360,29 @@ fn replace(
     catalog.revision = catalog.revision.wrapping_add(1);
 }
 
-type Changes<'w, 's> = Query<
-    'w,
-    's,
-    &'static ChildOf,
-    (
-        With<Item>,
-        Or<(
-            Added<Item>,
-            Changed<ToolProviderId>,
-            Changed<Id>,
-            Changed<Name>,
-            Changed<RegistrationOrder>,
-            Changed<Version>,
-            Changed<Icon>,
-            Changed<Detail>,
-            Changed<Status>,
-            Changed<Operations>,
-            Changed<ChildOf>,
-            Added<Managed>,
-        )>,
-    ),
->;
-
-fn track(changes: Changes, mut catalogs: Query<&mut Catalog>) {
+fn track(
+    changes: Query<
+        &ChildOf,
+        (
+            With<Item>,
+            Or<(
+                Added<Item>,
+                Changed<ToolProviderId>,
+                Changed<Id>,
+                Changed<Name>,
+                Changed<RegistrationOrder>,
+                Changed<Version>,
+                Changed<Icon>,
+                Changed<Detail>,
+                Changed<Status>,
+                Changed<Operations>,
+                Changed<ChildOf>,
+                Added<Managed>,
+            )>,
+        ),
+    >,
+    mut catalogs: Query<&mut Catalog>,
+) {
     let mut dirty = HashSet::new();
     for parent in &changes {
         dirty.insert(parent.parent());
@@ -404,27 +406,7 @@ fn remove(trigger: On<Remove, Item>, parents: Query<&ChildOf>, mut catalogs: Que
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[derive(Resource, Default)]
-    struct Published(Option<ToolsSnapshot>);
-
-    struct FixturePlugin;
-
-    impl bevy::prelude::Plugin for FixturePlugin {
-        fn build(&self, app: &mut App) {
-            app.add_plugins(CatalogPlugin)
-                .init_resource::<Published>()
-                .add_systems(PostUpdate, publish);
-        }
-    }
-
-    fn publish(
-        root: Single<Entity, With<Catalog>>,
-        inventory: Inventory,
-        mut published: ResMut<Published>,
-    ) {
-        published.0 = inventory.snapshot(*root);
-    }
+    use bevy::ecs::system::SystemState;
 
     struct Fixture {
         app: App,
@@ -434,9 +416,18 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(FixturePlugin);
+            app.add_plugins(CatalogPlugin);
             let root = app.world_mut().spawn(Catalog::default()).id();
             Self { app, root }
+        }
+
+        fn snapshot(&mut self) -> ToolsSnapshot {
+            let mut state = SystemState::<Inventory>::new(self.app.world_mut());
+            state
+                .get(self.app.world())
+                .unwrap()
+                .snapshot(self.root)
+                .unwrap()
         }
 
         fn replace(&mut self, categories: Vec<ToolCategory>) -> ToolsSnapshot {
@@ -449,7 +440,7 @@ mod tests {
                 },
             });
             self.app.update();
-            self.app.world().resource::<Published>().0.clone().unwrap()
+            self.snapshot()
         }
 
         fn entity(&mut self, provider: &ToolProvider, id: &str) -> Entity {
@@ -551,13 +542,7 @@ mod tests {
             .entity_mut(original)
             .insert(Status(ToolStatus::Conflict));
         fixture.app.update();
-        let updated = fixture
-            .app
-            .world()
-            .resource::<Published>()
-            .0
-            .as_ref()
-            .unwrap();
+        let updated = fixture.snapshot();
         assert_eq!(updated.installed, 0);
         assert_eq!(updated.conflicts, 1);
         fixture.app.world_mut().entity_mut(fixture.root).despawn();

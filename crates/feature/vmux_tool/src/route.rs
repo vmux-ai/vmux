@@ -38,12 +38,6 @@ impl ToolRoute {
     }
 }
 
-impl From<&str> for ToolRoute {
-    fn from(url: &str) -> Self {
-        Self::parse(url).unwrap_or_default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

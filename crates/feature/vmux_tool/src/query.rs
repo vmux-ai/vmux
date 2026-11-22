@@ -139,30 +139,16 @@ mod tests {
     use vmux_api::protocol::ServiceMessage;
     use vmux_ecs::service::ServiceInbound;
 
-    fn handle_known(
-        mut queries: MessageReader<ToolQueryRequest>,
-        mut handled: MessageWriter<ToolQueryHandled>,
-    ) {
-        for request in queries.read() {
-            if request.query.id == "known@1" {
-                handled.write(ToolQueryHandled(request.request_id));
-            }
-        }
-    }
-
     #[test]
     fn fallback_rejects_only_unhandled_queries() {
         let mut app = App::new();
-        app.add_plugins(ToolQueryPlugin)
-            .add_systems(Update, handle_known.in_set(ToolQueryRouteSet));
+        app.add_tool_query::<AgentWorkingDirectory>();
         let known = AgentRequestId([1; 16]);
         let unknown = AgentRequestId([2; 16]);
+        let anchor = ProcessId([9; 16]);
         app.world_mut().write_message(ToolQueryRequest {
             request_id: known,
-            query: AgentRequest {
-                id: "known@1".to_string(),
-                body: Vec::new(),
-            },
+            query: AgentRequest::encode(&AgentWorkingDirectory { anchor }).unwrap(),
         });
         app.world_mut().write_message(ToolQueryRequest {
             request_id: unknown,

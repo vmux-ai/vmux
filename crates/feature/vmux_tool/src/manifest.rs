@@ -10,11 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::dotfiles::DotfilesManifest;
 use crate::mcp::McpManifest;
 
-const MANIFEST_VERSION: u32 = 1;
-
 #[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolsManifest {
-    #[serde(default = "manifest_version")]
+    #[serde(default = "ToolsManifest::default_version")]
     pub version: u32,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub packages: BTreeMap<String, Vec<String>>,
@@ -27,7 +25,7 @@ pub struct ToolsManifest {
 impl Default for ToolsManifest {
     fn default() -> Self {
         Self {
-            version: MANIFEST_VERSION,
+            version: Self::VERSION,
             packages: BTreeMap::new(),
             mcp: McpManifest::default(),
             dotfiles: DotfilesManifest::default(),
@@ -36,6 +34,12 @@ impl Default for ToolsManifest {
 }
 
 impl ToolsManifest {
+    const VERSION: u32 = 1;
+
+    fn default_version() -> u32 {
+        Self::VERSION
+    }
+
     pub fn contains(&self, provider: &str, name: &str) -> bool {
         self.packages
             .get(provider)
@@ -92,7 +96,7 @@ impl ToolsManifest {
         }
         let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
         let mut manifest: Self = toml::from_str(&source).map_err(|error| error.to_string())?;
-        if manifest.version != MANIFEST_VERSION {
+        if manifest.version != Self::VERSION {
             return Err(format!(
                 "unsupported tools manifest version: {}",
                 manifest.version
@@ -104,7 +108,7 @@ impl ToolsManifest {
 
     pub fn write_to(&self, path: &Path) -> Result<(), String> {
         let mut manifest = self.clone();
-        manifest.version = MANIFEST_VERSION;
+        manifest.version = Self::VERSION;
         manifest.normalize();
         let source = toml::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
         vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
@@ -296,10 +300,6 @@ impl ToolStore {
     }
 }
 
-fn manifest_version() -> u32 {
-    MANIFEST_VERSION
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +307,15 @@ mod tests {
     struct Notify {
         execution: Weak<Execution>,
         sender: std::sync::mpsc::SyncSender<bool>,
+    }
+
+    impl Notify {
+        fn waker(store: &ToolStore, sender: std::sync::mpsc::SyncSender<bool>) -> Waker {
+            Waker::from(Arc::new(Self {
+                execution: Arc::downgrade(&store.execution),
+                sender,
+            }))
+        }
     }
 
     impl std::task::Wake for Notify {
@@ -326,10 +335,7 @@ mod tests {
         let other = ToolStore::new(root.path(), root.path());
         let lease = store.lease().unwrap();
         let (sender, receiver) = std::sync::mpsc::sync_channel(8);
-        let waker = Waker::from(Arc::new(Notify {
-            execution: Arc::downgrade(&other.execution),
-            sender,
-        }));
+        let waker = Notify::waker(&other, sender);
         other.bind_waker(waker.clone());
         assert!(receiver.try_recv().is_err());
         drop(lease);
@@ -348,10 +354,7 @@ mod tests {
         let store = ToolStore::new(root.path(), root.path());
         drop(store.lease().unwrap());
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        store.bind_waker(Waker::from(Arc::new(Notify {
-            execution: Arc::downgrade(&store.execution),
-            sender,
-        })));
+        store.bind_waker(Notify::waker(&store, sender));
         assert!(
             receiver
                 .recv_timeout(std::time::Duration::from_secs(2))
