@@ -133,8 +133,8 @@ struct PresentationPlugin;
 
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_layout::placement::PlacementPlugin>() {
-            app.add_plugins(vmux_layout::placement::PlacementPlugin);
+        if !app.is_plugin_added::<PlacementPlugin>() {
+            app.add_plugins(PlacementPlugin);
         }
         app.add_message::<PendingProcessPresentation>()
             .add_observer(queue_presentation)
@@ -284,9 +284,7 @@ fn spawn_placed(
     event: On<SpawnPlacedTerminal>,
     stacks: Query<&ChildOf, With<Stack>>,
     terminals: Query<&ChildOf, With<Terminal>>,
-    settings: Res<AppSettings>,
-    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
-    mut commands: Commands,
+    mut spawn: SpawnTerminals,
 ) {
     if stacks
         .get(event.stack)
@@ -297,9 +295,7 @@ fn spawn_placed(
     {
         return;
     }
-    event
-        .request
-        .spawn(event.stack, &settings, &mut terminal_inputs, &mut commands);
+    spawn.spawn(event.stack, &event.request);
 }
 
 #[derive(Component)]
@@ -931,9 +927,7 @@ impl TerminalBundle {
 
 fn respond_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
-    settings: Res<AppSettings>,
-    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
-    mut commands: Commands,
+    mut spawn: SpawnTerminals,
 ) {
     for request in reader.read() {
         let stack_ts = if request.activate {
@@ -941,7 +935,8 @@ fn respond_stack_spawn(
         } else {
             LastActivatedAt(0)
         };
-        let stack = commands
+        let stack = spawn
+            .commands
             .spawn((Stack::bundle(), stack_ts, ChildOf(request.pane)))
             .id();
         let title = request
@@ -949,39 +944,48 @@ fn respond_stack_spawn(
             .as_ref()
             .map(|cwd| format!("Terminal ({})", cwd.display()))
             .unwrap_or_else(|| "Terminal".to_string());
-        commands.entity(stack).insert(PageMetadata {
+        spawn.commands.entity(stack).insert(PageMetadata {
             url: TerminalPlugin::url().to_string(),
             title,
             bg_color: None,
             ..default()
         });
-        request.spawn(stack, &settings, &mut terminal_inputs, &mut commands);
+        spawn.spawn(stack, request);
     }
 }
 
-impl TerminalStackSpawnRequest {
-    fn spawn(
-        &self,
-        stack: Entity,
-        settings: &AppSettings,
-        terminal_inputs: &mut MessageWriter<QueueTerminalInput>,
-        commands: &mut Commands,
-    ) {
-        let terminal = commands
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpawnTerminals<'w, 's> {
+    settings: Res<'w, AppSettings>,
+    terminal_inputs: MessageWriter<'w, QueueTerminalInput>,
+    commands: Commands<'w, 's>,
+}
+
+impl SpawnTerminals<'_, '_> {
+    fn spawn(&mut self, stack: Entity, request: &TerminalStackSpawnRequest) {
+        let terminal = self
+            .commands
             .spawn((
-                TerminalBundle::with_shell(settings, self.cwd.as_deref(), self.shell.as_deref()),
+                TerminalBundle::with_shell(
+                    &self.settings,
+                    request.cwd.as_deref(),
+                    request.shell.as_deref(),
+                ),
                 ChildOf(stack),
             ))
             .id();
-        commands.entity(terminal).insert(KeyboardOwner);
-        if self.agent_run {
-            commands.entity(terminal).insert(crate::AgentRunTerminal);
+        self.commands.entity(terminal).insert(KeyboardOwner);
+        if request.agent_run {
+            self.commands
+                .entity(terminal)
+                .insert(crate::AgentRunTerminal);
         }
-        if let Some(pid) = self.process_id {
-            commands.entity(terminal).insert(pid);
+        if let Some(pid) = request.process_id {
+            self.commands.entity(terminal).insert(pid);
         }
-        if let Some(data) = self.pending_input.clone() {
-            terminal_inputs.write(QueueTerminalInput { terminal, data });
+        if let Some(data) = request.pending_input.clone() {
+            self.terminal_inputs
+                .write(QueueTerminalInput { terminal, data });
         }
     }
 }
