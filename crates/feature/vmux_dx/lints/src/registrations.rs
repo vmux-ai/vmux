@@ -65,6 +65,37 @@ impl Fixture {
             ])
             .output()
             .expect("run the prepared Dylint compiler");
+        self.verify(name, output, expected, code);
+    }
+
+    fn check_default(&self, name: &str, source: &str, expected: &[&str], code: &str) {
+        std::fs::write(
+            self.directory
+                .path()
+                .join("examples")
+                .join(format!("{name}.rs")),
+            source,
+        )
+        .unwrap();
+        let output = Command::new("cargo")
+            .env("DYLINT_RUSTFLAGS", "")
+            .current_dir(self.directory.path())
+            .args([
+                "dylint",
+                "--path",
+                self.library.to_str().unwrap(),
+                "--",
+                "--locked",
+                "--example",
+                name,
+                "--message-format=json",
+            ])
+            .output()
+            .expect("run the prepared Dylint compiler");
+        self.verify(name, output, expected, code);
+    }
+
+    fn verify(&self, name: &str, output: std::process::Output, expected: &[&str], code: &str) {
         let stdout = String::from_utf8(output.stdout).unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
         let (mut diagnostics, unexpected) = self.diagnostics(name, &stdout, code);
@@ -154,6 +185,7 @@ fn runtime_inputs_follow_resolved_systems_and_system_param_methods() {
             &[
                 "`inspect`: inherent methods with ECS runtime inputs must belong to a SystemParam",
                 "`inspect_access`: inherent methods with ECS runtime inputs must belong to a SystemParam",
+                "`unguarded`: inherent methods with ECS runtime inputs must belong to a SystemParam",
                 "`isolated`: ECS runtime helpers must be private and have one local registered owner",
                 "`shared`: ECS runtime helpers must be private and have one local registered owner",
                 "`exposed`: ECS runtime helpers must be private and have one local registered owner",
@@ -164,6 +196,10 @@ fn runtime_inputs_follow_resolved_systems_and_system_param_methods() {
                 "`disconnected`: ECS runtime helpers must be private and have one local registered owner",
                 "`unread`: ECS runtime helpers must be private and have one local registered owner",
                 "`plain_helper`: ECS runtime helpers must be private and have one local registered owner",
+                "`mixed_callback`: ECS runtime helpers must be private and have one local registered owner",
+                "`copied_callback`: ECS runtime helpers must be private and have one local registered owner",
+                "`optional_commands`: ECS runtime helpers must be private and have one local registered owner",
+                "`vector_commands`: ECS runtime helpers must be private and have one local registered owner",
             ][..],
         ),
         (
@@ -172,8 +208,14 @@ fn runtime_inputs_follow_resolved_systems_and_system_param_methods() {
             &[][..],
         ),
     ] {
-        fixture.check(name, source, expected, "vmux_ecs_runtime");
+        fixture.check_default(name, source, expected, "vmux_ecs_runtime");
     }
+    fixture.check(
+        "runtime_inputs_allowed",
+        include_str!("../ui/runtime_inputs.rs"),
+        &[],
+        "vmux_ecs_runtime",
+    );
 }
 
 #[test]

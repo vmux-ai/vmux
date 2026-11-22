@@ -12,7 +12,7 @@ extern crate rustc_trait_selection;
 use rustc_errors::DiagDecorator;
 use rustc_hir::def::Res;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
-use rustc_hir::{Body, Expr, ExprKind, HirId, Item, Node, PatKind};
+use rustc_hir::{Body, Expr, ExprKind, HirId, Item, Node, Pat, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind, Visibility};
 use std::collections::{HashMap, HashSet};
@@ -81,9 +81,9 @@ struct VmuxExportedSystem<'tcx> {
     reported: HashSet<DefId>,
     configurations: HashSet<HirId>,
     systems: HashSet<DefId>,
-    helper_callers: HashMap<DefId, HashSet<DefId>>,
-    runtime_fields: HashMap<DefId, HashSet<DefId>>,
-    runtime_field_callers: HashMap<DefId, HashSet<DefId>>,
+    helper_references: HashMap<DefId, Vec<(HirId, DefId)>>,
+    callback_bindings: HashMap<HirId, DefId>,
+    runtime_field_readers: HashMap<DefId, HashSet<DefId>>,
     parameter_trait: Option<DefId>,
     trait_implementations: HashSet<DefId>,
 }
@@ -115,6 +115,13 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
         self.runtime_reference(cx, expression);
         self.runtime_field_reference(cx, expression);
         self.register(cx, expression);
+    }
+
+    fn check_pat(&mut self, cx: &LateContext<'tcx>, pattern: &'tcx Pat<'tcx>) {
+        if !self.owned {
+            return;
+        }
+        self.runtime_field_pattern(cx, pattern);
     }
 
     fn check_body(&mut self, cx: &LateContext<'tcx>, body: &Body<'tcx>) {
@@ -232,8 +239,9 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
         let name = cx.tcx.item_name(method);
         match (package.as_str(), owner.as_str(), name.as_str()) {
             ("bevy_app", "App" | "SubApp", "add_systems") => Some(1 + usize::from(qualified)),
-            ("bevy_app", "App" | "SubApp", "add_observer")
-            | ("bevy_ecs", "World" | "Commands", "add_observer")
+            ("bevy_app", "App" | "SubApp", "add_observer" | "register_system")
+            | ("bevy_ecs", "World", "register_system_cached")
+            | ("bevy_ecs", "World" | "Commands", "add_observer" | "register_system")
             | ("bevy_ecs", "EntityCommands" | "EntityWorldMut", "observe") => {
                 Some(usize::from(qualified))
             }
