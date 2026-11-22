@@ -93,7 +93,7 @@ jobs:
       macos_tooling: ${{ needs.plan.outputs.presentation_only != 'true' && (steps.filter.outputs.macos_tooling == 'true' && steps.native.outputs.native != 'false') }}
       ios: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name != 'pull_request' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false') }}
       code: ${{ needs.plan.outputs.presentation_only != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true') }}
-      compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' }}
+      compiler_lints: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' || steps.scope.outputs.sdk == 'true' }}
       contracts: ${{ steps.scope.outputs.sdk == 'true' }}
       headless: ${{ steps.scope.outputs.headless == 'true' }}
       rust: ${{ steps.scope.outputs.rust == 'true' }}
@@ -288,7 +288,7 @@ jobs:
           VMUX_SDK_REQUIRED: ${{ steps.scope.outputs.sdk }}
           VMUX_DESKTOP_REQUIRED: ${{ steps.scope.outputs.desktop }}
           VMUX_FEATURES_REQUIRED: ${{ steps.scope.outputs.headless == 'true' || github.event_name == 'schedule' }}
-          VMUX_COMPILER_REQUIRED: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' }}
+          VMUX_COMPILER_REQUIRED: ${{ steps.scope.outputs.rust == 'true' || steps.scope.outputs.desktop == 'true' || steps.scope.outputs.tooling == 'true' || steps.scope.outputs.sdk == 'true' }}
           VMUX_LEGACY_DESKTOP: ${{ github.event_name == 'schedule' }}
         run: vmux-ci checks-plan >> "$GITHUB_OUTPUT"
 
@@ -523,6 +523,16 @@ jobs:
       - name: Lint registered systems
         if: needs.changes.outputs.lint_args != ''
         run: VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked ${{ needs.changes.outputs.lint_args }} --all-targets
+      - name: Lint standalone framework consumers
+        if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.tooling == 'true'
+        env:
+          VMUX_BUILD_PROFILE: dev
+          VMUX_PROFILE: host-probe
+          VMUX_HOST_NAME: Vmux
+          VMUX_HOST_NAMESPACE: ai.vmux
+        run: |
+          VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --manifest-path examples/framework-consumer/Cargo.toml --all-targets
+          VMUX_SKIP_DX_BUILD=1 vmux internal --root .build-tools/compiler-checkout ecs-lint -- --locked --manifest-path examples/host-consumer/Cargo.toml --all-targets
       - uses: ./.github/actions/save-sources
         with:
           workspace: .build-tools/compiler-checkout

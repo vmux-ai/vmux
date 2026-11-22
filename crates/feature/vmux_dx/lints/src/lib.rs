@@ -5,18 +5,21 @@ extern crate rustc_hir;
 extern crate rustc_lint;
 extern crate rustc_middle;
 extern crate rustc_session;
+extern crate rustc_span;
 
 use rustc_errors::DiagDecorator;
 use rustc_hir::def::Res;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
-use rustc_hir::{Body, Expr, ExprKind, HirId, Node, PatKind};
+use rustc_hir::{Body, Expr, ExprKind, HirId, Item, Node, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind, Visibility};
 use std::collections::HashSet;
+use std::path::{Component, PathBuf};
 
 mod aliases;
 mod naming;
 mod ownership;
+mod plugins;
 #[cfg(test)]
 mod registrations;
 
@@ -40,17 +43,30 @@ rustc_session::declare_lint! {
     "registered Vmux systems must use short operation names within their module"
 }
 
+rustc_session::declare_lint! {
+    pub VMUX_PLUGIN_NAME,
+    Deny,
+    "Vmux plugin types and aliases must use descriptive names ending in Plugin"
+}
+
 #[unsafe(no_mangle)]
 pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintStore) {
-    store.register_lints(&[VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_ECS_OWNERSHIP]);
+    store.register_lints(&[
+        VMUX_EXPORTED_SYSTEM,
+        VMUX_SYSTEM_NAME,
+        VMUX_PLUGIN_NAME,
+        VMUX_ECS_OWNERSHIP,
+    ]);
     store.register_late_lint_pass(Box::new(|_| Box::new(VmuxExportedSystem::default())));
 }
 
-rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_ECS_OWNERSHIP]);
+rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_PLUGIN_NAME, VMUX_ECS_OWNERSHIP]);
 
 #[derive(Default)]
 struct VmuxExportedSystem<'tcx> {
+    owned: bool,
     named_systems: HashSet<DefId>,
+    plugin_types: HashSet<DefId>,
     ownership: ownership::Ownership<'tcx>,
     reported: HashSet<DefId>,
     configurations: HashSet<HirId>,
@@ -58,7 +74,13 @@ struct VmuxExportedSystem<'tcx> {
 
 impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
+        self.owned = Self::applies(cx);
         self.ownership.traits(cx);
+        self.collect_plugins(cx);
+    }
+
+    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
+        self.check_plugin_item(cx, item);
     }
 
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
@@ -66,7 +88,7 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
-        if !Self::applies(cx) {
+        if !self.owned {
             return;
         }
         self.ownership.call(cx, expression);
@@ -74,7 +96,7 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
     }
 
     fn check_body(&mut self, cx: &LateContext<'tcx>, body: &Body<'tcx>) {
-        if !Self::applies(cx) {
+        if !self.owned {
             return;
         }
         let method = body.value.hir_id.owner.def_id.to_def_id();
@@ -102,7 +124,32 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
     fn applies(cx: &LateContext<'_>) -> bool {
         let package = std::env::var("CARGO_PKG_NAME")
             .unwrap_or_else(|_| cx.tcx.crate_name(LOCAL_CRATE).as_str().to_owned());
-        package.starts_with("vmux_")
+        if package.starts_with("vmux_") {
+            return true;
+        }
+        let Some(manifest) = std::env::var_os("CARGO_MANIFEST_DIR") else {
+            return false;
+        };
+        let manifest = PathBuf::from(manifest);
+        for root in manifest.ancestors() {
+            if !root.join("Cargo.toml").is_file() || !root.join("crates").is_dir() {
+                continue;
+            }
+            let Ok(relative) = manifest.strip_prefix(root) else {
+                return false;
+            };
+            return match relative.components().next() {
+                None => true,
+                Some(Component::Normal(name)) => {
+                    matches!(
+                        name.to_str(),
+                        Some("crates" | "examples" | "website" | "scripts")
+                    )
+                }
+                _ => false,
+            };
+        }
+        false
     }
 
     fn register(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {

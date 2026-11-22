@@ -144,6 +144,60 @@ impl Fixture {
 }
 
 #[test]
+fn compiler_scope_includes_owned_consumer_packages_and_preserves_external_packages() {
+    let fixture = Fixture::new();
+    let manifest = fixture.directory.path().join("Cargo.toml");
+    let package = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, package.replace("vmux_lints", "consumer")).unwrap();
+    fixture.check(
+        "external_consumer",
+        include_str!("../ui/plugin_names.rs"),
+        &[],
+        "vmux_plugin_name",
+    );
+    std::fs::create_dir(fixture.directory.path().join("crates")).unwrap();
+    fixture.check(
+        "owned_consumer",
+        include_str!("../ui/plugin_names.rs"),
+        &[
+            "Bevy plugin `Http` must use a descriptive name ending in `Plugin`",
+            "Bevy plugin `Alias` must use a descriptive name ending in `Plugin`",
+            "Bevy plugin `Plugin` must use a descriptive name ending in `Plugin`",
+            "Bevy plugin `Engine` must use a descriptive name ending in `Plugin`",
+            "Bevy plugin `Root` must use a descriptive name ending in `Plugin`",
+            "Bevy plugin `Root` must use a descriptive name ending in `Plugin`",
+        ],
+        "vmux_plugin_name",
+    );
+}
+
+#[test]
+fn plugin_names_follow_real_implementations_aliases_and_globs() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        (
+            "plugin_names",
+            include_str!("../ui/plugin_names.rs"),
+            &[
+                "Bevy plugin `Http` must use a descriptive name ending in `Plugin`",
+                "Bevy plugin `Alias` must use a descriptive name ending in `Plugin`",
+                "Bevy plugin `Plugin` must use a descriptive name ending in `Plugin`",
+                "Bevy plugin `Engine` must use a descriptive name ending in `Plugin`",
+                "Bevy plugin `Root` must use a descriptive name ending in `Plugin`",
+                "Bevy plugin `Root` must use a descriptive name ending in `Plugin`",
+            ][..],
+        ),
+        (
+            "plugin_names_valid",
+            include_str!("../ui/plugin_names_valid.rs"),
+            &[][..],
+        ),
+    ] {
+        fixture.check(name, source, expected, "vmux_plugin_name");
+    }
+}
+
+#[test]
 fn registered_system_names_follow_resolved_functions_and_ignore_other_methods() {
     let fixture = Fixture::new();
     for (name, source, expected) in [
