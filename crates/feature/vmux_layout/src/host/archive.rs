@@ -1,20 +1,22 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashSet;
 #[cfg(test)]
 use std::path::PathBuf;
 
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::{Commands, SystemParam};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+#[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::Active;
-use vmux_ecs::store::{PageRestore, StoreAppExt};
+use vmux_ecs::PageOpenTarget;
+#[cfg(test)]
+use vmux_ecs::store::PageRestore;
+use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
-    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
-    PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
-    WorkspaceKind,
+    Active, ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
+    PageMetadata, PageOpenRequest, PaneStep, SplitAxis, TabCommandSet, UnixMillis, WorkspaceKind,
 };
 #[cfg(test)]
 use vmux_feature::manifest::FeaturePlugin;
@@ -31,8 +33,10 @@ use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
 };
 use crate::tab::{CloseTabRequest, Tab, TabClosed, TabHierarchy};
-use crate::window::TabSpawner;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
+
+mod restore;
+mod topology;
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct ReopenClosedPage;
@@ -52,6 +56,17 @@ fn issue_reopen_closed_page(
 
 pub struct ArchivePlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct CaptureEarlySet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct CaptureLateSet;
+
+#[derive(Component)]
+struct PendingTabClose {
+    retire: bool,
+}
+
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
@@ -65,25 +80,42 @@ impl Plugin for ArchivePlugin {
             .register_type::<PaneStep>()
             .register_type::<SplitAxis>()
             .register_type::<Vec<PaneStep>>()
+            .add_plugins((topology::TopologyPlugin, restore::RestorePlugin))
             .add_message::<ReopenClosedPage>()
             .add_message::<PageArchiveRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
             .init_resource::<LayoutSettings>()
             .add_observer(issue_reopen_closed_page)
-            .add_systems(Update, maintain)
+            .add_observer(capture_page)
+            .add_systems(
+                Update,
+                maintain
+                    .after(topology::TopologySet)
+                    .before(restore::RestoreAdmissionSet),
+            )
+            .add_systems(
+                Update,
+                (capture, finish_tabs)
+                    .chain()
+                    .in_set(CaptureLateSet)
+                    .after(handle_close_tab_requests)
+                    .in_set(LayoutRequestSet::Handle),
+            )
             .add_systems(
                 Update,
                 capture_archived_pages
                     .after(stack_close)
+                    .in_set(CaptureEarlySet)
                     .before(CloseStackSet),
             )
             .add_systems(
                 Update,
                 (
                     stack_close.after(StackCommandSet).before(CloseStackSet),
-                    handle_reopen_closed_page,
+                    handle_reopen_closed_page.in_set(restore::RestoreAdmissionSet),
                     handle_close_tab_requests
                         .after(TabCommandSet)
                         .after(StackCommandSet)
@@ -93,9 +125,6 @@ impl Plugin for ArchivePlugin {
             );
     }
 }
-
-const MAX_ARCHIVE_ENTRIES: usize = 25;
-const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 fn stack_close(
     mut reader: MessageReader<CloseStackRequest>,
@@ -115,55 +144,184 @@ fn stack_close(
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
     for request in reader.read() {
-        if let Some(bundle) = ArchivedPageBundle::new(request, UnixMillis::now().0, None) {
-            commands.queue(bundle.with_source(request.source));
+        if let Some(bundle) = PageCaptureIntent::new(request, UnixMillis::now().0, false) {
+            let operation = commands
+                .spawn((
+                    vmux_ecs::Operation::bundle("archive.capture-page").unwrap(),
+                    vmux_ecs::OperationRetained,
+                    bundle,
+                ))
+                .id();
+            commands.trigger(CapturePage { operation });
         }
     }
 }
 
-struct ArchivedPageBundle {
+#[derive(Component, Clone)]
+struct PageCaptureIntent {
     source: Option<Entity>,
-    page: ArchivedPage,
-    position: ArchivedPagePosition,
-    tab: Option<ArchivedTabPage>,
     workspace: Option<WorkspaceKind>,
 }
 
-impl Command for ArchivedPageBundle {
-    type Out = ();
+#[derive(Component)]
+struct TabCaptureIntent {
+    tab: Entity,
+}
 
-    fn apply(self, world: &mut World) {
-        let mut entity = world.spawn((self.page, self.position));
-        if let Some(tab) = self.tab {
-            entity.insert(tab);
-        }
-        if let Some(workspace) = self.workspace {
-            entity.insert(workspace);
-        }
-        let archive = entity.id();
-        if let Some(source) = self.source {
-            world.trigger(vmux_ecs::page::ArchiveCaptureRequest { archive, source });
+#[derive(EntityEvent)]
+struct CapturePage {
+    #[event_target]
+    operation: Entity,
+}
+
+fn capture_page(
+    request: On<CapturePage>,
+    intents: Query<(&PageCaptureIntent, &ArchivedPage, &ArchivedPagePosition)>,
+    mut commands: Commands,
+) {
+    let Ok((intent, page, position)) = intents.get(request.operation) else {
+        return;
+    };
+    spawn_page_capture(intent, page, position, &mut commands);
+    commands.entity(request.operation).despawn();
+}
+
+fn capture(world: &mut World, tabs: &mut QueryState<(Entity, &TabCaptureIntent)>) {
+    let pending = tabs
+        .iter(world)
+        .map(|(operation, intent)| (operation, intent.tab))
+        .collect::<Vec<_>>();
+    for (operation, tab) in pending {
+        capture_tab(world, tab);
+        world.despawn(operation);
+        world.flush();
+    }
+}
+
+fn finish_tabs(pending: Query<(Entity, &PendingTabClose)>, mut commands: Commands) {
+    for (tab, pending) in &pending {
+        if pending.retire {
+            commands
+                .entity(tab)
+                .insert(Retiring)
+                .remove::<PendingTabClose>();
+        } else {
+            commands.entity(tab).despawn();
         }
     }
 }
 
-impl ArchivedPageBundle {
-    fn with_source(mut self, source: Option<Entity>) -> Self {
-        self.source = source;
-        self
+fn spawn_page_capture(
+    intent: &PageCaptureIntent,
+    page: &ArchivedPage,
+    position: &ArchivedPagePosition,
+    commands: &mut Commands,
+) {
+    let root = commands
+        .spawn((
+            topology::Root,
+            topology::Id(uuid::Uuid::new_v4().to_string()),
+            Name::new(page.title.clone()),
+            CreatedAt(page.closed_at),
+            topology::Origin {
+                space_id: page.space_id.clone(),
+                tab_index: page.tab_index,
+            },
+            topology::Materialized,
+        ))
+        .id();
+    let mut parent = root;
+    let validity = topology::Root::validate_position(position);
+    if validity.is_ok() {
+        for (depth, step) in position.pane_path.iter().enumerate() {
+            let (order, weight) = if depth == 0 {
+                (0, 1.0)
+            } else {
+                let previous = &position.pane_path[depth - 1];
+                (
+                    previous.child_index as u32,
+                    previous.flex_weights[previous.child_index],
+                )
+            };
+            let split = commands
+                .spawn((
+                    topology::Id(step.split_id.clone()),
+                    topology::Split::new(step.axis),
+                    vmux_ecs::Order(order),
+                    topology::Weight(weight),
+                    ChildOf(parent),
+                ))
+                .id();
+            for (index, weight) in step.flex_weights.iter().enumerate() {
+                if index != step.child_index {
+                    commands.spawn((
+                        topology::Slot,
+                        vmux_ecs::Order(index as u32),
+                        topology::Weight(*weight),
+                        ChildOf(split),
+                    ));
+                }
+            }
+            parent = split;
+        }
+        let (order, weight) = position.pane_path.last().map_or((0, 1.0), |step| {
+            (step.child_index as u32, step.flex_weights[step.child_index])
+        });
+        let id = if position.leaf_pane_id.is_empty() {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            position.leaf_pane_id.clone()
+        };
+        parent = commands
+            .spawn((
+                topology::Leaf,
+                topology::Id(id),
+                vmux_ecs::Order(order),
+                topology::Weight(weight),
+                ChildOf(parent),
+            ))
+            .id();
     }
+    let archive = commands
+        .spawn((
+            page.clone(),
+            ChildOf(parent),
+            vmux_ecs::Order(position.stack_index as u32),
+            Active,
+            topology::Materialized,
+        ))
+        .id();
+    if let Err(error) = validity {
+        commands
+            .entity(root)
+            .insert(topology::InvalidTopology(error.clone()));
+        commands
+            .entity(archive)
+            .insert((topology::InvalidTopology(error), position.clone()));
+    }
+    if let Some(workspace) = intent.workspace {
+        commands.entity(archive).insert(workspace);
+    }
+    if let Some(source) = intent.source {
+        commands.trigger(vmux_ecs::page::ArchiveCaptureRequest { archive, source });
+    }
+}
 
+impl PageCaptureIntent {
     fn new(
         request: &PageArchiveRequest,
         closed_at: i64,
-        tab: Option<ArchivedTabPage>,
-    ) -> Option<Self> {
-        if request.url.is_empty() && tab.is_none() {
+        include_empty: bool,
+    ) -> Option<(Self, ArchivedPage, ArchivedPagePosition)> {
+        if request.url.is_empty() && !include_empty {
             return None;
         }
-        Some(Self {
-            source: None,
-            page: ArchivedPage {
+        Some((
+            Self {
+                source: request.source,
+                workspace: request.workspace,
+            },
+            ArchivedPage {
                 url: request.url.clone(),
                 title: request.title.clone(),
                 space_id: request.space_id.clone(),
@@ -171,61 +329,196 @@ impl ArchivedPageBundle {
                 launch: request.launch.clone(),
                 tab_index: request.tab_index,
             },
-            position: ArchivedPagePosition {
+            ArchivedPagePosition {
                 leaf_pane_id: request.leaf_pane_id.clone(),
                 stack_index: request.stack_index,
                 pane_path: request.pane_path.clone(),
             },
-            tab,
-            workspace: request.workspace,
-        })
+        ))
     }
 }
 
-fn maintain(
-    archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
-    mut commands: Commands,
-) {
-    let now = UnixMillis::now().0;
-    let mut groups: HashMap<String, (i64, Vec<Entity>)> = HashMap::new();
-    let mut singles = Vec::new();
-    for (entity, page, tab) in &archived {
-        if let Some(tab) = tab.filter(|tab| !tab.group_id.is_empty()) {
-            let group = groups
-                .entry(tab.group_id.clone())
-                .or_insert_with(|| (page.closed_at, Vec::new()));
-            group.0 = group.0.max(page.closed_at);
-            group.1.push(entity);
-        } else {
-            singles.push((page.closed_at, vec![entity]));
-        }
-    }
-
-    let mut live: Vec<(i64, Vec<Entity>)> = groups.into_values().collect();
-    live.extend(singles);
-    for (closed_at, entities) in &live {
-        if now - *closed_at <= ARCHIVE_TTL_MS {
+fn capture_tab(world: &mut World, tab: Entity) {
+    let Some(root) = spawn_tab_root(world, tab) else {
+        return;
+    };
+    let mut state = bevy::ecs::system::SystemState::<TabArchiveLayout>::new(world);
+    let selected_stack = state
+        .get(world)
+        .ok()
+        .and_then(|layout| layout.focus.resolve(Some(tab)).2);
+    let mut pending = vec![(tab, root)];
+    let mut selected_page = None;
+    let mut active = None;
+    while let Some((live_parent, archive_parent)) = pending.pop() {
+        if live_parent != tab && world.get::<PaneSplit>(live_parent).is_none() {
+            capture_tab_pages(
+                world,
+                &mut state,
+                root,
+                live_parent,
+                archive_parent,
+                selected_stack,
+                &mut selected_page,
+                &mut active,
+            );
             continue;
         }
-        for &entity in entities {
-            commands.entity(entity).despawn();
+        let children = world
+            .get::<Children>(live_parent)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| world.get::<Pane>(*child).is_some())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for (index, live) in children.into_iter().enumerate().rev() {
+            let id = world
+                .get::<PaneId>(live)
+                .map(|id| id.0.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let weight = world
+                .get::<PaneSize>(live)
+                .map_or(1.0, |size| size.flex_grow);
+            let axis = world
+                .get::<PaneSplit>(live)
+                .map(|split| match split.direction {
+                    PaneSplitDirection::Row => SplitAxis::Row,
+                    PaneSplitDirection::Column => SplitAxis::Column,
+                });
+            let archive = world
+                .spawn((
+                    topology::Id(id),
+                    topology::Weight(weight),
+                    vmux_ecs::Order(index as u32),
+                    ChildOf(archive_parent),
+                ))
+                .id();
+            if let Some(axis) = axis {
+                world.entity_mut(archive).insert(topology::Split::new(axis));
+            } else {
+                world.entity_mut(archive).insert(topology::Leaf);
+            }
+            pending.push((live, archive));
         }
     }
-    live.retain(|(closed_at, _)| now - *closed_at <= ARCHIVE_TTL_MS);
-    if live.len() <= MAX_ARCHIVE_ENTRIES {
-        return;
+    if let Some(page) = selected_page.or_else(|| active.map(|(page, _)| page)) {
+        world.entity_mut(page).insert(Active);
+    } else {
+        world.despawn(root);
     }
-    live.sort_by_key(|(closed_at, _)| *closed_at);
-    let overflow = live.len() - MAX_ARCHIVE_ENTRIES;
-    for (_, entities) in live.into_iter().take(overflow) {
-        for entity in entities {
-            commands.entity(entity).despawn();
+    world.flush();
+}
+
+fn spawn_tab_root(world: &mut World, tab: Entity) -> Option<Entity> {
+    let metadata = world.get::<Tab>(tab)?;
+    let name = metadata.name.clone();
+    let directory = metadata.startup_dir.clone();
+    let space = world.get::<ChildOf>(tab)?.parent();
+    let space_id = world.get::<SpaceId>(space)?.0.clone();
+    let index = world
+        .get::<Children>(space)?
+        .iter()
+        .filter(|child| world.get::<Tab>(*child).is_some())
+        .position(|child| child == tab);
+    Some(
+        world
+            .spawn((
+                topology::Root,
+                topology::TabGroup,
+                topology::Materialized,
+                topology::Id(uuid::Uuid::new_v4().to_string()),
+                Name::new(name),
+                topology::TabDirectory(directory),
+                CreatedAt(UnixMillis::now().0),
+                topology::Origin {
+                    space_id,
+                    tab_index: index,
+                },
+            ))
+            .id(),
+    )
+}
+
+fn capture_tab_pages(
+    world: &mut World,
+    state: &mut bevy::ecs::system::SystemState<TabArchiveLayout>,
+    root: Entity,
+    live: Entity,
+    archive: Entity,
+    selected_stack: Option<Entity>,
+    selected_page: &mut Option<Entity>,
+    active: &mut Option<(Entity, i64)>,
+) {
+    let stacks = world
+        .get::<Children>(live)
+        .map(|children| {
+            children
+                .iter()
+                .filter(|stack| {
+                    world.get::<Stack>(*stack).is_some() && world.get::<Retiring>(*stack).is_none()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (index, stack) in stacks.into_iter().enumerate() {
+        let request = state.get(world).unwrap().request_page(stack, true);
+        let Some(request) = request else {
+            continue;
+        };
+        let closed_at = world.get::<CreatedAt>(root).unwrap().0;
+        let Some((intent, metadata, _)) = PageCaptureIntent::new(&request, closed_at, true) else {
+            continue;
+        };
+        let activated = world.get::<LastActivatedAt>(stack).map_or(0, |time| time.0);
+        let page = world
+            .spawn((
+                metadata,
+                topology::Materialized,
+                vmux_ecs::Order(index as u32),
+                ChildOf(archive),
+            ))
+            .id();
+        if selected_stack == Some(stack) {
+            *selected_page = Some(page);
         }
+        if active.is_none_or(|(_, time)| activated >= time) {
+            *active = Some((page, activated));
+        }
+        if let Some(workspace) = intent.workspace {
+            world.entity_mut(page).insert(workspace);
+        }
+        if let Some(source) = request.source {
+            world.trigger(vmux_ecs::page::ArchiveCaptureRequest {
+                archive: page,
+                source,
+            });
+            world.flush();
+        }
+    }
+}
+
+fn maintain(roots: Query<(Entity, &CreatedAt), With<topology::Root>>, mut commands: Commands) {
+    let now = UnixMillis::now().0;
+    let mut retained = Vec::new();
+    for (root, closed_at) in &roots {
+        if now - closed_at.0 > topology::Root::TTL_MS {
+            commands.entity(root).despawn();
+        } else {
+            retained.push((closed_at.0, root));
+        }
+    }
+    retained.sort_by_key(|(closed_at, root)| (*closed_at, root.to_bits()));
+    let excess = retained.len().saturating_sub(topology::Root::CAPACITY);
+    for (_, root) in retained.into_iter().take(excess) {
+        commands.entity(root).despawn();
     }
 }
 
 #[derive(SystemParam)]
 pub(super) struct TabArchiveLayout<'w, 's> {
+    focus: crate::stack::LayoutFocus<'w, 's>,
     surfaces: crate::hosted_page::StackSurface<'w, 's>,
     surface_metadata: Query<'w, 's, &'static PageMetadata, With<crate::Browser>>,
     stack_pages: Query<
@@ -257,18 +550,29 @@ impl TabArchiveLayout<'_, '_> {
         let Some(request) = self.request(stack) else {
             return;
         };
-        if let Some(bundle) = ArchivedPageBundle::new(&request, UnixMillis::now().0, None) {
-            commands.queue(bundle.with_source(request.source));
+        if let Some(bundle) = PageCaptureIntent::new(&request, UnixMillis::now().0, false) {
+            let operation = commands
+                .spawn((
+                    vmux_ecs::Operation::bundle("archive.capture-page").unwrap(),
+                    vmux_ecs::OperationRetained,
+                    bundle,
+                ))
+                .id();
+            commands.trigger(CapturePage { operation });
         }
     }
 
     fn request(&self, stack: Entity) -> Option<PageArchiveRequest> {
+        self.request_page(stack, false)
+    }
+
+    fn request_page(&self, stack: Entity, include_empty: bool) -> Option<PageArchiveRequest> {
         let (_, metadata, launch, _, workspace) = self.stack_pages.get(stack).ok()?;
         let source = self.surfaces.current(stack);
         let metadata = source
             .and_then(|source| self.surface_metadata.get(source).ok())
             .unwrap_or(metadata);
-        if metadata.url.is_empty() {
+        if metadata.url.is_empty() && !include_empty {
             return None;
         }
         let space = self.space_hierarchy.get(stack);
@@ -377,6 +681,23 @@ struct TabCloseLayout<'w, 's> {
 }
 
 impl TabCloseLayout<'_, '_> {
+    fn next(&self, tab: Entity, siblings: &[Entity], closing: &HashSet<Entity>) -> Option<Entity> {
+        let mut eligible = Vec::new();
+        for sibling in siblings {
+            if *sibling == tab || !closing.contains(sibling) && !self.retiring.contains(*sibling) {
+                eligible.push(*sibling);
+            }
+        }
+        Tab::next_after_close(tab, &eligible)
+    }
+
+    fn preferred(&self, tab: Entity, siblings: &[Entity], closing: &HashSet<Entity>) -> Entity {
+        self.active_tab
+            .get()
+            .filter(|active| siblings.contains(active) && closing.contains(active))
+            .unwrap_or(tab)
+    }
+
     fn has_surface(&self, entity: Entity) -> bool {
         if self.surfaces.contains(entity) {
             return true;
@@ -402,14 +723,21 @@ fn handle_close_tab_requests(
     let mut replacement_spaces = HashSet::new();
     for requested_tab in requests {
         let request = CloseTabRequest { tab: requested_tab };
-        let Ok(tab) = layout.tabs.get(request.tab) else {
+        let Ok(_) = layout.tabs.get(request.tab) else {
             continue;
         };
         if let Some((incoming, mut transition)) = layout.presentation.retaining(request.tab) {
             transition.retire(request.tab);
-            archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+            layout.commands.spawn((
+                vmux_ecs::Operation::bundle("archive.capture-tab").unwrap(),
+                vmux_ecs::OperationRetained,
+                TabCaptureIntent { tab: request.tab },
+            ));
             layout.commands.trigger(TabClosed);
-            layout.commands.entity(request.tab).insert(Retiring);
+            layout
+                .commands
+                .entity(request.tab)
+                .insert(PendingTabClose { retire: true });
             layout.commands.entity(incoming).insert(transition);
             continue;
         }
@@ -430,11 +758,7 @@ fn handle_close_tab_requests(
             else {
                 continue;
             };
-            let preferred_source = layout
-                .active_tab
-                .get()
-                .filter(|active| siblings.contains(active) && closing.contains(active))
-                .unwrap_or(request.tab);
+            let preferred_source = layout.preferred(request.tab, &siblings, &closing);
             if request.tab == preferred_source && !replacement_spaces.contains(&tab_space) {
                 let Some(window) = layout
                     .archive
@@ -456,19 +780,7 @@ fn handle_close_tab_requests(
                 replacement_spaces.insert(tab_space);
                 deferred = layout.has_surface(request.tab);
             }
-        } else if active
-            && let Some(next) = Tab::next_after_close(
-                request.tab,
-                &siblings
-                    .iter()
-                    .copied()
-                    .filter(|sibling| {
-                        *sibling == request.tab
-                            || !closing.contains(sibling) && !layout.retiring.contains(*sibling)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        {
+        } else if active && let Some(next) = layout.next(request.tab, &siblings, &closing) {
             deferred = layout.has_surface(request.tab);
             if deferred {
                 let pending = layout.transitions.get(request.tab).ok();
@@ -485,88 +797,16 @@ fn handle_close_tab_requests(
             }
         }
 
-        archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+        layout.commands.spawn((
+            vmux_ecs::Operation::bundle("archive.capture-tab").unwrap(),
+            vmux_ecs::OperationRetained,
+            TabCaptureIntent { tab: request.tab },
+        ));
         layout.commands.trigger(TabClosed);
-        if deferred {
-            layout.commands.entity(request.tab).insert(Retiring);
-        } else {
-            layout.commands.entity(request.tab).despawn();
-        }
-    }
-}
-
-fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, commands: &mut Commands) {
-    let Some(space) = layout.space_hierarchy.get(tab_entity) else {
-        return;
-    };
-    let space_id = layout.space_hierarchy.id(tab_entity).unwrap_or_default();
-    let tab_index = layout.children_q.get(space).ok().and_then(|children| {
-        children
-            .iter()
-            .filter(|entity| layout.tabs.contains(*entity))
-            .position(|entity| entity == tab_entity)
-    });
-    let mut stacks = Vec::new();
-    collect_descendant_stacks(tab_entity, &layout.children_q, &layout.stacks, &mut stacks);
-    let active_stack = stacks.iter().copied().max_by_key(|stack| {
         layout
-            .stack_pages
-            .get(*stack)
-            .ok()
-            .and_then(|(_, _, _, activated, _)| activated)
-            .map(|activated| activated.0)
-            .unwrap_or_default()
-    });
-    let group_id = uuid::Uuid::new_v4().to_string();
-    let closed_at = UnixMillis::now().0;
-
-    for stack in stacks {
-        let Ok((_, metadata, launch, _, workspace)) = layout.stack_pages.get(stack) else {
-            continue;
-        };
-        let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
-        let request = PageArchiveRequest {
-            source: layout.surfaces.current(stack),
-            url: metadata.url.clone(),
-            title: metadata.title.clone(),
-            space_id: space_id.clone(),
-            launch: launch.cloned(),
-            tab_index,
-            leaf_pane_id,
-            stack_index,
-            pane_path,
-            workspace: workspace.copied(),
-        };
-        if let Some(bundle) = ArchivedPageBundle::new(
-            &request,
-            closed_at,
-            Some(ArchivedTabPage {
-                group_id: group_id.clone(),
-                tab_name: tab.name.clone(),
-                tab_startup_dir: tab.startup_dir.clone(),
-                active: active_stack == Some(stack),
-            }),
-        ) {
-            commands.queue(bundle.with_source(layout.surfaces.current(stack)));
-        }
-    }
-}
-
-fn collect_descendant_stacks(
-    entity: Entity,
-    children_q: &Query<&Children>,
-    stacks: &Query<(), (With<Stack>, Without<Retiring>)>,
-    result: &mut Vec<Entity>,
-) {
-    if stacks.contains(entity) {
-        result.push(entity);
-        return;
-    }
-    let Ok(children) = children_q.get(entity) else {
-        return;
-    };
-    for child in children.iter() {
-        collect_descendant_stacks(child, children_q, stacks, result);
+            .commands
+            .entity(request.tab)
+            .insert(PendingTabClose { retire: deferred });
     }
 }
 
@@ -576,29 +816,16 @@ struct ReopenLayout<'w, 's> {
     focus: crate::stack::LayoutFocus<'w, 's>,
     surfaces: crate::hosted_page::StackSurface<'w, 's>,
     item_history: Query<'w, 's, &'static vmux_ecs::page::PageItemHistory>,
-    pane_ids: Query<'w, 's, (Entity, &'static PaneId)>,
-    leaf_panes: Query<'w, 's, (), (With<Pane>, Without<PaneSplit>)>,
-    child_of: Query<'w, 's, &'static ChildOf>,
     window_hierarchy: crate::window::WindowHierarchy<'w, 's>,
-    children_q: Query<'w, 's, &'static Children>,
-    stacks_q: Query<'w, 's, (), With<Stack>>,
-    tabs: Query<'w, 's, (), With<Tab>>,
     spaces: Query<'w, 's, (Entity, &'static SpaceId), With<Space>>,
     any_space: Query<'w, 's, Entity, With<Space>>,
     current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
     focused_window: crate::window::FocusedWindow<'w, 's>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
-    settings: Res<'w, LayoutSettings>,
-}
-
-struct ReopenTarget {
-    space: Entity,
-    origin_matches: bool,
-    window: Entity,
 }
 
 impl ReopenLayout<'_, '_> {
-    fn target(&self, space_id: &str) -> Option<ReopenTarget> {
+    fn target(&self, root: Entity, space_id: &str) -> Option<restore::RestoreIntent> {
         let focused_window = self.focused_window.entity();
         let origin_space = self
             .spaces
@@ -617,679 +844,529 @@ impl ReopenLayout<'_, '_> {
                     .find(|entity| self.any_space.contains(*entity))
             })
             .or_else(|| self.any_space.iter().next())?;
-        let window = self
-            .window_hierarchy
-            .get(space)
+        let bound_window = self.window_hierarchy.get(space);
+        let window = bound_window
             .or(focused_window)
             .or_else(|| self.primary_window.single().ok())?;
-        Some(ReopenTarget {
+        Some(restore::RestoreIntent {
+            root,
             space,
             origin_matches: origin_space == Some(space),
             window,
+            window_bound: bound_window.is_some(),
         })
-    }
-
-    fn pane_in_space(&self, pane: Entity, space: Entity) -> bool {
-        let mut current = pane;
-        while let Ok(parent) = self.child_of.get(current) {
-            if parent.parent() == space {
-                return true;
-            }
-            current = parent.parent();
-        }
-        false
     }
 }
 
-#[derive(Clone)]
-struct ReopenEntry {
-    entity: Entity,
-    page: ArchivedPage,
-    position: Option<ArchivedPagePosition>,
-    tab: Option<ArchivedTabPage>,
-    workspace: Option<WorkspaceKind>,
+#[derive(SystemParam)]
+struct ReopenRequest<'w, 's> {
+    reader: MessageReader<'w, 's, ReopenClosedPage>,
+    archived: Query<
+        'w,
+        's,
+        (Entity, &'static CreatedAt, &'static topology::Origin),
+        (
+            With<topology::Root>,
+            Without<restore::Claimed>,
+            Without<topology::InvalidTopology>,
+        ),
+    >,
+    layout: ReopenLayout<'w, 's>,
 }
 
 fn handle_reopen_closed_page(
-    mut reader: MessageReader<ReopenClosedPage>,
-    archived: Query<(
-        Entity,
-        &ArchivedPage,
-        Option<&ArchivedTabPage>,
-        Option<&WorkspaceKind>,
-    )>,
-    positions: Query<&ArchivedPagePosition>,
-    layout: ReopenLayout,
-    mut tabs: TabSpawner,
-    mut commands: Commands,
+    world: &mut World,
+    state: &mut bevy::ecs::system::SystemState<ReopenRequest>,
 ) {
-    let mut reopen = false;
-    for _ in reader.read() {
-        reopen = true;
-    }
-    if !reopen {
-        return;
-    }
-    let latest = archived
-        .iter()
-        .map(|(_, page, _, _)| page.closed_at)
-        .max()
-        .unwrap_or(0);
-    let (_, _, stack) = layout.focus.resolve(layout.active_tab.get());
-    if let Some(page) = stack.and_then(|stack| layout.surfaces.current(stack))
-        && layout
-            .item_history
-            .get(page)
-            .is_ok_and(|history| history.closed_at >= latest)
-    {
-        commands.trigger(vmux_ecs::page::ReopenItemRequest::new(page, latest));
-        return;
-    }
-
-    let Some((entry_entity, page, archived_tab, archived_workspace)) = archived
-        .iter()
-        .max_by_key(|(_, page, _, _)| page.closed_at)
-        .map(|(entity, page, tab, workspace)| {
-            (entity, page.clone(), tab.cloned(), workspace.copied())
-        })
-    else {
-        return;
-    };
-
-    let Some(target) = layout.target(&page.space_id) else {
-        return;
-    };
-
-    if let Some(tab) = archived_tab.filter(|tab| !tab.group_id.is_empty()) {
-        let entries: Vec<ReopenEntry> = archived
+    let (candidate, latest, item_page) = {
+        let Ok(mut params) = state.get_mut(world) else {
+            return;
+        };
+        if params.reader.read().count() == 0 {
+            return;
+        }
+        let candidate = params
+            .archived
             .iter()
-            .filter(|(_, _, candidate, _)| {
-                candidate.is_some_and(|candidate| candidate.group_id == tab.group_id)
-            })
-            .map(|(entity, page, tab, workspace)| ReopenEntry {
-                entity,
-                page: page.clone(),
-                position: positions.get(entity).ok().cloned(),
-                tab: tab.cloned(),
-                workspace: workspace.copied(),
-            })
-            .collect();
-        let restored = restore_archived_tab(
-            target.space,
-            target.origin_matches,
-            &tab,
-            entries,
-            &mut commands,
-            target.window,
-        );
-        for (entry, stack) in restored {
-            commands.trigger(vmux_ecs::page::ArchiveRestoreRequest {
-                stack,
-                archive: entry.entity,
+            .max_by_key(|(root, closed_at, _)| (closed_at.0, root.to_bits()))
+            .map(|(root, closed_at, origin)| (root, closed_at.0, origin.space_id.clone()));
+        let latest = candidate.as_ref().map_or(0, |(_, closed_at, _)| *closed_at);
+        let (_, _, stack) = params.layout.focus.resolve(params.layout.active_tab.get());
+        let item_page = stack
+            .and_then(|stack| params.layout.surfaces.current(stack))
+            .filter(|page| {
+                params
+                    .layout
+                    .item_history
+                    .get(*page)
+                    .is_ok_and(|history| history.closed_at >= latest)
             });
-            reopen_page_content(&entry.page, entry.workspace, stack, &mut commands);
-            commands.entity(entry.entity).despawn();
-        }
-        return;
-    }
-
-    let position = positions.get(entry_entity).ok().cloned();
-    let (stack, focus_anchor) = resolve_reopen_stack(
-        target.space,
-        target.origin_matches,
-        page.tab_index,
-        position.as_ref(),
-        &layout,
-        &mut commands,
-        &mut tabs,
-        target.window,
-        layout.settings.pane.gap,
-    );
-    commands.entity(stack).insert(PageMetadata {
-        url: page.url.clone(),
-        title: page.title.clone(),
-        ..default()
-    });
-    commands.entity(target.space).insert(LastActivatedAt::now());
-    commands.entity(stack).insert(LastActivatedAt::now());
-    focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
-
-    commands.trigger(vmux_ecs::page::ArchiveRestoreRequest {
-        stack,
-        archive: entry_entity,
-    });
-    reopen_page_content(&page, archived_workspace, stack, &mut commands);
-
-    commands.entity(entry_entity).despawn();
-}
-
-fn reopen_page_content(
-    page: &ArchivedPage,
-    workspace: Option<WorkspaceKind>,
-    stack: Entity,
-    commands: &mut Commands,
-) {
-    if page.url.is_empty() {
-        return;
-    }
-    commands.entity(stack).insert(PageRestore);
-    if let Some(workspace) = workspace {
-        commands.entity(stack).insert(workspace);
-    }
-    if let Some(launch) = page.launch.as_ref() {
-        commands.entity(stack).insert(launch.clone());
-    }
-    let request = PageOpenRequest {
-        target: PageOpenTarget::Stack(stack),
-        url: page.url.clone(),
-        request_id: None,
+        (candidate, latest, item_page)
     };
-    commands.queue(move |world: &mut World| {
-        world.write_message(request);
-    });
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum ArchivedPaneChild {
-    Split(String),
-    Leaf(String),
-}
-
-struct ArchivedSplit {
-    axis: SplitAxis,
-    flex_weights: Vec<f32>,
-    children: BTreeMap<usize, ArchivedPaneChild>,
-}
-
-struct ArchivedPaneTree {
-    root_id: String,
-    splits: HashMap<String, ArchivedSplit>,
-}
-
-fn restore_archived_tab(
-    space: Entity,
-    origin_matches: bool,
-    archived_tab: &ArchivedTabPage,
-    mut entries: Vec<ReopenEntry>,
-    commands: &mut Commands,
-    primary_window: Entity,
-) -> Vec<(ReopenEntry, Entity)> {
-    if entries.is_empty() {
-        return Vec::new();
+    if let Some(page) = item_page {
+        let request = vmux_ecs::page::ReopenItemRequest::new(page, latest);
+        world.trigger(request.clone());
+        world.flush();
+        if request.handled() {
+            return;
+        }
     }
-    let active_entry = entries
-        .iter()
-        .find(|entry| entry.tab.as_ref().is_some_and(|tab| tab.active))
-        .map(|entry| entry.entity)
-        .unwrap_or(entries[0].entity);
-    let tab = commands
+    let Some((root, _, space_id)) = candidate else {
+        return;
+    };
+    let target = state
+        .get(world)
+        .ok()
+        .and_then(|params| params.layout.target(root, &space_id));
+    let Some(target) = target else {
+        return;
+    };
+    let operation = world
         .spawn((
-            Tab::bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(space),
+            Name::new("Restore archived layout"),
+            vmux_ecs::Operation::bundle("archive.restore").unwrap(),
+            vmux_ecs::OperationRetained,
         ))
         .id();
-    commands.entity(tab).insert(Tab {
-        name: archived_tab.tab_name.clone(),
-        startup_dir: archived_tab.tab_startup_dir.clone(),
+    world.trigger(restore::RestoreRequest {
+        operation,
+        root,
+        space: target.space,
+        window: target.window,
+        origin_matches: target.origin_matches,
+        window_bound: target.window_bound,
     });
-    if origin_matches && let Some(index) = entries.first().and_then(|entry| entry.page.tab_index) {
-        commands.entity(space).insert_children(index, &[tab]);
-    }
-
-    let tree = build_archived_pane_tree(&entries);
-    let mut pane_entities = HashMap::new();
-    let mut leaf_entities = HashMap::new();
-    let fallback_leaf = if let Some(tree) = tree.as_ref() {
-        spawn_archived_split(
-            &tree.root_id,
-            tab,
-            None,
-            true,
-            tree,
-            commands,
-            primary_window,
-            &mut pane_entities,
-            &mut leaf_entities,
-        );
-        None
-    } else {
-        let root_id = uuid::Uuid::new_v4().to_string();
-        let root = commands
-            .spawn((
-                Pane::split_bundle(PaneSplitDirection::Row),
-                PaneId(root_id.clone()),
-                LastActivatedAt(0),
-                HostWindow(primary_window),
-                ChildOf(tab),
-            ))
-            .id();
-        pane_entities.insert(root_id, root);
-        let leaf_id = uuid::Uuid::new_v4().to_string();
-        let leaf = commands
-            .spawn((
-                Pane::bundle(),
-                PaneId(leaf_id.clone()),
-                LastActivatedAt(0),
-                ChildOf(root),
-            ))
-            .id();
-        pane_entities.insert(leaf_id.clone(), leaf);
-        leaf_entities.insert(leaf_id, leaf);
-        Some(leaf)
-    };
-
-    entries.sort_by(|left, right| {
-        let left_position = left.position.as_ref();
-        let right_position = right.position.as_ref();
-        left_position
-            .map(|position| (&position.leaf_pane_id, position.stack_index))
-            .cmp(&right_position.map(|position| (&position.leaf_pane_id, position.stack_index)))
-    });
-
-    let mut restored = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let leaf = entry
-            .position
-            .as_ref()
-            .and_then(|position| leaf_entities.get(&position.leaf_pane_id).copied())
-            .or(fallback_leaf)
-            .or_else(|| leaf_entities.values().next().copied());
-        let Some(leaf) = leaf else {
-            continue;
-        };
-        let active = entry.entity == active_entry;
-        let stack = commands
-            .spawn((
-                Stack::bundle(),
-                LastActivatedAt(if active { UnixMillis::now().0 } else { 0 }),
-                CreatedAt::now(),
-                ChildOf(leaf),
-            ))
-            .id();
-        commands.entity(stack).insert(PageMetadata {
-            url: entry.page.url.clone(),
-            title: entry.page.title.clone(),
-            ..default()
-        });
-        if active {
-            commands.entity(leaf).insert(LastActivatedAt::now());
-            if let Some(position) = entry.position.as_ref() {
-                for step in &position.pane_path {
-                    if let Some(entity) = pane_entities.get(&step.split_id) {
-                        commands.entity(*entity).insert(LastActivatedAt::now());
-                    }
-                }
-            }
-        }
-        restored.push((entry, stack));
-    }
-    restored
-}
-
-fn build_archived_pane_tree(entries: &[ReopenEntry]) -> Option<ArchivedPaneTree> {
-    let mut root_id = None;
-    let mut splits: HashMap<String, ArchivedSplit> = HashMap::new();
-    for entry in entries {
-        let position = entry.position.as_ref()?;
-        if position.leaf_pane_id.is_empty() || position.pane_path.is_empty() {
-            return None;
-        }
-        let entry_root = &position.pane_path[0].split_id;
-        if root_id
-            .as_ref()
-            .is_some_and(|root: &String| root != entry_root)
-        {
-            return None;
-        }
-        root_id.get_or_insert_with(|| entry_root.clone());
-        for (index, step) in position.pane_path.iter().enumerate() {
-            let child = if let Some(next) = position.pane_path.get(index + 1) {
-                ArchivedPaneChild::Split(next.split_id.clone())
-            } else {
-                ArchivedPaneChild::Leaf(position.leaf_pane_id.clone())
-            };
-            let split = splits
-                .entry(step.split_id.clone())
-                .or_insert_with(|| ArchivedSplit {
-                    axis: step.axis,
-                    flex_weights: step.flex_weights.clone(),
-                    children: BTreeMap::new(),
-                });
-            if split.axis != step.axis {
-                return None;
-            }
-            if let Some(existing) = split.children.get(&step.child_index)
-                && existing != &child
-            {
-                return None;
-            }
-            split.children.insert(step.child_index, child);
-        }
-    }
-    Some(ArchivedPaneTree {
-        root_id: root_id?,
-        splits,
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spawn_archived_split(
-    id: &str,
-    parent: Entity,
-    flex_grow: Option<f32>,
-    root: bool,
-    tree: &ArchivedPaneTree,
-    commands: &mut Commands,
-    primary_window: Entity,
-    pane_entities: &mut HashMap<String, Entity>,
-    leaf_entities: &mut HashMap<String, Entity>,
-) -> Option<Entity> {
-    let split = tree.splits.get(id)?;
-    let direction = match split.axis {
-        SplitAxis::Row => PaneSplitDirection::Row,
-        SplitAxis::Column => PaneSplitDirection::Column,
-    };
-    let entity = commands
-        .spawn((
-            Pane::split_bundle(direction),
-            PaneId(id.to_string()),
-            LastActivatedAt(0),
-            ChildOf(parent),
-        ))
-        .id();
-    if let Some(flex_grow) = flex_grow {
-        commands.entity(entity).insert(PaneSize { flex_grow });
-    }
-    if root {
-        commands.entity(entity).insert(HostWindow(primary_window));
-    }
-    pane_entities.insert(id.to_string(), entity);
-
-    for (child_index, child) in &split.children {
-        let flex_grow = split.flex_weights.get(*child_index).copied().unwrap_or(1.0);
-        match child {
-            ArchivedPaneChild::Split(child_id) => {
-                spawn_archived_split(
-                    child_id,
-                    entity,
-                    Some(flex_grow),
-                    false,
-                    tree,
-                    commands,
-                    primary_window,
-                    pane_entities,
-                    leaf_entities,
-                );
-            }
-            ArchivedPaneChild::Leaf(child_id) => {
-                let leaf = commands
-                    .spawn((
-                        Pane::bundle(),
-                        PaneId(child_id.clone()),
-                        LastActivatedAt(0),
-                        ChildOf(entity),
-                    ))
-                    .id();
-                commands.entity(leaf).insert(PaneSize { flex_grow });
-                pane_entities.insert(child_id.clone(), leaf);
-                leaf_entities.insert(child_id.clone(), leaf);
-            }
-        }
-    }
-    Some(entity)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolve_reopen_stack(
-    space: Entity,
-    origin_matches: bool,
-    tab_index: Option<usize>,
-    position: Option<&ArchivedPagePosition>,
-    layout: &ReopenLayout,
-    commands: &mut Commands,
-    tabs: &mut TabSpawner,
-    primary_window: Entity,
-    gap: f32,
-) -> (Entity, Entity) {
-    if let Some(pos) = position.filter(|p| !p.leaf_pane_id.is_empty()) {
-        if let Some(leaf) = layout
-            .pane_ids
-            .iter()
-            .find(|(e, id)| id.0 == pos.leaf_pane_id && layout.leaf_panes.contains(*e))
-            .map(|(e, _)| e)
-            .filter(|&leaf| layout.pane_in_space(leaf, space))
-        {
-            return (
-                spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands),
-                leaf,
-            );
-        }
-        if let Some((leaf, anchor)) = reattach_along_path(space, pos, layout, commands) {
-            return (
-                spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands),
-                anchor,
-            );
-        }
-    }
-
-    let scaffold = tabs.spawn(space, primary_window, gap);
-    if origin_matches && let Some(idx) = tab_index {
-        commands
-            .entity(space)
-            .insert_children(idx, &[scaffold.tab()]);
-    }
-    (scaffold.stack(), scaffold.tab())
-}
-
-fn spawn_stack_in_leaf(
-    leaf: Entity,
-    stack_index: usize,
-    layout: &ReopenLayout,
-    commands: &mut Commands,
-) -> Entity {
-    let stack = commands
-        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
-        .id();
-    let stack_count = layout
-        .children_q
-        .get(leaf)
-        .map(|c| c.iter().filter(|&e| layout.stacks_q.contains(e)).count())
-        .unwrap_or(0);
-    let idx = stack_index.min(stack_count);
-    commands.entity(leaf).insert_children(idx, &[stack]);
-    stack
-}
-
-fn focus_reopened_ancestors(anchor: Entity, layout: &ReopenLayout, commands: &mut Commands) {
-    commands.entity(anchor).insert(LastActivatedAt::now());
-    let mut cur = anchor;
-    while let Ok(rel) = layout.child_of.get(cur) {
-        let parent = rel.parent();
-        commands.entity(parent).insert(LastActivatedAt::now());
-        if layout.tabs.contains(parent) {
-            break;
-        }
-        cur = parent;
-    }
-}
-
-fn reattach_along_path(
-    space: Entity,
-    pos: &ArchivedPagePosition,
-    layout: &ReopenLayout,
-    commands: &mut Commands,
-) -> Option<(Entity, Entity)> {
-    let path = &pos.pane_path;
-    let root_step = path.first()?;
-    let root = layout
-        .pane_ids
-        .iter()
-        .find(|(_, id)| id.0 == root_step.split_id)
-        .map(|(e, _)| e)?;
-    if !layout.pane_in_space(root, space) {
-        return None;
-    }
-
-    let node_id = |i: usize| -> String {
-        if i + 1 < path.len() {
-            path[i + 1].split_id.clone()
-        } else {
-            pos.leaf_pane_id.clone()
-        }
-    };
-    let find_child_by_id = |parent: Entity, id: &str| -> Option<Entity> {
-        layout.children_q.get(parent).ok()?.iter().find(|&child| {
-            layout
-                .pane_ids
-                .iter()
-                .any(|(e, pid)| e == child && pid.0 == id)
-        })
-    };
-
-    let mut parent = root;
-    let mut depth = 0usize;
-    while depth < path.len() {
-        match find_child_by_id(parent, &node_id(depth)) {
-            Some(child) => {
-                parent = child;
-                depth += 1;
-            }
-            None => break,
-        }
-    }
-    let anchor = parent;
-    if depth == path.len() {
-        let leaf = if layout.leaf_panes.contains(parent) {
-            parent
-        } else if let Some(leaf) = first_leaf_descendant(parent, layout) {
-            leaf
-        } else {
-            commands
-                .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
-                .id()
-        };
-        return Some((leaf, anchor));
-    }
-
-    if layout.leaf_panes.contains(parent) {
-        promote_leaf_to_split(parent, path[depth].axis, layout, commands);
-    }
-
-    for level in depth..path.len() {
-        let step = &path[level];
-        let is_last = level + 1 == path.len();
-        let child_id = node_id(level);
-        let flex = step
-            .flex_weights
-            .get(step.child_index)
-            .copied()
-            .unwrap_or(1.0);
-        let new_child = if is_last {
-            commands
-                .spawn((
-                    Pane::bundle(),
-                    PaneId(child_id),
-                    LastActivatedAt::now(),
-                    ChildOf(parent),
-                ))
-                .id()
-        } else {
-            let axis = match path[level + 1].axis {
-                SplitAxis::Row => PaneSplitDirection::Row,
-                SplitAxis::Column => PaneSplitDirection::Column,
-            };
-            commands
-                .spawn((
-                    Pane::split_bundle(axis),
-                    PaneId(child_id),
-                    LastActivatedAt::now(),
-                    ChildOf(parent),
-                ))
-                .id()
-        };
-        commands
-            .entity(new_child)
-            .insert(PaneSize { flex_grow: flex });
-        let insert_at = clamp_child_index(parent, step.child_index, &layout.children_q);
-        commands
-            .entity(parent)
-            .insert_children(insert_at, &[new_child]);
-        parent = new_child;
-    }
-    Some((parent, anchor))
-}
-
-fn first_leaf_descendant(root: Entity, layout: &ReopenLayout) -> Option<Entity> {
-    if layout.leaf_panes.contains(root) {
-        return Some(root);
-    }
-    for child in layout.children_q.get(root).ok()?.iter() {
-        if let Some(leaf) = first_leaf_descendant(child, layout) {
-            return Some(leaf);
-        }
-    }
-    None
-}
-
-fn clamp_child_index(parent: Entity, idx: usize, children_q: &Query<&Children>) -> usize {
-    let count = children_q
-        .get(parent)
-        .map(|c| c.iter().count())
-        .unwrap_or(0);
-    idx.min(count)
-}
-
-fn promote_leaf_to_split(
-    parent: Entity,
-    axis: SplitAxis,
-    layout: &ReopenLayout,
-    commands: &mut Commands,
-) {
-    let direction = match axis {
-        SplitAxis::Row => PaneSplitDirection::Row,
-        SplitAxis::Column => PaneSplitDirection::Column,
-    };
-    let stacks: Vec<Entity> = layout
-        .children_q
-        .get(parent)
-        .map(|c| c.iter().filter(|&e| layout.stacks_q.contains(e)).collect())
-        .unwrap_or_default();
-    let survivor = commands
-        .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
-        .id();
-    for s in stacks {
-        commands.entity(s).insert(ChildOf(survivor));
-    }
-    commands
-        .entity(parent)
-        .insert(Pane::split_bundle(direction));
+    world.flush();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::ecs::relationship::Relationship;
+    use bevy::ecs::system::Command;
 
     use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
 
-    fn page(url: &str, closed_at: i64) -> ArchivedPage {
-        ArchivedPage {
-            url: url.to_string(),
-            title: String::new(),
-            space_id: "s".to_string(),
-            closed_at,
-            launch: None,
-            tab_index: None,
+    struct Fixture {
+        app: App,
+    }
+
+    impl std::ops::Deref for Fixture {
+        type Target = App;
+
+        fn deref(&self) -> &App {
+            &self.app
+        }
+    }
+
+    impl std::ops::DerefMut for Fixture {
+        fn deref_mut(&mut self) -> &mut App {
+            &mut self.app
+        }
+    }
+
+    impl Fixture {
+        fn page(url: &str, closed_at: i64) -> ArchivedPage {
+            ArchivedPage {
+                url: url.to_string(),
+                title: String::new(),
+                space_id: "s".to_string(),
+                closed_at,
+                launch: None,
+                tab_index: None,
+            }
+        }
+
+        fn drain_archive_reqs(&mut self) -> Vec<PageArchiveRequest> {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<PageArchiveRequest>>()
+                .drain()
+                .collect()
+        }
+
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(ArchivePlugin)
+                .add_message::<CloseStackRequest>()
+                .init_resource::<LayoutSettings>();
+            app.world_mut()
+                .spawn((bevy::window::Window::default(), PrimaryWindow));
+            Self { app }
+        }
+
+        fn request_close(&mut self, stack: Entity) {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<CloseStackRequest>>()
+                .write(CloseStackRequest::by_user(stack));
+            self.app.update();
+        }
+
+        fn closing() -> Self {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                crate::stack::StackPlugin,
+                crate::presentation::PresentationPlugin,
+                ArchivePlugin,
+            ))
+            .add_message::<CloseTabRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<LayoutSettings>();
+            app.world_mut()
+                .spawn((bevy::window::Window::default(), PrimaryWindow));
+            Self { app }
+        }
+
+        fn spawn_inactive_and_active_stacks(&mut self) -> (Entity, Entity) {
+            let space = self
+                .app
+                .world_mut()
+                .spawn((Space, SpaceId("s1".to_string())))
+                .id();
+            let tab = self
+                .app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+                .id();
+            let pane = self
+                .app
+                .world_mut()
+                .spawn((
+                    Pane,
+                    PaneId("leaf".to_string()),
+                    LastActivatedAt(1),
+                    ChildOf(tab),
+                ))
+                .id();
+            let inactive = self
+                .app
+                .world_mut()
+                .spawn((
+                    Stack::default(),
+                    PageMetadata {
+                        url: "https://inactive.example".to_string(),
+                        ..default()
+                    },
+                    LastActivatedAt(1),
+                    ChildOf(pane),
+                ))
+                .id();
+            let active = self
+                .app
+                .world_mut()
+                .spawn((
+                    Stack::default(),
+                    PageMetadata {
+                        url: "https://active.example".to_string(),
+                        ..default()
+                    },
+                    LastActivatedAt(2),
+                    ChildOf(pane),
+                ))
+                .id();
+            (inactive, active)
+        }
+
+        fn archived_urls(&mut self) -> Vec<String> {
+            self.app
+                .world_mut()
+                .query::<&ArchivedPage>()
+                .iter(self.app.world())
+                .map(|page| page.url.clone())
+                .collect()
+        }
+
+        fn dispatch_reopen(&mut self) {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<ReopenClosedPage>>()
+                .write(ReopenClosedPage);
+            self.app.update();
+        }
+
+        fn drain_opens(&mut self) -> Vec<PageOpenRequest> {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .collect()
         }
     }
 
     #[test]
+    fn captured_canonical_tab_survives_store_reload_with_empty_leaves_weights_and_selection() {
+        let mut app = Fixture::new();
+        app.add_plugins(vmux_ecs::PrimitivesPlugin)
+            .register_type::<Name>();
+        let space = app.world_mut().spawn((Space, SpaceId("s1".into()))).id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("root".into()),
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        app.world_mut().spawn((
+            Pane,
+            PaneId("empty".into()),
+            PaneSize { flex_grow: 3.0 },
+            ChildOf(root),
+        ));
+        let nested = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("nested".into()),
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                PaneSize { flex_grow: 2.0 },
+                ChildOf(root),
+            ))
+            .id();
+        for (id, url, weight) in [
+            ("first", "https://first.example", 2.0),
+            ("second", "https://second.example", 1.0),
+        ] {
+            let leaf = app
+                .world_mut()
+                .spawn((
+                    Pane,
+                    PaneId(id.into()),
+                    PaneSize { flex_grow: weight },
+                    ChildOf(nested),
+                ))
+                .id();
+            app.world_mut().spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: url.into(),
+                    ..Default::default()
+                },
+                LastActivatedAt(1),
+                ChildOf(leaf),
+            ));
+        }
+        app.world_mut().write_message(CloseTabRequest { tab });
+        app.update();
+        let archive_root = app
+            .world_mut()
+            .query_filtered::<Entity, With<topology::TabGroup>>()
+            .single(app.world())
+            .unwrap();
+        let mut entities = Vec::new();
+        let mut pending = vec![archive_root];
+        while let Some(entity) = pending.pop() {
+            entities.push(entity);
+            if let Some(children) = app.world().get::<Children>(entity) {
+                pending.extend(children.iter());
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("archive.ron");
+        let mut save = moonshine_save::save::SaveWorld::default_into_file(&path);
+        save.entities = moonshine_save::save::EntityFilter::allow(entities);
+        moonshine_save::save::SaveCommand(save)
+            .apply(app.world_mut())
+            .unwrap();
+        let mut restored = Fixture::new();
+        restored.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
+        restored
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .register_type::<Name>();
+        moonshine_save::load::LoadCommand(moonshine_save::load::LoadWorld::default_from_file(
+            &path,
+        ))
+        .apply(restored.world_mut())
+        .unwrap();
+        restored.world_mut().spawn((Space, SpaceId("s1".into())));
+        restored.dispatch_reopen();
+        let panes = restored
+            .world_mut()
+            .query::<(Entity, &PaneId, &PaneSize, &vmux_flex::Node)>()
+            .iter(restored.world())
+            .map(|(entity, id, size, node)| (entity, id.0.clone(), size.flex_grow, node.flex_grow))
+            .collect::<Vec<_>>();
+        assert_eq!(panes.len(), 5);
+        let empty = panes.iter().find(|(_, id, _, _)| id == "empty").unwrap();
+        assert_eq!(empty.2, 3.0);
+        assert_eq!(empty.3, 3.0);
+        assert!(
+            restored
+                .world()
+                .get::<Children>(empty.0)
+                .is_none_or(|children| children.is_empty())
+        );
+        assert!(
+            panes
+                .iter()
+                .any(|(_, id, weight, node)| id == "nested" && *weight == 2.0 && *node == 2.0)
+        );
+        let selected = restored
+            .world_mut()
+            .query::<(&PageMetadata, &LastActivatedAt)>()
+            .iter(restored.world())
+            .max_by_key(|(_, time)| time.0)
+            .unwrap()
+            .0
+            .url
+            .clone();
+        assert_eq!(selected, "https://second.example");
+        let urls = restored
+            .drain_opens()
+            .into_iter()
+            .map(|open| open.url)
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            urls,
+            HashSet::from([
+                "https://first.example".into(),
+                "https://second.example".into()
+            ])
+        );
+        assert_eq!(
+            restored
+                .world_mut()
+                .query::<&ArchivedPage>()
+                .iter(restored.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn conflicting_legacy_group_retains_both_pages_and_refuses_live_allocation() {
+        let mut app = Fixture::new();
+        app.world_mut().spawn((Space, SpaceId("s1".into())));
+        let closed_at = UnixMillis::now().0;
+        for (index, weight) in [(0, 2.0), (1, 3.0)] {
+            app.world_mut().spawn((
+                ArchivedPage {
+                    url: format!("https://retained-{index}.example"),
+                    space_id: "s1".into(),
+                    closed_at,
+                    ..Default::default()
+                },
+                ArchivedTabPage {
+                    group_id: "conflict".into(),
+                    tab_name: "Retained".into(),
+                    tab_startup_dir: None,
+                    active: index == 1,
+                },
+                ArchivedPagePosition {
+                    leaf_pane_id: format!("leaf-{index}"),
+                    stack_index: 0,
+                    pane_path: vec![PaneStep {
+                        split_id: "root".into(),
+                        axis: SplitAxis::Row,
+                        child_index: index,
+                        flex_weights: vec![1.0, weight],
+                    }],
+                },
+            ));
+        }
+        app.dispatch_reopen();
+        assert!(app.drain_opens().is_empty());
+        assert_eq!(
+            app.world_mut()
+                .query::<&ArchivedPage>()
+                .iter(app.world())
+                .count(),
+            2
+        );
+        assert_eq!(
+            app.world_mut().query::<&Stack>().iter(app.world()).count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, (With<topology::Root>, With<topology::InvalidTopology>)>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn reopen_burst_is_coalesced_and_fully_consumed_in_the_input_frame() {
+        let mut app = Fixture::new();
+        app.world_mut().spawn((Space, SpaceId("s1".into())));
+        let now = UnixMillis::now().0;
+        for (url, closed_at) in [
+            ("https://older.example", now),
+            ("https://newer.example", now + 1),
+        ] {
+            app.world_mut().spawn(ArchivedPage {
+                url: url.into(),
+                space_id: "s1".into(),
+                closed_at,
+                ..Default::default()
+            });
+        }
+        for _ in 0..3 {
+            app.world_mut().write_message(ReopenClosedPage);
+        }
+        app.update();
+        let opens = app.drain_opens();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(opens[0].url, "https://newer.example");
+        app.update();
+        assert!(app.drain_opens().is_empty());
+        assert_eq!(
+            app.world_mut()
+                .query::<&ArchivedPage>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn reopening_an_old_leaf_under_a_retiring_tab_uses_a_live_new_tab() {
+        let mut app = Fixture::new();
+        let space = app.world_mut().spawn((Space, SpaceId("s1".into()))).id();
+        let retiring = app
+            .world_mut()
+            .spawn((Tab::default(), Retiring, ChildOf(space)))
+            .id();
+        let leaf = app
+            .world_mut()
+            .spawn((Pane, PaneId("old".into()), ChildOf(retiring)))
+            .id();
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "https://retained.example".into(),
+                space_id: "s1".into(),
+                closed_at: UnixMillis::now().0,
+                ..Default::default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "old".into(),
+                ..Default::default()
+            },
+        ));
+        app.dispatch_reopen();
+        let opens = app.drain_opens();
+        let PageOpenTarget::Stack(stack) = opens[0].target else {
+            panic!("explicit restored stack");
+        };
+        let live_leaf = app.world().get::<ChildOf>(stack).unwrap().parent();
+        assert_ne!(live_leaf, leaf);
+        let live_tab = app.world().get::<ChildOf>(live_leaf).unwrap().parent();
+        assert_ne!(live_tab, retiring);
+        assert!(app.world().get::<Retiring>(live_tab).is_none());
+    }
+
+    #[test]
     fn capture_spawns_archived_page() {
-        let mut app = App::new();
-        app.add_message::<PageArchiveRequest>()
-            .add_systems(Update, capture_archived_pages);
+        let mut app = Fixture::new();
         app.world_mut()
             .resource_mut::<Messages<PageArchiveRequest>>()
             .write(PageArchiveRequest {
@@ -1314,9 +1391,7 @@ mod tests {
 
     #[test]
     fn capture_skips_empty_url() {
-        let mut app = App::new();
-        app.add_message::<PageArchiveRequest>()
-            .add_systems(Update, capture_archived_pages);
+        let mut app = Fixture::new();
         app.world_mut()
             .resource_mut::<Messages<PageArchiveRequest>>()
             .write(PageArchiveRequest {
@@ -1337,98 +1412,80 @@ mod tests {
     }
 
     #[test]
-    fn capture_spawns_position_component() {
-        let mut app = App::new();
-        app.add_message::<PageArchiveRequest>()
-            .add_systems(Update, capture_archived_pages);
-        app.world_mut()
-            .resource_mut::<Messages<PageArchiveRequest>>()
-            .write(PageArchiveRequest {
-                source: None,
-                url: "https://a.example".to_string(),
-                title: "A".to_string(),
-                space_id: "s".to_string(),
-                launch: None,
-                tab_index: Some(0),
-                leaf_pane_id: "leaf-1".to_string(),
-                stack_index: 2,
-                pane_path: vec![PaneStep {
-                    split_id: "root".to_string(),
-                    axis: SplitAxis::Row,
-                    child_index: 1,
-                    flex_weights: vec![1.0, 2.0],
-                }],
-                workspace: None,
-            });
+    fn capture_materializes_a_weighted_path_before_reopen() {
+        let mut app = Fixture::new();
+        app.world_mut().write_message(PageArchiveRequest {
+            source: None,
+            url: "https://a.example".into(),
+            title: "A".into(),
+            space_id: "s".into(),
+            launch: None,
+            tab_index: Some(0),
+            leaf_pane_id: "leaf-1".into(),
+            stack_index: 2,
+            pane_path: vec![PaneStep {
+                split_id: "root".into(),
+                axis: SplitAxis::Row,
+                child_index: 1,
+                flex_weights: vec![1.0, 2.0],
+            }],
+            workspace: None,
+        });
         app.update();
-        let mut q = app
+        let (page, parent, order) = app
             .world_mut()
-            .query::<(&ArchivedPage, &ArchivedPagePosition)>();
-        let (page, pos) = q.single(app.world()).expect("archived page + position");
+            .query::<(&ArchivedPage, &ChildOf, &vmux_ecs::Order)>()
+            .single(app.world())
+            .unwrap();
         assert_eq!(page.url, "https://a.example");
-        assert_eq!(pos.leaf_pane_id, "leaf-1");
-        assert_eq!(pos.stack_index, 2);
-        assert_eq!(pos.pane_path.len(), 1);
-        assert_eq!(pos.pane_path[0].child_index, 1);
+        assert_eq!(order.0, 2);
+        let leaf = parent.parent();
+        assert_eq!(app.world().get::<topology::Id>(leaf).unwrap().0, "leaf-1");
+        assert_eq!(app.world().get::<topology::Weight>(leaf).unwrap().0, 2.0);
+        let split = app.world().get::<ChildOf>(leaf).unwrap().parent();
+        assert_eq!(app.world().get::<topology::Id>(split).unwrap().0, "root");
+        assert_eq!(app.world().get::<Children>(split).unwrap().len(), 2);
+        assert_eq!(
+            app.world_mut()
+                .query::<&ArchivedPagePosition>()
+                .iter(app.world())
+                .count(),
+            0
+        );
     }
 
     #[test]
     fn maintain_enforces_cap_dropping_oldest() {
-        let mut app = App::new();
-        app.add_systems(Update, maintain);
+        let mut app = Fixture::new();
         let now = UnixMillis::now().0;
-        for i in 0..(MAX_ARCHIVE_ENTRIES as i64 + 1) {
-            app.world_mut().spawn(page(&format!("u{i}"), now - i));
+        for i in 0..(topology::Root::CAPACITY as i64 + 1) {
+            app.world_mut()
+                .spawn(Fixture::page(&format!("u{i}"), now - i));
         }
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
         let urls: Vec<String> = q.iter(app.world()).map(|p| p.url.clone()).collect();
-        assert_eq!(urls.len(), MAX_ARCHIVE_ENTRIES);
-        let oldest = format!("u{}", MAX_ARCHIVE_ENTRIES);
+        assert_eq!(urls.len(), topology::Root::CAPACITY);
+        let oldest = format!("u{}", topology::Root::CAPACITY);
         assert!(!urls.contains(&oldest));
     }
 
     #[test]
     fn maintain_purges_expired() {
-        let mut app = App::new();
-        app.add_systems(Update, maintain);
+        let mut app = Fixture::new();
         let now = UnixMillis::now().0;
-        app.world_mut().spawn(page("fresh", now));
+        app.world_mut().spawn(Fixture::page("fresh", now));
         app.world_mut()
-            .spawn(page("stale", now - ARCHIVE_TTL_MS - 1));
+            .spawn(Fixture::page("stale", now - topology::Root::TTL_MS - 1));
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
         let urls: Vec<String> = q.iter(app.world()).map(|p| p.url.clone()).collect();
         assert_eq!(urls, vec!["fresh".to_string()]);
     }
 
-    fn drain_archive_reqs(app: &mut App) -> Vec<PageArchiveRequest> {
-        app.world_mut()
-            .resource_mut::<Messages<PageArchiveRequest>>()
-            .drain()
-            .collect()
-    }
-
-    fn archive_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(ArchivePlugin)
-            .add_message::<CloseStackRequest>()
-            .init_resource::<LayoutSettings>();
-        app.world_mut()
-            .spawn((bevy::window::Window::default(), PrimaryWindow));
-        app
-    }
-
-    fn request_close(app: &mut App, stack: Entity) {
-        app.world_mut()
-            .resource_mut::<Messages<CloseStackRequest>>()
-            .write(CloseStackRequest::by_user(stack));
-        app.update();
-    }
-
     #[test]
     fn close_request_archives_the_named_stack() {
-        let mut app = archive_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1445,8 +1502,8 @@ mod tests {
                 ChildOf(space),
             ))
             .id();
-        request_close(&mut app, stack);
-        let reqs = drain_archive_reqs(&mut app);
+        app.request_close(stack);
+        let reqs = app.drain_archive_reqs();
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].url, "https://gone.example");
         assert_eq!(reqs[0].space_id, "s1");
@@ -1454,7 +1511,7 @@ mod tests {
 
     #[test]
     fn duplicate_close_requests_archive_the_stack_once() {
-        let mut app = archive_app();
+        let mut app = Fixture::new();
         let stack = app
             .world_mut()
             .spawn((
@@ -1473,12 +1530,12 @@ mod tests {
 
         app.update();
 
-        assert_eq!(drain_archive_reqs(&mut app).len(), 1);
+        assert_eq!(app.drain_archive_reqs().len(), 1);
     }
 
     #[test]
     fn tidying_a_stack_never_reaches_the_reopen_list() {
-        let mut app = archive_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1498,23 +1555,23 @@ mod tests {
             .resource_mut::<Messages<CloseStackRequest>>()
             .write(CloseStackRequest::tidying(stack));
         app.update();
-        assert!(drain_archive_reqs(&mut app).is_empty());
+        assert!(app.drain_archive_reqs().is_empty());
     }
 
     #[test]
     fn close_request_skips_empty_url_stack() {
-        let mut app = archive_app();
+        let mut app = Fixture::new();
         let stack = app
             .world_mut()
             .spawn((Stack::default(), PageMetadata::default()))
             .id();
-        request_close(&mut app, stack);
-        assert!(drain_archive_reqs(&mut app).is_empty());
+        app.request_close(stack);
+        assert!(app.drain_archive_reqs().is_empty());
     }
 
     #[test]
     fn close_records_tab_index_of_closing_stack() {
-        let mut app = archive_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1533,15 +1590,15 @@ mod tests {
                 ChildOf(pane),
             ))
             .id();
-        request_close(&mut app, stack);
-        let reqs = drain_archive_reqs(&mut app);
+        app.request_close(stack);
+        let reqs = app.drain_archive_reqs();
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].tab_index, Some(1));
     }
 
     #[test]
     fn close_records_pane_path_and_leaf() {
-        let mut app = archive_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1589,8 +1646,8 @@ mod tests {
                 ChildOf(leaf1),
             ))
             .id();
-        request_close(&mut app, stack);
-        let reqs = drain_archive_reqs(&mut app);
+        app.request_close(stack);
+        let reqs = app.drain_archive_reqs();
         assert_eq!(reqs.len(), 1);
         let req = &reqs[0];
         assert_eq!(req.leaf_pane_id, "leaf1");
@@ -1602,79 +1659,10 @@ mod tests {
         assert!(matches!(req.pane_path[0].axis, SplitAxis::Row));
     }
 
-    fn close_pipeline_app() -> App {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            crate::stack::StackPlugin,
-            crate::presentation::PresentationPlugin,
-            ArchivePlugin,
-        ))
-        .add_message::<CloseTabRequest>()
-        .add_message::<PageOpenRequest>()
-        .init_resource::<LayoutSettings>();
-        app.world_mut()
-            .spawn((bevy::window::Window::default(), PrimaryWindow));
-        app
-    }
-
-    fn spawn_inactive_and_active_stacks(app: &mut App) -> (Entity, Entity) {
-        let space = app
-            .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
-            .id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
-            .id();
-        let pane = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneId("leaf".to_string()),
-                LastActivatedAt(1),
-                ChildOf(tab),
-            ))
-            .id();
-        let inactive = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    url: "https://inactive.example".to_string(),
-                    ..default()
-                },
-                LastActivatedAt(1),
-                ChildOf(pane),
-            ))
-            .id();
-        let active = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    url: "https://active.example".to_string(),
-                    ..default()
-                },
-                LastActivatedAt(2),
-                ChildOf(pane),
-            ))
-            .id();
-        (inactive, active)
-    }
-
-    fn archived_urls(app: &mut App) -> Vec<String> {
-        app.world_mut()
-            .query::<&ArchivedPage>()
-            .iter(app.world())
-            .map(|page| page.url.clone())
-            .collect()
-    }
-
     #[test]
     fn closing_an_inactive_stack_archives_it_and_not_the_active_one() {
-        let mut app = close_pipeline_app();
-        let (inactive, active) = spawn_inactive_and_active_stacks(&mut app);
+        let mut app = Fixture::closing();
+        let (inactive, active) = app.spawn_inactive_and_active_stacks();
 
         app.world_mut()
             .resource_mut::<Messages<CloseStackRequest>>()
@@ -1685,15 +1673,15 @@ mod tests {
         assert!(app.world().get_entity(inactive).is_err());
         assert!(app.world().get_entity(active).is_ok());
         assert_eq!(
-            archived_urls(&mut app),
+            app.archived_urls(),
             vec!["https://inactive.example".to_string()]
         );
     }
 
     #[test]
     fn close_command_archives_the_active_stack_before_the_successor_retires_it() {
-        let mut app = close_pipeline_app();
-        let (inactive, active) = spawn_inactive_and_active_stacks(&mut app);
+        let mut app = Fixture::closing();
+        let (inactive, active) = app.spawn_inactive_and_active_stacks();
 
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
@@ -1703,7 +1691,7 @@ mod tests {
 
         assert!(app.world().get_entity(active).is_ok());
         assert_eq!(
-            archived_urls(&mut app),
+            app.archived_urls(),
             vec!["https://active.example".to_string()]
         );
 
@@ -1816,62 +1804,51 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(tab).is_err());
-        let mut query = app
+        let roots = app
             .world_mut()
-            .query::<(&ArchivedPage, &ArchivedPagePosition, &ArchivedTabPage)>();
-        let archived: Vec<_> = query
+            .query_filtered::<Entity, With<topology::TabGroup>>()
             .iter(app.world())
-            .map(|(page, position, tab)| {
-                (
-                    page.url.clone(),
-                    position.leaf_pane_id.clone(),
-                    tab.group_id.clone(),
-                    tab.tab_name.clone(),
-                    tab.tab_startup_dir.clone(),
-                    tab.active,
-                )
-            })
-            .collect();
+            .collect::<Vec<_>>();
+        assert_eq!(roots.len(), 1);
+        let archive_root = roots[0];
+        assert_eq!(
+            app.world().get::<Name>(archive_root).unwrap().as_str(),
+            "Work"
+        );
+        assert_eq!(
+            app.world()
+                .get::<topology::TabDirectory>(archive_root)
+                .unwrap()
+                .0
+                .as_deref(),
+            Some("/tmp/work")
+        );
+        let archived = app
+            .world_mut()
+            .query::<(&ArchivedPage, &ChildOf, Has<Active>)>()
+            .iter(app.world())
+            .map(|(page, parent, active)| (page.url.clone(), parent.parent(), active))
+            .collect::<Vec<_>>();
         assert_eq!(archived.len(), 3);
         assert!(
             archived
                 .iter()
                 .all(|entry| entry.0 != "https://retiring.example")
         );
+        assert_eq!(archived.iter().filter(|entry| entry.2).count(), 1);
+        assert!(
+            archived
+                .iter()
+                .any(|entry| entry.0 == "https://right.example" && entry.2)
+        );
+        let empty = archived.iter().find(|entry| entry.0.is_empty()).unwrap().1;
+        assert_eq!(app.world().get::<topology::Id>(empty).unwrap().0, "left");
         assert_eq!(
-            archived
-                .iter()
-                .map(|entry| entry.2.as_str())
-                .collect::<HashSet<_>>()
-                .len(),
-            1
-        );
-        assert!(archived.iter().all(|entry| entry.3 == "Work"));
-        assert!(
-            archived
-                .iter()
-                .all(|entry| entry.4.as_deref() == Some("/tmp/work"))
-        );
-        assert_eq!(archived.iter().filter(|entry| entry.5).count(), 1);
-        assert!(
-            archived
-                .iter()
-                .any(|entry| entry.0 == "https://right.example" && entry.5)
-        );
-        assert!(
-            archived
-                .iter()
-                .any(|entry| entry.1 == "left" && entry.0 == "https://left.example")
-        );
-        assert!(
-            archived
-                .iter()
-                .any(|entry| entry.1 == "right" && entry.0 == "https://right.example")
-        );
-        assert!(
-            archived
-                .iter()
-                .any(|entry| entry.1 == "left" && entry.0.is_empty())
+            app.world_mut()
+                .query::<&ArchivedPagePosition>()
+                .iter(app.world())
+                .count(),
+            0
         );
     }
 
@@ -1921,47 +1898,22 @@ mod tests {
         assert!(requests[0].focus);
     }
 
-    fn reopen_app() -> App {
-        let mut app = App::new();
-        app.add_message::<ReopenClosedPage>()
-            .add_message::<PageOpenRequest>()
-            .init_resource::<crate::settings::LayoutSettings>()
-            .add_systems(Update, super::handle_reopen_closed_page);
-        app.world_mut()
-            .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
-        app
-    }
-
-    fn dispatch_reopen(app: &mut App) {
-        app.world_mut()
-            .resource_mut::<Messages<ReopenClosedPage>>()
-            .write(ReopenClosedPage);
-        app.update();
-    }
-
-    fn drain_opens(app: &mut App) -> Vec<PageOpenRequest> {
-        app.world_mut()
-            .resource_mut::<Messages<PageOpenRequest>>()
-            .drain()
-            .collect()
-    }
-
     #[test]
     fn reopen_targets_materialized_stack() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         app.world_mut().spawn((Space, SpaceId("s1".to_string())));
         app.world_mut().spawn((
             ArchivedPage {
                 url: "vmux://terminal/".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             WorkspaceKind::Knowledge,
         ));
 
-        dispatch_reopen(&mut app);
-        let opens = drain_opens(&mut app);
+        app.dispatch_reopen();
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         let PageOpenTarget::Stack(stack) = opens[0].target else {
             panic!("reopened page must target a stack");
@@ -1976,7 +1928,7 @@ mod tests {
 
     #[test]
     fn reopen_tab_group_restores_panes_and_stacks_together() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1988,6 +1940,7 @@ mod tests {
             },
             ChildOf(space),
         ));
+        let closed_at = UnixMillis::now().0 + 10;
         for (url, leaf, stack_index, child_index, active) in [
             ("https://left-1.example", "left", 0, 0, false),
             ("https://left-2.example", "left", 1, 0, false),
@@ -1998,7 +1951,7 @@ mod tests {
                 ArchivedPage {
                     url: url.to_string(),
                     space_id: "s1".to_string(),
-                    closed_at: 10,
+                    closed_at,
                     tab_index: Some(1),
                     ..default()
                 },
@@ -2021,7 +1974,7 @@ mod tests {
             ));
         }
 
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let tabs: Vec<Entity> = app
             .world_mut()
@@ -2135,7 +2088,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(drain_opens(&mut app).len(), 3);
+        assert_eq!(app.drain_opens().len(), 3);
         assert_eq!(
             app.world_mut()
                 .query::<&ArchivedPage>()
@@ -2147,20 +2100,20 @@ mod tests {
 
     #[test]
     fn reopen_web_opens_in_origin_space_and_consumes_entry() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
             url: "https://a.example".to_string(),
             title: "A".to_string(),
             space_id: "s1".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             launch: None,
             tab_index: None,
         });
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
-        let opens = drain_opens(&mut app);
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         assert_eq!(opens[0].url, "https://a.example");
         assert!(matches!(opens[0].target, PageOpenTarget::Stack(_)));
@@ -2178,7 +2131,7 @@ mod tests {
 
     #[test]
     fn reopen_prefers_the_focused_windows_view_of_the_origin_space() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let primary_window = app
             .world_mut()
             .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -2203,11 +2156,11 @@ mod tests {
         app.world_mut().spawn(ArchivedPage {
             url: "https://focused.example".to_string(),
             space_id: "shared".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             ..default()
         });
 
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let tab_parents: Vec<Entity> = app
             .world_mut()
@@ -2221,14 +2174,14 @@ mod tests {
 
     #[test]
     fn reopen_picks_newest_first() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
             url: "https://old.example".to_string(),
             title: String::new(),
             space_id: "s1".to_string(),
-            closed_at: 1,
+            closed_at: UnixMillis::now().0 + 1,
             launch: None,
             tab_index: None,
         });
@@ -2236,26 +2189,26 @@ mod tests {
             url: "https://new.example".to_string(),
             title: String::new(),
             space_id: "s1".to_string(),
-            closed_at: 2,
+            closed_at: UnixMillis::now().0 + 2,
             launch: None,
             tab_index: None,
         });
-        dispatch_reopen(&mut app);
-        let opens = drain_opens(&mut app);
+        app.dispatch_reopen();
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         assert_eq!(opens[0].url, "https://new.example");
     }
 
     #[test]
     fn reopen_terminal_respawns_at_cwd() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
             url: "vmux://terminal/".to_string(),
             title: String::new(),
             space_id: "s1".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             launch: Some(TerminalLaunch {
                 command: "/bin/zsh".to_string(),
                 args: vec![],
@@ -2264,8 +2217,8 @@ mod tests {
             }),
             tab_index: None,
         });
-        dispatch_reopen(&mut app);
-        let opens = drain_opens(&mut app);
+        app.dispatch_reopen();
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         let PageOpenTarget::Stack(stack) = opens[0].target else {
             panic!("reopened page must target a stack");
@@ -2279,16 +2232,16 @@ mod tests {
 
     #[test]
     fn reopen_empty_archive_is_noop() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
-        dispatch_reopen(&mut app);
-        assert!(drain_opens(&mut app).is_empty());
+        app.dispatch_reopen();
+        assert!(app.drain_opens().is_empty());
     }
 
     #[test]
     fn reopen_falls_back_to_active_space_when_origin_gone() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let active = app
             .world_mut()
             .spawn((
@@ -2303,12 +2256,12 @@ mod tests {
             url: "https://x.example".to_string(),
             title: String::new(),
             space_id: "ghost".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             launch: None,
             tab_index: None,
         });
-        dispatch_reopen(&mut app);
-        let opens = drain_opens(&mut app);
+        app.dispatch_reopen();
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         let mut tabs = app.world_mut().query::<(&crate::tab::Tab, &ChildOf)>();
         assert!(tabs.iter(app.world()).any(|(_, co)| co.get() == active));
@@ -2316,7 +2269,7 @@ mod tests {
 
     #[test]
     fn reopen_restores_tab_at_original_index() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2327,11 +2280,11 @@ mod tests {
             url: "https://z.example".to_string(),
             title: String::new(),
             space_id: "s1".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             launch: None,
             tab_index: Some(0),
         });
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let tabs_q = app.world().entity(space).get::<Children>().unwrap();
         let tab_order: Vec<Entity> = tabs_q.iter().collect();
@@ -2344,7 +2297,7 @@ mod tests {
 
     #[test]
     fn reopen_appends_when_origin_space_gone() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let active = app
             .world_mut()
             .spawn((Space, SpaceId("active".to_string())))
@@ -2364,11 +2317,11 @@ mod tests {
             url: "https://z.example".to_string(),
             title: String::new(),
             space_id: "ghost".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             launch: None,
             tab_index: Some(0),
         });
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let tabs_q = app.world().entity(active).get::<Children>().unwrap();
         let tab_order: Vec<Entity> = tabs_q.iter().collect();
@@ -2381,7 +2334,7 @@ mod tests {
 
     #[test]
     fn reopen_into_surviving_leaf_pane_at_index() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2396,7 +2349,7 @@ mod tests {
             ArchivedPage {
                 url: "https://z.example".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2405,7 +2358,7 @@ mod tests {
                 pane_path: Vec::new(),
             },
         ));
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let children = app.world().entity(leaf).get::<Children>().unwrap();
         let stacks: Vec<Entity> = children
@@ -2413,24 +2366,24 @@ mod tests {
             .filter(|&e| app.world().entity(e).contains::<Stack>())
             .collect();
         assert_eq!(stacks.len(), 2, "stack added into the existing leaf pane");
-        let opens = drain_opens(&mut app);
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         assert_eq!(opens[0].url, "https://z.example");
     }
 
     #[test]
     fn reopen_without_position_recreates_tab() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
             url: "https://a.example".to_string(),
             space_id: "s1".to_string(),
-            closed_at: 5,
+            closed_at: UnixMillis::now().0 + 5,
             ..default()
         });
-        dispatch_reopen(&mut app);
-        let opens = drain_opens(&mut app);
+        app.dispatch_reopen();
+        let opens = app.drain_opens();
         assert_eq!(opens.len(), 1);
         let mut tabs = app.world_mut().query::<&crate::tab::Tab>();
         assert_eq!(tabs.iter(app.world()).count(), 1, "a tab was recreated");
@@ -2438,7 +2391,7 @@ mod tests {
 
     #[test]
     fn reopen_readds_leaf_under_surviving_split() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2461,7 +2414,7 @@ mod tests {
             ArchivedPage {
                 url: "https://z".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2475,7 +2428,7 @@ mod tests {
                 }],
             },
         ));
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let root_children = app.world().entity(root).get::<Children>().unwrap();
         let panes: Vec<Entity> = root_children
@@ -2495,12 +2448,12 @@ mod tests {
                 .unwrap_or(false)
         });
         assert!(has_stack);
-        assert_eq!(drain_opens(&mut app).len(), 1);
+        assert_eq!(app.drain_opens().len(), 1);
     }
 
     #[test]
     fn reopen_reconstructs_collapsed_split_level() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2523,7 +2476,7 @@ mod tests {
             ArchivedPage {
                 url: "https://z".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2545,19 +2498,19 @@ mod tests {
                 ],
             },
         ));
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let mut ids = app.world_mut().query::<&PaneId>();
         let recreated_nested = ids.iter(app.world()).any(|id| id.0 == "nested");
         assert!(recreated_nested, "nested split recreated by id");
         let stack_count = app.world_mut().query::<&Stack>().iter(app.world()).count();
         assert_eq!(stack_count, 1);
-        assert_eq!(drain_opens(&mut app).len(), 1);
+        assert_eq!(app.drain_opens().len(), 1);
     }
 
     #[test]
     fn reopen_focuses_restored_stack_and_ancestors() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2571,7 +2524,7 @@ mod tests {
             ArchivedPage {
                 url: "https://z".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2580,14 +2533,14 @@ mod tests {
                 pane_path: Vec::new(),
             },
         ));
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
         assert!(app.world().entity(leaf).get::<LastActivatedAt>().is_some());
         assert!(app.world().entity(tab).get::<LastActivatedAt>().is_some());
     }
 
     #[test]
     fn reopen_focus_propagates_through_reattached_splits() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2619,7 +2572,7 @@ mod tests {
             ArchivedPage {
                 url: "https://z".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2641,7 +2594,7 @@ mod tests {
                 ],
             },
         ));
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
         assert!(
             app.world().entity(mid).get::<LastActivatedAt>().is_some(),
             "reattached intermediate split is activated through the restored chain"
@@ -2650,7 +2603,7 @@ mod tests {
 
     #[test]
     fn reopen_stale_leaf_id_that_is_now_split_uses_descendant_leaf() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2687,7 +2640,7 @@ mod tests {
             ArchivedPage {
                 url: "https://reopened.example".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2702,7 +2655,7 @@ mod tests {
             },
         ));
 
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         let reopened = app
             .world_mut()
@@ -2723,7 +2676,7 @@ mod tests {
 
     #[test]
     fn reopen_resplits_collapsed_two_pane() {
-        let mut app = reopen_app();
+        let mut app = Fixture::new();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -2741,7 +2694,7 @@ mod tests {
             ArchivedPage {
                 url: "https://z".to_string(),
                 space_id: "s1".to_string(),
-                closed_at: 5,
+                closed_at: UnixMillis::now().0 + 5,
                 ..default()
             },
             ArchivedPagePosition {
@@ -2755,7 +2708,7 @@ mod tests {
                 }],
             },
         ));
-        dispatch_reopen(&mut app);
+        app.dispatch_reopen();
 
         assert!(
             app.world().entity(root).get::<PaneSplit>().is_some(),
@@ -2782,6 +2735,6 @@ mod tests {
             panes.contains(&survivor_pane),
             "survivor re-homed into a pane"
         );
-        assert_eq!(drain_opens(&mut app).len(), 1);
+        assert_eq!(app.drain_opens().len(), 1);
     }
 }
