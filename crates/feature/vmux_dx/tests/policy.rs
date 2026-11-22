@@ -9792,7 +9792,7 @@ struct Inventory {
     boundary_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
     framework_handle_cache: RefCell<BTreeMap<(String, String), Option<String>>>,
     function_reference_cache: RefCell<BTreeMap<(String, String), Option<String>>>,
-    states_by_function: RefCell<Option<BTreeMap<String, Vec<(String, String, String)>>>>,
+    states_by_function: RefCell<Option<BTreeMap<String, Vec<[String; 3]>>>>,
     constructors_by_owner: RefCell<Option<BTreeMap<String, BTreeSet<String>>>>,
     shadowed_roots: RefCell<Option<BTreeSet<String>>>,
     automatic_boundary_keys: RefCell<Option<Vec<String>>>,
@@ -14310,19 +14310,19 @@ impl Inventory {
         self.direct_endpoint(source, endpoint)
     }
 
-    fn states_for_function(&self, function_key: &str) -> Vec<(String, String, String)> {
+    fn states_for_function(&self, function_key: &str) -> Vec<[String; 3]> {
         if let Some(index) = self.states_by_function.borrow().as_ref() {
             return index.get(function_key).cloned().unwrap_or_default();
         }
-        let mut index: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
+        let mut index: BTreeMap<String, Vec<[String; 3]>> = BTreeMap::new();
         for usage in self.usage.values() {
             for (function, namespace, state, reference) in &usage.states {
                 if let Some(entry) = self.resolve_function(function, &mut BTreeSet::new()) {
-                    index.entry(entry.key.clone()).or_default().push((
+                    index.entry(entry.key.clone()).or_default().push([
                         namespace.clone(),
                         state.clone(),
                         reference.clone(),
-                    ));
+                    ]);
                 }
             }
         }
@@ -14345,7 +14345,7 @@ impl Inventory {
             }
         }
         if matches!(source.kind, Kind::Function) && self.registered_keys.contains(&source.key) {
-            for (namespace, state, reference) in self.states_for_function(&source.key) {
+            for [namespace, state, reference] in self.states_for_function(&source.key) {
                 if !self.system_state(&namespace, &state, &mut BTreeSet::new()) {
                     continue;
                 }
