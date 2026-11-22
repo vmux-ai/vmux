@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["host"]
-host = ["dep:bevy", "dep:bevy_cef", "dep:vmux_clipboard", "dep:vmux_service", "dep:uuid", "vmux_ecs/host"]
+host = ["dep:bevy", "dep:bevy_cef", "dep:vmux_account", "dep:vmux_clipboard", "dep:vmux_service", "dep:uuid", "vmux_ecs/host"]
 
 [dependencies]
 bevy_app = { workspace = true }
@@ -18,6 +18,7 @@ bevy_ecs = { workspace = true }
 bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
+vmux_account = { path = "../vmux_account", optional = true, features = ["cloud", "profile-sync"] }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 vmux_clipboard = { path = "../../util/vmux_clipboard", optional = true }

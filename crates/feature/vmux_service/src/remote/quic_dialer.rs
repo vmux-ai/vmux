@@ -61,7 +61,7 @@ impl Registration {
             }
         };
         let opened = tokio::select! {
-            result = Self::open(&state.relay_token) => result,
+            result = Self::open(&state.device_id, &state.relay_token) => result,
             _ = RemoteState::stopped(liveness.clone()) => return SessionEnd::Unregistered("remote admission closed".into()),
         };
         match opened {
@@ -70,11 +70,8 @@ impl Registration {
         }
     }
 
-    async fn open(token: &str) -> Result<Self, String> {
+    async fn open(device_id: &DeviceId, token: &str) -> Result<Self, String> {
         let relay = Relay::configured();
-        let device_id = RelayDevice::current()
-            .load_or_create()
-            .map_err(|error| error.to_string())?;
         let address = relay.address().await?;
         let server_name = relay.host()?;
 
@@ -87,8 +84,8 @@ impl Registration {
             .await
             .map_err(|error| format!("relay connect {} at {address}: {error}", relay.url()))?;
 
-        Self::register(&control, &device_id, token).await?;
-        let registered = RegisteredDevice::claim(&device_id)
+        Self::register(&control, device_id, token).await?;
+        let registered = RegisteredDevice::claim(device_id)
             .map_err(|error| format!("persist relay registration: {error}"))?;
         tracing::info!(device_id = %device_id.as_str(), relay = %relay.url(), "remote quic: registered with the relay");
 
@@ -270,30 +267,6 @@ impl RegisteredDevice {
 impl Drop for RegisteredDevice {
     fn drop(&mut self) {
         Self::remove(&self.path);
-    }
-}
-
-struct RelayDevice {
-    path: PathBuf,
-}
-
-impl RelayDevice {
-    fn current() -> Self {
-        Self {
-            path: RemotePaths::current().relay_device(),
-        }
-    }
-
-    fn load_or_create(&self) -> std::io::Result<DeviceId> {
-        if let Ok(existing) = std::fs::read_to_string(&self.path) {
-            let existing = existing.trim();
-            if !existing.is_empty() {
-                return Ok(DeviceId::new(existing));
-            }
-        }
-        let minted = uuid::Uuid::new_v4().simple().to_string();
-        PrivateFile::new(&self.path).write(&minted)?;
-        Ok(DeviceId::new(minted))
     }
 }
 

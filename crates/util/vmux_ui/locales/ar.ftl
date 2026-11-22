@@ -1368,6 +1368,7 @@ gallery-model-description = نموذج تجريبي: { $id }
 gallery-mode-description = وضع أذونات تجريبي: { $id }
 gallery-example-review = راجع مكوّن واجهة المستخدم هذا
 gallery-completion = وصِف السلوك المتوقع
+live-account-required = سجّل الدخول إلى حساب Vmux لاستخدام Live.
 live-attention = يتطلب الانتباه
 live-auto-pair = يفتح Vmux ويقترن تلقائيًا
 live-connect-device = توصيل جهاز

@@ -23,6 +23,7 @@ const MAX_HELLO_BYTES: usize = 16 * 1024;
 #[derive(Clone, bevy_ecs::prelude::Component)]
 #[component(immutable)]
 pub(crate) struct RemoteState {
+    pub(crate) device_id: DeviceId,
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: RemoteAuthorizations,
     pub(crate) remote: Arc<dyn RemoteDriver>,
@@ -709,7 +710,8 @@ pub(crate) mod live {
             });
             let (sessions, _, _) = SessionPublisher::channel();
             let state = RemoteState {
-                relay_token: Arc::from("relay-token"),
+                device_id: DeviceId::new(uuid::Uuid::new_v4().to_string()),
+                relay_token: Arc::from("a1.aabb.ccdd"),
                 authorizations: authorizations.clone(),
                 remote: Arc::new(ClosedRemote),
                 sessions,

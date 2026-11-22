@@ -39,6 +39,8 @@ pub struct UiRemote {
     pub paired: bool,
     #[serde(default)]
     pub pairing_visible: bool,
+    #[serde(default)]
+    pub account_required: bool,
     pub devices: Vec<RemoteDevice>,
     pub error: String,
 }

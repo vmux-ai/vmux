@@ -1,5 +1,5 @@
 pub use crate::remote::authorization::{
-    AuthorizationOutcome, AuthorizedDevice, RelayToken, RemoteAuthorizationStore,
+    AccountRelayCredential, AuthorizationOutcome, AuthorizedDevice, RemoteAuthorizationStore,
 };
 pub use crate::remote::pairing;
 pub use vmux_transport::DeviceId;

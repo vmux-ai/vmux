@@ -543,7 +543,8 @@ fn translate(mut replies: Query<(Entity, &mut Reply), With<Connection>>, mut com
             | Response::ProfileRefused => {
                 target.insert(Rejected(Failure::invalid_store()));
             }
-            Response::ControlAccess { .. }
+            Response::Asserted { .. }
+            | Response::ControlAccess { .. }
             | Response::ControlRefused
             | Response::ControlUnavailable => {
                 target.insert(Rejected(Failure::invalid_store()));

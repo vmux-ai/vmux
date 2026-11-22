@@ -1368,6 +1368,7 @@ gallery-model-description = Voorbeeldmodel: { $id }
 gallery-mode-description = Voorbeeldmachtigingsmodus: { $id }
 gallery-example-review = Bekijk deze UI-component
 gallery-completion = en beschrijf het verwachte gedrag
+live-account-required = Log in op je Vmux-account om Live te gebruiken.
 live-attention = Aandacht vereist
 live-auto-pair = Opent Vmux en koppelt automatisch
 live-connect-device = Apparaat verbinden

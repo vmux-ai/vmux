@@ -96,12 +96,12 @@ values: [
     (key: "crates/util/vmux_profile/src/mcp_credentials/access.rs||struct:McpCredentialAccess", owner: "crates/util/vmux_ecs/src/profile.rs||struct:McpCredentials", lifetime: "profile-owned credential access configuration"),
 ],
 shape: (
-  debt: [
-  ],
   enums: [
     (key: "crates/util/vmux_profile/src/safe_storage.rs||enum:SafeStorageError", fingerprint: "7ef873c4f4d66020", role: Boundary, owner: "crates/util/vmux_profile/src/safe_storage.rs||struct:SafeStorageContext", reason: "Typed native Keychain, envelope, and cryptographic IO error returned by SafeStorage boundary adapters."),
   ],
   bodies: [
+  ],
+  debt: [
   ],
 ),
 )

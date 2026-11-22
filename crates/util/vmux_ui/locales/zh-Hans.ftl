@@ -1365,6 +1365,7 @@ gallery-model-description = 示例模型：{ $id }
 gallery-mode-description = 示例权限模式：{ $id }
 gallery-example-review = 查看此 UI 组件
 gallery-completion = 并描述预期行为
+live-account-required = 登录您的 Vmux 账户以使用 Live。
 live-attention = 需要处理
 live-auto-pair = 打开 Vmux 并自动配对
 live-connect-device = 连接设备

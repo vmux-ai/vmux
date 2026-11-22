@@ -13,47 +13,109 @@ use super::authorization::{AuthorizationAuthority, PairingCredential};
 use super::file_driver::PrivateFile;
 use crate::RemotePaths;
 
-const MIN_TOKEN_LEN: usize = 32;
+#[derive(Clone, Debug, Eq, PartialEq, Component)]
+pub struct AccountRelayCredential {
+    device_id: DeviceId,
+    assertion: String,
+}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RelayToken(String);
-
-impl RelayToken {
-    pub fn ensure() -> std::io::Result<Self> {
-        let path = RemotePaths::current().relay_token();
-        if let Some(token) = Self::read(&path) {
-            return Ok(Self(token));
+impl AccountRelayCredential {
+    pub fn new(device_id: DeviceId, assertion: String) -> Option<Self> {
+        if !Self::valid_device_id(device_id.as_str()) || !Self::valid_assertion(&assertion) {
+            return None;
         }
-        let token = Token::generate();
-        PrivateFile::new(path).write(token.as_bytes())?;
-        Ok(Self(token))
+        Some(Self {
+            device_id,
+            assertion,
+        })
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        let mut lines = raw.lines().map(str::trim).filter(|line| !line.is_empty());
+        let device_id = lines.next()?;
+        let assertion = lines.next()?;
+        if lines.next().is_some() {
+            return None;
+        }
+        Self::new(DeviceId::new(device_id), assertion.to_string())
+    }
+
+    pub fn read_current() -> Option<Self> {
+        Self::read_at(&RemotePaths::current().relay_assertion())
+    }
+
+    pub fn read_at(path: &Path) -> Option<Self> {
+        let contents = std::fs::read_to_string(path).ok()?;
+        Self::parse(&contents)
+    }
+
+    pub fn write_current(device_id: &DeviceId, assertion: &str) -> std::io::Result<()> {
+        let paths = RemotePaths::current();
+        Self::write_at(&paths.relay_assertion(), device_id, assertion)?;
+        let _ = std::fs::remove_file(paths.relay_token());
+        let _ = std::fs::remove_file(paths.relay_device());
+        Ok(())
+    }
+
+    pub fn write_at(path: &Path, device_id: &DeviceId, assertion: &str) -> std::io::Result<()> {
+        if Self::new(device_id.clone(), assertion.to_string()).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid account relay assertion",
+            ));
+        }
+        let body = format!("{}\n{}\n", device_id.as_str(), assertion);
+        PrivateFile::new(path).write(body.as_bytes())
+    }
+
+    pub fn clear_current() {
+        let paths = RemotePaths::current();
+        let _ = std::fs::remove_file(paths.relay_assertion());
+        let _ = std::fs::remove_file(paths.relay_token());
+        let _ = std::fs::remove_file(paths.relay_device());
     }
 
     pub fn wait(timeout: Duration) -> std::io::Result<Self> {
-        let path = RemotePaths::current().relay_token();
+        let path = RemotePaths::current().relay_assertion();
         let deadline = Instant::now() + timeout;
         loop {
-            if let Some(token) = Self::read(&path) {
-                return Ok(Self(token));
+            if let Some(credential) = Self::read_at(&path) {
+                return Ok(credential);
             }
             if Instant::now() >= deadline {
                 return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("relay token not created: {}", path.display()),
+                    std::io::ErrorKind::PermissionDenied,
+                    "Sign in to your Vmux account in the desktop app before enabling Live",
                 ));
             }
             std::thread::sleep(Duration::from_millis(50));
         }
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn device_id(&self) -> &DeviceId {
+        &self.device_id
     }
 
-    fn read(path: &Path) -> Option<String> {
-        let token = std::fs::read_to_string(path).ok()?;
-        let token = token.trim();
-        (token.len() >= MIN_TOKEN_LEN).then(|| token.to_string())
+    pub fn assertion(&self) -> &str {
+        &self.assertion
+    }
+
+    fn valid_device_id(raw: &str) -> bool {
+        uuid::Uuid::parse_str(raw).is_ok_and(|id| !id.is_nil())
+    }
+
+    fn valid_assertion(raw: &str) -> bool {
+        let Some(rest) = raw.strip_prefix("a1.") else {
+            return false;
+        };
+        let Some((claims, signature)) = rest.split_once('.') else {
+            return false;
+        };
+        !claims.is_empty()
+            && !signature.is_empty()
+            && !signature.contains('.')
+            && claims.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && signature.bytes().all(|byte| byte.is_ascii_hexdigit())
     }
 }
 
@@ -403,5 +465,30 @@ impl TokenHash {
 
     pub(super) fn matches(&self, token: &str) -> bool {
         Token::secure_eq(&self.0, &Self::of(token).0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_relay_credential_round_trips_and_rejects_anonymous_tokens() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("remote-relay-assertion");
+        let device = DeviceId::new(uuid::Uuid::new_v4().to_string());
+        let assertion = "a1.deadbeef.cafebabe";
+
+        AccountRelayCredential::write_at(&path, &device, assertion).expect("write");
+        let loaded = AccountRelayCredential::read_at(&path).expect("read");
+        assert_eq!(loaded.device_id(), &device);
+        assert_eq!(loaded.assertion(), assertion);
+
+        assert!(
+            AccountRelayCredential::parse(&format!("{}\nanonymous-token", device.as_str()))
+                .is_none()
+        );
+        assert!(AccountRelayCredential::parse("not-a-uuid\na1.deadbeef.cafebabe").is_none());
+        assert!(AccountRelayCredential::write_at(&path, &device, "anonymous-token").is_err());
     }
 }

@@ -6,13 +6,13 @@ use bevy::prelude::*;
 use vmux_transport::DeviceId;
 
 pub(crate) use super::authorization_driver::RemoteAuthorizations;
+pub use super::authorization_driver::{
+    AccountRelayCredential, AuthorizationOutcome, AuthorizedDevice, RemoteAuthorizationStore,
+};
 use super::authorization_driver::{
     AuthenticateDevice, AuthorizationFile, AuthorizationInbox, PairDevice, ResetAuthorization,
     RevalidateAuthorization, RevokeAuthorization, StoredAuthorizations, StoredDevice, Token,
     TokenHash,
-};
-pub use super::authorization_driver::{
-    AuthorizationOutcome, AuthorizedDevice, RelayToken, RemoteAuthorizationStore,
 };
 
 pub struct RemoteAuthorizationPlugin;

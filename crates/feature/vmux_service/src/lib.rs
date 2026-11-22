@@ -1,7 +1,7 @@
 #[cfg(host)]
 pub use host::{
-    AuthorizationOutcome, AuthorizedDevice, DaemonBinary, DaemonIdentity, DeviceId, LaunchAgent,
-    RelayToken, RemoteAuthorizationStore, RemotePaths, RuntimeHandoff, ServiceCliPlugin,
+    AccountRelayCredential, AuthorizationOutcome, AuthorizedDevice, DaemonBinary, DaemonIdentity,
+    DeviceId, LaunchAgent, RemoteAuthorizationStore, RemotePaths, RuntimeHandoff, ServiceCliPlugin,
     ServicePaths, bundle, cleanup, cli, pairing, plugin, registry, runner, server, supervisor,
 };
 #[cfg(all(host, target_os = "macos"))]

@@ -128,6 +128,10 @@ impl RemotePaths {
     pub fn relay_registration(&self) -> PathBuf {
         self.service.runtime_file("remote-relay-registration")
     }
+
+    pub fn relay_assertion(&self) -> PathBuf {
+        self.service.runtime_file("remote-relay-assertion")
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +160,15 @@ mod tests {
         assert_eq!(
             path.extension().and_then(|value| value.to_str()),
             Some("remote-token")
+        );
+    }
+
+    #[test]
+    fn remote_assertion_uses_profile_file_name() {
+        let path = RemotePaths::current().relay_assertion();
+        assert_eq!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("remote-relay-assertion")
         );
     }
 

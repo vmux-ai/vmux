@@ -1348,6 +1348,7 @@ gallery-model-description = サンプルモデル: { $id }
 gallery-mode-description = サンプルの権限モード: { $id }
 gallery-example-review = この UI コンポーネントを確認する
 gallery-completion = そして期待する動作を説明する
+live-account-required = Live を使うには Vmux アカウントにサインインしてください。
 live-attention = 確認が必要です
 live-auto-pair = Vmux を開いて自動的にペアリングします
 live-connect-device = デバイスを接続
