@@ -354,6 +354,12 @@ fn publish_mcp_connections(
             success: result.success,
             message: result.message.clone(),
         });
+        commands.trigger(McpServersSnapshot {
+            target,
+            loading: state.loading,
+            has_pending: pending.is_some(),
+            servers: entries.clone(),
+        });
         commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
             target,
             &McpServersUiState {
@@ -367,6 +373,15 @@ fn publish_mcp_connections(
             },
         ));
     }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct McpServersSnapshot {
+    #[event_target]
+    pub target: Entity,
+    pub loading: bool,
+    pub has_pending: bool,
+    pub servers: Vec<McpServerEntry>,
 }
 
 #[derive(EntityEvent)]

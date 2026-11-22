@@ -1,7 +1,6 @@
-use crate::state::{ToolOperationKey, ToolProvider};
+use crate::state::ToolProvider;
 use bevy_ecs::prelude::Component;
 
-use crate::ToolStore;
 use vmux_feature::manifest::{FeatureId, FeatureManifestSource};
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -27,23 +26,5 @@ impl ToolProviderBinding {
 
     pub fn index(self) -> usize {
         self.index
-    }
-}
-
-#[derive(Component, Clone, Copy)]
-pub struct ToolOperator(fn(&ToolStore, &ToolOperationKey, &str) -> Result<String, String>);
-
-impl ToolOperator {
-    pub fn new(run: fn(&ToolStore, &ToolOperationKey, &str) -> Result<String, String>) -> Self {
-        Self(run)
-    }
-
-    pub fn run(
-        self,
-        store: &ToolStore,
-        operation: &ToolOperationKey,
-        value: &str,
-    ) -> Result<String, String> {
-        (self.0)(store, operation, value)
     }
 }
