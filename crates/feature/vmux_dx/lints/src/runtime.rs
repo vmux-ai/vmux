@@ -90,7 +90,8 @@ impl crate::VmuxExportedSystem<'_> {
                 "inherent methods with ECS runtime inputs must belong to a SystemParam"
             } else {
                 if self.private_runtime_function(cx, function)
-                    && self.runtime_helper_owner(cx, function, &mut HashSet::new())
+                    && (self.runtime_helper_owner(cx, function, &mut HashSet::new())
+                        || self.runtime_callback_owner(cx, function))
                 {
                     continue;
                 }
@@ -106,6 +107,87 @@ impl crate::VmuxExportedSystem<'_> {
                 }),
             );
         }
+    }
+
+    pub(super) fn runtime_field_reference(&mut self, cx: &LateContext<'_>, expression: &Expr<'_>) {
+        if let ExprKind::Call(callee, arguments) = expression.kind {
+            if let ExprKind::Field(base, _) = callee.kind {
+                let ty = cx.typeck_results().expr_ty_adjusted(base).peel_refs();
+                if let TyKind::Adt(owner, _) = ty.kind()
+                    && owner.is_struct()
+                    && self.ownership.has_role(owner.did(), "component")
+                {
+                    let field = owner.non_enum_variant().fields
+                        [cx.typeck_results().field_index(callee.hir_id)]
+                    .did;
+                    let caller = cx
+                        .tcx
+                        .hir_enclosing_body_owner(expression.hir_id)
+                        .to_def_id();
+                    self.runtime_field_callers
+                        .entry(field)
+                        .or_default()
+                        .insert(caller);
+                }
+            }
+            if let TyKind::FnDef(function, _) = cx.typeck_results().expr_ty(callee).kind()
+                && matches!(cx.tcx.def_kind(*function), DefKind::Ctor(..))
+                && let TyKind::Adt(owner, _) = cx.typeck_results().expr_ty(expression).kind()
+                && owner.is_struct()
+                && self.ownership.has_role(owner.did(), "component")
+            {
+                for (field, argument) in owner.non_enum_variant().fields.iter().zip(arguments) {
+                    if let TyKind::FnDef(function, _) = cx.typeck_results().expr_ty(argument).kind()
+                        && function.is_local()
+                    {
+                        self.runtime_fields
+                            .entry(field.did)
+                            .or_default()
+                            .insert(*function);
+                    }
+                }
+            }
+        }
+        if let ExprKind::Struct(_, fields, _) = expression.kind
+            && let TyKind::Adt(owner, _) = cx.typeck_results().expr_ty(expression).kind()
+            && owner.is_struct()
+            && self.ownership.has_role(owner.did(), "component")
+        {
+            for field in fields {
+                if let TyKind::FnDef(function, _) = cx.typeck_results().expr_ty(field.expr).kind()
+                    && function.is_local()
+                    && let Some(definition) = owner
+                        .non_enum_variant()
+                        .fields
+                        .iter()
+                        .find(|definition| definition.name == field.ident.name)
+                {
+                    self.runtime_fields
+                        .entry(definition.did)
+                        .or_default()
+                        .insert(*function);
+                }
+            }
+        }
+    }
+
+    fn runtime_callback_owner(&self, cx: &LateContext<'_>, function: DefId) -> bool {
+        let mut owners = HashSet::new();
+        for (field, callbacks) in &self.runtime_fields {
+            if !callbacks.contains(&function) {
+                continue;
+            }
+            let Some(callers) = self.runtime_field_callers.get(field) else {
+                continue;
+            };
+            for caller in callers {
+                if !self.runtime_helper_owner(cx, *caller, &mut HashSet::new()) {
+                    return false;
+                }
+                owners.insert(*caller);
+            }
+        }
+        owners.len() == 1
     }
 
     fn runtime_type<'tcx>(

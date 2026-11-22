@@ -50,6 +50,37 @@ fn inspect(access: Access, input: Inputs) {
 
 fn generic_helper<T: SystemParam>(_: T) {}
 
+#[derive(Component)]
+struct Writer {
+    run: for<'w, 's> fn(&mut Commands<'w, 's>),
+}
+
+impl Writer {
+    fn new() -> Self {
+        Self { run: field_helper }
+    }
+}
+
+fn field_helper(_: &mut Commands) {}
+
+#[derive(Component)]
+struct TupleWriter(for<'w, 's> fn(&mut Commands<'w, 's>));
+
+impl TupleWriter {
+    fn new() -> Self {
+        Self(tuple_helper)
+    }
+}
+
+fn tuple_helper(_: &mut Commands) {}
+
+fn forward(writers: Query<(&Writer, &TupleWriter)>, mut commands: Commands) {
+    for (writer, tuple) in &writers {
+        (writer.run)(&mut commands);
+        (tuple.0)(&mut commands);
+    }
+}
+
 mod unrelated {
     pub struct Query;
     pub trait SystemParam {}
@@ -78,6 +109,6 @@ trait Framework {
 }
 
 fn main() {
-    App::new().add_systems(Update, (apply, inspect));
+    App::new().add_systems(Update, (apply, inspect, forward));
     Engine.unrelated(unrelated::Query);
 }

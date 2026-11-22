@@ -82,6 +82,8 @@ struct VmuxExportedSystem<'tcx> {
     configurations: HashSet<HirId>,
     systems: HashSet<DefId>,
     helper_callers: HashMap<DefId, HashSet<DefId>>,
+    runtime_fields: HashMap<DefId, HashSet<DefId>>,
+    runtime_field_callers: HashMap<DefId, HashSet<DefId>>,
     parameter_trait: Option<DefId>,
     trait_implementations: HashSet<DefId>,
 }
@@ -111,6 +113,7 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
         }
         self.ownership.call(cx, expression);
         self.runtime_reference(cx, expression);
+        self.runtime_field_reference(cx, expression);
         self.register(cx, expression);
     }
 

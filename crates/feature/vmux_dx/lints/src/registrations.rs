@@ -162,6 +162,8 @@ fn runtime_inputs_follow_resolved_systems_and_system_param_methods() {
                 "`generic`: ECS runtime helpers must be private and have one local registered owner",
                 "`captured`: ECS runtime helpers must be private and have one local registered owner",
                 "`disconnected`: ECS runtime helpers must be private and have one local registered owner",
+                "`unread`: ECS runtime helpers must be private and have one local registered owner",
+                "`plain_helper`: ECS runtime helpers must be private and have one local registered owner",
             ][..],
         ),
         (

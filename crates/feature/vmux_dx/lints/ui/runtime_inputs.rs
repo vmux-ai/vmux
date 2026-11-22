@@ -43,6 +43,35 @@ fn disconnected(input: Inputs) {
     invoke();
 }
 
+#[derive(Component)]
+struct UnusedWriter {
+    run: for<'w, 's> fn(&mut Commands<'w, 's>),
+}
+
+impl UnusedWriter {
+    fn new() -> Self {
+        Self { run: unread }
+    }
+}
+
+fn unread(_: &mut Commands) {}
+
+struct PlainWriter {
+    run: for<'w, 's> fn(&mut Commands<'w, 's>),
+}
+
+impl PlainWriter {
+    fn new() -> Self {
+        Self { run: plain_helper }
+    }
+}
+
+fn plain_helper(_: &mut Commands) {}
+
+fn read_plain(writer: NonSend<PlainWriter>, mut commands: Commands) {
+    (writer.run)(&mut commands);
+}
+
 fn first(input: Inputs) {
     shared(input);
 }
@@ -56,5 +85,5 @@ fn invoke(input: Inputs) {
 }
 
 fn main() {
-    App::new().add_systems(Update, (first, second, invoke));
+    App::new().add_systems(Update, (first, second, invoke, read_plain));
 }
