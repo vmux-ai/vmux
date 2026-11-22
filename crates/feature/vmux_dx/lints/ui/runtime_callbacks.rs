@@ -16,6 +16,10 @@ mod callbacks {
 
     pub fn tail(_: DeferredWorld, _: HookContext) {}
 
+    pub fn labeled(_: DeferredWorld, _: HookContext) {}
+
+    pub fn unreachable(_: DeferredWorld, _: HookContext) {}
+
     pub fn fallible_added(_: DeferredWorld, _: HookContext) {}
 
     pub fn fallible_inserted(_: DeferredWorld, _: HookContext) {}
@@ -38,6 +42,16 @@ mod callbacks {
 
         fn on_insert() -> Option<bevy_ecs::lifecycle::ComponentHook> {
             Some(tail)
+        }
+
+        fn on_remove() -> Option<bevy_ecs::lifecycle::ComponentHook> {
+            'ready: { break 'ready; }
+            return Some(labeled);
+        }
+
+        fn on_despawn() -> Option<bevy_ecs::lifecycle::ComponentHook> {
+            return None;
+            Some(unreachable)
         }
     }
 

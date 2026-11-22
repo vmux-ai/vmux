@@ -39,13 +39,23 @@ impl<'tcx> Ownership<'tcx> {
                 _ => continue,
             };
             for implementation in implementations {
-                if role == "plugin" {
+                if matches!(role, "plugin" | "component") {
                     for method in cx
                         .tcx
                         .associated_items(implementation.to_def_id())
                         .in_definition_order()
                     {
-                        if method.name().as_str() == "build" {
+                        if role == "plugin" && method.name().as_str() == "build"
+                            || role == "component"
+                                && matches!(
+                                    method.name().as_str(),
+                                    "on_add"
+                                        | "on_insert"
+                                        | "on_discard"
+                                        | "on_remove"
+                                        | "on_despawn"
+                                )
+                        {
                             self.entrypoints.insert(method.def_id);
                         }
                     }

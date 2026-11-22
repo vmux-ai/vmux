@@ -203,6 +203,7 @@ fn compiler_resolves_observers_and_ignores_lookalike_registration_apis() {
                 "once",
                 "explicit",
                 "tail",
+                "labeled",
                 "fallible_added",
                 "fallible_inserted",
                 "fallible_discarded",

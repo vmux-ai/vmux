@@ -3511,6 +3511,16 @@ fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
             true,
             false,
         ),
+        (
+            "use rustc_lint::{LateLintPass,LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { if true { return; } store.register_late_lint_pass(Box::new(|_| Box::new(Adapter))); }",
+            true,
+            false,
+        ),
+        (
+            "use rustc_lint::{LateLintPass,LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { #[cfg(test)] store.register_late_lint_pass(Box::new(|_| Box::new(Adapter))); }",
+            true,
+            false,
+        ),
     ] {
         let inventory = Inventory::fixture(source);
         let adapter = inventory
@@ -12359,8 +12369,11 @@ impl Inventory {
                         return false;
                     }
                     let syn::Expr::MethodCall(call) = expression else {
-                        continue;
+                        return false;
                     };
+                    if Usage::test_only(&call.attrs) {
+                        continue;
+                    }
                     if call.method == "register_late_lint_pass"
                         && matches!(call.receiver.as_ref(), syn::Expr::Path(path) if path.path.is_ident(&binding.ident))
                         && call.args.first().is_some_and(|factory| {

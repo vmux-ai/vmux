@@ -90,10 +90,11 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
         {
             return;
         }
+        let previous = self.ownership.site.replace(method);
         for value in aliases::Assignments::returns(body.value) {
             self.configuration(cx, value);
         }
-        self.configuration(cx, body.value);
+        self.ownership.site = previous;
     }
 }
 

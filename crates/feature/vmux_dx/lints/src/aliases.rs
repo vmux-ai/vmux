@@ -47,6 +47,9 @@ impl<'tcx> Assignments<'tcx> {
     pub fn returns(expression: &'tcx Expr<'tcx>) -> Vec<&'tcx Expr<'tcx>> {
         let mut assignments = Self::new(None, None);
         assignments.visit_expr(expression);
+        if assignments.reachable {
+            assignments.returned.push(expression);
+        }
         assignments.returned
     }
 
@@ -163,6 +166,21 @@ impl<'tcx> Visitor<'tcx> for Assignments<'tcx> {
             ExprKind::If(condition, then, otherwise) => self.branches(condition, then, otherwise),
             ExprKind::Match(scrutinee, arms, _) => self.alternatives(scrutinee, arms),
             ExprKind::Loop(body, ..) => self.repeat(expression, body),
+            ExprKind::Block(block, _) => {
+                self.visit_block(block);
+                let escaped = self
+                    .breaks
+                    .remove(&expression.hir_id)
+                    .or_else(|| self.breaks.remove(&block.hir_id));
+                if let Some(values) = escaped {
+                    if self.reachable {
+                        Self::merge(&mut self.values, values);
+                    } else {
+                        self.values = values;
+                    }
+                    self.reachable = true;
+                }
+            }
             ExprKind::Break(destination, value) => {
                 if let Some(value) = value {
                     self.visit_expr(value);
