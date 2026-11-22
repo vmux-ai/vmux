@@ -1,22 +1,21 @@
-pub use driver::*;
-pub use login_shell::*;
-pub use plugin::*;
-pub use runtime_driver::*;
-pub use service::*;
-pub use service_driver::*;
+pub use login_shell::LoginShellEnvironment;
+pub use plugin::ProcessPlugin;
+pub use pty::PtyInputWriter;
+pub use runtime_driver::{ProcessCreated, ProcessLaunch, ProcessRuntime};
+pub use service::ProcessServicePlugin;
+pub use service_driver::ProcessService;
+pub use viewport::{ProcessCommandLifecycle, ProcessMode, ProcessSnapshot, ProcessUpdate};
 
-#[cfg(any(test, feature = "test-support"))]
-pub use manager::*;
-
-mod driver;
+mod emulator;
 mod login_shell;
-#[cfg(any(test, feature = "test-support"))]
-mod manager;
 mod plugin;
+mod pty;
 mod render;
 mod run_marker;
 mod runtime_driver;
+mod selection;
 mod service;
 mod service_driver;
 mod shell_events;
 mod shell_integration;
+mod viewport;

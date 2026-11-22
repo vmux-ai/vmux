@@ -122,10 +122,8 @@ impl ProcessShell {
                 }
             }
             Shell::Fish => {
-                Self::prepend_args(
-                    args,
-                    vec!["--init-command".to_string(), FISH_INIT.to_string()],
-                );
+                let init = FISH_INIT.to_string();
+                Self::prepend_args(args, vec!["--init-command".to_string(), init]);
             }
             Shell::Nu => {
                 let config = dir.join("config.nu");

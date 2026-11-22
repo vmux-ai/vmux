@@ -23,6 +23,12 @@ impl ShellEvents {
         self.parser.advance(&mut collector, bytes);
         collector.events
     }
+    #[cfg(test)]
+    fn esc(seq: &str) -> Vec<u8> {
+        seq.replace("\\e", "\u{1b}")
+            .replace("\\a", "\u{07}")
+            .into_bytes()
+    }
 }
 
 #[derive(Default)]
@@ -97,27 +103,24 @@ mod tests {
         );
     }
 
-    fn esc(seq: &str) -> Vec<u8> {
-        seq.replace("\\e", "\u{1b}")
-            .replace("\\a", "\u{07}")
-            .into_bytes()
-    }
-
     #[test]
     fn detects_command_start() {
         let mut s = ShellEvents::new();
-        assert_eq!(s.feed(&esc("\\e]133;C\\a")), vec![ShellEvent::CommandStart]);
+        assert_eq!(
+            s.feed(&ShellEvents::esc("\\e]133;C\\a")),
+            vec![ShellEvent::CommandStart]
+        );
     }
 
     #[test]
     fn detects_command_end_with_exit_code() {
         let mut s = ShellEvents::new();
         assert_eq!(
-            s.feed(&esc("\\e]133;D;0\\a")),
+            s.feed(&ShellEvents::esc("\\e]133;D;0\\a")),
             vec![ShellEvent::CommandEnd(Some(0))]
         );
         assert_eq!(
-            s.feed(&esc("\\e]133;D;130\\a")),
+            s.feed(&ShellEvents::esc("\\e]133;D;130\\a")),
             vec![ShellEvent::CommandEnd(Some(130))]
         );
     }
@@ -126,7 +129,7 @@ mod tests {
     fn command_end_without_code_is_none() {
         let mut s = ShellEvents::new();
         assert_eq!(
-            s.feed(&esc("\\e]133;D\\a")),
+            s.feed(&ShellEvents::esc("\\e]133;D\\a")),
             vec![ShellEvent::CommandEnd(None)]
         );
     }
@@ -135,7 +138,7 @@ mod tests {
     fn accepts_st_terminator() {
         let mut s = ShellEvents::new();
         assert_eq!(
-            s.feed(&esc("\\e]133;D;0\\e\\")),
+            s.feed(&ShellEvents::esc("\\e]133;D;0\\e\\")),
             vec![ShellEvent::CommandEnd(Some(0))]
         );
     }
@@ -143,21 +146,27 @@ mod tests {
     #[test]
     fn reassembles_sequence_split_across_feeds() {
         let mut s = ShellEvents::new();
-        assert_eq!(s.feed(&esc("\\e]133;D")), vec![]);
-        assert_eq!(s.feed(&esc(";0\\a")), vec![ShellEvent::CommandEnd(Some(0))]);
+        assert_eq!(s.feed(&ShellEvents::esc("\\e]133;D")), vec![]);
+        assert_eq!(
+            s.feed(&ShellEvents::esc(";0\\a")),
+            vec![ShellEvent::CommandEnd(Some(0))]
+        );
     }
 
     #[test]
     fn ignores_other_osc_and_plain_text() {
         let mut s = ShellEvents::new();
-        assert_eq!(s.feed(&esc("\\e]0;my title\\ahello world\n")), vec![]);
+        assert_eq!(
+            s.feed(&ShellEvents::esc("\\e]0;my title\\ahello world\n")),
+            vec![]
+        );
     }
 
     #[test]
     fn emits_start_then_end_in_order() {
         let mut s = ShellEvents::new();
         assert_eq!(
-            s.feed(&esc("\\e]133;C\\als -la\n\\e]133;D;0\\a")),
+            s.feed(&ShellEvents::esc("\\e]133;C\\als -la\n\\e]133;D;0\\a")),
             vec![ShellEvent::CommandStart, ShellEvent::CommandEnd(Some(0))]
         );
     }
