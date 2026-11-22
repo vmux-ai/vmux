@@ -1,5 +1,12 @@
 pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
 use bevy::{ecs::message::MessageReader, prelude::*};
+pub use policy::{
+    ActivateSpaceProject, AssociateKnownProject, ForgetSpaceProject, KnownProject,
+    KnownProjectCheckout, KnownProjectId, KnownProjectLabel, KnownProjectOrder, KnownProjectPath,
+    RememberSpaceProject, RenameKnownProject, SettingsPolicySet, SpaceActiveProject,
+    SpaceBindingCheckout, SpaceBindingOrder, SpaceBindingProject, SpaceBindingTarget,
+    SpaceProjectBinding, SpaceSetting, SpaceSettingKey, SpaceSettings, SpaceStartupUrl,
+};
 pub use runtime::{
     AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkDefaults,
     BookmarkFolderSettings, BrowserSettings, ColorScheme, DirSource, KeyComboDef, SettingsLoadSet,
@@ -13,6 +20,7 @@ use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 
 mod agent;
 mod appearance;
+mod policy;
 mod projection;
 mod runtime;
 mod state;
@@ -31,6 +39,7 @@ impl Plugin for SettingsPlugin {
         app.add_plugins((
             agent::AgentSettingsPlugin,
             SettingsRuntimePlugin,
+            policy::SettingsPolicyPlugin,
             SettingToolPlugin,
             state::StatePlugin,
             projection::ProjectionPlugin,
