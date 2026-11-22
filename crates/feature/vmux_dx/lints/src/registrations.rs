@@ -42,6 +42,11 @@ impl Fixture {
     }
 
     fn check(&self, name: &str, source: &str, expected: &[&str], code: &str) {
+        let source = if code == "vmux_ecs_runtime" {
+            source.to_string()
+        } else {
+            format!("#![allow(vmux_ecs_runtime)]{source}")
+        };
         std::fs::write(
             self.directory
                 .path()
@@ -140,6 +145,34 @@ impl Fixture {
             diagnostics.push(diagnostic);
         }
         (diagnostics, unexpected)
+    }
+}
+
+#[test]
+fn runtime_inputs_follow_resolved_systems_and_system_param_methods() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        (
+            "runtime_inputs",
+            include_str!("../ui/runtime_inputs.rs"),
+            &[
+                "`inspect`: inherent methods with ECS runtime inputs must belong to a SystemParam",
+                "`inspect_access`: inherent methods with ECS runtime inputs must belong to a SystemParam",
+                "`isolated`: ECS runtime helpers must be private and have one local registered owner",
+                "`shared`: ECS runtime helpers must be private and have one local registered owner",
+                "`exposed`: ECS runtime helpers must be private and have one local registered owner",
+                "`detached`: ECS runtime helpers must be private and have one local registered owner",
+                "`unregistered`: ECS runtime helpers must be private and have one local registered owner",
+                "`generic`: ECS runtime helpers must be private and have one local registered owner",
+            ][..],
+        ),
+        (
+            "runtime_inputs_valid",
+            include_str!("../ui/runtime_inputs_valid.rs"),
+            &[][..],
+        ),
+    ] {
+        fixture.check(name, source, expected, "vmux_ecs_runtime");
     }
 }
 

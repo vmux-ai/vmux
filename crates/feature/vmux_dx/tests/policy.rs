@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use compiler_inputs::CompilerInputs;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
