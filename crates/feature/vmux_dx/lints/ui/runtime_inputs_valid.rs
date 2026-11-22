@@ -1,4 +1,4 @@
-#![deny(vmux_ecs_runtime)]
+use std::marker::PhantomData;
 
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
@@ -28,6 +28,40 @@ struct Access<'w, 's> {
 impl Access<'_, '_> {
     fn inspect(&self, input: Inputs) {
         parameter_helper(input);
+    }
+}
+
+struct Wrapper<T>(PhantomData<T>);
+
+unsafe impl<T: SystemParam> SystemParam for Wrapper<T> {
+    type State = ();
+    type Item<'w, 's> = Self;
+
+    fn init_state(_: &mut World) -> Self::State {}
+
+    fn init_access(
+        _: &Self::State,
+        _: &mut bevy_ecs::system::SystemMeta,
+        _: &mut bevy_ecs::query::FilteredAccessSet,
+        _: &mut World,
+    ) {
+    }
+
+    unsafe fn get_param<'w, 's>(
+        _: &'s mut Self::State,
+        _: &bevy_ecs::system::SystemMeta,
+        _: bevy_ecs::world::unsafe_world_cell::UnsafeWorldCell<'w>,
+        _: bevy_ecs::change_detection::Tick,
+    ) -> Result<Self::Item<'w, 's>, bevy_ecs::system::SystemParamValidationError> {
+        Ok(Self(PhantomData))
+    }
+}
+
+impl<T> Wrapper<T> {
+    fn inspect(&self, _: Commands)
+    where
+        T: SystemParam,
+    {
     }
 }
 
@@ -61,7 +95,13 @@ fn traverse(input: Inputs) {
     walk(&input);
 }
 
-#[derive(Component)]
+fn tick(_: Commands) {}
+
+fn poll(_: Commands) {}
+
+fn cached(_: Commands) {}
+
+#[derive(Component, Clone, Copy)]
 struct Writer {
     run: for<'w, 's> fn(&mut Commands<'w, 's>),
 }
@@ -74,7 +114,7 @@ impl Writer {
 
 fn field_helper(_: &mut Commands) {}
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 struct TupleWriter(for<'w, 's> fn(&mut Commands<'w, 's>));
 
 impl TupleWriter {
@@ -109,17 +149,30 @@ impl Engine {
         _: Option<u32>,
         _: Vec<u32>,
         _: Result<u32, String>,
-        _: std::marker::PhantomData<State>,
-    ) {}
+        _: PhantomData<State>,
+        _: Option<PhantomData<State>>,
+        _: Vec<PhantomData<State>>,
+    ) {
+    }
 }
 
-fn ordinary(_: Option<u32>, _: Vec<u32>) {}
+fn ordinary(
+    _: Option<u32>,
+    _: Vec<u32>,
+    _: Option<PhantomData<State>>,
+    _: Vec<PhantomData<State>>,
+) {
+}
 
 trait Framework {
     fn inspect(&self, _: Inputs);
 }
 
 fn main() {
+    let mut world = World::new();
+    world.register_system(tick);
+    World::register_system(&mut world, poll);
+    world.register_system_cached(cached);
     App::new().add_systems(Update, (apply, inspect, forward, traverse));
     Engine.unrelated(unrelated::Query);
 }
