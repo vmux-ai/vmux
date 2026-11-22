@@ -1110,7 +1110,7 @@ fn shift(
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
     stack_q: Query<Entity, With<Stack>>,
-    mut commands: Commands,
+    mut order: SiblingOrder,
 ) {
     for request in reader.read() {
         let (_, active_pane, active_stack) = focus.resolve(active_tab_param.get());
@@ -1137,10 +1137,8 @@ fn shift(
         } else {
             SiblingOrder::next(active_index, kind_positions.len())
         };
-        if let Some((left, right)) = pair
-            && let Some(order) = SiblingOrder::swapped(pane, children, &kind_positions, left, right)
-        {
-            commands.queue(order);
+        if let Some((left, right)) = pair {
+            order.swap(pane, children, &kind_positions, left, right);
         }
     }
 }

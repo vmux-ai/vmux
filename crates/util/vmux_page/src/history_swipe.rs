@@ -32,7 +32,6 @@ const SCRIPT: &str = r#"
   globalThis.__vmuxHistorySwipeCleanup?.();
   const threshold = 200;
   const idle = 240;
-  const cooldown = 650;
   const duration = __VMUX_HISTORY_FEEDBACK_MS__;
   class HistoryFeedback {
     node = null;
@@ -102,12 +101,11 @@ const SCRIPT: &str = r#"
   }
   const feedback = new HistoryFeedback();
   let lastEvent = -Infinity;
-  let lastNavigation = -Infinity;
   let horizontal = 0;
   let vertical = 0;
   let horizontalDirection = 0;
   let blocked = false;
-  let navigated = false;
+  let emitted = false;
   const protectsScroll = (event, direction) => {
     for (const node of event.composedPath()) {
       if (!(node instanceof Element)) continue;
@@ -132,7 +130,7 @@ const SCRIPT: &str = r#"
       vertical = 0;
       horizontalDirection = 0;
       blocked = false;
-      navigated = false;
+      emitted = false;
     }
     if (event.deltaMode !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !event.cancelable) {
       blocked = true;
@@ -148,7 +146,7 @@ const SCRIPT: &str = r#"
       return;
     }
     if (x === 0 && y === 0) return;
-    if (navigated) {
+    if (emitted) {
       if (Math.abs(x) > Math.abs(y) && x !== 0) event.preventDefault();
       return;
     }
@@ -167,12 +165,10 @@ const SCRIPT: &str = r#"
     }
     event.preventDefault();
     feedback.update(horizontal < 0 ? 'back' : 'forward', Math.abs(horizontal) / threshold);
-    if (Math.abs(horizontal) < threshold || now - lastNavigation < cooldown) return;
-    const requested = horizontal < 0 ? 'back' : 'forward';
-    navigated = true;
-    lastNavigation = now;
+    if (Math.abs(horizontal) < threshold) return;
+    const direction = horizontal < 0 ? 'back' : 'forward';
+    emitted = true;
     feedback.finish();
-    const direction = requested;
     __VMUX_HISTORY_CALLBACK__
   };
   const reset = () => {

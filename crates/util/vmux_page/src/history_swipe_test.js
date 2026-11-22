@@ -154,3 +154,9 @@ for (const extra of [{ isTrusted: false }, { ctrlKey: true }, { deltaMode: 1 }])
   invalid.wheel(-240, 0, [], extra);
   invalid.expect();
 }
+
+const repeated = new GestureProbe();
+repeated.wheel(-240);
+repeated.now += 250;
+repeated.wheel(-240);
+repeated.expect('back', 'back');

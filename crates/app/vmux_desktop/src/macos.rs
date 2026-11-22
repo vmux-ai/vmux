@@ -19,7 +19,7 @@ use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
-use crate::window_interaction::{WindowFrame, WindowPointerPolicy};
+use crate::window_interaction::{WindowFrame, WindowResizeDrag};
 
 pub(super) struct RuntimePlatformPlugin;
 
@@ -572,7 +572,7 @@ impl InputMonitor {
             } else {
                 MOUSE_DRAG_WAKE_INTERVAL
             };
-            if WindowPointerPolicy::motion_should_wake(
+            if WindowResizeDrag::motion_should_wake(
                 event_type != NSEventType::MouseMoved,
                 sampled,
                 self.windows.was_windowed(source),
@@ -584,7 +584,7 @@ impl InputMonitor {
                 (self.wake)(interval);
             }
         } else if event_type == NSEventType::ScrollWheel {
-            if WindowPointerPolicy::scroll_should_wake(
+            if WindowResizeDrag::scroll_should_wake(
                 self.windows.layout_inside(source),
                 sampled,
                 native_webview,

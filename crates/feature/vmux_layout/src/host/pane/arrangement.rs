@@ -29,6 +29,7 @@ fn arrange_from_commands(
     active_tab: ActiveTabParam,
     focus: LayoutFocus,
     mut tree: PaneTree,
+    mut order: SiblingOrder,
 ) {
     for request in reader.read() {
         let arrangement = request.0;
@@ -65,11 +66,8 @@ fn arrange_from_commands(
                 } else {
                     SiblingOrder::next(active_index, pane_positions.len())
                 };
-                if let Some((from, to)) = pair
-                    && let Some(order) =
-                        SiblingOrder::swapped(parent, children, &pane_positions, from, to)
-                {
-                    tree.commands.queue(order);
+                if let Some((from, to)) = pair {
+                    order.swap(parent, children, &pane_positions, from, to);
                 }
             }
             PaneArrangement::Rotate(direction) => {
