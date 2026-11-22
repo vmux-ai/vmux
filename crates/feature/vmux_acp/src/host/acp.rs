@@ -515,13 +515,10 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
         };
-        let vmux_api::protocol::ClientMessage::SpawnAcpAgentWithMcp {
-            managed_mcp_servers,
-            ..
-        } = request.0
-        else {
+        let vmux_api::protocol::ClientMessage::SpawnAcpAgentWithMcp(spawn) = request.0 else {
             panic!("expected SpawnAcpAgentWithMcp");
         };
+        let managed_mcp_servers = spawn.managed_mcp_servers;
         assert!(
             managed_mcp_servers
                 .iter()

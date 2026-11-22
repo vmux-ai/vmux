@@ -24,6 +24,21 @@ pub struct ManagedMcpServer {
     pub headers: Vec<(String, String)>,
 }
 
+#[vmux_api::contract(Eq)]
+pub struct AcpSpawnWithMcp {
+    pub sid: String,
+    pub agent_id: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub cwd: String,
+    pub anchor: ProcessId,
+    pub mcp_command: Option<String>,
+    pub mcp_args: Vec<String>,
+    pub managed_mcp_servers: Vec<ManagedMcpServer>,
+    pub resume_acp_session_id: Option<String>,
+}
+
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
     CreateProcess {
@@ -178,19 +193,7 @@ pub enum ClientMessage {
         sid: String,
         cwd: String,
     },
-    SpawnAcpAgentWithMcp {
-        sid: String,
-        agent_id: String,
-        command: String,
-        args: Vec<String>,
-        env: Vec<(String, String)>,
-        cwd: String,
-        anchor: ProcessId,
-        mcp_command: Option<String>,
-        mcp_args: Vec<String>,
-        managed_mcp_servers: Vec<ManagedMcpServer>,
-        resume_acp_session_id: Option<String>,
-    },
+    SpawnAcpAgentWithMcp(Box<AcpSpawnWithMcp>),
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn acp_protocol_messages_roundtrip() {
-        let client = ClientMessage::SpawnAcpAgentWithMcp {
+        let client = ClientMessage::SpawnAcpAgentWithMcp(Box::new(AcpSpawnWithMcp {
             sid: "s1".into(),
             agent_id: "vibe-acp".into(),
             command: "uv".into(),
@@ -547,10 +547,13 @@ mod tests {
                 headers: vec![("Authorization".into(), "Bearer token".into())],
             }],
             resume_acp_session_id: Some("prev-session".into()),
-        };
+        }));
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        let ClientMessage::SpawnAcpAgentWithMcp {
+        let ClientMessage::SpawnAcpAgentWithMcp(spawn) = decoded else {
+            panic!("expected SpawnAcpAgentWithMcp");
+        };
+        let AcpSpawnWithMcp {
             sid,
             agent_id,
             mcp_command,
@@ -558,10 +561,7 @@ mod tests {
             managed_mcp_servers,
             resume_acp_session_id,
             ..
-        } = decoded
-        else {
-            panic!("expected SpawnAcpAgentWithMcp");
-        };
+        } = *spawn;
         assert_eq!(sid, "s1");
         assert_eq!(agent_id, "vibe-acp");
         assert_eq!(mcp_command.as_deref(), Some("vmux"));
