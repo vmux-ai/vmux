@@ -1,5 +1,3 @@
-use std::result::Result;
-
 use crate::catalog::ProjectionSet;
 use crate::inventory::{
     InventorySet, PendingToolOperation, Registry as ToolRegistry, Scan,
@@ -14,17 +12,13 @@ use crate::state::{
 };
 use bevy::prelude::*;
 use bevy::prelude::{Commands, On, Query};
-use bevy::tasks::IoTaskPool;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::{
-    AsyncTask, EntityTarget, OperationState, PageMetadata, TaskPlugin, TaskResult, TaskSet,
-    TaskWaker, UiStatePlugin,
-};
+use vmux_ecs::{EntityTarget, OperationState, PageMetadata, TaskWaker, UiStatePlugin};
 
 use crate::{
     ExternalToolOperation, ToolInventoryChanged, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationSucceeded, ToolOperator, ToolProviderId, ToolProviderTarget,
-    ToolStore, ToolStoreTarget, ToolTaskSet,
+    ToolOperationRequest, ToolOperationSucceeded, ToolProviderId, ToolProviderTarget, ToolStore,
+    ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct ToolHostPlugin;
@@ -38,7 +32,6 @@ impl Plugin for ToolHostPlugin {
             crate::McpConnectionPlugin,
             crate::presentation::ToolPagePlugin,
             crate::open::ToolOpenPlugin,
-            TaskPlugin::<Result<String, String>>::default(),
             UiStatePlugin::<ToolsUiState>::default(),
         ))
         .add_plugins((
@@ -62,10 +55,6 @@ impl Plugin for ToolHostPlugin {
             )>::default(),
         ))
         .configure_sets(Update, ProjectionSet)
-        .configure_sets(
-            Update,
-            TaskSet::of::<Result<String, String>>().in_set(ToolTaskSet::Collect),
-        )
         .add_systems(Update, wake.in_set(ToolTaskSet::Wake))
         .add_observer(operation_request::<ToolInstallRequest>)
         .add_observer(operation_request::<ToolUpdateRequest>)
@@ -79,19 +68,21 @@ impl Plugin for ToolHostPlugin {
         .add_observer(register_mcp)
         .add_observer(forget_mcp_config)
         .add_systems(Update, cancel.in_set(crate::ToolOperationCancelSet))
-        .add_observer(complete)
         .add_systems(
             Update,
             (
                 (
-                    start_external_operations::<ToolInstallRequest>,
-                    start_external_operations::<ToolUpdateRequest>,
-                    start_external_operations::<ToolUninstallRequest>,
-                    start_external_operations::<ToolAdoptRequest>,
-                    start_external_operations::<ToolImportRequest>,
+                    refuse_unsupported_operations::<ToolInstallRequest>,
+                    refuse_unsupported_operations::<ToolUpdateRequest>,
+                    refuse_unsupported_operations::<ToolUninstallRequest>,
+                    refuse_unsupported_operations::<ToolForgetRequest>,
+                    refuse_unsupported_operations::<ToolAdoptRequest>,
+                    refuse_unsupported_operations::<ToolLinkRequest>,
+                    refuse_unsupported_operations::<ToolUnlinkRequest>,
+                    refuse_unsupported_operations::<ToolApplyRequest>,
+                    refuse_unsupported_operations::<ToolImportRequest>,
                 )
                     .in_set(ToolTaskSet::Start),
-                finish_external_operations.in_set(ToolTaskSet::Apply),
                 drain_mcp_mutations,
                 drain_succeeded_operations,
                 drain_failed_operations,
@@ -122,9 +113,6 @@ fn wake(
         }
     }
 }
-
-#[derive(Component)]
-struct ExternalWorker;
 
 #[derive(Component)]
 struct McpPageMutation {
@@ -313,8 +301,6 @@ fn drain_mcp_mutations(
     }
 }
 
-type ToolProviderOperationTask = AsyncTask<Result<String, String>>;
-
 fn operation_request<R>(
     trigger: On<UiInput<R>>,
     mut registries: Query<(Entity, &ToolStore, &mut OperationRequestSequence), With<ToolRegistry>>,
@@ -435,152 +421,40 @@ fn start_operation(
     }
 }
 
-fn start_external_operations<R: Clone + Send + Sync + 'static>(
+fn refuse_unsupported_operations<R: Clone + Send + Sync + 'static>(
     operations: Query<
         (
             Entity,
             &ToolOperationRequest<R>,
             &ToolStoreTarget,
-            Option<&ToolOperationRequest<ToolAdoptRequest>>,
-            Option<&ToolOperationRequest<ToolImportRequest>>,
             Option<&OperationState>,
         ),
-        (
-            With<ExternalToolOperation>,
-            Without<ToolProviderOperationTask>,
-            Without<ToolOperationFinished>,
-        ),
+        (With<ExternalToolOperation>, Without<ToolOperationFinished>),
     >,
-    providers: Query<(&ToolProviderId, &ToolOperator)>,
-    stores: Query<&ToolStore>,
+    stores: Query<(), With<ToolStore>>,
     mut commands: Commands,
 ) where
     ToolOperationKey: From<R>,
 {
-    for (entity, request, target, adopt, import, state) in &operations {
+    for (entity, request, target, state) in &operations {
         if !state
             .is_some_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
         {
             continue;
         }
         let operation = ToolOperationKey::from(request.0.clone());
-        let value = match operation.kind {
-            ToolOperationKind::Adopt => adopt
-                .map(|request| request.0.value.clone())
-                .unwrap_or_default(),
-            ToolOperationKind::Import => import
-                .map(|request| request.0.value.clone())
-                .unwrap_or_default(),
-            _ => String::new(),
+        let message = if stores.contains(target.entity()) {
+            format!(
+                "{} does not support this operation",
+                operation.provider.id()
+            )
+        } else {
+            "tool store entity is unavailable".to_string()
         };
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let Some(lease) = store.lease() else {
-            continue;
-        };
-        let Some((_, operator)) = providers
-            .iter()
-            .find(|(provider, _)| provider.0 == operation.provider)
-        else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed(format!(
-                    "{} does not support this operation",
-                    operation.provider.id()
-                )),
-            ));
-            continue;
-        };
-        let operator = *operator;
-        let task = IoTaskPool::get().spawn(async move {
-            let _lease = lease;
-            operator.run(&store, &operation, value.as_str())
-        });
         commands
             .entity(entity)
             .remove::<ExternalToolOperation>()
-            .insert((
-                ToolProviderOperationTask::new(task),
-                ExternalWorker,
-                OperationState::Running,
-            ));
-    }
-}
-
-fn finish_external_operations(
-    mut operations: Query<(Entity, &mut TaskResult<Result<String, String>>), With<ExternalWorker>>,
-    mut commands: Commands,
-) {
-    for (entity, mut completion) in &mut operations {
-        let Some(result) = completion.take() else {
-            continue;
-        };
-        let result = match result {
-            Ok(result) => result,
-            Err(error) => Err(error.to_string()),
-        };
-        commands.queue(completion.guard(
-            entity,
-            ProviderCompletion {
-                entity,
-                result: Some(result),
-            },
-        ));
-    }
-}
-
-#[derive(Event)]
-struct ProviderCompletion {
-    entity: Entity,
-    result: Option<Result<String, String>>,
-}
-
-impl Command for ProviderCompletion {
-    type Out = ();
-
-    fn apply(self, world: &mut World) {
-        world.trigger(self);
-    }
-}
-
-fn complete(
-    mut receipt: On<ProviderCompletion>,
-    operations: Query<(&OperationState, Option<&EntityTarget<ToolStore>>)>,
-    stores: Query<(), With<ToolStore>>,
-    mut commands: Commands,
-) {
-    let receipt = receipt.event_mut();
-    let Ok((state, target)) = operations.get(receipt.entity) else {
-        return;
-    };
-    if !matches!(state, OperationState::Pending | OperationState::Running) {
-        return;
-    }
-    if target.is_some_and(|target| !stores.contains(target.entity())) {
-        commands
-            .entity(receipt.entity)
-            .insert(OperationState::Canceled);
-        return;
-    }
-    let Some(result) = receipt.result.take() else {
-        return;
-    };
-    match result {
-        Ok(message) => {
-            commands
-                .entity(receipt.entity)
-                .insert((ToolOperationFinished, ToolOperationSucceeded(message)));
-        }
-        Err(error) => {
-            commands
-                .entity(receipt.entity)
-                .insert((ToolOperationFinished, ToolOperationFailed(error)));
-        }
+            .insert((ToolOperationFinished, ToolOperationFailed(message)));
     }
 }
 
@@ -666,72 +540,46 @@ fn drain_canceled_operations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_ecs::PageOpenRequest;
 
     #[test]
-    fn queued_provider_completion_refuses_cancellation_and_retired_stores() {
-        for interruption in ["none", "cancel", "store"] {
-            let directory = tempfile::tempdir().unwrap();
-            let mut app = App::new();
-            app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin));
-            let store = app
-                .world_mut()
-                .spawn(ToolStore::new(directory.path(), directory.path()))
-                .id();
-            let operation = app
-                .world_mut()
-                .spawn((
-                    vmux_ecs::Operation::bundle("tools.test.provider")
-                        .unwrap()
-                        .running(),
-                    ToolStoreTarget::new(store),
-                ))
-                .id();
-            app.world_mut().commands().queue(ProviderCompletion {
-                entity: operation,
-                result: Some(Ok("completed".into())),
-            });
-            match interruption {
-                "none" => {}
-                "cancel" => {
-                    app.world_mut()
-                        .entity_mut(operation)
-                        .insert(OperationState::Canceled);
-                }
-                "store" => {
-                    app.world_mut().despawn(store);
-                }
-                _ => unreachable!(),
-            }
-            app.world_mut().flush();
-            if interruption == "none" {
-                assert_eq!(
-                    app.world()
-                        .get::<ToolOperationSucceeded>(operation)
-                        .map(|result| result.0.as_str()),
-                    Some("completed")
-                );
-                assert!(
-                    app.world()
-                        .get::<ToolOperationFinished>(operation)
-                        .is_some()
-                );
-            } else {
-                assert_eq!(
-                    app.world().get::<OperationState>(operation),
-                    Some(&OperationState::Canceled)
-                );
-                assert!(
-                    app.world()
-                        .get::<ToolOperationSucceeded>(operation)
-                        .is_none()
-                );
-                assert!(
-                    app.world()
-                        .get::<ToolOperationFinished>(operation)
-                        .is_none()
-                );
-            }
-        }
+    fn unclaimed_external_operation_is_refused_without_a_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(directory.path(), directory.path());
+        let mut app = App::new();
+        app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin))
+            .add_message::<PageOpenRequest>();
+        let store_entity = app.world_mut().spawn(store.clone()).id();
+        let operation = app
+            .world_mut()
+            .spawn((
+                ToolStoreTarget::new(store_entity),
+                ToolOperationRequest(ToolInstallRequest {
+                    provider: ToolProvider::new("custom"),
+                    id: "pkg".into(),
+                }),
+            ))
+            .id();
+
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            app.world()
+                .get::<ToolOperationFailed>(operation)
+                .map(|failure| failure.0.as_str()),
+            Some("custom does not support this operation")
+        );
+        assert!(
+            app.world()
+                .get::<ExternalToolOperation>(operation)
+                .is_none()
+        );
+        assert!(store.lease().is_some());
     }
 
     #[test]

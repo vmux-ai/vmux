@@ -3,13 +3,12 @@ use bevy::prelude::*;
 use bevy::prelude::{ChildOf, Commands, Entity, On, Query, With};
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{CommandBarResultItem, OpenRequest};
-use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, McpServersUiState};
-use vmux_ecs::UiStateWrite;
+use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus};
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 use vmux_feature::manifest::FeatureManifest;
 use vmux_ui::i18n::translate;
 
-use crate::connection::McpSnapshotRequest;
+use crate::connection::{McpServersSnapshot, McpSnapshotRequest};
 
 pub(crate) struct CommandBarPlugin;
 
@@ -294,13 +293,48 @@ impl RouteContribution {
 #[derive(Component)]
 struct McpContribution(String);
 
+impl McpContribution {
+    fn matches(server: &McpServerEntry, filter: &str) -> bool {
+        let filter = filter.to_ascii_lowercase();
+        filter.is_empty()
+            || server.id.to_ascii_lowercase().contains(&filter)
+            || server.name.to_ascii_lowercase().contains(&filter)
+            || server.description.to_ascii_lowercase().contains(&filter)
+    }
+
+    fn project(server: &McpServerEntry, loading: bool, has_pending: bool) -> CommandBarResultItem {
+        CommandBarResultItem {
+            key: server.id.clone(),
+            title: server.name.clone(),
+            subtitle: server.description.clone(),
+            trailing: "\u{21b5}".to_string(),
+            active: server.status == McpServerStatus::Connected,
+            disabled: loading || has_pending,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Component)]
 struct McpCommandBar(String);
+
+impl McpCommandBar {
+    fn parse(query: &str) -> Option<&str> {
+        let rest = query.trim().strip_prefix("/mcp")?;
+        if rest.is_empty() {
+            return Some("");
+        }
+        rest.chars()
+            .next()?
+            .is_whitespace()
+            .then(|| rest.trim_start())
+    }
+}
 
 fn query(trigger: On<CommandBarQueryChanged>, mut results: McpResults) {
     let event = trigger.event();
     results.clear(event.target);
-    let Some(filter) = McpQuery::parse(&event.query) else {
+    let Some(filter) = McpCommandBar::parse(&event.query) else {
         results
             .commands
             .entity(event.target)
@@ -317,26 +351,26 @@ fn query(trigger: On<CommandBarQueryChanged>, mut results: McpResults) {
 }
 
 fn receive(
-    trigger: On<UiStateWrite<McpServersUiState>>,
+    trigger: On<McpServersSnapshot>,
     active: Query<&McpCommandBar>,
     mut results: McpResults,
 ) {
-    let target = trigger.event().webview();
+    let snapshot = trigger.event();
+    let target = snapshot.target;
     let Ok(active) = active.get(target) else {
         return;
     };
     results.clear(target);
-    let state = trigger.event().update();
-    for (rank, server) in state
+    for (rank, server) in snapshot
         .servers
         .iter()
-        .filter(|server| McpServerRow(server).matches(&active.0))
+        .filter(|server| McpContribution::matches(server, &active.0))
         .enumerate()
     {
         results.commands.spawn((
             Name::new(format!("MCP command-bar row: {}", server.id)),
             CommandBarContribution {
-                row: McpServerRow(server).project(state),
+                row: McpContribution::project(server, snapshot.loading, snapshot.has_pending),
                 rank: rank as i32,
                 close: false,
                 pre_filtered: true,
@@ -377,46 +411,6 @@ impl McpResults<'_, '_> {
             if parent.parent() == target {
                 self.commands.entity(entity).despawn();
             }
-        }
-    }
-}
-
-struct McpQuery;
-
-impl McpQuery {
-    fn parse(query: &str) -> Option<&str> {
-        let rest = query.trim().strip_prefix("/mcp")?;
-        if rest.is_empty() {
-            return Some("");
-        }
-        rest.chars()
-            .next()?
-            .is_whitespace()
-            .then(|| rest.trim_start())
-    }
-}
-
-struct McpServerRow<'a>(&'a McpServerEntry);
-
-impl McpServerRow<'_> {
-    fn matches(&self, filter: &str) -> bool {
-        let filter = filter.to_ascii_lowercase();
-        filter.is_empty()
-            || self.0.id.to_ascii_lowercase().contains(&filter)
-            || self.0.name.to_ascii_lowercase().contains(&filter)
-            || self.0.description.to_ascii_lowercase().contains(&filter)
-    }
-
-    fn project(&self, state: &McpServersUiState) -> CommandBarResultItem {
-        let server = self.0;
-        CommandBarResultItem {
-            key: server.id.clone(),
-            title: server.name.clone(),
-            subtitle: server.description.clone(),
-            trailing: "\u{21b5}".to_string(),
-            active: server.status == McpServerStatus::Connected,
-            disabled: state.loading || state.pending.is_some(),
-            ..Default::default()
         }
     }
 }

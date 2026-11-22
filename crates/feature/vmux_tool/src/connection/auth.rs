@@ -163,7 +163,11 @@ type BeginRequests<'w, 's> = Query<
 fn begin(
     requests: BeginRequests<'_, '_>,
     servers: Query<&McpCatalogServer>,
-    credentials: Query<(Entity, &McpCredentials)>,
+    credentials: Query<(
+        Entity,
+        &McpCredentials,
+        Option<&vmux_ecs::profile::ProfileDirectories>,
+    )>,
     mut commands: Commands,
 ) {
     for (entity, request, server) in &requests {
@@ -172,7 +176,7 @@ fn begin(
         }
         let current = credentials.single().ok();
         let selected = servers.get(server.entity()).ok();
-        let error = if current.is_none_or(|(owner, _)| request.owner != owner) {
+        let error = if current.is_none_or(|(owner, _, _)| request.owner != owner) {
             Some("MCP source Profile changed")
         } else if selected.is_none() {
             Some("MCP server is no longer available")
@@ -195,8 +199,12 @@ fn begin(
             });
             continue;
         }
-        let (owner, credentials) = current.unwrap();
+        let (owner, credentials, directories) = current.unwrap();
         let server = selected.unwrap();
+        let store = match directories {
+            Some(paths) => ToolStore::new(paths.0.config(), paths.0.home()),
+            None => ToolStore::current(),
+        };
         commands
             .entity(entity)
             .remove::<PendingMcpOperation>()
@@ -210,7 +218,7 @@ fn begin(
                 },
                 server.clone(),
                 Credentials(credentials.clone()),
-                ToolStore::current(),
+                store,
                 PhaseState(Phase::Inspect),
             ));
     }

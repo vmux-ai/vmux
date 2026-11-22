@@ -127,7 +127,11 @@ type BeginRequests<'w, 's> = Query<
 fn begin(
     requests: BeginRequests<'_, '_>,
     servers: Query<&McpCatalogServer>,
-    credentials: Query<(Entity, &McpCredentials)>,
+    credentials: Query<(
+        Entity,
+        &McpCredentials,
+        Option<&vmux_ecs::profile::ProfileDirectories>,
+    )>,
     mut commands: Commands,
 ) {
     for (entity, request, server) in &requests {
@@ -136,7 +140,7 @@ fn begin(
         }
         let current = credentials.single().ok();
         let selected = servers.get(server.entity()).ok();
-        let error = if current.is_none_or(|(owner, _)| request.owner != owner) {
+        let error = if current.is_none_or(|(owner, _, _)| request.owner != owner) {
             Some("MCP source Profile changed")
         } else if selected.is_none() {
             Some("MCP server is no longer available")
@@ -159,8 +163,12 @@ fn begin(
             });
             continue;
         }
-        let (owner, credentials) = current.unwrap();
+        let (owner, credentials, directories) = current.unwrap();
         let server = selected.unwrap();
+        let store = match directories {
+            Some(paths) => ToolStore::new(paths.0.config(), paths.0.home()),
+            None => ToolStore::current(),
+        };
         commands
             .entity(entity)
             .remove::<PendingMcpOperation>()
@@ -174,7 +182,7 @@ fn begin(
                 },
                 Credentials(credentials.clone()),
                 server.clone(),
-                ToolStore::current(),
+                store,
                 PhaseState(Phase::StoreLock),
             ));
     }
@@ -690,5 +698,69 @@ mod tests {
         assert!(app.world().get::<CredentialLease>(operation).is_none());
         assert!(app.world().get::<OperationRetained>(operation).is_none());
         assert!(access.stable_revision().unwrap().is_multiple_of(2));
+    }
+
+    #[test]
+    fn begin_uses_profile_directories_instead_of_global_tool_store() {
+        IoTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(2).build());
+        let directory = tempfile::tempdir().unwrap();
+        let profile = vmux_profile::Profile::named("isolated-mcp-profile");
+        let paths = vmux_profile::ProfilePaths::at(profile.clone(), directory.path().to_path_buf());
+        let expected_store = ToolStore::new(paths.config(), paths.home());
+        let credentials = McpCredentials {
+            access: McpCredentialAccess::default(),
+            storage: vmux_profile::mcp_credentials::McpCredentialStorage::at(
+                profile,
+                paths.clone(),
+            ),
+        };
+        let mut app = App::new();
+        app.add_plugins(super::super::McpConnectionPlugin);
+        let owner = app
+            .world_mut()
+            .spawn((credentials, vmux_ecs::profile::ProfileDirectories(paths)))
+            .id();
+        let catalog = app
+            .world_mut()
+            .spawn(McpCatalogServer {
+                id: "linear".into(),
+                url: "https://mcp.linear.app/mcp".into(),
+                scopes: Vec::new(),
+            })
+            .id();
+        let connect = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("mcp.connect").unwrap().running(),
+                EntityTarget::<McpCatalogServer>::new(catalog),
+                PendingMcpOperation {
+                    generation: 1,
+                    owner,
+                    id: "linear".into(),
+                    disconnect: false,
+                },
+            ))
+            .id();
+        let disconnect = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("mcp.disconnect").unwrap().running(),
+                EntityTarget::<McpCatalogServer>::new(catalog),
+                PendingMcpOperation {
+                    generation: 2,
+                    owner,
+                    id: "linear".into(),
+                    disconnect: true,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<ToolStore>(connect), Some(&expected_store));
+        assert_eq!(
+            app.world().get::<ToolStore>(disconnect),
+            Some(&expected_store)
+        );
     }
 }
