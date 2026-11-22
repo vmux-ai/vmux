@@ -1,7 +1,7 @@
-use std::time::Duration;
-
 use bevy::prelude::*;
+use bevy::prelude::{Changed, Commands};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use std::time::Duration;
 use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
@@ -13,17 +13,15 @@ use vmux_api::prompt_media::{
     PromptComposerAttachment, PromptMediaOption,
 };
 use vmux_ecs::UiStateWrite;
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_ui::file_icon::FilePath;
 
 use crate::CommandDispatch;
 
 use super::{
-    NewPalette, OpenVersion, PaletteDraftInput, PaletteSnapshot, PendingPaletteRequest,
-    RequestDelay, RequestGeneration,
+    OpenVersion, PaletteDraftInput, PaletteSnapshot, PendingPaletteRequest, RequestDelay,
+    RequestGeneration,
 };
-use crate::host::command_bar::driver::CompletionQuery;
-
-const MEDIA_DEBOUNCE: Duration = Duration::from_millis(300);
 
 pub(super) struct PaletteMediaPlugin;
 
@@ -61,8 +59,10 @@ pub(super) struct PaletteMedia {
 }
 
 impl PaletteMedia {
+    const DEBOUNCE: Duration = Duration::from_millis(300);
+
     fn inline_query(start: bool, draft: &str) -> Option<String> {
-        if !start || CompletionQuery::only_files(draft) {
+        if !start || PaletteDraftInput::only_files(draft) {
             return None;
         }
         InlineMediaQuery::parse(draft).map(|query| query.query.to_string())
@@ -72,19 +72,29 @@ impl PaletteMedia {
 #[derive(Component)]
 struct PendingMediaQuery(Option<String>);
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMediaNextBinding;
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMediaPreviousBinding;
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMediaChooseBinding;
 
-#[vmux_command::command]
+#[crate::command]
 struct CommandBarMediaDismissBinding;
 
-fn attach(pages: Query<Entity, NewPalette<PaletteMedia>>, mut commands: Commands) {
+type NewMediaPages<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
+        Without<PaletteMedia>,
+    ),
+>;
+
+fn attach(pages: NewMediaPages, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PaletteMedia::default());
     }
@@ -106,15 +116,15 @@ fn update(
     if opened {
         media.query = None;
         media.generation.advance();
-        snapshot.0.open_id = request.open_id;
-        snapshot.0.media_query = None;
-        snapshot.0.media_entries.clear();
-        snapshot.0.media_options.clear();
-        snapshot.0.media_loading = false;
-        snapshot.0.media_selected = 0;
-        snapshot.0.attachments.clear();
-        snapshot.0.composer_attachments.clear();
-        snapshot.0.attachment_sequence = 0;
+        snapshot.open_id = request.open_id;
+        snapshot.media_query = None;
+        snapshot.media_entries.clear();
+        snapshot.media_options.clear();
+        snapshot.media_loading = false;
+        snapshot.media_selected = 0;
+        snapshot.attachments.clear();
+        snapshot.composer_attachments.clear();
+        snapshot.attachment_sequence = 0;
     }
     media.start = request.start;
     let query = PaletteMedia::inline_query(request.start, &request.query);
@@ -143,7 +153,7 @@ fn move_selection(
     commands.trigger(UiInput {
         webview: target,
         payload: CommandPaletteMediaMoveRequest {
-            open_id: snapshot.0.open_id,
+            open_id: snapshot.open_id,
             next,
         },
     });
@@ -165,7 +175,7 @@ fn choose(
     commands.trigger(UiInput {
         webview: target,
         payload: CommandPaletteMediaActivateRequest {
-            open_id: snapshot.0.open_id,
+            open_id: snapshot.open_id,
             index: None,
         },
     });
@@ -187,7 +197,7 @@ fn close(
     commands.trigger(UiInput {
         webview: target,
         payload: CommandPaletteMediaDismissRequest {
-            open_id: snapshot.0.open_id,
+            open_id: snapshot.open_id,
         },
     });
 }
@@ -203,10 +213,10 @@ fn move_cursor(
     if !media.open.matches(request.open_id) || !media.start {
         return;
     }
-    let last = snapshot.0.media_entries.len().saturating_sub(1) as u32;
-    snapshot.0.media_selected = match request.next {
-        true => snapshot.0.media_selected.saturating_add(1).min(last),
-        false => snapshot.0.media_selected.saturating_sub(1),
+    let last = snapshot.media_entries.len().saturating_sub(1) as u32;
+    snapshot.media_selected = match request.next {
+        true => snapshot.media_selected.saturating_add(1).min(last),
+        false => snapshot.media_selected.saturating_sub(1),
     };
 }
 
@@ -221,9 +231,9 @@ fn highlight(
     if !media.open.matches(request.open_id) || !media.start {
         return;
     }
-    snapshot.0.media_selected = request
+    snapshot.media_selected = request
         .index
-        .min(snapshot.0.media_entries.len().saturating_sub(1) as u32);
+        .min(snapshot.media_entries.len().saturating_sub(1) as u32);
 }
 
 fn activate(
@@ -239,8 +249,8 @@ fn activate(
     if !media.open.matches(request.open_id) || !media.start {
         return;
     }
-    let index = request.index.unwrap_or(snapshot.0.media_selected) as usize;
-    let Some(entry) = snapshot.0.media_entries.get(index).cloned() else {
+    let index = request.index.unwrap_or(snapshot.media_selected) as usize;
+    let Some(entry) = snapshot.media_entries.get(index).cloned() else {
         return;
     };
     let Some(query) = InlineMediaQuery::parse(&draft.query) else {
@@ -303,7 +313,6 @@ fn remove_attachment(
         return;
     }
     snapshot
-        .0
         .attachments
         .retain(|attachment| attachment.path != request.path);
 }
@@ -325,8 +334,8 @@ fn receive_attachments(
     if !media.start {
         return;
     }
-    if response.merge_into(&mut snapshot.0.attachments) {
-        snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
+    if response.merge_into(&mut snapshot.attachments) {
+        snapshot.attachment_sequence = snapshot.attachment_sequence.wrapping_add(1).max(1);
     }
 }
 
@@ -361,12 +370,11 @@ fn receive_entries(
     {
         return;
     }
-    snapshot.0.media_entries.clone_from(&response.entries);
-    snapshot.0.media_loading = false;
-    snapshot.0.media_selected = snapshot
-        .0
+    snapshot.media_entries.clone_from(&response.entries);
+    snapshot.media_loading = false;
+    snapshot.media_selected = snapshot
         .media_selected
-        .min(snapshot.0.media_entries.len().saturating_sub(1) as u32);
+        .min(snapshot.media_entries.len().saturating_sub(1) as u32);
 }
 
 #[derive(Component)]
@@ -387,17 +395,22 @@ fn queue(
         }
         media.query.clone_from(&pending.0);
         let generation = media.generation.advance();
-        snapshot.0.media_query.clone_from(&pending.0);
-        snapshot.0.media_entries.clear();
-        snapshot.0.media_options.clear();
-        snapshot.0.media_loading = pending.0.is_some();
-        snapshot.0.media_selected = 0;
+        snapshot.media_query.clone_from(&pending.0);
+        snapshot.media_entries.clear();
+        snapshot.media_options.clear();
+        snapshot.media_loading = pending.0.is_some();
+        snapshot.media_selected = 0;
         let Some(query) = pending.0.clone() else {
             continue;
         };
         commands.spawn((
             Name::new("Command Palette Media Request"),
-            MediaRequestDelay(RequestDelay::new(target, generation, query, MEDIA_DEBOUNCE)),
+            MediaRequestDelay(RequestDelay::new(
+                target,
+                generation,
+                query,
+                PaletteMedia::DEBOUNCE,
+            )),
             PendingPaletteRequest,
         ));
     }
@@ -449,8 +462,8 @@ struct MediaResponsePending {
 
 fn project(mut snapshots: Query<&mut PaletteSnapshot, Changed<PaletteSnapshot>>) {
     for mut snapshot in &mut snapshots {
-        let mut options = Vec::with_capacity(snapshot.0.media_entries.len());
-        for entry in &snapshot.0.media_entries {
+        let mut options = Vec::with_capacity(snapshot.media_entries.len());
+        for entry in &snapshot.media_entries {
             options.push(PromptMediaOption {
                 key: format!("media-{}", entry.path),
                 name: entry.name.clone(),
@@ -460,12 +473,12 @@ fn project(mut snapshots: Query<&mut PaletteSnapshot, Changed<PaletteSnapshot>>)
                 is_dir: entry.is_dir,
             });
         }
-        if snapshot.0.media_options != options {
-            snapshot.0.media_options = options;
+        if snapshot.media_options != options {
+            snapshot.media_options = options;
         }
 
-        let mut attachments = Vec::with_capacity(snapshot.0.attachments.len());
-        for (index, attachment) in snapshot.0.attachments.iter().enumerate() {
+        let mut attachments = Vec::with_capacity(snapshot.attachments.len());
+        for (index, attachment) in snapshot.attachments.iter().enumerate() {
             attachments.push(PromptComposerAttachment {
                 key: format!("attachment-{}", attachment.path),
                 name: attachment.name.clone(),
@@ -474,8 +487,8 @@ fn project(mut snapshots: Query<&mut PaletteSnapshot, Changed<PaletteSnapshot>>)
                 remove_index: Some(index as u32),
             });
         }
-        if snapshot.0.composer_attachments != attachments {
-            snapshot.0.composer_attachments = attachments;
+        if snapshot.composer_attachments != attachments {
+            snapshot.composer_attachments = attachments;
         }
     }
 }
@@ -483,7 +496,7 @@ fn project(mut snapshots: Query<&mut PaletteSnapshot, Changed<PaletteSnapshot>>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::command_bar::{CommandPaletteUiState, OpenId};
+    use vmux_api::command_bar::OpenId;
     use vmux_api::prompt_media::ChatMediaEntry;
 
     #[test]
@@ -515,7 +528,7 @@ mod tests {
                     query: "show @pic".to_string(),
                     ..Default::default()
                 },
-                PaletteSnapshot(CommandPaletteUiState {
+                PaletteSnapshot {
                     open_id,
                     media_query: Some("pic".to_string()),
                     media_entries: vec![
@@ -532,7 +545,7 @@ mod tests {
                     ],
                     media_selected: 1,
                     ..Default::default()
-                }),
+                },
             ))
             .id();
 
@@ -548,7 +561,6 @@ mod tests {
             app.world()
                 .get::<PaletteSnapshot>(page)
                 .unwrap()
-                .0
                 .media_selected,
             0
         );
@@ -563,8 +575,8 @@ mod tests {
         assert_eq!(input.query, "show ");
         assert_eq!(input.input_revision, 1);
         let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
-        assert_eq!(snapshot.0.media_query, None);
-        assert!(snapshot.0.media_entries.is_empty());
-        assert_eq!(snapshot.0.media_selected, 0);
+        assert_eq!(snapshot.media_query, None);
+        assert!(snapshot.media_entries.is_empty());
+        assert_eq!(snapshot.media_selected, 0);
     }
 }

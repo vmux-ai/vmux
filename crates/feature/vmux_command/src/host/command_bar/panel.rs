@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-
 use crate::CommandBar;
+use bevy::prelude::Commands;
+use bevy::prelude::*;
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::launcher::RendersLauncherPanel;
@@ -64,17 +64,10 @@ fn active(
 mod tests {
     use super::*;
 
-    fn app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_observer(active)
-            .add_systems(Update, sync_inline);
-        app
-    }
-
     #[test]
     fn active_event_round_trips_the_marker() {
-        let mut app = app();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, PanelPlugin));
         let webview = app.world_mut().spawn(RendersLauncherPanel).id();
 
         app.world_mut()
@@ -99,7 +92,8 @@ mod tests {
 
     #[test]
     fn inline_launcher_does_not_capture_the_layout() {
-        let mut app = app();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, PanelPlugin));
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut()

@@ -1,11 +1,11 @@
+use super::{OpenVersion, PaletteContext, PaletteSnapshot};
 use bevy::prelude::*;
+use bevy::prelude::{Changed, Commands};
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
 use vmux_ecs::UiStateWrite;
-
-use super::prompt_driver::PromptContext;
-use super::{NewPalette, OpenVersion, PaletteContext, PaletteSnapshot};
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
 pub(super) struct PalettePromptPlugin;
 
@@ -28,7 +28,41 @@ pub(super) struct PalettePrompt {
     inflight: Option<PromptFlight>,
 }
 
-fn attach(pages: Query<Entity, NewPalette<PalettePrompt>>, mut commands: Commands) {
+impl PalettePrompt {
+    fn context_for(agent: &str, cwd: &str) -> Option<PromptContext> {
+        if agent.is_empty() || cwd.is_empty() {
+            return None;
+        }
+        Some(PromptContext {
+            agent: agent.to_string(),
+            cwd: cwd.to_string(),
+        })
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct PromptContext {
+    agent: String,
+    cwd: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct PromptFlight {
+    open_generation: u64,
+    context: PromptContext,
+}
+
+type NewPromptPages<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
+        Without<PalettePrompt>,
+    ),
+>;
+
+fn attach(pages: NewPromptPages, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PalettePrompt::default());
     }
@@ -52,14 +86,14 @@ fn update(
         if opened {
             prompt.desired = None;
             prompt.loaded = None;
-            snapshot.0.open_id = context.open_id;
-            snapshot.0.prompt_history.clear();
+            snapshot.open_id = context.open_id;
+            snapshot.prompt_history.clear();
         }
-        let desired = PromptContext::new(&context.agent, &context.cwd);
+        let desired = PalettePrompt::context_for(&context.agent, &context.cwd);
         if prompt.desired != desired {
             prompt.desired = desired;
             prompt.loaded = None;
-            snapshot.0.prompt_history.clear();
+            snapshot.prompt_history.clear();
         }
     }
 }
@@ -82,7 +116,7 @@ fn receive_history(
     if flight.open_generation == prompt.open.generation()
         && prompt.desired.as_ref() == Some(&flight.context)
     {
-        snapshot.0.prompt_history.clone_from(&response.prompts);
+        snapshot.prompt_history.clone_from(&response.prompts);
         prompt.loaded = Some(flight.context);
     }
 }
@@ -107,10 +141,4 @@ fn request_history(mut palettes: Query<(Entity, &mut PalettePrompt)>, mut comman
             },
         });
     }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct PromptFlight {
-    open_generation: u64,
-    context: PromptContext,
 }
