@@ -189,25 +189,30 @@ impl FilePanel {
         true
     }
 
-    fn choice(&mut self, index: Option<u32>) -> Option<FilePanelChoice> {
-        let content = self.state.content.as_ref()?;
-        let selected = index.unwrap_or(self.state.selected) as usize;
-        let choice = match content {
-            FilePanelContent::References { items } => {
-                FilePanelChoice::Reference(items.get(selected)?.clone())
-            }
-            FilePanelContent::Completion {
-                items,
-                replace_from_col,
-                line,
-            } => FilePanelChoice::Completion {
-                item: items.get(selected)?.clone(),
-                replace_from_col: *replace_from_col,
-                line: *line,
-            },
+    fn choose_reference(&mut self, index: Option<u32>) -> Option<RefItem> {
+        let FilePanelContent::References { items } = self.state.content.as_ref()? else {
+            return None;
         };
+        let selected = index.unwrap_or(self.state.selected) as usize;
+        let item = items.get(selected)?.clone();
         self.dismiss();
-        Some(choice)
+        Some(item)
+    }
+
+    fn choose_completion(&mut self, index: Option<u32>) -> Option<(CompletionItem, u32, u32)> {
+        let FilePanelContent::Completion {
+            items,
+            replace_from_col,
+            line,
+        } = self.state.content.as_ref()?
+        else {
+            return None;
+        };
+        let selected = index.unwrap_or(self.state.selected) as usize;
+        let item = items.get(selected)?.clone();
+        let (replace_from_col, line) = (*replace_from_col, *line);
+        self.dismiss();
+        Some((item, replace_from_col, line))
     }
 
     fn dismiss(&mut self) -> bool {
@@ -248,15 +253,6 @@ impl FilePanel {
     fn state(&self) -> FilePanelState {
         self.state.clone()
     }
-}
-
-enum FilePanelChoice {
-    Reference(RefItem),
-    Completion {
-        item: CompletionItem,
-        replace_from_col: u32,
-        line: u32,
-    },
 }
 
 #[derive(EntityEvent)]
@@ -504,46 +500,44 @@ fn choose_item(
         ));
         return;
     }
-    let choice = panel.choice(trigger.event().index);
-    let state = choice.as_ref().map(|_| panel.state());
-    match choice {
-        Some(FilePanelChoice::Reference(item)) => {
-            let path = PathBuf::from(item.path);
-            let line_text = LspLine::read(&path, item.line);
-            let utf16_col = line_text.utf16_col(item.col);
-            goto.write(crate::lsp::manager::LspGoto {
-                entity,
-                path,
-                line: item.line,
-                utf16_col,
-                origin,
-            });
-        }
-        Some(FilePanelChoice::Completion {
-            item,
-            replace_from_col,
+    let mut chosen = false;
+    if let Some(item) = panel.choose_reference(trigger.event().index) {
+        chosen = true;
+        let path = PathBuf::from(item.path);
+        let line_text = LspLine::read(&path, item.line);
+        let utf16_col = line_text.utf16_col(item.col);
+        goto.write(crate::lsp::manager::LspGoto {
+            entity,
+            path,
+            line: item.line,
+            utf16_col,
+            origin,
+        });
+    } else if let Some((item, replace_from_col, line)) =
+        panel.choose_completion(trigger.event().index)
+    {
+        chosen = true;
+        let request = crate::host::editing::document::CompletionInsertRequest {
+            entity,
+            document: Some(edit.core.revision.identity),
+            text: item.insert_text,
             line,
-        }) => {
-            let request = crate::host::editing::document::CompletionInsertRequest {
-                entity,
-                document: Some(edit.core.revision.identity),
-                text: item.insert_text,
-                line,
-                replace_from_col,
-            };
-            if let Some(origin) = origin {
-                commands.queue(GuardedResponse {
-                    origin,
-                    event: request,
-                });
-            } else {
-                commands.trigger(request);
-            }
+            replace_from_col,
+        };
+        if let Some(origin) = origin {
+            commands.queue(GuardedResponse {
+                origin,
+                event: request,
+            });
+        } else {
+            commands.trigger(request);
         }
-        None => {}
     }
-    if let Some(state) = state {
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+    if chosen {
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+            entity,
+            &panel.state(),
+        ));
     }
 }
 
@@ -684,8 +678,8 @@ mod tests {
         assert!(fixture.panel_mut().select_previous());
         assert_eq!(fixture.panel().state.selected, 2);
         assert!(matches!(
-            fixture.panel_mut().choice(None),
-            Some(FilePanelChoice::Completion { item, .. }) if item.label == "panic"
+            fixture.panel_mut().choose_completion(None),
+            Some((item, _, _)) if item.label == "panic"
         ));
         assert!(fixture.panel().state.content.is_none());
     }

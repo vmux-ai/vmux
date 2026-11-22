@@ -11,17 +11,18 @@ use vmux_ecs::scroll::{
 };
 
 use crate::host::edit::Selection;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::FileView;
 use crate::host::file_lifecycle::EditorFileLoadedSet;
 use crate::host::fold::FoldState;
-use crate::host::highlight::Highlighter;
+use crate::host::highlight::HighlightScheme;
 use crate::host::keymap::EditorKeymap;
 
 pub(crate) struct ViewportPlugin;
 
 impl Plugin for ViewportPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
+        app.init_resource::<HighlightScheme>()
+            .add_plugins(UiEventPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
             .add_systems(
                 Update,
                 (
@@ -160,8 +161,7 @@ impl FileViewport {
                 first_line as usize,
                 last_line as usize + 1,
             );
-            let guides =
-                crate::host::fold::IndentGuides::new(&edit.core.buffer.rope, edit.indent_width());
+            let indent_width = edit.indent_width();
             for layout in &layouts {
                 let index = (layout.line_no - first_line) as usize;
                 let Some(line) = window.get_mut(index) else {
@@ -169,14 +169,17 @@ impl FileViewport {
                 };
                 let mut line = std::mem::take(line);
                 line.fold = edit.folds.gutter(layout.line_no);
-                line.indent_levels = guides.levels(layout.line_no as usize);
+                line.indent_levels = FoldState::indent_levels(
+                    &edit.core.buffer.rope,
+                    indent_width,
+                    layout.line_no as usize,
+                );
                 lines.push(line);
             }
         }
         let mut sticky = Vec::new();
         if let Some(top) = visible_top {
-            let guides =
-                crate::host::fold::IndentGuides::new(&edit.core.buffer.rope, edit.indent_width());
+            let indent_width = edit.indent_width();
             for header in edit.folds.sticky(top, Self::STICKY_SCROLL_DEPTH) {
                 let at = header as usize;
                 let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
@@ -185,7 +188,8 @@ impl FileViewport {
                 }
                 let mut line = window.remove(0);
                 line.fold = edit.folds.gutter(header);
-                line.indent_levels = guides.levels(at);
+                line.indent_levels =
+                    FoldState::indent_levels(&edit.core.buffer.rope, indent_width, at);
                 sticky.push(line);
             }
         }
@@ -338,14 +342,21 @@ fn render_cursor(
 
 fn rehighlight_on_color_scheme(
     mut changes: MessageReader<vmux_setting::ColorSchemeChanged>,
-    views: Query<Entity, (With<Editor>, With<FileViewport>)>,
+    mut scheme: ResMut<HighlightScheme>,
+    mut views: Query<(Entity, Edit), With<FileViewport>>,
     mut commands: Commands,
 ) {
     let Some(change) = changes.read().last().copied() else {
         return;
     };
-    Highlighter::set_dark(matches!(change.0, vmux_setting::ResolvedScheme::Dark));
-    for entity in &views {
+    let dark = matches!(change.0, vmux_setting::ResolvedScheme::Dark);
+    scheme.set_dark(dark);
+    for (entity, mut edit) in &mut views {
+        edit.hl.set_dark(dark);
+        if edit.is_note() {
+            edit.refresh_parsed_note();
+            commands.trigger(super::note::RenderRequest::new(entity));
+        }
         commands.trigger(ViewportRenderRequest::new(entity));
     }
 }
@@ -494,6 +505,7 @@ mod tests {
     use super::*;
     use crate::host::edit::EditCommand;
     use crate::host::edit::highlight_cache::HighlightCache;
+    use crate::host::editor::Editor;
 
     struct Fixture {
         world: World,

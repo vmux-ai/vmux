@@ -6,11 +6,10 @@ use vmux_ecs::event::{FileLine, PreviewKind};
 use super::file_lifecycle::FileDir;
 use crate::host::highlight::{Highlighter, LoadError};
 
-const TEXT_PREVIEW_LINES: usize = 200;
-
 pub(crate) struct PreviewBuilder;
 
 impl PreviewBuilder {
+    const TEXT_PREVIEW_LINES: usize = 200;
     pub(crate) const IMAGE_BYTES_CAP: u64 = 25 * 1024 * 1024;
     pub(crate) const THUMB_MAX_EDGE: u32 = 64;
 
@@ -28,11 +27,11 @@ impl PreviewBuilder {
         Ok(output.into_inner())
     }
 
-    pub(crate) fn build(path: &Path) -> PreviewKind {
-        Self::build_with_cap(path, Self::IMAGE_BYTES_CAP)
+    pub(crate) fn build(path: &Path, dark: bool) -> PreviewKind {
+        Self::build_with_cap(path, Self::IMAGE_BYTES_CAP, dark)
     }
 
-    fn build_with_cap(path: &Path, cap: u64) -> PreviewKind {
+    fn build_with_cap(path: &Path, cap: u64, dark: bool) -> PreviewKind {
         if path.is_dir() {
             return PreviewKind::Dir(FileDir::read(path));
         }
@@ -62,10 +61,13 @@ impl PreviewBuilder {
                     && vmux_api::media::MediaKind::requires_native_video(&path_string),
             };
         }
-        match Highlighter::new().load_file(path) {
+        match Highlighter::load_file(path, dark) {
             Ok(output) => {
-                let lines: Vec<FileLine> =
-                    output.lines.into_iter().take(TEXT_PREVIEW_LINES).collect();
+                let lines: Vec<FileLine> = output
+                    .lines
+                    .into_iter()
+                    .take(Self::TEXT_PREVIEW_LINES)
+                    .collect();
                 PreviewKind::Text(lines)
             }
             Err(LoadError::Binary) => Self::info(&metadata, "binary"),
@@ -113,18 +115,20 @@ impl PreviewBuilder {
 mod tests {
     use super::*;
 
-    fn png_bytes(w: u32, h: u32) -> Vec<u8> {
-        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 20, 30, 255]));
-        let mut out = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(img)
-            .write_to(&mut out, image::ImageFormat::Png)
-            .unwrap();
-        out.into_inner()
+    impl PreviewBuilder {
+        fn png_bytes(w: u32, h: u32) -> Vec<u8> {
+            let img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 20, 30, 255]));
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(img)
+                .write_to(&mut out, image::ImageFormat::Png)
+                .unwrap();
+            out.into_inner()
+        }
     }
 
     #[test]
     fn downscale_caps_longest_edge_and_is_valid_png() {
-        let src = png_bytes(200, 100);
+        let src = PreviewBuilder::png_bytes(200, 100);
         let thumb = PreviewBuilder::thumbnail(&src, 64).unwrap();
         let decoded = image::load_from_memory(&thumb).unwrap();
         assert!(decoded.width() <= 64 && decoded.height() <= 64);
@@ -141,23 +145,29 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path().join("sub");
         std::fs::create_dir(&d).unwrap();
-        assert!(matches!(PreviewBuilder::build(&d), PreviewKind::Dir(_)));
+        assert!(matches!(
+            PreviewBuilder::build(&d, true),
+            PreviewKind::Dir(_)
+        ));
 
         let t = tmp.path().join("a.rs");
         std::fs::write(&t, "fn main() {}\n").unwrap();
-        assert!(matches!(PreviewBuilder::build(&t), PreviewKind::Text(_)));
+        assert!(matches!(
+            PreviewBuilder::build(&t, true),
+            PreviewKind::Text(_)
+        ));
 
         let p = tmp.path().join("p.png");
-        std::fs::write(&p, png_bytes(8, 8)).unwrap();
+        std::fs::write(&p, PreviewBuilder::png_bytes(8, 8)).unwrap();
         assert!(matches!(
-            PreviewBuilder::build(&p),
+            PreviewBuilder::build(&p, true),
             PreviewKind::Image { .. }
         ));
 
         let b = tmp.path().join("blob.bin");
         std::fs::write(&b, [0u8; 4]).unwrap();
         assert!(matches!(
-            PreviewBuilder::build(&b),
+            PreviewBuilder::build(&b, true),
             PreviewKind::Info { .. }
         ));
     }
@@ -166,8 +176,8 @@ mod tests {
     fn build_preview_image_over_cap_is_info() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("huge.png");
-        std::fs::write(&p, png_bytes(8, 8)).unwrap();
-        let k = PreviewBuilder::build_with_cap(&p, 1);
+        std::fs::write(&p, PreviewBuilder::png_bytes(8, 8)).unwrap();
+        let k = PreviewBuilder::build_with_cap(&p, 1, true);
         assert!(matches!(k, PreviewKind::Info { .. }));
     }
 }

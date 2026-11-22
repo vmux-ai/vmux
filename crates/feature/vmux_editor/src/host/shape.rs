@@ -1,6 +1,6 @@
 use crate::host::editor::Edit;
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy_cef::prelude::*;
 use ropey::Rope;
 use vmux_ecs::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
@@ -14,9 +14,6 @@ impl Plugin for ShapePlugin {
     }
 }
 
-const SAMPLE_LINES: usize = 2000;
-const WIDTHS: &[u16] = &[2, 4, 8];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferShape {
     pub indent: FileIndent,
@@ -24,8 +21,11 @@ pub struct BufferShape {
 }
 
 impl BufferShape {
+    const SAMPLE_LINES: usize = 2000;
+    const WIDTHS: &'static [u16] = &[2, 4, 8];
+
     pub fn detect(rope: &Rope) -> Self {
-        let total = rope.len_lines().min(SAMPLE_LINES);
+        let total = rope.len_lines().min(Self::SAMPLE_LINES);
         let mut crlf = 0usize;
         let mut tabs = 0usize;
         let mut widths = Vec::new();
@@ -68,39 +68,13 @@ impl BufferShape {
         }
     }
 
-    fn common_width(widths: &[usize]) -> u16 {
-        let mut best = 4;
-        let mut best_hits = 0;
-        for candidate in WIDTHS.iter().rev() {
-            let mut hits = 0;
-            for width in widths {
-                if *width % usize::from(*candidate) == 0 {
-                    hits += 1;
-                }
-            }
-            if hits > best_hits {
-                best_hits = hits;
-                best = *candidate;
-            }
-        }
-        best
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Reindent {
-    pub from: FileIndent,
-    pub to: BufferShape,
-}
-
-impl Reindent {
-    pub fn applied(&self, text: &str) -> String {
-        let newline = match self.to.line_ending {
+    pub fn reindent(&self, from: FileIndent, text: &str) -> String {
+        let newline = match self.line_ending {
             FileLineEnding::Crlf => "\r\n",
             FileLineEnding::Lf => "\n",
         };
-        let stop = usize::from(self.from.width).max(1);
-        let step = usize::from(self.to.indent.width).max(1);
+        let stop = usize::from(from.width).max(1);
+        let step = usize::from(self.indent.width).max(1);
         let mut out = String::with_capacity(text.len());
         for line in text.split_inclusive('\n') {
             let (body, terminated) = match line.strip_suffix('\n') {
@@ -119,7 +93,7 @@ impl Reindent {
             }
             let levels = columns / stop;
             let remainder = columns % stop;
-            if self.to.indent.spaces {
+            if self.indent.spaces {
                 for _ in 0..levels * step + remainder {
                     out.push(' ');
                 }
@@ -137,6 +111,24 @@ impl Reindent {
             }
         }
         out
+    }
+
+    fn common_width(widths: &[usize]) -> u16 {
+        let mut best = 4;
+        let mut best_hits = 0;
+        for candidate in Self::WIDTHS.iter().rev() {
+            let mut hits = 0;
+            for width in widths {
+                if *width % usize::from(*candidate) == 0 {
+                    hits += 1;
+                }
+            }
+            if hits > best_hits {
+                best_hits = hits;
+                best = *candidate;
+            }
+        }
+        best
     }
 }
 
@@ -243,46 +235,43 @@ mod tests {
                 line_ending: FileLineEnding::Lf,
             }
         }
-    }
 
-    impl Reindent {
-        fn apply_to(text: &str, to: BufferShape) -> String {
-            let from = BufferShape::detect(&Rope::from_str(text)).indent;
-            Self { from, to }.applied(text)
+        fn reindent_detected(self, text: &str) -> String {
+            let from = Self::detect(&Rope::from_str(text)).indent;
+            self.reindent(from, text)
         }
     }
 
     #[test]
     fn converting_tabs_to_spaces_widens_each_level_to_the_target_width() {
-        let out = Reindent::apply_to("fn a() {\n\tb();\n\t\tc();\n}\n", BufferShape::spaces(4));
+        let out = BufferShape::spaces(4).reindent_detected("fn a() {\n\tb();\n\t\tc();\n}\n");
 
         assert_eq!(out, "fn a() {\n    b();\n        c();\n}\n");
     }
 
     #[test]
     fn converting_spaces_to_tabs_folds_whole_levels_and_keeps_the_remainder() {
-        let out = Reindent {
-            from: FileIndent {
+        let out = BufferShape::tabs(4).reindent(
+            FileIndent {
                 spaces: true,
                 width: 4,
             },
-            to: BufferShape::tabs(4),
-        }
-        .applied("a\n    b\n      c\n");
+            "a\n    b\n      c\n",
+        );
 
         assert_eq!(out, "a\n\tb\n\t  c\n");
     }
 
     #[test]
     fn a_new_width_reindents_every_level_rather_than_retyping_the_same_columns() {
-        let out = Reindent::apply_to("a\n  b\n    c\n", BufferShape::spaces(4));
+        let out = BufferShape::spaces(4).reindent_detected("a\n  b\n    c\n");
 
         assert_eq!(out, "a\n    b\n        c\n");
     }
 
     #[test]
     fn conversion_leaves_text_after_the_indentation_untouched() {
-        let out = Reindent::apply_to("\tlet s = \"\tkeep\tthese\";\n", BufferShape::spaces(4));
+        let out = BufferShape::spaces(4).reindent_detected("\tlet s = \"\tkeep\tthese\";\n");
 
         assert_eq!(out, "    let s = \"\tkeep\tthese\";\n");
     }
@@ -297,17 +286,17 @@ mod tests {
             line_ending: FileLineEnding::Crlf,
         };
 
-        assert_eq!(Reindent::apply_to("a\nb\n", crlf), "a\r\nb\r\n");
+        assert_eq!(crlf.reindent_detected("a\nb\n"), "a\r\nb\r\n");
         assert_eq!(
-            Reindent::apply_to("a\r\nb\r\n", BufferShape::spaces(4)),
+            BufferShape::spaces(4).reindent_detected("a\r\nb\r\n"),
             "a\nb\n"
         );
     }
 
     #[test]
     fn a_file_without_a_trailing_newline_does_not_gain_one() {
-        assert_eq!(Reindent::apply_to("a\nb", BufferShape::spaces(4)), "a\nb");
-        assert_eq!(Reindent::apply_to("", BufferShape::spaces(4)), "");
+        assert_eq!(BufferShape::spaces(4).reindent_detected("a\nb"), "a\nb");
+        assert_eq!(BufferShape::spaces(4).reindent_detected(""), "");
     }
 
     #[test]
@@ -315,6 +304,6 @@ mod tests {
         let text = "fn a() {\n    b();\n        c();\n}\n";
         let shape = BufferShape::detect(&Rope::from_str(text));
 
-        assert_eq!(Reindent::apply_to(text, shape), text);
+        assert_eq!(shape.reindent_detected(text), text);
     }
 }

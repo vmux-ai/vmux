@@ -19,7 +19,7 @@ impl WrapView {
         viewport_columns: u16,
         word_wrap_column: u16,
     ) -> Self {
-        let columns = resolve_columns(mode, viewport_columns, word_wrap_column);
+        let columns = Self::resolve_columns(mode, viewport_columns, word_wrap_column);
         let mut lines = Vec::new();
         let mut row = 0u32;
         for line_no in 0..rope.len_lines() as u32 {
@@ -140,15 +140,15 @@ impl WrapView {
             })
             .collect()
     }
-}
 
-fn resolve_columns(mode: WordWrap, viewport: u16, column: u16) -> u16 {
-    match mode {
-        WordWrap::Off => 0,
-        WordWrap::On => viewport,
-        WordWrap::WordWrapColumn => column.max(1),
-        WordWrap::Bounded if viewport == 0 => 0,
-        WordWrap::Bounded => viewport.min(column.max(1)),
+    fn resolve_columns(mode: WordWrap, viewport: u16, column: u16) -> u16 {
+        match mode {
+            WordWrap::Off => 0,
+            WordWrap::On => viewport,
+            WordWrap::WordWrapColumn => column.max(1),
+            WordWrap::Bounded if viewport == 0 => 0,
+            WordWrap::Bounded => viewport.min(column.max(1)),
+        }
     }
 }
 
@@ -158,11 +158,14 @@ mod tests {
 
     #[test]
     fn vscode_wrap_modes_resolve_columns() {
-        assert_eq!(resolve_columns(WordWrap::Off, 120, 80), 0);
-        assert_eq!(resolve_columns(WordWrap::On, 120, 80), 120);
-        assert_eq!(resolve_columns(WordWrap::WordWrapColumn, 120, 80), 80);
-        assert_eq!(resolve_columns(WordWrap::Bounded, 120, 80), 80);
-        assert_eq!(resolve_columns(WordWrap::Bounded, 60, 80), 60);
+        assert_eq!(WrapView::resolve_columns(WordWrap::Off, 120, 80), 0);
+        assert_eq!(WrapView::resolve_columns(WordWrap::On, 120, 80), 120);
+        assert_eq!(
+            WrapView::resolve_columns(WordWrap::WordWrapColumn, 120, 80),
+            80
+        );
+        assert_eq!(WrapView::resolve_columns(WordWrap::Bounded, 120, 80), 80);
+        assert_eq!(WrapView::resolve_columns(WordWrap::Bounded, 60, 80), 60);
     }
 
     #[test]

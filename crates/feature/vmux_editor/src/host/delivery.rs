@@ -26,6 +26,35 @@ impl Surface<'_, '_> {
         };
         browsers.can_emit_to(entity)
     }
+
+    pub(super) fn has_browser(&self, entity: Entity) -> bool {
+        self.browsers
+            .as_deref()
+            .is_some_and(|browsers| browsers.has_browser(entity))
+    }
+
+    pub(super) fn attach_media_overlay(&self, entity: &Entity, path: &str) {
+        if let Some(browsers) = self.browsers.as_deref() {
+            browsers.attach_media_overlay(entity, path);
+        }
+    }
+
+    pub(super) fn set_media_overlay(
+        &self,
+        entity: &Entity,
+        path: &str,
+        rect: (f32, f32, f32, f32),
+    ) {
+        if let Some(browsers) = self.browsers.as_deref() {
+            browsers.set_media_overlay(entity, path, rect);
+        }
+    }
+
+    pub(super) fn detach_media_overlay(&self, entity: &Entity) {
+        if let Some(browsers) = self.browsers.as_deref() {
+            browsers.detach_media_overlay(entity);
+        }
+    }
 }
 
 #[derive(SystemParam)]

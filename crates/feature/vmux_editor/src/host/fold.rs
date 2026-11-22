@@ -37,16 +37,15 @@ impl FoldState {
 
     pub(crate) fn indent_regions(rope: &Rope) -> Vec<FoldRegion> {
         let total = rope.len_lines();
-        let indents: Vec<Option<usize>> = (0..total)
-            .map(|line| {
-                let text: String = rope
-                    .line(line)
-                    .chars()
-                    .filter(|character| *character != '\n' && *character != '\r')
-                    .collect();
-                indent_width(&text)
-            })
-            .collect();
+        let mut indents = Vec::with_capacity(total);
+        for line in 0..total {
+            let text: String = rope
+                .line(line)
+                .chars()
+                .filter(|character| *character != '\n' && *character != '\r')
+                .collect();
+            indents.push(Self::indent_width(&text));
+        }
         let mut regions = Vec::new();
         for line in 0..total {
             let Some(indent) = indents[line] else {
@@ -229,6 +228,36 @@ impl FoldState {
         }
         FoldView { hidden, total }
     }
+
+    pub fn indent_levels(rope: &Rope, columns: u16, line: usize) -> u16 {
+        let columns = usize::from(columns).max(1);
+        let total = rope.len_lines();
+        let mut probe = line;
+        while probe < total {
+            let text: String = rope
+                .line(probe)
+                .chars()
+                .filter(|c| *c != '\n' && *c != '\r')
+                .collect();
+            if let Some(width) = Self::indent_width(&text) {
+                return u16::try_from(width / columns).unwrap_or(u16::MAX);
+            }
+            probe += 1;
+        }
+        0
+    }
+
+    fn indent_width(line: &str) -> Option<usize> {
+        let mut w = 0;
+        for c in line.chars() {
+            match c {
+                ' ' => w += 1,
+                '\t' => w += 4,
+                _ => return Some(w),
+            }
+        }
+        None
+    }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -310,54 +339,6 @@ impl FoldView {
     }
 }
 
-fn indent_width(line: &str) -> Option<usize> {
-    let mut w = 0;
-    for c in line.chars() {
-        match c {
-            ' ' => w += 1,
-            '\t' => w += 4,
-            _ => return Some(w),
-        }
-    }
-    None
-}
-
-pub struct IndentGuides<'a> {
-    rope: &'a Rope,
-    columns: usize,
-}
-
-impl<'a> IndentGuides<'a> {
-    pub fn new(rope: &'a Rope, columns: u16) -> Self {
-        Self {
-            rope,
-            columns: usize::from(columns).max(1),
-        }
-    }
-
-    pub fn levels(&self, line: usize) -> u16 {
-        let total = self.rope.len_lines();
-        let mut probe = line;
-        while probe < total {
-            if let Some(width) = self.width(probe) {
-                return u16::try_from(width / self.columns).unwrap_or(u16::MAX);
-            }
-            probe += 1;
-        }
-        0
-    }
-
-    fn width(&self, line: usize) -> Option<usize> {
-        let text: String = self
-            .rope
-            .line(line)
-            .chars()
-            .filter(|c| *c != '\n' && *c != '\r')
-            .collect();
-        indent_width(&text)
-    }
-}
-
 #[cfg(test)]
 mod indent_tests {
     use super::*;
@@ -436,60 +417,56 @@ mod tests {
     #[test]
     fn a_guide_counts_indent_levels_and_carries_them_through_a_blank_line() {
         let rope = Rope::from_str("fn a() {\n    let x = 1;\n\n        deep();\n}\n");
-        let guides = IndentGuides::new(&rope, 4);
 
-        assert_eq!(guides.levels(0), 0);
-        assert_eq!(guides.levels(1), 1);
+        assert_eq!(FoldState::indent_levels(&rope, 4, 0), 0);
+        assert_eq!(FoldState::indent_levels(&rope, 4, 1), 1);
         assert_eq!(
-            guides.levels(2),
+            FoldState::indent_levels(&rope, 4, 2),
             2,
             "a blank line takes the next non-blank line's depth so the guide does not break"
         );
-        assert_eq!(guides.levels(3), 2);
+        assert_eq!(FoldState::indent_levels(&rope, 4, 3), 2);
     }
 
     #[test]
     fn trailing_blank_lines_have_no_guide_to_carry() {
         let rope = Rope::from_str("fn a() {\n    x;\n}\n\n\n");
-        let guides = IndentGuides::new(&rope, 4);
 
-        assert_eq!(guides.levels(3), 0);
-        assert_eq!(guides.levels(4), 0);
+        assert_eq!(FoldState::indent_levels(&rope, 4, 3), 0);
+        assert_eq!(FoldState::indent_levels(&rope, 4, 4), 0);
     }
 
     #[test]
     fn a_guide_counts_one_level_per_detected_indent_not_per_four_columns() {
         let rope = Rope::from_str("a\n  b\n    c\n");
-        let two = IndentGuides::new(&rope, 2);
 
         assert_eq!(
-            two.levels(1),
+            FoldState::indent_levels(&rope, 2, 1),
             1,
             "a two-space file still guides its first indent"
         );
-        assert_eq!(two.levels(2), 2);
-
-        let eight = IndentGuides::new(&rope, 8);
-
+        assert_eq!(FoldState::indent_levels(&rope, 2, 2), 2);
         assert_eq!(
-            eight.levels(2),
+            FoldState::indent_levels(&rope, 8, 2),
             0,
             "four columns is not yet one eight-wide indent"
         );
     }
 
-    fn state() -> FoldState {
-        let mut s = FoldState::default();
-        s.set_regions(vec![
-            FoldRegion { start: 1, end: 4 },
-            FoldRegion { start: 6, end: 8 },
-        ]);
-        s
+    impl FoldState {
+        fn sample() -> Self {
+            let mut s = Self::default();
+            s.set_regions(vec![
+                FoldRegion { start: 1, end: 4 },
+                FoldRegion { start: 6, end: 8 },
+            ]);
+            s
+        }
     }
 
     #[test]
     fn gutter_marks_headers() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         assert_eq!(s.gutter(1), FoldGutter::Open);
         assert_eq!(s.gutter(2), FoldGutter::None);
         s.close(1);
@@ -513,14 +490,14 @@ mod tests {
 
     #[test]
     fn clicking_a_line_that_starts_no_region_folds_nothing() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.toggle_header(2);
         assert!(s.collapsed.is_empty());
     }
 
     #[test]
     fn view_hides_body_only() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.close(1);
         let v = s.view(10);
         assert!(!v.is_hidden(1));
@@ -532,7 +509,7 @@ mod tests {
 
     #[test]
     fn step_rows_skips_hidden() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.close(1);
         let v = s.view(10);
         assert_eq!(v.step_rows(1, 1), 5);
@@ -541,7 +518,7 @@ mod tests {
 
     #[test]
     fn window_returns_visible_lines() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.close(1);
         let v = s.view(10);
         assert_eq!(v.lines_for_window(0, 4), vec![0, 1, 5, 6]);
@@ -562,7 +539,7 @@ mod tests {
 
     #[test]
     fn reveal_opens_enclosing() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.close(1);
         s.reveal(3);
         assert!(!s.collapsed.contains(&1));
@@ -584,7 +561,7 @@ mod tests {
 
     #[test]
     fn shift_moves_collapsed_starts() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.close(6);
         s.shift(2, 3);
         assert!(s.collapsed.contains(&9));
@@ -592,7 +569,7 @@ mod tests {
 
     #[test]
     fn reconcile_drops_stale() {
-        let mut s = state();
+        let mut s = FoldState::sample();
         s.close(6);
         s.set_regions(vec![FoldRegion { start: 1, end: 4 }]);
         assert!(!s.collapsed.contains(&6));

@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy_cef::prelude::UiInput;
 use vmux_api::address::{
     AddressCrumb, AddressIntent, AddressOption, PageAddress, PageAddressRequest,
@@ -32,8 +33,18 @@ impl Plugin for AddressPlugin {
 
 #[derive(Component, Default)]
 pub(super) struct AddressSource {
-    state: FileUiState,
-    projects: ProjectNavigation,
+    repo_root: String,
+    branch: String,
+    directory_abs_path: Option<String>,
+    document_kind: Option<FileDocumentKind>,
+    view_mode: Option<FileViewMode>,
+    checkout: Option<(String, String, String, bool)>,
+    breadcrumb_path: String,
+    breadcrumb_pending: bool,
+    breadcrumb_entries: Vec<(String, String, bool)>,
+    outline: Vec<OutlineRow>,
+    search_active: bool,
+    project_roots: Vec<String>,
     line: u32,
 }
 
@@ -71,11 +82,18 @@ fn capture_projects(
     mut sources: Query<&mut AddressSource>,
     mut commands: Commands,
 ) {
+    let roots = event
+        .update()
+        .rows
+        .iter()
+        .filter(|row| row.depth == 0 && !row.missing)
+        .map(|row| row.path.clone())
+        .collect::<Vec<_>>();
     if let Ok(mut source) = sources.get_mut(event.webview()) {
-        source.projects = event.update().clone();
+        source.project_roots = roots;
     } else {
         commands.entity(event.webview()).insert(AddressSource {
-            projects: event.update().clone(),
+            project_roots: roots,
             ..Default::default()
         });
     }
@@ -83,17 +101,43 @@ fn capture_projects(
 
 impl AddressSource {
     fn apply(&mut self, patch: &FileUiStatePatch) {
-        let update = FileUiStatePatch {
-            meta: patch.meta.clone(),
-            view_mode: patch.view_mode,
-            directory: patch.directory.clone(),
-            breadcrumb: patch.breadcrumb.clone(),
-            git_state: patch.git_state.clone(),
-            checkout: patch.checkout.clone(),
-            outline: patch.outline.clone(),
-            explorer_panel: patch.explorer_panel,
-            ..Default::default()
-        };
+        if let Some(meta) = &patch.meta {
+            self.document_kind = Some(meta.kind);
+            self.directory_abs_path = None;
+        }
+        if let Some(view_mode) = &patch.view_mode {
+            self.view_mode = Some(view_mode.mode);
+        }
+        if let Some(directory) = &patch.directory {
+            self.directory_abs_path = Some(directory.abs_path.clone());
+        }
+        if let Some(breadcrumb) = &patch.breadcrumb {
+            self.breadcrumb_path.clone_from(&breadcrumb.path);
+            self.breadcrumb_pending = breadcrumb.pending;
+            self.breadcrumb_entries = breadcrumb
+                .entries
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.path.clone(), entry.is_dir))
+                .collect();
+        }
+        if let Some(git) = &patch.git_state {
+            self.repo_root.clone_from(&git.repo_root);
+            self.branch.clone_from(&git.branch);
+        }
+        if let Some(checkout) = &patch.checkout {
+            self.checkout = Some((
+                checkout.path.clone(),
+                checkout.repository.clone(),
+                checkout.checkout.clone(),
+                checkout.read_only,
+            ));
+        }
+        if let Some(outline) = &patch.outline {
+            self.outline.clone_from(&outline.items);
+        }
+        if let Some(panel) = &patch.explorer_panel {
+            self.search_active = panel.search;
+        }
         if let Some(viewport) = &patch.viewport
             && let Some(line) = viewport.lines.first()
         {
@@ -102,7 +146,6 @@ impl AddressSource {
         if let Some(cursor) = &patch.cursor {
             self.line = cursor.source_primary.line;
         }
-        vmux_api::UiStateProjection::apply(&mut self.state, update);
     }
 
     fn address(
@@ -114,16 +157,40 @@ impl AddressSource {
         workspace: Option<&vmux_ecs::WorkspaceKind>,
     ) -> PageAddress {
         let absolute = view.path.to_string_lossy().into_owned();
-        let git = self.state.git.git_state.clone().unwrap_or_default();
-        let project = self
-            .projects
-            .rows
-            .iter()
-            .filter(|row| row.depth == 0 && !row.missing && view.path.starts_with(&row.path))
-            .max_by_key(|row| Path::new(&row.path).components().count());
-        let root = project
-            .map(|row| row.path.clone())
-            .unwrap_or_else(|| git.repo_root.clone());
+        let root = self.project_root(view);
+        let is_dir = self.directory_abs_path.as_deref() == Some(absolute.as_str());
+        let mut result = self.base_address(owner, view, revision, metadata, workspace, &absolute);
+        self.append_path_crumbs(&mut result, view, &root, is_dir);
+        self.append_symbol_crumbs(&mut result, is_dir);
+        result.search_active = self.search_active;
+        result.search_available = true;
+        result
+    }
+
+    fn project_root(&self, view: &FileView) -> String {
+        let mut best: Option<(&str, usize)> = None;
+        for path in &self.project_roots {
+            if !view.path.starts_with(path) {
+                continue;
+            }
+            let count = Path::new(path).components().count();
+            if best.is_none_or(|(_, prev)| count >= prev) {
+                best = Some((path.as_str(), count));
+            }
+        }
+        best.map(|(path, _)| path.to_string())
+            .unwrap_or_else(|| self.repo_root.clone())
+    }
+
+    fn base_address(
+        &self,
+        owner: Entity,
+        view: &FileView,
+        revision: &FileDocumentRevision,
+        metadata: &PageMetadata,
+        workspace: Option<&vmux_ecs::WorkspaceKind>,
+        absolute: &str,
+    ) -> PageAddress {
         let knowledge = workspace == Some(&vmux_ecs::WorkspaceKind::Knowledge)
             || metadata.url.starts_with("vmux://knowledge");
         let mut result = PageAddress {
@@ -161,7 +228,7 @@ impl AddressSource {
             }),
             ..Default::default()
         });
-        if let Some(url) = vmux_git::GitUrl::from_path(Path::new(&git.repo_root)) {
+        if let Some(url) = vmux_git::GitUrl::from_path(Path::new(&self.repo_root)) {
             result.contextual.push(AddressOption {
                 label_key: "git-title".to_string(),
                 icon: Some(vmux_api::BuiltinIcon::GitBranch),
@@ -169,32 +236,33 @@ impl AddressSource {
                 ..Default::default()
             });
         }
-        if let Some(checkout) = self
-            .state
-            .document
-            .checkout
-            .as_ref()
-            .filter(|state| state.read_only && state.path == absolute)
+        if let Some((path, repository, checkout, read_only)) = &self.checkout
+            && *read_only
+            && path == absolute
         {
             result.checkout = Some(AddressOption {
                 label_key: "git-checkout".to_string(),
                 icon: Some(vmux_api::BuiltinIcon::GitBranch),
                 intent: Some(AddressIntent::Checkout {
-                    repository: checkout.repository.clone(),
-                    branch: git.branch,
-                    checkout: checkout.checkout.clone(),
+                    repository: repository.clone(),
+                    branch: self.branch.clone(),
+                    checkout: checkout.clone(),
                 }),
                 ..Default::default()
             });
         }
-        let is_dir = self
-            .state
-            .document
-            .directory
-            .as_ref()
-            .is_some_and(|directory| directory.abs_path == absolute);
-        let (relative, mut path) = match view.path.strip_prefix(&root) {
-            Ok(relative) if !root.is_empty() => (relative, std::path::PathBuf::from(&root)),
+        result
+    }
+
+    fn append_path_crumbs(
+        &self,
+        result: &mut PageAddress,
+        view: &FileView,
+        root: &str,
+        is_dir: bool,
+    ) {
+        let (relative, mut path) = match view.path.strip_prefix(root) {
+            Ok(relative) if !root.is_empty() => (relative, std::path::PathBuf::from(root)),
             _ => (view.path.as_path(), std::path::PathBuf::from("/")),
         };
         let components = relative
@@ -206,14 +274,13 @@ impl AddressSource {
             path.push(component.as_os_str());
             let target = path.to_string_lossy().into_owned();
             let mut options = Vec::new();
-            let siblings = &self.state.document.breadcrumb;
-            let pending = siblings.path != parent || siblings.pending;
-            if siblings.path == parent {
-                for entry in &siblings.entries {
+            let pending = self.breadcrumb_path != parent || self.breadcrumb_pending;
+            if self.breadcrumb_path == parent {
+                for (name, entry_path, entry_is_dir) in &self.breadcrumb_entries {
                     options.push(AddressOption::file(
-                        entry.name.clone(),
-                        entry.path.clone(),
-                        entry.is_dir,
+                        name.clone(),
+                        entry_path.clone(),
+                        *entry_is_dir,
                     ));
                 }
             }
@@ -230,27 +297,17 @@ impl AddressSource {
                 ..Default::default()
             });
         }
-        let reading_note = self
-            .state
-            .document
-            .meta
-            .as_ref()
-            .is_some_and(|meta| meta.kind == FileDocumentKind::Markdown)
-            && self
-                .state
-                .document
-                .view_mode
-                .as_ref()
-                .is_none_or(|view| view.mode == FileViewMode::Note);
-        let rows = self
-            .state
-            .explorer
-            .outline
-            .as_ref()
-            .map(|outline| outline.items.as_slice())
-            .unwrap_or_default();
+    }
+
+    fn append_symbol_crumbs(&self, result: &mut PageAddress, is_dir: bool) {
+        let reading_note = self.document_kind == Some(FileDocumentKind::Markdown)
+            && self.view_mode.is_none_or(|mode| mode == FileViewMode::Note);
+        let rows = if reading_note || is_dir {
+            &[][..]
+        } else {
+            self.outline.as_slice()
+        };
         let mut chain: Vec<usize> = Vec::new();
-        let rows = if reading_note || is_dir { &[] } else { rows };
         for (index, row) in rows.iter().enumerate() {
             if !row.contains(self.line) {
                 continue;
@@ -272,35 +329,23 @@ impl AddressSource {
                     break;
                 }
                 if sibling.depth == row.depth {
-                    options.push(AddressSymbol(sibling).option());
+                    options.push(Self::symbol_option(sibling));
                 }
             }
             result.symbols.push(AddressCrumb {
-                entry: AddressSymbol(row).option(),
+                entry: Self::symbol_option(row),
                 options,
                 active: level + 1 == chain.len(),
                 ..Default::default()
             });
         }
-        result.search_active = self
-            .state
-            .explorer
-            .explorer_panel
-            .as_ref()
-            .is_some_and(|panel| panel.search);
-        result.search_available = true;
-        result
     }
-}
 
-struct AddressSymbol<'a>(&'a OutlineRow);
-
-impl AddressSymbol<'_> {
-    fn option(self) -> AddressOption {
+    fn symbol_option(row: &OutlineRow) -> AddressOption {
         AddressOption {
-            label: self.0.name.clone(),
+            label: row.name.clone(),
             icon: Some(vmux_api::BuiltinIcon::Code),
-            intent: Some(AddressIntent::Goto { line: self.0.line }),
+            intent: Some(AddressIntent::Goto { line: row.line }),
             ..Default::default()
         }
     }
@@ -435,14 +480,9 @@ fn forward(
             commands.trigger(UiInput {
                 webview,
                 payload: ExplorerPanelViewSet {
-                    search: !sources.get(webview).is_ok_and(|source| {
-                        source
-                            .state
-                            .explorer
-                            .explorer_panel
-                            .as_ref()
-                            .is_some_and(|panel| panel.search)
-                    }),
+                    search: !sources
+                        .get(webview)
+                        .is_ok_and(|source| source.search_active),
                 },
             });
         }
@@ -476,19 +516,18 @@ fn forward(
 mod tests {
     use super::*;
 
-    #[derive(Resource, Default)]
-    struct Opened(Vec<(Entity, String)>);
-
-    fn record(event: On<UiInput<FileOpenEvent>>, mut opened: ResMut<Opened>) {
-        opened.0.push((event.webview, event.payload.path.clone()));
-    }
-
     #[test]
     fn address_requests_reject_other_pages_and_stale_document_selections() {
+        let opened = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(Entity, String)>::new()));
+        let recorded = opened.clone();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AddressPlugin))
-            .init_resource::<Opened>()
-            .add_observer(record);
+            .add_observer(move |event: On<UiInput<FileOpenEvent>>| {
+                recorded
+                    .lock()
+                    .unwrap()
+                    .push((event.webview, event.payload.path.clone()));
+            });
         let page = app
             .world_mut()
             .spawn((
@@ -538,14 +577,14 @@ mod tests {
             webview: page,
             payload: stale,
         });
-        assert!(app.world().resource::<Opened>().0.is_empty());
+        assert!(opened.lock().unwrap().is_empty());
         app.world_mut().trigger(UiInput {
             webview: page,
             payload: request.clone(),
         });
         app.world_mut().flush();
         assert_eq!(
-            app.world().resource::<Opened>().0.as_slice(),
+            opened.lock().unwrap().as_slice(),
             [(page, "/repo/source/selected.rs".to_string())]
         );
         app.world_mut().get_mut::<FileView>(page).unwrap().path = "/repo/source/replaced.rs".into();
@@ -553,7 +592,7 @@ mod tests {
             webview: page,
             payload: request,
         });
-        assert_eq!(app.world().resource::<Opened>().0.len(), 1);
+        assert_eq!(opened.lock().unwrap().len(), 1);
     }
 
     #[test]
