@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy::prelude::{App, Commands, Plugin};
+use bevy::prelude::{App, Changed, Commands, Plugin};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     ExplorerCreateDirectoryPromptRequest, ExplorerCreateFilePromptRequest,
     ExplorerDeletePromptRequest, ExplorerPromptDismissRequest, ExplorerPromptDraftRequest,
@@ -23,8 +23,8 @@ use vmux_knowledge::{
 
 use super::fs::ExplorerFs;
 use super::{
-    ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
-    UsesExplorerTree,
+    ExplorerState, ExplorerTree, ExplorerTreeDirRefresh, ExplorerTreeDirty, ExplorerTreeLookup,
+    ExplorerTreeSubtreeEvict, OpenEditorsDirty, UsesExplorerTree,
 };
 use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::feedback::ExplorerFeedback;
@@ -129,32 +129,30 @@ struct DeleteEntry {
     path: PathBuf,
 }
 
-type PromptComponents = (
-    CreateFilePrompt,
-    CreateDirectoryPrompt,
-    RenamePrompt,
-    DeletePrompt,
-    PromptTarget,
-    PromptDraft,
-);
-
 fn open_file_prompt(
     trigger: On<UiInput<ExplorerCreateFilePromptRequest>>,
     views: Query<&UsesExplorerTree>,
-    trees: Query<&ExplorerTree>,
+    trees: ExplorerTreeLookup,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let Ok(tree_of) = views.get(entity) else {
         return;
     };
-    let Ok(tree) = trees.get(tree_of.0) else {
+    let Some(parent) = trees.create_parent(tree_of.0, Path::new(&trigger.event().payload.path))
+    else {
         return;
     };
-    let parent = tree.create_parent(Path::new(&trigger.event().payload.path));
     commands
         .entity(entity)
-        .remove::<PromptComponents>()
+        .remove::<(
+            CreateFilePrompt,
+            CreateDirectoryPrompt,
+            RenamePrompt,
+            DeletePrompt,
+            PromptTarget,
+            PromptDraft,
+        )>()
         .insert((
             CreateFilePrompt,
             PromptTarget {
@@ -169,20 +167,27 @@ fn open_file_prompt(
 fn open_directory_prompt(
     trigger: On<UiInput<ExplorerCreateDirectoryPromptRequest>>,
     views: Query<&UsesExplorerTree>,
-    trees: Query<&ExplorerTree>,
+    trees: ExplorerTreeLookup,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let Ok(tree_of) = views.get(entity) else {
         return;
     };
-    let Ok(tree) = trees.get(tree_of.0) else {
+    let Some(parent) = trees.create_parent(tree_of.0, Path::new(&trigger.event().payload.path))
+    else {
         return;
     };
-    let parent = tree.create_parent(Path::new(&trigger.event().payload.path));
     commands
         .entity(entity)
-        .remove::<PromptComponents>()
+        .remove::<(
+            CreateFilePrompt,
+            CreateDirectoryPrompt,
+            RenamePrompt,
+            DeletePrompt,
+            PromptTarget,
+            PromptDraft,
+        )>()
         .insert((
             CreateDirectoryPrompt,
             PromptTarget {
@@ -199,7 +204,14 @@ fn open_rename_prompt(trigger: On<UiInput<ExplorerRenamePromptRequest>>, mut com
     let request = &trigger.event().payload;
     commands
         .entity(entity)
-        .remove::<PromptComponents>()
+        .remove::<(
+            CreateFilePrompt,
+            CreateDirectoryPrompt,
+            RenamePrompt,
+            DeletePrompt,
+            PromptTarget,
+            PromptDraft,
+        )>()
         .insert((
             RenamePrompt,
             PromptTarget {
@@ -216,7 +228,14 @@ fn open_delete_prompt(trigger: On<UiInput<ExplorerDeletePromptRequest>>, mut com
     let request = &trigger.event().payload;
     commands
         .entity(entity)
-        .remove::<PromptComponents>()
+        .remove::<(
+            CreateFilePrompt,
+            CreateDirectoryPrompt,
+            RenamePrompt,
+            DeletePrompt,
+            PromptTarget,
+            PromptDraft,
+        )>()
         .insert((
             DeletePrompt,
             PromptTarget {
@@ -297,14 +316,28 @@ fn submit_prompt(
     }
     commands
         .entity(entity)
-        .remove::<PromptComponents>()
+        .remove::<(
+            CreateFilePrompt,
+            CreateDirectoryPrompt,
+            RenamePrompt,
+            DeletePrompt,
+            PromptTarget,
+            PromptDraft,
+        )>()
         .insert(PromptDirty);
 }
 
 fn dismiss_prompt(trigger: On<UiInput<ExplorerPromptDismissRequest>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
-        .remove::<PromptComponents>()
+        .remove::<(
+            CreateFilePrompt,
+            CreateDirectoryPrompt,
+            RenamePrompt,
+            DeletePrompt,
+            PromptTarget,
+            PromptDraft,
+        )>()
         .insert(PromptDirty);
 }
 
@@ -315,7 +348,14 @@ fn clear_prompt(
     for entity in &files {
         commands
             .entity(entity)
-            .remove::<PromptComponents>()
+            .remove::<(
+                CreateFilePrompt,
+                CreateDirectoryPrompt,
+                RenamePrompt,
+                DeletePrompt,
+                PromptTarget,
+                PromptDraft,
+            )>()
             .insert(PromptDirty);
     }
 }
@@ -334,12 +374,12 @@ fn project(
         ),
         (With<PromptDirty>, With<PageReady>),
     >,
-    browsers: Option<NonSend<Browsers>>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
-    let Some(browsers) = browsers else {
+    if !browsers.available() {
         return;
-    };
+    }
     for (entity, target, draft, create_file, create_directory, rename, delete) in &prompts {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -790,7 +830,6 @@ fn drain_creates(
         &OperationState,
     )>,
     views: Query<&UsesExplorerTree>,
-    mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
     for (task_entity, mut pending, target, state) in &mut tasks {
@@ -814,15 +853,10 @@ fn drain_creates(
                 continue;
             }
         };
-        if let Ok(mut tree) = trees.get_mut(tree_of.0)
-            && tree.begin_dir_load(&outcome.parent, true)
-        {
-            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                tree_of.0,
-                outcome.parent,
-            ));
-            commands.trigger(ExplorerTreeChanged(tree_of.0));
-        }
+        commands.trigger(ExplorerTreeDirRefresh {
+            tree: tree_of.0,
+            path: outcome.parent,
+        });
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
@@ -897,7 +931,6 @@ fn finish_rename(
     trigger: On<RenameFinished>,
     operations: Query<Option<&OperationTarget>, With<Operation>>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
-    mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
     let entity = trigger.entity;
@@ -933,18 +966,16 @@ fn finish_rename(
         Ok(suffix) => Some(outcome.new_path.join(suffix)),
         Err(_) => None,
     };
-    if let Ok(mut tree) = trees.get_mut(tree_of.0) {
-        if outcome.was_dir {
-            tree.evict_subtree(&outcome.old_path);
-        }
-        if tree.begin_dir_load(&outcome.parent, true) {
-            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                tree_of.0,
-                outcome.parent,
-            ));
-        }
-        commands.trigger(ExplorerTreeChanged(tree_of.0));
+    if outcome.was_dir {
+        commands.trigger(ExplorerTreeSubtreeEvict {
+            tree: tree_of.0,
+            path: outcome.old_path,
+        });
     }
+    commands.trigger(ExplorerTreeDirRefresh {
+        tree: tree_of.0,
+        path: outcome.parent,
+    });
     commands
         .entity(webview)
         .insert((ExplorerTreeDirty, OpenEditorsDirty));
@@ -977,7 +1008,6 @@ fn drain_deletes(
         &OperationState,
     )>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
-    mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
     for (task_entity, mut pending, target, state) in &mut tasks {
@@ -1009,18 +1039,16 @@ fn drain_deletes(
         } else {
             None
         };
-        if let Ok(mut tree) = trees.get_mut(tree_of.0) {
-            if outcome.was_dir {
-                tree.evict_subtree(&outcome.path);
-            }
-            if tree.begin_dir_load(&outcome.parent, true) {
-                commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                    tree_of.0,
-                    outcome.parent,
-                ));
-            }
-            commands.trigger(ExplorerTreeChanged(tree_of.0));
+        if outcome.was_dir {
+            commands.trigger(ExplorerTreeSubtreeEvict {
+                tree: tree_of.0,
+                path: outcome.path.clone(),
+            });
         }
+        commands.trigger(ExplorerTreeDirRefresh {
+            tree: tree_of.0,
+            path: outcome.parent,
+        });
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
@@ -1045,6 +1073,7 @@ fn drain_deletes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::Browsers;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},

@@ -4,15 +4,15 @@ use crate::host::editor::Editor;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+use bevy::prelude::{App, Changed, Commands, Plugin};
 use bevy_cef::prelude::*;
 use vmux_ecs::event::*;
 
 use super::editor::FileView;
 use super::explorer::OutlineDirty;
 use super::explorer::{
-    ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
+    ExplorerDirsChanged, ExplorerPanelSent, ExplorerTreeDirty, OpenEditorsDirty,
 };
 pub(super) use super::file_loading::FileLoadTask;
 use super::file_watch::{FileWatchPlugin, Observed, Reconciled};
@@ -37,6 +37,8 @@ impl Plugin for FileLifecyclePlugin {
             FileWritesPlugin,
             super::file_loading::FileLoadingPlugin,
         ))
+        .init_resource::<GitDocumentSequence>()
+        .add_message::<ExplorerDirsChanged>()
         .add_systems(
             Update,
             (sync_file_git, drain_file_changes, reload_changed_files)
@@ -47,16 +49,28 @@ impl Plugin for FileLifecyclePlugin {
     }
 }
 
-type ChangedFileViews<'w, 's> =
-    Query<'w, 's, (Entity, &'static FileView), Or<(Added<FileView>, Changed<FileView>)>>;
+#[derive(Resource, Default)]
+struct GitDocumentSequence(u64);
 
-fn sync_file_git(views: ChangedFileViews, mut document: Local<u64>, mut commands: Commands) {
+impl GitDocumentSequence {
+    fn allocate(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1).max(1);
+        self.0
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_file_git(
+    views: Query<(Entity, &FileView), Or<(Added<FileView>, Changed<FileView>)>>,
+    mut documents: ResMut<GitDocumentSequence>,
+    mut commands: Commands,
+) {
     for (entity, view) in &views {
-        *document = document.wrapping_add(1).max(1);
+        let document = documents.allocate();
         commands
             .entity(entity)
             .remove::<vmux_git::FileGit>()
-            .insert(vmux_git::FileGit::new(&view.path, *document));
+            .insert(vmux_git::FileGit::new(&view.path, document));
     }
 }
 
@@ -161,7 +175,7 @@ fn drain_file_changes(
     mut reconciled: MessageReader<Reconciled>,
     self_writes: WriteReceipts,
     views: Query<(Entity, &FileView, Has<MissingFileView>)>,
-    mut trees: Query<(Entity, &mut ExplorerTree)>,
+    mut explorer_dirs: MessageWriter<ExplorerDirsChanged>,
     mut commands: Commands,
 ) {
     let mut changed = HashSet::new();
@@ -201,15 +215,8 @@ fn drain_file_changes(
             changed_dirs.insert(vmux_path::PathIdentity::resolve(parent).into_path_buf());
         }
     }
-    for (tree_entity, mut tree) in &mut trees {
-        let requests = tree.refresh_changed(tree_entity, &changed_dirs);
-        if requests.is_empty() {
-            continue;
-        }
-        for request in requests {
-            commands.spawn(request);
-        }
-        commands.trigger(ExplorerTreeChanged(tree_entity));
+    if !changed_dirs.is_empty() {
+        explorer_dirs.write(ExplorerDirsChanged(changed_dirs));
     }
 }
 
@@ -282,27 +289,27 @@ mod tests {
     use super::*;
     use crate::host::viewport::FileViewport;
 
-    fn app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(FileLifecyclePlugin);
-        app.world_mut().insert_non_send(Browsers::default());
+    impl FileView {
+        fn test_app() -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, FileLifecyclePlugin))
+                .insert_non_send(Browsers::default());
+            app
+        }
 
-        app
-    }
-
-    fn file_view(path: PathBuf) -> impl Bundle {
-        (
-            FileView { path },
-            FileViewport {
-                top_row: 0,
-                rows: 0,
-                wrap_columns: 0,
-                word_wrap: vmux_api::editor::WordWrap::default(),
-                word_wrap_column: 80,
-                scroll_revision: 0,
-            },
-        )
+        fn test_bundle(path: PathBuf) -> impl Bundle {
+            (
+                FileView { path },
+                FileViewport {
+                    top_row: 0,
+                    rows: 0,
+                    wrap_columns: 0,
+                    word_wrap: vmux_api::editor::WordWrap::default(),
+                    word_wrap_column: 80,
+                    scroll_revision: 0,
+                },
+            )
+        }
     }
 
     #[test]
@@ -310,8 +317,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let parent = temp.path().join("created-after-open");
         let path = parent.join("file.txt");
-        let mut app = app();
-        let entity = app.world_mut().spawn(file_view(path.clone())).id();
+        let mut app = FileView::test_app();
+        let entity = app
+            .world_mut()
+            .spawn(FileView::test_bundle(path.clone()))
+            .id();
 
         FileLoadTask::settle(&mut app, entity);
         assert!(
@@ -349,8 +359,8 @@ mod tests {
         std::fs::create_dir(&second).unwrap();
         std::fs::write(second.join("second.txt"), "").unwrap();
 
-        let mut app = app();
-        let entity = app.world_mut().spawn(file_view(first)).id();
+        let mut app = FileView::test_app();
+        let entity = app.world_mut().spawn(FileView::test_bundle(first)).id();
         FileLoadTask::settle(&mut app, entity);
         assert!(
             app.world()

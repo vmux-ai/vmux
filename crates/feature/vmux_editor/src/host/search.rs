@@ -1,107 +1,234 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Plugin};
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::UiEventPlugin;
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use vmux_ecs::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
+use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
 
+use super::explorer::{
+    ExplorerSearchCancelRequest, ExplorerSearchCompleted, ExplorerSearchQuery,
+    ExplorerSearchRunRequest,
+};
 use super::file_lifecycle::FileDir;
-use crate::{FileView, GlobalSearchRequest};
-
-const MAX_MATCHES: usize = 500;
-const MAX_MATCHES_PER_FILE: usize = 40;
-const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_FILES_SCANNED: usize = 40_000;
-const MAX_PREVIEW_CHARS: usize = 240;
+use crate::FileView;
 
 pub(crate) struct SearchPlugin;
 
 impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         app.add_plugins(UiEventPlugin::<(ExplorerSearchRequest,)>::default())
             .add_observer(start_project)
+            .add_observer(cancel_project)
             .add_systems(Update, finish_project);
     }
 }
 
-fn start_project(
-    trigger: On<UiInput<ExplorerSearchRequest>>,
-    views: Query<&FileView>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let Ok(view) = views.get(entity) else {
-        return;
-    };
-    let Some(search) = ProjectSearch::compile(&view.path, &trigger.event().payload) else {
-        commands.entity(entity).remove::<RunningSearch>();
-        return;
-    };
-    let task = IoTaskPool::get().spawn(async move { search.run() });
-    commands.entity(entity).insert(RunningSearch(task));
-}
-
-fn finish_project(
-    mut running: Query<(Entity, &FileView, &mut RunningSearch)>,
-    mut writer: MessageWriter<GlobalSearchRequest>,
-    mut commands: Commands,
-) {
-    for (entity, view, mut search) in &mut running {
-        let Some(outcome) = block_on(future::poll_once(&mut search.0)) else {
-            continue;
-        };
-        commands.entity(entity).remove::<RunningSearch>();
-        writer.write(GlobalSearchRequest {
-            target_path: view.path.clone(),
-            root: outcome.root.to_string_lossy().into_owned(),
-            query: outcome.query,
-            regex: outcome.regex,
-            case_sensitive: outcome.case_sensitive,
-            whole_word: outcome.whole_word,
-            files: outcome.files,
-            capped: outcome.capped,
-        });
-    }
-}
-
 #[derive(Component)]
-struct RunningSearch(Task<SearchOutcome>);
-
-struct SearchOutcome {
-    root: PathBuf,
+struct SearchRun {
+    view: Entity,
+    generation: u64,
     query: String,
     regex: bool,
     case_sensitive: bool,
     whole_word: bool,
+    cancel: Arc<AtomicBool>,
+}
+
+#[derive(Component)]
+struct SearchTask(Task<SearchOutput>);
+
+struct SearchOutput {
+    root: PathBuf,
     files: Vec<ExplorerSearchFile>,
     capped: bool,
 }
 
-struct ProjectSearch {
-    root: PathBuf,
-    query: String,
-    regex: bool,
-    case_sensitive: bool,
-    whole_word: bool,
-    pattern: SearchPattern,
+fn cancel_project(
+    trigger: On<ExplorerSearchCancelRequest>,
+    runs: Query<(Entity, &SearchRun, &OperationState)>,
+    mut commands: Commands,
+) {
+    for (operation, run, state) in &runs {
+        if run.view != trigger.entity {
+            continue;
+        }
+        run.cancel.store(true, Ordering::Relaxed);
+        if matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.trigger(OperationCompleted {
+                entity: operation,
+                result: Err("Search canceled".to_string()),
+            });
+        }
+        commands
+            .entity(operation)
+            .remove::<(SearchRun, SearchTask)>();
+    }
 }
 
-impl ProjectSearch {
-    fn compile(start: &Path, request: &ExplorerSearchRequest) -> Option<Self> {
-        let pattern = SearchPattern::compile(request)?;
+fn start_project(
+    trigger: On<ExplorerSearchRunRequest>,
+    views: Query<&FileView>,
+    runs: Query<(Entity, &SearchRun, &OperationState)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let view = trigger.entity;
+    for (operation, run, state) in &runs {
+        if run.view != view {
+            continue;
+        }
+        run.cancel.store(true, Ordering::Relaxed);
+        if matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.trigger(OperationCompleted {
+                entity: operation,
+                result: Err("Search superseded".to_string()),
+            });
+        }
+        commands
+            .entity(operation)
+            .remove::<(SearchRun, SearchTask)>();
+    }
+    let Ok(file) = views.get(view) else {
+        return;
+    };
+    let Some(scanner) = SearchScanner::compile(
+        &file.path,
+        &trigger.query,
+        trigger.regex,
+        trigger.case_sensitive,
+        trigger.whole_word,
+    ) else {
+        return;
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = cancel.clone();
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let output = scanner.run(&worker_cancel);
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        output
+    });
+    commands.spawn((
+        Operation::bundle("editor.search").unwrap().running(),
+        OperationTarget::new(view),
+        ChildOf(view),
+        SearchRun {
+            view,
+            generation: trigger.generation,
+            query: trigger.query.clone(),
+            regex: trigger.regex,
+            case_sensitive: trigger.case_sensitive,
+            whole_word: trigger.whole_word,
+            cancel,
+        },
+        SearchTask(task),
+    ));
+}
+
+fn finish_project(
+    mut tasks: Query<(Entity, &SearchRun, &mut SearchTask, &OperationState)>,
+    queries: Query<&ExplorerSearchQuery>,
+    mut commands: Commands,
+) {
+    for (operation, run, mut task, state) in &mut tasks {
+        let Some(output) = block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands
+            .entity(operation)
+            .remove::<(SearchRun, SearchTask)>();
+        let canceled = run.cancel.load(Ordering::Relaxed)
+            || !matches!(state, OperationState::Pending | OperationState::Running);
+        if canceled {
+            if matches!(state, OperationState::Pending | OperationState::Running) {
+                commands.trigger(OperationCompleted {
+                    entity: operation,
+                    result: Err("Search canceled".to_string()),
+                });
+            }
+            continue;
+        }
+        commands.trigger(OperationCompleted {
+            entity: operation,
+            result: Ok(()),
+        });
+        let current = queries
+            .get(run.view)
+            .is_ok_and(|query| query.generation == run.generation);
+        if !current {
+            continue;
+        }
+        commands.trigger(ExplorerSearchCompleted {
+            entity: run.view,
+            generation: run.generation,
+            root: output.root.to_string_lossy().into_owned(),
+            query: run.query.clone(),
+            regex: run.regex,
+            case_sensitive: run.case_sensitive,
+            whole_word: run.whole_word,
+            files: output.files,
+            capped: output.capped,
+        });
+    }
+}
+
+struct SearchScanner {
+    root: PathBuf,
+    pattern: Regex,
+}
+
+impl SearchScanner {
+    const MAX_MATCHES: usize = 500;
+    const MAX_MATCHES_PER_FILE: usize = 40;
+    const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+    const MAX_FILES_SCANNED: usize = 40_000;
+    const MAX_PREVIEW_CHARS: usize = 240;
+
+    fn compile(
+        start: &Path,
+        query: &str,
+        regex: bool,
+        case_sensitive: bool,
+        whole_word: bool,
+    ) -> Option<Self> {
+        if query.trim().is_empty() {
+            return None;
+        }
+        let mut source = match regex {
+            true => crate::edit::search::Search::translate(query),
+            false => regex::escape(query),
+        };
+        if whole_word {
+            let literal = match regex {
+                true => None,
+                false => Some(query),
+            };
+            source = Self::whole_word(&source, literal);
+        }
+        let pattern = RegexBuilder::new(&source)
+            .case_insensitive(!case_sensitive)
+            .size_limit(1 << 20)
+            .build()
+            .ok()?;
         Some(Self {
             root: FileDir::project_root(start),
-            query: request.query.clone(),
-            regex: request.regex,
-            case_sensitive: request.case_sensitive,
-            whole_word: request.whole_word,
             pattern,
         })
     }
 
-    fn run(self) -> SearchOutcome {
+    fn run(self, cancel: &AtomicBool) -> SearchOutput {
         let mut files = Vec::new();
         let mut found = 0usize;
         let mut scanned = 0usize;
@@ -113,10 +240,13 @@ impl ProjectSearch {
             .git_global(true)
             .git_exclude(true)
             .follow_links(false)
-            .max_filesize(Some(MAX_FILE_BYTES))
+            .max_filesize(Some(Self::MAX_FILE_BYTES))
             .build();
         for entry in walk {
-            if found >= MAX_MATCHES || scanned >= MAX_FILES_SCANNED {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            if found >= Self::MAX_MATCHES || scanned >= Self::MAX_FILES_SCANNED {
                 capped = true;
                 break;
             }
@@ -130,29 +260,28 @@ impl ProjectSearch {
                 continue;
             }
             scanned += 1;
-            let Some(file) = self.scan(entry.path(), MAX_MATCHES - found) else {
+            let Some(file) = self.scan(entry.path(), Self::MAX_MATCHES - found, cancel) else {
                 continue;
             };
             found += file.matches.len();
             files.push(file);
         }
-        SearchOutcome {
+        SearchOutput {
             root: self.root,
-            query: self.query,
-            regex: self.regex,
-            case_sensitive: self.case_sensitive,
-            whole_word: self.whole_word,
             files,
             capped,
         }
     }
 
-    fn scan(&self, path: &Path, budget: usize) -> Option<ExplorerSearchFile> {
+    fn scan(&self, path: &Path, budget: usize, cancel: &AtomicBool) -> Option<ExplorerSearchFile> {
         let text = crate::encoding::DecodedText::read(path)?.text;
-        let limit = budget.min(MAX_MATCHES_PER_FILE);
+        let limit = budget.min(Self::MAX_MATCHES_PER_FILE);
         let mut matches = Vec::new();
         let mut capped = false;
         for (index, line) in text.lines().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
             let Some(found) = self.pattern.find(line) else {
                 continue;
             };
@@ -162,9 +291,13 @@ impl ProjectSearch {
             }
             matches.push(ExplorerSearchMatch {
                 line: index as u32 + 1,
-                col: SearchPattern::utf16_col(line, found.start()),
-                end_col: SearchPattern::utf16_col(line, found.end()),
-                preview: line.trim_end().chars().take(MAX_PREVIEW_CHARS).collect(),
+                col: Self::utf16_col(line, found.start()),
+                end_col: Self::utf16_col(line, found.end()),
+                preview: line
+                    .trim_end()
+                    .chars()
+                    .take(Self::MAX_PREVIEW_CHARS)
+                    .collect(),
             });
         }
         if matches.is_empty() {
@@ -175,37 +308,6 @@ impl ProjectSearch {
             matches,
             capped,
         })
-    }
-}
-
-struct SearchPattern(Regex);
-
-impl SearchPattern {
-    fn compile(request: &ExplorerSearchRequest) -> Option<Self> {
-        if request.query.trim().is_empty() {
-            return None;
-        }
-        let mut source = match request.regex {
-            true => crate::edit::search::Search::translate(&request.query),
-            false => regex::escape(&request.query),
-        };
-        if request.whole_word {
-            let literal = match request.regex {
-                true => None,
-                false => Some(request.query.as_str()),
-            };
-            source = Self::whole_word(&source, literal);
-        }
-        RegexBuilder::new(&source)
-            .case_insensitive(!request.case_sensitive)
-            .size_limit(1 << 20)
-            .build()
-            .map(Self)
-            .ok()
-    }
-
-    fn find<'a>(&self, line: &'a str) -> Option<regex::Match<'a>> {
-        self.0.find(line)
     }
 
     fn whole_word(source: &str, literal: Option<&str>) -> String {
@@ -245,19 +347,52 @@ impl SearchPattern {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::UiInput;
 
-    struct Project {
+    #[derive(Resource, Default)]
+    struct CapturedResults(Vec<ExplorerSearchCompleted>);
+
+    struct SearchFixture {
         dir: tempfile::TempDir,
+        app: App,
+        view: Entity,
     }
 
-    impl Project {
+    impl SearchFixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
             std::fs::create_dir_all(dir.path().join(".git")).expect("git");
-            Self { dir }
+            let anchor = dir.path().join("anchor.rs");
+            std::fs::write(&anchor, "").expect("anchor");
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                crate::contract::ContractPlugin,
+                SearchPlugin,
+                crate::host::explorer::ExplorerPlugin,
+            ))
+            .init_non_send::<bevy_cef::prelude::Browsers>()
+            .init_resource::<CapturedResults>()
+            .add_observer(Self::capture);
+            let view = app.world_mut().spawn(FileView { path: anchor }).id();
+            Self { dir, app, view }
         }
 
-        fn write(&self, relative: &str, body: &str) -> &Self {
+        fn capture(trigger: On<ExplorerSearchCompleted>, mut results: ResMut<CapturedResults>) {
+            results.0.push(ExplorerSearchCompleted {
+                entity: trigger.entity,
+                generation: trigger.generation,
+                root: trigger.root.clone(),
+                query: trigger.query.clone(),
+                regex: trigger.regex,
+                case_sensitive: trigger.case_sensitive,
+                whole_word: trigger.whole_word,
+                files: trigger.files.clone(),
+                capped: trigger.capped,
+            });
+        }
+
+        fn write(&mut self, relative: &str, body: &str) -> &mut Self {
             let path = self.dir.path().join(relative);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).expect("parent");
@@ -266,19 +401,42 @@ mod tests {
             self
         }
 
-        fn search(&self, request: ExplorerSearchRequest) -> SearchOutcome {
-            let anchor = self.dir.path().join("anchor.rs");
-            std::fs::write(&anchor, "").expect("anchor");
-            ProjectSearch::compile(&anchor, &request)
-                .expect("pattern")
-                .run()
+        fn search(&mut self, request: ExplorerSearchRequest) -> ExplorerSearchCompleted {
+            self.app
+                .world_mut()
+                .resource_mut::<CapturedResults>()
+                .0
+                .clear();
+            self.app.world_mut().trigger(UiInput {
+                webview: self.view,
+                payload: request,
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if let Some(found) = self
+                    .app
+                    .world_mut()
+                    .resource_mut::<CapturedResults>()
+                    .0
+                    .pop()
+                {
+                    return found;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "search did not complete"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
 
-        fn named(&self, request: ExplorerSearchRequest) -> Vec<String> {
+        fn named(&mut self, request: ExplorerSearchRequest) -> Vec<String> {
             let mut named = Vec::new();
+            let root = self.dir.path().to_path_buf();
             for file in self.search(request).files {
                 let relative = Path::new(&file.path)
-                    .strip_prefix(self.dir.path())
+                    .strip_prefix(&root)
                     .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or(file.path);
                 for hit in file.matches {
@@ -289,7 +447,7 @@ mod tests {
             named
         }
 
-        fn hits(&self, query: &str) -> Vec<String> {
+        fn hits(&mut self, query: &str) -> Vec<String> {
             self.named(ExplorerSearchRequest {
                 query: query.to_string(),
                 regex: false,
@@ -298,7 +456,7 @@ mod tests {
             })
         }
 
-        fn words(&self, query: &str, regex: bool) -> Vec<String> {
+        fn words(&mut self, query: &str, regex: bool) -> Vec<String> {
             self.named(ExplorerSearchRequest {
                 query: query.to_string(),
                 regex,
@@ -310,7 +468,7 @@ mod tests {
 
     #[test]
     fn a_gitignored_file_is_not_searched() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project
             .write(".gitignore", "secret.txt\nbuilt/\n")
             .write("secret.txt", "needle")
@@ -322,7 +480,7 @@ mod tests {
 
     #[test]
     fn a_binary_file_is_skipped_but_its_text_neighbour_is_not() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project.write("keep.txt", "needle");
         std::fs::write(project.dir.path().join("blob.bin"), b"need\0le needle").expect("blob");
 
@@ -331,7 +489,7 @@ mod tests {
 
     #[test]
     fn a_match_reports_its_one_based_line_and_utf16_columns() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project.write("src/lib.rs", "first\nlet \u{1F600} = \"needle\";  \n");
 
         let found = project.search(ExplorerSearchRequest {
@@ -352,7 +510,7 @@ mod tests {
 
     #[test]
     fn a_case_sensitive_search_rejects_what_an_insensitive_one_accepts() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project.write("src/lib.rs", "Needle");
 
         let sensitive = project.search(ExplorerSearchRequest {
@@ -367,7 +525,7 @@ mod tests {
 
     #[test]
     fn a_plain_query_matches_regex_metacharacters_literally() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project.write("a.txt", "a.c").write("b.txt", "abc");
 
         assert_eq!(project.hits("a.c"), vec!["a.txt:1".to_string()]);
@@ -375,7 +533,7 @@ mod tests {
 
     #[test]
     fn a_regex_query_matches_by_pattern() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project.write("a.txt", "a.c").write("b.txt", "abc");
 
         let found = project.search(ExplorerSearchRequest {
@@ -389,50 +547,67 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_query_builds_no_search() {
-        let project = Project::new();
-        let anchor = project.dir.path().join("anchor.rs");
-        std::fs::write(&anchor, "").expect("anchor");
-
-        assert!(
-            ProjectSearch::compile(
-                &anchor,
-                &ExplorerSearchRequest {
-                    query: "   ".to_string(),
-                    regex: false,
+    fn blank_and_unparseable_queries_spawn_no_search_operation() {
+        let mut project = SearchFixture::new();
+        for (query, regex) in [("   ", false), ("[unclosed", true)] {
+            project.app.world_mut().trigger(UiInput {
+                webview: project.view,
+                payload: ExplorerSearchRequest {
+                    query: query.to_string(),
+                    regex,
                     case_sensitive: false,
                     whole_word: false,
                 },
-            )
-            .is_none()
-        );
+            });
+            project.app.update();
+            assert_eq!(
+                project
+                    .app
+                    .world_mut()
+                    .query::<&SearchRun>()
+                    .iter(project.app.world())
+                    .count(),
+                0
+            );
+        }
     }
 
     #[test]
-    fn an_unparseable_regex_builds_no_search() {
-        let project = Project::new();
-        let anchor = project.dir.path().join("anchor.rs");
-        std::fs::write(&anchor, "").expect("anchor");
-
+    fn clearing_search_cancels_active_search_and_drops_late_results() {
+        let mut project = SearchFixture::new();
+        project.write("src/lib.rs", "needle\n");
+        project.app.world_mut().trigger(UiInput {
+            webview: project.view,
+            payload: ExplorerSearchRequest {
+                query: "needle".to_string(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: false,
+            },
+        });
+        project.app.world_mut().trigger(UiInput {
+            webview: project.view,
+            payload: vmux_ecs::event::ExplorerSearchClear,
+        });
+        for _ in 0..50 {
+            project.app.update();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         assert!(
-            ProjectSearch::compile(
-                &anchor,
-                &ExplorerSearchRequest {
-                    query: "[unclosed".to_string(),
-                    regex: true,
-                    case_sensitive: false,
-                    whole_word: false,
-                },
-            )
-            .is_none()
+            project
+                .app
+                .world()
+                .resource::<CapturedResults>()
+                .0
+                .is_empty()
         );
     }
 
     #[test]
     fn one_file_cannot_crowd_out_the_rest_of_the_results() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         let mut noisy = String::new();
-        for _ in 0..(MAX_MATCHES_PER_FILE * 2) {
+        for _ in 0..(SearchScanner::MAX_MATCHES_PER_FILE * 2) {
             noisy.push_str("needle\n");
         }
         project
@@ -457,7 +632,7 @@ mod tests {
             }
         }
         let noisy = noisy.expect("noisy file");
-        assert_eq!(noisy.matches.len(), MAX_MATCHES_PER_FILE);
+        assert_eq!(noisy.matches.len(), SearchScanner::MAX_MATCHES_PER_FILE);
         assert!(noisy.capped);
         let quiet = quiet.expect("quiet file");
         assert_eq!(quiet.matches.len(), 1);
@@ -467,7 +642,7 @@ mod tests {
 
     #[test]
     fn a_file_reports_every_hit_it_holds_under_one_entry() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project
             .write("src/lib.rs", "needle\nquiet\nneedle\n")
             .write("src/other.rs", "needle\n");
@@ -489,7 +664,7 @@ mod tests {
 
     #[test]
     fn a_whole_word_literal_rejects_the_hits_buried_inside_longer_words() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project
             .write("bare.txt", "let value = 1")
             .write("prefixed.txt", "let revalue = 1")
@@ -504,7 +679,7 @@ mod tests {
 
     #[test]
     fn a_whole_word_literal_with_no_word_edge_still_matches() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project
             .write("arrow.rs", "fn f() -> T")
             .write("plain.rs", "let a - b = 1");
@@ -514,7 +689,7 @@ mod tests {
 
     #[test]
     fn a_whole_word_literal_bounds_only_the_end_that_is_a_word() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project
             .write("bare.txt", "call .value here")
             .write("glued.txt", "call .valuegram here");
@@ -527,7 +702,7 @@ mod tests {
 
     #[test]
     fn a_whole_word_regex_bounds_the_whole_alternation() {
-        let project = Project::new();
+        let mut project = SearchFixture::new();
         project
             .write("bare.txt", "one two")
             .write("glued.txt", "oneself twofold");
