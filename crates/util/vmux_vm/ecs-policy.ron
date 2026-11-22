@@ -83,11 +83,6 @@ shape: (
   debt: [
   ],
   enums: [
-    (key: "crates/util/vmux_vm/src/batch.rs||enum:Stage", fingerprint: "8a9b0a34568437c7", role: Phase, owner: "crates/util/vmux_vm/src/batch.rs||struct:Scope", reason: "Required stage of one canonical Docker dependency-start batch; registered systems ingest, resolve, order and execute its selected starts."),
-    (key: "crates/util/vmux_vm/src/connection.rs||enum:Stage", fingerprint: "e37fddaa69ccc64d", role: Phase, owner: "crates/util/vmux_vm/src/connection.rs||struct:Connection", reason: "One engine connection progresses through transport, forwarding, Docker readiness and steady port observation; each stage has a concrete task result."),
-    (key: "crates/util/vmux_vm/src/docker.rs||enum:Condition", fingerprint: "db2d6701d466fa13", role: Scalar, owner: "crates/util/vmux_vm/src/batch.rs||struct:Links", reason: "Readiness predicate of a canonical Compose dependency edge, decoded from Docker labels and evaluated against current container observations."),
-    (key: "crates/util/vmux_vm/src/engine.rs||enum:EngineSet", fingerprint: "18d821830eb10de5", role: Boundary, owner: "crates/util/vmux_vm/src/engine.rs||struct:EnginePlugin", reason: "Bevy schedule labels install the native engine preparation, control, launch, connection, observation and retirement order."),
-    (key: "crates/util/vmux_vm/src/engine.rs||enum:Phase", fingerprint: "6fd7ff24c81373fc", role: Phase, owner: "crates/util/vmux_vm/src/engine.rs||struct:Engine", reason: "Required canonical lifecycle state of one leased native engine; persisted State and Status are read-only external observations."),
   ],
   bodies: [
   ],

@@ -69,13 +69,6 @@ shape: (
   debt: [
   ],
   enums: [
-    (key: "crates/feature/vmux_container/src/control.rs||enum:ControlSet", fingerprint: "617f6b46ba618759", role: Boundary, owner: "crates/feature/vmux_container/src/control.rs||struct:ControlPlugin", reason: "Bevy scheduling label for completing concrete typed control tasks before host inspection and projection."),
-    (key: "crates/feature/vmux_container/src/control.rs||enum:Ownership", fingerprint: "24a3b564d3138505", role: Scalar, owner: "crates/feature/vmux_container/src/control.rs||struct:Start", reason: "Ownership scope of one typed VM startup request; independent CLI startup is not cancelled by GUI lifetime."),
-    (key: "crates/feature/vmux_container/src/event.rs||enum:ContainerChangeOperation", fingerprint: "89d530d6f4d14a88", role: UiEncoder, owner: "crates/feature/vmux_container/src/ui.rs||struct:Controls", reason: "UI encoder generates distinct start, stop, restart and remove events carrying selected IDs; host observers receive each concrete event and never execute this enum."),
-    (key: "crates/feature/vmux_container/src/host.rs||enum:ContainerSet", fingerprint: "9b826934632ce953", role: Boundary, owner: "crates/feature/vmux_container/src/host.rs||impl:Plugin for ContainerPlugin", reason: "Bevy schedule labels order engine inspection, canonical inventory and one-way page projection."),
-    (key: "crates/feature/vmux_container/src/inventory.rs||enum:Origin", fingerprint: "17cc798da0be9c18", role: Scalar, owner: "crates/feature/vmux_container/src/inventory.rs||struct:SnapshotTask", reason: "Source tag for one bounded inventory read; canonical inventory adoption distinguishes cache restore from authoritative daemon observation."),
-    (key: "crates/feature/vmux_container/src/ui.rs||enum:Intent", fingerprint: "5a62fd3bb84a4ce4", role: Boundary, owner: "crates/feature/vmux_container/src/ui.rs||struct:Controls", reason: "Mounted DOM callback encoding and one pending immutable display echo; send translates to concrete typed UI events and host ECS alone authorizes mutation."),
-    (key: "crates/feature/vmux_container/src/ui.rs||enum:Level", fingerprint: "56ea5bc75a4a7dfb", role: Boundary, owner: "crates/feature/vmux_container/src/ui.rs||fn:Page", reason: "Three-level mounted page navigation presentation derived from the canonical address projection and encoded as address intent."),
   ],
   bodies: [
   ],
