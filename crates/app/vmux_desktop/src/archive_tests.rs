@@ -334,6 +334,7 @@ fn deliver(event: On<BinHostEmitEvent>) {
 fn archive_reopen_preserves_unsaved_text_selection_and_undo() {
     let mut fixture = ArchiveEditorFixture::new();
     let view = fixture.ready();
+    let initial = fixture.text(view).unwrap();
     fixture.edit(view);
     let edited = fixture.text(view).unwrap();
     assert!(edited.starts_with("original\noriginal\n"));
@@ -370,9 +371,7 @@ fn archive_reopen_preserves_unsaved_text_selection_and_undo() {
     );
     fixture.key(reopened, "Escape");
     fixture.key(reopened, "u");
-    let undone = fixture.text(reopened).unwrap();
-    assert!(undone.starts_with("original\n"));
-    assert!(!undone.starts_with("original\noriginal\n"));
+    assert_eq!(fixture.text(reopened).unwrap(), initial);
     assert_eq!(
         std::fs::read_to_string(fixture.directory.path().join("archive.txt")).unwrap(),
         "original\n"

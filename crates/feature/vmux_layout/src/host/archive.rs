@@ -2737,4 +2737,215 @@ mod tests {
         );
         assert_eq!(app.drain_opens().len(), 1);
     }
+
+    #[test]
+    fn reopen_reconstructs_collapsed_outer_split_around_surviving_split() {
+        let mut app = Fixture::closing();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let outer = app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(PaneSplitDirection::Row),
+                PaneId("outer".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let pane_a = app
+            .world_mut()
+            .spawn((Pane::bundle(), PaneId("pane-a".to_string()), ChildOf(outer)))
+            .id();
+        let stack_a = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://a.example".to_string(),
+                    ..default()
+                },
+                ChildOf(pane_a),
+            ))
+            .id();
+        let inner = app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(PaneSplitDirection::Column),
+                PaneId("inner".to_string()),
+                ChildOf(outer),
+            ))
+            .id();
+        let pane_b = app
+            .world_mut()
+            .spawn((Pane::bundle(), PaneId("pane-b".to_string()), ChildOf(inner)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://b.example".to_string(),
+                ..default()
+            },
+            ChildOf(pane_b),
+        ));
+        let pane_c = app
+            .world_mut()
+            .spawn((Pane::bundle(), PaneId("pane-c".to_string()), ChildOf(inner)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://c.example".to_string(),
+                ..default()
+            },
+            ChildOf(pane_c),
+        ));
+
+        app.world_mut()
+            .write_message(CloseStackRequest::by_user(stack_a));
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PaneSplit>(outer).unwrap().direction,
+            PaneSplitDirection::Column
+        );
+        let collapsed: Vec<Entity> = app
+            .world()
+            .get::<Children>(outer)
+            .unwrap()
+            .iter()
+            .filter(|&entity| app.world().get::<Pane>(entity).is_some())
+            .collect();
+        assert_eq!(collapsed, vec![pane_b, pane_c]);
+
+        app.dispatch_reopen();
+
+        assert_eq!(
+            app.world().get::<PaneSplit>(outer).unwrap().direction,
+            PaneSplitDirection::Row
+        );
+        let restored: Vec<Entity> = app
+            .world()
+            .get::<Children>(outer)
+            .unwrap()
+            .iter()
+            .filter(|&entity| app.world().get::<Pane>(entity).is_some())
+            .collect();
+        assert_eq!(restored.len(), 2);
+        assert_eq!(app.world().get::<PaneId>(restored[0]).unwrap().0, "pane-a");
+        assert!(app.world().get::<PaneSplit>(restored[0]).is_none());
+        let surviving_split = restored[1];
+        assert_eq!(
+            app.world()
+                .get::<PaneSplit>(surviving_split)
+                .unwrap()
+                .direction,
+            PaneSplitDirection::Column
+        );
+        let surviving_children: Vec<Entity> = app
+            .world()
+            .get::<Children>(surviving_split)
+            .unwrap()
+            .iter()
+            .filter(|&entity| app.world().get::<Pane>(entity).is_some())
+            .collect();
+        assert_eq!(surviving_children, vec![pane_b, pane_c]);
+        assert_eq!(app.drain_opens().len(), 1);
+    }
+
+    #[test]
+    fn reopen_inserts_directly_into_uncollapsed_three_pane_split() {
+        let mut app = Fixture::closing();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let outer = app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(PaneSplitDirection::Row),
+                PaneId("outer".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let pane_a = app
+            .world_mut()
+            .spawn((Pane::bundle(), PaneId("pane-a".to_string()), ChildOf(outer)))
+            .id();
+        let stack_a = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://a.example".to_string(),
+                    ..default()
+                },
+                ChildOf(pane_a),
+            ))
+            .id();
+        let pane_b = app
+            .world_mut()
+            .spawn((Pane::bundle(), PaneId("pane-b".to_string()), ChildOf(outer)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://b.example".to_string(),
+                ..default()
+            },
+            ChildOf(pane_b),
+        ));
+        let pane_c = app
+            .world_mut()
+            .spawn((Pane::bundle(), PaneId("pane-c".to_string()), ChildOf(outer)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://c.example".to_string(),
+                ..default()
+            },
+            ChildOf(pane_c),
+        ));
+
+        app.world_mut()
+            .write_message(CloseStackRequest::by_user(stack_a));
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PaneSplit>(outer).unwrap().direction,
+            PaneSplitDirection::Row
+        );
+        let surviving: Vec<Entity> = app
+            .world()
+            .get::<Children>(outer)
+            .unwrap()
+            .iter()
+            .filter(|&entity| app.world().get::<Pane>(entity).is_some())
+            .collect();
+        assert_eq!(surviving, vec![pane_b, pane_c]);
+
+        app.dispatch_reopen();
+
+        assert_eq!(
+            app.world().get::<PaneSplit>(outer).unwrap().direction,
+            PaneSplitDirection::Row
+        );
+        let restored: Vec<Entity> = app
+            .world()
+            .get::<Children>(outer)
+            .unwrap()
+            .iter()
+            .filter(|&entity| app.world().get::<Pane>(entity).is_some())
+            .collect();
+        assert_eq!(restored.len(), 3);
+        assert_eq!(app.world().get::<PaneId>(restored[0]).unwrap().0, "pane-a");
+        assert_eq!(restored[1], pane_b);
+        assert_eq!(restored[2], pane_c);
+        assert_eq!(app.drain_opens().len(), 1);
+    }
 }
