@@ -67,6 +67,35 @@ fn fixture_registration_refuses_fake_framework_and_unowned_nested_state() {
 }
 
 #[test]
+fn test_implementations_keep_fixture_registration_on_the_production_plugin() {
+    for production_owner in [true, false] {
+        let production = match production_owner {
+            true => "fn read(state: Query<&State>) {}",
+            false => "",
+        };
+        let register = match production_owner {
+            true => "app.add_systems(Update, read);",
+            false => "",
+        };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; {production} #[cfg(test)] #[derive(Resource)] struct NativeInput(u32); #[cfg(test)] fn receive(input: Res<NativeInput>, state: Query<&State>) {{}} struct OwnerPlugin; #[cfg(not(test))] impl Plugin for OwnerPlugin {{ fn build(&self, app: &mut App) {{ {register} }} }} #[cfg(test)] impl Plugin for OwnerPlugin {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, receive); }} }}"
+        ));
+        let input = &inventory.entries[&inventory.key("struct:NativeInput")];
+        let state = &inventory.entries[&inventory.key("struct:State")];
+        let callback = &inventory.entries[&inventory.key("fn:receive")];
+        assert!(inventory.canonical(input, &Policy::default(), &mut BTreeSet::new()));
+        assert_eq!(
+            inventory.canonical(state, &Policy::default(), &mut BTreeSet::new()),
+            production_owner
+        );
+        assert_eq!(
+            inventory.canonical(callback, &Policy::default(), &mut BTreeSet::new()),
+            production_owner
+        );
+    }
+}
+
+#[test]
 fn fixture_boundary_edges_remain_scoped_to_the_test_world() {
     let inventory = Inventory::fixture(
         "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Component,Query}; #[derive(Component)] struct State; fn read(state:Query<&State>){} struct ProducerPlugin; impl Plugin for ProducerPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}} struct Adapter { input:tests::NativeInput } #[cfg(test)] mod tests { use super::State; use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::{Resource,Res,Query}; #[derive(Resource)] pub struct NativeInput(u32); fn receive(input:Res<NativeInput>,state:Query<&State>){} pub struct ReceiverPlugin; impl Plugin for ReceiverPlugin{fn build(&self,app:&mut App){app.add_systems(Update,receive);}} }",
