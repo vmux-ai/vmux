@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarUiState, CommandBarWorkspaceSelection, StartGoToBranch, StartSelectWorkspace,
@@ -27,8 +28,11 @@ impl bevy::app::Plugin for WorkspacePlugin {
             app.add_plugins(CheckoutPlugin);
         }
         app.init_resource::<ManagedWorktreeRoot>()
+            .init_resource::<vmux_git::GitRuntime>()
             .add_plugins(UiEventPlugin::<(StartSelectWorkspace, StartGoToBranch)>::default())
             .add_observer(select)
+            .add_observer(folder_picked)
+            .add_observer(initialize_git)
             .add_observer(pick)
             .add_observer(apply)
             .add_observer(project_selection)
@@ -36,7 +40,15 @@ impl bevy::app::Plugin for WorkspacePlugin {
             .add_systems(Update, (pin, release).in_set(Binding))
             .add_systems(
                 Update,
-                (retire, finish, commit, failed, finish_pickers)
+                (
+                    retire,
+                    finish,
+                    commit,
+                    failed,
+                    finish_pickers,
+                    finish_initialize_prompts,
+                    finish_initialize_git,
+                )
                     .chain()
                     .before(Binding),
             );
@@ -49,10 +61,56 @@ pub(crate) struct Binding;
 #[derive(Component)]
 struct Pinned;
 
+#[derive(Component, Default)]
+struct PickerRevision(u64);
+
+impl PickerRevision {
+    fn next(current: Option<&Self>) -> u64 {
+        current.map_or(1, |revision| revision.0.wrapping_add(1).max(1))
+    }
+
+    fn matches(&self, revision: u64) -> bool {
+        self.0 == revision
+    }
+}
+
 #[derive(Component)]
 struct Picker {
     webview: Entity,
-    task: Task<Option<(PathBuf, bool)>>,
+    revision: u64,
+    task: Task<Option<PathBuf>>,
+}
+
+#[derive(Component)]
+struct InitializePrompt {
+    webview: Entity,
+    revision: u64,
+    path: PathBuf,
+    task: Task<bool>,
+}
+
+#[derive(Component)]
+struct InitializeGitTask {
+    webview: Entity,
+    revision: u64,
+    path: PathBuf,
+    task: vmux_git::GitTask<Result<(), String>>,
+}
+
+#[derive(EntityEvent)]
+struct FolderPicked {
+    #[event_target]
+    webview: Entity,
+    revision: u64,
+    path: PathBuf,
+}
+
+#[derive(EntityEvent)]
+struct InitializeGitRequested {
+    #[event_target]
+    webview: Entity,
+    revision: u64,
+    path: PathBuf,
 }
 
 #[derive(Component)]
@@ -170,6 +228,7 @@ fn release(
             }
             commands.entity(webview).remove::<(
                 Pinned,
+                PickerRevision,
                 CommandBarWorkDirectory,
                 Selection,
                 WorkspaceSelectionState,
@@ -181,7 +240,14 @@ fn release(
 
 fn pick(
     trigger: On<UiInput<StartGoToBranch>>,
-    pages: Query<(&PageMetadata, Option<&CheckoutTargetRevision>), With<HostsLauncher>>,
+    pages: Query<
+        (
+            &PageMetadata,
+            Option<&CheckoutTargetRevision>,
+            Option<&PickerRevision>,
+        ),
+        With<HostsLauncher>,
+    >,
     selections: Query<&Selection>,
     root: Res<ManagedWorktreeRoot>,
     mut requests: MessageWriter<SelectBranchCheckout>,
@@ -189,10 +255,10 @@ fn pick(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !pages
-        .get(webview)
-        .is_ok_and(|(page, _)| page.url.starts_with(crate::StartPlugin::url()))
-    {
+    let Ok((page, checkout_revision, picker_revision)) = pages.get(webview) else {
+        return;
+    };
+    if !page.url.starts_with(crate::StartPlugin::url()) {
         return;
     }
     let request = &trigger.event().payload;
@@ -202,11 +268,8 @@ fn pick(
                 operation: selection.operation,
             });
         }
-        let revision = pages
-            .get(webview)
-            .ok()
-            .and_then(|(_, revision)| revision)
-            .map_or(1, |revision| revision.0.wrapping_add(1).max(1));
+        let revision = checkout_revision.map_or(1, |revision| revision.0.wrapping_add(1).max(1));
+        let next_picker = PickerRevision::next(picker_revision);
         let operation = commands
             .spawn((
                 Name::new("Launcher branch selection"),
@@ -222,6 +285,7 @@ fn pick(
             .insert((
                 Selection { operation },
                 CheckoutTargetRevision(revision),
+                PickerRevision(next_picker),
                 WorkspaceSelectionState::Pending,
             ))
             .remove::<Applied>();
@@ -246,16 +310,16 @@ fn pick(
 
 fn apply(
     trigger: On<Chosen>,
-    pages: Query<&PageMetadata, With<HostsLauncher>>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
     selections: Query<&Selection>,
     mut cancels: MessageWriter<CancelCheckout>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
-    if !pages
-        .get(request.webview)
-        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::url()))
-    {
+    let Ok((page, picker_revision)) = pages.get(request.webview) else {
+        return;
+    };
+    if !page.url.starts_with(crate::StartPlugin::url()) {
         return;
     }
     if let Ok(selection) = selections.get(request.webview) {
@@ -263,7 +327,11 @@ fn apply(
             operation: selection.operation,
         });
     }
-    commands.entity(request.webview).remove::<Applied>();
+    let next_picker = PickerRevision::next(picker_revision);
+    commands
+        .entity(request.webview)
+        .insert(PickerRevision(next_picker))
+        .remove::<Applied>();
     match request.path.canonicalize() {
         Ok(path) if path.is_dir() => {
             commands
@@ -411,20 +479,31 @@ fn failed(
 
 fn select(
     trigger: On<UiInput<StartSelectWorkspace>>,
-    pages: Query<&PageMetadata, With<HostsLauncher>>,
-    pending: Query<&Picker>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
+    pending_pickers: Query<&Picker>,
+    pending_prompts: Query<&InitializePrompt>,
+    pending_inits: Query<&InitializeGitTask>,
     projects: vmux_ecs::profile::Projects,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !pages
-        .get(webview)
-        .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::url()))
-        || pending.iter().any(|picker| picker.webview == webview)
+    let Ok((page, current_revision)) = pages.get(webview) else {
+        return;
+    };
+    if !page.url.starts_with(crate::StartPlugin::url())
+        || pending_pickers
+            .iter()
+            .any(|picker| picker.webview == webview)
+        || pending_prompts
+            .iter()
+            .any(|prompt| prompt.webview == webview)
+        || pending_inits.iter().any(|task| task.webview == webview)
     {
         return;
     }
+    let revision = PickerRevision::next(current_revision);
+    commands.entity(webview).insert(PickerRevision(revision));
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let initial_dir = projects
         .path()
@@ -445,43 +524,214 @@ fn select(
             .pick_folder()
             .await
             .map(|handle| handle.path().to_path_buf());
-        let result = if let Some(path) = selected {
-            let initialize_git = !path.join(".git").exists()
-                && matches!(
-                    rfd::AsyncMessageDialog::new()
-                        .set_title(translate("space-initialize-git-question"))
-                        .set_description(translate("project-import-not-repository"))
-                        .set_buttons(rfd::MessageButtons::YesNo)
-                        .show()
-                        .await,
-                    rfd::MessageDialogResult::Yes
-                );
-            Some((path, initialize_git))
-        } else {
-            None
-        };
         if let Some(wake) = wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
         }
-        result
+        selected
     });
-    commands.spawn(Picker { webview, task });
+    commands.spawn(Picker {
+        webview,
+        revision,
+        task,
+    });
 }
 
-fn finish_pickers(mut pending: Query<(Entity, &mut Picker)>, mut commands: Commands) {
+fn finish_pickers(
+    mut pending: Query<(Entity, &mut Picker)>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
+    mut commands: Commands,
+) {
     for (entity, mut picker) in &mut pending {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
         };
         commands.entity(entity).despawn();
-        if let Some((path, initialize_git)) = selected {
-            if initialize_git {
-                let _ = vmux_git::worktree::CheckoutInfo::initialize(&path);
-            }
-            commands.trigger(Chosen {
-                webview: picker.webview,
-                path,
+        let Some(path) = selected else {
+            continue;
+        };
+        let valid = pages.get(picker.webview).is_ok_and(|(page, current)| {
+            page.url.starts_with(crate::StartPlugin::url())
+                && current.is_some_and(|current| current.matches(picker.revision))
+        });
+        if !valid {
+            continue;
+        }
+        commands.trigger(FolderPicked {
+            webview: picker.webview,
+            revision: picker.revision,
+            path,
+        });
+    }
+}
+
+fn folder_picked(
+    trigger: On<FolderPicked>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let valid = pages.get(event.webview).is_ok_and(|(page, current)| {
+        page.url.starts_with(crate::StartPlugin::url())
+            && current.is_some_and(|current| current.matches(event.revision))
+    });
+    if !valid {
+        return;
+    }
+    let Ok(path) = event.path.canonicalize() else {
+        commands
+            .entity(event.webview)
+            .insert(WorkspaceSelectionState::Failed(translate(
+                "project-directory-unavailable",
+            )));
+        return;
+    };
+    if !path.is_dir() {
+        commands
+            .entity(event.webview)
+            .insert(WorkspaceSelectionState::Failed(translate(
+                "project-directory-unavailable",
+            )));
+        return;
+    }
+    if path.join(".git").exists() {
+        commands.trigger(Chosen {
+            webview: event.webview,
+            path,
+        });
+        return;
+    }
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let confirmed = matches!(
+            rfd::AsyncMessageDialog::new()
+                .set_title(translate("space-initialize-git-question"))
+                .set_description(translate("project-import-not-repository"))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+                .await,
+            rfd::MessageDialogResult::Yes
+        );
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        confirmed
+    });
+    commands.spawn(InitializePrompt {
+        webview: event.webview,
+        revision: event.revision,
+        path,
+        task,
+    });
+}
+
+fn finish_initialize_prompts(
+    mut pending: Query<(Entity, &mut InitializePrompt)>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
+    mut commands: Commands,
+) {
+    for (entity, mut prompt) in &mut pending {
+        let Some(confirmed) = future::block_on(future::poll_once(&mut prompt.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        let valid = pages.get(prompt.webview).is_ok_and(|(page, current)| {
+            page.url.starts_with(crate::StartPlugin::url())
+                && current.is_some_and(|current| current.matches(prompt.revision))
+        });
+        if !valid {
+            continue;
+        }
+        if confirmed {
+            commands.trigger(InitializeGitRequested {
+                webview: prompt.webview,
+                revision: prompt.revision,
+                path: prompt.path.clone(),
             });
+        } else {
+            commands.trigger(Chosen {
+                webview: prompt.webview,
+                path: prompt.path.clone(),
+            });
+        }
+    }
+}
+
+fn initialize_git(
+    trigger: On<InitializeGitRequested>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
+    runtime: Res<vmux_git::GitRuntime>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let valid = pages.get(event.webview).is_ok_and(|(page, current)| {
+        page.url.starts_with(crate::StartPlugin::url())
+            && current.is_some_and(|current| current.matches(event.revision))
+    });
+    if !valid {
+        return;
+    }
+    let path = event.path.clone();
+    let init_path = path.clone();
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let Some(task) = runtime.spawn_operation(wake, move || {
+        vmux_git::worktree::CheckoutInfo::initialize(&init_path)
+            .map(|_| ())
+            .map_err(|error| error.0)
+    }) else {
+        commands
+            .entity(event.webview)
+            .insert(WorkspaceSelectionState::Failed(
+                "git operation queue is full".to_string(),
+            ));
+        return;
+    };
+    commands
+        .entity(event.webview)
+        .insert(WorkspaceSelectionState::Pending);
+    commands.spawn(InitializeGitTask {
+        webview: event.webview,
+        revision: event.revision,
+        path,
+        task,
+    });
+}
+
+fn finish_initialize_git(
+    mut pending: Query<(Entity, &mut InitializeGitTask)>,
+    pages: Query<(&PageMetadata, Option<&PickerRevision>), With<HostsLauncher>>,
+    mut commands: Commands,
+) {
+    for (entity, mut init) in &mut pending {
+        let Some(result) = init.task.poll() else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        let valid = pages.get(init.webview).is_ok_and(|(page, current)| {
+            page.url.starts_with(crate::StartPlugin::url())
+                && current.is_some_and(|current| current.matches(init.revision))
+        });
+        if !valid {
+            continue;
+        }
+        match result {
+            Ok(Ok(())) => commands.trigger(Chosen {
+                webview: init.webview,
+                path: init.path.clone(),
+            }),
+            Ok(Err(error)) => {
+                commands
+                    .entity(init.webview)
+                    .insert(WorkspaceSelectionState::Failed(error));
+            }
+            Err(_) => {
+                commands
+                    .entity(init.webview)
+                    .insert(WorkspaceSelectionState::Failed(
+                        "git initialization worker failed".to_string(),
+                    ));
+            }
         }
     }
 }
@@ -937,5 +1187,213 @@ mod tests {
                 .entity(page)
                 .contains::<moonshine_save::prelude::Save>()
         );
+    }
+
+    #[test]
+    fn folder_picked_refuses_stale_and_navigated_pages_without_mutating_workspace() {
+        let mut composers = Composers::new();
+        composers.app.update();
+        let uninitialized = tempfile::tempdir().unwrap();
+        composers
+            .app
+            .world_mut()
+            .entity_mut(composers.first)
+            .insert(PickerRevision(2));
+
+        composers.app.world_mut().trigger(FolderPicked {
+            webview: composers.first,
+            revision: 1,
+            path: uninitialized.path().to_path_buf(),
+        });
+        composers.app.update();
+        assert_eq!(
+            composers
+                .app
+                .world_mut()
+                .query::<&InitializePrompt>()
+                .iter(composers.app.world())
+                .count(),
+            0
+        );
+        assert_eq!(composers.cwd(composers.first), composers.original.path());
+        assert!(!uninitialized.path().join(".git").exists());
+
+        composers
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(composers.first)
+            .unwrap()
+            .url = "vmux://sessions/other".into();
+        composers.app.world_mut().trigger(FolderPicked {
+            webview: composers.first,
+            revision: 2,
+            path: uninitialized.path().to_path_buf(),
+        });
+        composers.app.update();
+        assert_eq!(
+            composers
+                .app
+                .world_mut()
+                .query::<&InitializePrompt>()
+                .iter(composers.app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn confirmed_git_initialization_runs_asynchronously_and_selects_directory() {
+        let mut composers = Composers::new();
+        composers.app.update();
+        let target = tempfile::tempdir().unwrap();
+        composers
+            .app
+            .world_mut()
+            .entity_mut(composers.first)
+            .insert(PickerRevision(1));
+
+        composers.app.world_mut().trigger(InitializeGitRequested {
+            webview: composers.first,
+            revision: 1,
+            path: target.path().to_path_buf(),
+        });
+        composers.app.world_mut().flush();
+        assert_eq!(
+            composers
+                .app
+                .world_mut()
+                .query::<&InitializeGitTask>()
+                .iter(composers.app.world())
+                .count(),
+            1
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while composers
+            .app
+            .world_mut()
+            .query::<&InitializeGitTask>()
+            .iter(composers.app.world())
+            .count()
+            > 0
+        {
+            composers.app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "async git initialization never completed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        composers.app.update();
+
+        assert!(target.path().join(".git").exists());
+        assert_eq!(
+            composers.cwd(composers.first),
+            target.path().canonicalize().unwrap()
+        );
+        let published = &composers.app.world().resource::<Published>().0;
+        assert!(!published.pending);
+        assert!(published.error.is_empty(), "{}", published.error);
+    }
+
+    #[test]
+    fn superseded_git_initialization_drains_without_overwriting_newer_selection() {
+        let mut composers = Composers::new();
+        composers.app.update();
+        let stale = tempfile::tempdir().unwrap();
+        let newer = composers.other.path().to_path_buf();
+        composers
+            .app
+            .world_mut()
+            .entity_mut(composers.first)
+            .insert(PickerRevision(1));
+
+        composers.app.world_mut().trigger(InitializeGitRequested {
+            webview: composers.first,
+            revision: 1,
+            path: stale.path().to_path_buf(),
+        });
+        composers.app.world_mut().flush();
+        assert_eq!(
+            composers
+                .app
+                .world_mut()
+                .query::<&InitializeGitTask>()
+                .iter(composers.app.world())
+                .count(),
+            1
+        );
+        composers.choose(composers.first, &newer);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while composers
+            .app
+            .world_mut()
+            .query::<&InitializeGitTask>()
+            .iter(composers.app.world())
+            .count()
+            > 0
+        {
+            composers.app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "superseded git initialization task never drained"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        composers.app.update();
+
+        assert_eq!(
+            composers.cwd(composers.first),
+            newer.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn failed_git_initialization_surfaces_error_without_selecting_directory() {
+        let mut composers = Composers::new();
+        composers.app.update();
+        let missing = composers.other.path().join("missing-directory");
+        composers
+            .app
+            .world_mut()
+            .entity_mut(composers.first)
+            .insert(PickerRevision(1));
+
+        composers.app.world_mut().trigger(InitializeGitRequested {
+            webview: composers.first,
+            revision: 1,
+            path: missing,
+        });
+        composers.app.world_mut().flush();
+        assert_eq!(
+            composers
+                .app
+                .world_mut()
+                .query::<&InitializeGitTask>()
+                .iter(composers.app.world())
+                .count(),
+            1
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while composers
+            .app
+            .world_mut()
+            .query::<&InitializeGitTask>()
+            .iter(composers.app.world())
+            .count()
+            > 0
+        {
+            composers.app.update();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "failed git initialization task never settled"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        composers.app.update();
+
+        let published = &composers.app.world().resource::<Published>().0;
+        assert!(!published.pending);
+        assert!(!published.error.is_empty());
+        assert_eq!(composers.cwd(composers.first), composers.original.path());
     }
 }
