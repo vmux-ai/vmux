@@ -535,7 +535,7 @@ jobs:
       - uses: ./.github/actions/report-compiler-cache
         if: always() && env.VMUX_CI_COMPILER_CACHE_READY == '1'
         with:
-          name: ${{ github.job }}
+          name: ${{ github.job }}-${{ matrix.os }}
 
   lint:
     name: Lint
