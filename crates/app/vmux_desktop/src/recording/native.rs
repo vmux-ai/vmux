@@ -1,5 +1,7 @@
 use bevy::prelude::*;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
+#[cfg(any(target_os = "macos", test))]
+use crossbeam_channel::Sender;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -22,12 +24,19 @@ impl CapturePorts {
         let backend: Arc<dyn OpenCapture> = Arc::new(super::macos::Backend);
         #[cfg(not(target_os = "macos"))]
         let backend: Arc<dyn OpenCapture> = Arc::new(Backend);
+        #[cfg(not(any(target_os = "macos", test)))]
+        {
+            drop(opened_tx);
+            drop(encoded_tx);
+        }
         Self {
             backend,
             opened,
             encoded,
             completion: Completion {
+                #[cfg(any(target_os = "macos", test))]
                 opened: opened_tx,
+                #[cfg(any(target_os = "macos", test))]
                 encoded: encoded_tx,
                 wake,
             },
@@ -85,12 +94,15 @@ pub(super) struct Encoded {
 
 #[derive(Clone)]
 pub(super) struct Completion {
+    #[cfg(any(target_os = "macos", test))]
     opened: Sender<Opened>,
+    #[cfg(any(target_os = "macos", test))]
     encoded: Sender<Encoded>,
     wake: Option<super::WakeFn>,
 }
 
 impl Completion {
+    #[cfg(any(target_os = "macos", test))]
     pub(super) fn opened(&self, receipt: Opened) {
         if let Err(error) = self.opened.send(receipt)
             && let Some(handle) = error.0.handle
@@ -100,6 +112,7 @@ impl Completion {
         self.wake();
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(super) fn encoded(&self, receipt: Encoded) {
         let _ = self.encoded.send(receipt);
         self.wake();
@@ -126,6 +139,7 @@ pub(super) trait CaptureControl: Send + Sync {
 pub(super) struct CaptureHandle(Arc<dyn CaptureControl>);
 
 impl CaptureHandle {
+    #[cfg(any(target_os = "macos", test))]
     pub(super) fn new(handle: Arc<dyn CaptureControl>) -> Self {
         Self(handle)
     }
