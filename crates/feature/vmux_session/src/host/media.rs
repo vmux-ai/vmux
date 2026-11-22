@@ -696,13 +696,78 @@ fn decode_media_query_path(value: &str) -> PathBuf {
 }
 
 fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    let Some((home, directory, filter)) = resolve_media_directory(&query) else {
         return ChatMediaEntries {
             request_id,
             query,
             entries: Vec::new(),
         };
     };
+    let mut entries = Vec::new();
+    if let Ok(read) = std::fs::read_dir(&directory) {
+        for entry in read.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.')
+                || (!filter.is_empty() && !name.to_ascii_lowercase().contains(&filter))
+            {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let is_dir = file_type.is_dir();
+            let mime_type = if is_dir {
+                String::new()
+            } else {
+                attachment_mime(&path)
+            };
+            if !is_dir
+                && !mime_type.starts_with("image/")
+                && !mime_type.starts_with("audio/")
+                && !mime_type.starts_with("video/")
+                && mime_type != "application/pdf"
+            {
+                continue;
+            }
+            let parent = path
+                .parent()
+                .and_then(|parent| parent.strip_prefix(&home).ok())
+                .map(|parent| {
+                    if parent.as_os_str().is_empty() {
+                        "~".to_string()
+                    } else {
+                        format!("~/{}", parent.to_string_lossy())
+                    }
+                })
+                .unwrap_or_else(|| "~".to_string());
+            entries.push(ChatMediaEntry {
+                path: path.to_string_lossy().into_owned(),
+                name,
+                parent,
+                mime_type,
+                is_dir,
+                preview_data_url: String::new(),
+            });
+        }
+    }
+    entries.sort_by(|a, b| {
+        b.is_dir.cmp(&a.is_dir).then_with(|| {
+            a.name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase())
+        })
+    });
+    entries.truncate(100);
+    ChatMediaEntries {
+        request_id,
+        query,
+        entries,
+    }
+}
+
+fn resolve_media_directory(query: &str) -> Option<(PathBuf, PathBuf, String)> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let candidate = if let Some(rest) = query.strip_prefix("file://") {
         decode_media_query_path(rest)
     } else if let Some(rest) = query.strip_prefix("~/") {
@@ -710,7 +775,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
     } else if query == "~" {
         home.clone()
     } else {
-        let path = decode_media_query_path(&query);
+        let path = decode_media_query_path(query);
         if path.is_absolute() {
             path
         } else {
@@ -733,88 +798,11 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
                 .to_ascii_lowercase(),
         )
     };
-    let Ok(home) = home.canonicalize() else {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    };
-    let Ok(directory) = directory.canonicalize() else {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    };
-    if !directory.starts_with(&home) {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    }
-    let mut entries = std::fs::read_dir(&directory)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.')
-                || (!filter.is_empty() && !name.to_ascii_lowercase().contains(&filter))
-            {
-                return None;
-            }
-            let is_dir = entry.file_type().ok()?.is_dir();
-            let mime_type = if is_dir {
-                String::new()
-            } else {
-                attachment_mime(&path)
-            };
-            if !is_dir
-                && !mime_type.starts_with("image/")
-                && !mime_type.starts_with("audio/")
-                && !mime_type.starts_with("video/")
-                && mime_type != "application/pdf"
-            {
-                return None;
-            }
-            let parent = path
-                .parent()
-                .and_then(|parent| parent.strip_prefix(&home).ok())
-                .map(|parent| {
-                    if parent.as_os_str().is_empty() {
-                        "~".to_string()
-                    } else {
-                        format!("~/{}", parent.to_string_lossy())
-                    }
-                })
-                .unwrap_or_else(|| "~".to_string());
-            Some(ChatMediaEntry {
-                path: path.to_string_lossy().into_owned(),
-                name,
-                parent,
-                mime_type,
-                is_dir,
-                preview_data_url: String::new(),
-            })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|a, b| {
-        b.is_dir.cmp(&a.is_dir).then_with(|| {
-            a.name
-                .to_ascii_lowercase()
-                .cmp(&b.name.to_ascii_lowercase())
-        })
-    });
-    entries.truncate(100);
-    ChatMediaEntries {
-        request_id,
-        query,
-        entries,
-    }
+    let home = home.canonicalize().ok()?;
+    let directory = directory.canonicalize().ok()?;
+    directory
+        .starts_with(&home)
+        .then_some((home, directory, filter))
 }
 
 fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
