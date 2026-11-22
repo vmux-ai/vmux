@@ -18,6 +18,7 @@ use crate::KeyboardOwner;
 use crate::page_driver::PageAssets;
 
 #[derive(Component, Clone, Debug, PartialEq)]
+#[require(crate::address::EffectRevision)]
 pub struct AddressContribution(pub vmux_api::address::PageAddress);
 
 #[derive(EntityEvent, Clone)]

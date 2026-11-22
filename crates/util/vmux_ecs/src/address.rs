@@ -6,7 +6,7 @@ use vmux_api::address::{
 };
 
 use crate::page::{AddressContribution, AddressIntentRequest, HostsPage, PageManifest};
-use crate::{PageMetadata, PageOpenRequest, PageOpenTarget, UiStatePlugin, UiStateWrite};
+use crate::{PageMetadata, PageOpenRequest, PageOpenTarget, Revision, UiStatePlugin, UiStateWrite};
 
 pub struct AddressPlugin;
 
@@ -17,7 +17,10 @@ impl Plugin for AddressPlugin {
             .add_plugins(UiEventPlugin::<(PageAddressPublish,)>::default())
             .add_observer(publish)
             .add_observer(activate)
-            .add_systems(PostUpdate, project.in_set(AddressProjectionSet));
+            .add_systems(
+                PostUpdate,
+                (retain, project).chain().in_set(AddressProjectionSet),
+            );
     }
 }
 
@@ -26,6 +29,9 @@ pub struct AddressProjectionSet;
 
 #[derive(Component)]
 struct RouteAddress(PageAddress);
+
+#[derive(Component, Default)]
+pub(crate) struct EffectRevision(Revision);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct AddressScope(vmux_api::RoutePattern<'static>);
@@ -59,7 +65,7 @@ type Sources<'w, 's> = Query<
     With<HostsPage>,
 >;
 
-fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands) {
+fn retain(pages: Sources, mut commands: Commands) {
     for (owner, metadata, current, automatic, scope) in &pages {
         if let Some(current) = current
             && current.0.url != metadata.url
@@ -115,6 +121,11 @@ fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands)
             ));
             continue;
         }
+    }
+}
+
+fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands) {
+    for (owner, metadata, current, automatic, _) in &pages {
         if let Some(current) = current
             && current.0.url == metadata.url
             && automatic.is_none_or(|automatic| automatic.0 != current.0)
@@ -143,7 +154,15 @@ fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands)
         let mut address = PageAddress {
             owner: owner.to_bits(),
             url: metadata.url.clone(),
-            current: RouteLabel(route).option(),
+            current: AddressOption {
+                label: route.title.to_string(),
+                label_key: route.title_message_id.unwrap_or_default().to_string(),
+                icon: route.icon,
+                intent: Some(AddressIntent::Navigate {
+                    url: route.url.to_string(),
+                }),
+                ..Default::default()
+            },
             ..Default::default()
         };
         address.revision = current.map_or(1, |current| current.0.revision);
@@ -156,54 +175,6 @@ fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands)
         commands
             .entity(owner)
             .insert((RouteAddress(address.clone()), AddressContribution(address)));
-    }
-}
-
-pub struct RouteLabel<'a>(pub &'a PageManifest);
-
-impl RouteLabel<'_> {
-    pub fn option(&self) -> AddressOption {
-        AddressOption {
-            label: self.0.title.to_string(),
-            label_key: self.0.title_message_id.unwrap_or_default().to_string(),
-            icon: self.0.icon,
-            intent: Some(AddressIntent::Navigate {
-                url: self.0.url.to_string(),
-            }),
-            ..Default::default()
-        }
-    }
-}
-
-impl AddressContribution {
-    pub fn options(
-        entries: impl IntoIterator<Item = AddressOption>,
-        contextual: &[AddressOption],
-    ) -> Vec<AddressOption> {
-        let mut options = Vec::new();
-        for mut option in entries {
-            if let Some(AddressIntent::Navigate { url }) = &option.intent {
-                for candidate in contextual {
-                    let Some(AddressIntent::Navigate { url: target }) = &candidate.intent else {
-                        continue;
-                    };
-                    if vmux_api::RoutePattern::new(url, true).matches(target) {
-                        option = candidate.clone();
-                        break;
-                    }
-                }
-            }
-            options.push(option);
-        }
-        for candidate in contextual {
-            if !options
-                .iter()
-                .any(|option| option.intent == candidate.intent)
-            {
-                options.push(candidate.clone());
-            }
-        }
-        options
     }
 }
 
@@ -244,12 +215,11 @@ fn publish(
 
 fn activate(
     event: On<AddressIntentRequest>,
-    addresses: Query<&AddressContribution>,
+    mut addresses: Query<(&AddressContribution, &mut EffectRevision)>,
     parents: Query<&ChildOf>,
     mut commands: Commands,
-    mut sequence: Local<u64>,
 ) {
-    let Ok(address) = addresses.get(event.entity) else {
+    let Ok((address, mut sequence)) = addresses.get_mut(event.entity) else {
         return;
     };
     if address.0.revision != event.revision || address.0.url != event.url {
@@ -264,12 +234,12 @@ fn activate(
             });
         }
     } else {
-        *sequence = sequence.saturating_add(1);
+        sequence.0 = sequence.0.saturating_next();
         commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
             event.entity,
             &PageAddressUiStatePatch {
                 effect: Some(AddressEffect {
-                    revision: *sequence,
+                    revision: sequence.0.0,
                     owner: event.entity.to_bits(),
                     url: event.url.clone(),
                     address_revision: event.revision,
@@ -578,6 +548,7 @@ mod tests {
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].0, trail.page);
         assert_eq!(effects[0].1.intent, intent);
+        assert_eq!(effects[0].1.revision, 1);
         assert!(effects[0].1.matches(&trail.address()));
         assert!(
             trail
@@ -589,40 +560,49 @@ mod tests {
     }
 
     #[test]
-    fn route_catalog_preserves_input_order_and_replaces_contextual_destinations() {
-        let entries = vec![
-            AddressOption {
-                label: "Start".into(),
-                label_key: "start-title".into(),
-                intent: Some(AddressIntent::Navigate {
-                    url: "vmux://start/".into(),
-                }),
-                ..Default::default()
-            },
-            AddressOption {
-                label: "Git".into(),
-                intent: Some(AddressIntent::Navigate {
-                    url: "git://".into(),
-                }),
-                ..Default::default()
-            },
-        ];
-        let contextual = AddressOption {
-            label: "Repository".into(),
-            intent: Some(AddressIntent::Navigate {
-                url: "git:///repo".into(),
-            }),
-            ..Default::default()
-        };
-        let options = AddressContribution::options(entries, std::slice::from_ref(&contextual));
-        assert_eq!(
-            options
-                .iter()
-                .map(|option| option.label.as_str())
-                .collect::<Vec<_>>(),
-            ["Start", "Repository"]
+    fn effects_keep_page_local_order_across_contribution_replacement() {
+        let mut trail = Trail::new();
+        trail.publish("vmux://projects/one", "One");
+        let first = trail.page;
+        let revision = trail.address().revision;
+        for id in ["one", "two"] {
+            trail.select(
+                revision,
+                "vmux://projects/one",
+                AddressIntent::Section { id: id.into() },
+            );
+        }
+        let second = trail
+            .app
+            .world_mut()
+            .spawn((
+                HostsPage,
+                ChildOf(trail.stack),
+                PageMetadata {
+                    url: "vmux://projects/two".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        trail.page = second;
+        trail.publish("vmux://projects/two", "Two");
+        trail.select(
+            trail.address().revision,
+            "vmux://projects/two",
+            AddressIntent::Section { id: "other".into() },
         );
-        assert_eq!(options[0].label_key, "start-title");
-        assert_eq!(options[1], contextual);
+        trail.page = first;
+        trail.publish("vmux://projects/one", "Renamed");
+        trail.select(
+            trail.address().revision,
+            "vmux://projects/one",
+            AddressIntent::Section { id: "three".into() },
+        );
+        let effects = &trail.app.world().resource::<Effects>().0;
+        let delivered: Vec<_> = effects
+            .iter()
+            .map(|(owner, effect)| (*owner, effect.revision))
+            .collect();
+        assert_eq!(delivered, [(first, 1), (first, 2), (second, 1), (first, 3)]);
     }
 }

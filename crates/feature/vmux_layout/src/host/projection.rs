@@ -1030,6 +1030,85 @@ impl HeaderChanges<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+struct HeaderAddresses<'w, 's> {
+    pages: Query<'w, 's, (&'static AddressContribution, &'static PageMetadata)>,
+    routes: Query<'w, 's, &'static PageManifest>,
+    manifests: Query<'w, 's, &'static FeatureManifest>,
+}
+
+impl HeaderAddresses<'_, '_> {
+    fn current(&self, owner: Entity) -> Option<vmux_api::address::PageAddress> {
+        let (address, metadata) = self.pages.get(owner).ok()?;
+        if address.0.url != metadata.url {
+            return None;
+        }
+        let mut contribution = address.0.clone();
+        if contribution.current.label.is_empty() && contribution.current.label_key.is_empty() {
+            let mut route = None;
+            let mut specificity = None;
+            for candidate in &self.routes {
+                let pattern = vmux_api::RoutePattern::new(candidate.route, candidate.owns_subtree);
+                if !pattern.matches(&metadata.url) {
+                    continue;
+                }
+                let rank = pattern.specificity(&metadata.url);
+                if route.is_none() || rank >= specificity {
+                    route = Some(candidate);
+                    specificity = rank;
+                }
+            }
+            if let Some(route) = route {
+                contribution.current = vmux_api::address::AddressOption {
+                    label: route.title.to_string(),
+                    label_key: route.title_message_id.unwrap_or_default().to_string(),
+                    icon: route.icon,
+                    intent: Some(vmux_api::address::AddressIntent::Navigate {
+                        url: route.url.to_string(),
+                    }),
+                    ..Default::default()
+                };
+            }
+        }
+        if contribution.views.is_empty() {
+            contribution.views = self.options(&contribution.contextual);
+        }
+        Some(contribution)
+    }
+
+    fn options(
+        &self,
+        contextual: &[vmux_api::address::AddressOption],
+    ) -> Vec<vmux_api::address::AddressOption> {
+        let mut options = Vec::new();
+        for mut option in FeatureManifest::address_options(self.manifests.iter()) {
+            if let Some(vmux_api::address::AddressIntent::Navigate { url }) = &option.intent {
+                for candidate in contextual {
+                    let Some(vmux_api::address::AddressIntent::Navigate { url: target }) =
+                        &candidate.intent
+                    else {
+                        continue;
+                    };
+                    if vmux_api::RoutePattern::new(url, true).matches(target) {
+                        option = candidate.clone();
+                        break;
+                    }
+                }
+            }
+            options.push(option);
+        }
+        for candidate in contextual {
+            if !options
+                .iter()
+                .any(|option| option.intent == candidate.intent)
+            {
+                options.push(candidate.clone());
+            }
+        }
+        options
+    }
+}
+
 fn project_header(
     layouts: Query<
         (
@@ -1042,9 +1121,7 @@ fn project_header(
         ),
         With<LayoutCef>,
     >,
-    addresses: Query<(Entity, &AddressContribution, &PageMetadata)>,
-    routes: Query<&PageManifest>,
-    manifests: Query<&FeatureManifest>,
+    addresses: HeaderAddresses,
     mut changes: HeaderChanges,
     focus: crate::stack::FocusedStack,
     surfaces: StackSurface,
@@ -1086,35 +1163,11 @@ fn project_header(
             .map(|projection| &projection.0)
             .unwrap_or(&empty_team);
         let mut next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
-        for (owner, address, metadata) in &addresses {
-            if !scope.contains(entity, owner) {
-                continue;
-            }
-            if Some(owner) == active && address.0.url == metadata.url {
-                let mut contribution = address.0.clone();
-                if contribution.current.label.is_empty()
-                    && contribution.current.label_key.is_empty()
-                    && let Some(route) = routes
-                        .iter()
-                        .filter(|route| {
-                            vmux_api::RoutePattern::new(route.route, route.owns_subtree)
-                                .matches(&metadata.url)
-                        })
-                        .max_by_key(|route| {
-                            vmux_api::RoutePattern::new(route.route, route.owns_subtree)
-                                .specificity(&metadata.url)
-                        })
-                {
-                    contribution.current = vmux_ecs::address::RouteLabel(route).option();
-                }
-                if contribution.views.is_empty() {
-                    contribution.views = AddressContribution::options(
-                        FeatureManifest::address_options(manifests.iter()),
-                        &contribution.contextual,
-                    );
-                }
-                next.0.address = Some(contribution);
-            }
+        if let Some(owner) = active
+            && scope.contains(entity, owner)
+            && let Some(contribution) = addresses.current(owner)
+        {
+            next.0.address = Some(contribution);
         }
         if current != Some(&next) {
             commands.entity(entity).insert(next);
@@ -1647,6 +1700,58 @@ mod tests {
             .remove::<FeatureManifest>();
         pages.app.update();
         assert!(pages.address().unwrap().views.is_empty());
+    }
+
+    #[test]
+    fn header_choices_use_current_context_and_preserve_authored_views() {
+        let mut pages = HeaderPages::new();
+        pages.app.world_mut().spawn(FeatureManifest::parse(
+            r#"(pages: [
+                (url: "vmux://start/", title: "Start", title_message_id: "start-title", bookmark: Some(1)),
+                (url: "git://", title: "Git", bookmark: Some(2)),
+            ])"#,
+        ));
+        let repository = vmux_api::address::AddressOption {
+            label: "Repository".into(),
+            intent: Some(vmux_api::address::AddressIntent::Navigate {
+                url: "git:///repo".into(),
+            }),
+            ..Default::default()
+        };
+        let extra = vmux_api::address::AddressOption {
+            label: "History".into(),
+            intent: Some(vmux_api::address::AddressIntent::Navigate {
+                url: "vmux://history/".into(),
+            }),
+            ..Default::default()
+        };
+        pages
+            .app
+            .world_mut()
+            .get_mut::<AddressContribution>(pages.first)
+            .unwrap()
+            .0
+            .contextual = vec![repository.clone(), repository.clone(), extra.clone()];
+        pages.app.update();
+        let choices = &pages.address().unwrap().views;
+        assert_eq!(
+            choices
+                .iter()
+                .map(|option| option.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Start", "Repository", "History"]
+        );
+        assert_eq!(choices[0].label_key, "start-title");
+        assert_eq!(choices[1], repository);
+        pages
+            .app
+            .world_mut()
+            .get_mut::<AddressContribution>(pages.first)
+            .unwrap()
+            .0
+            .views = vec![extra.clone()];
+        pages.app.update();
+        assert_eq!(pages.address().unwrap().views, [extra]);
     }
 
     #[derive(Resource, Default)]
