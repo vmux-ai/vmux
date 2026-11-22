@@ -1,60 +1,23 @@
-use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::{Commands, Query};
 use std::path::Path;
 
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
+use vmux_profile::mcp_credentials::{McpCredentialAccess, McpCredentialStorage};
 
 pub use crate::{ProfileId, ProfileLabel};
-use vmux_profile::mcp_credentials::{McpCredentialAccess, McpCredentialStorage};
+pub use bootstrap::ProfileBootstrapSpec;
+pub use migration::{MigrationRefusal, ProfileMigrationComplete, ProfileMigrationSpec};
 pub use vmux_profile::*;
+
+mod bootstrap;
+mod migration;
 
 pub struct ProfilePlugin;
 
 impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, (queue_migration, migrate, spawn).chain());
-    }
-}
-
-fn queue_migration(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Profile migration"),
-        ProfileMigrationJob(ProfileMigration::current()),
-    ));
-}
-
-fn migrate(jobs: Query<(Entity, &ProfileMigrationJob)>, mut commands: Commands) {
-    for (entity, job) in &jobs {
-        job.0.run();
-        commands
-            .entity(entity)
-            .remove::<ProfileMigrationJob>()
-            .insert(ProfileMigrationComplete);
-    }
-}
-
-fn spawn(mut commands: bevy::prelude::Commands) {
-    let profile = Profile::current();
-    let paths = ProfilePaths::current();
-    let label = ProfileStore::current().active_label();
-    let credentials = McpCredentials {
-        access: McpCredentialAccess::default(),
-        storage: McpCredentialStorage::at(profile.clone(), paths.clone()),
-    };
-    let mut active = commands.spawn((
-        Name::new(label),
-        ActiveProfile(profile.clone()),
-        ProfileDirectories(paths),
-        credentials,
-    ));
-    match ProjectsDirectory::ensure() {
-        Ok(directory) => {
-            active.insert(ProjectsRoot(directory));
-        }
-        Err(error) => {
-            active.insert(ProjectsRootFailure(error));
-        }
+        app.add_plugins((migration::MigrationPlugin, bootstrap::BootstrapPlugin));
     }
 }
 
@@ -108,17 +71,11 @@ impl CurrentProfile<'_, '_> {
     }
 }
 
-#[derive(Component)]
-struct ProfileMigrationJob(ProfileMigration);
-
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct ProfileMigrationComplete;
-
 #[derive(Component, Clone, Debug)]
 pub struct ProjectsRoot(pub ProjectsDirectory);
 
 #[derive(Component, Clone, Debug)]
-struct ProjectsRootFailure(String);
+pub(super) struct ProjectsRootFailure(pub(super) String);
 
 #[derive(SystemParam)]
 pub struct Projects<'w, 's> {
