@@ -12291,7 +12291,6 @@ impl Inventory {
 
     fn automatic_pre_world_boundary(&self, entry: &Declaration) -> bool {
         if !entry.production
-            || entry.local
             || entry.dynamic
             || entry.opaque
             || entry.ecs
@@ -12301,12 +12300,20 @@ impl Inventory {
             return false;
         }
         let path = entry.path.as_str();
+        if matches!(
+            path,
+            "crates/feature/vmux_dx/tests/policy.rs"
+                | "crates/feature/vmux_dx/tests/conventions.rs"
+        ) {
+            return true;
+        }
+        if entry.local {
+            return false;
+        }
         path.starts_with("crates/util/vmux_macro/src/")
             || matches!(
                 path,
-                "crates/feature/vmux_dx/tests/policy.rs"
-                    | "crates/feature/vmux_dx/tests/conventions.rs"
-                    | "crates/build_cfg.rs"
+                "crates/build_cfg.rs"
                     | "crates/build_cfg_git.rs"
                     | "crates/build_git_env.rs"
                     | "crates/build_platform_cfg.rs"
