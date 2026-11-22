@@ -12,6 +12,8 @@ use bevy::window::{
 
 use crate::plugin::DesktopPluginGroup;
 
+#[cfg(test)]
+mod archive_tests;
 mod boot_status;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;

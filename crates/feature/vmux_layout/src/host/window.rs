@@ -661,16 +661,6 @@ pub(super) struct TabScaffold {
     stack: Entity,
 }
 
-impl TabScaffold {
-    pub(super) fn tab(&self) -> Entity {
-        self.tab
-    }
-
-    pub(super) fn stack(&self) -> Entity {
-        self.stack
-    }
-}
-
 #[derive(SystemParam)]
 pub(super) struct TabSpawner<'w, 's> {
     commands: Commands<'w, 's>,

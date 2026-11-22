@@ -408,7 +408,7 @@ mod tests {
                 .add_message::<crate::TerminalLayoutSpawnRequest>()
                 .add_message::<PageOpenRequest>()
                 .add_plugins(vmux_ecs::PrimitivesPlugin)
-                .add_plugins(LayoutApplyPlugin);
+                .add_plugins((LayoutApplyPlugin, super::super::archive::ArchivePlugin));
             app.world_mut()
                 .spawn(crate::active_pane::ActiveStack::default().local_bundle());
         }
