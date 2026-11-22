@@ -657,7 +657,7 @@ impl Topology<'_, '_> {
             if let Some(existing) = existing {
                 live = existing;
             } else {
-                if world.get::<crate::pane::PaneSplit>(live).is_none() {
+                if Self::needs_promotion(world, parent, live, operation) {
                     world
                         .entity_mut(parent)
                         .insert(Promotion { operation, live });
@@ -712,6 +712,90 @@ impl Topology<'_, '_> {
         }
     }
 
+    fn needs_promotion(world: &World, parent: Entity, live: Entity, operation: Entity) -> bool {
+        let Some(live_split) = world.get::<crate::pane::PaneSplit>(live) else {
+            return true;
+        };
+        let Some(archived_split) = world.get::<Split>(parent) else {
+            return false;
+        };
+        if live_split.direction != Self::direction(archived_split.axis()) {
+            return true;
+        }
+        let archived_children = Self::ordered_children(world, parent).len();
+        if archived_children != 2 {
+            return false;
+        }
+        let existing_panes = world
+            .get::<Children>(live)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| {
+                        world.get::<crate::pane::Pane>(*child).is_some()
+                            && world
+                                .get::<ScaffoldOwner>(*child)
+                                .is_none_or(|owner| owner.0 != operation)
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        existing_panes >= 2
+    }
+
+    fn promote_survivor(world: &mut World, live: Entity, operation: Entity) -> Entity {
+        if let Some(direction) = world
+            .get::<crate::pane::PaneSplit>(live)
+            .map(|split| split.direction)
+        {
+            let panes = world
+                .get::<Children>(live)
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter(|child| {
+                            world.get::<crate::pane::Pane>(*child).is_some()
+                                && world
+                                    .get::<ScaffoldOwner>(*child)
+                                    .is_none_or(|owner| owner.0 != operation)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let survivor = world
+                .spawn((
+                    crate::pane::Pane::split_bundle(direction),
+                    ChildOf(live),
+                    vmux_ecs::LastActivatedAt(0),
+                ))
+                .id();
+            for pane in panes {
+                world.entity_mut(pane).insert(ChildOf(survivor));
+            }
+            return survivor;
+        }
+        let stacks = world
+            .get::<Children>(live)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| world.get::<crate::stack::Stack>(*child).is_some())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let survivor = world
+            .spawn((
+                crate::pane::Pane::bundle(),
+                ChildOf(live),
+                vmux_ecs::LastActivatedAt(0),
+            ))
+            .id();
+        for stack in stacks {
+            world.entity_mut(stack).insert(ChildOf(survivor));
+        }
+        survivor
+    }
+
     fn promote(
         world: &mut World,
         operation: Entity,
@@ -728,25 +812,7 @@ impl Topology<'_, '_> {
             })
             .collect::<Vec<_>>();
         for (archive, live, axis) in pending {
-            let stacks = world
-                .get::<Children>(live)
-                .map(|children| {
-                    children
-                        .iter()
-                        .filter(|child| world.get::<crate::stack::Stack>(*child).is_some())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let survivor = world
-                .spawn((
-                    crate::pane::Pane::bundle(),
-                    ChildOf(live),
-                    vmux_ecs::LastActivatedAt(0),
-                ))
-                .id();
-            for stack in stacks {
-                world.entity_mut(stack).insert(ChildOf(survivor));
-            }
+            let survivor = Self::promote_survivor(world, live, operation);
             let target_order = Self::ordered_children(world, archive)
                 .into_iter()
                 .find_map(|child| {
