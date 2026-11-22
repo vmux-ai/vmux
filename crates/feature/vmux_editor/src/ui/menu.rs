@@ -12,9 +12,6 @@ use super::EditorFocus;
 use super::key::FileKeys;
 use crate::event::FileEditorOperation;
 
-const RENAME_ID: &str = "file-rename";
-const CODE_ACTION_ID: &str = "file-code-action";
-
 #[component]
 pub(super) fn CodeActionMenu(titles: Vec<String>, selected: u32, top: f64, left: f64) -> Element {
     if titles.is_empty() {
@@ -24,7 +21,7 @@ pub(super) fn CodeActionMenu(titles: Vec<String>, selected: u32, top: f64, left:
     let chosen = (selected as usize).min(len - 1);
     rsx! {
         div {
-            id: CODE_ACTION_ID,
+            id: EditorMenu::CODE_ACTION_ID,
             tabindex: 0,
             autofocus: true,
             class: "absolute z-50 max-h-56 min-w-64 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground outline-none ring-1 ring-inset ring-primary/30 backdrop-blur-2xl shadow-lg",
@@ -77,7 +74,7 @@ pub(super) fn RenameInput(rename: FileRenameState, top: f64, left: f64) -> Eleme
     let ime = use_ime_guard();
     rsx! {
         input {
-            id: RENAME_ID,
+            id: EditorMenu::RENAME_ID,
             autofocus: true,
             spellcheck: false,
             autocomplete: "off",
@@ -236,6 +233,9 @@ struct EditorMenu {
 }
 
 impl EditorMenu {
+    const RENAME_ID: &str = "file-rename";
+    const CODE_ACTION_ID: &str = "file-code-action";
+
     fn offering(offered: &[EditorCapability]) -> Self {
         Self {
             offered: offered.to_vec(),

@@ -9,11 +9,11 @@ use vmux_ui::i18n::translate;
 
 use super::text_style::StyledSpanStyle;
 
-pub const NOTE_CARET_ID: &str = "note-caret";
-
 pub(super) struct CaretStyle;
 
 impl CaretStyle {
+    pub(super) const ID: &str = "note-caret";
+
     pub(super) const BAR: &str = "pointer-events-none absolute left-0 top-1/2 h-[1em] -translate-y-1/2 rounded-full bg-[var(--term-cursor,var(--primary))] opacity-80";
 
     pub(super) fn width(keymap: KeymapKind) -> &'static str {
@@ -27,6 +27,10 @@ impl CaretStyle {
 pub(super) struct HeadingStyle;
 
 impl HeadingStyle {
+    fn hidden_class(class: &'static str, hidden: bool) -> String {
+        cn([class, if hidden { "invisible" } else { "" }])
+    }
+
     pub(super) fn class(level: u8) -> &'static str {
         match level {
             1 => "mb-3 mt-6 text-3xl font-bold tracking-tight text-foreground",
@@ -128,7 +132,7 @@ pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> 
                 if chunk.caret_before {
                     span {
                         key: "caret-{index}",
-                        id: NOTE_CARET_ID,
+                        id: CaretStyle::ID,
                         class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
                         span { class: "{caret_class} {caret_width_class}" }
                     }
@@ -145,10 +149,6 @@ pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> 
     }
 }
 
-fn hidden_class(class: &'static str, hidden: bool) -> String {
-    cn([class, if hidden { "invisible" } else { "" }])
-}
-
 #[component]
 pub fn MdBlockView(
     block: MdBlock,
@@ -162,10 +162,10 @@ pub fn MdBlockView(
     let block = &block;
     match block {
         MdBlock::Heading { level, inlines } => rsx! {
-            div { key: "{key}", class: hidden_class(HeadingStyle::class(*level), hidden), MdInlines { inlines: inlines.clone() } }
+            div { key: "{key}", class: HeadingStyle::hidden_class(HeadingStyle::class(*level), hidden), MdInlines { inlines: inlines.clone() } }
         },
         MdBlock::Paragraph { inlines } => rsx! {
-            p { key: "{key}", class: hidden_class("my-3", hidden), MdInlines { inlines: inlines.clone() } }
+            p { key: "{key}", class: HeadingStyle::hidden_class("my-3", hidden), MdInlines { inlines: inlines.clone() } }
         },
         MdBlock::List {
             ordered,
@@ -186,7 +186,7 @@ pub fn MdBlockView(
         MdBlock::CodeBlock { lines, .. } => rsx! {
             pre {
                 key: "{key}",
-                class: hidden_class("my-4 overflow-auto rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border", hidden),
+                class: HeadingStyle::hidden_class("my-4 overflow-auto rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border", hidden),
                 for (line_index, line) in lines.iter().enumerate() {
                     div { key: "{line_index}",
                         for (span_index, span) in line.spans.iter().enumerate() {
@@ -199,7 +199,7 @@ pub fn MdBlockView(
         MdBlock::BlockQuote { blocks } => rsx! {
             blockquote {
                 key: "{key}",
-                class: hidden_class("my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70", hidden),
+                class: HeadingStyle::hidden_class("my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70", hidden),
                 for (index, block) in blocks.iter().enumerate() {
                     MdBlockView { block: block.clone(), block_key: index, hidden: hidden, hidden_list_line: hidden_list_line }
                 }
@@ -219,10 +219,10 @@ pub fn MdBlockView(
             }
         },
         MdBlock::ThematicBreak => rsx! {
-            hr { key: "{key}", class: hidden_class("my-6 border-border", hidden) }
+            hr { key: "{key}", class: HeadingStyle::hidden_class("my-6 border-border", hidden) }
         },
         MdBlock::Html { raw } => rsx! {
-            div { key: "{key}", class: hidden_class("my-3 whitespace-pre-wrap text-foreground/60", hidden), "{raw}" }
+            div { key: "{key}", class: HeadingStyle::hidden_class("my-3 whitespace-pre-wrap text-foreground/60", hidden), "{raw}" }
         },
     }
 }
@@ -282,7 +282,7 @@ fn MdList(
             }
         }
     };
-    let class = hidden_class(
+    let class = HeadingStyle::hidden_class(
         if ordered {
             "my-3 list-decimal pl-6"
         } else {
@@ -358,7 +358,7 @@ fn MdTable(
             .to_string()
     };
     rsx! {
-        div { key: "{key}", class: hidden_class("my-4 overflow-auto rounded-xl ring-1 ring-inset ring-border", hidden),
+        div { key: "{key}", class: HeadingStyle::hidden_class("my-4 overflow-auto rounded-xl ring-1 ring-inset ring-border", hidden),
             table { class: "w-full border-collapse text-xs",
                 thead {
                     tr { class: "bg-foreground/[0.04]",

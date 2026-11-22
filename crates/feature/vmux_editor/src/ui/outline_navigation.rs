@@ -5,7 +5,7 @@ use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::scroll::{ScrollIntoView, SectionNavigation};
 
 use super::SCROLL_ID;
-use super::note::NoteBlocks;
+use super::note::NoteCursor;
 
 #[derive(Clone, Copy)]
 pub(super) struct OutlineNavigation {
@@ -118,7 +118,7 @@ impl OutlineNavigation {
             return Some(format!("file-line-{line}"));
         }
         let blocks = self.blocks.read();
-        let index = blocks.as_slice().block_index_for_line(line)?;
+        let index = NoteCursor::block_index_for_line(blocks.as_slice(), line)?;
         Some(format!("note-block-{index}"))
     }
 

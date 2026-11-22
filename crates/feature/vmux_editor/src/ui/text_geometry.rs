@@ -279,11 +279,13 @@ impl<'a> RowRuler<'a> {
 mod tests {
     use super::*;
 
-    const MENLO: CellMetrics = CellMetrics {
-        narrow: 8.4287109375,
-        wide: 14.0,
-        height: 17.0,
-    };
+    impl CellMetrics {
+        const MENLO: Self = Self {
+            narrow: 8.4287109375,
+            wide: 14.0,
+            height: 17.0,
+        };
+    }
 
     #[test]
     fn gutter_width_has_a_three_character_minimum() {
@@ -295,17 +297,17 @@ mod tests {
 
     #[test]
     fn a_wide_glyph_uses_its_measured_advance() {
-        let ruler = ColumnRuler::new("今日の予定は？", MENLO);
+        let ruler = ColumnRuler::new("今日の予定は？", CellMetrics::MENLO);
 
-        assert_eq!(ruler.x_of(14), 7.0 * MENLO.wide);
-        assert_eq!(ruler.x_of(4), 2.0 * MENLO.wide);
-        assert!(ruler.x_of(14) < 14.0 * MENLO.narrow);
+        assert_eq!(ruler.x_of(14), 7.0 * CellMetrics::MENLO.wide);
+        assert_eq!(ruler.x_of(4), 2.0 * CellMetrics::MENLO.wide);
+        assert!(ruler.x_of(14) < 14.0 * CellMetrics::MENLO.narrow);
     }
 
     #[test]
     fn a_mixed_line_round_trips_every_character_boundary() {
         let text = "ab今c😀d\u{0301}e";
-        let ruler = ColumnRuler::new(text, MENLO);
+        let ruler = ColumnRuler::new(text, CellMetrics::MENLO);
 
         assert_eq!(DisplayCells::from(text).width(), 9);
 
@@ -325,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_column_inside_a_wide_glyph_snaps_out_to_a_boundary() {
-        let ruler = ColumnRuler::new("ab今c", MENLO);
+        let ruler = ColumnRuler::new("ab今c", CellMetrics::MENLO);
 
         assert_eq!(ruler.col_at(ruler.x_of(3), true), 4);
         assert_eq!(ruler.col_at(ruler.x_of(3), false), 2);
@@ -333,7 +335,7 @@ mod tests {
 
     #[test]
     fn x_grows_with_every_column_that_has_width() {
-        let ruler = ColumnRuler::new("a今b", MENLO);
+        let ruler = ColumnRuler::new("a今b", CellMetrics::MENLO);
         let widths = [
             ruler.x_of(0),
             ruler.x_of(1),
@@ -343,35 +345,50 @@ mod tests {
         ];
 
         assert_eq!(widths[0], 0.0);
-        assert_eq!(widths[1], MENLO.narrow);
-        assert_eq!(widths[2], MENLO.narrow + MENLO.wide / 2.0);
-        assert_eq!(widths[3], MENLO.narrow + MENLO.wide);
-        assert_eq!(widths[4], MENLO.narrow * 2.0 + MENLO.wide);
+        assert_eq!(widths[1], CellMetrics::MENLO.narrow);
+        assert_eq!(
+            widths[2],
+            CellMetrics::MENLO.narrow + CellMetrics::MENLO.wide / 2.0
+        );
+        assert_eq!(
+            widths[3],
+            CellMetrics::MENLO.narrow + CellMetrics::MENLO.wide
+        );
+        assert_eq!(
+            widths[4],
+            CellMetrics::MENLO.narrow * 2.0 + CellMetrics::MENLO.wide
+        );
     }
 
     #[test]
     fn a_click_snaps_to_the_nearer_edge_of_a_wide_glyph() {
-        let ruler = ColumnRuler::new("今日", MENLO);
+        let ruler = ColumnRuler::new("今日", CellMetrics::MENLO);
 
-        assert_eq!(ruler.col_at(MENLO.wide * 0.4, true), 0);
-        assert_eq!(ruler.col_at(MENLO.wide * 0.6, true), 2);
-        assert_eq!(ruler.col_at(MENLO.wide * 0.6, false), 0);
-        assert_eq!(ruler.col_at(MENLO.wide * 1.6, false), 2);
+        assert_eq!(ruler.col_at(CellMetrics::MENLO.wide * 0.4, true), 0);
+        assert_eq!(ruler.col_at(CellMetrics::MENLO.wide * 0.6, true), 2);
+        assert_eq!(ruler.col_at(CellMetrics::MENLO.wide * 0.6, false), 0);
+        assert_eq!(ruler.col_at(CellMetrics::MENLO.wide * 1.6, false), 2);
     }
 
     #[test]
     fn a_click_past_the_end_counts_narrow_cells() {
-        let ruler = ColumnRuler::new("今", MENLO);
+        let ruler = ColumnRuler::new("今", CellMetrics::MENLO);
 
-        assert_eq!(ruler.col_at(MENLO.wide + MENLO.narrow * 3.0, false), 5);
+        assert_eq!(
+            ruler.col_at(
+                CellMetrics::MENLO.wide + CellMetrics::MENLO.narrow * 3.0,
+                false
+            ),
+            5
+        );
     }
 
     #[test]
     fn a_wrapped_row_measures_only_its_own_segment() {
-        let ruler = ColumnRuler::wrapped_row("今日の予定は？", MENLO, 4, 1);
+        let ruler = ColumnRuler::wrapped_row("今日の予定は？", CellMetrics::MENLO, 4, 1);
 
-        assert_eq!(ruler.x_of(4), 2.0 * MENLO.wide);
-        assert_eq!(ruler.col_at(2.0 * MENLO.wide, true), 4);
+        assert_eq!(ruler.x_of(4), 2.0 * CellMetrics::MENLO.wide);
+        assert_eq!(ruler.col_at(2.0 * CellMetrics::MENLO.wide, true), 4);
     }
 
     #[test]

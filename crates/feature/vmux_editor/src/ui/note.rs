@@ -28,8 +28,6 @@ use super::markdown::{
 use super::note_text::{NoteInlineKind, NoteInlineNode, NoteText};
 use super::text_style::GitLineTone;
 
-const NOTE_CARET_ID: &str = "note-caret";
-
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct NoteCursor {
     active: Memo<Option<u32>>,
@@ -196,11 +194,21 @@ impl NoteCursor {
     }
 
     pub(super) fn reveal(self, block_index: usize, line: u32) {
-        NoteCaretAnchor::new(block_index, line).reveal();
+        let anchors = Self::caret_anchors(block_index, line);
+        ScrollIntoView::first_rendered(&anchors.each_ref().map(String::as_str));
     }
 
     fn edit(self) {
         let _ = send(&FileNoteEditRequest);
+    }
+
+    fn caret_anchors(block_index: usize, line: u32) -> [String; 4] {
+        [
+            CaretStyle::ID.to_string(),
+            format!("note-line-{line}"),
+            format!("note-live-block-{block_index}"),
+            format!("note-block-{block_index}"),
+        ]
     }
 
     fn activate_with_scroll(self, block_index: usize, line: u32, center: bool) {
@@ -209,89 +217,32 @@ impl NoteCursor {
             Platform::sleep(0).await;
             EditorFocus::file();
             if center {
-                NoteCaretAnchor::new(block_index, line).center();
+                let anchors = Self::caret_anchors(block_index, line);
+                ScrollIntoView::first_rendered_centered(&anchors.each_ref().map(String::as_str));
             }
         });
     }
-}
 
-fn note_pointer_line(
-    at: ElementPoint,
-    height: f64,
-    start: u32,
-    end: u32,
-    block: &MdBlock,
-    list_hit: Option<u32>,
-) -> u32 {
-    if matches!(block, MdBlock::List { .. })
-        && let Some(line) = list_hit
-    {
-        return line;
-    }
-    let count = end.saturating_sub(start).max(1);
-    if height <= 0.0 {
-        return start;
-    }
-    let ratio = (at.y / height).clamp(0.0, 1.0);
-
-    start + ((ratio * count as f64).floor() as u32).min(count - 1)
-}
-
-fn note_edit_block_class(block: &MdBlock) -> &'static str {
-    match block {
-        MdBlock::Heading { level, .. } => HeadingStyle::class(*level),
-        MdBlock::Paragraph { .. } => "my-3",
-        MdBlock::List { .. } => "my-3 pl-6",
-        MdBlock::CodeBlock { .. } => {
-            "my-4 rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border"
-        }
-        MdBlock::BlockQuote { .. } => {
-            "my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70"
-        }
-        MdBlock::Table { .. } => {
-            "my-4 rounded-xl p-3 font-mono text-xs ring-1 ring-inset ring-border"
-        }
-        MdBlock::ThematicBreak => "my-6",
-        MdBlock::Html { .. } => "my-3 whitespace-pre-wrap text-foreground/60",
-    }
-}
-
-fn note_edit_line_class(block: &MdBlock) -> &'static str {
-    if matches!(block, MdBlock::List { .. }) {
-        "my-1 min-h-[1lh] w-full whitespace-pre-wrap break-words"
-    } else {
-        "min-h-[1lh] w-full whitespace-pre-wrap break-words"
-    }
-}
-
-fn note_edit_overlay_class() -> &'static str {
-    "visible absolute inset-0 z-10 flex items-center cursor-text overflow-visible"
-}
-
-pub(super) trait NoteBlocks {
-    fn block_index_for_line(&self, line: u32) -> Option<usize>;
-    fn blank_line_slot(&self, line: u32) -> Option<usize>;
-}
-
-impl NoteBlocks for [NoteBlock] {
-    fn block_index_for_line(&self, line: u32) -> Option<usize> {
-        self.iter()
+    pub(super) fn block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
+        blocks
+            .iter()
             .position(|block| block.start_line <= line && line < block.end_line)
-            .or_else(|| self.iter().rposition(|block| block.start_line <= line))
-            .or_else(|| (!self.is_empty()).then_some(0))
+            .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
+            .or_else(|| (!blocks.is_empty()).then_some(0))
     }
 
-    fn blank_line_slot(&self, line: u32) -> Option<usize> {
-        if self
+    pub(super) fn blank_line_slot(blocks: &[NoteBlock], line: u32) -> Option<usize> {
+        if blocks
             .iter()
             .any(|block| block.start_line <= line && line < block.end_line)
         {
             return None;
         }
         Some(
-            self.iter()
+            blocks
+                .iter()
                 .position(|block| line < block.start_line)
-                .unwrap_or(self.len()),
+                .unwrap_or(blocks.len()),
         )
     }
 }
@@ -414,58 +365,178 @@ struct NoteSourceChunk {
     caret_before: bool,
 }
 
-fn note_source_chunks(
-    source: &[char],
-    start: u32,
-    end: u32,
-    caret: u32,
-    selections: &[(u32, u32)],
-) -> Vec<NoteSourceChunk> {
-    let mut boundaries = vec![start, end];
-    if start <= caret && caret < end {
-        boundaries.push(caret);
-    }
-    for (selection_start, selection_end) in selections {
-        let clipped_start = (*selection_start).clamp(start, end);
-        let clipped_end = (*selection_end).clamp(start, end);
-        if clipped_start < clipped_end {
-            boundaries.push(clipped_start);
-            boundaries.push(clipped_end);
+impl NoteSourceChunk {
+    fn note_pointer_line(
+        at: ElementPoint,
+        height: f64,
+        start: u32,
+        end: u32,
+        block: &MdBlock,
+        list_hit: Option<u32>,
+    ) -> u32 {
+        if matches!(block, MdBlock::List { .. })
+            && let Some(line) = list_hit
+        {
+            return line;
         }
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    boundaries
-        .windows(2)
-        .map(|range| {
-            let chunk_start = range[0];
-            let chunk_end = range[1];
-            NoteSourceChunk {
-                text: source[chunk_start as usize..chunk_end as usize]
-                    .iter()
-                    .map(|character| if *character == '\n' { ' ' } else { *character })
-                    .collect(),
-                selected: selections.iter().any(|(selection_start, selection_end)| {
-                    chunk_start < *selection_end && chunk_end > *selection_start
-                }),
-                caret_before: caret == chunk_start,
-            }
-        })
-        .collect()
-}
+        let count = end.saturating_sub(start).max(1);
+        if height <= 0.0 {
+            return start;
+        }
+        let ratio = (at.y / height).clamp(0.0, 1.0);
 
-fn note_inline_class(kind: NoteInlineKind) -> &'static str {
-    match kind {
-        NoteInlineKind::BlockMarker | NoteInlineKind::Escape => "",
-        NoteInlineKind::Code => {
-            "rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.85em] text-primary"
+        start + ((ratio * count as f64).floor() as u32).min(count - 1)
+    }
+
+    fn note_edit_block_class(block: &MdBlock) -> &'static str {
+        match block {
+            MdBlock::Heading { level, .. } => HeadingStyle::class(*level),
+            MdBlock::Paragraph { .. } => "my-3",
+            MdBlock::List { .. } => "my-3 pl-6",
+            MdBlock::CodeBlock { .. } => {
+                "my-4 rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border"
+            }
+            MdBlock::BlockQuote { .. } => {
+                "my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70"
+            }
+            MdBlock::Table { .. } => {
+                "my-4 rounded-xl p-3 font-mono text-xs ring-1 ring-inset ring-border"
+            }
+            MdBlock::ThematicBreak => "my-6",
+            MdBlock::Html { .. } => "my-3 whitespace-pre-wrap text-foreground/60",
         }
-        NoteInlineKind::Strong => "font-semibold text-foreground",
-        NoteInlineKind::Emph => "italic",
-        NoteInlineKind::Strike => "line-through opacity-70",
-        NoteInlineKind::Link | NoteInlineKind::WikiLink => {
-            "text-primary underline decoration-primary/40 underline-offset-2"
+    }
+
+    fn note_edit_line_class(block: &MdBlock) -> &'static str {
+        if matches!(block, MdBlock::List { .. }) {
+            "my-1 min-h-[1lh] w-full whitespace-pre-wrap break-words"
+        } else {
+            "min-h-[1lh] w-full whitespace-pre-wrap break-words"
         }
+    }
+
+    fn note_edit_overlay_class() -> &'static str {
+        "visible absolute inset-0 z-10 flex items-center cursor-text overflow-visible"
+    }
+
+    fn note_source_chunks(
+        source: &[char],
+        start: u32,
+        end: u32,
+        caret: u32,
+        selections: &[(u32, u32)],
+    ) -> Vec<NoteSourceChunk> {
+        let mut boundaries = vec![start, end];
+        if start <= caret && caret < end {
+            boundaries.push(caret);
+        }
+        for (selection_start, selection_end) in selections {
+            let clipped_start = (*selection_start).clamp(start, end);
+            let clipped_end = (*selection_end).clamp(start, end);
+            if clipped_start < clipped_end {
+                boundaries.push(clipped_start);
+                boundaries.push(clipped_end);
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        boundaries
+            .windows(2)
+            .map(|range| {
+                let chunk_start = range[0];
+                let chunk_end = range[1];
+                NoteSourceChunk {
+                    text: source[chunk_start as usize..chunk_end as usize]
+                        .iter()
+                        .map(|character| if *character == '\n' { ' ' } else { *character })
+                        .collect(),
+                    selected: selections.iter().any(|(selection_start, selection_end)| {
+                        chunk_start < *selection_end && chunk_end > *selection_start
+                    }),
+                    caret_before: caret == chunk_start,
+                }
+            })
+            .collect()
+    }
+
+    fn note_inline_class(kind: NoteInlineKind) -> &'static str {
+        match kind {
+            NoteInlineKind::BlockMarker | NoteInlineKind::Escape => "",
+            NoteInlineKind::Code => {
+                "rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.85em] text-primary"
+            }
+            NoteInlineKind::Strong => "font-semibold text-foreground",
+            NoteInlineKind::Emph => "italic",
+            NoteInlineKind::Strike => "line-through opacity-70",
+            NoteInlineKind::Link | NoteInlineKind::WikiLink => {
+                "text-primary underline decoration-primary/40 underline-offset-2"
+            }
+        }
+    }
+
+    fn note_selection_ranges(
+        source: &str,
+        start_line: u32,
+        selections: &[vmux_api::editor::SelSpan],
+    ) -> Vec<(u32, u32)> {
+        let text = NoteText::new(source);
+        selections
+            .iter()
+            .map(|selection| {
+                let start = text.offset(start_line, selection.line, selection.start);
+                let end_col = if selection.end == u32::MAX {
+                    source
+                        .split('\n')
+                        .nth(selection.line.saturating_sub(start_line) as usize)
+                        .map_or(0, |line| line.chars().count() as u32)
+                } else {
+                    selection.end
+                };
+                let end = text.offset(start_line, selection.line, end_col);
+                (start.min(end), start.max(end))
+            })
+            .filter(|(start, end)| start < end)
+            .collect()
+    }
+
+    fn property_kind_label(kind: KnowledgePropertyKind) -> String {
+        match kind {
+            KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
+            KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
+            KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
+            KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
+            KnowledgePropertyKind::List => translate("editor-property-kind-list"),
+            KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
+            KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
+        }
+    }
+
+    fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
+        match kind {
+            KnowledgePropertyKind::Text => KnowledgePropertyKind::Number,
+            KnowledgePropertyKind::Number => KnowledgePropertyKind::Checkbox,
+            KnowledgePropertyKind::Checkbox => KnowledgePropertyKind::Date,
+            KnowledgePropertyKind::Date => KnowledgePropertyKind::List,
+            KnowledgePropertyKind::List => KnowledgePropertyKind::Link,
+            KnowledgePropertyKind::Link => KnowledgePropertyKind::Tags,
+            KnowledgePropertyKind::Tags => KnowledgePropertyKind::Text,
+        }
+    }
+
+    fn note_block_diff_marker(
+        markers: &HashMap<u32, GitLineStatus>,
+        start_line: u32,
+        end_line: u32,
+    ) -> Option<GitLineStatus> {
+        let priority = |marker| match marker {
+            GitLineStatus::Staged => 0,
+            GitLineStatus::Deleted => 1,
+            GitLineStatus::Added => 2,
+            GitLineStatus::Modified => 3,
+        };
+        (start_line..=end_line)
+            .filter_map(|line| markers.get(&(line + 1)).copied())
+            .max_by_key(|marker| priority(*marker))
     }
 }
 
@@ -474,7 +545,7 @@ fn NoteCaret(width_class: String) -> Element {
     let caret_class = CaretStyle::BAR;
     rsx! {
         span {
-            id: NOTE_CARET_ID,
+            id: CaretStyle::ID,
             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
             span { class: "{caret_class} {width_class}" }
         }
@@ -493,7 +564,7 @@ fn NoteSourceRange(
     let source = source.as_slice();
     let selections = selections.as_slice();
     let caret_width_class = caret_width_class.as_str();
-    let chunks = note_source_chunks(source, start, end, caret, selections);
+    let chunks = NoteSourceChunk::note_source_chunks(source, start, end, caret, selections);
     rsx! {
         for (index, chunk) in chunks.iter().enumerate() {
             if chunk.caret_before {
@@ -544,7 +615,7 @@ fn NoteInlineNodes(
                     } => {
                         let reveal = *start <= caret && caret <= *end;
                         rsx! {
-                            span { key: "syntax-{index}", class: note_inline_class(*kind),
+                            span { key: "syntax-{index}", class: NoteSourceChunk::note_inline_class(*kind),
                                 span { class: if reveal { "text-foreground/55" } else { "hidden" },
                                     NoteSourceRange {
         source: source.to_vec(),
@@ -580,31 +651,6 @@ fn NoteInlineNodes(
         }
 }
 
-fn note_selection_ranges(
-    source: &str,
-    start_line: u32,
-    selections: &[vmux_api::editor::SelSpan],
-) -> Vec<(u32, u32)> {
-    let text = NoteText::new(source);
-    selections
-        .iter()
-        .map(|selection| {
-            let start = text.offset(start_line, selection.line, selection.start);
-            let end_col = if selection.end == u32::MAX {
-                source
-                    .split('\n')
-                    .nth(selection.line.saturating_sub(start_line) as usize)
-                    .map_or(0, |line| line.chars().count() as u32)
-            } else {
-                selection.end
-            };
-            let end = text.offset(start_line, selection.line, end_col);
-            (start.min(end), start.max(end))
-        })
-        .filter(|(start, end)| start < end)
-        .collect()
-}
-
 impl DocumentPropertyInput {
     fn submit(
         revision: u64,
@@ -624,30 +670,6 @@ impl DocumentPropertyInput {
                 remove,
             },
         });
-    }
-}
-
-fn property_kind_label(kind: KnowledgePropertyKind) -> String {
-    match kind {
-        KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
-        KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
-        KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
-        KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
-        KnowledgePropertyKind::List => translate("editor-property-kind-list"),
-        KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
-        KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
-    }
-}
-
-fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
-    match kind {
-        KnowledgePropertyKind::Text => KnowledgePropertyKind::Number,
-        KnowledgePropertyKind::Number => KnowledgePropertyKind::Checkbox,
-        KnowledgePropertyKind::Checkbox => KnowledgePropertyKind::Date,
-        KnowledgePropertyKind::Date => KnowledgePropertyKind::List,
-        KnowledgePropertyKind::List => KnowledgePropertyKind::Link,
-        KnowledgePropertyKind::Link => KnowledgePropertyKind::Tags,
-        KnowledgePropertyKind::Tags => KnowledgePropertyKind::Text,
     }
 }
 
@@ -800,7 +822,8 @@ pub(super) fn NoteBlockView(
     );
     let start = note_block.start_line;
     let end = note_block.end_line;
-    let note_diff_marker = note_block_diff_marker(&diff_markers.read(), start, end);
+    let note_diff_marker =
+        NoteSourceChunk::note_block_diff_marker(&diff_markers.read(), start, end);
     let source = note_block.source.clone();
     let pointer_source = source.clone();
     let live_pointer_source = source.clone();
@@ -832,7 +855,7 @@ pub(super) fn NoteBlockView(
             .map(|(offset, raw)| (start + offset as u32, raw.to_string(), 0))
             .collect::<Vec<_>>()
     };
-    let edit_class = note_edit_block_class(&note_block.block);
+    let edit_class = NoteSourceChunk::note_edit_block_class(&note_block.block);
     let heading_level = match &note_block.block {
         MdBlock::Heading { level, .. } => Some(*level),
         _ => None,
@@ -842,7 +865,7 @@ pub(super) fn NoteBlockView(
             NoteText::new(&source).inline_nodes(heading_level),
             source.chars().collect::<Vec<_>>(),
             NoteText::new(&source).offset(start, current.line, current.col),
-            note_selection_ranges(&source, start, &selections),
+            NoteSourceChunk::note_selection_ranges(&source, start, &selections),
         )
     } else {
         (Vec::new(), Vec::new(), 0, Vec::new())
@@ -934,7 +957,7 @@ pub(super) fn NoteBlockView(
                     note_cursor.place_block( index, start, live_pointer_source.clone(), at);
                     return;
                 }
-                let line = note_pointer_line(
+                let line = NoteSourceChunk::note_pointer_line(
                     event.element_coordinates(),
                     block_height(),
                     start,
@@ -975,7 +998,7 @@ pub(super) fn NoteBlockView(
             }
             if editing && !is_list {
                 div {
-                    class: note_edit_overlay_class(),
+                    class: NoteSourceChunk::note_edit_overlay_class(),
                     if is_live_inline {
                         div {
                             id: "note-live-block-{index}",
@@ -1026,7 +1049,7 @@ pub(super) fn NoteBlockView(
                                     let line_class = if is_list {
                                         "min-h-[1lh] w-full whitespace-pre-wrap break-words"
                                     } else {
-                                        note_edit_line_class(&note_block.block)
+                                        NoteSourceChunk::note_edit_line_class(&note_block.block)
                                     };
                                     rsx! {
                                         div {
@@ -1068,7 +1091,7 @@ pub(super) fn NoteBlockView(
                                                     if chunk.caret_before {
                                                         span {
                                                             key: "caret-{chunk_index}",
-                                                            id: NOTE_CARET_ID,
+                                                            id: CaretStyle::ID,
                                                             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
                                                             span { class: "{caret_class} {caret_width_class}" }
                                                         }
@@ -1109,22 +1132,6 @@ pub(super) fn NoteBlockView(
             }
         }
     }
-}
-
-fn note_block_diff_marker(
-    markers: &HashMap<u32, GitLineStatus>,
-    start_line: u32,
-    end_line: u32,
-) -> Option<GitLineStatus> {
-    let priority = |marker| match marker {
-        GitLineStatus::Staged => 0,
-        GitLineStatus::Deleted => 1,
-        GitLineStatus::Added => 2,
-        GitLineStatus::Modified => 3,
-    };
-    (start_line..=end_line)
-        .filter_map(|line| markers.get(&(line + 1)).copied())
-        .max_by_key(|marker| priority(*marker))
 }
 
 #[component]
@@ -1176,11 +1183,11 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                     let values = values.clone();
                     let property_key = key.clone();
                     move |_| {
-                        let next = next_property_kind(kind);
+                        let next = NoteSourceChunk::next_property_kind(kind);
                         DocumentPropertyInput::submit(document_revision, key_for_kind.clone(), property_key.clone(), next, values.clone(), false);
                     }
                 },
-                {property_kind_label(kind)}
+                {NoteSourceChunk::property_kind_label(kind)}
             }
             div { class: "min-w-0 flex-1",
                 if kind == KnowledgePropertyKind::Checkbox {
@@ -1326,27 +1333,6 @@ fn RenderedNoteBlock(
     }
 }
 
-struct NoteCaretAnchor([String; 4]);
-
-impl NoteCaretAnchor {
-    fn new(block_index: usize, line: u32) -> Self {
-        Self([
-            NOTE_CARET_ID.to_string(),
-            format!("note-line-{line}"),
-            format!("note-live-block-{block_index}"),
-            format!("note-block-{block_index}"),
-        ])
-    }
-
-    fn reveal(&self) {
-        ScrollIntoView::first_rendered(&self.0.each_ref().map(String::as_str));
-    }
-
-    fn center(&self) {
-        ScrollIntoView::first_rendered_centered(&self.0.each_ref().map(String::as_str));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1357,6 +1343,19 @@ mod tests {
     use vmux_ecs::event::NoteBlock;
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
+
+    impl NoteCursor {
+        fn block(start_line: u32, end_line: u32) -> NoteBlock {
+            NoteBlock {
+                start_line,
+                end_line,
+                source: "text".into(),
+                block: MdBlock::Paragraph {
+                    inlines: Vec::new(),
+                },
+            }
+        }
+    }
 
     #[derive(Default)]
     struct PointerHost {
@@ -1677,25 +1676,14 @@ mod tests {
         );
     }
 
-    fn block(start_line: u32, end_line: u32) -> NoteBlock {
-        NoteBlock {
-            start_line,
-            end_line,
-            source: "text".into(),
-            block: MdBlock::Paragraph {
-                inlines: Vec::new(),
-            },
-        }
-    }
-
     #[test]
     fn a_blank_source_line_gets_its_own_visual_slot() {
-        let blocks = vec![block(1, 2), block(4, 5)];
+        let blocks = vec![NoteCursor::block(1, 2), NoteCursor::block(4, 5)];
 
-        assert_eq!(blocks.as_slice().blank_line_slot(0), Some(0));
-        assert_eq!(blocks.as_slice().blank_line_slot(2), Some(1));
-        assert_eq!(blocks.as_slice().blank_line_slot(5), Some(2));
-        assert_eq!(blocks.as_slice().blank_line_slot(1), None);
-        assert_eq!(blocks.as_slice().blank_line_slot(4), None);
+        assert_eq!(NoteCursor::blank_line_slot(&blocks, 0), Some(0));
+        assert_eq!(NoteCursor::blank_line_slot(&blocks, 2), Some(1));
+        assert_eq!(NoteCursor::blank_line_slot(&blocks, 5), Some(2));
+        assert_eq!(NoteCursor::blank_line_slot(&blocks, 1), None);
+        assert_eq!(NoteCursor::blank_line_slot(&blocks, 4), None);
     }
 }
