@@ -3,9 +3,6 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use super::bridge::{BridgeAuthorization, ExtensionBridgeServer};
-use super::broker::{
-    BridgeResponseCache, BridgeSubscriptions, ConformanceWakeTimer, PendingBridgeEvents,
-};
 use super::load::PreparedExtensions;
 use super::{Binding, RuntimeBinding, RuntimeGeneration};
 use crate::{Catalog, ExtensionSet, ProfileId};
@@ -14,12 +11,16 @@ pub(super) struct AccessPlugin;
 
 impl bevy::prelude::Plugin for AccessPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, project.in_set(AccessSet).after(ExtensionSet::Step));
+        app.add_message::<BridgeAuthorizationRevoked>()
+            .add_systems(Update, project.in_set(AccessSet).after(ExtensionSet::Step));
     }
 }
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AccessSet;
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub(super) struct BridgeAuthorizationRevoked(pub(super) String);
 
 fn project(
     root: Query<(Entity, &ProfileId, &RuntimeGeneration), With<Binding>>,
@@ -27,12 +28,7 @@ fn project(
     bindings: Query<(&crate::Id, &ChildOf), With<RuntimeBinding>>,
     catalog: Catalog,
     mut servers: Query<&mut ExtensionBridgeServer>,
-    mut brokers: Query<(
-        &mut BridgeSubscriptions,
-        &mut BridgeResponseCache,
-        &mut PendingBridgeEvents,
-        Option<&mut ConformanceWakeTimer>,
-    )>,
+    mut revoked: MessageWriter<BridgeAuthorizationRevoked>,
 ) {
     let mut projected = HashMap::new();
     if let Ok((root, profile, generation)) = root.single()
@@ -97,16 +93,8 @@ fn project(
         }
     }
     for mut server in &mut servers {
-        let changed = server.project_authorizations(projected.clone());
-        for (mut subscriptions, mut cache, mut pending, mut timer) in &mut brokers {
-            for id in &changed {
-                subscriptions.0.remove(id);
-                cache.revoke(id);
-                pending.revoke(id);
-                if let Some(timer) = &mut timer {
-                    timer.revoke(id)
-                }
-            }
+        for id in server.project_authorizations(projected.clone()) {
+            revoked.write(BridgeAuthorizationRevoked(id));
         }
     }
 }

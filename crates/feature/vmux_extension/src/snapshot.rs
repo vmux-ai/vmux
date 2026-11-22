@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use vmux_api::extension::{ExtRow, ExtStatus, ExtensionsUiState};
 
 const INDEX_VERSION: u32 = 3;
 
@@ -67,13 +66,6 @@ impl ExtensionGrants {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EnableForProfileResult {
-    Updated,
-    NeedsApproval,
-    NotFound,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Index {
     #[serde(default)]
@@ -98,145 +90,14 @@ impl Index {
         self.migrated
     }
 
-    pub fn upsert(&mut self, e: ExtEntry) {
-        if let Some(slot) = self.entries.iter_mut().find(|x| x.id == e.id) {
-            *slot = e;
+    pub fn upsert(&mut self, entry: ExtEntry) {
+        if let Some(slot) = self.entries.iter_mut().find(|slot| slot.id == entry.id) {
+            *slot = entry;
         } else {
-            self.entries.push(e);
+            self.entries.push(entry);
         }
     }
 
-    pub fn remove(&mut self, id: &str) {
-        self.entries.retain(|x| x.id != id);
-    }
-
-    pub fn set_enabled_for(
-        &mut self,
-        profile: &str,
-        id: &str,
-        enabled: bool,
-        approve_permissions: bool,
-    ) -> EnableForProfileResult {
-        let Some(slot) = self.entries.iter_mut().find(|x| x.id == id) else {
-            return EnableForProfileResult::NotFound;
-        };
-        if !slot.installed_for(profile) {
-            return EnableForProfileResult::NotFound;
-        }
-        if !enabled {
-            slot.profile_enabled.insert(profile.to_string(), false);
-            return EnableForProfileResult::Updated;
-        }
-        if !slot
-            .grants_for(profile)
-            .covers(&slot.permissions, &slot.host_permissions)
-        {
-            if !approve_permissions {
-                return EnableForProfileResult::NeedsApproval;
-            }
-            slot.approved_grants.insert(
-                profile.to_string(),
-                ExtensionGrants {
-                    permissions: slot.permissions.clone(),
-                    host_permissions: slot.host_permissions.clone(),
-                },
-            );
-        }
-        slot.profile_enabled.insert(profile.to_string(), true);
-        EnableForProfileResult::Updated
-    }
-
-    pub fn set_pinned_for(&mut self, profile: &str, id: &str, pinned: bool) -> bool {
-        let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) else {
-            return false;
-        };
-        if !entry.installed_for(profile) {
-            return false;
-        }
-        if entry.pinned_for(profile) == pinned {
-            return false;
-        }
-        entry.profile_pinned.insert(profile.to_string(), pinned);
-        true
-    }
-
-    pub fn enabled_ids_for(&self, profile: &str) -> Vec<String> {
-        self.entries
-            .iter()
-            .filter(|entry| entry.enabled_for(profile))
-            .map(|e| e.id.clone())
-            .collect()
-    }
-
-    pub fn is_dirty_for(&self, profile: &str, loaded: &[String]) -> bool {
-        let mut a = self.enabled_ids_for(profile);
-        let mut b = loaded.to_vec();
-        a.sort();
-        b.sort();
-        a != b
-    }
-
-    pub fn snapshot(&self, profile: &str, loaded: &[String]) -> ExtensionsUiState {
-        let mut extensions = Vec::new();
-        for entry in &self.entries {
-            if !entry.installed_for(profile) {
-                continue;
-            }
-            let enabled = entry.enabled_for(profile);
-            extensions.push(ExtRow {
-                id: entry.id.clone(),
-                name: entry.name.clone(),
-                version: entry.version.clone(),
-                icon: entry.icon.clone(),
-                popup: entry.popup.clone(),
-                enabled,
-                pinned: entry.pinned_for(profile),
-                needs_approval: !entry
-                    .grants_for(profile)
-                    .covers(&entry.permissions, &entry.host_permissions),
-                required_permissions: entry.permissions.clone(),
-                required_host_permissions: entry.host_permissions.clone(),
-                status: if enabled {
-                    ExtStatus::Installed
-                } else {
-                    ExtStatus::Disabled
-                },
-            });
-        }
-        let visible = extensions.clone();
-        ExtensionsUiState {
-            loaded: true,
-            extensions,
-            visible,
-            query: String::new(),
-            installing: Vec::new(),
-            pending: self.is_dirty_for(profile, loaded),
-        }
-    }
-}
-
-impl ExtEntry {
-    pub fn installed_for(&self, profile: &str) -> bool {
-        self.profile_enabled.contains_key(profile)
-    }
-
-    pub fn enabled_for(&self, profile: &str) -> bool {
-        self.profile_enabled.get(profile).copied().unwrap_or(false)
-    }
-
-    pub fn pinned_for(&self, profile: &str) -> bool {
-        self.profile_pinned.get(profile).copied().unwrap_or(false)
-    }
-
-    pub fn grants_for(&self, profile: &str) -> ExtensionGrants {
-        self.approved_grants
-            .get(profile)
-            .cloned()
-            .unwrap_or_default()
-    }
-}
-
-impl Index {
     pub fn validate(&self) -> Result<(), String> {
         if self.version > INDEX_VERSION {
             return Err("unsupported extension index version".into());
@@ -259,9 +120,7 @@ impl Index {
         }
         Ok(())
     }
-}
 
-impl Index {
     pub fn decode(source: &str) -> Result<Self, String> {
         let mut index: Self = serde_json::from_str(source).map_err(|error| error.to_string())?;
         if index.version > INDEX_VERSION {
@@ -293,5 +152,26 @@ impl Index {
         }
         index.validate()?;
         Ok(index)
+    }
+}
+
+impl ExtEntry {
+    pub fn installed_for(&self, profile: &str) -> bool {
+        self.profile_enabled.contains_key(profile)
+    }
+
+    pub fn enabled_for(&self, profile: &str) -> bool {
+        self.profile_enabled.get(profile).copied().unwrap_or(false)
+    }
+
+    pub fn pinned_for(&self, profile: &str) -> bool {
+        self.profile_pinned.get(profile).copied().unwrap_or(false)
+    }
+
+    pub fn grants_for(&self, profile: &str) -> ExtensionGrants {
+        self.approved_grants
+            .get(profile)
+            .cloned()
+            .unwrap_or_default()
     }
 }

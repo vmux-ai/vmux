@@ -37,20 +37,29 @@ impl Plugin for ExtensionPlugin {
             app.is_plugin_added::<CorePlugin>(),
             "Native Extension requires CorePlugin in application composition"
         );
-        let store = crate::store::ExtensionStore::current();
-        let mut seed = store.load_index();
-        if let Ok(index) = &mut seed
-            && index.requires_save()
-            && let Err(error) = PreparedExtensions::migrate_index_permissions(&store, index)
-        {
-            seed = Err(error);
-        }
+        let root_path = vmux_ecs::profile::ProfilePaths::current().extensions();
+        let seed = crate::filesystem::FileStore::read(&root_path);
+        let needs_migration = seed
+            .as_ref()
+            .is_ok_and(crate::snapshot::Index::requires_save);
         let root = app
             .world_mut()
-            .spawn((Binding, Root(store.path().to_path_buf()), Seed(seed)))
+            .spawn((Binding, Root(root_path.clone()), Seed(seed)))
             .id();
         app.world_mut().run_schedule(ExtensionSchedule);
         let mut catalog = SystemState::<Catalog>::new(app.world_mut());
+        if needs_migration && let Ok(index) = catalog.get(app.world()).unwrap().snapshot(root) {
+            match PreparedExtensions::migrate_catalog_permissions(&root_path, &index) {
+                Ok(evidence) => {
+                    app.world_mut().entity_mut(root).insert(evidence);
+                    app.world_mut().run_schedule(ExtensionSchedule);
+                }
+                Err(error) => {
+                    app.world_mut().entity_mut(root).insert(Seed(Err(error)));
+                    app.world_mut().run_schedule(ExtensionSchedule);
+                }
+            }
+        }
         let generation = catalog
             .get(app.world())
             .unwrap()

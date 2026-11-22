@@ -1,8 +1,9 @@
+use crate::filesystem::FileStore;
 use crate::protocol::{
     BRIDGE_CHANNEL, BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE,
     BRIDGE_PROTOCOL_VERSION, KEEPALIVE_CHANNEL,
 };
-use crate::{driver, store};
+use crate::{driver, snapshot};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -64,22 +65,25 @@ pub(crate) struct BridgeConfig {
 
 impl PreparedRuntime {
     pub(crate) fn prepare(
-        store: &store::ExtensionStore,
-        runtime_store: &store::ExtensionStore,
+        source_root: &Path,
+        runtime_store_root: &Path,
         profile: &str,
-        entry: &store::ExtEntry,
+        entry: &snapshot::ExtEntry,
     ) -> Result<Self, PrepareRuntimeError> {
-        let expected_source = store.source_dir(&entry.id, &entry.version);
+        let expected_source = FileStore::source_dir(source_root, &entry.id, &entry.version);
         let source = if expected_source.exists() {
             expected_source
         } else {
-            store
-                .migrate_legacy_package(entry)
-                .map_err(PrepareRuntimeError::Infrastructure)?
+            FileStore::migrate_legacy_package(
+                source_root,
+                &entry.id,
+                &entry.version,
+                &entry.source_hash,
+            )
+            .map_err(PrepareRuntimeError::Infrastructure)?
         };
-        let source_hash = store
-            .source_hash(&source)
-            .map_err(PrepareRuntimeError::Infrastructure)?;
+        let source_hash =
+            FileStore::source_hash(&source).map_err(PrepareRuntimeError::Infrastructure)?;
         if !entry.source_hash.is_empty() && source_hash != entry.source_hash {
             return Err(PrepareRuntimeError::Corrupt(format!(
                 "source hash mismatch for {}",
@@ -90,7 +94,7 @@ impl PreparedRuntime {
         let worker_source = Self::worker_source().map_err(PrepareRuntimeError::Infrastructure)?;
         let runtime_hash = Self::runtime_hash(&source_hash, &worker_source)
             .map_err(PrepareRuntimeError::Infrastructure)?;
-        let runtime_root = runtime_store.runtime_dir(profile, &entry.id);
+        let runtime_root = FileStore::runtime_dir(runtime_store_root, profile, &entry.id);
         std::fs::create_dir_all(&runtime_root)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         let temp_dir = runtime_root.join(format!("current-{runtime_hash}.tmp"));
@@ -317,61 +321,35 @@ impl BridgeConfig {
 mod tests {
     use super::*;
 
-    fn source_entry(
-        store: &store::ExtensionStore,
-        worker: &str,
-        module: bool,
-    ) -> (store::ExtEntry, PathBuf, String) {
-        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let version = "1.0";
-        let source = store.source_dir(id, version);
-        std::fs::create_dir_all(&source).unwrap();
-        let worker_type = if module { r#", "type": "module""# } else { "" };
-        let manifest = format!(
-            r#"{{"manifest_version":3,"name":"test","version":"{version}","background":{{"service_worker":"{worker}"{worker_type}}}}}"#
-        );
-        std::fs::write(source.join("manifest.json"), &manifest).unwrap();
-        if let Some(parent) = Path::new(worker).parent() {
-            std::fs::create_dir_all(source.join(parent)).unwrap();
-        }
-        std::fs::write(source.join(worker), "original worker").unwrap();
-        let source_hash = store.source_hash(&source).unwrap();
-        (
-            store::ExtEntry {
-                id: id.into(),
-                name: "test".into(),
-                version: version.into(),
-                popup: None,
-                icon: None,
-                enabled: true,
-                profile_enabled: Default::default(),
-                profile_pinned: Default::default(),
-                permissions: Vec::new(),
-                optional_permissions: Vec::new(),
-                host_permissions: Vec::new(),
-                optional_host_permissions: Vec::new(),
-                approved_grants: Default::default(),
-                source_hash,
-                public_key_b64: None,
-            },
-            source,
-            manifest,
-        )
-    }
-
     #[test]
     fn prepares_classic_worker_without_mutating_source() {
         let root = tempfile::tempdir().unwrap();
-        let store = store::ExtensionStore::at(root.path());
-        let (entry, source, original_manifest) = source_entry(&store, "background.js", false);
-
-        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
-
-        assert!(
-            prepared
-                .dir
-                .starts_with(store.runtime_dir("personal", &entry.id))
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let version = "1.0";
+        let source = FileStore::source_dir(root.path(), id, version);
+        std::fs::create_dir_all(&source).unwrap();
+        let original_manifest = format!(
+            r#"{{"manifest_version":3,"name":"test","version":"{version}","background":{{"service_worker":"background.js"}}}}"#
         );
+        std::fs::write(source.join("manifest.json"), &original_manifest).unwrap();
+        std::fs::write(source.join("background.js"), "original worker").unwrap();
+        let entry = snapshot::ExtEntry {
+            id: id.into(),
+            name: "test".into(),
+            version: version.into(),
+            enabled: true,
+            source_hash: FileStore::source_hash(&source).unwrap(),
+            ..Default::default()
+        };
+
+        let prepared =
+            PreparedRuntime::prepare(root.path(), root.path(), "personal", &entry).unwrap();
+
+        assert!(prepared.dir.starts_with(FileStore::runtime_dir(
+            root.path(),
+            "personal",
+            &entry.id
+        )));
         assert_eq!(prepared.dir.file_name().unwrap(), "current");
         assert_eq!(
             std::fs::read_to_string(source.join("manifest.json")).unwrap(),
@@ -415,28 +393,65 @@ mod tests {
     fn prepares_runtime_outside_shared_package_store() {
         let root = tempfile::tempdir().unwrap();
         let runtime_store = tempfile::tempdir().unwrap();
-        let store = store::ExtensionStore::at(root.path());
-        let runtime_store = store::ExtensionStore::at(runtime_store.path());
-        let (entry, _, _) = source_entry(&store, "background.js", false);
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let version = "1.0";
+        let source = FileStore::source_dir(root.path(), id, version);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("manifest.json"),
+            format!(
+                r#"{{"manifest_version":3,"name":"test","version":"{version}","background":{{"service_worker":"background.js"}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(source.join("background.js"), "original worker").unwrap();
+        let entry = snapshot::ExtEntry {
+            id: id.into(),
+            name: "test".into(),
+            version: version.into(),
+            enabled: true,
+            source_hash: FileStore::source_hash(&source).unwrap(),
+            ..Default::default()
+        };
 
         let prepared =
-            PreparedRuntime::prepare(&store, &runtime_store, "personal", &entry).unwrap();
+            PreparedRuntime::prepare(root.path(), runtime_store.path(), "personal", &entry)
+                .unwrap();
 
-        assert!(
-            prepared
-                .dir
-                .starts_with(runtime_store.runtime_dir("personal", &entry.id))
-        );
-        assert!(!prepared.dir.starts_with(store.runtimes_dir()));
+        assert!(prepared.dir.starts_with(FileStore::runtime_dir(
+            runtime_store.path(),
+            "personal",
+            &entry.id
+        )));
+        assert!(!prepared.dir.starts_with(root.path().join("runtime")));
     }
 
     #[test]
     fn prepares_module_worker_with_static_imports_in_order() {
         let root = tempfile::tempdir().unwrap();
-        let store = store::ExtensionStore::at(root.path());
-        let (entry, _, _) = source_entry(&store, "sw/main.js", true);
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let version = "1.0";
+        let source = FileStore::source_dir(root.path(), id, version);
+        std::fs::create_dir_all(source.join("sw")).unwrap();
+        std::fs::write(
+            source.join("manifest.json"),
+            format!(
+                r#"{{"manifest_version":3,"name":"test","version":"{version}","background":{{"service_worker":"sw/main.js", "type": "module"}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(source.join("sw/main.js"), "original worker").unwrap();
+        let entry = snapshot::ExtEntry {
+            id: id.into(),
+            name: "test".into(),
+            version: version.into(),
+            enabled: true,
+            source_hash: FileStore::source_hash(&source).unwrap(),
+            ..Default::default()
+        };
 
-        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
+        let prepared =
+            PreparedRuntime::prepare(root.path(), root.path(), "personal", &entry).unwrap();
 
         let generated: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(prepared.dir.join("manifest.json")).unwrap(),
@@ -454,8 +469,26 @@ mod tests {
     #[test]
     fn prepends_message_retry_to_static_content_scripts() {
         let root = tempfile::tempdir().unwrap();
-        let store = store::ExtensionStore::at(root.path());
-        let (mut entry, source, _) = source_entry(&store, "background.js", false);
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let version = "1.0";
+        let source = FileStore::source_dir(root.path(), id, version);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("manifest.json"),
+            format!(
+                r#"{{"manifest_version":3,"name":"test","version":"{version}","background":{{"service_worker":"background.js"}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(source.join("background.js"), "original worker").unwrap();
+        let mut entry = snapshot::ExtEntry {
+            id: id.into(),
+            name: "test".into(),
+            version: version.into(),
+            enabled: true,
+            source_hash: FileStore::source_hash(&source).unwrap(),
+            ..Default::default()
+        };
         std::fs::write(
             source.join("manifest.json"),
             r#"{
@@ -470,9 +503,10 @@ mod tests {
             }"#,
         )
         .unwrap();
-        entry.source_hash = store.source_hash(&source).unwrap();
+        entry.source_hash = FileStore::source_hash(&source).unwrap();
 
-        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
+        let prepared =
+            PreparedRuntime::prepare(root.path(), root.path(), "personal", &entry).unwrap();
 
         let generated: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(prepared.dir.join("manifest.json")).unwrap(),
@@ -499,8 +533,26 @@ mod tests {
     #[test]
     fn injects_page_shim_before_popup_application() {
         let root = tempfile::tempdir().unwrap();
-        let store = store::ExtensionStore::at(root.path());
-        let (mut entry, source, _) = source_entry(&store, "background.js", false);
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let version = "1.0";
+        let source = FileStore::source_dir(root.path(), id, version);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("manifest.json"),
+            format!(
+                r#"{{"manifest_version":3,"name":"test","version":"{version}","background":{{"service_worker":"background.js"}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(source.join("background.js"), "original worker").unwrap();
+        let mut entry = snapshot::ExtEntry {
+            id: id.into(),
+            name: "test".into(),
+            version: version.into(),
+            enabled: true,
+            source_hash: FileStore::source_hash(&source).unwrap(),
+            ..Default::default()
+        };
         entry.popup = Some("popup/index.html".into());
         std::fs::create_dir_all(source.join("popup")).unwrap();
         std::fs::write(
@@ -508,9 +560,10 @@ mod tests {
             "<!doctype html><html><head><script defer src=\"main.js\"></script></head></html>",
         )
         .unwrap();
-        entry.source_hash = store.source_hash(&source).unwrap();
+        entry.source_hash = FileStore::source_hash(&source).unwrap();
 
-        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
+        let prepared =
+            PreparedRuntime::prepare(root.path(), root.path(), "personal", &entry).unwrap();
 
         let popup = std::fs::read_to_string(prepared.dir.join("popup/index.html")).unwrap();
         assert!(popup.find("/vmux_runtime.js").unwrap() < popup.find("/vmux_patch.js").unwrap());

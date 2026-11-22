@@ -533,11 +533,16 @@ impl ExtensionModel {
 mod tests {
     use super::*;
     use crate::host::bridge::BridgeAuthorization;
+    use crate::host::manager_page::popup;
     use crate::host::tabs::ExtensionTabs;
-    use crate::host::windows::{ExtensionWindows, WindowDispatch};
+    use crate::host::windows::{
+        CloseExtensionWindowRequest, ExtensionWindowsPlugin, VirtualWindows,
+    };
     use crate::protocol::{ApiRequest, ExtensionCallerContext};
+    use bevy::ecs::system::SystemState;
     use serde_json::json;
     use vmux_layout::active_pane::ActiveStack;
+    use vmux_layout::stack::CloseStackRequest;
 
     #[test]
     fn authentication_popup_is_searchable_for_close_without_becoming_the_active_content_tab() {
@@ -545,7 +550,11 @@ mod tests {
         let url =
             format!("chrome-extension://{id}/popup/index.html?singleActionPopout=fido#/fido2");
         let mut app = App::new();
-        app.add_plugins(ExtensionProjectPlugin);
+        app.add_plugins((ExtensionProjectPlugin, ExtensionWindowsPlugin))
+            .add_message::<popup::OpenRequest>()
+            .add_message::<popup::CloseRequest>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<CloseStackRequest>();
         let window = app
             .world_mut()
             .spawn((
@@ -593,21 +602,24 @@ mod tests {
             permissions: ["tabs".to_string()].into(),
             ..default()
         };
-        let mut windows = ExtensionWindows::default();
-        let created = WindowDispatch::from_request(
-            &ApiRequest {
-                request_id: "create".into(),
-                namespace: "windows".into(),
-                method: "create".into(),
-                arguments: json!([{ "type": "popup", "url": url }]),
-                caller_context: caller.clone(),
-            },
-            &model,
-            &mut windows,
-            &authorization,
-        )
-        .unwrap();
-        let window_id = created.result["id"].as_i64().unwrap() as i32;
+        let mut windows = SystemState::<VirtualWindows>::new(app.world_mut());
+        let (created, _) = windows
+            .get_mut(app.world_mut())
+            .unwrap()
+            .dispatch(
+                &ApiRequest {
+                    request_id: "create".into(),
+                    namespace: "windows".into(),
+                    method: "create".into(),
+                    arguments: json!([{ "type": "popup", "url": url }]),
+                    caller_context: caller.clone(),
+                },
+                &model,
+                &authorization,
+            )
+            .unwrap();
+        windows.apply(app.world_mut());
+        let window_id = created["id"].as_i64().unwrap() as i32;
         let popup = app
             .world_mut()
             .spawn((
@@ -650,35 +662,47 @@ mod tests {
         }, &authorization).unwrap();
         assert_eq!(popouts.as_array().unwrap().len(), 1);
         assert_eq!(popouts[0]["windowId"], window_id);
-        let populated = WindowDispatch::from_request(
-            &ApiRequest {
-                request_id: "populated".into(),
-                namespace: "windows".into(),
-                method: "get".into(),
-                arguments: json!([window_id, { "populate": true }]),
-                caller_context: caller.clone(),
-            },
-            &model,
-            &mut windows,
-            &authorization,
-        )
-        .unwrap();
-        assert_eq!(populated.result["tabs"].as_array().unwrap().len(), 1);
-        assert_eq!(populated.result["tabs"][0]["id"], popouts[0]["id"]);
-        let removed = WindowDispatch::from_request(
-            &ApiRequest {
-                request_id: "close".into(),
-                namespace: "windows".into(),
-                method: "remove".into(),
-                arguments: json!([popouts[0]["windowId"]]),
-                caller_context: caller,
-            },
-            &model,
-            &mut windows,
-            &authorization,
-        )
-        .unwrap();
-        assert_eq!(removed.close_window.unwrap().window_id, Some(window_id));
+        let (populated, _) = windows
+            .get_mut(app.world_mut())
+            .unwrap()
+            .dispatch(
+                &ApiRequest {
+                    request_id: "populated".into(),
+                    namespace: "windows".into(),
+                    method: "get".into(),
+                    arguments: json!([window_id, { "populate": true }]),
+                    caller_context: caller.clone(),
+                },
+                &model,
+                &authorization,
+            )
+            .unwrap();
+        windows.apply(app.world_mut());
+        assert_eq!(populated["tabs"].as_array().unwrap().len(), 1);
+        assert_eq!(populated["tabs"][0]["id"], popouts[0]["id"]);
+        windows
+            .get_mut(app.world_mut())
+            .unwrap()
+            .dispatch(
+                &ApiRequest {
+                    request_id: "close".into(),
+                    namespace: "windows".into(),
+                    method: "remove".into(),
+                    arguments: json!([popouts[0]["windowId"]]),
+                    caller_context: caller,
+                },
+                &model,
+                &authorization,
+            )
+            .unwrap();
+        windows.apply(app.world_mut());
+        let close = app
+            .world_mut()
+            .resource_mut::<Messages<CloseExtensionWindowRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(close.window_id, Some(window_id));
         app.world_mut().despawn(popup);
         app.update();
         let model = app

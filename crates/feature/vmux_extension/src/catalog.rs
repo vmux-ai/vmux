@@ -318,7 +318,7 @@ fn project(
         Ok(index) => {
             let mut snapshot = match prepared.single() {
                 Ok(prepared) => prepared.snapshot(&index, &profile, &runtime.0),
-                Err(_) => index.snapshot(&profile, &runtime.0),
+                Err(_) => Catalog::project_ui_state(&index, &profile, &runtime.0),
             };
             for entry in &index.entries {
                 if !entry.enabled_for(&profile) {

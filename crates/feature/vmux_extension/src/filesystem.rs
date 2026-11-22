@@ -101,6 +101,169 @@ pub struct MaterializeCompleted {
 }
 
 impl FileStore {
+    pub fn source_dir(directory: &Path, id: &str, version: &str) -> std::path::PathBuf {
+        directory
+            .join("packages")
+            .join(id)
+            .join(version)
+            .join("source")
+    }
+
+    pub fn runtime_dir(directory: &Path, profile: &str, id: &str) -> std::path::PathBuf {
+        directory.join("runtime").join(profile).join(id)
+    }
+
+    pub fn read_loaded_ids(directory: &Path, profile: &str) -> Vec<String> {
+        let loaded_path = directory.join("loaded").join(format!("{profile}.txt"));
+        std::fs::read_to_string(loaded_path)
+            .or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    std::fs::read_to_string(directory.join("loaded.txt"))
+                } else {
+                    Err(error)
+                }
+            })
+            .ok()
+            .map(|contents| {
+                contents
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn write_loaded_ids(directory: &Path, profile: &str, ids: &[String]) -> Result<(), String> {
+        std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        let path = directory.join("loaded").join(format!("{profile}.txt"));
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+    }
+
+    pub fn migrate_legacy_package(
+        directory: &Path,
+        id: &str,
+        version: &str,
+        expected_source_hash: &str,
+    ) -> Result<std::path::PathBuf, String> {
+        let source = Self::source_dir(directory, id, version);
+        if source.exists() {
+            Self::validate_manifest_object(&source)?;
+            let hash = Self::source_hash(&source)?;
+            if !expected_source_hash.is_empty() && hash != expected_source_hash {
+                return Err(format!("source hash mismatch for {id}"));
+            }
+            return Ok(source);
+        }
+        let legacy = directory.join(id);
+        if !legacy.is_dir() {
+            return Err(format!("legacy extension package not found: {id}"));
+        }
+        let parent = source.parent().ok_or("source directory has no parent")?;
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let temporary = parent.join("source.tmp");
+        if temporary.exists() {
+            std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+        }
+        Self::copy_legacy_tree(&legacy, &temporary)?;
+        Self::restore_legacy_worker(&temporary)?;
+        Self::validate_manifest_object(&temporary)?;
+        Self::source_hash(&temporary)?;
+        std::fs::rename(&temporary, &source).map_err(|error| error.to_string())?;
+        Ok(source)
+    }
+
+    fn copy_legacy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            let target = destination.join(entry.file_name());
+            if file_type.is_dir() {
+                Self::copy_legacy_tree(&entry.path(), &target)?;
+            } else if file_type.is_file() {
+                std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+            } else {
+                return Err(format!(
+                    "unsupported legacy package entry: {}",
+                    entry.path().display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn is_generated_shim_file(name: &str) -> bool {
+        name == "vmux_patch.js"
+            || name == "vmux_shim.js"
+            || name == "vmux_shim.json"
+            || name.starts_with("vmux_sw_") && name.ends_with(".js")
+    }
+
+    fn remove_generated_shim_files(dir: &Path) -> Result<(), String> {
+        for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                Self::remove_generated_shim_files(&path)?;
+            } else if Self::is_generated_shim_file(&entry.file_name().to_string_lossy()) {
+                std::fs::remove_file(path).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_legacy_worker(dir: &Path) -> Result<(), String> {
+        let sidecar_path = dir.join("vmux_shim.json");
+        if sidecar_path.exists() {
+            let sidecar: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&sidecar_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let original = sidecar
+                .get("original")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("legacy shim sidecar has no original worker")?;
+            if Self::is_generated_shim_file(original) {
+                return Err("legacy shim sidecar points to a generated worker".into());
+            }
+            let manifest_path = dir.join("manifest.json");
+            let mut manifest: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let background = manifest
+                .get_mut("background")
+                .and_then(serde_json::Value::as_object_mut)
+                .ok_or("legacy manifest has no background object")?;
+            background.insert(
+                "service_worker".into(),
+                serde_json::Value::String(original.into()),
+            );
+            std::fs::write(
+                manifest_path,
+                serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        Self::remove_generated_shim_files(dir)
+    }
+
+    fn validate_manifest_object(dir: &Path) -> Result<(), String> {
+        let manifest_path = dir.join("manifest.json");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        if !manifest.is_object() {
+            return Err("manifest is not an object".into());
+        }
+        Ok(())
+    }
+
     pub fn source_hash(source: &Path) -> Result<String, String> {
         let mut files = Vec::new();
         Self::collect_files(source, source, &mut files)?;
@@ -1386,5 +1549,46 @@ mod tests {
         ));
         assert_eq!(host.complete(retry), OperationState::Succeeded);
         assert!(FileStore::read(directory.path()).unwrap().entries[0].pinned_for("personal"));
+    }
+
+    #[test]
+    fn migrates_legacy_package_without_generated_files() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join(ID);
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("manifest.json"),
+            serde_json::json!({
+                "manifest_version": 3,
+                "name": "test",
+                "version": "1",
+                "background": { "service_worker": "vmux_sw_deadbeef.js" },
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(legacy.join("background.js"), "original").unwrap();
+        std::fs::write(legacy.join("vmux_patch.js"), "patch").unwrap();
+        std::fs::write(legacy.join("vmux_sw_deadbeef.js"), "loader").unwrap();
+        std::fs::write(
+            legacy.join("vmux_shim.json"),
+            serde_json::json!({
+                "original": "background.js",
+                "loader": "vmux_sw_deadbeef.js",
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let migrated = FileStore::migrate_legacy_package(root.path(), ID, "1", "").unwrap();
+        assert_eq!(migrated, FileStore::source_dir(root.path(), ID, "1"));
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(migrated.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["background"]["service_worker"], "background.js");
+        assert!(!migrated.join("vmux_patch.js").exists());
+        assert!(!migrated.join("vmux_shim.json").exists());
+        assert_eq!(FileStore::source_hash(&migrated).unwrap().len(), 64);
+        assert!(legacy.join("vmux_shim.json").exists());
     }
 }
