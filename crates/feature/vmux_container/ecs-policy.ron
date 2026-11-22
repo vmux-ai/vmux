@@ -69,6 +69,7 @@ shape: (
   debt: [
   ],
   enums: [
+    (key: "crates/feature/vmux_container/src/ui.rs||enum:Intent", fingerprint: "5a62fd3bb84a4ce4", role: Boundary, owner: "crates/feature/vmux_container/src/ui.rs||struct:Controls", reason: "Mounted DOM callback encoding and one pending immutable display echo; send translates to concrete typed UI events and host ECS alone authorizes mutation."),
   ],
   bodies: [
   ],
