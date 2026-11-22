@@ -4,13 +4,36 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef_core::prelude::*;
+use std::collections::VecDeque;
+
+const MAX_RETAINED_SCHEME_ASSETS: usize = 512;
+
+#[derive(Resource, Default)]
+struct LoadedSchemeAssets {
+    handles: HashSet<Handle<CefResponse>>,
+    order: VecDeque<Handle<CefResponse>>,
+}
+
+impl LoadedSchemeAssets {
+    fn retain(&mut self, handle: Handle<CefResponse>) {
+        if self.handles.insert(handle.clone()) {
+            self.order.push_back(handle);
+            while self.order.len() > MAX_RETAINED_SCHEME_ASSETS {
+                if let Some(evicted) = self.order.pop_front() {
+                    self.handles.remove(&evicted);
+                }
+            }
+        }
+    }
+}
 
 pub struct ResponserPlugin;
 
 impl Plugin for ResponserPlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = async_channel::unbounded();
-        app.insert_resource(Requester(tx))
+        app.init_resource::<LoadedSchemeAssets>()
+            .insert_resource(Requester(tx))
             .insert_resource(RequesterReceiver(rx))
             .add_systems(PreUpdate, resolve_webview_source)
             .add_systems(
@@ -60,7 +83,7 @@ fn coming_request(
 
 fn responser(
     mut commands: Commands,
-    mut handle_stores: Local<HashSet<Handle<CefResponse>>>,
+    mut loaded: ResMut<LoadedSchemeAssets>,
     responses: Res<Assets<CefResponse>>,
     asset_server: Res<AssetServer>,
     handles: Query<(Entity, &CefResponseHandle, &Responser)>,
@@ -72,7 +95,7 @@ fn responser(
         if let Some(response) = responses.get(&handle.0) {
             let _ = responser.0.send_blocking(response.clone());
             commands.entity(entity).despawn();
-            handle_stores.insert(handle.0.clone());
+            loaded.retain(handle.0.clone());
         } else if matches!(
             asset_server.load_state(&handle.0),
             bevy::asset::LoadState::Failed(_)

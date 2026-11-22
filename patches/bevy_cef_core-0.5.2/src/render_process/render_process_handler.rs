@@ -34,21 +34,111 @@ if (!cef) cef = {};
 })();
 "#;
 
-pub(crate) static LISTEN_EVENTS: LazyLock<Mutex<HashMap<(c_int, String, String), Vec<V8Value>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+const MAX_LISTENERS_PER_CHANNEL: usize = 64;
 
 struct InitScript {
     source: String,
     url: String,
 }
 
-static INIT_SCRIPTS: LazyLock<Mutex<HashMap<c_int, InitScript>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-static BIN_SURFACE_GENERATIONS: LazyLock<Mutex<HashMap<c_int, u64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-static BIN_IPC_EPOCHS: LazyLock<Mutex<HashMap<c_int, u64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+struct RenderBrowserState {
+    surface_generation: Option<u64>,
+    ipc_epoch: Option<u64>,
+    init_script: Option<InitScript>,
+    listeners: HashMap<(String, String), Vec<V8Value>>,
+}
+
+#[derive(Default)]
+struct RenderBrowserRegistry {
+    browsers: HashMap<c_int, RenderBrowserState>,
+}
+
+impl RenderBrowserRegistry {
+    fn register_browser(
+        &mut self,
+        browser_id: c_int,
+        surface_generation: Option<u64>,
+        ipc_epoch: Option<u64>,
+        init_script: Option<InitScript>,
+    ) {
+        self.browsers.insert(
+            browser_id,
+            RenderBrowserState {
+                surface_generation,
+                ipc_epoch,
+                init_script,
+                listeners: HashMap::new(),
+            },
+        );
+    }
+
+    fn set_ipc_epoch(&mut self, browser_id: c_int, epoch: u64) {
+        self.browsers.entry(browser_id).or_default().ipc_epoch = Some(epoch);
+    }
+
+    fn surface_generation(&self, browser_id: c_int) -> Option<u64> {
+        self.browsers
+            .get(&browser_id)
+            .and_then(|state| state.surface_generation)
+    }
+
+    fn ipc_epoch(&self, browser_id: c_int) -> Option<u64> {
+        self.browsers
+            .get(&browser_id)
+            .and_then(|state| state.ipc_epoch)
+    }
+
+    fn init_script_for(&self, browser_id: c_int, frame_url: &str, is_main: bool) -> Option<String> {
+        let script = self.browsers.get(&browser_id)?.init_script.as_ref()?;
+        should_inject_init_script(&script.url, frame_url, is_main).then(|| script.source.clone())
+    }
+
+    fn add_listener(&mut self, browser_id: c_int, token: String, id: String, callback: V8Value) {
+        let state = self.browsers.entry(browser_id).or_default();
+        let entry = state.listeners.entry((token, id)).or_default();
+        if entry.len() >= MAX_LISTENERS_PER_CHANNEL {
+            entry.remove(0);
+        }
+        entry.push(callback);
+    }
+
+    fn listeners(&self, browser_id: c_int, token: &str, id: &str) -> Option<Vec<V8Value>> {
+        self.browsers
+            .get(&browser_id)?
+            .listeners
+            .get(&(token.to_string(), id.to_string()))
+            .cloned()
+    }
+
+    fn release_context(&mut self, browser_id: c_int, token: &str) {
+        if let Some(state) = self.browsers.get_mut(&browser_id) {
+            state
+                .listeners
+                .retain(|(registered_token, _), _| registered_token != token);
+        }
+    }
+
+    fn destroy_browser(&mut self, browser_id: c_int) {
+        self.browsers.remove(&browser_id);
+    }
+}
+
+static RENDER_BROWSERS: LazyLock<Mutex<RenderBrowserRegistry>> =
+    LazyLock::new(|| Mutex::new(RenderBrowserRegistry::default()));
+
 static NEXT_BIN_DOCUMENT_REVISION: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn register_render_listener(
+    browser_id: c_int,
+    token: String,
+    id: String,
+    callback: V8Value,
+) {
+    if let Ok(mut registry) = RENDER_BROWSERS.lock() {
+        registry.add_listener(browser_id, token, id, callback);
+    }
+}
 pub const INIT_SCRIPT_KEY: &str = "init_script";
 pub const INIT_SCRIPT_URL_KEY: &str = "init_script_url";
 pub const BIN_IPC_SURFACE_GENERATION_KEY: &str = "bin_ipc_surface_generation";
@@ -102,10 +192,10 @@ impl BinDocumentIdentity {
             return;
         }
         let browser_id = browser.identifier();
-        let Some(surface_generation) = BIN_SURFACE_GENERATIONS
+        let Some(surface_generation) = RENDER_BROWSERS
             .lock()
             .ok()
-            .and_then(|generations| generations.get(&browser_id).copied())
+            .and_then(|registry| registry.surface_generation(browser_id))
         else {
             return;
         };
@@ -189,10 +279,10 @@ impl BinDocumentIdentity {
 
 pub(crate) fn current_bin_ipc_epoch(context: &V8Context) -> Option<u64> {
     let browser = context.browser()?;
-    BIN_IPC_EPOCHS
+    RENDER_BROWSERS
         .lock()
         .ok()
-        .and_then(|epochs| epochs.get(&browser.identifier()).copied())
+        .and_then(|registry| registry.ipc_epoch(browser.identifier()))
 }
 
 pub struct RenderProcessHandlerBuilder {
@@ -235,6 +325,10 @@ impl Clone for RenderProcessHandlerBuilder {
 
 impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
     fn on_web_kit_initialized(&self) {
+        if let Some(config) = load_embedded_config_from_command_line() {
+            let config: crate::util::CefEmbeddedPageConfig = config;
+            crate::util::try_set_cef_embedded_page_config(config);
+        }
         register_cef_api_extension();
         register_extensions_from_command_line();
     }
@@ -246,37 +340,26 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
     ) {
         if let (Some(browser), Some(extra)) = (browser, extra) {
             let id = browser.identifier();
-            if let Ok(surface_generation) = extra
+            let surface_generation = extra
                 .string(Some(&BIN_IPC_SURFACE_GENERATION_KEY.into()))
                 .into_string()
                 .parse::<u64>()
-            {
-                BIN_SURFACE_GENERATIONS
-                    .lock()
-                    .unwrap()
-                    .insert(id, surface_generation);
-            }
-            if let Ok(ipc_epoch) = extra
+                .ok();
+            let ipc_epoch = extra
                 .string(Some(&BIN_IPC_EPOCH_KEY.into()))
                 .into_string()
                 .parse::<u64>()
-            {
-                BIN_IPC_EPOCHS.lock().unwrap().insert(id, ipc_epoch);
-            }
+                .ok();
             let script = extra.string(Some(&INIT_SCRIPT_KEY.into())).into_string();
-            if script.is_empty() {
-                return;
+            let init_script = (!script.is_empty()).then(|| InitScript {
+                source: script,
+                url: extra
+                    .string(Some(&INIT_SCRIPT_URL_KEY.into()))
+                    .into_string(),
+            });
+            if let Ok(mut registry) = RENDER_BROWSERS.lock() {
+                registry.register_browser(id, surface_generation, ipc_epoch, init_script);
             }
-            let url = extra
-                .string(Some(&INIT_SCRIPT_URL_KEY.into()))
-                .into_string();
-            INIT_SCRIPTS.lock().unwrap().insert(
-                id,
-                InitScript {
-                    source: script,
-                    url,
-                },
-            );
         }
     }
 
@@ -310,31 +393,16 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
         let Some(token) = BinDocumentIdentity::current_token(context) else {
             return;
         };
-        if let Ok(mut events) = LISTEN_EVENTS.lock() {
-            let browser_id = browser.identifier();
-            events.retain(|(registered_browser_id, registered_token, _), _| {
-                *registered_browser_id != browser_id || registered_token != &token
-            });
+        if let Ok(mut registry) = RENDER_BROWSERS.lock() {
+            registry.release_context(browser.identifier(), &token);
         }
     }
 
     fn on_browser_destroyed(&self, browser: Option<&mut Browser>) {
-        if let Some(browser) = browser {
-            let browser_id = browser.identifier();
-            if let Ok(mut events) = LISTEN_EVENTS.lock() {
-                events.retain(|(registered_browser_id, _, _), _| {
-                    *registered_browser_id != browser_id
-                });
-            }
-            if let Ok(mut scripts) = INIT_SCRIPTS.lock() {
-                scripts.remove(&browser_id);
-            }
-            if let Ok(mut generations) = BIN_SURFACE_GENERATIONS.lock() {
-                generations.remove(&browser_id);
-            }
-            if let Ok(mut epochs) = BIN_IPC_EPOCHS.lock() {
-                epochs.remove(&browser_id);
-            }
+        if let Some(browser) = browser
+            && let Ok(mut registry) = RENDER_BROWSERS.lock()
+        {
+            registry.destroy_browser(browser.identifier());
         }
     }
 
@@ -376,8 +444,9 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
                 PROCESS_MESSAGE_BIN_IPC_EPOCH => {
                     if let Some(arguments) = message.argument_list()
                         && let Ok(epoch) = arguments.string(0).into_string().parse::<u64>()
+                        && let Ok(mut registry) = RENDER_BROWSERS.lock()
                     {
-                        BIN_IPC_EPOCHS.lock().unwrap().insert(browser_id, epoch);
+                        registry.set_ipc_epoch(browser_id, epoch);
                     }
                 }
                 _ => {}
@@ -395,11 +464,12 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
 fn inject_initialize_scripts(browser: &mut Browser, context: &mut V8Context, frame: &mut Frame) {
     let id = browser.identifier();
     let frame_url = frame.url().into_string();
-    if let Some(script) = INIT_SCRIPTS.lock().ok().and_then(|scripts| {
-        let script = scripts.get(&id)?;
-        should_inject_init_script(&script.url, &frame_url, frame.is_main() != 0)
-            .then(|| CefString::from(script.source.as_str()))
-    }) {
+    let script = RENDER_BROWSERS
+        .lock()
+        .ok()
+        .and_then(|registry| registry.init_script_for(id, &frame_url, frame.is_main() != 0))
+        .map(|source| CefString::from(source.as_str()));
+    if let Some(script) = script {
         context.enter();
         let mut retval: Option<V8Value> = None;
         let mut exception: Option<cef::V8Exception> = None;
@@ -473,10 +543,10 @@ fn handle_listen_message(message: &ProcessMessage, browser_id: c_int, mut ctx: V
     // Host can emit before JS calls `cef.listen` (e.g. WASM boot). Do not call `ctx.enter()` or
     // allocate V8 objects when there is no listener — that triggered Blink "HandleScope" fatals.
     let callbacks = {
-        let Ok(events) = LISTEN_EVENTS.lock() else {
+        let Ok(registry) = RENDER_BROWSERS.lock() else {
             return;
         };
-        events.get(&(browser_id, token, id)).cloned()
+        registry.listeners(browser_id, &token, &id)
     };
     let Some(callbacks) = callbacks else {
         return;
@@ -522,10 +592,10 @@ fn handle_bin_listen_message(message: &ProcessMessage, browser_id: c_int, mut ct
     let len = buffer.len();
 
     let callbacks = {
-        let Ok(events) = LISTEN_EVENTS.lock() else {
+        let Ok(registry) = RENDER_BROWSERS.lock() else {
             return;
         };
-        events.get(&(browser_id, token, id)).cloned()
+        registry.listeners(browser_id, &token, &id)
     };
     let Some(callbacks) = callbacks else {
         return;
@@ -555,6 +625,20 @@ fn authorized_host_message(arguments: &cef::ListValue, context: &V8Context) -> O
     }
     let epoch = arguments.string(3).into_string().parse::<u64>().ok()?;
     (current_bin_ipc_epoch(context) == Some(epoch)).then_some(token)
+}
+
+fn load_embedded_config_from_command_line() -> Option<crate::util::CefEmbeddedPageConfig> {
+    let cmd_line = command_line_get_global()?;
+    if cmd_line.has_switch(Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into())) == 0 {
+        return None;
+    }
+    let json = cmd_line
+        .switch_value(Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into()))
+        .into_string();
+    if json.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<crate::util::CefEmbeddedPageConfig>(&json).ok()
 }
 
 fn register_extensions_from_command_line() {

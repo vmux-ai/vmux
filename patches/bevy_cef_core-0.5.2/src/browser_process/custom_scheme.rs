@@ -81,22 +81,25 @@ pub(crate) fn asset_load_path_from_request_url_with(
 ) -> String {
     const EMBEDDED_SCHEME: &str = "embedded://";
 
-    // We override the built-in `file` scheme: the editor SPA is addressed as
-    // `file:///abs/path`. Serve the app's own assets (`/wasm/*`, `/assets/*`) same-scheme
-    // from the embedded `files` host; every other `file://` path is a document navigation
-    // and gets the SPA shell (the real source file's bytes arrive over the bin bridge).
-    for (scheme, host) in [("file://", "files"), ("git://", "git")] {
-        if let Some(after) = url.strip_prefix(scheme) {
-            let after = if scheme == "git://" && (after == "git" || after.starts_with("git/")) {
-                after.strip_prefix("git").unwrap_or(after)
+    for route in &cfg.scheme_routes {
+        let prefix = route.scheme_prefix();
+        if let Some(after) = url.strip_prefix(&prefix) {
+            let after = if route.strip_self_host {
+                if after == route.host {
+                    ""
+                } else if let Some(rest) = after.strip_prefix(&route.host) {
+                    if rest.starts_with('/') { rest } else { after }
+                } else {
+                    after
+                }
             } else {
                 after
             };
             let path = after.split(['?', '#']).next().unwrap_or(after);
             if path.starts_with("/wasm/") || path.starts_with("/assets/") {
-                return format!("{EMBEDDED_SCHEME}{host}{path}");
+                return format!("{EMBEDDED_SCHEME}{}{path}", route.host);
             }
-            return format!("{EMBEDDED_SCHEME}{host}/index.html");
+            return format!("{EMBEDDED_SCHEME}{}", route.default_document);
         }
     }
 
@@ -524,9 +527,41 @@ mod custom_scheme_url_tests {
     }
 
     #[test]
-    fn git_protocol_documents_and_styles_use_the_git_asset_bundle() {
-        let config = empty_hosts_config();
+    fn registered_scheme_routes_dispatch_documents_and_assets_while_unregistered_schemes_return_empty()
+     {
+        let empty = empty_hosts_config();
+        assert_eq!(
+            asset_load_path_from_request_url_with("git://git/", &empty),
+            ""
+        );
+        assert_eq!(
+            asset_load_path_from_request_url_with("file:///tmp/demo.rs", &empty),
+            ""
+        );
+
+        let config = empty.with_scheme_routes(vec![
+            crate::util::CefSchemeRoute {
+                scheme: "file".to_string(),
+                host: "files".to_string(),
+                default_document: "files/index.html".to_string(),
+                trusted_ipc: true,
+                extension_free: true,
+                register_handler: true,
+                strip_self_host: false,
+            },
+            crate::util::CefSchemeRoute {
+                scheme: "git".to_string(),
+                host: "git".to_string(),
+                default_document: "git/index.html".to_string(),
+                trusted_ipc: false,
+                extension_free: false,
+                register_handler: false,
+                strip_self_host: true,
+            },
+        ]);
         for (url, expected) in [
+            ("file:///tmp/demo.rs", "embedded://files/index.html"),
+            ("file:///assets/app.css", "embedded://files/assets/app.css"),
             ("git://git/", "embedded://git/index.html"),
             (
                 "git://git/assets/index.css",

@@ -33,25 +33,26 @@ use cef_dll_sys::cef_scheme_options_t::{
     CEF_SCHEME_OPTION_CORS_ENABLED, CEF_SCHEME_OPTION_FETCH_ENABLED, CEF_SCHEME_OPTION_LOCAL,
     CEF_SCHEME_OPTION_SECURE, CEF_SCHEME_OPTION_STANDARD,
 };
+use std::collections::{HashSet, VecDeque};
 use std::env::home_dir;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
-
-pub const FILES_SCHEME: &str = "file";
+pub const EMBEDDED_CONFIG_SWITCH: &str = "bevy-cef-embedded-config";
 
 pub fn compile_time_cef_embedded_scheme() -> &'static str {
     include_str!(concat!(env!("OUT_DIR"), "/cef_embedded_scheme.txt")).trim()
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CefEmbeddedHost {
     pub host: String,
     pub default_document: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CefEmbeddedHosts(pub Vec<CefEmbeddedHost>);
 
 impl CefEmbeddedHosts {
@@ -72,11 +73,42 @@ impl Default for CefEmbeddedHosts {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CefSchemeRoute {
+    pub scheme: String,
+    pub host: String,
+    pub default_document: String,
+    #[serde(default)]
+    pub trusted_ipc: bool,
+    #[serde(default)]
+    pub extension_free: bool,
+    #[serde(default)]
+    pub register_handler: bool,
+    #[serde(default)]
+    pub strip_self_host: bool,
+}
+
+impl CefSchemeRoute {
+    pub fn scheme_prefix(&self) -> String {
+        format!("{}://", self.scheme)
+    }
+
+    pub fn matches(&self, url: &str) -> bool {
+        !self.scheme.is_empty() && url.starts_with(&self.scheme_prefix())
+    }
+}
+
+#[derive(
+    bevy::prelude::Resource, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 pub struct CefEmbeddedPageConfig {
     pub scheme: String,
     scheme_prefix: String,
     pub hosts: CefEmbeddedHosts,
+    #[serde(default)]
+    pub scheme_routes: Vec<CefSchemeRoute>,
+    #[serde(default)]
+    pub bridge_origins: Vec<String>,
 }
 
 impl CefEmbeddedPageConfig {
@@ -87,11 +119,44 @@ impl CefEmbeddedPageConfig {
             scheme,
             scheme_prefix,
             hosts,
+            scheme_routes: Vec::new(),
+            bridge_origins: Vec::new(),
         }
+    }
+
+    pub fn with_scheme_routes(mut self, scheme_routes: Vec<CefSchemeRoute>) -> Self {
+        self.scheme_routes = scheme_routes;
+        self
+    }
+
+    pub fn with_bridge_origins(mut self, bridge_origins: Vec<String>) -> Self {
+        self.bridge_origins = bridge_origins;
+        self
     }
 
     pub fn scheme_prefix(&self) -> &str {
         &self.scheme_prefix
+    }
+
+    pub fn scheme_route_for(&self, url: &str) -> Option<&CefSchemeRoute> {
+        self.scheme_routes.iter().find(|route| route.matches(url))
+    }
+
+    pub fn requires_extension_free_context(&self, url: &str) -> bool {
+        self.scheme_route_for(url)
+            .is_some_and(|route| route.extension_free)
+    }
+
+    pub fn is_bridge_allowed_origin(&self, url: &str) -> bool {
+        let Some(rest) = url.strip_prefix("https://") else {
+            return false;
+        };
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        !authority.is_empty()
+            && self
+                .bridge_origins
+                .iter()
+                .any(|allowed| allowed == authority)
     }
 }
 
@@ -104,16 +169,21 @@ impl Default for CefEmbeddedPageConfig {
     }
 }
 
-static CEF_EMBEDDED_PAGE_OVERRIDE: OnceLock<Arc<CefEmbeddedPageConfig>> = OnceLock::new();
+static CEF_EMBEDDED_PAGE_OVERRIDE: std::sync::LazyLock<
+    std::sync::RwLock<Option<Arc<CefEmbeddedPageConfig>>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
 
 pub fn try_set_cef_embedded_page_config(config: CefEmbeddedPageConfig) {
-    let _ = CEF_EMBEDDED_PAGE_OVERRIDE.set(Arc::new(config));
+    if let Ok(mut guard) = CEF_EMBEDDED_PAGE_OVERRIDE.write() {
+        *guard = Some(Arc::new(config));
+    }
 }
 
 pub fn resolved_cef_embedded_page_config() -> Arc<CefEmbeddedPageConfig> {
     CEF_EMBEDDED_PAGE_OVERRIDE
-        .get()
-        .cloned()
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
         .unwrap_or_else(|| Arc::new(CefEmbeddedPageConfig::default()))
 }
 
@@ -146,30 +216,27 @@ pub fn url_is_trusted_embedded_page(
 }
 
 pub fn has_embedded_scheme(url: &str) -> bool {
-    url_has_embedded_scheme(url, resolved_cef_embedded_page_config().scheme_prefix())
-        || url.starts_with("file://")
+    let config: Arc<CefEmbeddedPageConfig> = resolved_cef_embedded_page_config();
+    url_has_embedded_scheme(url, config.scheme_prefix())
+        || config
+            .scheme_route_for(url)
+            .is_some_and(|route| route.trusted_ipc)
 }
 
 pub fn is_trusted_embedded_page(url: &str) -> bool {
-    if url.starts_with("file://") {
+    let config: Arc<CefEmbeddedPageConfig> = resolved_cef_embedded_page_config();
+    if config
+        .scheme_route_for(url)
+        .is_some_and(|route| route.trusted_ipc)
+    {
         return true;
     }
-    let config = resolved_cef_embedded_page_config();
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
 }
 
-pub const BRIDGE_ALLOWED_AUTHORITIES: &[&str] = &[
-    "chat.mistral.ai",
-    "chat.local.mistral.ai:8443",
-    "chromewebstore.google.com",
-];
-
 pub fn is_bridge_allowed_origin(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://") else {
-        return false;
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    BRIDGE_ALLOWED_AUTHORITIES.contains(&authority)
+    let config: Arc<CefEmbeddedPageConfig> = resolved_cef_embedded_page_config();
+    config.is_bridge_allowed_origin(url)
 }
 
 pub fn ipc_allowed_render(url: &str) -> bool {
@@ -180,19 +247,12 @@ pub fn ipc_allowed_browser(url: &str) -> bool {
     is_trusted_embedded_page(url) || is_bridge_allowed_origin(url)
 }
 
-/// Which page a URL belongs to, as the browser process sees it.
-///
-/// This used to have to agree with the wasm bundle's own answer to the same
-/// question and the key its component is looked up by. Two pages are not served from the embedded
-/// scheme and so cannot be recognised by stripping it: the editor, from `file://`. A page whose
-/// name is unknown here comes through as the empty string,
-/// which matches no entry in an IPC owner-host allowlist — so the disagreement does not show up as
-/// an error, it shows up as that page's messages silently never arriving.
 pub fn embedded_page_host_of(url: &str) -> Option<String> {
-    if url.starts_with("file://") {
-        return Some("files".to_string());
+    let config: Arc<CefEmbeddedPageConfig> = resolved_cef_embedded_page_config();
+    if let Some(route) = config.scheme_route_for(url) {
+        return Some(route.host.clone());
     }
-    embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
+    embedded_page_host(url, config.scheme_prefix())
 }
 
 pub fn cef_scheme_flags() -> u32 {
@@ -203,27 +263,121 @@ pub fn cef_scheme_flags() -> u32 {
         | CEF_SCHEME_OPTION_FETCH_ENABLED as u32
 }
 
-static MEDIA_ALLOWLIST: std::sync::LazyLock<std::sync::RwLock<std::collections::HashSet<PathBuf>>> =
-    std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashSet::new()));
+const MAX_MEDIA_ALLOWLIST_PATHS: usize = 4096;
 
-/// Replace the set of absolute paths the raw-media resource handler is allowed to
-/// read. Paths are canonicalized; callers pass the live set each frame.
-pub fn set_media_allowlist(paths: std::collections::HashSet<PathBuf>) {
-    let canon: std::collections::HashSet<PathBuf> = paths
-        .into_iter()
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
-        .collect();
-    if let Ok(mut w) = MEDIA_ALLOWLIST.write() {
-        *w = canon;
+#[derive(Default)]
+struct MediaAllowlistRegistry {
+    owner_generation: u64,
+    paths: HashSet<PathBuf>,
+    order: VecDeque<PathBuf>,
+}
+
+impl MediaAllowlistRegistry {
+    fn acquire(&mut self, generation: u64) {
+        self.owner_generation = generation;
+        self.paths.clear();
+        self.order.clear();
+    }
+
+    fn replace_all(&mut self, paths: HashSet<PathBuf>) {
+        self.paths.clear();
+        self.order.clear();
+        for path in paths {
+            let canon = std::fs::canonicalize(&path).unwrap_or(path);
+            if self.paths.insert(canon.clone()) {
+                self.order.push_back(canon);
+                if self.order.len() > MAX_MEDIA_ALLOWLIST_PATHS
+                    && let Some(evicted) = self.order.pop_front()
+                {
+                    self.paths.remove(&evicted);
+                }
+            }
+        }
+    }
+
+    fn replace_owned(&mut self, generation: u64, paths: HashSet<PathBuf>) -> bool {
+        if self.owner_generation != generation {
+            return false;
+        }
+        self.replace_all(paths);
+        true
+    }
+
+    fn release(&mut self, generation: u64) {
+        if self.owner_generation == generation {
+            self.paths.clear();
+            self.order.clear();
+        }
+    }
+
+    fn contains(&self, path: &std::path::Path) -> bool {
+        let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        self.paths.contains(&canon)
     }
 }
 
-/// Whether `path` is currently allowed to be served as raw media.
+static NEXT_MEDIA_ALLOWLIST_OWNER: AtomicU64 = AtomicU64::new(0);
+static MEDIA_ALLOWLIST: std::sync::LazyLock<std::sync::RwLock<MediaAllowlistRegistry>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(MediaAllowlistRegistry::default()));
+
+#[derive(Debug)]
+pub struct MediaAllowlistLease {
+    generation: u64,
+}
+
+impl MediaAllowlistLease {
+    pub fn acquire() -> Self {
+        let generation = NEXT_MEDIA_ALLOWLIST_OWNER.fetch_add(1, Ordering::AcqRel) + 1;
+        if let Ok(mut registry) = MEDIA_ALLOWLIST.write() {
+            registry.acquire(generation);
+        }
+        Self { generation }
+    }
+
+    pub fn replace(&self, paths: HashSet<PathBuf>) -> bool {
+        MEDIA_ALLOWLIST
+            .write()
+            .map(|mut registry| registry.replace_owned(self.generation, paths))
+            .unwrap_or(false)
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn clear(&self) {
+        if let Ok(mut registry) = MEDIA_ALLOWLIST.write() {
+            registry.release(self.generation);
+        }
+    }
+
+    pub fn replace_current(paths: HashSet<PathBuf>) {
+        set_media_allowlist(paths);
+    }
+
+    pub fn allows(path: &std::path::Path) -> bool {
+        is_media_path_allowed(path)
+    }
+}
+
+impl Drop for MediaAllowlistLease {
+    fn drop(&mut self) {
+        if let Ok(mut registry) = MEDIA_ALLOWLIST.write() {
+            registry.release(self.generation);
+        }
+    }
+}
+
+pub fn set_media_allowlist(paths: HashSet<PathBuf>) {
+    if let Ok(mut registry) = MEDIA_ALLOWLIST.write() {
+        registry.replace_all(paths);
+    }
+}
+
 pub fn is_media_path_allowed(path: &std::path::Path) -> bool {
-    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     MEDIA_ALLOWLIST
         .read()
-        .map(|s| s.contains(&canon))
+        .map(|registry| registry.contains(path))
         .unwrap_or(false)
 }
 
@@ -637,6 +791,66 @@ mod tests {
         assert_eq!(embedded_page_host("vmux://", "vmux://"), None);
         assert_eq!(embedded_page_host("https://evil.com/", "vmux://"), None);
         assert_eq!(embedded_page_host("vmux://history/", ""), None);
+    }
+
+    #[test]
+    fn default_config_authorizes_no_hardcoded_bridge_origins_or_product_schemes() {
+        let config = CefEmbeddedPageConfig::default();
+        assert!(!config.is_bridge_allowed_origin("https://chat.mistral.ai/"));
+        assert!(!config.is_bridge_allowed_origin("https://chromewebstore.google.com/"));
+        assert!(config.scheme_route_for("file:///tmp/a.rs").is_none());
+        assert!(config.scheme_route_for("git://git/").is_none());
+    }
+
+    #[test]
+    fn configured_bridge_origins_and_scheme_routes_govern_authorization() {
+        let config = CefEmbeddedPageConfig::new("vmux", allowlisted_hosts())
+            .with_bridge_origins(vec!["chat.mistral.ai".to_string()])
+            .with_scheme_routes(vec![CefSchemeRoute {
+                scheme: "file".to_string(),
+                host: "files".to_string(),
+                default_document: "files/index.html".to_string(),
+                trusted_ipc: true,
+                extension_free: true,
+                register_handler: true,
+                strip_self_host: false,
+            }]);
+        assert!(config.is_bridge_allowed_origin("https://chat.mistral.ai/chat"));
+        assert!(!config.is_bridge_allowed_origin("http://chat.mistral.ai/chat"));
+        assert!(!config.is_bridge_allowed_origin("https://evil.example/"));
+        assert!(config.requires_extension_free_context("file:///tmp/demo.rs"));
+        assert!(!config.requires_extension_free_context("https://example.com/"));
+        assert_eq!(
+            config
+                .scheme_route_for("file:///tmp/demo.rs")
+                .map(|r| r.host.as_str()),
+            Some("files")
+        );
+    }
+
+    #[test]
+    fn media_allowlist_lease_rejects_stale_owners_and_revokes_on_drop() {
+        let dir = std::env::temp_dir().join(format!("vmux_lease_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("sample.bin");
+        std::fs::write(&file, b"ok").unwrap();
+        let canon = std::fs::canonicalize(&file).unwrap();
+
+        let owner_a = MediaAllowlistLease::acquire();
+        let owner_b = MediaAllowlistLease::acquire();
+        assert!(owner_b.generation() > owner_a.generation());
+        assert!(!owner_a.replace(HashSet::from([canon.clone()])));
+        assert!(!is_media_path_allowed(&canon));
+
+        assert!(owner_b.replace(HashSet::from([canon.clone()])));
+        assert!(is_media_path_allowed(&canon));
+
+        drop(owner_a);
+        assert!(is_media_path_allowed(&canon));
+
+        drop(owner_b);
+        assert!(!is_media_path_allowed(&canon));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

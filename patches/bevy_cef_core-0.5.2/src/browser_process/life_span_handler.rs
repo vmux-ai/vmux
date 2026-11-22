@@ -108,6 +108,7 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
     }
 
     fn on_before_close(&self, _browser: Option<&mut Browser>) {
+        crate::browser_process::permission_handler::revoke_webview_permissions(self.webview);
         let _ = OPEN_BROWSER_COUNT.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
             count.checked_sub(1)
         });

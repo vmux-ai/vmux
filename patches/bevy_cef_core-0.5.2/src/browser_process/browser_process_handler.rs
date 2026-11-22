@@ -214,12 +214,19 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         command_line.append_switch(Some(&"ignore-certificate-errors".into()));
         command_line.append_switch(Some(&"ignore-ssl-errors".into()));
         command_line.append_switch(Some(&"disable-web-security".into()));
-        // Pass extensions to render process via command line
         if !self.extensions.is_empty()
             && let Ok(json) = serde_json::to_string(&self.extensions.0)
         {
             command_line.append_switch_with_value(
                 Some(&EXTENSIONS_SWITCH.into()),
+                Some(&json.as_str().into()),
+            );
+        }
+        let embedded: std::sync::Arc<crate::util::CefEmbeddedPageConfig> =
+            crate::util::resolved_cef_embedded_page_config();
+        if let Ok(json) = serde_json::to_string(embedded.as_ref()) {
+            command_line.append_switch_with_value(
+                Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into()),
                 Some(&json.as_str().into()),
             );
         }

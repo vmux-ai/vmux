@@ -1,8 +1,9 @@
 use crate::prelude::{
-    LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_HISTORY_SWIPE,
-    PROCESS_MESSAGE_JS_EMIT,
+    PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_HISTORY_SWIPE, PROCESS_MESSAGE_JS_EMIT,
 };
-use crate::render_process::render_process_handler::{BinDocumentIdentity, current_bin_ipc_epoch};
+use crate::render_process::render_process_handler::{
+    BinDocumentIdentity, current_bin_ipc_epoch, register_render_listener,
+};
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
 use cef::{
@@ -141,7 +142,15 @@ impl CefApiHandler {
         let Some(frame) = context.frame() else {
             return 0;
         };
-        if !crate::util::ipc_allowed_render(&frame.url().into_string()) {
+        let frame_url = frame.url().into_string();
+        let config: std::sync::Arc<crate::util::CefEmbeddedPageConfig> =
+            crate::util::resolved_cef_embedded_page_config();
+        if !crate::util::url_has_embedded_scheme(&frame_url, config.scheme_prefix())
+            && !config
+                .scheme_route_for(&frame_url)
+                .is_some_and(|route| route.trusted_ipc)
+            && !config.is_bridge_allowed_origin(&frame_url)
+        {
             return 1;
         }
 
@@ -245,12 +254,12 @@ impl CefApiHandler {
             && let Some(browser) = context.browser()
             && let Some(token) = BinDocumentIdentity::current_token(&context)
         {
-            LISTEN_EVENTS
-                .lock()
-                .unwrap()
-                .entry((browser.identifier(), token, id.string_value().into_string()))
-                .or_default()
-                .push(callback.clone());
+            register_render_listener(
+                browser.identifier(),
+                token,
+                id.string_value().into_string(),
+                callback.clone(),
+            );
         }
         1
     }
