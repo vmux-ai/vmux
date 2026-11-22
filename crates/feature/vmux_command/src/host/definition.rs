@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
+use bevy::prelude::{Added, Commands};
 use vmux_api::JsonSchema;
 use vmux_ecs::JsonArguments;
 use vmux_feature::manifest::{self, FeatureId, FeatureManifest};
@@ -18,19 +19,14 @@ impl Plugin for CommandRuntimePlugin {
         app.add_message::<CommandInvocation>()
             .configure_sets(
                 Startup,
-                (
-                    CommandStartupSet::Manifest,
-                    CommandStartupSet::Flush,
-                    BindCommands,
-                )
-                    .chain(),
+                (RegisterManifests, FlushManifests, BindCommands).chain(),
             )
             .add_systems(
                 Startup,
                 (
                     spawn.before(BindCommands),
-                    register.in_set(CommandStartupSet::Manifest),
-                    ApplyDeferred.in_set(CommandStartupSet::Flush),
+                    register.in_set(RegisterManifests),
+                    ApplyDeferred.in_set(FlushManifests),
                 ),
             )
             .configure_sets(
@@ -60,28 +56,17 @@ impl Plugin for CommandRuntimePlugin {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ShortcutDefinition {
-    Direct(String),
-    Chord(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandShortcut {
-    pub shortcut: ShortcutDefinition,
+    pub chord: bool,
+    pub key: String,
     pub when: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum AgentAccess {
-    Denied,
-    Allowed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandMcp {
     pub description: String,
     pub input_schema: JsonSchema,
-    pub(super) agent_access: AgentAccess,
+    pub(super) allow_agent: bool,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -225,10 +210,10 @@ pub struct DispatchCommandInvocations;
 pub struct BindCommands;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-enum CommandStartupSet {
-    Manifest,
-    Flush,
-}
+struct RegisterManifests;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct FlushManifests;
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
@@ -410,80 +395,14 @@ mod tests {
         assert!(app.world().get::<CommandDefinition>(foreign).is_some());
     }
 
-    #[derive(Message)]
-    struct TestToggleRequest;
-
-    impl TryFrom<&CommandInvocation> for TestToggleRequest {
-        type Error = ();
-
-        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-            (invocation.id == "test_toggle").then_some(Self).ok_or(())
-        }
-    }
-
-    #[derive(Message)]
-    struct AgentVisibleRequest;
-
-    impl TryFrom<&CommandInvocation> for AgentVisibleRequest {
-        type Error = ();
-
-        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-            (invocation.id == "agent_visible").then_some(Self).ok_or(())
-        }
-    }
-
-    #[derive(Message)]
-    struct UserOnlyRequest;
-
-    impl TryFrom<&CommandInvocation> for UserOnlyRequest {
-        type Error = ();
-
-        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-            (invocation.id == "user_only").then_some(Self).ok_or(())
-        }
-    }
-
-    #[derive(Message)]
-    struct DuplicateCommandA;
-
-    impl TryFrom<&CommandInvocation> for DuplicateCommandA {
-        type Error = ();
-
-        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-            Err(())
-        }
-    }
-
-    #[derive(Message)]
-    struct DuplicateCommandB;
-
-    impl TryFrom<&CommandInvocation> for DuplicateCommandB {
-        type Error = ();
-
-        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-            Err(())
-        }
-    }
-
     #[derive(Message, Debug, PartialEq, Eq)]
-    struct AliasedCommand(String);
+    struct TestCommandMessage(String);
 
-    impl TryFrom<&CommandInvocation> for AliasedCommand {
+    impl TryFrom<&CommandInvocation> for TestCommandMessage {
         type Error = ();
 
         fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
             Ok(Self(invocation.id.clone()))
-        }
-    }
-
-    #[derive(Message)]
-    struct DuplicateAlias;
-
-    impl TryFrom<&CommandInvocation> for DuplicateAlias {
-        type Error = ();
-
-        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-            Err(())
         }
     }
 
@@ -496,17 +415,15 @@ mod tests {
             app
         }
 
-        fn register<T>(app: &mut App, definition: CommandDefinition)
-        where
-            T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-        {
-            app.add_message::<T>();
-            app.world_mut().spawn(definition.message::<T>());
+        fn register(app: &mut App, definition: CommandDefinition) {
+            app.add_message::<TestCommandMessage>();
+            app.world_mut()
+                .spawn(definition.message::<TestCommandMessage>());
         }
 
         fn test_toggle() -> App {
             let mut app = Self::empty();
-            Self::register::<TestToggleRequest>(
+            Self::register(
                 &mut app,
                 CommandDefinition::new("test_toggle", "Toggle", "Test").direct("Super+t"),
             );
@@ -515,12 +432,12 @@ mod tests {
 
         fn agent_commands() -> App {
             let mut app = Self::empty();
-            Self::register::<AgentVisibleRequest>(
+            Self::register(
                 &mut app,
                 CommandDefinition::new("agent_visible", "Visible", "Agent")
                     .mcp(CommandMcp::new("Visible", vmux_api::JsonSchema::object()).allow_agent()),
             );
-            Self::register::<UserOnlyRequest>(
+            Self::register(
                 &mut app,
                 CommandDefinition::new("user_only", "Only", "User")
                     .mcp(CommandMcp::new("User only", vmux_api::JsonSchema::object())),
@@ -539,12 +456,12 @@ mod tests {
 
         app.update();
 
-        let request_count = app
+        let requests = app
             .world_mut()
-            .resource_mut::<Messages<TestToggleRequest>>()
+            .resource_mut::<Messages<TestCommandMessage>>()
             .drain()
-            .count();
-        assert_eq!(request_count, 1);
+            .collect::<Vec<_>>();
+        assert_eq!(requests, [TestCommandMessage("test_toggle".to_string())]);
     }
 
     #[test]
@@ -569,7 +486,7 @@ mod tests {
     #[test]
     fn alias_dispatches_with_the_canonical_id() {
         let mut app = CommandTestApp::empty();
-        CommandTestApp::register::<AliasedCommand>(
+        CommandTestApp::register(
             &mut app,
             CommandDefinition::new("canonical", "Canonical", "Test").alias("legacy"),
         );
@@ -582,21 +499,21 @@ mod tests {
 
         let requests = app
             .world_mut()
-            .resource_mut::<Messages<AliasedCommand>>()
+            .resource_mut::<Messages<TestCommandMessage>>()
             .drain()
             .collect::<Vec<_>>();
-        assert_eq!(requests, [AliasedCommand("canonical".to_string())]);
+        assert_eq!(requests, [TestCommandMessage("canonical".to_string())]);
     }
 
     #[test]
     #[should_panic(expected = "duplicate command id: duplicate")]
     fn duplicate_command_ids_are_rejected() {
         let mut app = CommandTestApp::empty();
-        CommandTestApp::register::<DuplicateCommandA>(
+        CommandTestApp::register(
             &mut app,
             CommandDefinition::new("duplicate", "First", "Test"),
         );
-        CommandTestApp::register::<DuplicateCommandB>(
+        CommandTestApp::register(
             &mut app,
             CommandDefinition::new("duplicate", "Second", "Test"),
         );
@@ -607,11 +524,11 @@ mod tests {
     #[should_panic(expected = "duplicate command id: duplicate")]
     fn aliases_cannot_collide_with_command_ids() {
         let mut app = CommandTestApp::empty();
-        CommandTestApp::register::<DuplicateCommandA>(
+        CommandTestApp::register(
             &mut app,
             CommandDefinition::new("duplicate", "First", "Test"),
         );
-        CommandTestApp::register::<DuplicateAlias>(
+        CommandTestApp::register(
             &mut app,
             CommandDefinition::new("alias_owner", "Alias", "Test").alias("duplicate"),
         );
@@ -651,13 +568,12 @@ mod tests {
             .resource_mut::<Messages<CommandInvocation>>()
             .write(invocation);
         app.update();
-        assert_eq!(
-            app.world_mut()
-                .resource_mut::<Messages<AgentVisibleRequest>>()
-                .drain()
-                .count(),
-            1,
-        );
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<TestCommandMessage>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests, [TestCommandMessage("agent_visible".to_string())]);
     }
 
     #[test]

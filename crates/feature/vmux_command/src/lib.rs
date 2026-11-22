@@ -12,7 +12,7 @@ pub use host::{
     ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPage,
     ContributedPages, DispatchCommandInvocations, KeyCombo, KeyContext, Keymap, Modifiers,
     PendingCommandBarReveal, ReadCommandRequests, RegisteredPage, ResolvedKey, ResolvedLocale,
-    Shortcut, ShortcutDefinition, Source, When, WriteCommandBarRequests, WriteCommandBarSnapshots,
+    Shortcut, Source, When, WriteCommandBarRequests, WriteCommandBarSnapshots,
     WriteCommandRequests,
 };
 pub use palette_surface::CommandPaletteSurface;

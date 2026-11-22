@@ -1,8 +1,6 @@
 use crate::ui::composer::CommandComposerMenus;
-use crate::ui::composer_driver::{ComposerChips, ComposerMenuView};
-use crate::ui::input_driver::{
-    COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_input,
-};
+use crate::ui::composer_driver::ComposerChips;
+use crate::ui::input_driver::{CommandBarField, PaletteInput, Readline, TypedDigit};
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
     CommandBarControl, CommandBarUiState, CommandPaletteActivateRequest,
@@ -66,7 +64,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_close = props.on_close;
     let on_activity = props.on_activity;
 
-    let mut input = use_palette_input();
+    let mut input = PaletteInput::use_hook();
     let tree = props.state;
     let state = use_memo(move || tree().snapshot);
     let host_state = use_memo(move || tree().palette);
@@ -111,7 +109,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let input_id = if is_start {
         PROMPT_INPUT_ID
     } else {
-        COMMAND_BAR_INPUT_ID
+        CommandBarField::INPUT_ID
     };
     use_effect(move || {
         let opened = state();
@@ -207,7 +205,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         && !workspace_selection.pending
         && workspace_selection.error.is_empty();
     let chips = ComposerChips::build(&composer, state_val.open_id);
-    let opened_menu = ComposerMenuView::kind(projection.menus);
+    let opened_menu = if projection.menus.agent {
+        Some(vmux_ui::components::composer_bar::ComposerMenuKind::Agent)
+    } else if projection.menus.model {
+        Some(vmux_ui::components::composer_bar::ComposerMenuKind::Model)
+    } else if projection.menus.permission {
+        Some(vmux_ui::components::composer_bar::ComposerMenuKind::Permission)
+    } else if projection.menus.project {
+        Some(vmux_ui::components::composer_bar::ComposerMenuKind::Project)
+    } else if projection.menus.branch {
+        Some(vmux_ui::components::composer_bar::ComposerMenuKind::Branch)
+    } else {
+        None
+    };
 
     let start_composer_footer = rsx! {
         ComposerBar {
@@ -403,7 +413,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if ime.swallows(&e) {
                 return;
             }
-            if let Some(edited) = Readline::chord(&e, keys, &query, &ghost, COMMAND_BAR_INPUT_ID) {
+            if let Some(edited) =
+                Readline::chord(&e, keys, &query, &ghost, CommandBarField::INPUT_ID)
+            {
                 let _ = send(&CommandPaletteDraftRequest {
                     open_id: state().open_id,
                     query: vmux_path::UrlPresentation::new(&canonical).edit(&edited),
@@ -538,7 +550,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     let canonical = canonical_q.clone();
                                     let displayed = q.clone();
                                     move |event| {
-                                        let (start, end) = DomSelection::in_field(COMMAND_BAR_INPUT_ID);
+                                        let (start, end) =
+                                            DomSelection::in_field(CommandBarField::INPUT_ID);
                                         if start == 0 && end == displayed.len() && canonical != displayed {
                                             event.prevent_default();
                                             vmux_ui::clipboard::Clipboard::write(&canonical);

@@ -1,3 +1,4 @@
+use bevy::prelude::Commands;
 use bevy::prelude::*;
 use vmux_api::command_bar::{
     CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
@@ -284,12 +285,6 @@ mod tests {
         assert_eq!(ContributedPage::prompt_url_among(Vec::new(), None), None);
     }
 
-    #[derive(Component)]
-    struct FirstContributor;
-
-    #[derive(Component)]
-    struct SecondContributor;
-
     impl ContributedCommand {
         fn named(id: &str) -> Self {
             Self {
@@ -303,16 +298,24 @@ mod tests {
     #[test]
     fn one_contributor_rebuilding_leaves_the_others_rows() {
         let mut world = World::new();
-        world.spawn((FirstContributor, ContributedCommand::named("first")));
-        world.spawn((SecondContributor, ContributedCommand::named("second")));
+        let first_owner = world.spawn_empty().id();
+        let second_owner = world.spawn_empty().id();
+        world.spawn((ChildOf(first_owner), ContributedCommand::named("first")));
+        world.spawn((ChildOf(second_owner), ContributedCommand::named("second")));
 
         world
             .run_system_once(
-                |mine: Query<Entity, With<FirstContributor>>, mut commands: Commands| {
-                    for entity in mine.iter() {
-                        commands.entity(entity).despawn();
+                move |mine: Query<(Entity, &ChildOf), With<ContributedCommand>>,
+                      mut commands: Commands| {
+                    for (entity, parent) in mine.iter() {
+                        if parent.parent() == first_owner {
+                            commands.entity(entity).despawn();
+                        }
                     }
-                    commands.spawn((FirstContributor, ContributedCommand::named("first-again")));
+                    commands.spawn((
+                        ChildOf(first_owner),
+                        ContributedCommand::named("first-again"),
+                    ));
                 },
             )
             .expect("republish runs");

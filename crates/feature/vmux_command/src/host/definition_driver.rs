@@ -1,3 +1,4 @@
+use bevy::prelude::Commands;
 use bevy::prelude::*;
 use vmux_api::JsonSchema;
 use vmux_api::json::JsonValue;
@@ -7,24 +8,20 @@ use vmux_feature::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
 use super::definition::{
-    AgentAccess, CommandDefinition, CommandDispatch, CommandInvocation, CommandMcp, CommandMessage,
-    CommandShortcut, CommandToolbar, ShortcutDefinition,
+    CommandDefinition, CommandDispatch, CommandInvocation, CommandMcp, CommandMessage,
+    CommandShortcut, CommandToolbar,
 };
 use super::shortcut_driver::{Binding, KeyCombo, Shortcut, Source, When};
 
-impl From<manifest::ShortcutKind> for ShortcutDefinition {
-    fn from(shortcut: manifest::ShortcutKind) -> Self {
-        match shortcut {
-            manifest::ShortcutKind::Direct(value) => Self::Direct(value),
-            manifest::ShortcutKind::Chord(value) => Self::Chord(value),
-        }
-    }
-}
-
 impl From<manifest::Shortcut> for CommandShortcut {
     fn from(shortcut: manifest::Shortcut) -> Self {
+        let (chord, key) = match shortcut.shortcut {
+            manifest::ShortcutKind::Direct(value) => (false, value),
+            manifest::ShortcutKind::Chord(value) => (true, value),
+        };
         Self {
-            shortcut: shortcut.shortcut.into(),
+            chord,
+            key,
             when: shortcut.when,
         }
     }
@@ -48,12 +45,12 @@ impl CommandMcp {
         Self {
             description: description.into(),
             input_schema,
-            agent_access: AgentAccess::Denied,
+            allow_agent: false,
         }
     }
 
     pub fn allow_agent(mut self) -> Self {
-        self.agent_access = AgentAccess::Allowed;
+        self.allow_agent = true;
         self
     }
 }
@@ -151,7 +148,7 @@ impl CommandDefinition {
         let Some(mcp) = &self.mcp else {
             return Err(format!("unknown app command: {}", self.id));
         };
-        if require_agent_access && mcp.agent_access != AgentAccess::Allowed {
+        if require_agent_access && !mcp.allow_agent {
             return Err("focus-changing app command is disabled for agents".to_string());
         }
         self.validate_arguments(&arguments)?;
@@ -173,7 +170,7 @@ impl CommandDefinition {
             .mcp
             .as_mut()
             .expect("agent access requires an MCP command definition");
-        mcp.agent_access = AgentAccess::Allowed;
+        mcp.allow_agent = true;
         self
     }
 
@@ -216,7 +213,8 @@ impl CommandDefinition {
         when: Option<impl Into<String>>,
     ) -> Self {
         self.shortcuts.push(CommandShortcut {
-            shortcut: ShortcutDefinition::Direct(shortcut.into()),
+            chord: false,
+            key: shortcut.into(),
             when: when.map(Into::into),
         });
         self
@@ -232,7 +230,8 @@ impl CommandDefinition {
         when: Option<impl Into<String>>,
     ) -> Self {
         self.shortcuts.push(CommandShortcut {
-            shortcut: ShortcutDefinition::Chord(shortcut.into()),
+            chord: true,
+            key: shortcut.into(),
             when: when.map(Into::into),
         });
         self
@@ -290,25 +289,22 @@ impl CommandDefinition {
     pub fn bindings(&self) -> Vec<Binding> {
         let mut bindings = Vec::new();
         for definition in &self.shortcuts {
-            let shortcut = match &definition.shortcut {
-                ShortcutDefinition::Direct(value) => {
-                    let Some(combo) = KeyCombo::parse(value) else {
-                        continue;
-                    };
-                    Shortcut::Direct(combo)
-                }
-                ShortcutDefinition::Chord(value) => {
-                    let Some((prefix, second)) = value.split_once(',') else {
-                        continue;
-                    };
-                    let (Some(prefix), Some(second)) = (
-                        KeyCombo::parse(prefix.trim()),
-                        KeyCombo::parse(second.trim()),
-                    ) else {
-                        continue;
-                    };
-                    Shortcut::Chord(prefix, second)
-                }
+            let shortcut = if definition.chord {
+                let Some((prefix, second)) = definition.key.split_once(',') else {
+                    continue;
+                };
+                let (Some(prefix), Some(second)) = (
+                    KeyCombo::parse(prefix.trim()),
+                    KeyCombo::parse(second.trim()),
+                ) else {
+                    continue;
+                };
+                Shortcut::Chord(prefix, second)
+            } else {
+                let Some(combo) = KeyCombo::parse(&definition.key) else {
+                    continue;
+                };
+                Shortcut::Direct(combo)
             };
             bindings.push(Binding {
                 shortcut,
@@ -392,13 +388,10 @@ impl CommandDefinition {
                 .as_deref()
                 .or_else(|| {
                     definition.shortcuts.iter().find_map(|shortcut| {
-                        if shortcut.when.is_some() {
+                        if shortcut.when.is_some() || shortcut.chord {
                             return None;
                         }
-                        let ShortcutDefinition::Direct(value) = &shortcut.shortcut else {
-                            return None;
-                        };
-                        Some(value.as_str())
+                        Some(shortcut.key.as_str())
                     })
                 })
                 .and_then(|value| value.parse::<muda::accelerator::Accelerator>().ok());
@@ -415,19 +408,19 @@ impl CommandMessage {
     where
         T: Message + for<'a> TryFrom<&'a CommandInvocation>,
     {
-        Self(write_command_message::<T>)
+        Self(Self::write::<T>)
     }
-}
 
-fn write_command_message<T>(invocation: &CommandInvocation, commands: &mut Commands)
-where
-    T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-{
-    let Ok(message) = T::try_from(invocation) else {
-        warn!(command = %invocation.id, "command message rejected its registered definition");
-        return;
-    };
-    commands.write_message(message);
+    fn write<T>(invocation: &CommandInvocation, commands: &mut Commands)
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        let Ok(message) = T::try_from(invocation) else {
+            warn!(command = %invocation.id, "command message rejected its registered definition");
+            return;
+        };
+        commands.write_message(message);
+    }
 }
 
 impl CommandInvocation {

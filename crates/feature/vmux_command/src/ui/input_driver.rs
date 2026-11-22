@@ -1,11 +1,9 @@
-use super::readline_driver::TextEditCommand;
+use super::readline_driver::Edited;
 use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::dom::{DomCaret, DomSelection};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::KeyClaim;
-
-pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct PaletteInput {
@@ -13,14 +11,13 @@ pub struct PaletteInput {
     pub last_host_input: Signal<(OpenId, u64)>,
 }
 
-pub fn use_palette_input() -> PaletteInput {
-    PaletteInput {
-        last_focus_open_id: use_signal(|| OpenId(u64::MAX)),
-        last_host_input: use_signal(|| (OpenId(u64::MAX), 0)),
-    }
-}
-
 impl PaletteInput {
+    pub fn use_hook() -> Self {
+        Self {
+            last_focus_open_id: use_signal(|| OpenId(u64::MAX)),
+            last_host_input: use_signal(|| (OpenId(u64::MAX), 0)),
+        }
+    }
     pub fn refocus(&mut self, open_id: OpenId) -> bool {
         if !open_id.should_refocus((self.last_focus_open_id)()) {
             return false;
@@ -65,15 +62,15 @@ impl TypedDigit {
 pub struct CommandBarField;
 
 impl CommandBarField {
+    pub const INPUT_ID: &str = "command-bar-input";
+
     pub fn focus(opened: &CommandBarOpenEvent) {
         if opened.caret_at_end {
-            FocusClaim::new(COMMAND_BAR_INPUT_ID)
-                .caret_at_end()
-                .request();
+            FocusClaim::new(Self::INPUT_ID).caret_at_end().request();
             return;
         }
-        FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
-        DomCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
+        FocusClaim::new(Self::INPUT_ID).request();
+        DomCaret::in_field(Self::INPUT_ID).select_all_from_start_next_frame();
     }
 }
 
@@ -91,34 +88,16 @@ impl Readline {
             return Some(query.to_string());
         }
         let command = keys.command(event)?;
-        let edit = TextEditCommand::from_command(&command)?;
+        if !Edited::handles(&command) {
+            return None;
+        }
 
         event.prevent_default();
         event.stop_propagation();
-        Some(Self::edit(
-            query,
-            edit,
-            ghost,
-            DomSelection::caret_in(input_id),
-            input_id,
-        ))
-    }
-
-    fn edit(
-        query: &str,
-        edit: TextEditCommand,
-        ghost: &str,
-        caret: usize,
-        input_id: &'static str,
-    ) -> String {
-        let ghost = match edit {
-            TextEditCommand::End => ghost,
-            _ => "",
-        };
-
-        let edited = edit.apply(query, caret, ghost);
+        let edited =
+            Edited::apply_command(&command, query, DomSelection::caret_in(input_id), ghost)?;
         DomCaret::in_field(input_id).place(edited.caret);
-        edited.value
+        Some(edited.value)
     }
 
     fn select_all(event: &KeyboardEvent, input_id: &'static str) -> bool {

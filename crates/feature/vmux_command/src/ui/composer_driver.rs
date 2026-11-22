@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
     CommandPaletteAgentMenuToggleRequest, CommandPaletteBranchMenuToggleRequest,
-    CommandPaletteComposer, CommandPaletteMenuActivateRequest, CommandPaletteMenus,
+    CommandPaletteComposer, CommandPaletteMenuActivateRequest,
     CommandPaletteModelMenuToggleRequest, CommandPalettePermissionMenuToggleRequest,
     CommandPaletteProjectMenuToggleRequest, OpenId,
 };
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
-use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
+use vmux_ui::components::composer_bar::ComposerChip;
 use vmux_ui::components::project_picker::ProjectPick;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -167,28 +167,5 @@ impl MenuSelection {
             return;
         };
         self.activate(index);
-    }
-}
-
-pub(super) struct ComposerMenuView;
-
-impl ComposerMenuView {
-    pub(super) const fn kind(menus: CommandPaletteMenus) -> Option<ComposerMenuKind> {
-        if menus.agent {
-            return Some(ComposerMenuKind::Agent);
-        }
-        if menus.model {
-            return Some(ComposerMenuKind::Model);
-        }
-        if menus.permission {
-            return Some(ComposerMenuKind::Permission);
-        }
-        if menus.project {
-            return Some(ComposerMenuKind::Project);
-        }
-        if menus.branch {
-            return Some(ComposerMenuKind::Branch);
-        }
-        None
     }
 }

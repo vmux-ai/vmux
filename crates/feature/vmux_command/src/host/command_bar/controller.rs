@@ -15,6 +15,7 @@ use crate::host::snapshot::{
     CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
 };
 use crate::{CommandInvocation, ReadCommandRequests};
+use bevy::prelude::Commands;
 use bevy::{
     ecs::{message::MessageReader, system::SystemParam},
     prelude::*,
@@ -94,7 +95,7 @@ fn wake(
     }
 }
 
-#[vmux_command::command(message)]
+#[crate::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarToggleRequest;
 
@@ -108,7 +109,7 @@ impl TryFrom<&CommandInvocation> for CommandBarToggleRequest {
     }
 }
 
-#[vmux_command::command(message)]
+#[crate::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarEditPageRequest;
 
@@ -122,7 +123,7 @@ impl TryFrom<&CommandInvocation> for CommandBarEditPageRequest {
     }
 }
 
-#[vmux_command::command(message)]
+#[crate::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarPathRequest;
 
@@ -136,7 +137,7 @@ impl TryFrom<&CommandInvocation> for CommandBarPathRequest {
     }
 }
 
-#[vmux_command::command(message)]
+#[crate::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarCommandsRequest;
 
@@ -221,63 +222,201 @@ pub struct CommandBarNativeSize {
 
 #[derive(Component)]
 pub struct PendingCommandBarReveal {
-    pub(super) frames: u8,
-    pub(super) open_id: OpenId,
-    pub(super) payload: Option<CommandBarOpenEvent>,
-    pub(super) started_at: Option<Instant>,
-    pub(super) last_retry: Option<Instant>,
+    frames: u8,
+    open_id: OpenId,
+    payload: Option<CommandBarOpenEvent>,
+    started_at: Option<Instant>,
+    last_retry: Option<Instant>,
 }
 
-pub(super) const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
-pub(super) const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
-pub(super) const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
-const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+impl PendingCommandBarReveal {
+    const REVEAL_FRAMES: u8 = 2;
+    const REVEAL_FALLBACK_FRAMES: u8 = 10;
+    const NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
+    const OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
-type PrewarmRow = (
-    Entity,
-    &'static mut Node,
-    &'static mut Visibility,
-    Has<KeyboardOwner>,
-    Has<PendingCommandBarReveal>,
-    Has<WebviewNativeOverlay>,
-);
-type ResizeRow = (
-    &'static Visibility,
-    Option<&'static PendingCommandBarReveal>,
-    Option<&'static CommandBarNativeSize>,
-    Has<WebviewWindowed>,
-);
-type RevealRow = (
-    Entity,
-    &'static mut Visibility,
-    &'static mut PendingCommandBarReveal,
-    Option<&'static CommandBarRenderedOpen>,
-    Option<&'static CommandBarNativeSize>,
-    Has<WebviewWindowed>,
-    Has<WebviewNativeOverlay>,
-);
-type RetryRow = (
-    Entity,
-    &'static mut PendingCommandBarReveal,
-    Option<&'static CommandBarRenderedOpen>,
-    Has<CommandBarRecreating>,
-);
-type CloseRow = (
-    Entity,
-    &'static mut Node,
-    &'static mut Visibility,
-    Has<WebviewNativeOverlay>,
-);
-type LauncherLayout = (
-    Entity,
-    Has<CommandBarPanelActive>,
-    Option<&'static HostWindow>,
-);
+    pub fn is_active(&self) -> bool {
+        self.open_id.is_open()
+    }
+
+    fn next_frame(
+        &self,
+        rendered_open_id: Option<OpenId>,
+        native_windowed: bool,
+        native_overlay: bool,
+        has_native_size: bool,
+    ) -> Option<u8> {
+        if (native_windowed || native_overlay)
+            && self.open_id.is_open()
+            && (rendered_open_id != Some(self.open_id) || (native_windowed && !has_native_size))
+        {
+            return Some(self.frames.saturating_add(1));
+        }
+        if !self.open_id.is_open() {
+            return Some(self.frames);
+        }
+        if rendered_open_id != Some(self.open_id) {
+            if self.frames >= Self::REVEAL_FALLBACK_FRAMES {
+                return None;
+            }
+            return Some(self.frames + 1);
+        }
+        if self.frames >= Self::REVEAL_FRAMES {
+            None
+        } else {
+            Some(self.frames + 1)
+        }
+    }
+
+    fn timed_out(
+        &self,
+        now: Instant,
+        rendered_open_id: Option<OpenId>,
+        native_windowed: bool,
+        native_overlay: bool,
+        has_native_size: bool,
+    ) -> bool {
+        let elapsed = self
+            .started_at
+            .map(|started_at| now.duration_since(started_at))
+            .unwrap_or_default();
+        (native_windowed || native_overlay)
+            && self.open_id.is_open()
+            && elapsed >= Self::NATIVE_REVEAL_TIMEOUT
+            && (rendered_open_id != Some(self.open_id) || (native_windowed && !has_native_size))
+    }
+
+    fn should_retry(&self, rendered_open_id: Option<OpenId>) -> bool {
+        self.open_id.is_open() && self.payload.is_some() && rendered_open_id != Some(self.open_id)
+    }
+
+    fn accepts_size(&self) -> bool {
+        self.open_id.is_open() && self.payload.is_some()
+    }
+
+    #[cfg(test)]
+    fn waiting(frames: u8, open_id: OpenId) -> Self {
+        Self {
+            frames,
+            open_id,
+            payload: Some(CommandBarOpenEvent {
+                open_id,
+                ..Default::default()
+            }),
+            started_at: Some(Instant::now()),
+            last_retry: None,
+        }
+    }
+}
+
+type PrewarmBars<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Node,
+        &'static mut Visibility,
+        Has<KeyboardOwner>,
+        Has<PendingCommandBarReveal>,
+        Has<WebviewNativeOverlay>,
+    ),
+    With<CommandBar>,
+>;
+
+type ResizeBars<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Visibility,
+        Option<&'static PendingCommandBarReveal>,
+        Option<&'static CommandBarNativeSize>,
+        Has<WebviewWindowed>,
+    ),
+>;
+
+type RevealBars<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Visibility,
+        &'static mut PendingCommandBarReveal,
+        Option<&'static CommandBarRenderedOpen>,
+        Option<&'static CommandBarNativeSize>,
+        Has<WebviewWindowed>,
+        Has<WebviewNativeOverlay>,
+    ),
+    With<CommandBar>,
+>;
+
+type RetryBars<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut PendingCommandBarReveal,
+        Option<&'static CommandBarRenderedOpen>,
+        Has<CommandBarRecreating>,
+    ),
+    With<CommandBar>,
+>;
+
+type CloseBars<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Node,
+        &'static mut Visibility,
+        Has<WebviewNativeOverlay>,
+    ),
+    With<CommandBar>,
+>;
+
+type LauncherLayouts<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Has<CommandBarPanelActive>,
+        Option<&'static HostWindow>,
+    ),
+    With<RendersLauncherPanel>,
+>;
+
 type BrowserPageFilter = Or<(With<WebviewSource>, With<HostsPage>)>;
 
 #[derive(SystemParam)]
+struct CommandBarBrowsers<'w, 's> {
+    browsers: Option<NonSend<'w, Browsers>>,
+    bars: Query<'w, 's, (), With<CommandBar>>,
+}
+
+impl CommandBarBrowsers<'_, '_> {
+    fn focus_input(&self, webview: Entity) {
+        let _ = &self.bars;
+        let Some(browsers) = self.browsers.as_deref() else {
+            return;
+        };
+        browsers.set_windowed_focus(&webview, true);
+        browsers.execute_js(
+            &webview,
+            "const input = document.getElementById('command-bar-input'); if (input) { input.focus({ preventScroll: true }); }",
+        );
+    }
+
+    fn can_emit_to(&self, webview: Entity) -> bool {
+        self.bars.contains(webview)
+            && self
+                .browsers
+                .as_deref()
+                .is_some_and(|browsers| browsers.can_emit_to(&webview))
+    }
+}
+
+#[derive(SystemParam)]
 struct CommandBarSurface<'w, 's> {
-    bars: Query<'w, 's, CloseRow, With<CommandBar>>,
+    bars: CloseBars<'w, 's>,
 }
 
 impl CommandBarSurface<'_, '_> {
@@ -313,7 +452,7 @@ impl CommandBarSurface<'_, '_> {
     }
 }
 
-fn prewarm(mut commands: Commands, mut modal_q: Query<PrewarmRow, With<CommandBar>>) {
+fn prewarm(mut commands: Commands, mut modal_q: PrewarmBars) {
     let Ok((
         modal_e,
         mut modal_node,
@@ -363,15 +502,11 @@ fn ready(
 
 fn rendered(
     trigger: On<UiInput<CommandBarRenderedEvent>>,
-    browsers: NonSend<Browsers>,
+    browsers: CommandBarBrowsers,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    browsers.set_windowed_focus(&webview, true);
-    browsers.execute_js(
-        &webview,
-        "const input = document.getElementById('command-bar-input'); if (input) { input.focus({ preventScroll: true }); }",
-    );
+    browsers.focus_input(webview);
     commands.entity(webview).insert((
         CommandBarRenderedOpen(trigger.event().payload.open_id),
         CommandBarOpenedOnce,
@@ -380,8 +515,8 @@ fn rendered(
 
 fn resize(
     trigger: On<UiInput<CommandBarSizeEvent>>,
-    browsers: NonSend<Browsers>,
-    state: Query<ResizeRow>,
+    browsers: CommandBarBrowsers,
+    state: ResizeBars,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -399,11 +534,7 @@ fn resize(
             .filter(|pending| pending.open_id.is_open())
             .map(|pending| pending.open_id)
     {
-        browsers.set_windowed_focus(&webview, true);
-        browsers.execute_js(
-            &webview,
-            "const input = document.getElementById('command-bar-input'); if (input) { input.focus({ preventScroll: true }); }",
-        );
+        browsers.focus_input(webview);
         commands
             .entity(webview)
             .insert((CommandBarRenderedOpen(open_id), CommandBarOpenedOnce));
@@ -428,21 +559,6 @@ fn resize(
     });
 }
 
-#[derive(Default)]
-struct CommandBarOpenState {
-    should_toggle: bool,
-    should_dismiss: bool,
-    should_dismiss_nav: bool,
-    replace_active_stack: bool,
-    url_override: Option<String>,
-    picker: Option<CommandBarPicker>,
-    picks: Vec<CommandBarPickRow>,
-    picker_label: String,
-    picker_placeholder: String,
-    picker_typed: bool,
-    picker_numbered: bool,
-}
-
 #[derive(SystemParam)]
 struct OpenRequests<'w, 's> {
     invocations: MessageReader<'w, 's, CommandInvocation>,
@@ -454,29 +570,32 @@ struct OpenRequests<'w, 's> {
 }
 
 impl OpenRequests<'_, '_> {
-    fn read(&mut self) -> CommandBarOpenState {
-        let mut request = CommandBarOpenState::default();
+    fn read(&mut self) -> (bool, bool, bool, CommandBarOpenRequest) {
+        let mut should_toggle = false;
+        let mut should_dismiss = false;
+        let mut should_dismiss_nav = false;
+        let mut request = CommandBarOpenRequest::default();
         if self.toggle.read().count() > 0 {
-            request.should_toggle = true;
-            request.url_override = Some(String::new());
+            should_toggle = true;
+            request.query = Some(String::new());
         }
         if self.edit_page.read().count() > 0 {
-            request.should_toggle = true;
+            should_toggle = true;
             request.replace_active_stack = true;
         }
         if self.path.read().count() > 0 {
-            request.should_toggle = true;
-            request.url_override = Some("/".to_string());
+            should_toggle = true;
+            request.query = Some("/".to_string());
         }
         if self.commands.read().count() > 0 {
-            request.should_toggle = true;
-            request.url_override = Some(">".to_string());
+            should_toggle = true;
+            request.query = Some(">".to_string());
         }
         for open in self.open.read() {
-            request.should_toggle = true;
+            should_toggle = true;
             request.replace_active_stack |= open.replace_active_stack;
             if open.query.is_some() {
-                request.url_override.clone_from(&open.query);
+                request.query.clone_from(&open.query);
             }
             if open.picker.is_some() {
                 request.picker.clone_from(&open.picker);
@@ -492,24 +611,24 @@ impl OpenRequests<'_, '_> {
         for invocation in self.invocations.read() {
             match invocation.id.as_str() {
                 "stack_close" => {
-                    request.should_dismiss = true;
+                    should_dismiss = true;
                 }
                 "stack_next" | "stack_previous" | "select_pane_left" | "select_pane_right"
                 | "select_pane_up" | "select_pane_down" => {
-                    request.should_dismiss_nav = true;
+                    should_dismiss_nav = true;
                 }
                 _ => {
                     continue;
                 }
             }
         }
-        request
+        (should_toggle, should_dismiss, should_dismiss_nav, request)
     }
 }
 
 #[derive(SystemParam)]
 struct OpenSources<'w, 's> {
-    layouts: Query<'w, 's, LauncherLayout, With<RendersLauncherPanel>>,
+    layouts: LauncherLayouts<'w, 's>,
     windows: Query<'w, 's, &'static Window>,
     children: Query<'w, 's, &'static Children>,
     metadata: Query<'w, 's, &'static PageMetadata, BrowserPageFilter>,
@@ -565,8 +684,8 @@ fn open(
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut commands: Commands,
 ) {
-    let request = open_requests.read();
-    if !request.should_toggle && !request.should_dismiss && !request.should_dismiss_nav {
+    let (should_toggle, should_dismiss, should_dismiss_nav, request) = open_requests.read();
+    if !should_toggle && !should_dismiss && !should_dismiss_nav {
         return;
     }
 
@@ -576,12 +695,9 @@ fn open(
     let focus = &*sources.workspace;
     let context = (*sources.context).clone();
     let locale = sources.locale();
-    let toggle_closes = request.should_toggle && is_open && request.picker.is_none();
-    let should_toggle = request.should_toggle;
-    let should_dismiss = request.should_dismiss;
-    let should_dismiss_nav = request.should_dismiss_nav;
+    let toggle_closes = should_toggle && is_open && request.picker.is_none();
     let replace_active_stack = request.replace_active_stack;
-    let url_override = request.url_override;
+    let url_override = request.query;
     let picker = request.picker;
     let picks = request.picks;
     let picker_label = request.picker_label;
@@ -723,7 +839,7 @@ fn dismiss_requested(
     }
 }
 
-fn reveal(mut commands: Commands, mut query: Query<RevealRow, With<CommandBar>>) {
+fn reveal(mut commands: Commands, mut query: RevealBars) {
     for (entity, mut vis, mut pending, rendered, native_size, native_windowed, native_overlay) in
         &mut query
     {
@@ -758,11 +874,7 @@ fn reveal(mut commands: Commands, mut query: Query<RevealRow, With<CommandBar>>)
     }
 }
 
-fn retry(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    mut query: Query<RetryRow, With<CommandBar>>,
-) {
+fn retry(mut commands: Commands, browsers: CommandBarBrowsers, mut query: RetryBars) {
     let now = Instant::now();
     for (entity, mut pending, rendered, recreating) in &mut query {
         if recreating {
@@ -776,13 +888,12 @@ fn retry(
             pending.last_retry = None;
             continue;
         }
-        if !browsers.can_emit_to(&entity) {
+        if !browsers.can_emit_to(entity) {
             continue;
         }
-        if pending
-            .last_retry
-            .is_some_and(|last| now.duration_since(last) < COMMAND_BAR_OPEN_RETRY_INTERVAL)
-        {
+        if pending.last_retry.is_some_and(|last| {
+            now.duration_since(last) < PendingCommandBarReveal::OPEN_RETRY_INTERVAL
+        }) {
             continue;
         }
         commands.trigger(vmux_ecs::UiStateWrite::<
@@ -922,29 +1033,10 @@ mod tests {
         assert!(!empty.should_retry(None));
     }
 
-    #[derive(Resource, Default)]
-    struct CapturedCommandBarOpen(bool);
-
-    type CaptureRow = (
-        &'static Node,
-        &'static Visibility,
-        Has<KeyboardOwner>,
-        Has<vmux_ecs::overlay::OverlayShownInline>,
-    );
-
-    fn capture_bar_open(
-        modal_q: Query<CaptureRow, With<CommandBar>>,
-        mut captured: ResMut<CapturedCommandBarOpen>,
-    ) {
-        captured.0 = OverlayState::from_surfaces(modal_q.iter()).owns_input();
-    }
-
     #[test]
     fn hidden_prewarmed_modal_is_not_command_bar_open() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<CapturedCommandBarOpen>()
-            .add_systems(Update, capture_bar_open);
+        app.add_plugins(MinimalPlugins);
         app.world_mut().spawn((
             CommandBar,
             Node {
@@ -956,7 +1048,14 @@ mod tests {
 
         app.update();
 
-        assert!(!app.world().resource::<CapturedCommandBarOpen>().0);
+        let mut query = app.world_mut().query_filtered::<(
+            &Node,
+            &Visibility,
+            Has<KeyboardOwner>,
+            Has<vmux_ecs::overlay::OverlayShownInline>,
+        ), With<CommandBar>>();
+        let open = OverlayState::from_surfaces(query.iter(app.world())).owns_input();
+        assert!(!open);
     }
 
     #[test]
@@ -1114,7 +1213,7 @@ mod tests {
     fn native_command_bar_aborts_stalled_reveal() {
         let now = Instant::now();
         let mut pending = PendingCommandBarReveal::waiting(0, OpenId(7));
-        pending.started_at = Some(now - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT);
+        pending.started_at = Some(now - PendingCommandBarReveal::NATIVE_REVEAL_TIMEOUT);
 
         assert!(pending.timed_out(now, None, true, false, false));
         assert!(pending.timed_out(now, Some(OpenId(7)), true, false, false));
@@ -1122,7 +1221,7 @@ mod tests {
         assert!(!pending.timed_out(now, None, false, false, false));
 
         pending.started_at =
-            Some(now - (COMMAND_BAR_NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1)));
+            Some(now - (PendingCommandBarReveal::NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1)));
         assert!(!pending.timed_out(now, None, true, false, false));
     }
 
@@ -1160,7 +1259,9 @@ mod tests {
                         open_id: OpenId(7),
                         ..Default::default()
                     }),
-                    started_at: Some(Instant::now() - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT),
+                    started_at: Some(
+                        Instant::now() - PendingCommandBarReveal::NATIVE_REVEAL_TIMEOUT,
+                    ),
                     last_retry: None,
                 },
             ))
@@ -1238,95 +1339,94 @@ mod tests {
     #[derive(Resource, Default)]
     struct EmittedToPage(Vec<(Entity, CommandBarUiStatePatch)>);
 
-    fn capture_page_emit(
-        trigger: On<UiStateWrite<CommandBarUiState>>,
-        mut emitted: ResMut<EmittedToPage>,
-    ) {
-        emitted
-            .0
-            .push((trigger.event().webview(), trigger.event().update().clone()));
-    }
-
-    fn panel_app() -> App {
-        let mut app = App::new();
-        app.add_message::<CommandInvocation>()
-            .add_message::<CommandBarToggleRequest>()
-            .add_message::<CommandBarEditPageRequest>()
-            .add_message::<CommandBarPathRequest>()
-            .add_message::<CommandBarCommandsRequest>()
-            .add_message::<CommandBarOpenRequest>()
-            .add_message::<RestoreKeyboardToStack>()
-            .add_message::<LauncherDismissRequest>()
-            .init_resource::<EmittedToPage>()
-            .add_observer(capture_page_emit)
-            .add_observer(close_panel)
-            .add_systems(Update, open);
-        app.world_mut().spawn((
-            CommandBarWorkspaceSnapshot::default(),
-            CommandBarProjectRoots::default(),
-            CommandBarContextSnapshot::default(),
-            CommandBarPagesSnapshot::default(),
-            CommandBarWorkSnapshot::default(),
-        ));
-        app
-    }
-
-    fn emitted_to_page(app: &App) -> Vec<Entity> {
-        app.world()
-            .resource::<EmittedToPage>()
-            .0
-            .iter()
-            .map(|(webview, _)| *webview)
-            .collect()
-    }
-
-    fn open_payload(app: &App) -> CommandBarOpenEvent {
-        let (_, patch) = app
-            .world()
-            .resource::<EmittedToPage>()
-            .0
-            .iter()
-            .find(|(_, patch)| patch.snapshot.is_some())
-            .expect("no open payload emitted");
-        let snapshot = patch.snapshot.as_ref().unwrap();
-        *snapshot.clone()
-    }
-
-    fn send(app: &mut App, id: &str) {
-        match id {
-            "command_bar_open" => {
-                app.world_mut().write_message(CommandBarToggleRequest);
-            }
-            "command_bar_edit_page" => {
-                app.world_mut().write_message(CommandBarEditPageRequest);
-            }
-            "command_bar_open_path" => {
-                app.world_mut().write_message(CommandBarPathRequest);
-            }
-            "command_bar_open_commands" => {
-                app.world_mut().write_message(CommandBarCommandsRequest);
-            }
-            _ => {
-                app.world_mut()
-                    .write_message(CommandInvocation::new(Entity::PLACEHOLDER, id));
-            }
+    impl EmittedToPage {
+        fn capture(trigger: On<UiStateWrite<CommandBarUiState>>, mut emitted: ResMut<Self>) {
+            emitted
+                .0
+                .push((trigger.event().webview(), trigger.event().update().clone()));
         }
-        app.update();
+
+        fn panel_app() -> App {
+            let mut app = App::new();
+            app.add_message::<CommandInvocation>()
+                .add_message::<CommandBarToggleRequest>()
+                .add_message::<CommandBarEditPageRequest>()
+                .add_message::<CommandBarPathRequest>()
+                .add_message::<CommandBarCommandsRequest>()
+                .add_message::<CommandBarOpenRequest>()
+                .add_message::<RestoreKeyboardToStack>()
+                .add_message::<LauncherDismissRequest>()
+                .init_resource::<Self>()
+                .add_observer(Self::capture)
+                .add_observer(close_panel)
+                .add_systems(Update, open);
+            app.world_mut().spawn((
+                CommandBarWorkspaceSnapshot::default(),
+                CommandBarProjectRoots::default(),
+                CommandBarContextSnapshot::default(),
+                CommandBarPagesSnapshot::default(),
+                CommandBarWorkSnapshot::default(),
+            ));
+            app
+        }
+
+        fn targets(app: &App) -> Vec<Entity> {
+            app.world()
+                .resource::<Self>()
+                .0
+                .iter()
+                .map(|(webview, _)| *webview)
+                .collect()
+        }
+
+        fn open_payload(app: &App) -> CommandBarOpenEvent {
+            let (_, patch) = app
+                .world()
+                .resource::<Self>()
+                .0
+                .iter()
+                .find(|(_, patch)| patch.snapshot.is_some())
+                .expect("no open payload emitted");
+            let snapshot = patch.snapshot.as_ref().unwrap();
+            *snapshot.clone()
+        }
+
+        fn send(app: &mut App, id: &str) {
+            match id {
+                "command_bar_open" => {
+                    app.world_mut().write_message(CommandBarToggleRequest);
+                }
+                "command_bar_edit_page" => {
+                    app.world_mut().write_message(CommandBarEditPageRequest);
+                }
+                "command_bar_open_path" => {
+                    app.world_mut().write_message(CommandBarPathRequest);
+                }
+                "command_bar_open_commands" => {
+                    app.world_mut().write_message(CommandBarCommandsRequest);
+                }
+                _ => {
+                    app.world_mut()
+                        .write_message(CommandInvocation::new(Entity::PLACEHOLDER, id));
+                }
+            }
+            app.update();
+        }
     }
 
     #[test]
     fn opening_the_command_bar_pushes_the_payload_to_the_layout_page() {
-        let mut app = panel_app();
+        let mut app = EmittedToPage::panel_app();
         let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
-        send(&mut app, "command_bar_open");
+        EmittedToPage::send(&mut app, "command_bar_open");
 
-        assert_eq!(emitted_to_page(&app), vec![layout]);
+        assert_eq!(EmittedToPage::targets(&app), vec![layout]);
     }
 
     #[test]
     fn the_start_page_gets_the_same_empty_command_bar_as_every_other_page() {
-        let mut app = panel_app();
+        let mut app = EmittedToPage::panel_app();
         let layout = app.world_mut().spawn(RendersLauncherPanel).id();
         let stack = app.world_mut().spawn(()).id();
         app.world_mut().spawn((
@@ -1344,29 +1444,29 @@ mod tests {
             })
             .unwrap();
 
-        send(&mut app, "command_bar_open");
+        EmittedToPage::send(&mut app, "command_bar_open");
 
-        assert_eq!(emitted_to_page(&app), vec![layout]);
-        assert_eq!(open_payload(&app).url, "");
+        assert_eq!(EmittedToPage::targets(&app), vec![layout]);
+        assert_eq!(EmittedToPage::open_payload(&app).url, "");
     }
 
     #[test]
     fn toggling_an_open_command_bar_asks_the_page_to_close_it() {
-        let mut app = panel_app();
+        let mut app = EmittedToPage::panel_app();
         let layout = app
             .world_mut()
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
-        send(&mut app, "command_bar_open");
+        EmittedToPage::send(&mut app, "command_bar_open");
 
-        assert_eq!(emitted_to_page(&app), vec![layout]);
-        assert!(!open_payload(&app).open_id.is_open());
+        assert_eq!(EmittedToPage::targets(&app), vec![layout]);
+        assert!(!EmittedToPage::open_payload(&app).open_id.is_open());
     }
 
     #[test]
     fn a_surface_opening_under_the_launcher_closes_the_panel_too() {
-        let mut app = panel_app();
+        let mut app = EmittedToPage::panel_app();
         app.add_systems(Update, dismiss_requested);
         let layout = app
             .world_mut()
@@ -1377,17 +1477,17 @@ mod tests {
         app.update();
 
         assert_eq!(
-            emitted_to_page(&app),
+            EmittedToPage::targets(&app),
             vec![layout],
             "the launcher is drawn by the layout page here, so closing only the overlay window \
              leaves it on screen"
         );
-        assert!(!open_payload(&app).open_id.is_open());
+        assert!(!EmittedToPage::open_payload(&app).open_id.is_open());
     }
 
     #[test]
     fn page_dismiss_request_closes_the_panel() {
-        let mut app = panel_app();
+        let mut app = EmittedToPage::panel_app();
         app.add_plugins(UiEventPlugin::<(DismissRequest,)>::default())
             .add_observer(dismiss);
         app.world_mut().spawn((
@@ -1406,18 +1506,21 @@ mod tests {
         });
         app.world_mut().flush();
 
-        assert_eq!(emitted_to_page(&app), vec![layout]);
-        assert!(!open_payload(&app).open_id.is_open());
+        assert_eq!(EmittedToPage::targets(&app), vec![layout]);
+        assert!(!EmittedToPage::open_payload(&app).open_id.is_open());
     }
 
     #[test]
     fn open_page_in_command_bar_marks_payload_as_in_place_target() {
-        let mut app = panel_app();
+        let mut app = EmittedToPage::panel_app();
         app.world_mut().spawn(RendersLauncherPanel);
 
-        send(&mut app, "command_bar_edit_page");
+        EmittedToPage::send(&mut app, "command_bar_edit_page");
 
-        assert_eq!(open_payload(&app).target, Some(OpenTarget::InPlace));
+        assert_eq!(
+            EmittedToPage::open_payload(&app).target,
+            Some(OpenTarget::InPlace)
+        );
     }
 
     #[test]
@@ -1426,7 +1529,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin, ControllerPlugin))
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .init_resource::<EmittedToPage>()
-            .add_observer(capture_page_emit);
+            .add_observer(EmittedToPage::capture);
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(CommandBarWorkspaceSnapshot {
             stack: Some(stack),
@@ -1463,7 +1566,7 @@ mod tests {
             Display::None
         );
         assert!(app.world().get::<KeyboardOwner>(modal).is_none());
-        assert!(!open_payload(&app).open_id.is_open());
+        assert!(!EmittedToPage::open_payload(&app).open_id.is_open());
         assert!(
             app.world()
                 .resource::<Messages<RestoreKeyboardToStack>>()

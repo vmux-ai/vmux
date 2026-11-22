@@ -1,22 +1,17 @@
 use crate::host::definition::CommandDefinition;
 use crate::host::snapshot::{
     CommandBarContextSnapshot, CommandBarPagesSnapshot, CommandBarProjectRoots,
-    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPages,
+    CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes, ContributedCommand,
+    ContributedPages,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::Query;
 use vmux_api::command_bar::{
-    AgentModels, AgentModes, CommandBarCommandEntry, CommandBarControl, CommandBarTab,
+    AgentModels, AgentModes, CommandBarCommandEntry, CommandBarControl, CommandBarOpenEvent,
+    CommandBarTab, OpenId,
 };
-use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_api::open_target::OpenTarget;
 use vmux_ui::i18n::{Locale, TranslationValue};
-
-struct CommandBarEntry {
-    pub id: String,
-    pub name: String,
-    pub shortcut: String,
-}
 
 #[derive(SystemParam)]
 pub struct CommandBarProjector<'w, 's> {
@@ -34,19 +29,14 @@ pub struct CommandBarOpenProjection {
     pub url: String,
     pub pages: CommandBarPagesSnapshot,
     pub projects: CommandBarProjectRoots,
-    pub work: crate::host::snapshot::CommandBarWorkSnapshot,
+    pub work: CommandBarWorkSnapshot,
     pub locale: Locale,
     pub tabs: Vec<CommandBarTab>,
     pub target: Option<OpenTarget>,
 }
 
 impl CommandBarProjector<'_, '_> {
-    fn entries(
-        &self,
-        locale: &Locale,
-        contributed: Vec<CommandBarEntry>,
-        superseded: &[&str],
-    ) -> Vec<CommandBarEntry> {
+    fn entries(&self, locale: &Locale, superseded: &[&str]) -> Vec<CommandBarCommandEntry> {
         let mut entries = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for definition in &self.definitions {
@@ -56,13 +46,23 @@ impl CommandBarProjector<'_, '_> {
             {
                 continue;
             }
-            entries.push(CommandBarEntry {
-                id: definition.id.to_string(),
+            entries.push(CommandBarCommandEntry {
+                id: definition.id.clone(),
                 name: definition.localized_name(locale.as_str()),
                 shortcut: definition.shortcut_label(),
             });
         }
-        entries.extend(contributed);
+        for command in &self.commands {
+            let mut args = Vec::new();
+            for (name, value) in &command.args {
+                args.push((name.as_str(), TranslationValue::String(value)));
+            }
+            entries.push(CommandBarCommandEntry {
+                id: command.id.clone(),
+                name: locale.translate_with(&command.message_id, &args),
+                shortcut: String::new(),
+            });
+        }
         entries
     }
 
@@ -74,20 +74,59 @@ impl CommandBarProjector<'_, '_> {
             .unwrap_or_default()
     }
 
-    pub fn project(&self, projection: CommandBarOpenProjection) -> CommandBarOpenEvent {
-        let mut contributed = Vec::new();
-        for command in &self.commands {
-            let mut args = Vec::new();
-            for (name, value) in &command.args {
-                args.push((name.as_str(), TranslationValue::String(value)));
-            }
-            contributed.push(CommandBarEntry {
-                id: command.id.clone(),
-                name: projection.locale.translate_with(&command.message_id, &args),
-                shortcut: String::new(),
-            });
+    fn controls(&self, locale: &Locale) -> Vec<CommandBarControl> {
+        let mut controls = Vec::new();
+        for definition in &self.definitions {
+            let Some(toolbar) = definition.toolbar else {
+                continue;
+            };
+            let title = definition.localized_name(locale.as_str());
+            let label = title
+                .rsplit(" > ")
+                .next()
+                .unwrap_or(title.as_str())
+                .to_string();
+            let shortcut = definition.shortcut_label();
+            let title = if shortcut.is_empty() {
+                title
+            } else {
+                format!("{title} ({shortcut})")
+            };
+            controls.push((
+                toolbar.rank,
+                CommandBarControl {
+                    id: definition.id.clone(),
+                    label,
+                    title,
+                    icon: toolbar.icon,
+                },
+            ));
         }
+        controls.sort_by(|(left_rank, left), (right_rank, right)| {
+            left_rank
+                .cmp(right_rank)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        controls.into_iter().map(|(_, control)| control).collect()
+    }
 
+    fn agent_catalogs(&self) -> (Vec<AgentModels>, Vec<AgentModes>) {
+        let mut agent_models: Vec<AgentModels> = self
+            .agent_models
+            .iter()
+            .map(|models| models.0.clone())
+            .collect();
+        agent_models.sort_by(|left, right| left.agent_key.cmp(&right.agent_key));
+        let mut agent_modes: Vec<AgentModes> = self
+            .agent_modes
+            .iter()
+            .map(|modes| modes.0.clone())
+            .collect();
+        agent_modes.sort_by(|left, right| left.agent_key.cmp(&right.agent_key));
+        (agent_models, agent_modes)
+    }
+
+    pub fn project(&self, projection: CommandBarOpenProjection) -> CommandBarOpenEvent {
         let mut pages = Vec::with_capacity(projection.pages.pages.len());
         let mut superseded = Vec::new();
         for entry in &projection.pages.pages {
@@ -104,64 +143,9 @@ impl CommandBarProjector<'_, '_> {
         for entry in self.pages.sorted() {
             pages.push(entry.page);
         }
-
-        let entries = self.entries(&projection.locale, contributed, &superseded);
-        let mut commands = Vec::new();
-        for entry in entries {
-            commands.push(CommandBarCommandEntry {
-                id: entry.id,
-                name: entry.name,
-                shortcut: entry.shortcut,
-            });
-        }
-
-        let mut controls = self
-            .definitions
-            .iter()
-            .filter_map(|definition| {
-                let toolbar = definition.toolbar?;
-                let title = definition.localized_name(projection.locale.as_str());
-                let label = title
-                    .rsplit(" > ")
-                    .next()
-                    .unwrap_or(title.as_str())
-                    .to_string();
-                let shortcut = definition.shortcut_label();
-                let title = if shortcut.is_empty() {
-                    title
-                } else {
-                    format!("{title} ({shortcut})")
-                };
-                Some((
-                    toolbar.rank,
-                    CommandBarControl {
-                        id: definition.id.clone(),
-                        label,
-                        title,
-                        icon: toolbar.icon,
-                    },
-                ))
-            })
-            .collect::<Vec<_>>();
-        controls.sort_by(|(left_rank, left), (right_rank, right)| {
-            left_rank
-                .cmp(right_rank)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        let controls = controls.into_iter().map(|(_, control)| control).collect();
-
-        let mut agent_models = self
-            .agent_models
-            .iter()
-            .map(|models| models.0.clone())
-            .collect::<Vec<AgentModels>>();
-        agent_models.sort_by(|left, right| left.agent_key.cmp(&right.agent_key));
-        let mut agent_modes = self
-            .agent_modes
-            .iter()
-            .map(|modes| modes.0.clone())
-            .collect::<Vec<AgentModes>>();
-        agent_modes.sort_by(|left, right| left.agent_key.cmp(&right.agent_key));
+        let commands = self.entries(&projection.locale, &superseded);
+        let controls = self.controls(&projection.locale);
+        let (agent_models, agent_modes) = self.agent_catalogs();
 
         CommandBarOpenEvent {
             open_id: projection.open_id,
