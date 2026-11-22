@@ -474,7 +474,7 @@ impl Browsers {
         windowed: bool,
         shared_texture: bool,
     ) -> WindowInfo {
-        let _ = (webview_size, windowed, shared_texture);
+        let _ = (window_handle, webview_size, windowed, shared_texture);
         #[cfg(target_os = "macos")]
         {
             let parent = match window_handle {
@@ -2981,7 +2981,6 @@ impl Browsers {
 
 #[cfg(test)]
 mod tests {
-    use super::requires_extension_free_context;
     use super::{
         BACKGROUND_WINDOWLESS_FRAME_RATE, DEFAULT_WINDOWLESS_FRAME_RATE,
         HIDDEN_WINDOWLESS_FRAME_RATE, MAX_CEF_WHEEL_DELTA, cef_mouse_wheel_event,
