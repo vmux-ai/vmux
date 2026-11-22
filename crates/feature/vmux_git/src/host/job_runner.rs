@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,7 +25,8 @@ use super::runtime::{GitRuntime, GitTask};
 #[cfg(test)]
 use crate::event::GitRepositorySnapshot;
 use crate::event::{
-    GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
+    DiffKind, DiffLine, GitCatalog, GitDiffViewport, GitFileStatus, GitLineMarker, GitLineStatus,
+    GitOperationError, GitOperationResult,
 };
 use crate::state::{
     GitBranchFilesPagePatch, GitBranchFilesPatch, GitCatalogEntries, GitCatalogPatch, GitUiState,
@@ -335,6 +337,222 @@ impl DiffOutput {
             branch_page_complete: false,
         }
     }
+
+    fn read(job: DiffJob, repository: &GitRepository) -> Self {
+        if !GitRepository::has_repository(repository.path()) {
+            return Self {
+                viewport: GitDiffViewport {
+                    generation: job.generation,
+                    revision: 0,
+                    first_line: job.top_line,
+                    total_lines: 0,
+                    has_more: false,
+                    lines: Vec::new(),
+                    markers: Vec::new(),
+                    error: String::new(),
+                },
+                branch_paths: job.branch_paths,
+                source: None,
+                branch_top_line: job.branch_top_line,
+                branch_page_complete: true,
+            };
+        }
+        let result = match job.cached_source.clone() {
+            Some(source) => Ok(source),
+            None => Self::load_source(&job, repository),
+        };
+        let source = match result {
+            Ok(source) => source,
+            Err(error) => return Self::failure(&job, error),
+        };
+        let window_top = if matches!(job.scope, DiffScope::Branch(_)) {
+            job.branch_top_line
+        } else {
+            job.top_line
+        };
+        let (source_total, lines) = match source.window(repository, window_top, job.rows) {
+            Ok(window) => window,
+            Err(error) => return Self::failure(&job, error),
+        };
+        let (first_line, total_lines, has_more, branch_page_complete) =
+            Self::window_bounds(&job, source_total, &lines);
+        let markers = if matches!(job.scope, DiffScope::File) {
+            Self::markers_from_lines(&lines)
+        } else {
+            Vec::new()
+        };
+        Self {
+            viewport: GitDiffViewport {
+                generation: job.generation,
+                revision: 0,
+                first_line,
+                total_lines,
+                has_more,
+                lines,
+                markers,
+                error: String::new(),
+            },
+            branch_paths: job.branch_paths,
+            source: Some(source),
+            branch_top_line: job.branch_top_line,
+            branch_page_complete,
+        }
+    }
+
+    fn load_source(job: &DiffJob, repository: &GitRepository) -> Result<DiffSource, GitError> {
+        match &job.scope {
+            DiffScope::File => match job.content.as_deref() {
+                Some(content) => repository.diff_source_with_content(&job.path, content),
+                None => repository.diff_source(&job.path),
+            },
+            DiffScope::Branch(reference) => {
+                if !job.branch_source.as_os_str().is_empty() && !job.branch_merge_base.is_empty() {
+                    GitRepository::at(job.branch_source.clone())
+                        .branch_diff_source_for_paths_against(
+                            reference,
+                            &job.branch_merge_base,
+                            &job.branch_paths,
+                        )
+                } else {
+                    repository.branch_diff_source_for_paths(reference, &job.branch_paths)
+                }
+            }
+            DiffScope::Commit(reference) => repository.commit_diff_source(reference),
+            DiffScope::Stash(reference) => repository.stash_diff_source(reference),
+        }
+    }
+
+    fn window_bounds(
+        job: &DiffJob,
+        source_total: u32,
+        lines: &[DiffLine],
+    ) -> (u32, u32, bool, bool) {
+        let count = u32::try_from(lines.len()).unwrap_or(u32::MAX);
+        if matches!(job.scope, DiffScope::Branch(_)) {
+            let branch_loaded = job.branch_top_line.saturating_add(count);
+            let branch_page_complete = branch_loaded >= source_total;
+            return (
+                job.top_line,
+                job.top_line.saturating_add(count),
+                !branch_page_complete || job.branch_has_more,
+                branch_page_complete,
+            );
+        }
+        let loaded = job.top_line.saturating_add(count);
+        (
+            job.top_line.min(source_total),
+            source_total,
+            loaded < source_total,
+            true,
+        )
+    }
+
+    fn markers_from_lines(lines: &[DiffLine]) -> Vec<GitLineMarker> {
+        let mut hunk_kinds = HashMap::<u32, (bool, bool)>::new();
+        for line in lines {
+            let Some(hunk) = line.hunk else {
+                continue;
+            };
+            let kinds = hunk_kinds.entry(hunk).or_default();
+            match line.kind {
+                DiffKind::Add => kinds.0 = true,
+                DiffKind::Remove => kinds.1 = true,
+                _ => {}
+            }
+        }
+        let replacements = Self::replacement_lines(lines);
+        let mut markers = HashMap::new();
+        for (index, line) in lines.iter().enumerate() {
+            match line.kind {
+                DiffKind::Add => {
+                    let Some(line_number) = line.new_no else {
+                        continue;
+                    };
+                    let modified = line
+                        .hunk
+                        .and_then(|hunk| hunk_kinds.get(&hunk))
+                        .is_some_and(|(added, removed)| *added && *removed)
+                        || replacements.contains(&index);
+                    let status = if modified {
+                        GitLineStatus::Modified
+                    } else {
+                        GitLineStatus::Added
+                    };
+                    Self::insert_marker(&mut markers, line_number, status);
+                }
+                DiffKind::Remove => {
+                    let next = lines[index + 1..].iter().find_map(|next| next.new_no);
+                    let previous = lines[..index]
+                        .iter()
+                        .rev()
+                        .find_map(|previous| previous.new_no);
+                    if let Some(line_number) = next.or(previous) {
+                        Self::insert_marker(&mut markers, line_number, GitLineStatus::Deleted);
+                    }
+                }
+                DiffKind::Staged => {
+                    if let Some(line_number) = line.new_no {
+                        Self::insert_marker(&mut markers, line_number, GitLineStatus::Staged);
+                    }
+                }
+                DiffKind::Context | DiffKind::Hunk => {}
+            }
+        }
+        let mut markers = markers
+            .into_iter()
+            .map(|(line, status)| GitLineMarker { line, status })
+            .collect::<Vec<_>>();
+        markers.sort_by_key(|marker| marker.line);
+        markers
+    }
+
+    fn replacement_lines(lines: &[DiffLine]) -> HashSet<usize> {
+        let mut replacements = HashSet::new();
+        let mut index = 0;
+        while index < lines.len() {
+            if matches!(lines[index].kind, DiffKind::Context | DiffKind::Staged)
+                || lines[index].hunk.is_some()
+            {
+                index += 1;
+                continue;
+            }
+            let start = index;
+            while index < lines.len()
+                && !matches!(lines[index].kind, DiffKind::Context | DiffKind::Staged)
+                && lines[index].hunk.is_none()
+            {
+                index += 1;
+            }
+            let mut has_add = false;
+            let mut has_remove = false;
+            for line in &lines[start..index] {
+                match line.kind {
+                    DiffKind::Add => has_add = true,
+                    DiffKind::Remove => has_remove = true,
+                    _ => {}
+                }
+            }
+            if has_add && has_remove {
+                replacements.extend(start..index);
+            }
+        }
+        replacements
+    }
+
+    fn insert_marker(markers: &mut HashMap<u32, GitLineStatus>, line: u32, status: GitLineStatus) {
+        let priority = |status| match status {
+            GitLineStatus::Staged => 0,
+            GitLineStatus::Deleted => 1,
+            GitLineStatus::Added => 2,
+            GitLineStatus::Modified => 3,
+        };
+        match markers.get(&line) {
+            Some(current) if priority(*current) >= priority(status) => {}
+            _ => {
+                markers.insert(line, status);
+            }
+        }
+    }
 }
 
 #[derive(Component, Clone, Debug)]
@@ -581,61 +799,12 @@ fn deliver_repository_outputs(
     }
 }
 
-fn deliver_catalog_outputs(
-    mut outputs: Query<(Entity, &GitJob, &mut CatalogOutput)>,
-    mut states: Query<(
-        &mut super::state::GitState,
-        &mut super::state::GitCatalogRevision,
-    )>,
-    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
-    mut commands: Commands,
-) {
-    for (entity, job, mut output) in &mut outputs {
-        let Ok((mut state, mut revision)) = states.get_mut(job.webview) else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        if state.snapshot.workspace != output.repo_root {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let catalog = output.catalog;
-        let offset = u32::try_from(output.offset).unwrap_or(u32::MAX);
-        if state.snapshot.nonce != output.revision {
-            if revision.finish(catalog, output.generation) {
-                let mut progress = state.snapshot.catalog(catalog);
-                progress.loading = false;
-                state
-                    .bypass_change_detection()
-                    .snapshot
-                    .catalog_mut(catalog)
-                    .clone_from(&progress);
-                if let Some(ui_state) = ui_state.as_mut() {
-                    ui_state.push(
-                        job.webview,
-                        GitCatalogPatch {
-                            catalog,
-                            offset,
-                            entries: None,
-                            progress,
-                            message: None,
-                        },
-                    );
-                }
-            }
-            commands.entity(entity).despawn();
-            continue;
-        }
-        if !revision.finish(catalog, output.generation) {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let patch = match &mut output.result {
+impl CatalogOutput {
+    fn take_patch(&mut self, current: crate::state::GitCatalogProgress) -> GitCatalogPatch {
+        let catalog = self.catalog;
+        let offset = u32::try_from(self.offset).unwrap_or(u32::MAX);
+        match &mut self.result {
             Ok(page) => {
-                if state.snapshot.repository.is_none() {
-                    commands.entity(entity).despawn();
-                    continue;
-                }
                 let (entries, has_more) = match page {
                     GitCatalogPage::LocalBranches(entries, has_more) => (
                         GitCatalogEntries::LocalBranches(std::mem::take(entries)),
@@ -676,7 +845,7 @@ fn deliver_catalog_outputs(
                 offset,
                 entries: None,
                 progress: crate::state::GitCatalogProgress {
-                    initialized: state.snapshot.catalog(catalog).initialized,
+                    initialized: current.initialized,
                     loaded: false,
                     loading: false,
                     has_more: false,
@@ -684,18 +853,70 @@ fn deliver_catalog_outputs(
                 },
                 message: Some(error.message.clone()),
             },
+        }
+    }
+}
+
+fn deliver_catalog_outputs(
+    mut outputs: Query<(Entity, &GitJob, &mut CatalogOutput)>,
+    mut states: Query<(
+        &mut super::state::GitState,
+        &mut super::state::GitCatalogRevision,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, job, mut output) in &mut outputs {
+        commands.entity(entity).despawn();
+        let Ok((mut state, mut revision)) = states.get_mut(job.webview) else {
+            continue;
         };
+        if state.snapshot.workspace != output.repo_root {
+            continue;
+        }
+        let catalog = output.catalog;
+        let offset = u32::try_from(output.offset).unwrap_or(u32::MAX);
+        if state.snapshot.nonce != output.revision {
+            if revision.finish(catalog, output.generation) {
+                let mut progress = state.snapshot.catalog(catalog);
+                progress.loading = false;
+                state
+                    .bypass_change_detection()
+                    .snapshot
+                    .catalog_mut(catalog)
+                    .clone_from(&progress);
+                let patch = GitCatalogPatch {
+                    catalog,
+                    offset,
+                    entries: None,
+                    progress,
+                    message: None,
+                };
+                commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                    job.webview,
+                    &patch,
+                ));
+            }
+            continue;
+        }
+        if !revision.finish(catalog, output.generation) {
+            continue;
+        }
+        if output.result.is_ok() && state.snapshot.repository.is_none() {
+            continue;
+        }
+        let patch = output.take_patch(state.snapshot.catalog(catalog));
         state
             .bypass_change_detection()
             .snapshot
             .apply_catalog_patch(&patch);
-        if let Some(ui_state) = ui_state.as_mut() {
-            ui_state.push(job.webview, patch);
-        }
-        commands.entity(entity).despawn();
+        commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            job.webview,
+            &patch,
+        ));
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn deliver_diff_outputs(
     mut outputs: Query<(Entity, &GitJob, &mut DiffOutput)>,
     presented: Query<Has<super::diff::PendingGitDiffSeek>, With<vmux_ecs::PagePresented>>,
@@ -705,13 +926,16 @@ fn deliver_diff_outputs(
         &mut super::state::GitDiffProjectionState,
     )>,
     mut files: super::status::FileGitStates,
-    mut diffs: Query<&mut super::diff::GitDiffQuery>,
-    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
+    mut diffs: Query<(
+        &mut super::diff::GitDiffQuery,
+        Option<&mut super::diff::PrefetchBudget>,
+    )>,
+    mut branch_diffs: super::diff::BranchDiffs,
     mut commands: Commands,
 ) {
     for (entity, job, mut output) in &mut outputs {
         let webview = job.webview;
-        let Ok(mut query) = diffs.get_mut(webview) else {
+        let Ok((mut query, budget)) = diffs.get_mut(webview) else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -727,13 +951,15 @@ fn deliver_diff_outputs(
             revision: event.revision,
         };
         let loaded_lines = u32::try_from(event.lines.len()).unwrap_or(u32::MAX);
-        let branch_has_more = query.complete_branch(
+        let branch_has_more = branch_diffs.complete(
+            webview,
             &output.branch_paths,
             output.branch_top_line,
             loaded_lines,
             output.branch_page_complete,
             succeeded,
             output.source.clone(),
+            &mut commands,
         );
         if !output.branch_paths.is_empty() {
             event.has_more = branch_has_more;
@@ -749,9 +975,9 @@ fn deliver_diff_outputs(
                     .append_diff_patch(event, &revealed.0)
                     .expect("appendability was checked");
                 projection.capture(snapshot, &revealed.0);
-                if let Some(ui_state) = ui_state.as_mut() {
-                    ui_state.push(webview, append);
-                }
+                commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                    webview, &append,
+                ));
             } else {
                 view.snapshot.diff_loading = false;
                 view.snapshot.diff_viewport = Some(event);
@@ -760,7 +986,7 @@ fn deliver_diff_outputs(
             if presented.get(webview).is_ok_and(|seeking| !seeking)
                 && branch_has_more
                 && succeeded
-                && query.continue_prefetch(loaded_lines)
+                && budget.is_some_and(|mut budget| budget.continue_after(loaded_lines))
             {
                 commands.trigger(bevy_cef::prelude::UiInput {
                     webview,
@@ -785,7 +1011,6 @@ fn deliver_branch_files_outputs(
         &crate::state::GitPageControllerState,
         &mut super::state::GitCatalogRevision,
     )>,
-    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
     mut commands: Commands,
 ) {
     for (entity, job, mut output) in &mut outputs {
@@ -839,9 +1064,10 @@ fn deliver_branch_files_outputs(
             .snapshot
             .apply_branch_files_patch(&patch);
         revision.advance();
-        if let Some(ui_state) = ui_state.as_mut() {
-            ui_state.push(job.webview, patch);
-        }
+        commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            job.webview,
+            &patch,
+        ));
         commands.entity(entity).despawn();
     }
 }
@@ -1297,111 +1523,7 @@ fn start_branch_files_jobs(jobs: PendingGitJobs<BranchFilesJob>, mut commands: C
 
 fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
-        let Some(task) = jobs.spawn(wake, move || {
-            if !GitRepository::has_repository(repository.path()) {
-                return DiffOutput {
-                    viewport: GitDiffViewport {
-                        generation: job.generation,
-                        revision: 0,
-                        first_line: job.top_line,
-                        total_lines: 0,
-                        has_more: false,
-                        lines: Vec::new(),
-                        markers: Vec::new(),
-                        error: String::new(),
-                    },
-                    branch_paths: job.branch_paths,
-                    source: None,
-                    branch_top_line: job.branch_top_line,
-                    branch_page_complete: true,
-                };
-            }
-            let result = match job.cached_source.clone() {
-                Some(source) => Ok(source),
-                None => match &job.scope {
-                    DiffScope::File => match job.content.as_deref() {
-                        Some(content) => repository.diff_source_with_content(&job.path, content),
-                        None => repository.diff_source(&job.path),
-                    },
-                    DiffScope::Branch(reference) => {
-                        if !job.branch_source.as_os_str().is_empty()
-                            && !job.branch_merge_base.is_empty()
-                        {
-                            GitRepository::at(job.branch_source.clone())
-                                .branch_diff_source_for_paths_against(
-                                    reference,
-                                    &job.branch_merge_base,
-                                    &job.branch_paths,
-                                )
-                        } else {
-                            repository.branch_diff_source_for_paths(reference, &job.branch_paths)
-                        }
-                    }
-                    DiffScope::Commit(reference) => repository.commit_diff_source(reference),
-                    DiffScope::Stash(reference) => repository.stash_diff_source(reference),
-                },
-            };
-            match result {
-                Ok(source) => {
-                    let window_top = if matches!(job.scope, DiffScope::Branch(_)) {
-                        job.branch_top_line
-                    } else {
-                        job.top_line
-                    };
-                    let (source_total, lines) =
-                        match source.window(&repository, window_top, job.rows) {
-                            Ok(window) => window,
-                            Err(error) => return DiffOutput::failure(&job, error),
-                        };
-                    let (first_line, total_lines, has_more, lines, branch_page_complete) =
-                        if matches!(job.scope, DiffScope::Branch(_)) {
-                            let page_lines = u32::try_from(lines.len()).unwrap_or(u32::MAX);
-                            let branch_loaded = job.branch_top_line.saturating_add(page_lines);
-                            let branch_page_complete = branch_loaded >= source_total;
-                            (
-                                job.top_line,
-                                job.top_line.saturating_add(page_lines),
-                                !branch_page_complete || job.branch_has_more,
-                                lines,
-                                branch_page_complete,
-                            )
-                        } else {
-                            let loaded = job
-                                .top_line
-                                .saturating_add(u32::try_from(lines.len()).unwrap_or(u32::MAX));
-                            (
-                                job.top_line.min(source_total),
-                                source_total,
-                                loaded < source_total,
-                                lines,
-                                true,
-                            )
-                        };
-                    let markers = if matches!(job.scope, DiffScope::File) {
-                        super::diff::GitDiffMarkers::from_lines(&lines).into_inner()
-                    } else {
-                        Vec::new()
-                    };
-                    DiffOutput {
-                        viewport: GitDiffViewport {
-                            generation: job.generation,
-                            revision: 0,
-                            first_line,
-                            total_lines,
-                            has_more,
-                            lines,
-                            markers,
-                            error: String::new(),
-                        },
-                        branch_paths: job.branch_paths,
-                        source: Some(source),
-                        branch_top_line: job.branch_top_line,
-                        branch_page_complete,
-                    }
-                }
-                Err(error) => DiffOutput::failure(&job, error),
-            }
-        }) else {
+        let Some(task) = jobs.spawn(wake, move || DiffOutput::read(job, &repository)) else {
             continue;
         };
         commands.entity(entity).insert((GitJobRunning, task));
@@ -2583,5 +2705,63 @@ mod tests {
                 ..
             }] if lines.is_empty() && markers.is_empty()
         ));
+    }
+
+    #[test]
+    fn markers_classify_modified_added_and_deleted_lines() {
+        let context = |no| DiffLine {
+            kind: DiffKind::Context,
+            old_no: Some(no),
+            new_no: Some(no),
+            hunk: None,
+            spans: Vec::new(),
+        };
+        let lines = vec![
+            DiffLine {
+                kind: DiffKind::Remove,
+                old_no: Some(2),
+                new_no: None,
+                hunk: None,
+                spans: Vec::new(),
+            },
+            DiffLine {
+                kind: DiffKind::Add,
+                old_no: None,
+                new_no: Some(2),
+                hunk: None,
+                spans: Vec::new(),
+            },
+            context(3),
+            DiffLine {
+                kind: DiffKind::Add,
+                old_no: None,
+                new_no: Some(8),
+                hunk: Some(1),
+                spans: Vec::new(),
+            },
+            DiffLine {
+                kind: DiffKind::Remove,
+                old_no: Some(12),
+                new_no: None,
+                hunk: Some(2),
+                spans: Vec::new(),
+            },
+            context(12),
+        ];
+
+        let markers = DiffOutput::markers_from_lines(&lines);
+
+        assert!(markers.contains(&GitLineMarker {
+            line: 2,
+            status: GitLineStatus::Modified,
+        }));
+        assert!(markers.contains(&GitLineMarker {
+            line: 8,
+            status: GitLineStatus::Added,
+        }));
+        assert!(markers.contains(&GitLineMarker {
+            line: 12,
+            status: GitLineStatus::Deleted,
+        }));
     }
 }

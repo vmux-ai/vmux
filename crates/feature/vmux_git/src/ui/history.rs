@@ -26,54 +26,18 @@ pub(super) fn HistoryCard(
         .commits
         .iter()
         .find(|entry| entry.sha == selected_commit)
-        .cloned();
-    let commit_operations = selected.clone().map(|commit| {
-        rsx! {
-            div { class: "flex shrink-0 items-center gap-0.5",
-                HeaderOperationButton {
-                    icon: LineIcon::Check,
-                    shortcut: "space",
-                    label: translate("git-checkout-commit"),
-                    disabled: !operations.checkout_commit,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let commit = commit.sha.clone();
-                        move |_| GitOperation::CheckoutCommit { commit: commit.clone() }.send(repo_root.clone())
-                    },
-                }
-                HeaderOperationButton {
-                    icon: LineIcon::GitCommit,
-                    shortcut: "C",
-                    label: translate("git-cherry-pick"),
-                    disabled: !operations.cherry_pick,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let commit = commit.sha.clone();
-                        move |_| GitOperation::CherryPick { commit: commit.clone() }.send(repo_root.clone())
-                    },
-                }
-                HeaderOperationButton {
-                    icon: LineIcon::RotateCcw,
-                    shortcut: "t",
-                    label: translate("git-revert-commit"),
-                    disabled: !operations.revert_commit,
-                    danger: true,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let commit = commit.sha.clone();
-                        move |_| GitOperation::Revert { commit: commit.clone() }.send(repo_root.clone())
-                    },
-                }
-            }
-        }
-    });
+        .map(|entry| entry.sha.clone());
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
             div { class: "flex h-10 shrink-0 items-center justify-end px-3",
-                {commit_operations}
+                if let Some(commit) = selected {
+                    CommitOperationsBar {
+                        repo_root: repository.repo_root.clone(),
+                        commit,
+                        operations,
+                    }
+                }
             }
             div {
                 class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
@@ -134,6 +98,54 @@ pub(super) fn HistoryCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn CommitOperationsBar(
+    repo_root: String,
+    commit: String,
+    operations: GitOperationEligibility,
+) -> Element {
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-0.5",
+            HeaderOperationButton {
+                icon: LineIcon::Check,
+                shortcut: "space",
+                label: translate("git-checkout-commit"),
+                disabled: !operations.checkout_commit,
+                danger: false,
+                onpress: {
+                    let repo_root = repo_root.clone();
+                    let commit = commit.clone();
+                    move |_| GitOperation::CheckoutCommit { commit: commit.clone() }.send(repo_root.clone())
+                },
+            }
+            HeaderOperationButton {
+                icon: LineIcon::GitCommit,
+                shortcut: "C",
+                label: translate("git-cherry-pick"),
+                disabled: !operations.cherry_pick,
+                danger: false,
+                onpress: {
+                    let repo_root = repo_root.clone();
+                    let commit = commit.clone();
+                    move |_| GitOperation::CherryPick { commit: commit.clone() }.send(repo_root.clone())
+                },
+            }
+            HeaderOperationButton {
+                icon: LineIcon::RotateCcw,
+                shortcut: "t",
+                label: translate("git-revert-commit"),
+                disabled: !operations.revert_commit,
+                danger: true,
+                onpress: {
+                    let repo_root = repo_root.clone();
+                    let commit = commit.clone();
+                    move |_| GitOperation::Revert { commit: commit.clone() }.send(repo_root.clone())
+                },
             }
         }
     }

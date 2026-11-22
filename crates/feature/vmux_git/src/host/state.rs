@@ -254,11 +254,13 @@ impl CachedGitPage {
 struct RetainedPageTouch(Instant);
 
 #[derive(SystemParam)]
+#[allow(clippy::type_complexity)]
 pub(super) struct RetainedPages<'w, 's> {
     entries: Query<
         'w,
         's,
         (
+            Entity,
             &'static mut CachedGitPage,
             &'static mut RetainedPageTouch,
             Option<&'static super::diff::GitDiffQuery>,
@@ -272,11 +274,12 @@ impl RetainedPages<'_, '_> {
         &mut self,
         path: &str,
     ) -> Option<(
+        Entity,
         CachedGitPage,
         Option<super::diff::GitDiffQuery>,
         Option<super::diff::GitBranchFilesQuery>,
     )> {
-        for (mut cached, mut touched, diff, branch_files) in &mut self.entries {
+        for (entity, mut cached, mut touched, diff, branch_files) in &mut self.entries {
             if !cached.matches(path) {
                 continue;
             }
@@ -284,6 +287,7 @@ impl RetainedPages<'_, '_> {
             restored.watch = cached.watch.take();
             touched.0 = Instant::now();
             return Some((
+                entity,
                 restored.restoring(),
                 diff.map(super::diff::GitDiffQuery::parked),
                 branch_files.cloned(),
@@ -919,7 +923,9 @@ fn cache_removed_page(
     queries: Query<(
         Option<&super::diff::GitDiffQuery>,
         Option<&super::diff::GitBranchFilesQuery>,
+        Option<&super::diff::PrefetchBudget>,
     )>,
+    branch_diffs: super::diff::BranchDiffs,
     jobs: Query<(
         Entity,
         &GitJob,
@@ -934,7 +940,7 @@ fn cache_removed_page(
         .as_deref_mut()
         .and_then(|watch| watch.take_page_subscription(owner));
     if let Ok((mut state, controller, source)) = pages.get_mut(owner) {
-        let (diff, branch_files) = queries.get(owner).unwrap_or_default();
+        let (diff, branch_files, budget) = queries.get(owner).unwrap_or_default();
         let retain_diff = !state.snapshot.diff_loading;
         let retain_branch_files = !state.snapshot.branch_files_loading;
         if let Some(cached) = CachedGitPage::capture(&mut state, controller, subscription, source) {
@@ -945,27 +951,41 @@ fn cache_removed_page(
             ));
             if retain_diff && let Some(diff) = diff {
                 retained.insert(diff.parked());
+                if let Some(budget) = budget {
+                    retained.insert(*budget);
+                }
             }
             if retain_branch_files && let Some(branch_files) = branch_files {
                 retained.insert(branch_files.clone());
             }
+            let retained_id = retained.id();
+            if retain_diff && diff.is_some() {
+                branch_diffs.park_to(owner, retained_id, &mut commands);
+            }
         }
     }
-    commands.entity(owner).try_remove::<(
-        super::diff::GitDiffQuery,
-        super::diff::GitBranchFilesQuery,
-        super::diff::PendingGitDiff,
-        super::diff::PendingGitDiffSeek,
-        GitDiffProjectionState,
-        GitPageControllerState,
-        GitDirectoryNavigation,
-        PendingBranchCheckout,
-        SelectionRevealRevision,
-        GitCommitResultSequence,
-        super::controller::LocationCursor,
-        GitDiffRevealRanges,
-        PageRepositorySource,
-    )>();
+    commands
+        .entity(owner)
+        .try_remove::<(
+            super::diff::GitDiffQuery,
+            super::diff::GitBranchFilesQuery,
+            super::diff::PendingGitDiff,
+            super::diff::PendingGitDiffSeek,
+            super::diff::BranchDiffCursor,
+            super::diff::BranchDiffPriority,
+            super::diff::PrefetchBudget,
+        )>()
+        .try_remove::<(
+            GitDiffProjectionState,
+            GitPageControllerState,
+            GitDirectoryNavigation,
+            PendingBranchCheckout,
+            SelectionRevealRevision,
+            GitCommitResultSequence,
+            super::controller::LocationCursor,
+            GitDiffRevealRanges,
+            PageRepositorySource,
+        )>();
     for (entity, job, running, operation) in &jobs {
         if job.owner() != owner {
             continue;
@@ -1091,6 +1111,9 @@ fn repository_request(
     commands.entity(webview).remove::<(
         super::diff::PendingGitDiff,
         super::diff::PendingGitDiffSeek,
+        super::diff::BranchDiffCursor,
+        super::diff::BranchDiffPriority,
+        super::diff::PrefetchBudget,
         PageRepositorySource,
     )>();
     queued_jobs.cancel_for(webview, &mut commands);
@@ -1205,6 +1228,7 @@ mod tests {
                 .get_mut(self.0.world_mut())
                 .unwrap()
                 .restore(&path.to_string_lossy())
+                .map(|(_, cached, diff, branch_files)| (cached, diff, branch_files))
         }
     }
 

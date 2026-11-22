@@ -142,6 +142,91 @@ struct ReviewDiffEntry {
 }
 
 impl ReviewDiffDocument {
+    fn index_line(
+        entries: &mut Vec<ReviewDiffEntry>,
+        paths: &mut Vec<PathBuf>,
+        raw: &str,
+        line_offset: u64,
+        len: usize,
+        state: &mut (u32, u32, u32, bool),
+    ) {
+        let (old_no, new_no, path, saw_hunk) = state;
+        if raw.starts_with("\\ No newline") {
+            return;
+        }
+        if let Some((_, next_path)) = raw.split_once(" b/")
+            && raw.starts_with("diff --git")
+        {
+            *saw_hunk = false;
+            *old_no = 0;
+            *new_no = 0;
+            paths.push(PathBuf::from(next_path));
+            *path = u32::try_from(paths.len().saturating_sub(1)).unwrap_or(u32::MAX);
+            entries.push(ReviewDiffEntry {
+                offset: 0,
+                len: 0,
+                kind: DiffKind::Hunk,
+                old_no: None,
+                new_no: None,
+                path: *path,
+                text: ReviewDiffText::Path,
+            });
+            return;
+        }
+        if raw.starts_with("index ") || raw.starts_with("--- ") || raw.starts_with("+++ ") {
+            return;
+        }
+        if raw.starts_with("@@") {
+            *saw_hunk = true;
+            if let Some((old, new)) = parse::DiffParser::hunk_start(raw) {
+                *old_no = old;
+                *new_no = new;
+            }
+            entries.push(ReviewDiffEntry {
+                offset: line_offset,
+                len: u32::try_from(len).unwrap_or(u32::MAX),
+                kind: DiffKind::Hunk,
+                old_no: None,
+                new_no: None,
+                path: *path,
+                text: ReviewDiffText::Raw,
+            });
+            return;
+        }
+        if !*saw_hunk {
+            return;
+        }
+        let (kind, old, new) = match raw.as_bytes().first() {
+            Some(b'+') => {
+                let line = *new_no;
+                *new_no = new_no.saturating_add(1);
+                (DiffKind::Add, None, Some(line))
+            }
+            Some(b'-') => {
+                let line = *old_no;
+                *old_no = old_no.saturating_add(1);
+                (DiffKind::Remove, Some(line), None)
+            }
+            _ => {
+                let old = *old_no;
+                let new = *new_no;
+                *old_no = old_no.saturating_add(1);
+                *new_no = new_no.saturating_add(1);
+                (DiffKind::Context, Some(old), Some(new))
+            }
+        };
+        let prefix = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
+        entries.push(ReviewDiffEntry {
+            offset: line_offset.saturating_add(prefix as u64),
+            len: u32::try_from(len.saturating_sub(prefix)).unwrap_or(u32::MAX),
+            kind,
+            old_no: old,
+            new_no: new,
+            path: *path,
+            text: ReviewDiffText::Raw,
+        });
+    }
+
     fn read(file: tempfile::NamedTempFile, include_single_file: bool) -> Result<Self, GitError> {
         let mut reader = BufReader::new(
             file.reopen()
@@ -151,10 +236,7 @@ impl ReviewDiffDocument {
         let mut paths = Vec::new();
         let mut buffer = Vec::new();
         let mut offset = 0u64;
-        let mut old_no = 0u32;
-        let mut new_no = 0u32;
-        let mut path = 0u32;
-        let mut saw_hunk = false;
+        let mut state = (0u32, 0u32, 0u32, false);
         loop {
             if super::runtime::GitRuntime::canceled() {
                 return Err(GitError("git command canceled".to_string()));
@@ -176,80 +258,7 @@ impl ReviewDiffDocument {
                 len -= 1;
             }
             let raw = String::from_utf8_lossy(&buffer[..len]);
-            if raw.starts_with("\\ No newline") {
-                continue;
-            }
-            if let Some((_, next_path)) = raw.split_once(" b/")
-                && raw.starts_with("diff --git")
-            {
-                saw_hunk = false;
-                old_no = 0;
-                new_no = 0;
-                paths.push(PathBuf::from(next_path));
-                path = u32::try_from(paths.len().saturating_sub(1)).unwrap_or(u32::MAX);
-                entries.push(ReviewDiffEntry {
-                    offset: 0,
-                    len: 0,
-                    kind: DiffKind::Hunk,
-                    old_no: None,
-                    new_no: None,
-                    path,
-                    text: ReviewDiffText::Path,
-                });
-                continue;
-            }
-            if raw.starts_with("index ") || raw.starts_with("--- ") || raw.starts_with("+++ ") {
-                continue;
-            }
-            if raw.starts_with("@@") {
-                saw_hunk = true;
-                if let Some((old, new)) = parse::DiffParser::hunk_start(&raw) {
-                    old_no = old;
-                    new_no = new;
-                }
-                entries.push(ReviewDiffEntry {
-                    offset: line_offset,
-                    len: u32::try_from(len).unwrap_or(u32::MAX),
-                    kind: DiffKind::Hunk,
-                    old_no: None,
-                    new_no: None,
-                    path,
-                    text: ReviewDiffText::Raw,
-                });
-                continue;
-            }
-            if !saw_hunk {
-                continue;
-            }
-            let (kind, old, new) = match raw.as_bytes().first() {
-                Some(b'+') => {
-                    let line = new_no;
-                    new_no = new_no.saturating_add(1);
-                    (DiffKind::Add, None, Some(line))
-                }
-                Some(b'-') => {
-                    let line = old_no;
-                    old_no = old_no.saturating_add(1);
-                    (DiffKind::Remove, Some(line), None)
-                }
-                _ => {
-                    let old = old_no;
-                    let new = new_no;
-                    old_no = old_no.saturating_add(1);
-                    new_no = new_no.saturating_add(1);
-                    (DiffKind::Context, Some(old), Some(new))
-                }
-            };
-            let prefix = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
-            entries.push(ReviewDiffEntry {
-                offset: line_offset.saturating_add(prefix as u64),
-                len: u32::try_from(len.saturating_sub(prefix)).unwrap_or(u32::MAX),
-                kind,
-                old_no: old,
-                new_no: new,
-                path,
-                text: ReviewDiffText::Raw,
-            });
+            Self::index_line(&mut entries, &mut paths, &raw, line_offset, len, &mut state);
         }
         if !include_single_file && paths.len() <= 1 {
             entries.retain(|entry| entry.text != ReviewDiffText::Path);
@@ -2182,6 +2191,71 @@ impl GitCommand {
         Ok(())
     }
 
+    fn spawn_pipe_reader<R: Read + Send + 'static>(
+        name: &str,
+        stream: &str,
+        reader: R,
+        used: &Arc<AtomicUsize>,
+        overflow: &Arc<AtomicBool>,
+    ) -> Result<mpsc::Receiver<std::io::Result<GitOutputCapture>>, GitError> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let used = Arc::clone(used);
+        let overflow = Arc::clone(overflow);
+        std::thread::Builder::new()
+            .name(name.to_string())
+            .spawn(move || {
+                let _ = tx.send(GitOutputCapture::read(reader, used, overflow));
+            })
+            .map_err(|error| GitError(format!("failed to read {stream}: {error}")))?;
+        Ok(rx)
+    }
+
+    fn wait_for_child(
+        child: &mut GitChild,
+        overflow: &AtomicBool,
+        deadline: Instant,
+    ) -> Result<(ExitStatus, Option<&'static str>), GitError> {
+        loop {
+            let reason = if overflow.load(Ordering::Acquire) {
+                Some("git command output exceeded 32 MiB")
+            } else if super::runtime::GitRuntime::canceled() {
+                Some("git command canceled")
+            } else if Instant::now() >= deadline {
+                Some("git command timed out")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                let status = child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+                return Ok((status, Some(reason)));
+            }
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?
+            {
+                return Ok((status, None));
+            }
+            child.pause(deadline);
+        }
+    }
+
+    fn receive_or_abort<T>(
+        child: &mut GitChild,
+        result: Result<std::io::Result<T>, GitError>,
+        error_prefix: &str,
+    ) -> Result<T, GitError> {
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                child.abort_group();
+                return Err(error);
+            }
+        };
+        result.map_err(|error| GitError(format!("{error_prefix}: {error}")))
+    }
+
     fn output_raw(
         command: &mut Command,
         input: Option<&[u8]>,
@@ -2220,76 +2294,26 @@ impl GitCommand {
         let stdin = child.child.stdin.take();
         let used = Arc::new(AtomicUsize::new(0));
         let overflow = Arc::new(AtomicBool::new(false));
-        let (stdout_tx, stdout_rx) = mpsc::sync_channel(1);
-        let stdout_used = Arc::clone(&used);
-        let stdout_overflow = Arc::clone(&overflow);
-        if let Err(error) = std::thread::Builder::new()
-            .name("vmux-git-stdout".to_string())
-            .spawn(move || {
-                let _ =
-                    stdout_tx.send(GitOutputCapture::read(stdout, stdout_used, stdout_overflow));
-            })
-        {
-            return Err(GitError(format!("failed to read git stdout: {error}")));
-        }
-        let (stderr_tx, stderr_rx) = mpsc::sync_channel(1);
-        let stderr_used = Arc::clone(&used);
-        let stderr_overflow = Arc::clone(&overflow);
-        if let Err(error) = std::thread::Builder::new()
-            .name("vmux-git-stderr".to_string())
-            .spawn(move || {
-                let _ =
-                    stderr_tx.send(GitOutputCapture::read(stderr, stderr_used, stderr_overflow));
-            })
-        {
-            return Err(GitError(format!("failed to read git stderr: {error}")));
-        }
+        let stdout_rx =
+            Self::spawn_pipe_reader("vmux-git-stdout", "git stdout", stdout, &used, &overflow)?;
+        let stderr_rx =
+            Self::spawn_pipe_reader("vmux-git-stderr", "git stderr", stderr, &used, &overflow)?;
         let writer = match (stdin, input) {
             (Some(mut stdin), Some(input)) => {
                 let input = input.to_vec();
                 let (tx, rx) = mpsc::sync_channel(1);
-                if let Err(error) = std::thread::Builder::new()
+                std::thread::Builder::new()
                     .name("vmux-git-stdin".to_string())
                     .spawn(move || {
                         let _ = tx.send(stdin.write_all(&input));
                     })
-                {
-                    return Err(GitError(format!("failed to write git stdin: {error}")));
-                }
+                    .map_err(|error| GitError(format!("failed to write git stdin: {error}")))?;
                 Some(rx)
             }
             _ => None,
         };
-        let deadline = Instant::now() + timeout;
-        let mut interrupted = None;
-        let status = loop {
-            if overflow.load(Ordering::Acquire) {
-                interrupted = Some("git command output exceeded 32 MiB");
-                break child
-                    .stop()
-                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
-            }
-            if super::runtime::GitRuntime::canceled() {
-                interrupted = Some("git command canceled");
-                break child
-                    .stop()
-                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                interrupted = Some("git command timed out");
-                break child
-                    .stop()
-                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
-            }
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?
-            {
-                break status;
-            }
-            child.pause(deadline);
-        };
+        let (status, interrupted) =
+            Self::wait_for_child(&mut child, &overflow, Instant::now() + timeout)?;
         let drain_deadline = Instant::now() + GIT_IO_DRAIN_TIMEOUT;
         let write = writer.map(|writer| Self::receive(writer, drain_deadline, "git stdin"));
         let stdout = Self::receive(stdout_rx, drain_deadline, "git stdout");
@@ -2298,31 +2322,10 @@ impl GitCommand {
             return Err(GitError(message.to_string()));
         }
         if let Some(write) = write {
-            let write = match write {
-                Ok(write) => write,
-                Err(error) => {
-                    child.abort_group();
-                    return Err(error);
-                }
-            };
-            write.map_err(|error| GitError(format!("failed to write git stdin: {error}")))?;
+            Self::receive_or_abort(&mut child, write, "failed to write git stdin")?;
         }
-        let stdout = match stdout {
-            Ok(stdout) => stdout,
-            Err(error) => {
-                child.abort_group();
-                return Err(error);
-            }
-        }
-        .map_err(|error| GitError(format!("failed to read git stdout: {error}")))?;
-        let stderr = match stderr {
-            Ok(stderr) => stderr,
-            Err(error) => {
-                child.abort_group();
-                return Err(error);
-            }
-        }
-        .map_err(|error| GitError(format!("failed to read git stderr: {error}")))?;
+        let stdout = Self::receive_or_abort(&mut child, stdout, "failed to read git stdout")?;
+        let stderr = Self::receive_or_abort(&mut child, stderr, "failed to read git stderr")?;
         Ok(Output {
             status,
             stdout: stdout.bytes,

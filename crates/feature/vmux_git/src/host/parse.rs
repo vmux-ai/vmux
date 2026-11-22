@@ -74,118 +74,88 @@ impl ParsedStatuses {
         )
     }
 
-    pub fn parse(out: &[u8]) -> Self {
-        let mut branch = String::new();
-        let mut upstream = String::new();
-        let mut ahead = 0u32;
-        let mut behind = 0u32;
-        let mut has_upstream = false;
-        let mut staged_count = 0u32;
-        let mut file_statuses = HashMap::new();
-        let mut file_entries = Vec::new();
+    fn push_entry(
+        &mut self,
+        path: &[u8],
+        previous_path: Option<&[u8]>,
+        status: FileStatus,
+        staged: bool,
+        unstaged: bool,
+    ) {
+        if path.is_empty() {
+            return;
+        }
+        self.file_statuses.insert(path.to_vec(), status);
+        self.file_entries.push(GitFileEntry {
+            path: Self::display_path(path),
+            path_bytes: path.to_vec(),
+            previous_path: previous_path.map(Self::display_path),
+            previous_path_bytes: previous_path.map(<[u8]>::to_vec),
+            status,
+            staged,
+            unstaged,
+        });
+    }
 
+    fn apply_tracked(
+        &mut self,
+        record: &[u8],
+        rest: &[u8],
+        tokens: usize,
+        previous: Option<&[u8]>,
+    ) {
+        let xy = rest
+            .split(|byte| byte.is_ascii_whitespace())
+            .next()
+            .unwrap_or(b"..");
+        if xy.first().is_some_and(|value| *value != b'.') {
+            self.staged_count += 1;
+        }
+        let path = Self::entry_path(record, tokens);
+        let status = Self::xy_status(xy);
+        let (staged, unstaged) = Self::staged_and_unstaged(xy);
+        self.push_entry(path, previous, status, staged, unstaged);
+    }
+
+    pub fn parse(out: &[u8]) -> Self {
+        let mut parsed = Self {
+            branch: String::new(),
+            upstream: String::new(),
+            ahead: 0,
+            behind: 0,
+            has_upstream: false,
+            staged_count: 0,
+            file_statuses: HashMap::new(),
+            file_entries: Vec::new(),
+        };
         let mut records = out.split(|byte| *byte == 0);
         while let Some(record) = records.next() {
             if let Some(rest) = record.strip_prefix(b"# branch.head ") {
-                branch = String::from_utf8_lossy(rest).trim().to_string();
+                parsed.branch = String::from_utf8_lossy(rest).trim().to_string();
             } else if let Some(rest) = record.strip_prefix(b"# branch.upstream ") {
-                upstream = String::from_utf8_lossy(rest).trim().to_string();
-                has_upstream = true;
+                parsed.upstream = String::from_utf8_lossy(rest).trim().to_string();
+                parsed.has_upstream = true;
             } else if let Some(rest) = record.strip_prefix(b"# branch.ab ") {
                 for token in rest.split(|byte| byte.is_ascii_whitespace()) {
                     if let Some(value) = token.strip_prefix(b"+") {
-                        ahead = String::from_utf8_lossy(value).parse().unwrap_or(0);
+                        parsed.ahead = String::from_utf8_lossy(value).parse().unwrap_or(0);
                     } else if let Some(value) = token.strip_prefix(b"-") {
-                        behind = String::from_utf8_lossy(value).parse().unwrap_or(0);
+                        parsed.behind = String::from_utf8_lossy(value).parse().unwrap_or(0);
                     }
                 }
             } else if let Some(rest) = record.strip_prefix(b"1 ") {
-                let xy = rest
-                    .split(|byte| byte.is_ascii_whitespace())
-                    .next()
-                    .unwrap_or(b"..");
-                if xy.first().is_some_and(|value| *value != b'.') {
-                    staged_count += 1;
-                }
-                let path = Self::entry_path(record, 8);
-                if !path.is_empty() {
-                    let status = Self::xy_status(xy);
-                    file_statuses.insert(path.to_vec(), status);
-                    let (staged, unstaged) = Self::staged_and_unstaged(xy);
-                    file_entries.push(GitFileEntry {
-                        path: Self::display_path(path),
-                        path_bytes: path.to_vec(),
-                        previous_path: None,
-                        previous_path_bytes: None,
-                        status,
-                        staged,
-                        unstaged,
-                    });
-                }
+                parsed.apply_tracked(record, rest, 8, None);
             } else if let Some(rest) = record.strip_prefix(b"2 ") {
-                let xy = rest
-                    .split(|byte| byte.is_ascii_whitespace())
-                    .next()
-                    .unwrap_or(b"..");
-                if xy.first().is_some_and(|value| *value != b'.') {
-                    staged_count += 1;
-                }
-                let path = Self::entry_path(record, 9);
-                let previous_path = records.next().filter(|path| !path.is_empty());
-                if !path.is_empty() {
-                    let status = Self::xy_status(xy);
-                    file_statuses.insert(path.to_vec(), status);
-                    let (staged, unstaged) = Self::staged_and_unstaged(xy);
-                    file_entries.push(GitFileEntry {
-                        path: Self::display_path(path),
-                        path_bytes: path.to_vec(),
-                        previous_path: previous_path.map(Self::display_path),
-                        previous_path_bytes: previous_path.map(<[u8]>::to_vec),
-                        status,
-                        staged,
-                        unstaged,
-                    });
-                }
+                let previous = records.next().filter(|path| !path.is_empty());
+                parsed.apply_tracked(record, rest, 9, previous);
             } else if record.starts_with(b"u ") {
                 let path = Self::entry_path(record, 10);
-                if !path.is_empty() {
-                    file_statuses.insert(path.to_vec(), FileStatus::Conflicted);
-                    file_entries.push(GitFileEntry {
-                        path: Self::display_path(path),
-                        path_bytes: path.to_vec(),
-                        previous_path: None,
-                        previous_path_bytes: None,
-                        status: FileStatus::Conflicted,
-                        staged: true,
-                        unstaged: true,
-                    });
-                }
-            } else if let Some(path) = record.strip_prefix(b"? ")
-                && !path.is_empty()
-            {
-                file_statuses.insert(path.to_vec(), FileStatus::Untracked);
-                file_entries.push(GitFileEntry {
-                    path: Self::display_path(path),
-                    path_bytes: path.to_vec(),
-                    previous_path: None,
-                    previous_path_bytes: None,
-                    status: FileStatus::Untracked,
-                    staged: false,
-                    unstaged: true,
-                });
+                parsed.push_entry(path, None, FileStatus::Conflicted, true, true);
+            } else if let Some(path) = record.strip_prefix(b"? ") {
+                parsed.push_entry(path, None, FileStatus::Untracked, false, true);
             }
         }
-
-        Self {
-            branch,
-            upstream,
-            ahead,
-            behind,
-            has_upstream,
-            staged_count,
-            file_statuses,
-            file_entries,
-        }
+        parsed
     }
 
     pub fn changed_paths(out: &[u8]) -> HashSet<String> {
