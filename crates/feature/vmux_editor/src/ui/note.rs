@@ -1,11 +1,13 @@
+use crate::event::{DocumentPointerInput, DocumentPropertyInput};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use vmux_ecs::event::{
     CompletionItem, FileNoteEditDismissRequest, FileNoteEditRequest,
-    FileNotePropertiesToggleRequest, FilePanelPick, FilePointerEvent, FilePropertyDraftRequest,
+    FileNotePropertiesToggleRequest, FilePanelPick, FilePropertyDraftRequest,
     FilePropertyDraftState, FilePropertyEdit, MdBlock, NoteBlock,
 };
 use vmux_git::event::GitLineStatus;
@@ -33,6 +35,8 @@ pub(super) struct NoteCursor {
     active: Memo<Option<u32>>,
     editing: Memo<bool>,
     edit_line: Memo<Option<u32>>,
+    revision: Memo<u64>,
+    generation: u64,
     mounted: Signal<BTreeMap<usize, Rc<MountedData>>>,
 }
 
@@ -45,6 +49,7 @@ impl NoteCursor {
         at: ClientPoint,
         extend: bool,
     ) {
+        let document_revision = self.generation;
         spawn(async move {
             let Some(offset) = TextRun::in_element(format!("note-block-{index}"))
                 .offset_at(at.x, at.y)
@@ -52,9 +57,17 @@ impl NoteCursor {
             else {
                 return;
             };
+            if !self
+                .revision
+                .try_read()
+                .is_ok_and(|current| *current == document_revision)
+            {
+                return;
+            }
             let (line, col) = NoteText::new(&source).rendered_position(start, offset);
             self.edit();
-            let _ = send(&FilePointerEvent {
+            let _ = send(&DocumentPointerInput {
+                revision: document_revision,
                 line,
                 col,
                 extend,
@@ -69,10 +82,13 @@ impl NoteCursor {
         editing: Memo<bool>,
         edit_line: Memo<Option<u32>>,
     ) -> Self {
+        let revision = super::state::FileUi::current().use_revision();
         Self {
             active,
             editing,
             edit_line,
+            revision,
+            generation: revision(),
             mounted: use_signal(BTreeMap::new),
         }
     }
@@ -88,6 +104,7 @@ impl NoteCursor {
     }
 
     pub(super) fn place_nearest(self, blocks: Vec<NoteBlock>, at: ClientPoint, extend: bool) {
+        let document_revision = self.generation;
         spawn(async move {
             let elements = self
                 .mounted
@@ -120,6 +137,13 @@ impl NoteCursor {
                     break;
                 }
             }
+            if !self
+                .revision
+                .try_read()
+                .is_ok_and(|current| *current == document_revision)
+            {
+                return;
+            }
             let Some((index, rect)) = nearest else {
                 return;
             };
@@ -132,7 +156,7 @@ impl NoteCursor {
             );
             if self.editing() && self.active() == Some(index as u32) {
                 self.edit();
-                place_note_block_caret(index, block.start_line, block.source.clone(), point);
+                self.place_block(index, block.start_line, block.source.clone(), point);
             } else {
                 self.place_rendered(index, block.start_line, block.source.clone(), point, extend);
             }
@@ -290,57 +314,97 @@ pub(super) fn NoteBlankLine(line: u32, col: u32, keymap: vmux_api::editor::Keyma
     }
 }
 
-fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint, extend: bool) {
-    spawn(async move {
-        let Some(offset) = TextRun::in_element(element_id).offset_at(at.x, at.y).await else {
-            return;
-        };
-        let _ = send(&FilePointerEvent {
-            line,
-            col: prefix + offset,
-            extend,
-            add: false,
+impl NoteCursor {
+    fn place_source(
+        self,
+        element_id: String,
+        line: u32,
+        prefix: u32,
+        at: ClientPoint,
+        extend: bool,
+    ) {
+        let document_revision = self.generation;
+        spawn(async move {
+            let Some(offset) = TextRun::in_element(element_id).offset_at(at.x, at.y).await else {
+                return;
+            };
+            if !self
+                .revision
+                .try_read()
+                .is_ok_and(|current| *current == document_revision)
+            {
+                return;
+            }
+            let _ = send(&DocumentPointerInput {
+                revision: document_revision,
+                line,
+                col: prefix + offset,
+                extend,
+                add: false,
+            });
+            EditorFocus::file();
         });
-        EditorFocus::file();
-    });
+    }
 }
 
-fn place_rendered_list_caret(line: u32, source: String, at: ClientPoint) {
-    spawn(async move {
-        let Some(offset) = TextRun::in_element(format!("note-list-line-{line}"))
-            .offset_at(at.x, at.y)
-            .await
-        else {
-            return;
-        };
-        let (line, col) = NoteText::new(&source).rendered_position(line, offset);
-        let _ = send(&FilePointerEvent {
-            line,
-            col,
-            extend: false,
-            add: false,
+impl NoteCursor {
+    fn place_list(self, line: u32, source: String, at: ClientPoint) {
+        let document_revision = self.generation;
+        spawn(async move {
+            let Some(offset) = TextRun::in_element(format!("note-list-line-{line}"))
+                .offset_at(at.x, at.y)
+                .await
+            else {
+                return;
+            };
+            if !self
+                .revision
+                .try_read()
+                .is_ok_and(|current| *current == document_revision)
+            {
+                return;
+            }
+            let (line, col) = NoteText::new(&source).rendered_position(line, offset);
+            let _ = send(&DocumentPointerInput {
+                revision: document_revision,
+                line,
+                col,
+                extend: false,
+                add: false,
+            });
+            EditorFocus::file();
         });
-        EditorFocus::file();
-    });
+    }
 }
 
-fn place_note_block_caret(index: usize, start_line: u32, source: String, at: ClientPoint) {
-    spawn(async move {
-        let Some(offset) = TextRun::in_element(format!("note-live-block-{index}"))
-            .offset_at(at.x, at.y)
-            .await
-        else {
-            return;
-        };
-        let (line, col) = NoteText::new(&source).cell_position(start_line, offset);
-        let _ = send(&FilePointerEvent {
-            line,
-            col,
-            extend: false,
-            add: false,
+impl NoteCursor {
+    fn place_block(self, index: usize, start_line: u32, source: String, at: ClientPoint) {
+        let document_revision = self.generation;
+        spawn(async move {
+            let Some(offset) = TextRun::in_element(format!("note-live-block-{index}"))
+                .offset_at(at.x, at.y)
+                .await
+            else {
+                return;
+            };
+            if !self
+                .revision
+                .try_read()
+                .is_ok_and(|current| *current == document_revision)
+            {
+                return;
+            }
+            let (line, col) = NoteText::new(&source).cell_position(start_line, offset);
+            let _ = send(&DocumentPointerInput {
+                revision: document_revision,
+                line,
+                col,
+                extend: false,
+                add: false,
+            });
+            EditorFocus::file();
         });
-        EditorFocus::file();
-    });
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -541,20 +605,26 @@ fn note_selection_ranges(
         .collect()
 }
 
-fn emit_property_edit(
-    original_key: String,
-    key: String,
-    kind: KnowledgePropertyKind,
-    values: Vec<String>,
-    remove: bool,
-) {
-    let _ = send(&FilePropertyEdit {
-        original_key,
-        key,
-        kind,
-        values,
-        remove,
-    });
+impl DocumentPropertyInput {
+    fn submit(
+        revision: u64,
+        original_key: String,
+        key: String,
+        kind: KnowledgePropertyKind,
+        values: Vec<String>,
+        remove: bool,
+    ) {
+        let _ = send(&DocumentPropertyInput {
+            revision,
+            edit: FilePropertyEdit {
+                original_key,
+                key,
+                kind,
+                values,
+                remove,
+            },
+        });
+    }
 }
 
 fn property_kind_label(kind: KnowledgePropertyKind) -> String {
@@ -587,6 +657,8 @@ pub(super) fn NoteProperties(
     open: bool,
     drafts: Vec<FilePropertyDraftState>,
 ) -> Element {
+    let document_revision = super::state::FileUi::current().use_revision();
+    let document_revision = document_revision();
     let has_tags = properties
         .iter()
         .any(|property| property.kind == KnowledgePropertyKind::Tags);
@@ -631,7 +703,7 @@ pub(super) fn NoteProperties(
                         if !open {
                             let _ = send(&FileNotePropertiesToggleRequest);
                         }
-                        emit_property_edit(
+                        DocumentPropertyInput::submit(document_revision,
                             String::new(),
                             "tags".to_string(),
                             KnowledgePropertyKind::Tags,
@@ -649,7 +721,7 @@ pub(super) fn NoteProperties(
                         if !open {
                             let _ = send(&FileNotePropertiesToggleRequest);
                         }
-                        emit_property_edit(
+                        DocumentPropertyInput::submit(document_revision,
                             String::new(),
                             add_key.clone(),
                             KnowledgePropertyKind::Text,
@@ -821,7 +893,7 @@ pub(super) fn NoteBlockView(
     let down_source = source.clone();
     let on_line_down = use_callback(move |(line, at, extend): (u32, ClientPoint, bool)| {
         note_dragging.set(true);
-        place_note_caret(
+        note_cursor.place_source(
             format!("note-line-{line}"),
             line,
             marker_prefix(&down_source, line),
@@ -846,7 +918,7 @@ pub(super) fn NoteBlockView(
                 event.stop_propagation();
                 if editing && !is_list {
                     note_cursor.edit();
-                    place_note_block_caret(index, start, live_pointer_source.clone(), event.client_coordinates());
+                    note_cursor.place_block( index, start, live_pointer_source.clone(), event.client_coordinates());
                     return;
                 }
                 if DomSelection::in_document() {
@@ -859,7 +931,7 @@ pub(super) fn NoteBlockView(
                 }
                 if is_live_inline {
                     note_cursor.edit();
-                    place_note_block_caret(index, start, live_pointer_source.clone(), at);
+                    note_cursor.place_block( index, start, live_pointer_source.clone(), at);
                     return;
                 }
                 let line = note_pointer_line(
@@ -877,10 +949,10 @@ pub(super) fn NoteBlockView(
                         .nth(line.saturating_sub(start) as usize)
                         .unwrap_or_default()
                         .to_string();
-                    place_rendered_list_caret(line, source, at);
+                    note_cursor.place_list( line, source, at);
                     return;
                 }
-                place_note_caret(
+                note_cursor.place_source(
                     format!("note-line-{line}"),
                     line,
                     marker_prefix(&pointer_source, line),
@@ -917,7 +989,7 @@ pub(super) fn NoteBlockView(
                                 event.stop_propagation();
                                 event.prevent_default();
                                 note_dragging.set(true);
-                                place_note_block_caret(
+                                note_cursor.place_block(
                                     index,
                                     start,
                                     live_down_source.clone(),
@@ -1057,6 +1129,8 @@ fn note_block_diff_marker(
 
 #[component]
 fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftState>) -> Element {
+    let document_revision = super::state::FileUi::current().use_revision();
+    let document_revision = document_revision();
     let original_key = property.key.clone();
     let kind = property.kind;
     let draft = draft.unwrap_or_else(|| FilePropertyDraftState {
@@ -1091,7 +1165,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                     let original_key = original_key.clone();
                     let property_key = key.clone();
                     let values = values.clone();
-                    move |_| emit_property_edit(original_key.clone(), property_key.clone(), kind, values.clone(), false)
+                    move |_| DocumentPropertyInput::submit(document_revision, original_key.clone(), property_key.clone(), kind, values.clone(), false)
                 },
             }
             button {
@@ -1103,7 +1177,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                     let property_key = key.clone();
                     move |_| {
                         let next = next_property_kind(kind);
-                        emit_property_edit(key_for_kind.clone(), property_key.clone(), next, values.clone(), false);
+                        DocumentPropertyInput::submit(document_revision, key_for_kind.clone(), property_key.clone(), next, values.clone(), false);
                     }
                 },
                 {property_kind_label(kind)}
@@ -1119,7 +1193,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                             let checkbox_scalar = scalar.clone();
                             move |_| {
                                 let next = (!checkbox_scalar.eq_ignore_ascii_case("true")).to_string();
-                                emit_property_edit(original_key.clone(), property_key.clone(), kind, vec![next], false);
+                                DocumentPropertyInput::submit(document_revision, original_key.clone(), property_key.clone(), kind, vec![next], false);
                             }
                         },
                         span { class: "h-4 w-4 rounded-full bg-background shadow-sm" }
@@ -1140,7 +1214,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                                         onclick: move |_| {
                                             let mut next = remove_values.clone();
                                             next.remove(index);
-                                            emit_property_edit(remove_key.clone(), property_key.clone(), kind, next, false);
+                                            DocumentPropertyInput::submit(document_revision, remove_key.clone(), property_key.clone(), kind, next, false);
                                         },
                                         if kind == KnowledgePropertyKind::Tags { "#" }
                                         "{value}"
@@ -1185,7 +1259,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                                     if !next.iter().any(|existing| existing.eq_ignore_ascii_case(&value)) {
                                         next.push(value);
                                     }
-                                    emit_property_edit(add_key.clone(), property_key.clone(), kind, next, false);
+                                    DocumentPropertyInput::submit(document_revision, add_key.clone(), property_key.clone(), kind, next, false);
                                 }
                             },
                         }
@@ -1214,7 +1288,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                             let original_key = original_key.clone();
                             let property_key = key.clone();
                             let property_scalar = scalar.clone();
-                            move |_| emit_property_edit(original_key.clone(), property_key.clone(), kind, vec![property_scalar.clone()], false)
+                            move |_| DocumentPropertyInput::submit(document_revision, original_key.clone(), property_key.clone(), kind, vec![property_scalar.clone()], false)
                         },
                     }
                 }
@@ -1223,7 +1297,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                 r#type: "button",
                 title: translate("editor-delete-property"),
                 class: "invisible shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible",
-                onclick: move |_| emit_property_edit(key_for_delete.clone(), String::new(), kind, Vec::new(), true),
+                onclick: move |_| DocumentPropertyInput::submit(document_revision, key_for_delete.clone(), String::new(), kind, Vec::new(), true),
                 Icon { class: "h-3.5 w-3.5", path { d: "M18 6 6 18" } path { d: "m6 6 12 12" } }
             }
         }
@@ -1280,28 +1354,33 @@ mod tests {
     use dioxus::html::{EventData, SerializedMouseData, SerializedPointerData};
     use std::{cell::RefCell, future::Future, rc::Rc};
     use vmux_api::BinEvent;
+    use vmux_ecs::event::NoteBlock;
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
 
     #[derive(Default)]
     struct PointerHost {
         events: RefCell<Vec<String>>,
-        positions: RefCell<Vec<FilePointerEvent>>,
+        positions: RefCell<Vec<DocumentPointerInput>>,
         measured_elements: RefCell<std::collections::HashSet<String>>,
+        listeners: RefCell<Vec<BytesListener>>,
     }
 
     impl PageHost for PointerHost {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
             self.events.borrow_mut().push(id.to_string());
-            if id == FilePointerEvent::id() {
+            if id == DocumentPointerInput::id() {
                 self.positions.borrow_mut().push(
-                    rkyv::from_bytes::<FilePointerEvent, rkyv::rancor::Error>(bytes).unwrap(),
+                    rkyv::from_bytes::<DocumentPointerInput, rkyv::rancor::Error>(bytes).unwrap(),
                 );
             }
             Ok(())
         }
 
-        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == vmux_ecs::event::FileUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
             Ok(())
         }
 
@@ -1311,6 +1390,31 @@ mod tests {
                 (element == "note-block-0" || self.measured_elements.borrow().contains(element))
                     .then_some(8),
             ))
+        }
+    }
+
+    impl PointerHost {
+        fn publish(&self, revision: u64) {
+            let mut state = vmux_ecs::event::FileUiState::default();
+            state.document.meta = Some(vmux_ecs::event::FileMetaEvent {
+                revision,
+                path: "note.md".into(),
+                abs_path: "/note.md".into(),
+                kind: vmux_ecs::event::FileDocumentKind::Markdown,
+                language: "Markdown".into(),
+                total_lines: 5,
+                indent: Default::default(),
+                line_ending: Default::default(),
+                encoding: Default::default(),
+            });
+            let frame = vmux_api::UiStateFrame::<
+                vmux_ecs::event::FileUiState,
+                <vmux_ecs::event::FileUiState as vmux_api::UiState>::Update,
+            >::Snapshot(state);
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in self.listeners.borrow_mut().iter_mut() {
+                listener(&bytes);
+            }
         }
     }
 
@@ -1333,7 +1437,11 @@ mod tests {
         let active = use_memo(|| None);
         let editing = use_memo(|| false);
         let line = use_memo(|| None);
+        super::super::state::FileUi::use_root();
         let cursor = NoteCursor::new(active, editing, line);
+        if let Some(capture) = try_consume_context::<Rc<RefCell<Option<NoteCursor>>>>() {
+            *capture.borrow_mut() = Some(cursor);
+        }
         let source_cursor = use_signal(vmux_api::editor::CursorPos::default);
         let selections = use_signal(Vec::new);
         let markers = use_signal(HashMap::new);
@@ -1374,12 +1482,67 @@ mod tests {
             [
                 "measure:note-block-0",
                 FileNoteEditRequest::id(),
-                FilePointerEvent::id()
+                DocumentPointerInput::id()
             ]
         );
         let positions = host.positions.borrow();
         assert_eq!(positions.len(), 1);
         assert_eq!((positions[0].line, positions[0].col), (3, 12));
+    }
+
+    #[test]
+    fn a_retained_note_pointer_handler_cannot_activate_a_replaced_document() {
+        let host = Rc::new(PointerHost::default());
+        let _host = HostScope::enter(host.clone());
+        let captured = Rc::new(RefCell::new(None::<NoteCursor>));
+        let mut dom = VirtualDom::new(ClickableNote);
+        dom.provide_root_context(captured.clone());
+        dom.rebuild_to_vec();
+        dom.render_immediate_to_vec();
+        host.publish(7);
+        dom.render_immediate_to_vec();
+        let previous = captured.borrow().unwrap();
+        host.publish(8);
+        dom.render_immediate_to_vec();
+        let current = captured.borrow().unwrap();
+        host.events.borrow_mut().clear();
+        dom.runtime().in_scope(dioxus::core::ScopeId::ROOT, || {
+            previous.place_rendered(
+                0,
+                3,
+                "日本 `code` end".into(),
+                ClientPoint::new(0.0, 0.0),
+                false,
+            );
+        });
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let _ = std::pin::pin!(dom.wait_for_work()).poll(&mut context);
+        dom.render_immediate_to_vec();
+        assert!(host.positions.borrow().is_empty());
+        assert!(
+            !host
+                .events
+                .borrow()
+                .iter()
+                .any(|event| event == FileNoteEditRequest::id())
+        );
+        dom.runtime().in_scope(dioxus::core::ScopeId::ROOT, || {
+            current.place_rendered(
+                0,
+                3,
+                "日本 `code` end".into(),
+                ClientPoint::new(0.0, 0.0),
+                false,
+            );
+        });
+        let _ = std::pin::pin!(dom.wait_for_work()).poll(&mut context);
+        dom.render_immediate_to_vec();
+        let positions = host.positions.borrow();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(
+            (positions[0].revision, positions[0].line, positions[0].col),
+            (8, 3, 12)
+        );
     }
 
     #[component]
@@ -1418,6 +1581,7 @@ mod tests {
         let active = use_memo(|| Some(0));
         let editing = use_memo(|| true);
         let line = use_memo(|| Some(3));
+        super::super::state::FileUi::use_root();
         let cursor = NoteCursor::new(active, editing, line);
         let source_cursor = use_signal(|| vmux_api::editor::CursorPos {
             line: 3,

@@ -1,5 +1,5 @@
+use crate::event::{DocumentKeyInput, DocumentTextInput};
 use dioxus::prelude::*;
-use vmux_ecs::event::FileTextInput;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send};
 use vmux_ui::ime::ImeGuard;
@@ -27,17 +27,20 @@ impl EditorFocus {
 pub(super) struct EditorInput;
 
 impl EditorInput {
-    pub(super) fn commit(mut field: Signal<String>, text: String) {
+    pub(super) fn commit(mut field: Signal<String>, text: String, revision: u64) {
         if text.is_empty() {
             return;
         }
-        let _ = send(&FileTextInput { text });
+        if send(&DocumentTextInput { revision, text }).is_err() {
+            return;
+        }
         field.set(String::new());
     }
 
     pub(super) fn forward_key(
         event: &Event<KeyboardData>,
         mode: vmux_api::editor::EditMode,
+        revision: u64,
     ) -> bool {
         let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
             return false;
@@ -46,7 +49,7 @@ impl EditorInput {
             return false;
         }
         event.prevent_default();
-        let _ = send(&stroke);
+        let _ = send(&DocumentKeyInput { revision, stroke });
         true
     }
 }

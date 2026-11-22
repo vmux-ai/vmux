@@ -1,3 +1,6 @@
+use crate::host::editor::EditReadOnly;
+#[cfg(test)]
+use crate::host::editor::Editor;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -6,7 +9,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::*;
 
-use super::editor::{Editor, FileView};
+use super::editor::FileView;
 use super::explorer::OutlineDirty;
 use super::explorer::{
     ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
@@ -211,8 +214,8 @@ fn drain_file_changes(
 }
 
 fn reload_changed_files(
-    files: Query<(Entity, &FileView, Option<&Editor>), With<FileReloadRequested>>,
-    browsers: NonSend<Browsers>,
+    files: Query<(Entity, &FileView, Option<EditReadOnly>), With<FileReloadRequested>>,
+    browsers: crate::host::delivery::Surface,
     mut lsp_changes: Option<MessageWriter<vmux_lsp::CloseDocument>>,
     mut commands: Commands,
 ) {
@@ -253,13 +256,13 @@ fn reload_changed_files(
         }
 
         if let Some(edit) = edit
-            && edit.core.dirty
+            && edit.core.revision.dirty
         {
             continue;
         }
         commands
             .entity(entity)
-            .remove::<Editor>()
+            .remove::<crate::host::editor::EditorBundle>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
             .remove::<FileLoadTask>()
@@ -327,8 +330,7 @@ mod tests {
         FileLoadTask::settle(&mut app, entity);
 
         assert_eq!(
-            app.world()
-                .get::<Editor>(entity)
+            Editor::read(app.world(), entity)
                 .unwrap()
                 .core
                 .buffer

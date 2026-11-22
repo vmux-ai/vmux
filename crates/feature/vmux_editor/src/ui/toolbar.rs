@@ -1,5 +1,7 @@
+use crate::event::DocumentFindInput;
+use dioxus::prelude::component;
 use dioxus::prelude::*;
-use vmux_ecs::event::{ExplorerCloseEditor, FileFindRequest, FileOpenEvent, OpenEditorItem};
+use vmux_ecs::event::{ExplorerCloseEditor, FileOpenEvent, OpenEditorItem};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -30,6 +32,8 @@ pub(super) fn FindBar(
     total: u32,
     index: u32,
 ) -> Element {
+    let document_revision = super::state::FileUi::current().use_revision();
+    let document_revision = document_revision();
     let ime = use_ime_guard();
     let key_query = query.clone();
     let regex_query = query.clone();
@@ -51,7 +55,8 @@ pub(super) fn FindBar(
                 placeholder: translate("editor-find-placeholder"),
                 value: "{query}",
                 oninput: move |event| {
-                    let _ = send(&FileFindRequest {
+                    let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                         query: event.value(),
                         step: false,
                         reverse: false,
@@ -70,7 +75,8 @@ pub(super) fn FindBar(
                     match event.key() {
                         Key::Enter => {
                             event.prevent_default();
-                            let _ = send(&FileFindRequest {
+                            let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                                 query: key_query.clone(),
                                 step: true,
                                 reverse: event.modifiers().shift(),
@@ -84,7 +90,8 @@ pub(super) fn FindBar(
                         }
                         Key::Escape => {
                             event.prevent_default();
-                            let _ = send(&FileFindRequest {
+                            let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                                 done: true,
                                 ..Default::default()
                             });
@@ -103,7 +110,8 @@ pub(super) fn FindBar(
                 },
                 title: translate("editor-find-regex"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                         query: regex_query.clone(),
                         step: false,
                         reverse: false,
@@ -127,7 +135,8 @@ pub(super) fn FindBar(
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-previous"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                         query: previous_query.clone(),
                         step: true,
                         reverse: true,
@@ -143,7 +152,8 @@ pub(super) fn FindBar(
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-next"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                         query: next_query.clone(),
                         step: true,
                         reverse: false,
@@ -159,7 +169,8 @@ pub(super) fn FindBar(
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-close"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    let _ = send(&DocumentFindInput {
+                        revision: document_revision,
                         done: true,
                         ..Default::default()
                     });

@@ -8,7 +8,7 @@ use vmux_ecs::{
     JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, OperationState, OperationTarget,
 };
 
-use super::edit::{EditCore, highlight_cache::HighlightCache};
+use super::edit::highlight_cache::HighlightCache;
 use super::editor::{Editor, FileView};
 use super::explorer::OutlineDirty;
 use super::file_lifecycle::{
@@ -17,7 +17,7 @@ use super::file_lifecycle::{
 };
 use super::file_loading_io::{Bytes, Directory, Inspect};
 use super::highlight::{FILE_VIEW_MAX_BYTES, HIGHLIGHT_MAX_BYTES};
-use super::keymap::KeymapConfig;
+use super::keymap::{EditorKeymap, KeymapConfig};
 use super::markdown::ParsedNote;
 use super::media::FileMedia;
 use super::note::NoteSent;
@@ -70,7 +70,7 @@ impl FileLoadTask {
                 && (world.get::<FileBuffer>(entity).is_some()
                     || world.get::<FileDir>(entity).is_some()
                     || world.get::<FileMedia>(entity).is_some()
-                    || world.get::<Editor>(entity).is_some());
+                    || Editor::read(world, entity).is_some());
             if loaded {
                 return;
             }
@@ -438,6 +438,7 @@ fn loaded(
     texts: Query<(Entity, &Text, Has<Heavy>)>,
     loads: Loads,
     settings: Option<Res<vmux_setting::AppSettings>>,
+    mut revisions: Query<&mut super::editor::FileDocumentRevision>,
     mut commands: Commands,
 ) {
     let keymap = KeymapConfig::resolve(settings.as_deref());
@@ -445,27 +446,32 @@ fn loaded(
         let Some((view, path, _)) = loads.current(operation) else {
             continue;
         };
+        if let Ok(mut revision) = revisions.get_mut(view) {
+            revision.advance();
+        }
         let highlight = match heavy {
             true => HighlightCache::plain(path),
             false => HighlightCache::new(path),
         };
-        let mut core = EditCore::new(
+        let mut core = crate::edit::Document::new(
             path.to_path_buf(),
             highlight.language.clone(),
             &text.0.text,
             keymap.initial_mode(),
         );
+        core.input = keymap.parser();
         core.buffer.encoding = text.0.encoding;
         let mut folds = crate::fold::FoldState::default();
         if !heavy {
             folds.set_indented(&core.buffer.rope);
         }
-        core.fold_view = folds.view(core.buffer.len_lines() as u32);
+        core.viewport.fold_view = folds.view(core.buffer.len_lines() as u32);
+        let editor_keymap: EditorKeymap = keymap.keymap();
         commands
             .entity(view)
             .insert((
-                Editor::new(core, highlight, folds),
-                keymap.keymap(),
+                crate::host::editor::EditorBundle::new(core, highlight, folds),
+                editor_keymap,
                 vmux_git::GitDiffSource {
                     content: text.0.text.clone(),
                     dirty: false,
@@ -632,16 +638,14 @@ mod tests {
         host.app.update();
         host.ready();
         loop {
-            let editor = host.app.world().get::<Editor>(host.view).unwrap();
+            let editor = Editor::read(host.app.world(), host.view).unwrap();
             if editor.folds.collapsed.contains(&0) {
                 break;
             }
             host.frame();
         }
         assert_eq!(
-            host.app
-                .world()
-                .get::<Editor>(host.view)
+            Editor::read(host.app.world(), host.view)
                 .unwrap()
                 .core
                 .buffer
@@ -656,9 +660,7 @@ mod tests {
         host.app.update();
         host.ready();
         assert_eq!(
-            host.app
-                .world()
-                .get::<Editor>(host.view)
+            Editor::read(host.app.world(), host.view)
                 .unwrap()
                 .core
                 .buffer
@@ -684,9 +686,7 @@ mod tests {
         worker.release();
         host.ready();
         assert_eq!(
-            host.app
-                .world()
-                .get::<Editor>(host.view)
+            Editor::read(host.app.world(), host.view)
                 .unwrap()
                 .core
                 .buffer
@@ -715,7 +715,7 @@ mod tests {
         worker.release();
         host.ready();
         host.frame();
-        assert!(host.app.world().get::<Editor>(host.view).is_none());
+        assert!(Editor::read(host.app.world(), host.view).is_none());
         assert!(
             host.app
                 .world()

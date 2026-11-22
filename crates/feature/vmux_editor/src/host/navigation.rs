@@ -1,3 +1,6 @@
+#[cfg(test)]
+use crate::host::editor::Editor;
+use crate::host::editor::{Edit, EditItem};
 use std::path::{Path, PathBuf};
 
 use bevy::ecs::system::Commands;
@@ -9,7 +12,7 @@ use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen, RecordVi
 use super::media::FileMedia;
 use super::parked_edits::Buffers;
 use crate::edit::Selection;
-use crate::host::editor::{Editor, FileDocumentRevision, FileNavigateRequest, FileView};
+use crate::host::editor::{FileDocumentRevision, FileNavigateRequest, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir};
 use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
@@ -228,7 +231,7 @@ impl PendingGoto {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct GotoActions<'w, 's> {
-    browsers: Option<NonSend<'w, Browsers>>,
+    browsers: crate::host::delivery::Surface<'w, 's>,
     commands: Commands<'w, 's>,
 }
 
@@ -236,14 +239,14 @@ impl GotoActions<'_, '_> {
     fn caret(
         &mut self,
         entity: Entity,
-        edit: &mut Editor,
+        edit: &mut EditItem<'_, '_>,
         line: u32,
         utf16_col: u32,
         viewport: &mut FileViewport,
     ) {
-        let Some(browsers) = self.browsers.as_deref() else {
+        if !self.browsers.available() {
             return;
-        };
+        }
         let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
         let line_text = edit
             .core
@@ -261,12 +264,12 @@ impl GotoActions<'_, '_> {
         edit.core.set_caret(caret);
         if let Some(top) = viewport.autoscroll(edit)
             && let Some(scroll) = viewport.set_top(top)
-            && browsers.can_emit_to(&entity)
+            && self.browsers.can_emit_to(&entity)
         {
             self.commands
                 .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
         }
-        edit.core.top_row = viewport.top_row;
+        edit.core.viewport.top_row = viewport.top_row;
     }
 }
 
@@ -377,7 +380,8 @@ fn apply_file(
         {
             return;
         }
-        let previous = document.take::<(Editor, vmux_git::GitDiffSource)>();
+        let previous =
+            document.take::<(crate::host::editor::EditorBundle, vmux_git::GitDiffSource)>();
         let previous = previous.map(|(edit, diff)| world.spawn((edit, diff, ChildOf(entity))).id());
         let keymap = world.spawn((resumed_keymap, ChildOf(entity))).id();
         world.trigger(Navigated {
@@ -515,17 +519,12 @@ fn apply_goto(
     mut messages: MessageReader<crate::lsp::manager::LspGoto>,
     mut view_params: ParamSet<(
         crate::lsp::manager::LspManager,
-        Query<(
-            &mut Editor,
-            &mut FileViewport,
-            &mut FileView,
-            &mut PageMetadata,
-        )>,
+        Query<(Edit, &mut FileViewport, &mut FileView, &mut PageMetadata)>,
     )>,
     mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
     mut actions: GotoActions,
 ) {
-    if actions.browsers.is_none() {
+    if !actions.browsers.available() {
         return;
     }
     for goto in messages.read() {
@@ -577,7 +576,7 @@ fn apply_goto(
         actions
             .commands
             .entity(goto.entity)
-            .remove::<Editor>()
+            .remove::<crate::host::editor::EditorBundle>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
             .remove::<FileMedia>()
@@ -595,10 +594,10 @@ fn apply_goto(
 }
 
 fn apply_pending_goto(
-    mut views: Query<(Entity, &mut Editor, &mut FileViewport, &PendingGoto)>,
+    mut views: Query<(Entity, Edit, &mut FileViewport, &PendingGoto)>,
     mut actions: GotoActions,
 ) {
-    if actions.browsers.is_none() {
+    if !actions.browsers.available() {
         return;
     }
     for (entity, mut edit, mut viewport, pending) in &mut views {
@@ -624,7 +623,7 @@ fn apply_pending_goto(
             let end = line_text.char_col(end) as usize;
             let anchor = edit.core.buffer.coords_to_char(line, start);
             let head = edit.core.buffer.coords_to_char(line, end);
-            edit.core.selections = vec![Selection { anchor, head }];
+            edit.core.carets.selections = vec![Selection { anchor, head }];
         }
         actions.commands.trigger(ViewportRenderRequest::new(entity));
         actions.commands.trigger(CursorRenderRequest::new(entity));
@@ -637,10 +636,8 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::edit::EditCore;
     use crate::edit::highlight_cache::HighlightCache;
     use crate::keymap::EditorKeymap;
-    use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
     use vmux_ecs::event::FileUiState;
 
@@ -657,13 +654,13 @@ mod tests {
             let text = (0..600)
                 .map(|index| format!("let v{index} = {index};\n"))
                 .collect::<String>();
-            let core = EditCore::new(
+            let core = crate::edit::Document::new(
                 path.to_path_buf(),
                 "Rust".into(),
                 &text,
                 crate::edit::EditMode::Normal,
             );
-            let edit = Editor::new(
+            let edit = crate::host::editor::EditorBundle::new(
                 core,
                 HighlightCache::new(path),
                 crate::fold::FoldState::default(),
@@ -718,7 +715,7 @@ mod tests {
                         word_wrap_column: 80,
                         scroll_revision: 0,
                     },
-                    EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    EditorKeymap(vmux_api::editor::KeymapKind::Vscode),
                     bevy_cef::prelude::BinIpcSurfaceGeneration(1),
                     bevy_cef::prelude::BinIpcNavigationRevision(1),
                     bevy_cef::prelude::BinIpcEpoch(1),
@@ -788,10 +785,7 @@ mod tests {
             match change {
                 0 => {}
                 1 => {
-                    fixture
-                        .app
-                        .world_mut()
-                        .get_mut::<Editor>(fixture.view)
+                    Editor::get_mut(fixture.app.world_mut(), fixture.view)
                         .unwrap()
                         .core
                         .apply(crate::edit::EditCommand::InsertText("mine".into()));
@@ -807,15 +801,12 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            let before = fixture
-                .app
-                .world()
-                .get::<Editor>(fixture.view)
+            let before = Editor::read(fixture.app.world(), fixture.view)
                 .unwrap()
                 .core
                 .primary();
             fixture.app.update();
-            let editor = fixture.app.world().get::<Editor>(fixture.view).unwrap();
+            let editor = Editor::read(fixture.app.world(), fixture.view).unwrap();
             if change == 0 {
                 assert_eq!(editor.core.cursor_pos().line, 5);
             } else {

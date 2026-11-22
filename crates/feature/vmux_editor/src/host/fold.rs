@@ -19,7 +19,7 @@ impl FoldRegion {
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(bevy::prelude::Component, Default, Clone, Debug)]
 pub struct FoldState {
     pub regions: Vec<FoldRegion>,
     pub collapsed: HashSet<u32>,

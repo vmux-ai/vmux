@@ -111,6 +111,7 @@ impl KeyInput {
     }
 }
 
+#[derive(Clone)]
 struct Mapping {
     scope: MapScope,
     lhs: Vec<KeyInput>,
@@ -123,7 +124,7 @@ pub(crate) enum MatchResult {
     Miss,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Mappings {
     entries: Vec<Mapping>,
 }

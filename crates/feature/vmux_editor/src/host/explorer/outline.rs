@@ -1,9 +1,11 @@
+use crate::host::editor::EditReadOnly;
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{OutlineEvent, OutlineRow};
 
 use super::OutlineDirty;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::FileView;
 use crate::host::file_lifecycle::EditorFileLoadedSet;
 use crate::host::markdown::ParsedNote;
 use crate::host::status::FileInitialMetaSent;
@@ -148,8 +150,8 @@ type DirtyOutline = (
 );
 
 fn emit_markdown(
-    query: Query<(Entity, &Editor, &FileView), DirtyOutline>,
-    browsers: NonSend<Browsers>,
+    query: Query<(Entity, EditReadOnly, &FileView), DirtyOutline>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     for (entity, edit, file) in &query {
@@ -187,7 +189,7 @@ fn clear_on_file_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit::{EditCore, highlight_cache::HighlightCache};
+    use crate::edit::highlight_cache::HighlightCache;
     use vmux_api::UiState;
     use vmux_ecs::event::{FileDocumentKind, FileMetaEvent, FileUiState};
 
@@ -231,14 +233,18 @@ mod tests {
             Self { app, page }
         }
 
-        fn editor(path: std::path::PathBuf, text: &str) -> Editor {
-            let core = EditCore::new(
+        fn editor(path: std::path::PathBuf, text: &str) -> crate::host::editor::EditorBundle {
+            let core = crate::edit::Document::new(
                 path.clone(),
                 "Markdown".to_string(),
                 text,
                 vmux_api::editor::EditMode::Normal,
             );
-            Editor::new(core, HighlightCache::plain(&path), Default::default())
+            crate::host::editor::EditorBundle::new(
+                core,
+                HighlightCache::plain(&path),
+                Default::default(),
+            )
         }
 
         fn metadata(&mut self, revision: u64) {

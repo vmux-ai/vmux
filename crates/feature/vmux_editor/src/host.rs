@@ -85,6 +85,7 @@ pub mod tool;
 mod address;
 pub(crate) mod app_key;
 mod command_bar;
+mod delivery;
 pub(crate) mod directory;
 pub(crate) mod editing;
 pub(crate) mod editor;

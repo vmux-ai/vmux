@@ -360,10 +360,7 @@ mod tests {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
             fixture.app.update();
-            if fixture
-                .app
-                .world()
-                .get::<Editor>(view)
+            if Editor::read(fixture.app.world(), view)
                 .is_some_and(|editor| editor.core.buffer.text() == "later\n")
             {
                 break;
@@ -400,10 +397,7 @@ mod tests {
             let remaining = deadline.saturating_duration_since(Instant::now());
             fixture.wake.recv_timeout(remaining).unwrap();
             fixture.app.update();
-            if fixture
-                .app
-                .world()
-                .get::<Editor>(view)
+            if Editor::read(fixture.app.world(), view)
                 .is_some_and(|editor| editor.core.buffer.text() == "changed\n")
             {
                 break;
@@ -424,10 +418,7 @@ mod tests {
             .add_path(fixture.directory.path().join("file.txt")))));
         fixture.app.update();
         assert_eq!(
-            fixture
-                .app
-                .world()
-                .get::<Editor>(view)
+            Editor::read(fixture.app.world(), view)
                 .unwrap()
                 .core
                 .buffer
@@ -456,7 +447,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             fixture.app.update();
-            if fixture.app.world().get::<Editor>(view).is_some() {
+            if Editor::read(fixture.app.world(), view).is_some() {
                 break;
             }
             assert!(Instant::now() < deadline);
@@ -464,10 +455,7 @@ mod tests {
         }
         assert_eq!(fixture.registrations(), [parent.canonicalize().unwrap()]);
         assert_eq!(
-            fixture
-                .app
-                .world()
-                .get::<Editor>(view)
+            Editor::read(fixture.app.world(), view)
                 .unwrap()
                 .core
                 .buffer

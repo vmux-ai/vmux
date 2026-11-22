@@ -20,6 +20,7 @@ use super::toolbar::{EditorTabStrip, FindBar, VimStatus};
 use std::collections::HashMap;
 
 use dioxus::html::input_data::MouseButton;
+use dioxus::prelude::component;
 use dioxus::prelude::*;
 use vmux_api::editor::KeymapKind;
 use vmux_api::editor::{CursorPos, EditMode};
@@ -56,6 +57,8 @@ pub fn Page() -> Element {
 #[component]
 fn EditorWorkspace() -> Element {
     let ui = FileUi::current();
+    let document_revision = ui.use_revision();
+    let document_revision = document_revision();
     let mut handled_document_revision = use_signal(|| 0u64);
     let meta_state = ui.use_value(|state| state.document.meta.as_ref());
     let checkout_state = ui.use_value(|state| state.document.checkout.as_ref());
@@ -934,7 +937,7 @@ fn EditorWorkspace() -> Element {
                     && is_markdown()
                     && !note_cursor.editing()
                 {
-                    let _ = EditorInput::forward_key(&e, ed_mode());
+                    let _ = EditorInput::forward_key(&e, ed_mode(), document_revision);
                     return;
                 }
                 match current_mode {
@@ -1239,13 +1242,13 @@ fn EditorWorkspace() -> Element {
                                             oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
                                                 ime.commit();
-                                                EditorInput::commit(typed, event.data().data());
+                                                EditorInput::commit(typed, event.data().data(), document_revision);
                                             },
                                             oninput: move |event: Event<FormData>| {
                                                 if ime.active() {
                                                     return;
                                                 }
-                                                EditorInput::commit(typed, event.value());
+                                                EditorInput::commit(typed, event.value(), document_revision);
                                             },
                                             onkeydown: move |event: Event<KeyboardData>| {
                                                 event.stop_propagation();
@@ -1270,7 +1273,7 @@ fn EditorWorkspace() -> Element {
                                                     }
                                                     return;
                                                 }
-                                                let _ = EditorInput::forward_key(&event, ed_mode());
+                                                let _ = EditorInput::forward_key(&event, ed_mode(), document_revision);
                                             },
                                         }
                                         if !note_references().is_empty() {
@@ -1565,13 +1568,13 @@ fn EditorWorkspace() -> Element {
                                             oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
                                                 ime.commit();
-                                                EditorInput::commit(typed, event.data().data());
+                                                EditorInput::commit(typed, event.data().data(), document_revision);
                                             },
                                             oninput: move |event: Event<FormData>| {
                                                 if ime.active() {
                                                     return;
                                                 }
-                                                EditorInput::commit(typed, event.value());
+                                                EditorInput::commit(typed, event.value(), document_revision);
                                             },
                                             onkeydown: move |e: Event<KeyboardData>| {
                                                 e.stop_propagation();
@@ -1581,7 +1584,7 @@ fn EditorWorkspace() -> Element {
                                                 if keys.offer(&e) {
                                                     return;
                                                 }
-                                                let _ = EditorInput::forward_key(&e, ed_mode());
+                                                let _ = EditorInput::forward_key(&e, ed_mode(), document_revision);
                                             },
                                         }
 

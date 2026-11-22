@@ -1,10 +1,13 @@
+use crate::host::editor::EditReadOnly;
+#[cfg(test)]
+use crate::host::editor::Editor;
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::Browsers;
 
-use super::editing::EditRequest;
-use super::editor::{Editor, FileView};
+use super::editor::FileView;
 use super::file_lifecycle::SelfWrites;
+#[cfg(test)]
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 
@@ -142,7 +145,7 @@ fn documents(request: &ApplyWorkspaceEdit, edits: &mut WorkspaceEdits) -> Option
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct WorkspaceEdits<'w, 's> {
-    views: Query<'w, 's, (Entity, &'static FileView, &'static Editor)>,
+    views: Query<'w, 's, (Entity, &'static FileView, EditReadOnly)>,
     self_writes: NonSendMut<'w, SelfWrites>,
     manager: crate::lsp::manager::LspManager<'w, 's>,
     unsent: Query<'w, 's, (), With<super::language::LspEditDirty>>,
@@ -236,10 +239,18 @@ impl WorkspaceEdits<'_, '_> {
             return Ok(());
         }
         for entity in document.targets {
-            self.commands.trigger(EditRequest::new(
-                entity,
-                vec![EditCommand::ReplaceText(document.updated.clone())],
-            ));
+            let Ok((_, _, editor)) = self.views.get(entity) else {
+                return Err(format!(
+                    "{} is no longer open",
+                    document.path.as_path().display()
+                ));
+            };
+            self.commands
+                .trigger(super::editing::document::ReplaceTextRequest {
+                    entity,
+                    document: Some(editor.core.revision.identity),
+                    text: document.updated.clone(),
+                });
         }
         Ok(())
     }
@@ -256,12 +267,11 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+    use crate::edit::EditMode;
     use crate::edit::highlight_cache::HighlightCache;
-    use crate::edit::{EditCore, EditMode};
     use crate::host::editing::ClipboardHandle;
     use crate::host::keymap::EditorKeymap;
     use crate::host::viewport::FileViewport;
-    use crate::keymap::KeymapKindExt;
 
     struct ApplyEdit {
         app: App,
@@ -327,7 +337,7 @@ mod tests {
 
             let mut views = Vec::new();
             for _ in 0..panes {
-                let core = EditCore::new(
+                let core = crate::edit::Document::new(
                     path.to_path_buf(),
                     "Rust".into(),
                     Self::BEFORE,
@@ -339,12 +349,12 @@ mod tests {
                             FileView {
                                 path: path.to_path_buf(),
                             },
-                            Editor::new(
+                            crate::host::editor::EditorBundle::new(
                                 core,
                                 HighlightCache::new(path),
                                 crate::fold::FoldState::default(),
                             ),
-                            EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
+                            EditorKeymap(vmux_api::editor::KeymapKind::Vscode),
                             FileViewport {
                                 top_row: 0,
                                 rows: 0,
@@ -392,9 +402,7 @@ mod tests {
         }
 
         fn text(&self, entity: Entity) -> String {
-            self.app
-                .world()
-                .get::<Editor>(entity)
+            Editor::read(self.app.world(), entity)
                 .unwrap()
                 .core
                 .buffer
@@ -402,9 +410,7 @@ mod tests {
         }
 
         fn undo(&mut self, entity: Entity) {
-            self.app
-                .world_mut()
-                .get_mut::<Editor>(entity)
+            Editor::get_mut(self.app.world_mut(), entity)
                 .unwrap()
                 .core
                 .apply(EditCommand::Undo);
@@ -505,8 +511,13 @@ mod tests {
                 FileView {
                     path: target.clone(),
                 },
-                Editor::new(
-                    EditCore::new(target.clone(), "Rust".into(), "abc\n", EditMode::Normal),
+                crate::host::editor::EditorBundle::new(
+                    crate::edit::Document::new(
+                        target.clone(),
+                        "Rust".into(),
+                        "abc\n",
+                        EditMode::Normal,
+                    ),
                     HighlightCache::new(&target),
                     crate::fold::FoldState::default(),
                 ),
@@ -524,10 +535,7 @@ mod tests {
                 1,
             );
             if mode >= 2 {
-                fixture
-                    .app
-                    .world_mut()
-                    .get_mut::<Editor>(affected)
+                Editor::get_mut(fixture.app.world_mut(), affected)
                     .unwrap()
                     .core
                     .apply(EditCommand::InsertText("X".into()));
@@ -537,10 +545,7 @@ mod tests {
             }
             let origin = first.origin(fixture.app.world_mut(), owner, &source);
             if mode == 1 {
-                fixture
-                    .app
-                    .world_mut()
-                    .get_mut::<Editor>(affected)
+                Editor::get_mut(fixture.app.world_mut(), affected)
                     .unwrap()
                     .core
                     .apply(EditCommand::InsertText("X".into()));
@@ -553,10 +558,7 @@ mod tests {
             }
             if mode == 3 {
                 std::fs::write(&target, "Xabc\n").unwrap();
-                fixture
-                    .app
-                    .world_mut()
-                    .get_mut::<Editor>(affected)
+                Editor::get_mut(fixture.app.world_mut(), affected)
                     .unwrap()
                     .core
                     .mark_saved();
@@ -688,9 +690,7 @@ mod tests {
             match change {
                 0 => {}
                 1 | 2 => {
-                    edit.app
-                        .world_mut()
-                        .get_mut::<Editor>(view)
+                    Editor::get_mut(edit.app.world_mut(), view)
                         .unwrap()
                         .core
                         .apply(EditCommand::InsertText("MINE ".into()));
@@ -772,7 +772,11 @@ mod tests {
         for view in edit.views.clone() {
             assert_eq!(edit.text(view), "1 two 3\n");
             assert!(
-                edit.app.world().get::<Editor>(view).unwrap().core.dirty,
+                Editor::read(edit.app.world(), view)
+                    .unwrap()
+                    .core
+                    .revision
+                    .dirty,
                 "an applied edit leaves the buffer dirty for the user to save"
             );
         }
@@ -806,9 +810,7 @@ mod tests {
 
         let mut edit = ApplyEdit::with_edit(&path, 2);
         let second = edit.views[1];
-        edit.app
-            .world_mut()
-            .get_mut::<Editor>(second)
+        Editor::get_mut(edit.app.world_mut(), second)
             .unwrap()
             .core
             .apply(EditCommand::InsertText("MINE ".to_string()));
