@@ -176,48 +176,51 @@ impl StartRequest {
     pub fn id(&self) -> &SessionId {
         self.create.id()
     }
+}
 
-    fn submit_initial_prompt(
-        &self,
-        session: Entity,
-        id: &SessionId,
-        queues: &mut QueuedPrompts,
-        appended: &mut MessageWriter<vmux_session::ConversationAppendReceived>,
-        commands: &mut Commands,
-    ) {
-        queues.enqueue(session, self.prompt.clone(), self.attachments.clone(), true);
-        commands.entity(session).insert((
+#[derive(SystemParam)]
+struct SessionStarter<'w, 's> {
+    page_opens: MessageWriter<'w, PageOpenRequest>,
+    appended: MessageWriter<'w, vmux_session::ConversationAppendReceived>,
+    queues: QueuedPrompts<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl SessionStarter<'_, '_> {
+    fn submit_initial_prompt(&mut self, session: Entity, id: &SessionId, request: &StartRequest) {
+        self.queues.enqueue(
+            session,
+            request.prompt.clone(),
+            request.attachments.clone(),
+            true,
+        );
+        self.commands.entity(session).insert((
             vmux_session::RunState::default(),
             vmux_session::InitialPromptSubmitted,
         ));
-        appended.write(vmux_session::ConversationAppendReceived {
-            session: id.clone(),
-            messages: vec![vmux_api::session::Message::user_with_attachments(
-                self.prompt.clone(),
-                self.attachments.clone(),
-            )],
-        });
-        if let Some(title) = AgentConversationTitle::from_prompt(&self.prompt) {
-            commands
+        self.appended
+            .write(vmux_session::ConversationAppendReceived {
+                session: id.clone(),
+                messages: vec![vmux_api::session::Message::user_with_attachments(
+                    request.prompt.clone(),
+                    request.attachments.clone(),
+                )],
+            });
+        if let Some(title) = AgentConversationTitle::from_prompt(&request.prompt) {
+            self.commands
                 .entity(session)
                 .insert((title, vmux_session::TitlePending));
         }
     }
 
-    fn open_target(
-        &self,
-        session: Entity,
-        id: &SessionId,
-        requests: &mut MessageWriter<PageOpenRequest>,
-        commands: &mut Commands,
-    ) {
-        if let PageOpenTarget::Stack(stack) = &self.target {
-            commands
+    fn open_target(&mut self, session: Entity, id: &SessionId, target: &PageOpenTarget) {
+        if let PageOpenTarget::Stack(stack) = target {
+            self.commands
                 .entity(*stack)
                 .insert(EntityTarget::<Session>::new(session));
         }
-        requests.write(PageOpenRequest {
-            target: self.target.clone(),
+        self.page_opens.write(PageOpenRequest {
+            target: target.clone(),
             url: Route::Session(id.clone()).url(),
             request_id: None,
         });
@@ -227,13 +230,10 @@ impl StartRequest {
 #[derive(Component)]
 struct CreationOperation(String);
 
-#[allow(clippy::too_many_arguments)]
 fn start(
     mut requests: MessageReader<StartRequest>,
     mut creates: MessageWriter<CreateRequest>,
-    mut page_opens: MessageWriter<PageOpenRequest>,
-    mut appended: MessageWriter<vmux_session::ConversationAppendReceived>,
-    mut queues: QueuedPrompts,
+    mut starter: SessionStarter,
     sessions: Query<
         (
             Entity,
@@ -243,7 +243,6 @@ fn start(
         With<Session>,
     >,
     pending: Query<(Entity, &StartRequest, &vmux_ecs::OperationState)>,
-    mut commands: Commands,
 ) {
     let mut existing = std::collections::HashMap::new();
     for (entity, id, prompt_submitted) in &sessions {
@@ -261,37 +260,35 @@ fn start(
     for request in requests.read() {
         if let Some(&(session, prompt_submitted)) = existing.get(request.create.id()) {
             if let Some(entity) = active.remove(request.create.id()) {
-                commands
+                starter
+                    .commands
                     .entity(entity)
                     .insert((request.clone(), vmux_ecs::OperationState::Succeeded));
             } else {
-                let entity = commands
+                let entity = starter
+                    .commands
                     .spawn((
                         vmux_ecs::Operation::bundle("session.start").unwrap(),
                         request.clone(),
                     ))
                     .id();
-                commands
+                starter
+                    .commands
                     .entity(entity)
                     .insert(vmux_ecs::OperationState::Succeeded);
             }
             if !prompt_submitted {
-                request.submit_initial_prompt(
-                    session,
-                    request.create.id(),
-                    &mut queues,
-                    &mut appended,
-                    &mut commands,
-                );
+                starter.submit_initial_prompt(session, request.create.id(), request);
                 existing.insert(request.create.id().clone(), (session, true));
             }
-            request.open_target(session, request.create.id(), &mut page_opens, &mut commands);
+            starter.open_target(session, request.create.id(), &request.target);
             continue;
         }
         if let Some(entity) = active.get(request.create.id()) {
-            commands.entity(*entity).insert(request.clone());
+            starter.commands.entity(*entity).insert(request.clone());
         } else {
-            let entity = commands
+            let entity = starter
+                .commands
                 .spawn((
                     vmux_ecs::Operation::bundle("session.start")
                         .unwrap()
@@ -362,10 +359,7 @@ fn open_started(
     trigger: On<Created>,
     sessions: Query<(&SessionId, Has<vmux_session::InitialPromptSubmitted>), With<Session>>,
     mut pending: Query<(&StartRequest, &mut vmux_ecs::OperationState)>,
-    mut requests: MessageWriter<PageOpenRequest>,
-    mut appended: MessageWriter<vmux_session::ConversationAppendReceived>,
-    mut queues: QueuedPrompts,
-    mut commands: Commands,
+    mut starter: SessionStarter,
 ) {
     let Ok((id, prompt_submitted)) = sessions.get(trigger.event().entity) else {
         return;
@@ -384,20 +378,9 @@ fn open_started(
     };
     *state = vmux_ecs::OperationState::Succeeded;
     if !prompt_submitted {
-        created.submit_initial_prompt(
-            trigger.event().entity,
-            &trigger.event().id,
-            &mut queues,
-            &mut appended,
-            &mut commands,
-        );
+        starter.submit_initial_prompt(trigger.event().entity, &trigger.event().id, created);
     }
-    created.open_target(
-        trigger.event().entity,
-        &trigger.event().id,
-        &mut requests,
-        &mut commands,
-    );
+    starter.open_target(trigger.event().entity, &trigger.event().id, &created.target);
 }
 
 fn submit_from_command_bar(
