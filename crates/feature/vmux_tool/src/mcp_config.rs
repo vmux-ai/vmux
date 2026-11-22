@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -489,7 +490,6 @@ impl McpTrustStore {
         let hash = digest(&SHA256, canonical.as_bytes());
         let mut hex = String::with_capacity(hash.as_ref().len() * 2);
         for byte in hash.as_ref() {
-            use std::fmt::Write;
             let _ = write!(&mut hex, "{byte:02x}");
         }
         Ok(hex)

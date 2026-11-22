@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -159,7 +160,6 @@ impl Job for CreateEmptyFile {
     type Output = Result<PathChanged, String>;
 
     fn run(self) -> Self::Output {
-        use std::io::Write;
         if BlockingCancellation::canceled() {
             return Err("file creation canceled".into());
         }

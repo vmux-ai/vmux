@@ -167,7 +167,7 @@ impl Plugin for ToolRuntimePlugin {
             inventory::InventoryPlugin,
             package::PackageChangePlugin,
             apply::ApplyPlugin,
-            mcp_registry::McpRegistryPlugin,
+            McpRegistryPlugin,
         ));
         #[cfg(host)]
         if !app.is_plugin_added::<io::ObservationIoPlugin>() {
