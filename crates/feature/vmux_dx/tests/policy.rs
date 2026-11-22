@@ -3496,6 +3496,21 @@ fn compiler_boundaries_require_external_framework_or_real_compiler_input_io() {
             true,
             false,
         ),
+        (
+            "use rustc_lint::{LateLintPass,LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { store.register_late_lint_pass(Box::new(|_| { Box::new(Adapter) })); }",
+            true,
+            true,
+        ),
+        (
+            "use rustc_lint::{LateLintPass,LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} struct Other; impl LateLintPass for Other {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { store.register_late_lint_pass(Box::new(|_| { if true { return Box::new(Other); } Box::new(Adapter) })); }",
+            true,
+            false,
+        ),
+        (
+            "use rustc_lint::{LateLintPass,LintStore}; use rustc_session::Session; struct Adapter; impl LateLintPass for Adapter {} #[cfg(not(test))] #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) {} #[cfg(test)] fn register_lints(_: &Session, store: &mut LintStore) { store.register_late_lint_pass(Box::new(|_| Box::new(Adapter))); }",
+            true,
+            false,
+        ),
     ] {
         let inventory = Inventory::fixture(source);
         let adapter = inventory
@@ -12236,6 +12251,21 @@ impl Inventory {
             || self.typed_page(entry)
     }
 
+    fn compiler_harness(&self, source: &Declaration) -> bool {
+        let Some(input) = self.sources.get(&source.path) else {
+            return false;
+        };
+        let Ok(file) = syn::parse_file(input) else {
+            return false;
+        };
+        CompilerInputs::harness(
+            &file,
+            &source.name,
+            &Workspace::current().0.join(&source.path),
+        )
+        .is_ok()
+    }
+
     fn registered_compiler_owner(&self, entry: &Declaration) -> bool {
         if !self.compiler_boundary(entry) {
             return false;
@@ -12248,13 +12278,7 @@ impl Inventory {
             return false;
         };
         if !source.production {
-            return self.sources.get(&source.path).is_some_and(|input| {
-                CompilerInputs::verifies_harness(
-                    input,
-                    &source.name,
-                    &Workspace::current().0.join(&source.path),
-                )
-            });
+            return self.compiler_harness(source);
         }
         if !self.implementations(source).iter().any(|implementation| {
             let Some((interface, _)) = implementation.name.split_once(" for ") else {
@@ -12289,7 +12313,11 @@ impl Inventory {
             let Item::Fn(function) = item else {
                 continue;
             };
-            if function.sig.ident != registration.name {
+            if function.sig.ident != registration.name
+                || Usage::test_only(&function.attrs)
+                || Declaration::fingerprint(&function.to_token_stream().to_string())
+                    != registration.fingerprint
+            {
                 continue;
             }
             for input in &function.sig.inputs {
@@ -12360,7 +12388,10 @@ impl Inventory {
             syn::Expr::Paren(value) => self.compiler_factory_value(namespace, &value.expr, owner),
             syn::Expr::Group(value) => self.compiler_factory_value(namespace, &value.expr, owner),
             syn::Expr::Block(block) => {
-                let Some(syn::Stmt::Expr(value, None)) = block.block.stmts.last() else {
+                if block.block.stmts.len() != 1 {
+                    return false;
+                }
+                let Some(syn::Stmt::Expr(value, None)) = block.block.stmts.first() else {
                     return false;
                 };
                 self.compiler_factory_value(namespace, value, owner)
@@ -13230,13 +13261,7 @@ impl Inventory {
         if source.production || !temporary || !cargo {
             return false;
         }
-        self.sources.get(&source.path).is_some_and(|input| {
-            CompilerInputs::verifies_harness(
-                input,
-                &source.name,
-                &Workspace::current().0.join(&source.path),
-            )
-        })
+        self.compiler_harness(source)
     }
 
     fn external_path(

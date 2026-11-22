@@ -197,7 +197,18 @@ fn compiler_resolves_observers_and_ignores_lookalike_registration_apis() {
         (
             "runtime_callbacks",
             include_str!("../ui/runtime_callbacks.rs"),
-            &["added", "removed", "once"][..],
+            &[
+                "added",
+                "removed",
+                "once",
+                "explicit",
+                "tail",
+                "fallible_added",
+                "fallible_inserted",
+                "fallible_discarded",
+                "fallible_removed",
+                "fallible_despawned",
+            ][..],
         ),
     ] {
         fixture.check(name, source, expected, "vmux_exported_system");

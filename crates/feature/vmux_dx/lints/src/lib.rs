@@ -90,6 +90,9 @@ impl<'tcx> LateLintPass<'tcx> for VmuxExportedSystem<'tcx> {
         {
             return;
         }
+        for value in aliases::Assignments::returns(body.value) {
+            self.configuration(cx, value);
+        }
         self.configuration(cx, body.value);
     }
 }
@@ -167,7 +170,8 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
             (
                 "bevy_ecs",
                 "ComponentHooks",
-                "on_add" | "on_insert" | "on_discard" | "on_remove" | "on_despawn",
+                "on_add" | "on_insert" | "on_discard" | "on_remove" | "on_despawn" | "try_on_add"
+                | "try_on_insert" | "try_on_discard" | "try_on_remove" | "try_on_despawn",
             ) => Some(usize::from(qualified)),
             ("bevy_ecs", "Observer", "new") if qualified => Some(0),
             _ => None,

@@ -14,6 +14,7 @@ pub(super) struct Assignments<'tcx> {
     breaks: HashMap<HirId, Vec<&'tcx Expr<'tcx>>>,
     continues: HashMap<HirId, Vec<&'tcx Expr<'tcx>>>,
     exits: HashMap<HirId, Vec<&'tcx Expr<'tcx>>>,
+    returned: Vec<&'tcx Expr<'tcx>>,
 }
 
 impl<'tcx> Assignments<'tcx> {
@@ -43,6 +44,12 @@ impl<'tcx> Assignments<'tcx> {
             .unwrap_or_default()
     }
 
+    pub fn returns(expression: &'tcx Expr<'tcx>) -> Vec<&'tcx Expr<'tcx>> {
+        let mut assignments = Self::new(None, None);
+        assignments.visit_expr(expression);
+        assignments.returned
+    }
+
     fn new(binding: Option<HirId>, target: Option<HirId>) -> Self {
         Self {
             values: Vec::new(),
@@ -53,6 +60,7 @@ impl<'tcx> Assignments<'tcx> {
             breaks: HashMap::new(),
             continues: HashMap::new(),
             exits: HashMap::new(),
+            returned: Vec::new(),
         }
     }
 
@@ -181,6 +189,9 @@ impl<'tcx> Visitor<'tcx> for Assignments<'tcx> {
             ExprKind::Ret(value) => {
                 if let Some(value) = value {
                     self.visit_expr(value);
+                    if self.reachable {
+                        Self::merge(&mut self.returned, vec![value]);
+                    }
                 }
                 self.reachable = false;
             }
