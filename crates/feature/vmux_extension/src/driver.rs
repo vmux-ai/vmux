@@ -3,10 +3,6 @@ use std::path::Path;
 
 use crate::match_pattern::ExtensionMatchPattern;
 
-const MAX_PERMISSION_COUNT: usize = 256;
-const MAX_PERMISSION_LENGTH: usize = 1024;
-const MAX_PERMISSION_BYTES: usize = 64 * 1024;
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExtensionManifest {
     pub manifest_version: u32,
@@ -22,6 +18,10 @@ pub struct ExtensionManifest {
 }
 
 impl ExtensionManifest {
+    const MAX_PERMISSION_COUNT: usize = 256;
+    const MAX_PERMISSION_LENGTH: usize = 1024;
+    const MAX_PERMISSION_BYTES: usize = 64 * 1024;
+
     pub fn prepare_unpacked(dir: &Path, key_b64: &str, popup: Option<&str>) -> Result<(), String> {
         let path = dir.join("manifest.json");
         let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
@@ -224,7 +224,7 @@ impl ExtensionManifest {
         let values = value
             .as_array()
             .ok_or_else(|| format!("manifest {key} must be an array"))?;
-        if values.len() > MAX_PERMISSION_COUNT {
+        if values.len() > Self::MAX_PERMISSION_COUNT {
             return Err(format!("manifest {key} exceeds permission count limit"));
         }
         let mut total = 0;
@@ -234,11 +234,11 @@ impl ExtensionManifest {
                 let value = value
                     .as_str()
                     .ok_or_else(|| format!("manifest {key} entries must be strings"))?;
-                if value.len() > MAX_PERMISSION_LENGTH {
+                if value.len() > Self::MAX_PERMISSION_LENGTH {
                     return Err(format!("manifest {key} entry exceeds length limit"));
                 }
                 total += value.len();
-                if total > MAX_PERMISSION_BYTES {
+                if total > Self::MAX_PERMISSION_BYTES {
                     return Err(format!("manifest {key} exceeds byte limit"));
                 }
                 Ok(value.to_string())

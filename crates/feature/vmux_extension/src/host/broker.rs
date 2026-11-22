@@ -35,19 +35,19 @@ impl Plugin for ExtensionBrokerPlugin {
                     bevy::ecs::schedule::ApplyDeferred,
                 )
                     .chain()
-                    .in_set(super::ExtensionSystemSet::DrainBridge)
+                    .in_set(super::DrainBridgeSet)
                     .after(super::access::AccessSet)
-                    .after(super::ExtensionSystemSet::SyncWindows),
+                    .after(super::SyncWindowsSet),
             )
             .add_systems(
                 Update,
                 forward_model_events
                     .after(super::project::ExtensionProjectionSet)
-                    .after(super::ExtensionSystemSet::DrainBridge),
+                    .after(super::DrainBridgeSet),
             )
             .add_systems(
                 Update,
-                fire_conformance_wake_timer.after(super::ExtensionSystemSet::DrainBridge),
+                fire_conformance_wake_timer.after(super::DrainBridgeSet),
             )
             .add_systems(Update, arm_bridge_wake);
     }

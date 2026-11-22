@@ -254,8 +254,30 @@ mod tests {
         fn fixture() -> Self {
             Self {
                 windows: vec![
-                    ExtensionWindowSnapshot::fixture(1, false),
-                    ExtensionWindowSnapshot::fixture(2, true),
+                    ExtensionWindowSnapshot {
+                        id: 1,
+                        focused: false,
+                        left: 0,
+                        top: 0,
+                        width: 800,
+                        height: 600,
+                        incognito: false,
+                        window_type: "normal".into(),
+                        state: "normal".into(),
+                        always_on_top: false,
+                    },
+                    ExtensionWindowSnapshot {
+                        id: 2,
+                        focused: true,
+                        left: 0,
+                        top: 0,
+                        width: 800,
+                        height: 600,
+                        incognito: false,
+                        window_type: "normal".into(),
+                        state: "normal".into(),
+                        always_on_top: false,
+                    },
                 ],
                 tabs: vec![
                     ExtensionTabSnapshot::fixture(10, 1, 0, false, "https://example.test/one"),
@@ -268,23 +290,6 @@ mod tests {
                         "https://accounts.google.com/signin",
                     ),
                 ],
-            }
-        }
-    }
-
-    impl ExtensionWindowSnapshot {
-        fn fixture(id: i32, focused: bool) -> Self {
-            Self {
-                id,
-                focused,
-                left: 0,
-                top: 0,
-                width: 800,
-                height: 600,
-                incognito: false,
-                window_type: "normal".into(),
-                state: "normal".into(),
-                always_on_top: false,
             }
         }
     }
@@ -315,9 +320,7 @@ mod tests {
         }
     }
 
-    struct WorkerCall;
-
-    impl WorkerCall {
+    impl ExtensionTabs<'_> {
         fn to(method: &str, arguments: Vec<Value>) -> ApiRequest {
             ApiRequest {
                 request_id: "1".into(),
@@ -331,21 +334,21 @@ mod tests {
                 },
             }
         }
-    }
 
-    fn ids(value: &Value) -> Vec<i64> {
-        value
-            .as_array()
-            .expect("array")
-            .iter()
-            .map(|tab| tab["id"].as_i64().expect("id"))
-            .collect()
+        fn ids(value: &Value) -> Vec<i64> {
+            value
+                .as_array()
+                .expect("array")
+                .iter()
+                .map(|tab| tab["id"].as_i64().expect("id"))
+                .collect()
+        }
     }
 
     #[test]
     fn the_active_tab_of_the_focused_window_is_the_one_a_content_script_sits_in() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to(
+        let request = ExtensionTabs::to(
             "query",
             vec![json!({ "active": true, "currentWindow": true })],
         );
@@ -354,13 +357,13 @@ mod tests {
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
-        assert_eq!(ids(&result), [12]);
+        assert_eq!(ExtensionTabs::ids(&result), [12]);
     }
 
     #[test]
     fn a_url_pattern_narrows_the_query_to_the_pages_it_matches() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to(
+        let request = ExtensionTabs::to(
             "query",
             vec![json!({ "url": ["https://accounts.google.com/*"] })],
         );
@@ -369,13 +372,13 @@ mod tests {
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
-        assert_eq!(ids(&result), [12]);
+        assert_eq!(ExtensionTabs::ids(&result), [12]);
     }
 
     #[test]
     fn a_scheme_chrome_patterns_cannot_express_still_narrows_the_query() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to(
+        let request = ExtensionTabs::to(
             "query",
             vec![json!({ "url": "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup/*" })],
         );
@@ -384,13 +387,13 @@ mod tests {
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
-        assert_eq!(ids(&result), [] as [i64; 0]);
+        assert_eq!(ExtensionTabs::ids(&result), [] as [i64; 0]);
     }
 
     #[test]
     fn getting_a_tab_the_model_does_not_hold_fails_the_way_chrome_fails() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to("get", vec![json!(1)]);
+        let request = ExtensionTabs::to("get", vec![json!(1)]);
 
         let error = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
@@ -402,19 +405,19 @@ mod tests {
     #[test]
     fn the_current_window_sentinel_is_not_a_window_id() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to("query", vec![json!({ "active": true, "windowId": -2 })]);
+        let request = ExtensionTabs::to("query", vec![json!({ "active": true, "windowId": -2 })]);
 
         let result = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
-        assert_eq!(ids(&result), [12]);
+        assert_eq!(ExtensionTabs::ids(&result), [12]);
     }
 
     #[test]
     fn an_id_too_large_for_a_tab_is_refused_rather_than_truncated() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to("get", vec![json!(4294967306i64)]);
+        let request = ExtensionTabs::to("get", vec![json!(4294967306i64)]);
 
         let error = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
@@ -426,7 +429,7 @@ mod tests {
     #[test]
     fn an_extension_without_the_tabs_permission_is_told_no_url() {
         let model = ExtensionModel::fixture();
-        let request = WorkerCall::to("get", vec![json!(12)]);
+        let request = ExtensionTabs::to("get", vec![json!(12)]);
         let authorization = BridgeAuthorization {
             permissions: HashSet::new(),
             ..BridgeAuthorization::fixture()

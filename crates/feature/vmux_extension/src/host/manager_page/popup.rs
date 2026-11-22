@@ -420,8 +420,6 @@ fn dismiss(trigger: On<Receive<DismissRequest>>, mut host: PopupHost) {
     host.close(owner);
 }
 
-const POPUP_SIZE_CHANNEL: &str = "vmux-extension-popup-size";
-
 fn open_request(trigger: On<UiInput<ExtensionPopupOpenRequest>>, mut host: PopupHost) {
     let Some(entry) = host.entry(&trigger.event().payload.id) else {
         return;
@@ -610,7 +608,7 @@ fn size(
     mut commands: Commands,
 ) {
     let request = &trigger.payload;
-    if request.channel != POPUP_SIZE_CHANNEL
+    if request.channel != "vmux-extension-popup-size"
         || !request.width.is_finite()
         || !request.height.is_finite()
     {

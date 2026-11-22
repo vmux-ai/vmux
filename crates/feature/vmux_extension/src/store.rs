@@ -66,12 +66,10 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    const LEGACY_PROFILE: &str = "personal";
-
     impl ExtEntry {
         fn fixture(id: &str, enabled: bool) -> Self {
             let mut profile_enabled = BTreeMap::new();
-            profile_enabled.insert(LEGACY_PROFILE.into(), enabled);
+            profile_enabled.insert("personal".into(), enabled);
             ExtEntry {
                 id: id.into(),
                 name: id.into(),

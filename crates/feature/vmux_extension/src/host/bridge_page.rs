@@ -1,5 +1,8 @@
 use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use bevy::prelude::{
+    Added, App, AppExit, Commands, Component, DetectChanges, Entity, IntoScheduleConfigs,
+    MessageReader, Plugin, Query, Ref, RemovedComponents, Res, Single, Update, Vec2, With,
+};
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::{
     CefShutdownState, PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
@@ -7,7 +10,7 @@ use bevy_cef::prelude::{
 use std::collections::HashSet;
 use vmux_flex::prelude::*;
 
-use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
+use super::bridge::ExtensionBridgeServer;
 use super::load::PreparedExtensions;
 
 pub(crate) struct ExtensionBridgePagePlugin;
@@ -38,6 +41,9 @@ pub enum ExtensionBridgeRole {
 #[derive(Component)]
 struct ExtensionBridgeStopping;
 
+#[derive(Component)]
+struct ExtensionBridgeInitialized;
+
 #[derive(SystemParam)]
 struct BridgePages<'w, 's> {
     primary_window: Query<'w, 's, (), With<PrimaryWindow>>,
@@ -45,6 +51,7 @@ struct BridgePages<'w, 's> {
     pages: Query<'w, 's, (Entity, &'static ExtensionBridgeWebview)>,
     removed_pages: RemovedComponents<'w, 's, ExtensionBridgeWebview>,
     stopping: Query<'w, 's, (), With<ExtensionBridgeStopping>>,
+    initialized: Query<'w, 's, (), With<ExtensionBridgeInitialized>>,
 }
 
 fn stop_bridge_pages(
@@ -71,15 +78,17 @@ fn spawn_bridge_pages(
     server: Single<&ExtensionBridgeServer>,
     mut world: BridgePages,
     shutdown: Option<Res<CefShutdownState>>,
-    mut initialized: Local<bool>,
 ) {
     let page_removed = world.removed_pages.read().count() > 0;
-    let should_reconcile = !*initialized
+    let first_run = world.initialized.is_empty();
+    let should_reconcile = first_run
         || prepared.is_changed()
         || !world.added_primary_window.is_empty()
         || page_removed
         || shutdown.as_ref().is_some_and(|state| state.is_changed());
-    *initialized = true;
+    if first_run {
+        commands.spawn(ExtensionBridgeInitialized);
+    }
     if !should_reconcile {
         return;
     }
@@ -144,11 +153,15 @@ fn spawn_bridge_pages(
                             "chrome-extension://{}/vmux_bridge.html",
                             runtime.extension_id
                         )),
-                        PrivatePreloadScripts::from([bridge_config_source(
-                            &server,
-                            identity,
+                        PrivatePreloadScripts::from([super::runtime::BridgeConfig {
+                            endpoint: server.endpoint().to_string(),
+                            extension: identity.extension_id.clone(),
+                            profile: identity.profile_id.clone(),
+                            token: identity.token.clone(),
                             conformance,
-                        )]),
+                        }
+                        .source()
+                        .expect("valid embedded extension bridge template")]),
                     ));
                 }
                 ExtensionBridgeRole::ConformanceEcho => {
@@ -162,22 +175,6 @@ fn spawn_bridge_pages(
     }
 }
 
-fn bridge_config_source(
-    server: &ExtensionBridgeServer,
-    identity: &BridgeIdentity,
-    conformance: bool,
-) -> String {
-    super::runtime::BridgeConfig {
-        endpoint: server.endpoint().to_string(),
-        extension: identity.extension_id.clone(),
-        profile: identity.profile_id.clone(),
-        token: identity.token.clone(),
-        conformance,
-    }
-    .source()
-    .expect("valid embedded extension bridge template")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,18 +183,18 @@ mod tests {
     };
     use crate::host::load::PreparedExtensions;
     use crate::host::runtime::PreparedRuntime;
+    use bevy::ecs::message::Messages;
     use bevy::window::PrimaryWindow;
     use bevy_cef::prelude::{
         PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
     };
 
-    const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
     #[test]
     fn spawns_bridge_for_separately_owned_runtime_and_server() {
+        let extension_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let mut app = App::new();
         let runtime = PreparedRuntime {
-            extension_id: EXTENSION_ID.into(),
+            extension_id: extension_id.into(),
             dir: std::path::PathBuf::from("runtime"),
             runtime_hash: "runtime-hash".into(),
             source_hash: "source-hash".into(),
@@ -213,7 +210,7 @@ mod tests {
             ExtensionBridgePlugin::new(
                 "personal".into(),
                 vec![BridgeRegistration {
-                    extension_id: EXTENSION_ID.into(),
+                    extension_id: extension_id.into(),
                     authorization: BridgeAuthorization::default(),
                 }],
             ),
@@ -226,7 +223,7 @@ mod tests {
             .query::<&ExtensionBridgeServer>()
             .single(app.world())
             .unwrap();
-        let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
+        let identity = bridge.identity(extension_id).unwrap().clone();
         let endpoint = bridge.endpoint().to_string();
         assert!(
             app.world_mut()
@@ -251,10 +248,10 @@ mod tests {
         )>();
         let (entity, bridge, source, preload, size, frame_rate, visibility) =
             query.single(app.world()).unwrap();
-        assert_eq!(bridge.extension_id, EXTENSION_ID);
+        assert_eq!(bridge.extension_id, extension_id);
         assert_eq!(bridge.role, ExtensionBridgeRole::Transport);
         assert!(
-            matches!(source, WebviewSource(url) if url == &format!("chrome-extension://{EXTENSION_ID}/vmux_bridge.html"))
+            matches!(source, WebviewSource(url) if url == &format!("chrome-extension://{extension_id}/vmux_bridge.html"))
         );
         let [config] = preload.0.as_slice() else {
             panic!("expected one bridge preload script");

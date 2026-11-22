@@ -25,14 +25,14 @@ impl Plugin for ExtensionWindowsPlugin {
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
                 Update,
-                sync.in_set(super::ExtensionSystemSet::SyncWindows)
+                sync.in_set(super::SyncWindowsSet)
                     .after(super::project::ExtensionProjectionSet),
             )
             .add_systems(
                 Update,
                 (open, route_close, host_update)
                     .in_set(WindowRequestSet)
-                    .after(super::ExtensionSystemSet::DrainBridge),
+                    .after(super::DrainBridgeSet),
             );
     }
 }

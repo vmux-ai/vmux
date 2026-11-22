@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-const INDEX_VERSION: u32 = 3;
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtEntry {
     pub id: String,
@@ -78,7 +76,7 @@ pub struct Index {
 impl Default for Index {
     fn default() -> Self {
         Self {
-            version: INDEX_VERSION,
+            version: Index::VERSION,
             entries: Vec::new(),
             migrated: false,
         }
@@ -86,6 +84,8 @@ impl Default for Index {
 }
 
 impl Index {
+    const VERSION: u32 = 3;
+
     pub fn requires_save(&self) -> bool {
         self.migrated
     }
@@ -99,7 +99,7 @@ impl Index {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.version > INDEX_VERSION {
+        if self.version > Index::VERSION {
             return Err("unsupported extension index version".into());
         }
         let mut ids = std::collections::HashSet::new();
@@ -123,10 +123,10 @@ impl Index {
 
     pub fn decode(source: &str) -> Result<Self, String> {
         let mut index: Self = serde_json::from_str(source).map_err(|error| error.to_string())?;
-        if index.version > INDEX_VERSION {
+        if index.version > Index::VERSION {
             return Err("unsupported extension index version".into());
         }
-        if index.version < INDEX_VERSION {
+        if index.version < Index::VERSION {
             for entry in &mut index.entries {
                 if index.version == 0 {
                     entry.profile_enabled.clear();
@@ -147,7 +147,7 @@ impl Index {
                     }
                 }
             }
-            index.version = INDEX_VERSION;
+            index.version = Index::VERSION;
             index.migrated = true;
         }
         index.validate()?;

@@ -786,8 +786,6 @@ mod tests {
     use vmux_api::extension::{ExtPinRequest, ExtUninstallRequest};
     use vmux_ecs::OperationState;
 
-    const ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
     struct HostWake(mpsc::Sender<()>);
 
     impl Wake for HostWake {
@@ -868,6 +866,8 @@ mod tests {
     }
 
     impl Host {
+        const ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
         fn new(directory: &Path) -> Self {
             let (sender, wake) = mpsc::channel();
             let mut app = App::new();
@@ -1029,7 +1029,7 @@ mod tests {
             .clone();
         let mut next = Index::default();
         next.entries.push(ExtEntry {
-            id: ID.into(),
+            id: Host::ID.into(),
             name: "Queued write".into(),
             version: "1".into(),
             ..Default::default()
@@ -1095,7 +1095,7 @@ mod tests {
         let manifest = r#"{"name":"Owned source","version":"1"}"#;
         std::fs::write(source.join("manifest.json"), manifest).unwrap();
         let entry = ExtEntry {
-            id: ID.into(),
+            id: Host::ID.into(),
             name: "Owned source".into(),
             version: "1".into(),
             source_hash: FileStore::source_hash(&source).unwrap(),
@@ -1116,7 +1116,7 @@ mod tests {
                 InstallRequest {
                     ticket: ticket.clone(),
                     profile: "personal".into(),
-                    id: ID.into(),
+                    id: Host::ID.into(),
                 },
             ))
             .id();
@@ -1162,7 +1162,7 @@ mod tests {
         let destination = directory
             .path()
             .join("packages")
-            .join(ID)
+            .join(Host::ID)
             .join("1/source/manifest.json");
         assert_eq!(std::fs::read_to_string(destination).unwrap(), manifest);
         drop(blocker);
@@ -1181,7 +1181,7 @@ mod tests {
         )
         .unwrap();
         let entry = ExtEntry {
-            id: ID.into(),
+            id: Host::ID.into(),
             name: "Example".into(),
             version: "1".into(),
             source_hash: FileStore::source_hash(&source).unwrap(),
@@ -1210,7 +1210,11 @@ mod tests {
         );
         let index = FileStore::read(directory.path()).unwrap();
         assert!(index.entries[0].installed_for("personal"));
-        let destination = directory.path().join("packages").join(ID).join("1/source");
+        let destination = directory
+            .path()
+            .join("packages")
+            .join(Host::ID)
+            .join("1/source");
         let before = std::fs::read(destination.join("manifest.json")).unwrap();
         let source = directory.path().join("staging/second/unpacked");
         std::fs::create_dir_all(&source).unwrap();
@@ -1235,7 +1239,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut original = Index::default();
         let mut entry = ExtEntry {
-            id: ID.into(),
+            id: Host::ID.into(),
             name: "Example".into(),
             version: "1".into(),
             ..Default::default()
@@ -1254,7 +1258,7 @@ mod tests {
             host.ticket(),
             "personal".into(),
             ExtPinRequest {
-                id: ID.into(),
+                id: Host::ID.into(),
                 pinned: true,
             },
         ));
@@ -1309,7 +1313,7 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let mut original = Index::default();
             let mut entry = ExtEntry {
-                id: ID.into(),
+                id: Host::ID.into(),
                 name: "Example".into(),
                 version: "1".into(),
                 ..Default::default()
@@ -1329,7 +1333,7 @@ mod tests {
                 host.ticket(),
                 "personal".into(),
                 ExtPinRequest {
-                    id: ID.into(),
+                    id: Host::ID.into(),
                     pinned: true,
                 },
             ));
@@ -1370,7 +1374,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut original = Index::default();
         let mut entry = ExtEntry {
-            id: ID.into(),
+            id: Host::ID.into(),
             name: "Example".into(),
             version: "1".into(),
             ..Default::default()
@@ -1387,7 +1391,7 @@ mod tests {
             host.ticket(),
             "personal".into(),
             ExtPinRequest {
-                id: ID.into(),
+                id: Host::ID.into(),
                 pinned: true,
             },
         ));
@@ -1443,7 +1447,8 @@ mod tests {
     fn legacy_index_restores_and_atomic_io_commits_the_selected_profile() {
         let directory = tempfile::tempdir().unwrap();
         let source = format!(
-            r#"{{"entries":[{{"id":"{ID}","name":"Legacy","version":"1","popup":null,"icon":null,"enabled":true,"permissions":["tabs"]}}]}}"#
+            r#"{{"entries":[{{"id":"{}","name":"Legacy","version":"1","popup":null,"icon":null,"enabled":true,"permissions":["tabs"]}}]}}"#,
+            Host::ID
         );
         std::fs::write(directory.path().join("index.json"), source).unwrap();
         let mut host = Host::new(directory.path());
@@ -1459,7 +1464,7 @@ mod tests {
             host.ticket(),
             "personal".into(),
             ExtPinRequest {
-                id: ID.into(),
+                id: Host::ID.into(),
                 pinned: true,
             },
         ));
@@ -1473,12 +1478,13 @@ mod tests {
     fn deleting_one_association_preserves_another_profile_and_shared_package_files() {
         let directory = tempfile::tempdir().unwrap();
         let source = format!(
-            r#"{{"version":3,"entries":[{{"id":"{ID}","name":"Shared","version":"1","popup":null,"icon":null,"enabled":false,"profile_enabled":{{"personal":false,"work":false}}}}]}}"#
+            r#"{{"version":3,"entries":[{{"id":"{}","name":"Shared","version":"1","popup":null,"icon":null,"enabled":false,"profile_enabled":{{"personal":false,"work":false}}}}]}}"#,
+            Host::ID
         );
         std::fs::write(directory.path().join("index.json"), source).unwrap();
-        let personal = directory.path().join("runtime/personal").join(ID);
-        let work = directory.path().join("runtime/work").join(ID);
-        let package = directory.path().join("packages").join(ID);
+        let personal = directory.path().join("runtime/personal").join(Host::ID);
+        let work = directory.path().join("runtime/work").join(Host::ID);
+        let package = directory.path().join("packages").join(Host::ID);
         for path in [&personal, &work, &package] {
             std::fs::create_dir_all(path).unwrap();
         }
@@ -1487,7 +1493,9 @@ mod tests {
         let operation = host.submit(Uninstall::bundle(
             host.ticket(),
             "personal".into(),
-            ExtUninstallRequest { id: ID.into() },
+            ExtUninstallRequest {
+                id: Host::ID.into(),
+            },
         ));
         assert_eq!(host.complete(operation), OperationState::Succeeded);
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -1511,7 +1519,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("index.json");
         let source = format!(
-            r#"{{"version":3,"entries":[{{"id":"{ID}","name":"Shared","version":"1","popup":null,"icon":null,"enabled":false,"profile_enabled":{{"personal":false}}}}]}}"#
+            r#"{{"version":3,"entries":[{{"id":"{}","name":"Shared","version":"1","popup":null,"icon":null,"enabled":false,"profile_enabled":{{"personal":false}}}}]}}"#,
+            Host::ID
         );
         std::fs::write(&path, &source).unwrap();
         let mut host = Host::new(directory.path());
@@ -1522,7 +1531,7 @@ mod tests {
             host.ticket(),
             "personal".into(),
             ExtPinRequest {
-                id: ID.into(),
+                id: Host::ID.into(),
                 pinned: true,
             },
         ));
@@ -1543,7 +1552,7 @@ mod tests {
             host.ticket(),
             "personal".into(),
             ExtPinRequest {
-                id: ID.into(),
+                id: Host::ID.into(),
                 pinned: true,
             },
         ));
@@ -1554,7 +1563,7 @@ mod tests {
     #[test]
     fn migrates_legacy_package_without_generated_files() {
         let root = tempfile::tempdir().unwrap();
-        let legacy = root.path().join(ID);
+        let legacy = root.path().join(Host::ID);
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(
             legacy.join("manifest.json"),
@@ -1580,8 +1589,8 @@ mod tests {
         )
         .unwrap();
 
-        let migrated = FileStore::migrate_legacy_package(root.path(), ID, "1", "").unwrap();
-        assert_eq!(migrated, FileStore::source_dir(root.path(), ID, "1"));
+        let migrated = FileStore::migrate_legacy_package(root.path(), Host::ID, "1", "").unwrap();
+        assert_eq!(migrated, FileStore::source_dir(root.path(), Host::ID, "1"));
         let manifest: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(migrated.join("manifest.json")).unwrap())
                 .unwrap();

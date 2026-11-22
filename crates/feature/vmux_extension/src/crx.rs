@@ -186,11 +186,9 @@ impl ChromeExtensionId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
 
-impl From<ChromeExtensionId> for String {
-    fn from(id: ChromeExtensionId) -> Self {
-        id.0
+    pub fn into_string(self) -> String {
+        self.0
     }
 }
 
@@ -199,36 +197,38 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn make_zip() -> Vec<u8> {
-        let mut buf = Vec::new();
-        {
-            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
-            zip.start_file("manifest.json", zip::write::SimpleFileOptions::default())
-                .unwrap();
-            zip.write_all(br#"{"name":"x","version":"1.0"}"#).unwrap();
-            zip.start_file("sub/popup.html", zip::write::SimpleFileOptions::default())
-                .unwrap();
-            zip.write_all(b"<html></html>").unwrap();
-            zip.finish().unwrap();
+    impl CrxArchive {
+        fn make_zip() -> Vec<u8> {
+            let mut buf = Vec::new();
+            {
+                let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+                zip.start_file("manifest.json", zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(br#"{"name":"x","version":"1.0"}"#).unwrap();
+                zip.start_file("sub/popup.html", zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(b"<html></html>").unwrap();
+                zip.finish().unwrap();
+            }
+            buf
         }
-        buf
-    }
 
-    fn make_crx3(zip: &[u8]) -> Vec<u8> {
-        let header = b"fakeheaderbytes";
-        let mut out = Vec::new();
-        out.extend_from_slice(b"Cr24");
-        out.extend_from_slice(&3u32.to_le_bytes());
-        out.extend_from_slice(&(header.len() as u32).to_le_bytes());
-        out.extend_from_slice(header);
-        out.extend_from_slice(zip);
-        out
+        fn make_crx3(zip: &[u8]) -> Vec<u8> {
+            let header = b"fakeheaderbytes";
+            let mut out = Vec::new();
+            out.extend_from_slice(b"Cr24");
+            out.extend_from_slice(&3u32.to_le_bytes());
+            out.extend_from_slice(&(header.len() as u32).to_le_bytes());
+            out.extend_from_slice(header);
+            out.extend_from_slice(zip);
+            out
+        }
     }
 
     #[test]
     fn unpacks_crx3_to_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let crx = make_crx3(&make_zip());
+        let crx = CrxArchive::make_crx3(&CrxArchive::make_zip());
         CrxArchive::new(crx).unpack(dir.path()).unwrap();
         let manifest = std::fs::read_to_string(dir.path().join("manifest.json")).unwrap();
         assert!(manifest.contains("\"version\":\"1.0\""));
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn computes_crx3_offset() {
-        let crx = make_crx3(&make_zip());
+        let crx = CrxArchive::make_crx3(&CrxArchive::make_zip());
         assert_eq!(
             CrxArchive::new(crx).zip_offset().unwrap(),
             12 + "fakeheaderbytes".len()

@@ -23,8 +23,6 @@ use crate::{
     download, driver, store,
 };
 
-const DEFAULT_PRODVERSION: &str = "120.0.0.0";
-
 pub(crate) struct InstallPlugin;
 
 impl Plugin for InstallPlugin {
@@ -159,6 +157,20 @@ struct DownloadJob {
     wake: Option<Waker>,
 }
 
+impl DownloadJob {
+    fn pair(install: ResolvedInstall, wake: Option<Waker>) -> (Self, DownloadProgressChannel) {
+        let (progress, receiver) = crossbeam_channel::bounded(16);
+        (
+            Self {
+                install,
+                progress,
+                wake,
+            },
+            DownloadProgressChannel(receiver),
+        )
+    }
+}
+
 impl Job for DownloadJob {
     type Output = Result<DownloadedInstall, String>;
 
@@ -220,7 +232,7 @@ impl ResolvedInstall {
             .join(operation.to_bits().to_string());
         let staging = Staging::new(staging);
         let crx_path = staging.path().join("download.crx");
-        let download_url = ChromeWebStore::crx_url(&id, DEFAULT_PRODVERSION);
+        let download_url = ChromeWebStore::crx_url(&id, "120.0.0.0");
         Ok(Self {
             id,
             profile,
@@ -381,15 +393,14 @@ fn download(
         if !matches!(state, OperationState::Pending | OperationState::Running) {
             continue;
         }
-        let (sender, receiver) = crossbeam_channel::bounded(16);
-        commands.entity(entity).remove::<Resolved>().insert((
-            DownloadProgressChannel(receiver),
-            JobRequest(DownloadJob {
-                install: resolved.0.clone(),
-                progress: sender,
-                wake: wake.as_deref().map(|wake| wake.0.clone()),
-            }),
-        ));
+        let (job, channel) = DownloadJob::pair(
+            resolved.0.clone(),
+            wake.as_deref().map(|wake| wake.0.clone()),
+        );
+        commands
+            .entity(entity)
+            .remove::<Resolved>()
+            .insert((channel, JobRequest(job)));
         catalog.update_progress(ExtInstallProgress {
             key: request.source.clone(),
             phase: ExtInstallPhase::Downloading,
@@ -599,15 +610,10 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    struct FixtureCrx {
-        id: String,
-        bytes: Vec<u8>,
-    }
-
-    impl FixtureCrx {
-        fn new(manifest: &str) -> Self {
+    impl PackageInstaller {
+        fn fixture_crx(manifest: &str) -> (String, Vec<u8>) {
             let public_key = b"PUBKEY";
-            let id = String::from(ChromeExtensionId::from_public_key(public_key));
+            let id = ChromeExtensionId::from_public_key(public_key).into_string();
             let mut zip_bytes = Vec::new();
             {
                 let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_bytes));
@@ -627,26 +633,26 @@ mod tests {
             bytes.extend_from_slice(&(header.len() as u32).to_le_bytes());
             bytes.extend_from_slice(&header);
             bytes.extend_from_slice(&zip_bytes);
-            Self { id, bytes }
+            (id, bytes)
         }
     }
 
     #[test]
     fn crx_unpack_stages_verified_source_without_changing_the_installed_package_or_index() {
         let root = tempfile::tempdir().unwrap();
-        let fixture = FixtureCrx::new(
+        let (fixture_id, fixture_bytes) = PackageInstaller::fixture_crx(
             r#"{"manifest_version":3,"name":"Fixture","version":"1.0","background":{"service_worker":"background.js"}}"#,
         );
         let store = store::ExtensionStore::at(root.path());
-        let installed = store.source_dir(&fixture.id, "1.0");
+        let installed = store.source_dir(&fixture_id, "1.0");
         std::fs::create_dir_all(&installed).unwrap();
         std::fs::write(installed.join("background.js"), "previous").unwrap();
         let output = PackageInstaller {
-            id: fixture.id.clone(),
+            id: fixture_id.clone(),
             profile: "test".into(),
             staging: Staging::new(root.path().join("staging/operation")),
         }
-        .unpack(fixture.bytes)
+        .unpack(fixture_bytes)
         .unwrap();
         assert!(output.source.join("manifest.json").exists());
         assert_eq!(
@@ -657,7 +663,7 @@ mod tests {
         std::fs::create_dir_all(&failed).unwrap();
         std::fs::write(failed.join("download.crx"), "invalid archive").unwrap();
         let result = PackageInstaller {
-            id: fixture.id,
+            id: fixture_id,
             profile: "test".into(),
             staging: Staging::new(failed.clone()),
         }
@@ -688,9 +694,11 @@ mod tests {
     #[test]
     fn unpack_refuses_download_from_a_replaced_install_context() {
         let directory = tempfile::tempdir().unwrap();
-        let fixture = FixtureCrx::new(r#"{"name":"Example","version":"1","manifest_version":3}"#);
+        let (fixture_id, fixture_bytes) = PackageInstaller::fixture_crx(
+            r#"{"name":"Example","version":"1","manifest_version":3}"#,
+        );
         let crx_path = directory.path().join("download.crx");
-        std::fs::write(&crx_path, &fixture.bytes).unwrap();
+        std::fs::write(&crx_path, &fixture_bytes).unwrap();
         let staged = directory.path().join("staging/request");
         std::fs::create_dir_all(&staged).unwrap();
         let mut app = App::new();
@@ -711,7 +719,7 @@ mod tests {
             .clone();
         let job = UnpackJob {
             downloaded: DownloadedInstall {
-                id: fixture.id.clone(),
+                id: fixture_id.clone(),
                 profile: "previous-profile".into(),
                 staging: Staging::new(staged.clone()),
                 crx_path: crx_path.clone(),
@@ -719,12 +727,12 @@ mod tests {
             request: InstallRequest {
                 ticket,
                 profile: "current-profile".into(),
-                id: fixture.id,
+                id: fixture_id,
             },
         };
         assert!(job.run().is_err());
         assert!(!staged.join("unpacked").exists());
-        assert_eq!(std::fs::read(crx_path).unwrap(), fixture.bytes);
+        assert_eq!(std::fs::read(crx_path).unwrap(), fixture_bytes);
         assert!(
             crate::filesystem::FileStore::read(directory.path())
                 .unwrap()

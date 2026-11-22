@@ -10,12 +10,6 @@ use std::path::{Path, PathBuf};
 use super::shim::ExtensionShim;
 use super::template::Template;
 
-const WORKER_TEMPLATE: &str = include_str!("runtime/worker.js");
-const CONTENT_SCRIPT: &str = include_str!("runtime/content.js");
-const CONTENT_SCRIPT_FILE: &str = "vmux_content.js";
-const BRIDGE_HTML: &str = include_str!("runtime/bridge.html");
-const BRIDGE_TEMPLATE: &str = include_str!("runtime/bridge.js");
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedRuntime {
     pub extension_id: String,
@@ -64,6 +58,11 @@ pub(crate) struct BridgeConfig {
 }
 
 impl PreparedRuntime {
+    const WORKER_TEMPLATE: &str = include_str!("runtime/worker.js");
+    const CONTENT_SCRIPT: &str = include_str!("runtime/content.js");
+    const CONTENT_SCRIPT_FILE: &str = "vmux_content.js";
+    const BRIDGE_HTML: &str = include_str!("runtime/bridge.html");
+
     pub(crate) fn prepare(
         source_root: &Path,
         runtime_store_root: &Path,
@@ -110,7 +109,7 @@ impl PreparedRuntime {
         }
         std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-        std::fs::write(temp_dir.join("vmux_bridge.html"), BRIDGE_HTML)
+        std::fs::write(temp_dir.join("vmux_bridge.html"), Self::BRIDGE_HTML)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         Self::install_content_script(&temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
         let loader = ExtensionShim::install_worker_loader(&temp_dir, "vmux_runtime.js")
@@ -145,7 +144,7 @@ impl PreparedRuntime {
     }
 
     fn worker_source() -> Result<String, String> {
-        Template::new(WORKER_TEMPLATE).render(&[
+        Template::new(Self::WORKER_TEMPLATE).render(&[
             (
                 "__VMUX_BRIDGE_CHANNEL__",
                 serde_json::to_string(BRIDGE_CHANNEL).map_err(|error| error.to_string())?,
@@ -179,20 +178,20 @@ impl PreparedRuntime {
             };
             if scripts
                 .iter()
-                .any(|script| script.as_str() == Some(CONTENT_SCRIPT_FILE))
+                .any(|script| script.as_str() == Some(Self::CONTENT_SCRIPT_FILE))
             {
                 continue;
             }
             scripts.insert(
                 0,
-                serde_json::Value::String(CONTENT_SCRIPT_FILE.to_string()),
+                serde_json::Value::String(Self::CONTENT_SCRIPT_FILE.to_string()),
             );
             installed = true;
         }
         if !installed {
             return Ok(());
         }
-        std::fs::write(dir.join(CONTENT_SCRIPT_FILE), CONTENT_SCRIPT)
+        std::fs::write(dir.join(Self::CONTENT_SCRIPT_FILE), Self::CONTENT_SCRIPT)
             .map_err(|error| error.to_string())?;
         std::fs::write(
             manifest_path,
@@ -205,8 +204,8 @@ impl PreparedRuntime {
         let mut hasher = Sha256::new();
         hasher.update(source_hash.as_bytes());
         hasher.update(worker_source.as_bytes());
-        hasher.update(CONTENT_SCRIPT.as_bytes());
-        hasher.update(BRIDGE_HTML.as_bytes());
+        hasher.update(Self::CONTENT_SCRIPT.as_bytes());
+        hasher.update(Self::BRIDGE_HTML.as_bytes());
         hasher.update(ExtensionShim::patch_source()?.as_bytes());
         Ok(format!("{:x}", hasher.finalize()))
     }
@@ -254,7 +253,7 @@ impl PreparedRuntime {
                         .is_some_and(|scripts| !scripts.is_empty())
                 })
             });
-        if has_content_scripts && !dir.join(CONTENT_SCRIPT_FILE).is_file() {
+        if has_content_scripts && !dir.join(Self::CONTENT_SCRIPT_FILE).is_file() {
             return Err("runtime content script is missing".into());
         }
         Ok(())
@@ -278,13 +277,15 @@ impl PreparedRuntime {
 }
 
 impl BridgeConfig {
+    const BRIDGE_TEMPLATE: &str = include_str!("runtime/bridge.js");
+
     pub(crate) fn source(&self) -> Result<String, String> {
         let mut replacements = Self::protocol_replacements()?;
         replacements.push((
             "__VMUX_BRIDGE_CONFIG__",
             serde_json::to_string(self).map_err(|error| error.to_string())?,
         ));
-        Template::new(BRIDGE_TEMPLATE).render(&replacements)
+        Template::new(Self::BRIDGE_TEMPLATE).render(&replacements)
     }
 
     fn protocol_replacements() -> Result<Vec<(&'static str, String)>, String> {
@@ -514,10 +515,16 @@ mod tests {
         .unwrap();
         assert_eq!(
             generated["content_scripts"][0]["js"],
-            serde_json::json!([CONTENT_SCRIPT_FILE, "first.js", "second.js"])
+            serde_json::json!([
+                PreparedRuntime::CONTENT_SCRIPT_FILE,
+                "first.js",
+                "second.js"
+            ])
         );
         assert!(generated["content_scripts"][1].get("js").is_none());
-        let retry = std::fs::read_to_string(prepared.dir.join(CONTENT_SCRIPT_FILE)).unwrap();
+        let retry =
+            std::fs::read_to_string(prepared.dir.join(PreparedRuntime::CONTENT_SCRIPT_FILE))
+                .unwrap();
         assert!(retry.contains("Receiving end does not exist"));
         assert!(retry.contains("sendCallback(args, callback, attempt + 1)"));
         assert!(retry.contains("sendPromise(args, attempt + 1)"));

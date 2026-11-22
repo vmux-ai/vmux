@@ -160,11 +160,11 @@ pub(crate) struct RuntimeGeneration(pub u64);
 #[derive(Component)]
 pub(crate) struct RuntimeBinding;
 
-#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
-enum ExtensionSystemSet {
-    DrainBridge,
-    SyncWindows,
-}
+#[derive(SystemSet, Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct DrainBridgeSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct SyncWindowsSet;
 
 #[vmux_api::agent]
 struct AgentBrowserInstallExtension {

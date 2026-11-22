@@ -602,10 +602,10 @@ impl Clock {
 struct Queued(u64);
 
 #[derive(Component)]
-enum Repair {
-    Required,
-    Suspended,
-}
+struct RepairRequired;
+
+#[derive(Component)]
+struct RepairSuspended;
 
 #[derive(Component)]
 struct Writing {
@@ -632,7 +632,8 @@ fn reset(
         Option<&Scope>,
         Option<&Seed>,
         Option<&Writing>,
-        Has<Repair>,
+        Has<RepairRequired>,
+        Has<RepairSuspended>,
     )>,
     packages: Query<(Entity, &ChildOf), With<Package>>,
     mut clock: ResMut<Clock>,
@@ -640,7 +641,7 @@ fn reset(
     mut completed: MessageWriter<LoadCompleted>,
     mut commands: Commands,
 ) {
-    for (owner, root, scope, seed, writing, pending_repair) in &roots {
+    for (owner, root, scope, seed, writing, repair_required, repair_suspended) in &roots {
         if seed.is_none()
             && !root.is_changed()
             && scope.is_some_and(|scope| scope.0.directory == root.0)
@@ -655,16 +656,23 @@ fn reset(
         let ticket = clock.ticket(owner, &root.0);
         let mut state = State::default();
         state.materialize();
-        let repair = writing.is_some() || pending_repair;
+        let repair = writing.is_some() || repair_required || repair_suspended;
         if repair {
             state.advance();
         }
         commands
             .entity(owner)
-            .remove::<(Loaded, Writing, WriteError, Seed, Repair)>()
+            .remove::<(
+                Loaded,
+                Writing,
+                WriteError,
+                Seed,
+                RepairRequired,
+                RepairSuspended,
+            )>()
             .insert((Scope(ticket.clone()), state, Revision::default()));
         if repair {
-            commands.entity(owner).insert(Repair::Required);
+            commands.entity(owner).insert(RepairRequired);
         }
         if let Some(seed) = seed {
             completed.write(LoadCompleted {
@@ -898,7 +906,7 @@ fn finish(
                 });
                 commands
                     .entity(ticket.owner)
-                    .remove::<(WriteError, Repair)>();
+                    .remove::<(WriteError, RepairRequired, RepairSuspended)>();
                 effects.changed.write(Changed(ticket.owner));
                 if let Some((id, profile)) = &writing.cleanup {
                     effects.cleanup.write(CleanupRequest {
@@ -915,7 +923,10 @@ fn finish(
             Err(error) => {
                 if completion.result.is_ok() {
                     state.retry(completion.revision, error.clone());
-                    commands.entity(ticket.owner).insert(Repair::Required);
+                    commands
+                        .entity(ticket.owner)
+                        .remove::<RepairSuspended>()
+                        .insert(RepairRequired);
                 } else if *revision == writing.base {
                     *state = writing.before.clone();
                 } else {
@@ -934,6 +945,124 @@ fn finish(
             .entity(completion.operation)
             .remove::<(Pending, Queued)>();
         commands.entity(ticket.owner).remove::<Writing>();
+    }
+}
+
+impl Reconcile {
+    fn reconcile_associations(
+        &self,
+        entity: Entity,
+        entry: &ExtEntry,
+        previous: Option<&ExtEntry>,
+        associations: &Query<
+            (
+                Entity,
+                &ProfileId,
+                &ChildOf,
+                Option<&Revision>,
+                Has<Installed>,
+            ),
+            With<Association>,
+        >,
+        commands: &mut Commands,
+    ) {
+        let mut profiles = HashMap::new();
+        for (association, profile, parent, revision, committed) in associations {
+            if parent.parent() == entity {
+                profiles.insert(
+                    profile.0.as_str(),
+                    (
+                        association,
+                        revision.copied().unwrap_or_default(),
+                        committed,
+                    ),
+                );
+            }
+        }
+        for (profile, enabled) in &entry.profile_enabled {
+            let changed = previous.is_none_or(|previous| {
+                !previous.installed_for(profile)
+                    || previous.enabled_for(profile) != *enabled
+                    || previous.pinned_for(profile) != entry.pinned_for(profile)
+                    || previous.grants_for(profile) != entry.grants_for(profile)
+            });
+            let (association, previous_revision, _) = match profiles.remove(profile.as_str()) {
+                Some(existing) => existing,
+                None => (
+                    commands
+                        .spawn((Association, ProfileId(profile.clone()), ChildOf(entity)))
+                        .id(),
+                    self.revision,
+                    false,
+                ),
+            };
+            commands.entity(association).insert((
+                Installed,
+                Grants(entry.grants_for(profile)),
+                if changed {
+                    self.revision
+                } else {
+                    previous_revision
+                },
+            ));
+            if *enabled {
+                commands.entity(association).insert(Enabled);
+            } else {
+                commands.entity(association).remove::<Enabled>();
+            }
+            if entry.pinned_for(profile) {
+                commands.entity(association).insert(Pinned);
+            } else {
+                commands.entity(association).remove::<Pinned>();
+            }
+        }
+        for (entity, _, committed) in profiles.values() {
+            if *committed {
+                commands.entity(*entity).despawn();
+            }
+        }
+    }
+
+    fn prune_packages(
+        existing: &HashMap<&str, (Entity, Revision, bool, bool)>,
+        retained: &HashSet<Entity>,
+        associations: &Query<
+            (
+                Entity,
+                &ProfileId,
+                &ChildOf,
+                Option<&Revision>,
+                Has<Installed>,
+            ),
+            With<Association>,
+        >,
+        commands: &mut Commands,
+    ) {
+        for (entity, _, committed, installing) in existing.values() {
+            if !retained.contains(entity) && *committed {
+                if *installing {
+                    commands.entity(*entity).remove::<(
+                        Name,
+                        Version,
+                        Popup,
+                        Icon,
+                        Permissions,
+                        OptionalPermissions,
+                        HostPermissions,
+                        OptionalHostPermissions,
+                        SourceHash,
+                        PublicKey,
+                    )>();
+                    for (association, _, parent, _, committed) in associations {
+                        if parent.parent() == *entity && committed {
+                            commands.entity(association).despawn();
+                        }
+                    }
+                } else {
+                    commands.entity(*entity).despawn();
+                }
+            }
+        }
     }
 }
 
@@ -1020,87 +1149,9 @@ fn reconcile(
                 PublicKey(entry.public_key_b64.clone()),
                 revision,
             ));
-            let mut profiles = HashMap::new();
-            for (association, profile, parent, revision, committed) in &associations {
-                if parent.parent() == entity {
-                    profiles.insert(
-                        profile.0.as_str(),
-                        (
-                            association,
-                            revision.copied().unwrap_or_default(),
-                            committed,
-                        ),
-                    );
-                }
-            }
-            for (profile, enabled) in &entry.profile_enabled {
-                let changed = previous.is_none_or(|previous| {
-                    !previous.installed_for(profile)
-                        || previous.enabled_for(profile) != *enabled
-                        || previous.pinned_for(profile) != entry.pinned_for(profile)
-                        || previous.grants_for(profile) != entry.grants_for(profile)
-                });
-                let (association, previous_revision, _) = match profiles.remove(profile.as_str()) {
-                    Some(existing) => existing,
-                    None => (
-                        commands
-                            .spawn((Association, ProfileId(profile.clone()), ChildOf(entity)))
-                            .id(),
-                        update.revision,
-                        false,
-                    ),
-                };
-                commands.entity(association).insert((
-                    Installed,
-                    Grants(entry.grants_for(profile)),
-                    if changed {
-                        update.revision
-                    } else {
-                        previous_revision
-                    },
-                ));
-                if *enabled {
-                    commands.entity(association).insert(Enabled);
-                } else {
-                    commands.entity(association).remove::<Enabled>();
-                }
-                if entry.pinned_for(profile) {
-                    commands.entity(association).insert(Pinned);
-                } else {
-                    commands.entity(association).remove::<Pinned>();
-                }
-            }
-            for (entity, _, committed) in profiles.values() {
-                if *committed {
-                    commands.entity(*entity).despawn();
-                }
-            }
+            update.reconcile_associations(entity, entry, previous, &associations, &mut commands);
         }
-        for (entity, _, committed, installing) in existing.values() {
-            if !retained.contains(entity) && *committed {
-                if *installing {
-                    commands.entity(*entity).remove::<(
-                        Name,
-                        Version,
-                        Popup,
-                        Icon,
-                        Permissions,
-                        OptionalPermissions,
-                        HostPermissions,
-                        OptionalHostPermissions,
-                        SourceHash,
-                        PublicKey,
-                    )>();
-                    for (association, _, parent, _, committed) in &associations {
-                        if parent.parent() == *entity && committed {
-                            commands.entity(association).despawn();
-                        }
-                    }
-                } else {
-                    commands.entity(*entity).despawn();
-                }
-            }
-        }
+        Reconcile::prune_packages(&existing, &retained, &associations, &mut commands);
     }
 }
 
@@ -1263,7 +1314,8 @@ fn autosave(
             &Scope,
             &State,
             Has<WriteError>,
-            Option<&Repair>,
+            Has<RepairRequired>,
+            Has<RepairSuspended>,
             Has<AutoSave>,
         ),
         (With<Loaded>, Without<Writing>),
@@ -1271,10 +1323,10 @@ fn autosave(
     requests: Query<&Scope, With<Pending>>,
     mut commands: Commands,
 ) {
-    for (scope, state, error, repair, auto) in &roots {
-        if (!auto && repair.is_none())
+    for (scope, state, error, repair_required, repair_suspended, auto) in &roots {
+        if (!auto && !repair_required && !repair_suspended)
             || !state.is_dirty()
-            || (error && !matches!(repair, Some(Repair::Required)))
+            || (error && !repair_required)
             || requests.iter().any(|request| request.0 == scope.0)
         {
             continue;
@@ -1322,7 +1374,16 @@ struct Admission<'w, 's> {
         's,
         (
             Catalog<'w, 's>,
-            Query<'w, 's, (&'static Revision, &'static mut State, Has<Repair>)>,
+            Query<
+                'w,
+                's,
+                (
+                    &'static Revision,
+                    &'static mut State,
+                    Has<RepairRequired>,
+                    Has<RepairSuspended>,
+                ),
+            >,
         ),
     >,
 }
@@ -1823,7 +1884,7 @@ fn admit(
         return;
     }
     let mut states = admission.store.p1();
-    let (base, mut state, repair) = states.get_mut(owner).unwrap();
+    let (base, mut state, repair_required, repair_suspended) = states.get_mut(owner).unwrap();
     if !state.is_dirty() && event.before == proposed {
         commands.trigger(OperationCompleted {
             entity: operation,
@@ -1838,8 +1899,11 @@ fn admit(
     commands
         .entity(operation)
         .insert((OperationState::Running, OperationTargetRevision(revision)));
-    if repair {
-        commands.entity(owner).insert(Repair::Suspended);
+    if repair_required || repair_suspended {
+        commands
+            .entity(owner)
+            .remove::<RepairRequired>()
+            .insert(RepairSuspended);
     }
     let cleanup = if remove {
         id.map(|id| (id.0.clone(), profile.0.clone()))
