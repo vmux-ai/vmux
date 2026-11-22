@@ -637,14 +637,6 @@ impl Inputs {
         if count == 0 {
             return Err("No workspace packages to cache".into());
         }
-        for (partition, consumer) in [
-            ("framework", "framework-consumer"),
-            ("framework", "host-consumer"),
-        ] {
-            if self.partition == partition {
-                paths.insert(format!("{target}/{consumer}/**"));
-            }
-        }
         paths.insert(format!("!{target}/**/incremental"));
         paths.insert(format!("!{target}/**/incremental/**"));
         paths.insert(format!("!{target}/**/.cargo-lock"));
@@ -669,7 +661,9 @@ impl Inputs {
             }
             let stem = name.replace('-', "_");
             for path in [
-                format!("{output}/deps/{stem}-*"),
+                format!("{output}/deps/{stem}-*.rlib"),
+                format!("{output}/deps/{stem}-*.rmeta"),
+                format!("{output}/deps/{stem}-*.d"),
                 format!("{output}/deps/lib{stem}-*"),
                 format!("{output}/{name}*"),
                 format!("{output}/lib{stem}*"),

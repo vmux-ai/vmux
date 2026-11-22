@@ -336,9 +336,9 @@ impl Profile {
         }
         let matrix = match key {
             "test-rust" => Some(("test", "test", "true")),
-            "test-framework" => Some(("framework", "sdk-path", "true")),
+            "test-framework" => Some(("framework", "test", "true")),
             "test-desktop" => Some(("desktop", "test", "true")),
-            "test-features" => Some(("headless", "headless", "true")),
+            "test-features" => Some(("headless", "test", "true")),
             "test-ecs" => Some(("ecs", "lint", "false")),
             _ => None,
         };

@@ -374,6 +374,11 @@ mod tests {
             "target/debug/deps/libvmux_cli-cafe.rlib",
             "workspace artifact",
         );
+        fixture.write(
+            "target/debug/deps/vmux_cli-cafe.rmeta",
+            "workspace metadata",
+        );
+        fixture.write("target/debug/deps/vmux_cli-cafe", "linked test executable");
         fixture.write("target/debug/deps/libserde-cafe.rlib", "registry artifact");
         fixture.write(
             "target/debug/.fingerprint/vmux_cli-cafe/dep-lib-vmux_cli",
@@ -414,6 +419,11 @@ mod tests {
             std::fs::read(staging.join("target/debug/deps/libvmux_cli-cafe.rlib")).unwrap(),
             b"workspace artifact"
         );
+        assert_eq!(
+            std::fs::read(staging.join("target/debug/deps/vmux_cli-cafe.rmeta")).unwrap(),
+            b"workspace metadata"
+        );
+        assert!(!staging.join("target/debug/deps/vmux_cli-cafe").exists());
         assert!(
             !staging
                 .join("target/debug/deps/libserde-cafe.rlib")
@@ -477,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn consumer_targets_are_cached_without_incremental_files_and_symlinked_roots_are_refused() {
+    fn consumer_targets_are_excluded_from_workspace_cache_and_symlinked_roots_are_refused() {
         let mut fixture = Fixture::new();
         fixture.cli();
         for (key, value) in [
@@ -509,21 +519,12 @@ mod tests {
         }
         fixture.run("cache-stage", &["framework"]).unwrap();
         let staging = fixture.root().join(&output["paths"]);
-        for consumer in ["framework-consumer", "host-consumer"] {
-            assert_eq!(
-                std::fs::read(
-                    staging.join(format!("target/{consumer}/debug/deps/libdependency.rlib"))
-                )
-                .unwrap(),
-                b"consumer dependency"
-            );
-            assert!(
-                !staging
-                    .join(format!("target/{consumer}/debug/incremental/cache.bin"))
-                    .exists()
-            );
-        }
-        for consumer in ["framework-git-consumer", "host-git-consumer"] {
+        for consumer in [
+            "framework-consumer",
+            "host-consumer",
+            "framework-git-consumer",
+            "host-git-consumer",
+        ] {
             assert!(
                 !staging
                     .join(format!("target/{consumer}/debug/deps/libdependency.rlib"))
