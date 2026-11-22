@@ -145,8 +145,10 @@ struct Materializer<'w, 's> {
 
 fn materialize(world: &mut World) {
     let mut state = SystemState::<Materializer>::new(world);
-    let pending = state
-        .get(world)
+    let Ok(materializer) = state.get(world) else {
+        return;
+    };
+    let pending = materializer
         .pages
         .iter()
         .map(|(page, metadata, tab, position)| {

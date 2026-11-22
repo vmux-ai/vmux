@@ -7,7 +7,7 @@ use bevy_cef::prelude::{
     HostWindow, UiInput,
 };
 use vmux_api::input::KeyStroke;
-use vmux_ecs::event::{FilePointerEvent, FileResizeEvent, FileTextInput, FileUiState};
+use vmux_ecs::event::{FileResizeEvent, FileUiState};
 use vmux_ecs::{ArchivedPage, PageMetadata, UiState};
 use vmux_layout::{
     pane::Pane,
@@ -221,32 +221,15 @@ impl ArchiveEditorFixture {
     }
 
     fn edit(&mut self, view: Entity) {
-        self.key(view, "i");
-        self.input(
-            view,
-            FileTextInput {
-                text: "unsaved ".into(),
-            },
-        );
-        self.key(view, "Escape");
-        self.input(
-            view,
-            FilePointerEvent {
-                line: 0,
-                col: 1,
-                extend: false,
-                add: false,
-            },
-        );
-        self.input(
-            view,
-            FilePointerEvent {
-                line: 0,
-                col: 4,
-                extend: true,
-                add: false,
-            },
-        );
+        self.key(view, "y");
+        self.key(view, "y");
+        self.key(view, "p");
+        self.key(view, "0");
+        self.key(view, "l");
+        self.key(view, "v");
+        self.key(view, "l");
+        self.key(view, "l");
+        self.key(view, "l");
     }
 
     fn close(&mut self) -> Entity {
@@ -351,7 +334,7 @@ fn archive_reopen_preserves_unsaved_text_selection_and_undo() {
     let view = fixture.ready();
     fixture.edit(view);
     let edited = fixture.text(view).unwrap();
-    assert!(edited.starts_with("unsaved original"));
+    assert!(edited.starts_with("original\noriginal\n"));
     let selection = fixture
         .app
         .world()
@@ -385,7 +368,9 @@ fn archive_reopen_preserves_unsaved_text_selection_and_undo() {
     );
     fixture.key(reopened, "Escape");
     fixture.key(reopened, "u");
-    assert!(fixture.text(reopened).unwrap().starts_with("original\n"));
+    let undone = fixture.text(reopened).unwrap();
+    assert!(undone.starts_with("original\n"));
+    assert!(!undone.starts_with("original\noriginal\n"));
     assert_eq!(
         std::fs::read_to_string(fixture.directory.path().join("archive.txt")).unwrap(),
         "original\n"
