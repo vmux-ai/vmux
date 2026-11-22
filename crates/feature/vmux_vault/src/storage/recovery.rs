@@ -9,18 +9,17 @@ use zeroize::Zeroizing;
 use super::VaultStorage;
 use super::keys::KeyStore;
 use super::repository::VaultRepositoryPath;
-use super::snapshot::{Hex, KEY_LEN, VaultCrypto};
-use super::sync::{VaultLocalState, VaultReconcile};
+use super::snapshot::{Hex, KEY_LEN, LocalEntry, RemoteManifest, VaultCrypto};
 
-pub(super) const RECOVERY_DIR: &str = "keys/recovery";
-pub(super) const RECOVERY_FILE: &str = "default.ron";
+pub(crate) const RECOVERY_DIR: &str = "keys/recovery";
+pub(crate) const RECOVERY_FILE: &str = "default.ron";
 const RECOVERY_AAD_PREFIX: &[u8] = b"vmux-vault-recovery-v1\0";
 const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const FORMAT_VERSION: u32 = 1;
 const MANIFEST_VERSION: u32 = 3;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(super) struct RecoveryEnvelope {
+pub(crate) struct RecoveryEnvelope {
     pub(super) version: u32,
     pub(super) wrapped_key: Vec<u8>,
 }
@@ -36,7 +35,6 @@ pub struct GeneratedRecoveryKey(Zeroizing<[u8; KEY_LEN]>);
 
 #[derive(Clone)]
 pub struct VaultRecovery {
-    root: PathBuf,
     repository: PathBuf,
 }
 
@@ -93,9 +91,12 @@ impl GeneratedRecoveryKey {
 impl VaultRecovery {
     pub fn current() -> Self {
         let storage = VaultStorage::current();
+        Self::from_storage(&storage)
+    }
+
+    pub(crate) fn from_storage(storage: &VaultStorage) -> Self {
         Self {
-            root: storage.root,
-            repository: storage.repository,
+            repository: storage.repository.clone(),
         }
     }
 
@@ -107,18 +108,35 @@ impl VaultRecovery {
         self.create_with(keys, recovery_key.as_bytes())
     }
 
-    pub fn unlock(
+    pub(crate) fn decrypt_for_unlock(
         &self,
         recovery_key: &str,
-        keys: &crate::host::key::KeyPort,
-    ) -> Result<String, String> {
-        self.unlock_with(keys, recovery_key)
+    ) -> Result<
+        (
+            RemoteManifest,
+            Zeroizing<Vec<u8>>,
+            BTreeMap<String, LocalEntry>,
+        ),
+        String,
+    > {
+        let recovery_key = GeneratedRecoveryKey::parse(recovery_key)?;
+        let vault = VaultRepositoryPath::at(&self.repository);
+        let manifest = vault.manifest()?;
+        let envelope = RecoveryEnvelope::read(&self.repository)?
+            .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
+        let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
+        let key = Zeroizing::new(
+            VaultCrypto::new(&wrapping_key)?
+                .decrypt(&recovery_aad(&manifest.vault_id), &envelope.wrapped_key)?,
+        );
+        VaultCrypto::new(&key)?;
+        let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
+        Ok((manifest, key, remote_files))
     }
 
     #[cfg(test)]
-    pub(super) fn at(root: &Path, repository: &Path) -> Self {
+    pub(super) fn at(_root: &Path, repository: &Path) -> Self {
         Self {
-            root: root.to_path_buf(),
             repository: repository.to_path_buf(),
         }
     }
@@ -174,33 +192,10 @@ impl VaultRecovery {
         }
         Ok(RecoveryKeyCreation { pending_upload })
     }
-
-    pub(super) fn unlock_with<K: KeyStore>(
-        &self,
-        keys: &K,
-        recovery_key: &str,
-    ) -> Result<String, String> {
-        let recovery_key = GeneratedRecoveryKey::parse(recovery_key)?;
-        let vault = VaultRepositoryPath::at(&self.repository);
-        let manifest = vault.manifest()?;
-        let envelope = RecoveryEnvelope::read(&self.repository)?
-            .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
-        let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
-        let key = Zeroizing::new(
-            VaultCrypto::new(&wrapping_key)?
-                .decrypt(&recovery_aad(&manifest.vault_id), &envelope.wrapped_key)?,
-        );
-        VaultCrypto::new(&key)?;
-        let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
-        keys.store(&manifest.vault_id, &key)?;
-        VaultReconcile::run(&self.root, &BTreeMap::new(), &remote_files)?;
-        VaultLocalState::write(&self.root, &self.repository)?;
-        Ok("Vault unlocked".to_string())
-    }
 }
 
 impl RecoveryEnvelope {
-    pub(super) fn read(repository: &Path) -> Result<Option<Self>, String> {
+    pub(crate) fn read(repository: &Path) -> Result<Option<Self>, String> {
         let path = repository.join(RECOVERY_DIR).join(RECOVERY_FILE);
         if !path.exists() {
             return Ok(None);

@@ -1,7 +1,15 @@
 pub use connect::RepositoryVisibility;
+pub(crate) use files::FileAttributes;
 pub use recovery::{GeneratedRecoveryKey, VaultRecovery};
+pub(crate) use recovery::{RECOVERY_DIR, RECOVERY_FILE, RecoveryEnvelope};
+pub(crate) use repository::VaultRepositoryPath;
+pub(crate) use snapshot::{
+    EntryKind, FileTimestamp, Hex, INDEX_FILE, LocalEntry, LocalFingerprint, MANIFEST_FILE,
+    OBJECTS_DIR, RemoteManifest, SnapshotPath,
+};
 pub use status::VaultStatus;
 use std::path::{Path, PathBuf};
+pub(crate) use sync::{LocalPath, RonMap, VaultLocalState, VaultSync};
 
 mod connect;
 mod files;
@@ -16,8 +24,8 @@ mod tests;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VaultStorage {
-    root: PathBuf,
-    repository: PathBuf,
+    pub(crate) root: PathBuf,
+    pub(crate) repository: PathBuf,
 }
 
 impl VaultStorage {

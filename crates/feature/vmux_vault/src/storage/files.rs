@@ -3,4 +3,4 @@ mod other;
 #[cfg(unix)]
 mod unix;
 
-pub(super) struct FileAttributes;
+pub(crate) struct FileAttributes;

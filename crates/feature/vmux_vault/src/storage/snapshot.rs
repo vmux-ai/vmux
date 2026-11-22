@@ -10,9 +10,9 @@ use super::sync::LocalPath;
 
 pub(super) const FORMAT_VERSION: u32 = 1;
 pub(super) const MANIFEST_VERSION: u32 = 3;
-pub(super) const MANIFEST_FILE: &str = "vault.ron";
-pub(super) const INDEX_FILE: &str = "index.enc";
-pub(super) const OBJECTS_DIR: &str = "objects";
+pub(crate) const MANIFEST_FILE: &str = "vault.ron";
+pub(crate) const INDEX_FILE: &str = "index.enc";
+pub(crate) const OBJECTS_DIR: &str = "objects";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 pub(super) const KEY_LEN: usize = 32;
@@ -20,7 +20,7 @@ const NONCE_LEN: usize = 12;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum EntryKind {
+pub(crate) enum EntryKind {
     File,
     Symlink,
 }
@@ -96,10 +96,10 @@ impl<'a> VaultCrypto<'a> {
     }
 }
 
-pub(super) struct Hex;
+pub(crate) struct Hex;
 
 impl Hex {
-    pub(super) fn random(bytes: usize) -> Result<String, String> {
+    pub(crate) fn random(bytes: usize) -> Result<String, String> {
         let mut value = vec![0_u8; bytes];
         SystemRandom::new()
             .fill(&mut value)
@@ -141,10 +141,10 @@ impl Hex {
     }
 }
 
-pub(super) struct SnapshotPath<'a>(pub(super) &'a str);
+pub(crate) struct SnapshotPath<'a>(pub(crate) &'a str);
 
 impl SnapshotPath<'_> {
-    pub(super) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         let path = Path::new(self.0);
         if path.as_os_str().is_empty()
             || path.is_absolute()
@@ -158,10 +158,10 @@ impl SnapshotPath<'_> {
     }
 }
 
-pub(super) struct FileTimestamp<'a>(pub(super) &'a std::fs::Metadata);
+pub(crate) struct FileTimestamp<'a>(pub(crate) &'a std::fs::Metadata);
 
 impl FileTimestamp<'_> {
-    pub(super) fn get(&self) -> (u64, u32) {
+    pub(crate) fn get(&self) -> (u64, u32) {
         self.0
             .modified()
             .ok()
@@ -172,18 +172,18 @@ impl FileTimestamp<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct LocalEntry {
-    pub(super) kind: EntryKind,
-    pub(super) mode: u32,
-    pub(super) size: u64,
-    pub(super) modified_secs: u64,
-    pub(super) modified_nanos: u32,
-    pub(super) data: Vec<u8>,
-    pub(super) digest: String,
+pub(crate) struct LocalEntry {
+    pub(crate) kind: EntryKind,
+    pub(crate) mode: u32,
+    pub(crate) size: u64,
+    pub(crate) modified_secs: u64,
+    pub(crate) modified_nanos: u32,
+    pub(crate) data: Vec<u8>,
+    pub(crate) digest: String,
 }
 
 impl LocalEntry {
-    pub(super) fn with_data(&self, data: Vec<u8>) -> Self {
+    pub(crate) fn with_data(&self, data: Vec<u8>) -> Self {
         let mut entry = self.clone();
         entry.size = data.len() as u64;
         entry.modified_secs = 0;
@@ -195,21 +195,22 @@ impl LocalEntry {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct LocalFingerprint {
-    pub(super) kind: EntryKind,
-    pub(super) mode: u32,
-    pub(super) size: u64,
-    pub(super) modified_secs: u64,
-    pub(super) modified_nanos: u32,
+pub(crate) struct LocalFingerprint {
+    pub(crate) kind: EntryKind,
+    pub(crate) mode: u32,
+    pub(crate) size: u64,
+    pub(crate) modified_secs: u64,
+    pub(crate) modified_nanos: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub(super) struct RemoteManifest {
-    pub(super) version: u32,
-    pub(super) cipher: String,
-    pub(super) vault_id: String,
-    pub(super) index: String,
+pub(crate) struct RemoteManifest {
+    pub(crate) version: u32,
+    pub(crate) cipher: String,
+    pub(crate) vault_id: String,
+    pub(crate) index: String,
 }
+
 #[derive(Debug, Deserialize, Serialize)]
 struct EncryptedIndex {
     version: u32,
@@ -248,7 +249,7 @@ pub(super) struct LocalStateEntry {
 }
 
 impl VaultRepositoryPath {
-    pub(super) fn write_encrypted_snapshot(
+    pub(crate) fn write_encrypted_snapshot(
         &self,
         vault_id: &str,
         key: &[u8],
@@ -321,7 +322,7 @@ impl VaultRepositoryPath {
         self.validate_encrypted_worktree()
     }
 
-    pub(super) fn load_encrypted_snapshot(
+    pub(crate) fn load_encrypted_snapshot(
         &self,
         key: &[u8],
     ) -> Result<(RemoteManifest, BTreeMap<String, LocalEntry>), String> {

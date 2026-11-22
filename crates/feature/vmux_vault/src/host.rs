@@ -13,10 +13,14 @@ use crate::state::{
     VaultSnapshot, VaultUiState, VaultWorkflowState,
 };
 
+mod connect;
 pub(crate) mod key;
 mod key_io;
 mod operation;
+mod reconcile;
 mod runtime;
+mod sync;
+mod vault_io;
 mod workflow;
 
 struct OperationPlugin;
@@ -48,6 +52,8 @@ impl Plugin for VaultPlugin {
             crate::agent::VaultAgentPlugin,
             UiStatePlugin::<VaultUiState>::default(),
             key::KeyAuthorityPlugin,
+            sync::SyncPlugin,
+            connect::ConnectionPlugin,
             RuntimePlugin,
             OperationPlugin,
             WorkflowPlugin,

@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use super::recovery::{RECOVERY_DIR, RECOVERY_FILE, RecoveryEnvelope};
+use super::recovery::{RECOVERY_FILE, RecoveryEnvelope};
 use super::snapshot::{
     FORMAT_VERSION, INDEX_FILE, MANIFEST_FILE, MANIFEST_VERSION, OBJECTS_DIR, RemoteManifest,
 };
 
-pub(super) struct VaultRepositoryPath {
+pub(crate) struct VaultRepositoryPath {
     root: PathBuf,
 }
 
@@ -24,7 +24,7 @@ pub(super) trait OutputText {
 }
 
 impl VaultRepositoryPath {
-    pub(super) fn at(root: &Path) -> Self {
+    pub(crate) fn at(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
         }
@@ -38,11 +38,11 @@ impl VaultRepositoryPath {
         &self.root
     }
 
-    pub(super) fn state_path(&self) -> PathBuf {
+    pub(crate) fn state_path(&self) -> PathBuf {
         self.root.join(".git").join("vmux-state.ron")
     }
 
-    pub(super) fn ensure(&self) -> Result<(), String> {
+    pub(crate) fn ensure(&self) -> Result<(), String> {
         std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
         if !self.root.join(".git").is_dir() {
             self.git().run(&["init", "-b", "main"])?;
@@ -50,7 +50,7 @@ impl VaultRepositoryPath {
         Ok(())
     }
 
-    pub(super) fn validate_empty(&self) -> Result<(), String> {
+    pub(crate) fn validate_empty(&self) -> Result<(), String> {
         if self.git().run(&["rev-parse", "--verify", "HEAD"]).is_ok() {
             return Err("Vault staging repository contains unsupported history".to_string());
         }
@@ -65,7 +65,7 @@ impl VaultRepositoryPath {
         Ok(())
     }
 
-    pub(super) fn manifest(&self) -> Result<RemoteManifest, String> {
+    pub(crate) fn manifest(&self) -> Result<RemoteManifest, String> {
         let source = std::fs::read(self.root.join(MANIFEST_FILE))
             .map_err(|error| format!("failed to read encrypted Vault manifest: {error}"))?;
         RemoteManifest::try_from(source.as_slice())
@@ -79,33 +79,6 @@ impl VaultRepositoryPath {
             format!("{source}\n").as_bytes(),
         )
         .map_err(|error| error.to_string())
-    }
-
-    pub(super) fn manifest_at(&self, branch: &str) -> Result<RemoteManifest, String> {
-        let spec = format!("{branch}:{MANIFEST_FILE}");
-        let source = self.git().run(&["show", &spec])?;
-        RemoteManifest::try_from(source.as_bytes())
-    }
-
-    pub(super) fn validate_remote_history(&self, branch: &str) -> Result<(), String> {
-        let entries = self
-            .git()
-            .run(&["log", branch, "--name-only", "--pretty=format:"])?;
-        for entry in entries.lines().map(str::trim) {
-            if entry.is_empty() || Self::is_vault_path(entry) {
-                continue;
-            }
-            return Err("selected repository contains plaintext or non-Vault history".to_string());
-        }
-        self.manifest_at(branch)?;
-        Ok(())
-    }
-
-    pub(super) fn remote_has_key_recipients(&self, branch: &str) -> Result<bool, String> {
-        let keys = self
-            .git()
-            .run(&["ls-tree", "-r", "--name-only", branch, "keys"])?;
-        Ok(!keys.is_empty())
     }
 
     pub(super) fn validate_encrypted_worktree(&self) -> Result<(), String> {
@@ -167,19 +140,6 @@ impl VaultRepositoryPath {
         }
         Ok(())
     }
-
-    fn is_vault_path(path: &str) -> bool {
-        if path == MANIFEST_FILE
-            || path == INDEX_FILE
-            || path == format!("{RECOVERY_DIR}/{RECOVERY_FILE}")
-        {
-            return true;
-        }
-        let Some(name) = path.strip_prefix(&format!("{OBJECTS_DIR}/")) else {
-            return false;
-        };
-        name.len() == 64 && !name.contains('/')
-    }
 }
 
 impl GitRepository {
@@ -224,34 +184,6 @@ impl GitRepository {
             return Err("Vault has no current branch".to_string());
         }
         Ok(branch)
-    }
-
-    pub(super) fn remote_branch(&self) -> Option<String> {
-        let symbolic = self.optional(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-        if symbolic.starts_with("origin/")
-            && self.run(&["rev-parse", "--verify", &symbolic]).is_ok()
-        {
-            return Some(symbolic);
-        }
-        for branch in ["origin/main", "origin/master"] {
-            if self.run(&["rev-parse", "--verify", branch]).is_ok() {
-                return Some(branch.to_string());
-            }
-        }
-        let branches = self
-            .optional(&[
-                "for-each-ref",
-                "--format=%(refname:short)",
-                "refs/remotes/origin",
-            ])
-            .lines()
-            .filter(|branch| *branch != "origin/HEAD")
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        if branches.len() != 1 {
-            return None;
-        }
-        branches.into_iter().next()
     }
 
     fn remove_inherited_environment(command: &mut Command) {
