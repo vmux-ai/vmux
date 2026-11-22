@@ -74,6 +74,7 @@ pub struct FileBytes(pub Option<Vec<u8>>);
 #[derive(Clone)]
 pub struct ReadDirectory {
     pub path: PathBuf,
+    pub limit: usize,
 }
 
 impl Job for ReadDirectory {
@@ -85,19 +86,28 @@ impl Job for ReadDirectory {
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Ok(DirectoryEntries {
                     exists: false,
+                    is_directory: false,
+                    entries: Vec::new(),
+                });
+            }
+            Err(error) if error.kind() == ErrorKind::NotADirectory => {
+                return Ok(DirectoryEntries {
+                    exists: true,
+                    is_directory: false,
                     entries: Vec::new(),
                 });
             }
             Err(error) => return Err(error.to_string()),
         };
+        let limit = self.limit.clamp(1, 100_000);
         let mut entries = Vec::new();
         for entry in directory {
             if BlockingCancellation::canceled() {
                 return Err("directory read canceled".into());
             }
-            if entries.len() == 4096 {
+            if entries.len() == limit {
                 return Err(format!(
-                    "directory exceeds 4096 entries: {}",
+                    "directory exceeds {limit} entries: {}",
                     self.path.display()
                 ));
             }
@@ -110,6 +120,7 @@ impl Job for ReadDirectory {
         }
         Ok(DirectoryEntries {
             exists: true,
+            is_directory: true,
             entries,
         })
     }
@@ -118,6 +129,7 @@ impl Job for ReadDirectory {
 #[derive(Component)]
 pub struct DirectoryEntries {
     pub exists: bool,
+    pub is_directory: bool,
     pub entries: Vec<DirectoryEntry>,
 }
 

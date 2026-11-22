@@ -565,6 +565,7 @@ impl CompilerInputFixture {
         let root = directory.path().join("crates/feature/vmux_dx/lints");
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::create_dir_all(root.join("ui")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname=\"compiler-fixture\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n").unwrap();
         let mut source = String::from(
             r#"use std::process::Command;
 use std::path::PathBuf;
@@ -579,11 +580,11 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let directory = tempfile::tempdir().unwrap();
+        let library = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         std::fs::create_dir(directory.path().join("src")).unwrap();
-        std::fs::write(directory.path().join("Cargo.toml"), "[package]\nname=\"compiler-fixture\"\nversion=\"0.0.0\"\n").unwrap();
         std::fs::create_dir(directory.path().join("examples")).unwrap();
         std::fs::write(directory.path().join("src/lib.rs"), "").unwrap();
-        let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lints");
+        std::fs::copy(library.join("Cargo.toml"), directory.path().join("Cargo.toml")).unwrap();
         Self { directory, library }
     }
 
@@ -635,6 +636,753 @@ fn compiled_inputs() {
             .join("crates/feature/vmux_dx/lints/ui")
             .join(format!("{name}.rs"))
     }
+}
+
+#[test]
+fn compiler_inputs_require_the_last_written_selected_target_before_execution() {
+    for change in [
+        "valid",
+        "unused_target",
+        "postcompile",
+        "other_target",
+        "overwrite",
+        "deferred",
+        "autoexamples_disabled",
+        "explicit_other_target",
+        "runtime_manifest_disabled",
+        "removed_target",
+        "unexecuted_loop",
+        "local_native_shadow",
+        "effectful_library_expect",
+        "format_named_override",
+        "effectful_output_argument",
+        "scoped_path_shadow",
+        "imported_format_shadow",
+        "macro_use_format_shadow",
+        "glob_format_shadow",
+        "local_inclusion_shadow",
+        "std_macro_import",
+        "unhandled_write_failure",
+        "absolute_target",
+        "generated_manifest",
+        "renamed_directory",
+    ] {
+        let fixture = CompilerInputFixture::new();
+        let root = fixture.0.path().join("crates/feature/vmux_dx/lints");
+        let source = root.join("src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let mut file = syn::parse_file(&original).unwrap();
+        let implementation = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Impl(value) => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let check = implementation
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                syn::ImplItem::Fn(value) if value.sig.ident == "check" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        match change {
+            "unused_target" => check.block.stmts[0] = syn::parse_quote!(std::fs::write(self.directory.path().join("unused.rs"), source).unwrap();),
+            "other_target" => check.block.stmts[0] = syn::parse_quote!(std::fs::write(self.directory.path().join("examples").join("other.rs"), source).unwrap();),
+            "postcompile" => check.block.stmts.swap(0, 1),
+            "overwrite" => check.block.stmts.insert(1, syn::parse_quote!(std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), "").unwrap();)),
+            "deferred" => {
+                let written = check.block.stmts.remove(0);
+                check.block.stmts.insert(0, syn::parse_quote!(let _deferred = || { #written };));
+            }
+            "effectful_library_expect" => check.block.stmts[1] = syn::parse_quote!(let output = Command::new("cargo").current_dir(self.directory.path()).args(["dylint", "--path", self.library.to_str().expect({ std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), "changed").unwrap(); "path" }), "--", "--example", name]).output().unwrap();),
+            "format_named_override" => check.block.stmts[0] = syn::parse_quote!(std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs", name = "unused")), source).unwrap();),
+            "effectful_output_argument" => check.block.stmts[1] = syn::parse_quote!(let output = Command::new("cargo").current_dir(self.directory.path()).args(["dylint", "--path", self.library.to_str().unwrap(), "--", "--example", name]).output({ std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), "changed").unwrap(); }).unwrap();),
+            "scoped_path_shadow" => {
+                check.block.stmts[0] = syn::parse_quote!(std::fs::write(path, source).unwrap(););
+                check.block.stmts.insert(0, syn::parse_quote!({ let path = self.directory.path().join("examples").join(format!("{name}.rs")); }));
+                check.block.stmts.insert(0, syn::parse_quote!(let path = self.directory.path().join("unused.rs");));
+            }
+            "runtime_manifest_disabled" => check.block.stmts.insert(0, syn::parse_quote!(std::fs::write(self.directory.path().join("Cargo.toml"), "[package]\nname=\"fixture\"\nversion=\"0.0.0\"\nautoexamples=false\n[workspace]\n").unwrap();)),
+            "removed_target" => check.block.stmts.insert(1, syn::parse_quote!(std::fs::remove_file(self.directory.path().join("examples").join(format!("{name}.rs"))).unwrap();)),
+            "unexecuted_loop" => {
+                let written = check.block.stmts.remove(0);
+                check.block.stmts.insert(0, syn::parse_quote!(while false { #written }));
+            }
+            "local_native_shadow" => {
+                check.block.stmts.insert(0, syn::parse_quote!(use crate::impostor::Command;));
+            }
+            "autoexamples_disabled" | "explicit_other_target" => {
+                let manifest = root.join("Cargo.toml");
+                let mut metadata: toml::Value = toml::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+                if change == "autoexamples_disabled" {
+                    metadata.get_mut("package").unwrap().as_table_mut().unwrap().insert("autoexamples".into(), toml::Value::Boolean(false));
+                } else {
+                    metadata.as_table_mut().unwrap().insert("example".into(), toml::Value::Array(vec![toml::Value::Table(toml::map::Map::from_iter([
+                        ("name".into(), toml::Value::String("private".into())),
+                        ("path".into(), toml::Value::String("unrelated.rs".into())),
+                    ]))]));
+                }
+                std::fs::write(manifest, toml::to_string(&metadata).unwrap()).unwrap();
+            }
+            "unhandled_write_failure" => check.block.stmts[0] = syn::parse_quote!(let _failed = std::fs::write(self.directory.path().join("examples").join(format!("{name}.rs")), source);),
+            "absolute_target" => check.block.stmts[0] = syn::parse_quote!(std::fs::write(self.directory.path().join("/examples").join(format!("{name}.rs")), source).unwrap();),
+            "std_macro_import" | "imported_format_shadow" | "glob_format_shadow" | "macro_use_format_shadow" | "local_inclusion_shadow" => {},
+            "valid" | "generated_manifest" | "renamed_directory" => {}
+            _ => unreachable!(),
+        }
+        if change == "generated_manifest" {
+            let manifest = syn::LitStr::new(
+                &std::fs::read_to_string(root.join("Cargo.toml")).unwrap(),
+                proc_macro2::Span::call_site(),
+            );
+            let constructor = implementation
+                .items
+                .iter_mut()
+                .find_map(|item| match item {
+                    syn::ImplItem::Fn(value) if value.sig.ident == "new" => Some(value),
+                    _ => None,
+                })
+                .unwrap();
+            constructor.block.stmts[5] = syn::parse_quote!(std::fs::write(directory.path().join("Cargo.toml"), #manifest).unwrap(););
+        }
+        match change {
+            "std_macro_import" => file.items.push(syn::parse_quote!(
+                use std::format;
+            )),
+            "imported_format_shadow" | "glob_format_shadow" => {
+                file.items.push(syn::parse_quote!(
+                    mod aliases {
+                        macro_rules! other {
+                            ($($tokens:tt)*) => {
+                                ::std::string::String::from("unused.rs")
+                            };
+                        }
+                        pub(crate) use other as format;
+                    }
+                ));
+                if change == "glob_format_shadow" {
+                    file.items.push(syn::parse_quote!(
+                        use aliases::*;
+                    ));
+                } else {
+                    file.items.push(syn::parse_quote!(
+                        use aliases::format;
+                    ));
+                }
+            }
+            "macro_use_format_shadow" => file.items.push(syn::parse_quote!(
+                #[macro_use]
+                mod aliases {
+                    macro_rules! format {
+                        ($($tokens:tt)*) => {
+                            ::std::string::String::from("unused.rs")
+                        };
+                    }
+                }
+            )),
+            "local_inclusion_shadow" => {
+                file.items.push(syn::parse_quote!(
+                    mod aliases {
+                        macro_rules! other {
+                            ($($tokens:tt)*) => {
+                                "fn main() {}"
+                            };
+                        }
+                        pub(crate) use other as include_str;
+                    }
+                ));
+                let test = file
+                    .items
+                    .iter_mut()
+                    .find_map(|item| match item {
+                        Item::Fn(value) if value.sig.ident == "compiled_inputs" => Some(value),
+                        _ => None,
+                    })
+                    .unwrap();
+                test.block.stmts.insert(
+                    0,
+                    syn::parse_quote!(
+                        use aliases::include_str;
+                    ),
+                );
+            }
+            _ => {}
+        }
+        if change == "local_native_shadow" {
+            file.items.push(syn::parse_quote!(
+                mod impostor {
+                    pub struct Command;
+                    impl Command {
+                        pub fn new(_: &str) -> Self {
+                            Self
+                        }
+                        pub fn current_dir(self, _: &std::path::Path) -> Self {
+                            self
+                        }
+                        pub fn args(self, _: [&str; 6]) -> Self {
+                            self
+                        }
+                        pub fn output(self) -> std::io::Result<std::process::Output> {
+                            unreachable!()
+                        }
+                    }
+                }
+            ));
+        }
+        let mut text = file.to_token_stream().to_string();
+        if change == "renamed_directory" {
+            text = text.replace("directory", "sandbox");
+        }
+        std::fs::write(&source, text).unwrap();
+        let result = CompilerInputs::read(fixture.0.path());
+        if matches!(
+            change,
+            "valid" | "generated_manifest" | "renamed_directory" | "std_macro_import"
+        ) {
+            assert!(
+                result.unwrap().owner(&fixture.input("private")).is_some(),
+                "{change}"
+            );
+        } else if let Ok(inputs) = result {
+            assert!(
+                inputs.owner(&fixture.input("private")).is_none(),
+                "{change}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compiler_inputs_preserve_native_fixture_serialization_without_admitting_shadowed_workflows() {
+    for change in [
+        "valid",
+        "side_effect",
+        "fake_mutex",
+        "local_shadow",
+        "local_static",
+    ] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        file.items.push(syn::parse_quote!(
+            #[cfg(test)]
+            static COMPILER_QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        ));
+        let structure = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Struct(value) if value.ident == "Fixture" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let syn::Fields::Named(fields) = &mut structure.fields else {
+            unreachable!();
+        };
+        fields
+            .named
+            .push(syn::parse_quote!(_queue: std::sync::MutexGuard<'static, ()>));
+        let implementation = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Impl(value) => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let constructor = implementation
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                syn::ImplItem::Fn(value) if value.sig.ident == "new" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        constructor.block.stmts.insert(
+            0,
+            syn::parse_quote!(
+                let queue = match COMPILER_QUEUE.lock() {
+                    Ok(queue) => queue,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+            ),
+        );
+        let Some(syn::Stmt::Expr(syn::Expr::Struct(returned), _)) =
+            constructor.block.stmts.last_mut()
+        else {
+            unreachable!();
+        };
+        returned.fields.push(syn::parse_quote!(_queue: queue));
+        if change == "side_effect" {
+            constructor.block.stmts[0] = syn::parse_quote!(
+                let queue = match COMPILER_QUEUE.lock() {
+                    Ok(queue) => {
+                        std::fs::write(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"), "changed").unwrap();
+                        queue
+                    }
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+            );
+        }
+        if change == "local_shadow" {
+            constructor
+                .block
+                .stmts
+                .insert(0, syn::parse_quote!(let COMPILER_QUEUE = FakeMutex;));
+        }
+        if change == "local_static" {
+            constructor.block.stmts.insert(
+                1,
+                syn::parse_quote!(
+                    static COMPILER_QUEUE: FakeMutex = FakeMutex;
+                ),
+            );
+        }
+        if matches!(change, "fake_mutex" | "local_shadow" | "local_static") {
+            file.items.push(syn::parse_quote!(
+                struct FakeMutex;
+            ));
+            file.items.push(syn::parse_quote!(
+                static REAL_QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            ));
+            file.items.push(syn::parse_quote!(impl FakeMutex {
+                fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'static, ()>> {
+                    std::fs::write(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"), "changed").unwrap();
+                    REAL_QUEUE.lock()
+                }
+            }));
+            if change == "fake_mutex" {
+                let declaration = file.items.iter_mut().find(|item| matches!(item, Item::Static(value) if value.ident == "COMPILER_QUEUE")).unwrap();
+                *declaration = syn::parse_quote!(
+                    #[cfg(test)]
+                    static COMPILER_QUEUE: FakeMutex = FakeMutex;
+                );
+            }
+        }
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let result = CompilerInputs::read(fixture.0.path());
+        if change == "valid" {
+            assert!(result.unwrap().owner(&fixture.input("private")).is_some());
+        } else if let Ok(inputs) = result {
+            assert!(
+                inputs.owner(&fixture.input("private")).is_none(),
+                "{change}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compiler_inputs_bind_each_literal_target_to_its_last_actual_write() {
+    for change in ["literal_overwrite", "explicit_match", "explicit_mismatch"] {
+        let fixture = CompilerInputFixture::new();
+        let root = fixture.0.path().join("crates/feature/vmux_dx/lints");
+        let source = root.join("src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        if change == "literal_overwrite" {
+            let implementation = file
+                .items
+                .iter_mut()
+                .find_map(|item| match item {
+                    Item::Impl(value) => Some(value),
+                    _ => None,
+                })
+                .unwrap();
+            let method = implementation
+                .items
+                .iter_mut()
+                .find_map(|item| match item {
+                    syn::ImplItem::Fn(value) if value.sig.ident == "check" => Some(value),
+                    _ => None,
+                })
+                .unwrap();
+            method.block.stmts.insert(1, syn::parse_quote!(std::fs::write(self.directory.path().join("examples/private.rs"), "fn main() {}").unwrap();));
+        } else {
+            let path = if change == "explicit_match" {
+                "examples/private.rs"
+            } else {
+                "examples/other.rs"
+            };
+            let manifest = format!(
+                "[package]\nname=\"compiler-fixture\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n[[example]]\nname=\"private\"\npath=\"{path}\"\n"
+            );
+            std::fs::write(root.join("Cargo.toml"), manifest).unwrap();
+        }
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert_eq!(
+            inputs.owner(&fixture.input("private")).is_some(),
+            change == "explicit_match",
+            "{change}"
+        );
+        assert!(
+            inputs.owner(&fixture.input("unrelated")).is_some(),
+            "untouched tuple {change}"
+        );
+    }
+}
+
+#[test]
+fn compiler_inputs_bind_manifest_ownership_to_the_returned_temporary() {
+    for change in ["alias", "fresh"] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        let implementation = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Impl(value) => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let constructor = implementation
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                syn::ImplItem::Fn(value) if value.sig.ident == "new" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let position = constructor.block.stmts.len() - 1;
+        if change == "alias" {
+            constructor
+                .block
+                .stmts
+                .insert(position, syn::parse_quote!(let previous = directory;));
+            constructor
+                .block
+                .stmts
+                .insert(position + 1, syn::parse_quote!(let directory = previous;));
+        } else {
+            constructor.block.stmts.insert(
+                position,
+                syn::parse_quote!(let directory = tempfile::tempdir().unwrap();),
+            );
+        }
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let result = CompilerInputs::read(fixture.0.path());
+        if change == "alias" {
+            assert!(result.unwrap().owner(&fixture.input("private")).is_some());
+        } else if let Ok(inputs) = result {
+            assert!(inputs.owner(&fixture.input("private")).is_none());
+        }
+    }
+}
+
+#[test]
+fn compiler_inputs_count_only_enabled_and_executed_source_writes() {
+    for change in [
+        "cfg_disabled",
+        "cfg_unknown",
+        "and_skipped",
+        "or_skipped",
+        "and_executed",
+        "or_executed",
+    ] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        let implementation = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Impl(value) => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let method = implementation
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                syn::ImplItem::Fn(value) if value.sig.ident == "check" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let write = method.block.stmts[0].clone();
+        method.block.stmts[0] = match change {
+            "cfg_disabled" => syn::parse_quote!(#[cfg(any())] #write),
+            "cfg_unknown" => syn::parse_quote!(#[cfg(feature = "unproved")] #write),
+            "and_skipped" => syn::parse_quote!(let _ = false && { #write true };),
+            "or_skipped" => syn::parse_quote!(let _ = true || { #write true };),
+            "and_executed" => syn::parse_quote!(let _ = true && { #write true };),
+            "or_executed" => syn::parse_quote!(let _ = false || { #write true };),
+            _ => unreachable!(),
+        };
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let result = CompilerInputs::read(fixture.0.path());
+        if matches!(change, "and_executed" | "or_executed") {
+            assert!(
+                result.unwrap().owner(&fixture.input("private")).is_some(),
+                "{change}"
+            );
+        } else if let Ok(inputs) = result {
+            assert!(
+                inputs.owner(&fixture.input("private")).is_none(),
+                "{change}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compiler_inputs_do_not_admit_calls_removed_by_cfg() {
+    for cfg in ["disabled", "unknown"] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        let test = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                Item::Fn(value) if value.sig.ident == "compiled_inputs" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        let loop_body = test
+            .block
+            .stmts
+            .iter_mut()
+            .find_map(|statement| match statement {
+                syn::Stmt::Expr(syn::Expr::ForLoop(value), _) => Some(&mut value.body),
+                _ => None,
+            })
+            .unwrap();
+        let call = loop_body.stmts[0].clone();
+        loop_body.stmts[0] = if cfg == "disabled" {
+            syn::parse_quote!(#[cfg(any())] #call)
+        } else {
+            syn::parse_quote!(#[cfg(feature = "unproved")] #call)
+        };
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert!(inputs.owner(&fixture.input("private")).is_none(), "{cfg}");
+    }
+}
+
+#[test]
+fn compiler_inputs_find_ordinary_include_modules_inside_unexecuted_bodies() {
+    for body in [
+        "closure",
+        "async",
+        "local_function",
+        "production",
+        "production_item",
+    ] {
+        let fixture = CompilerInputFixture::new();
+        assert!(
+            CompilerInputs::read(fixture.0.path())
+                .unwrap()
+                .owner(&fixture.input("private"))
+                .is_some()
+        );
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
+        let item = match body {
+            "async" => syn::parse_quote!(
+                fn ordinary() {
+                    let _future = async {
+                        include!("../ui/private.rs");
+                    };
+                }
+            ),
+            "closure" => syn::parse_quote!(
+                fn ordinary() {
+                    let _closure = || {
+                        include!("../ui/private.rs");
+                    };
+                }
+            ),
+            "local_function" => syn::parse_quote!(
+                fn ordinary() {
+                    fn unused() {
+                        include!("../ui/private.rs");
+                    }
+                }
+            ),
+            "production" => syn::parse_quote!(
+                fn ordinary() {
+                    #[cfg(not(test))]
+                    {
+                        include!("../ui/private.rs");
+                    }
+                }
+            ),
+            "production_item" => syn::parse_quote!(
+                #[cfg(not(test))]
+                mod ordinary {
+                    include!("../ui/private.rs");
+                }
+            ),
+            _ => unreachable!(),
+        };
+        file.items.push(item);
+        std::fs::write(source, file.to_token_stream().to_string()).unwrap();
+        let error = CompilerInputs::read(fixture.0.path())
+            .err()
+            .expect("ordinary module refusal");
+        assert!(
+            error.contains("Compiler input is also a Rust module"),
+            "{body}: {error}"
+        );
+        assert!(error.contains("private.rs"), "{body}: {error}");
+    }
+}
+
+#[test]
+fn compiler_inputs_do_not_credit_uncalled_local_function_writes() {
+    let fixture = CompilerInputFixture::new();
+    let source = fixture
+        .0
+        .path()
+        .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+    let original = std::fs::read_to_string(&source).unwrap();
+    assert!(
+        CompilerInputs::read(fixture.0.path())
+            .unwrap()
+            .owner(&fixture.input("private"))
+            .is_some()
+    );
+    let replacement = original.replace(
+        "std::fs::write(self.directory.path().join(\"examples\").join(format!(\"{name}.rs\")), source).unwrap();",
+        "let destination = self.directory.path().join(\"examples\").join(format!(\"{name}.rs\")); fn unused(destination: std::path::PathBuf, source: &str) { std::fs::write(destination, source).unwrap(); }",
+    );
+    assert_ne!(replacement, original);
+    std::fs::write(source, replacement).unwrap();
+    let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+    assert!(inputs.owner(&fixture.input("private")).is_none());
+}
+
+#[test]
+fn compiler_inputs_refuse_stale_manifest_evidence_after_an_intervening_fixture_call() {
+    for call in [
+        "",
+        "fixture.prepare();",
+        "#[cfg(any())] fixture.prepare();",
+        "before_loop",
+        "before_loop_scoped",
+    ] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let replacement = original.replace("    fn check(&self", "    fn prepare(&self) { std::fs::write(self.directory.path().join(\"Cargo.toml\"), \"[package]\\nname=\\\"compiler-fixture\\\"\\nversion=\\\"0.0.0\\\"\\n[[example]]\\nname=\\\"private\\\"\\npath=\\\"examples/other.rs\\\"\\n\").unwrap(); }\n    fn check(&self");
+        let replacement = if call == "before_loop_scoped" {
+            replacement.replace(
+                "let fixture = Fixture::new();",
+                "let fixture = Fixture::new(); { fixture.prepare(); }",
+            )
+        } else if call == "before_loop" {
+            replacement.replace(
+                "let fixture = Fixture::new();",
+                "let fixture = Fixture::new(); fixture.prepare();",
+            )
+        } else {
+            replacement.replace(
+                "fixture.check(name, source, expected);",
+                &format!("{call} fixture.check(name, source, expected);"),
+            )
+        };
+        std::fs::write(source, replacement).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert_eq!(
+            inputs.owner(&fixture.input("private")).is_some(),
+            !matches!(
+                call,
+                "fixture.prepare();" | "before_loop" | "before_loop_scoped"
+            ),
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn compiler_inputs_skip_disabled_literal_tuples_and_keep_enabled_siblings() {
+    for cfg in ["any()", "feature = \"unproved\""] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let replacement = original.replace(
+            "(\"private\", include_str!",
+            &format!("#[cfg({cfg})] (\"private\", include_str!"),
+        );
+        assert_ne!(original, replacement);
+        std::fs::write(source, replacement).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert!(inputs.owner(&fixture.input("private")).is_none(), "{cfg}");
+        assert!(inputs.owner(&fixture.input("unrelated")).is_some(), "{cfg}");
+    }
+}
+
+#[test]
+fn compiler_inputs_recognize_the_automatic_package_binary_and_explicit_overrides() {
+    for explicit in [false, true] {
+        let fixture = CompilerInputFixture::new();
+        let root = fixture.0.path().join("crates/feature/vmux_dx/lints");
+        let source = root.join("src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let replacement = original
+            .replace(
+                "join(\"examples\").join(format!(\"{name}.rs\"))",
+                "join(\"src/main.rs\")",
+            )
+            .replace("\"--example\", name", "\"--bin\", \"compiler-fixture\"");
+        assert_ne!(original, replacement);
+        std::fs::write(source, replacement).unwrap();
+        if explicit {
+            let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+            std::fs::write(
+                root.join("Cargo.toml"),
+                format!("{manifest}\n[[bin]]\nname=\"compiler-fixture\"\npath=\"src/other.rs\"\n"),
+            )
+            .unwrap();
+        }
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert_eq!(inputs.owner(&fixture.input("private")).is_some(), !explicit);
+    }
+}
+
+#[test]
+fn compiler_inputs_keep_the_registered_production_corpus_connected_to_its_cargo_harness() {
+    let root = Workspace::current();
+    let inputs = CompilerInputs::read(&root.0).unwrap();
+    let files = std::fs::read_dir(root.0.join("crates/feature/vmux_dx/lints/ui")).unwrap();
+    let mut checked = 0;
+    for file in files {
+        let path = file.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "rs") {
+            assert!(
+                inputs.owner(&path).is_some(),
+                "uncompiled input {}",
+                path.display()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "compiler input corpus is missing");
 }
 
 #[test]

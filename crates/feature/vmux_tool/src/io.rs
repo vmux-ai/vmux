@@ -12,7 +12,7 @@ pub use fs::{
     LinkFacts, ReadDirectory, ReadFile, WriteFile,
 };
 pub use http::{Authorization, Get};
-pub use links::{LinkPath, PathChanged, PathReceipt, UnlinkPath};
+pub use links::{CleanupPath, LinkPath, PathChanged, PathReceipt, UnlinkPath};
 pub use temporary::{CloseTemporary, CreateTemporary, TemporaryDirectory, TemporaryTransfer};
 
 mod files;
@@ -39,6 +39,7 @@ impl Plugin for ObservationIoPlugin {
             JobPlugin::<MovePath>::default(),
             JobPlugin::<CopyFile>::default(),
             JobPlugin::<CreateDirectory>::default(),
+            JobPlugin::<CleanupPath>::default(),
         ))
         .configure_sets(
             Update,

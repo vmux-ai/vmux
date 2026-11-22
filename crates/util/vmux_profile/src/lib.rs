@@ -619,10 +619,28 @@ mod tests {
 
     #[test]
     fn settings_live_in_dot_vmux_not_data_dir() {
-        let paths = ProfilePaths::current();
-        for candidate in paths.settings_candidates() {
-            assert!(candidate.starts_with(paths.config()));
-            assert!(!candidate.starts_with(paths.shared_data()));
+        let directory = tempfile::tempdir().unwrap();
+        for isolated in [false, true] {
+            let data = directory
+                .path()
+                .join(if isolated { "copied" } else { "native" });
+            let (config, home) = ProfilePaths::native_paths(&data, isolated);
+            let paths = ProfilePaths {
+                build: "dev",
+                profile: Profile::named("personal"),
+                data,
+                config,
+                home,
+                test: false,
+            };
+            for candidate in paths.settings_candidates() {
+                assert!(candidate.starts_with(paths.config()));
+                if isolated {
+                    assert!(candidate.starts_with(paths.shared_data().join("config")));
+                } else {
+                    assert!(!candidate.starts_with(paths.shared_data()));
+                }
+            }
         }
     }
 

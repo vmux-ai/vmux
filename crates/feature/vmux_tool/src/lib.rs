@@ -532,6 +532,7 @@ mod tests {
             ])
             .env("VMUX_DATA_DIR", directory.path())
             .env("VMUX_QA_PATHS_CHILD", directory.path())
+            .env_remove("VMUX_TEST")
             .status()
             .unwrap();
         assert!(status.success());

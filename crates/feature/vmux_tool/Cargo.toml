@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs", "page-binding"] }
 async-lock = "3"
+async-io = "2"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true }

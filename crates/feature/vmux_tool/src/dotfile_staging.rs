@@ -1,4 +1,8 @@
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::task::Context;
+use std::time::Duration;
 
 use bevy::prelude::*;
 use vmux_ecs::{
@@ -12,7 +16,9 @@ use crate::io::{
     MovePath, ObservePath, PathFacts, PathReceipt, ReadDirectory, TemporaryDirectory,
     TemporaryTransfer,
 };
-use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
+use crate::storage::{
+    ManifestOnly, ManifestReceipt, ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult,
+};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationSucceeded, ToolStore,
     ToolStoreOperation, ToolStoreTarget, ToolsManifest,
@@ -33,7 +39,7 @@ impl Plugin for DotfileImportPlugin {
             (
                 (accept, cancel, cancel_children).chain(),
                 (begin, loaded).chain(),
-                (observe_roots, roots_observed, select_packages).chain(),
+                (observe_roots, roots_observed, enumerate, select_packages).chain(),
                 (target_observed, directory_read, file_observed, preflight).chain(),
                 (create_staging, staging_created).chain(),
                 (copy, directories_created, files_copied, copied).chain(),
@@ -52,7 +58,8 @@ impl Plugin for DotfileImportPlugin {
                 .in_set(crate::ToolTaskSet::Start),
         )
         .add_systems(PostUpdate, finish.after(vmux_ecs::JobSet::Cleanup))
-        .add_observer(cleanup_failed);
+        .add_observer(cleanup_failed)
+        .add_observer(configuration_failed);
     }
 }
 
@@ -62,6 +69,17 @@ struct Work {
     source: Option<Entity>,
     request: ImportDotfiles,
     retained: bool,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct ImportDrain<'w, 's> {
+    work: Query<'w, 's, &'static Work>,
+}
+
+impl ImportDrain<'_, '_> {
+    pub(crate) fn is_drained(&self, requester: Entity) -> bool {
+        !self.work.iter().any(|work| work.requester == requester)
+    }
 }
 
 #[derive(Component)]
@@ -127,7 +145,7 @@ struct Activated;
 #[derive(Component)]
 struct Saving;
 #[derive(Component)]
-struct SaveStarted;
+struct ConfigurationPublished;
 #[derive(Component)]
 struct Committed;
 #[derive(Component)]
@@ -139,6 +157,8 @@ struct RestoringConfiguration;
 #[derive(Component)]
 struct ConfigurationRestored;
 #[derive(Component)]
+struct ConfigurationFailure(String);
+#[derive(Component)]
 struct Returning;
 #[derive(Component)]
 struct Returned;
@@ -148,6 +168,10 @@ struct Closing;
 struct Done;
 #[derive(Component)]
 struct CleanupFailed(String);
+#[derive(Component)]
+struct RetryDelay(Duration);
+#[derive(Component)]
+struct RetryAlarm(bevy::tasks::Task<()>);
 
 fn accept(
     requests: Query<
@@ -365,20 +389,20 @@ fn roots_observed(
     }
 }
 
-fn select_packages(
+fn enumerate(
     work: Query<
+        (Entity, &OperationState),
         (
-            Entity,
-            &OperationState,
-            Option<&JobResult<ReadDirectory>>,
-            Has<Enumerating>,
+            With<Observing>,
+            Without<Enumerating>,
+            Without<Enumerated>,
+            Without<Failure>,
         ),
-        (With<Observing>, Without<Enumerated>, Without<Failure>),
     >,
     roots: Query<(&ChildOf, &PathFacts, Has<InputRoot>, Has<OutputRoot>)>,
     mut commands: Commands,
 ) {
-    for (entity, state, result, enumerating) in &work {
+    for (entity, state) in &work {
         if *state != OperationState::Running {
             continue;
         }
@@ -404,25 +428,45 @@ fn select_packages(
                 .insert(Failure("dotfile import overlaps the Tools root".into()));
             continue;
         }
-        let Some(result) = result else {
-            if enumerating {
-                continue;
-            }
-            commands.entity(entity).insert((
-                Source(source.clone()),
-                Destination(destination.clone()),
-                Enumerating,
-                JobRequest(ReadDirectory {
-                    path: source.clone(),
-                }),
-            ));
+        commands.entity(entity).insert((
+            Source(source.clone()),
+            Destination(destination.clone()),
+            Enumerating,
+            JobRequest(ReadDirectory {
+                path: source.clone(),
+                limit: 4096,
+            }),
+        ));
+    }
+}
+
+fn select_packages(
+    work: Query<
+        (
+            Entity,
+            &OperationState,
+            &Destination,
+            &JobResult<ReadDirectory>,
+        ),
+        (With<Enumerating>, Without<Enumerated>, Without<Failure>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, state, destination, result) in &work {
+        if *state != OperationState::Running {
             continue;
-        };
+        }
         commands
             .entity(entity)
             .remove::<(JobResult<ReadDirectory>, Enumerating)>();
         let entries = match &result.0 {
-            Ok(Ok(entries)) => entries,
+            Ok(Ok(entries)) if entries.exists && entries.is_directory => entries,
+            Ok(Ok(_)) => {
+                commands
+                    .entity(entity)
+                    .insert(Failure("import source is no longer a directory".into()));
+                continue;
+            }
             Ok(Err(error)) | Err(error) => {
                 commands.entity(entity).insert(Failure(error.clone()));
                 continue;
@@ -437,7 +481,7 @@ fn select_packages(
                 continue;
             }
             count += 1;
-            let target = destination.join(name);
+            let target = destination.0.join(name);
             let package = commands
                 .spawn((
                     Name::new(name.to_string()),
@@ -464,6 +508,7 @@ fn select_packages(
                 Relative(PathBuf::new()),
                 JobRequest(ReadDirectory {
                     path: entry.path.clone(),
+                    limit: 4096,
                 }),
             ));
         }
@@ -537,7 +582,7 @@ fn directory_read(
             continue;
         }
         let entries = match &result.0 {
-            Ok(Ok(entries)) if entries.exists => entries,
+            Ok(Ok(entries)) if entries.exists && entries.is_directory => entries,
             Ok(Ok(_)) => {
                 commands
                     .entity(owner.parent())
@@ -579,6 +624,7 @@ fn directory_read(
                     Relative(relative.to_path_buf()),
                     JobRequest(ReadDirectory {
                         path: entry.path.clone(),
+                        limit: 4096,
                     }),
                 ));
             } else if entry.file_type.is_file() {
@@ -1056,7 +1102,7 @@ fn save(
         }
         commands.entity(entity).insert((
             Saving,
-            SaveStarted,
+            ManifestOnly,
             WriteRequest {
                 manifest,
                 retain_lease: true,
@@ -1065,9 +1111,15 @@ fn save(
     }
 }
 
-fn saved(work: Query<(Entity, &WriteResult, Has<Failure>), With<Saving>>, mut commands: Commands) {
-    for (entity, result, failed) in &work {
+fn saved(
+    work: Query<(Entity, &WriteResult, Option<&ManifestReceipt>, Has<Failure>), With<Saving>>,
+    mut commands: Commands,
+) {
+    for (entity, result, receipt, failed) in &work {
         commands.entity(entity).remove::<(Saving, WriteResult)>();
+        if receipt.is_some_and(ManifestReceipt::published) {
+            commands.entity(entity).insert(ConfigurationPublished);
+        }
         match &result.0 {
             Ok(()) if !failed => {
                 commands.entity(entity).insert(Committed);
@@ -1086,18 +1138,20 @@ fn rollback(
             Entity,
             Option<&Before>,
             Option<&Children>,
-            Has<SaveStarted>,
+            Has<ConfigurationPublished>,
             Has<ConfigurationRestored>,
             Has<RestoringConfiguration>,
             Has<ReadRequest>,
             Has<WriteRequest>,
+            Has<ConfigurationFailure>,
         ),
         (With<Failure>, Without<CleanupFailed>),
     >,
     captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
     mut commands: Commands,
 ) {
-    for (entity, before, children, started, restored, restoring, reading, writing) in &work {
+    for (entity, before, children, started, restored, restoring, reading, writing, failed) in &work
+    {
         if reading
             || writing
             || captures.iter().any(|target| {
@@ -1114,10 +1168,12 @@ fn rollback(
             commands.entity(entity).insert(ConfigurationRestored);
         } else if !restored
             && !restoring
+            && !failed
             && let Some(before) = before
         {
             commands.entity(entity).insert((
                 RestoringConfiguration,
+                ManifestOnly,
                 WriteRequest {
                     manifest: before.0.clone(),
                     retain_lease: true,
@@ -1140,7 +1196,9 @@ fn restored_configuration(
                 commands.entity(entity).insert(ConfigurationRestored);
             }
             Err(error) => {
-                commands.entity(entity).insert(CleanupFailed(error.clone()));
+                commands
+                    .entity(entity)
+                    .insert(ConfigurationFailure(error.clone()));
             }
         }
     }
@@ -1148,11 +1206,18 @@ fn restored_configuration(
 
 fn return_packages(
     work: Query<
-        Entity,
+        (
+            Entity,
+            Has<ConfigurationRestored>,
+            Has<ConfigurationFailure>,
+        ),
         (
             With<Failure>,
-            With<ConfigurationRestored>,
             Without<CleanupFailed>,
+            Without<Saving>,
+            Without<RestoringConfiguration>,
+            Without<ReadRequest>,
+            Without<WriteRequest>,
         ),
     >,
     packages: Query<
@@ -1170,7 +1235,10 @@ fn return_packages(
     >,
     mut commands: Commands,
 ) {
-    for owner in &work {
+    for (owner, restored, failed) in &work {
+        if !restored && !failed {
+            continue;
+        }
         let mut next = None;
         let mut pending = false;
         for (entity, parent, name, _, _, _, returning, returned) in &packages {
@@ -1304,16 +1372,49 @@ fn staging_closed(
 }
 
 fn retry(
-    added: Query<(Entity, &ToolStore), Added<Work>>,
-    failed: Query<(Entity, &ToolStore), With<CleanupFailed>>,
+    failed: Query<
+        (Entity, Option<&RetryDelay>),
+        (
+            With<Work>,
+            Or<(With<CleanupFailed>, With<ConfigurationFailure>)>,
+            Without<RetryAlarm>,
+        ),
+    >,
+    mut alarms: Query<(Entity, &mut RetryAlarm, Option<&RetryDelay>)>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
-    for (new, store) in &added {
-        for (old, captured) in &failed {
-            if new != old && store == captured {
-                commands.entity(old).remove::<CleanupFailed>();
-            }
+    let waker = wake
+        .as_deref()
+        .map(|wake| &wake.0)
+        .unwrap_or(std::task::Waker::noop());
+    let mut context = Context::from_waker(waker);
+    for (entity, mut alarm, delay) in &mut alarms {
+        if Pin::new(&mut alarm.0).poll(&mut context).is_pending() {
+            continue;
         }
+        let next = delay
+            .map(|delay| delay.0.saturating_mul(2))
+            .unwrap_or(Duration::from_millis(200))
+            .min(Duration::from_secs(2));
+        commands
+            .entity(entity)
+            .remove::<(RetryAlarm, CleanupFailed, ConfigurationFailure)>()
+            .insert(RetryDelay(next));
+    }
+    for (entity, delay) in &failed {
+        let delay = delay
+            .map(|delay| delay.0)
+            .unwrap_or(Duration::from_millis(100));
+        let waker = waker.clone();
+        commands
+            .entity(entity)
+            .insert(RetryAlarm(bevy::tasks::IoTaskPool::get().spawn(
+                async move {
+                    async_io::Timer::after(delay).await;
+                    waker.wake();
+                },
+            )));
     }
 }
 
@@ -1328,6 +1429,26 @@ fn cleanup_failed(
     if let Ok(mut requester) = commands.get_entity(work.requester) {
         requester.insert((
             ToolOperationFailed(format!("dotfile import cleanup failed: {}", failure.0)),
+            ToolOperationFinished,
+            OperationState::Failed,
+        ));
+    }
+}
+
+fn configuration_failed(
+    trigger: On<Add, ConfigurationFailure>,
+    work: Query<(&Work, &ConfigurationFailure)>,
+    mut commands: Commands,
+) {
+    let Ok((work, failure)) = work.get(trigger.event_target()) else {
+        return;
+    };
+    if let Ok(mut requester) = commands.get_entity(work.requester) {
+        requester.insert((
+            ToolOperationFailed(format!(
+                "dotfile import configuration recovery failed: {}",
+                failure.0
+            )),
             ToolOperationFinished,
             OperationState::Failed,
         ));
@@ -1395,6 +1516,7 @@ fn finish(
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    use vmux_ecs::cli::{CliInvocation, CliResult};
 
     struct Fixture {
         app: App,
@@ -1416,8 +1538,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 bevy::app::TaskPoolPlugin::default(),
-                crate::ToolRuntimePlugin,
-                DotfileImportPlugin,
+                crate::cli::ToolCliPlugin,
             ));
             let source = app.world_mut().spawn(store.clone()).id();
             Self {
@@ -1478,9 +1599,16 @@ mod tests {
     #[test]
     fn physical_import_copies_all_packages_before_committing_and_cleans_staging() {
         let mut fixture = Fixture::new();
+        let brewfile = fixture.store.brewfile_path();
+        let expected = b"# preserve comments\nbrew \"kept\", link: false";
+        let mut manifest = ToolsManifest::default();
+        manifest.set_package("homebrew-formula", "kept", true);
+        manifest.write_to(&fixture.store.manifest_path()).unwrap();
+        std::fs::write(&brewfile, expected).unwrap();
         let input = fixture.input();
         let request = fixture.import(input.clone());
         fixture.finish(request);
+        assert_eq!(std::fs::read(&brewfile).unwrap(), expected);
         assert!(
             fixture
                 .app
@@ -1676,56 +1804,31 @@ mod tests {
     }
 
     #[test]
-    fn failed_configuration_save_retains_packages_until_restoration_can_retry() {
+    fn failed_save_before_publication_returns_packages_without_configuration_retry() {
         let mut fixture = Fixture::new();
         let input = fixture.input();
-        let request = fixture.import(input.clone());
         let manifest = fixture.store.manifest_path();
-        let before = std::fs::read(&manifest).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            fixture.app.update();
-            if fixture
-                .app
-                .world_mut()
-                .query_filtered::<Entity, With<SaveStarted>>()
-                .iter(fixture.app.world())
-                .next()
-                .is_some()
-            {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "import did not reach configuration save"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        std::fs::remove_file(&manifest).unwrap();
-        std::fs::create_dir(&manifest).unwrap();
-        loop {
-            fixture.app.update();
-            if fixture
-                .app
-                .world_mut()
-                .query_filtered::<Entity, With<CleanupFailed>>()
-                .iter(fixture.app.world())
-                .next()
-                .is_some()
-            {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "failed save did not retain recovery work"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert!(fixture.store.lease().is_none());
+        let blocked = manifest.clone();
+        fixture.app.add_observer(move |_: On<Add, Saving>| {
+            std::fs::remove_file(&blocked).unwrap();
+            std::fs::create_dir(&blocked).unwrap();
+        });
+        let request = fixture.import(input.clone());
+        fixture.finish(request);
         assert!(manifest.is_dir());
+        assert!(!fixture.store.dotfiles_dir().join("editor").exists());
+        assert!(!fixture.store.dotfiles_dir().join("shell").exists());
         assert_eq!(
-            std::fs::read(fixture.store.dotfiles_dir().join("editor/.editor")).unwrap(),
+            std::fs::read(input.join("editor/.editor")).unwrap(),
             b"editor"
+        );
+        assert_eq!(std::fs::read(input.join("shell/.zshrc")).unwrap(), b"shell");
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(request)
+                .is_some()
         );
         assert!(
             fixture
@@ -1734,17 +1837,101 @@ mod tests {
                 .get::<ImportedDotfiles>(request)
                 .is_none()
         );
-        std::fs::remove_dir(&manifest).unwrap();
-        std::fs::write(&manifest, &before).unwrap();
-        let retry = fixture.import(input);
-        fixture.finish(request);
-        fixture.finish(retry);
-        assert!(fixture.app.world().get::<ImportedDotfiles>(retry).is_some());
         assert!(fixture.store.lease().is_some());
-        assert_eq!(
-            ToolsManifest::read(&manifest).unwrap().dotfiles.packages,
-            ["editor", "shell"]
+        assert!(
+            std::fs::read_dir(fixture.store.root())
+                .unwrap()
+                .all(|entry| {
+                    !entry
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".vmux-")
+                })
         );
+    }
+
+    #[test]
+    fn cli_waits_for_published_configuration_recovery_after_packages_return() {
+        let mut fixture = Fixture::new();
+        let input = fixture.input();
+        let manifest = fixture.store.manifest_path();
+        let before = ToolsManifest::read(&manifest).unwrap();
+        fixture.app.add_observer(
+            |trigger: On<Add, Saving>, work: Query<&Work>, mut commands: Commands| {
+                commands
+                    .entity(work.get(trigger.event_target()).unwrap().requester)
+                    .insert(OperationState::Canceled);
+            },
+        );
+        let blocked = manifest.clone();
+        fixture
+            .app
+            .add_observer(move |_: On<Add, ConfigurationPublished>| {
+                std::fs::remove_file(&blocked).unwrap();
+                std::fs::create_dir(&blocked).unwrap();
+            });
+        let request = fixture
+            .app
+            .world_mut()
+            .spawn((
+                fixture.store.clone(),
+                CliInvocation {
+                    command: "tool.import.dotfiles".into(),
+                    arguments: std::collections::BTreeMap::from([(
+                        "path".into(),
+                        vec![input.clone().into_os_string()],
+                    )]),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            fixture.app.update();
+            if manifest.is_dir()
+                && !fixture.store.dotfiles_dir().join("editor").exists()
+                && !fixture.store.dotfiles_dir().join("shell").exists()
+                && fixture
+                    .app
+                    .world()
+                    .get::<ToolOperationFailed>(request)
+                    .is_some()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "blocked configuration prevented package return"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(fixture.app.world().get::<CliResult>(request).is_none());
+        assert!(fixture.store.lease().is_none());
+        assert_eq!(
+            std::fs::read(input.join("editor/.editor")).unwrap(),
+            b"editor"
+        );
+        std::fs::remove_dir(&manifest).unwrap();
+        fixture.finish(request);
+        while fixture.app.world().get::<CliResult>(request).is_none() {
+            fixture.app.update();
+            assert!(
+                Instant::now() < deadline,
+                "CLI did not complete after recovery"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<CliResult>(request)
+                .unwrap()
+                .0
+                .is_err()
+        );
+        assert_eq!(ToolsManifest::read(&manifest).unwrap(), before);
+        assert!(fixture.store.lease().is_some());
     }
 
     #[test]
@@ -1839,6 +2026,7 @@ mod tests {
             .world_mut()
             .entity_mut(request)
             .insert(OperationState::Canceled);
+        let retry = fixture.import(input);
         loop {
             fixture.app.update();
             if fixture
@@ -1865,7 +2053,6 @@ mod tests {
         assert!(fixture.store.lease().is_none());
         std::fs::rename(&package, fixture.directory.path().join("foreign")).unwrap();
         std::fs::rename(held, &package).unwrap();
-        let retry = fixture.import(input);
         fixture.finish(request);
         fixture.finish(retry);
         assert!(

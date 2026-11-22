@@ -1,5 +1,10 @@
+use bevy::tasks::{IoTaskPool, Task};
+use std::future::Future;
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::task::Context;
+use std::time::Duration;
 
 use bevy::prelude::*;
 use vmux_ecs::{
@@ -15,10 +20,12 @@ use crate::dotfiles::{
     UnlinkDotfilePackage, UnlinkedDotfilePackage,
 };
 use crate::io::{
-    FileIdentity, InspectLink, LinkPath, MovePath, ObservePath, PathReceipt, ReadDirectory,
-    UnlinkPath,
+    CleanupPath, FileIdentity, InspectLink, LinkPath, MovePath, ObservePath, PathReceipt,
+    ReadDirectory, UnlinkPath,
 };
-use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
+use crate::storage::{
+    ManifestOnly, ManifestReceipt, ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult,
+};
 use crate::{
     ExternalToolOperation, ToolOperationFailed, ToolOperationFinished, ToolOperationSucceeded,
     ToolStore, ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
@@ -81,7 +88,7 @@ impl Plugin for DotfileOperationsPlugin {
                     reverted::<LinkPath, Linking>,
                     reverted::<UnlinkPath, Unlinking>,
                 ),
-                mutation_completed,
+                (recover_paths, recovered_paths, mutation_completed).chain(),
             )
                 .chain()
                 .in_set(ToolTaskSet::Start),
@@ -91,7 +98,8 @@ impl Plugin for DotfileOperationsPlugin {
             (finish, finish_mutations, finish_available, finish_adoption)
                 .after(vmux_ecs::JobSet::Cleanup),
         )
-        .add_observer(cleanup_failed);
+        .add_observer(cleanup_failed)
+        .add_observer(config_failed);
     }
 }
 
@@ -111,6 +119,12 @@ impl DotfileDrain<'_, '_> {
     pub(crate) fn is_drained(&self, requester: Entity) -> bool {
         !self.work.iter().any(|work| work.requester == requester)
     }
+}
+
+#[derive(Component, Clone)]
+pub(crate) struct SharedReadLease {
+    pub(crate) store: ToolStore,
+    pub(crate) lease: StoreLease,
 }
 
 #[derive(Component)]
@@ -147,8 +161,6 @@ struct Before(crate::ToolsManifest);
 #[derive(Component)]
 struct Saving;
 #[derive(Component)]
-struct SaveStarted;
-#[derive(Component)]
 struct Saved;
 #[derive(Component)]
 struct Rollback;
@@ -156,6 +168,45 @@ struct Rollback;
 struct RestoringConfig;
 #[derive(Component)]
 struct ConfigRestored;
+#[derive(Component)]
+struct ConfigPublished;
+#[derive(Component)]
+struct ConfigFailure(String);
+#[derive(Component)]
+struct RetryDelay(Duration);
+#[derive(Component)]
+struct RetryAlarm(Task<()>);
+
+#[derive(Component)]
+struct NativePaths {
+    packages: PathBuf,
+    home: PathBuf,
+    boundary: Option<PathBuf>,
+}
+
+impl NativePaths {
+    fn capture(store: &ToolStore) -> Result<Self, String> {
+        let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+        let packages = if store.dotfiles_dir().is_absolute() {
+            store.dotfiles_dir()
+        } else {
+            cwd.join(store.dotfiles_dir())
+        };
+        let home = if store.home().is_absolute() {
+            store.home().to_path_buf()
+        } else {
+            cwd.join(store.home())
+        };
+        let isolated = std::env::var_os("VMUX_DATA_DIR").is_some_and(|value| !value.is_empty());
+        let boundary = isolated.then(|| vmux_profile::ProfilePaths::current().shared_data());
+        Ok(Self {
+            packages,
+            home,
+            boundary,
+        })
+    }
+}
+
 #[derive(Component)]
 struct CleanupFailed(String);
 #[derive(Component)]
@@ -198,6 +249,14 @@ struct EffectDone;
 struct Reverting;
 #[derive(Component)]
 struct Reverted;
+#[derive(Component)]
+struct ForwardReceipt(PathReceipt);
+#[derive(Component)]
+struct ReverseReceipt(PathReceipt);
+#[derive(Component)]
+struct CleaningPaths;
+#[derive(Component)]
+struct CleaningReversePaths;
 
 #[derive(Component)]
 struct Ready;
@@ -246,13 +305,14 @@ fn accept<R: Component + Clone + PartialEq>(
             Option<&ToolStore>,
             Option<&OperationState>,
             Has<OperationRetained>,
+            Option<&SharedReadLease>,
         ),
         (Without<Accepted<R>>, Without<ToolOperationFinished>),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
-    for (entity, request, target, direct, state, retained) in &requests {
+    for (entity, request, target, direct, state, retained, shared) in &requests {
         if state.is_some_and(|state| {
             !matches!(state, OperationState::Pending | OperationState::Running)
         }) {
@@ -269,8 +329,31 @@ fn accept<R: Component + Clone + PartialEq>(
             ));
             continue;
         };
-        commands.spawn((
+        let read_only = std::any::TypeId::of::<R>() == std::any::TypeId::of::<PlanDotfilePackage>()
+            || std::any::TypeId::of::<R>() == std::any::TypeId::of::<DiscoverDotfilePackages>();
+        if let Some(shared) = shared
+            && (!read_only || shared.store != *store || !shared.lease._lease.matches(store))
+        {
+            commands.entity(entity).insert((
+                ToolOperationFailed(
+                    "dotfile read lease does not match the accepted request".into(),
+                ),
+                ToolOperationFinished,
+            ));
+            continue;
+        }
+        let paths = match NativePaths::capture(store) {
+            Ok(paths) => paths,
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert((ToolOperationFailed(error), ToolOperationFinished));
+                continue;
+            }
+        };
+        let mut observation = commands.spawn((
             Name::new("Observe dotfile operation"),
+            paths,
             Operation::bundle("tool.dotfile.observe").unwrap(),
             OperationRetained,
             OperationTarget::new(entity),
@@ -283,6 +366,9 @@ fn accept<R: Component + Clone + PartialEq>(
             Captured(request.clone()),
             EntryCount::default(),
         ));
+        if let Some(shared) = shared {
+            observation.insert(shared.lease.clone());
+        }
         commands
             .entity(entity)
             .insert((
@@ -346,25 +432,43 @@ fn cancel<R: Component + Clone + PartialEq>(
 
 fn begin(
     work: Query<
-        (Entity, &Work, &ToolStore, &OperationState),
+        (
+            Entity,
+            &Work,
+            &ToolStore,
+            &OperationState,
+            Option<&StoreLease>,
+        ),
         (Without<Loading>, Without<Loaded>, Without<Failure>),
     >,
     wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
-    for (entity, original, store, state) in &work {
+    for (entity, original, store, state, captured_lease) in &work {
         if *state != OperationState::Pending {
             continue;
         }
         if let Some(wake) = &wake {
             store.bind_waker(wake.0.clone());
         }
-        let Some(lease) = store.lease() else {
-            continue;
+        let lease = match captured_lease {
+            Some(lease) if lease._lease.matches(store) => lease.clone(),
+            Some(_) => {
+                commands.entity(entity).insert(Failure(
+                    "dotfile shared lease does not match the store".into(),
+                ));
+                continue;
+            }
+            None => {
+                let Some(lease) = store.lease() else {
+                    continue;
+                };
+                StoreLease { _lease: lease }
+            }
         };
         commands.entity(entity).insert((
             Loading,
-            StoreLease { _lease: lease },
+            lease,
             ReadRequest { retain_lease: true },
             OperationState::Running,
         ));
@@ -722,11 +826,20 @@ fn relocated(
 
 fn return_adopted(
     work: Query<
-        (Entity, Has<SaveStarted>, Has<ConfigRestored>),
+        (
+            Entity,
+            Has<ConfigPublished>,
+            Has<ConfigRestored>,
+            Has<ConfigFailure>,
+        ),
         (
             With<Captured<AdoptDotfile>>,
             With<Failure>,
             Without<CleanupFailed>,
+            Without<Saving>,
+            Without<RestoringConfig>,
+            Without<ReadRequest>,
+            Without<WriteRequest>,
         ),
     >,
     files: Query<
@@ -744,13 +857,19 @@ fn return_adopted(
             Without<MovingFile>,
             Without<ReturningFile>,
             Without<ReturnedFile>,
+            Without<Changing>,
+            Without<Reverting>,
+            Without<CleaningPaths>,
+            Without<JobRequest<LinkPath>>,
+            Without<JobRequest<UnlinkPath>>,
+            Without<JobRequest<CleanupPath>>,
         ),
     >,
     captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
     mut commands: Commands,
 ) {
-    for (owner, saved, restored) in &work {
-        if saved && !restored {
+    for (owner, saved, restored, config_failed) in &work {
+        if saved && !restored && !config_failed {
             continue;
         }
         for (file, parent, source, target, identity, changed, reverted) in &files {
@@ -797,12 +916,12 @@ fn returned_adopted(
 
 fn plan(
     work: Query<
-        (Entity, &Names, &ToolStore, &OperationState),
+        (Entity, &Names, &NativePaths, &OperationState),
         (With<Loaded>, Without<Selected>, Without<Failure>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, names, store, state) in &work {
+    for (entity, names, paths, state) in &work {
         if *state != OperationState::Running {
             continue;
         }
@@ -813,7 +932,7 @@ fn plan(
                     .insert(Failure(format!("invalid dotfile package name: {name}")));
                 break;
             }
-            let root = store.dotfiles_dir().join(name);
+            let root = paths.packages.join(name);
             let package = commands
                 .spawn((
                     Name::new(name.clone()),
@@ -831,7 +950,10 @@ fn plan(
                 ChildOf(entity),
                 EntityTarget::<Package>::new(package),
                 Directory { depth: 0 },
-                JobRequest(ReadDirectory { path: root }),
+                JobRequest(ReadDirectory {
+                    path: root,
+                    limit: 4096,
+                }),
             ));
         }
         commands.entity(entity).insert(Selected);
@@ -850,7 +972,12 @@ impl Package {
 
 fn discover(
     work: Query<
-        (Entity, &ToolStore, &OperationState),
+        (
+            Entity,
+            &NativePaths,
+            &OperationState,
+            Has<Captured<ImportAvailableDotfiles>>,
+        ),
         (
             Or<(
                 With<Captured<DiscoverDotfilePackages>>,
@@ -863,13 +990,14 @@ fn discover(
     >,
     mut commands: Commands,
 ) {
-    for (entity, store, state) in &work {
+    for (entity, paths, state, importing) in &work {
         if *state == OperationState::Running {
             commands.entity(entity).insert((
                 Selected,
                 Discovery,
                 JobRequest(ReadDirectory {
-                    path: store.dotfiles_dir(),
+                    path: paths.packages.clone(),
+                    limit: if importing { 4096 } else { 100_000 },
                 }),
             ));
         }
@@ -888,7 +1016,7 @@ fn directories(
         Without<DirectoryDone>,
     >,
     packages: Query<(&Name, &PackageRoot), With<Package>>,
-    mut work: Query<(&ToolStore, &OperationState, &mut EntryCount, Has<Disable>)>,
+    mut work: Query<(&NativePaths, &OperationState, &mut EntryCount, Has<Disable>)>,
     mut commands: Commands,
 ) {
     for (entity, owner, package, directory, result) in &directories {
@@ -896,7 +1024,7 @@ fn directories(
             .entity(entity)
             .insert(DirectoryDone)
             .remove::<JobResult<ReadDirectory>>();
-        let Ok((store, state, mut count, disabling)) = work.get_mut(owner.parent()) else {
+        let Ok((paths, state, mut count, disabling)) = work.get_mut(owner.parent()) else {
             continue;
         };
         if *state != OperationState::Running {
@@ -914,7 +1042,7 @@ fn directories(
         let Ok((name, root)) = packages.get(package.entity()) else {
             continue;
         };
-        if !entries.exists {
+        if !entries.exists || !entries.is_directory {
             if disabling && directory.depth == 0 {
                 continue;
             }
@@ -946,13 +1074,14 @@ fn directories(
                     },
                     JobRequest(ReadDirectory {
                         path: entry.path.clone(),
+                        limit: 4096,
                     }),
                 ));
             } else if entry.file_type.is_file() {
                 let Ok(relative) = entry.path.strip_prefix(&root.0) else {
                     continue;
                 };
-                let target = store.home().join(relative);
+                let target = paths.home.join(relative);
                 commands.spawn((
                     Name::new(relative.to_string_lossy().into_owned()),
                     File,
@@ -1084,6 +1213,12 @@ fn discovered(
         }
         match &result.0 {
             Ok(Ok(entries)) => {
+                if entries.exists && !entries.is_directory {
+                    commands
+                        .entity(entity)
+                        .insert(Failure("dotfile package catalog is not a directory".into()));
+                    continue;
+                }
                 let mut names = Vec::new();
                 for entry in &entries.entries {
                     if !entry.file_type.is_dir() {
@@ -1132,16 +1267,47 @@ fn import_available(
 }
 
 fn retry_cleanup(
-    added: Query<(Entity, &ToolStore), (With<Work>, Added<Work>)>,
-    failed: Query<(Entity, &ToolStore), With<CleanupFailed>>,
+    failed: Query<
+        (Entity, Option<&RetryDelay>),
+        (
+            With<Work>,
+            Or<(With<CleanupFailed>, With<ConfigFailure>)>,
+            Without<RetryAlarm>,
+        ),
+    >,
+    mut alarms: Query<(Entity, &mut RetryAlarm, Option<&RetryDelay>)>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
-    for (new, store) in &added {
-        for (old, captured) in &failed {
-            if new != old && store == captured {
-                commands.entity(old).remove::<CleanupFailed>();
-            }
+    let waker = wake
+        .as_deref()
+        .map(|wake| &wake.0)
+        .unwrap_or(std::task::Waker::noop());
+    let mut context = Context::from_waker(waker);
+    for (entity, mut alarm, delay) in &mut alarms {
+        if Pin::new(&mut alarm.0).poll(&mut context).is_pending() {
+            continue;
         }
+        let next = delay
+            .map(|delay| delay.0.saturating_mul(2))
+            .unwrap_or(Duration::from_millis(200))
+            .min(Duration::from_secs(2));
+        commands
+            .entity(entity)
+            .remove::<(RetryAlarm, CleanupFailed, ConfigFailure)>()
+            .insert(RetryDelay(next));
+    }
+    for (entity, delay) in &failed {
+        let delay = delay
+            .map(|delay| delay.0)
+            .unwrap_or(Duration::from_millis(100));
+        let waker = waker.clone();
+        commands
+            .entity(entity)
+            .insert(RetryAlarm(IoTaskPool::get().spawn(async move {
+                async_io::Timer::after(delay).await;
+                waker.wake();
+            })));
     }
 }
 
@@ -1163,6 +1329,27 @@ fn cleanup_failed(
     ));
 }
 
+fn config_failed(
+    trigger: On<Add, ConfigFailure>,
+    work: Query<(&Work, &ConfigFailure)>,
+    mut commands: Commands,
+) {
+    let Ok((work, failure)) = work.get(trigger.event_target()) else {
+        return;
+    };
+    let Ok(mut requester) = commands.get_entity(work.requester) else {
+        return;
+    };
+    requester.insert((
+        ToolOperationFailed(format!(
+            "dotfile configuration restoration failed: {}",
+            failure.0
+        )),
+        ToolOperationFinished,
+        OperationState::Failed,
+    ));
+}
+
 fn cancel_files(
     work: Query<(Entity, &OperationState, Has<Failure>, Has<Rollback>), With<Work>>,
     mut files: Query<
@@ -1175,6 +1362,7 @@ fn cancel_files(
                 With<AdoptRoot>,
             )>,
             Without<Work>,
+            Without<CleaningPaths>,
         ),
     >,
 ) {
@@ -1192,7 +1380,7 @@ fn cancel_files(
 
 fn mutate(
     work: Query<
-        (Entity, &OperationState, Has<RemoveLinks>),
+        (Entity, &OperationState, Has<RemoveLinks>, &NativePaths),
         (
             With<Mutation>,
             With<Ready>,
@@ -1212,7 +1400,7 @@ fn mutate(
     )>,
     mut commands: Commands,
 ) {
-    for (entity, state, removing) in &work {
+    for (entity, state, removing, paths) in &work {
         if *state != OperationState::Running {
             continue;
         }
@@ -1241,20 +1429,30 @@ fn mutate(
         };
         let (_, _, source, target, state, _, _) = files.get(file).unwrap();
         if removing && state.0 != DotfileLinkState::Linked
-            || !removing && state.0 != DotfileLinkState::Missing
+            || !removing
+                && !matches!(
+                    state.0,
+                    DotfileLinkState::Missing | DotfileLinkState::Linked
+                )
         {
             commands.entity(file).insert(EffectDone);
             continue;
         }
         let receipt = PathReceipt::default();
         let mut file = commands.entity(file);
-        file.insert((Changing, receipt.clone(), OperationState::Running));
+        file.insert((
+            Changing,
+            receipt.clone(),
+            ForwardReceipt(receipt.clone()),
+            OperationState::Running,
+        ));
         if removing {
             file.insert((
                 Unlinking,
                 JobRequest(UnlinkPath {
                     source: source.0.clone(),
                     target: target.0.clone(),
+                    boundary: paths.boundary.clone(),
                     receipt,
                 }),
             ));
@@ -1263,7 +1461,9 @@ fn mutate(
                 Linking,
                 JobRequest(LinkPath {
                     source: source.0.clone(),
+                    source_may_be_missing: false,
                     target: target.0.clone(),
+                    boundary: paths.boundary.clone(),
                     receipt,
                 }),
             ));
@@ -1357,7 +1557,7 @@ fn save(
         }
         commands.entity(entity).insert((
             Saving,
-            SaveStarted,
+            ManifestOnly,
             WriteRequest {
                 manifest: desired,
                 retain_lease: true,
@@ -1366,9 +1566,15 @@ fn save(
     }
 }
 
-fn saved(work: Query<(Entity, &WriteResult), With<Saving>>, mut commands: Commands) {
-    for (entity, result) in &work {
+fn saved(
+    work: Query<(Entity, &WriteResult, Option<&ManifestReceipt>), With<Saving>>,
+    mut commands: Commands,
+) {
+    for (entity, result, receipt) in &work {
         commands.entity(entity).remove::<(Saving, WriteResult)>();
+        if receipt.is_some_and(ManifestReceipt::published) {
+            commands.entity(entity).insert(ConfigPublished);
+        }
         match &result.0 {
             Ok(()) => {
                 commands.entity(entity).insert(Saved);
@@ -1385,13 +1591,15 @@ fn rollback(
         (
             Entity,
             &Before,
+            &NativePaths,
             Option<&Children>,
-            Has<SaveStarted>,
+            Has<ConfigPublished>,
             Has<ConfigRestored>,
             Has<RestoringConfig>,
             Has<RemoveLinks>,
             Has<ReadRequest>,
             Has<WriteRequest>,
+            Has<ConfigFailure>,
         ),
         (With<Mutation>, With<Failure>, Without<CleanupFailed>),
     >,
@@ -1404,10 +1612,23 @@ fn rollback(
         Has<Changed>,
         Has<Reverting>,
         Has<Reverted>,
+        Option<&ReverseReceipt>,
     )>,
     mut commands: Commands,
 ) {
-    for (entity, before, children, saved, restored, restoring, removing, reading, writing) in &work
+    for (
+        entity,
+        before,
+        paths,
+        children,
+        saved,
+        restored,
+        restoring,
+        removing,
+        reading,
+        writing,
+        config_failed,
+    ) in &work
     {
         if reading
             || writing
@@ -1421,25 +1642,23 @@ fn rollback(
         commands
             .entity(entity)
             .insert((Rollback, OperationState::Running));
-        if saved && !restored {
-            if !restoring {
-                commands.entity(entity).insert((
-                    RestoringConfig,
-                    WriteRequest {
-                        manifest: before.0.clone(),
-                        retain_lease: true,
-                    },
-                ));
-            }
-            continue;
+        if saved && !restored && !restoring && !config_failed {
+            commands.entity(entity).insert((
+                RestoringConfig,
+                ManifestOnly,
+                WriteRequest {
+                    manifest: before.0.clone(),
+                    retain_lease: true,
+                },
+            ));
         }
         let mut next = None;
         let mut active = false;
-        for (file, owner, source, _, changed, reverting, reverted) in &files {
+        for (file, owner, source, _, changed, reverting, reverted, receipt) in &files {
             if owner.parent() != entity || !changed || reverted {
                 continue;
             }
-            if reverting {
+            if reverting || receipt.is_some_and(|receipt| receipt.0.pending()) {
                 active = true;
                 break;
             }
@@ -1459,13 +1678,20 @@ fn rollback(
         let (_, _, source, target, ..) = files.get(file).unwrap();
         let receipt = PathReceipt::default();
         let mut file = commands.entity(file);
-        file.insert((Reverting, OperationState::Running, receipt.clone()));
+        file.insert((
+            Reverting,
+            OperationState::Running,
+            receipt.clone(),
+            ReverseReceipt(receipt.clone()),
+        ));
         if removing {
             file.insert((
                 Linking,
                 JobRequest(LinkPath {
                     source: source.0.clone(),
+                    source_may_be_missing: true,
                     target: target.0.clone(),
+                    boundary: paths.boundary.clone(),
                     receipt,
                 }),
             ));
@@ -1475,6 +1701,7 @@ fn rollback(
                 JobRequest(UnlinkPath {
                     source: source.0.clone(),
                     target: target.0.clone(),
+                    boundary: paths.boundary.clone(),
                     receipt,
                 }),
             ));
@@ -1495,7 +1722,7 @@ fn restored_config(
                 commands.entity(entity).insert(ConfigRestored);
             }
             Err(error) => {
-                commands.entity(entity).insert(CleanupFailed(error.clone()));
+                commands.entity(entity).insert(ConfigFailure(error.clone()));
             }
         }
     }
@@ -1522,13 +1749,118 @@ fn reverted<J: vmux_ecs::Job<Output = Result<crate::io::PathChanged, String>>, M
     }
 }
 
+fn recover_paths(
+    work: Query<(Entity, Has<Failure>, Has<Saved>), (With<Mutation>, Without<CleanupFailed>)>,
+    files: Query<
+        (
+            Entity,
+            &ChildOf,
+            &ForwardReceipt,
+            Option<&ReverseReceipt>,
+            Has<Changed>,
+            Has<Reverted>,
+            Has<Reverting>,
+        ),
+        Without<CleaningPaths>,
+    >,
+    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    mut commands: Commands,
+) {
+    for (entity, failed, saved) in &work {
+        for (file, parent, receipt, reverse, changed, reverted, reverting) in &files {
+            if parent.parent() != entity {
+                continue;
+            }
+            if !failed && saved {
+                receipt.0.commit();
+                if !receipt.0.pending() {
+                    continue;
+                }
+            }
+            if reverting || captures.iter().any(|capture| capture.entity() == file) {
+                continue;
+            }
+            if let Some(reverse) = reverse {
+                if reverted {
+                    reverse.0.commit();
+                }
+                if reverse.0.pending() {
+                    commands.entity(file).insert((
+                        CleaningPaths,
+                        CleaningReversePaths,
+                        OperationState::Running,
+                        JobRequest(CleanupPath {
+                            receipt: reverse.0.clone(),
+                        }),
+                    ));
+                    continue;
+                }
+                commands.entity(file).remove::<ReverseReceipt>();
+            }
+            if failed && changed && !reverted
+                || !receipt.0.pending()
+                || captures.iter().any(|capture| capture.entity() == file)
+            {
+                continue;
+            }
+            commands.entity(file).insert((
+                CleaningPaths,
+                OperationState::Running,
+                JobRequest(CleanupPath {
+                    receipt: receipt.0.clone(),
+                }),
+            ));
+        }
+    }
+}
+
+fn recovered_paths(
+    files: Query<
+        (
+            Entity,
+            &ChildOf,
+            Option<&JobResult<CleanupPath>>,
+            Has<JobRequest<CleanupPath>>,
+            Has<CleaningReversePaths>,
+        ),
+        With<CleaningPaths>,
+    >,
+    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    mut commands: Commands,
+) {
+    for (file, parent, result, requested, reverse) in &files {
+        if requested || captures.iter().any(|capture| capture.entity() == file) {
+            continue;
+        }
+        commands
+            .entity(file)
+            .remove::<(CleaningPaths, CleaningReversePaths, JobResult<CleanupPath>)>();
+        let Some(result) = result else {
+            continue;
+        };
+        if let Ok(Ok(_)) = &result.0 {
+            if reverse {
+                commands.entity(file).remove::<ReverseReceipt>();
+            }
+            continue;
+        }
+        let error = match &result.0 {
+            Ok(Err(error)) | Err(error) => error.clone(),
+            _ => unreachable!(),
+        };
+        commands
+            .entity(parent.parent())
+            .insert(CleanupFailed(error));
+    }
+}
+
 fn mutation_completed(
     work: Query<
         (
             Entity,
             Option<&Children>,
             Has<Failure>,
-            Has<SaveStarted>,
+            Has<ConfigPublished>,
             Has<ConfigRestored>,
             Has<Saved>,
             Has<ReadRequest>,
@@ -1540,7 +1872,17 @@ fn mutation_completed(
             Without<CleanupFailed>,
         ),
     >,
-    files: Query<(&ChildOf, Has<Changed>, Has<Reverted>, Has<EffectDone>), With<File>>,
+    files: Query<
+        (
+            &ChildOf,
+            Has<Changed>,
+            Has<Reverted>,
+            Has<EffectDone>,
+            Option<&ForwardReceipt>,
+            Option<&ReverseReceipt>,
+        ),
+        With<File>,
+    >,
     captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
     mut commands: Commands,
 ) {
@@ -1559,12 +1901,20 @@ fn mutation_completed(
         }
         let mut count = 0;
         let mut pending = false;
-        for (owner, changed, reverted, done) in &files {
+        for (owner, changed, reverted, done, receipt, reverse) in &files {
             if owner.parent() != entity {
                 continue;
             }
             count += usize::from(changed);
-            pending |= if failed { changed && !reverted } else { !done };
+            pending |= if failed {
+                changed && !reverted
+                    || receipt.is_some_and(|receipt| receipt.0.pending())
+                    || reverse.is_some_and(|receipt| receipt.0.pending())
+            } else {
+                !done
+                    || receipt.is_some_and(|receipt| receipt.0.pending())
+                    || reverse.is_some_and(|receipt| receipt.0.pending())
+            };
         }
         if !pending {
             commands.entity(entity).insert(MutationFinished(count));
@@ -1828,6 +2178,7 @@ fn finish_available(
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    use vmux_ecs::cli::{CliInvocation, CliResult};
 
     struct Fixture {
         app: App,
@@ -1849,8 +2200,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 bevy::app::TaskPoolPlugin::default(),
-                crate::ToolRuntimePlugin,
-                DotfileOperationsPlugin,
+                crate::cli::ToolCliPlugin,
             ));
             let source = app.world_mut().spawn(store.clone()).id();
             Self {
@@ -2019,6 +2369,86 @@ mod tests {
             assert!(fixture.app.world().get::<AdoptedDotfile>(request).is_none());
             assert!(fixture.store.lease().is_some());
         }
+    }
+
+    #[test]
+    fn adoption_restores_the_file_while_published_configuration_recovery_is_blocked() {
+        let mut fixture = Fixture::new();
+        let source = fixture.store.home().join(".adopt-qa");
+        let destination = fixture.store.dotfiles_dir().join("shell/.adopt-qa");
+        let manifest = fixture.store.manifest_path();
+        std::fs::write(&source, b"original content").unwrap();
+        let before = crate::ToolsManifest::read(&manifest).unwrap();
+        fixture.app.add_observer(
+            |trigger: On<Add, Saving>, work: Query<&Work>, mut commands: Commands| {
+                let owner = work.get(trigger.event_target()).unwrap();
+                commands
+                    .entity(owner.requester)
+                    .insert(OperationState::Canceled);
+            },
+        );
+        let blocked = manifest.clone();
+        fixture
+            .app
+            .add_observer(move |_: On<Add, ConfigPublished>| {
+                std::fs::remove_file(&blocked).unwrap();
+                std::fs::create_dir(&blocked).unwrap();
+            });
+        let request = fixture
+            .app
+            .world_mut()
+            .spawn((
+                fixture.store.clone(),
+                CliInvocation {
+                    command: "tool.adopt".into(),
+                    arguments: std::collections::BTreeMap::from([
+                        ("path".into(), vec![source.clone().into_os_string()]),
+                        ("package".into(), vec!["shell".into()]),
+                    ]),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if manifest.is_dir()
+                && source.symlink_metadata().is_ok_and(|entry| entry.is_file())
+                && !destination.exists()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "configuration failure blocked adopted-file restoration"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(std::fs::read(&source).unwrap(), b"original content");
+        assert!(fixture.store.lease().is_none());
+        assert!(fixture.app.world().get::<CliResult>(request).is_none());
+        std::fs::remove_dir(&manifest).unwrap();
+        fixture.finish(request);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fixture.app.world().get::<CliResult>(request).is_none() {
+            fixture.app.update();
+            assert!(
+                Instant::now() < deadline,
+                "adoption CLI did not return after recovery"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<CliResult>(request)
+                .unwrap()
+                .0
+                .is_err()
+        );
+        assert_eq!(crate::ToolsManifest::read(&manifest).unwrap(), before);
+        assert!(fixture.app.world().get::<AdoptedDotfile>(request).is_none());
+        assert!(fixture.store.lease().is_some());
     }
 
     #[test]
@@ -2425,6 +2855,603 @@ mod tests {
             before
         );
         assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn dotfile_changes_preserve_brewfile_bytes() {
+        let mut fixture = Fixture::new();
+        fixture.package("shell");
+        let brewfile = fixture.store.brewfile_path();
+        let expected = b"# keep exact bytes\nbrew \"ripgrep\", link: false";
+        std::fs::write(&brewfile, expected).unwrap();
+        let mut manifest = crate::ToolsManifest::default();
+        manifest.set_package("homebrew-formula", "ripgrep", true);
+        manifest.write_to(&fixture.store.manifest_path()).unwrap();
+        let link = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.brewfile.link").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                LinkDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(link);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<LinkedDotfilePackage>(link)
+                .is_some()
+        );
+        assert_eq!(std::fs::read(&brewfile).unwrap(), expected);
+        let disable = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.brewfile.disable").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                DisableDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(disable);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<DisabledDotfilePackage>(disable)
+                .is_some()
+        );
+        assert_eq!(std::fs::read(&brewfile).unwrap(), expected);
+        assert!(
+            crate::ToolsManifest::read(&fixture.store.manifest_path())
+                .unwrap()
+                .dotfiles
+                .packages
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn disable_clears_a_package_replaced_by_an_ordinary_file() {
+        let mut fixture = Fixture::new();
+        std::fs::create_dir_all(fixture.store.dotfiles_dir()).unwrap();
+        std::fs::write(fixture.store.dotfiles_dir().join("shell"), b"foreign root").unwrap();
+        let mut manifest = crate::ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        manifest.write_to(&fixture.store.manifest_path()).unwrap();
+        let disable = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.file-root.disable").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                DisableDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(disable);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<DisabledDotfilePackage>(disable)
+                .is_some()
+        );
+        assert_eq!(
+            std::fs::read(fixture.store.dotfiles_dir().join("shell")).unwrap(),
+            b"foreign root"
+        );
+        assert!(
+            crate::ToolsManifest::read(&fixture.store.manifest_path())
+                .unwrap()
+                .dotfiles
+                .packages
+                .is_empty()
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn relative_store_paths_share_one_absolute_native_context() {
+        let cwd = std::env::current_dir().unwrap();
+        let directory = tempfile::tempdir_in(&cwd).unwrap();
+        let relative = directory.path().strip_prefix(&cwd).unwrap();
+        let store = ToolStore::new(relative.join("config"), relative.join("home"));
+        let root = directory.path().join("config/tools/dotfiles/shell");
+        let home = directory.path().join("home");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(root.join(".zshrc"), b"shell").unwrap();
+        crate::ToolsManifest::default()
+            .write_to(&store.manifest_path())
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            crate::ToolRuntimePlugin,
+            DotfileOperationsPlugin,
+        ));
+        let request = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.relative.link").unwrap(),
+                store.clone(),
+                LinkDotfilePackage::new("shell"),
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<LinkedDotfilePackage>(request).is_none() {
+            app.update();
+            assert!(app.world().get::<ToolOperationFailed>(request).is_none());
+            assert!(Instant::now() < deadline, "relative link did not complete");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(std::fs::read(home.join(".zshrc")).unwrap(), b"shell");
+        assert_eq!(
+            vmux_path::PathIdentity::resolve(home.join(".zshrc")),
+            vmux_path::PathIdentity::resolve(root.join(".zshrc"))
+        );
+        assert!(
+            crate::ToolsManifest::read(&store.manifest_path())
+                .unwrap()
+                .dotfiles
+                .packages
+                .contains(&"shell".to_string())
+        );
+        assert!(store.lease().is_some());
+    }
+
+    #[test]
+    fn linking_revalidates_previously_linked_targets_before_commit() {
+        for foreign in [false, true] {
+            let mut fixture = Fixture::new();
+            let root = fixture.package("shell");
+            let target = fixture.store.home().join(".zshrc");
+            std::os::unix::fs::symlink(root.join(".zshrc"), &target).unwrap();
+            let replacement = target.clone();
+            fixture
+                .app
+                .add_observer(move |trigger: On<Add, Changing>, files: Query<&Source>| {
+                    if files.get(trigger.event_target()).is_ok_and(|source| {
+                        source.0.file_name().is_some_and(|name| name == "editor")
+                    }) {
+                        std::fs::remove_file(&replacement).unwrap();
+                        if foreign {
+                            std::fs::write(&replacement, b"foreign replacement").unwrap();
+                        }
+                    }
+                });
+            let link = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.dotfile.preflight.revalidation").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    LinkDotfilePackage::new("shell"),
+                ))
+                .id();
+            fixture.finish(link);
+            if foreign {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<ToolOperationFailed>(link)
+                        .is_some()
+                );
+                assert_eq!(std::fs::read(&target).unwrap(), b"foreign replacement");
+                assert!(
+                    crate::ToolsManifest::read(&fixture.store.manifest_path())
+                        .unwrap()
+                        .dotfiles
+                        .packages
+                        .is_empty()
+                );
+                assert!(
+                    fixture
+                        .store
+                        .home()
+                        .join(".config/editor")
+                        .symlink_metadata()
+                        .is_err()
+                );
+            } else {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<LinkedDotfilePackage>(link)
+                        .is_some()
+                );
+                assert_eq!(std::fs::read(&target).unwrap(), b"shell");
+                assert!(
+                    crate::ToolsManifest::read(&fixture.store.manifest_path())
+                        .unwrap()
+                        .dotfiles
+                        .packages
+                        .contains(&"shell".to_string())
+                );
+            }
+            assert!(fixture.store.lease().is_some());
+        }
+    }
+
+    #[test]
+    fn failed_manifest_publication_restores_links_without_another_configuration_write() {
+        let mut fixture = Fixture::new();
+        let root = fixture.package("shell");
+        let link = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.failed-save.setup").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                LinkDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(link);
+        let manifest_path = fixture.store.manifest_path();
+        let manifest = manifest_path.clone();
+        fixture.app.add_observer(move |_: On<Add, Saving>| {
+            std::fs::remove_file(&manifest).unwrap();
+            std::fs::create_dir(&manifest).unwrap();
+        });
+        let disable = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.failed-save.disable").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                DisableDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(disable);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(disable)
+                .is_some()
+        );
+        assert!(manifest_path.is_dir());
+        for path in [".zshrc", ".config/editor"] {
+            assert_eq!(
+                vmux_path::PathIdentity::resolve(fixture.store.home().join(path)),
+                vmux_path::PathIdentity::resolve(root.join(path))
+            );
+        }
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn failed_rollback_retries_when_the_waiter_was_already_queued() {
+        let mut fixture = Fixture::new();
+        let root = fixture.package("shell");
+        let link = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.retry.setup").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                LinkDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(link);
+        let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+        let manifest = fixture.store.manifest_path();
+        let target = fixture.store.home().join(".zshrc");
+        let store = fixture.store.clone();
+        let waiter = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let queued = waiter.clone();
+        fixture
+            .app
+            .add_observer(move |_: On<Add, Saving>, mut commands: Commands| {
+                std::fs::remove_file(&manifest).unwrap();
+                std::fs::create_dir(&manifest).unwrap();
+                std::fs::write(&target, b"rollback obstruction").unwrap();
+                let request = commands
+                    .spawn((
+                        Operation::bundle("test.dotfile.retry.waiter").unwrap(),
+                        store.clone(),
+                        PlanDotfilePackage::new("shell"),
+                    ))
+                    .id();
+                *queued.lock().unwrap() = Some(request);
+            });
+        let disable = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.retry.disable").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                DisableDotfilePackage::new("shell"),
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fixture
+            .app
+            .world()
+            .get::<ToolOperationFailed>(disable)
+            .is_none()
+        {
+            fixture.app.update();
+            assert!(
+                Instant::now() < deadline,
+                "rollback did not report its obstruction"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let queued = waiter.lock().unwrap().unwrap();
+        assert!(fixture.app.world().get::<DotfilePlan>(queued).is_none());
+        assert!(fixture.store.lease().is_none());
+        std::fs::remove_file(fixture.store.home().join(".zshrc")).unwrap();
+        std::fs::remove_dir(fixture.store.manifest_path()).unwrap();
+        std::fs::write(fixture.store.manifest_path(), before).unwrap();
+        fixture.finish(disable);
+        fixture.finish(queued);
+        let plan = fixture.app.world().get::<DotfilePlan>(queued).unwrap();
+        assert_eq!((plan.linked(), plan.missing(), plan.conflicts()), (2, 0, 0));
+        for path in [".zshrc", ".config/editor"] {
+            assert_eq!(
+                vmux_path::PathIdentity::resolve(fixture.store.home().join(path)),
+                vmux_path::PathIdentity::resolve(root.join(path))
+            );
+        }
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn queued_path_cleanup_survives_cancellation_and_suppressed_native_results() {
+        for suppress in [false, true] {
+            let mut fixture = Fixture::new();
+            let root = fixture.package("shell");
+            let link = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.cleanup.setup").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    LinkDotfilePackage::new("shell"),
+                ))
+                .id();
+            fixture.finish(link);
+            let before = std::fs::read(fixture.store.manifest_path()).unwrap();
+            let sentinel = fixture.store.home().join("unrelated");
+            std::fs::write(&sentinel, b"foreign content").unwrap();
+            fixture.app.insert_resource(vmux_ecs::BlockingRuntime::new(
+                vmux_ecs::blocking::BlockingPool::new("cleanup-pressure", 1, 8),
+                vmux_ecs::blocking::BlockingPool::new("unused", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("unused", 0, 0),
+            ));
+            let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+            let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+            let receiver = std::sync::Mutex::new(Some(release_rx));
+            let held = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let captured = held.clone();
+            fixture.app.add_observer(
+                move |_: On<Add, JobRequest<CleanupPath>>,
+                      runtime: Res<vmux_ecs::BlockingRuntime>| {
+                    let Some(receiver) = receiver.lock().unwrap().take() else {
+                        return;
+                    };
+                    let started = started_tx.clone();
+                    *captured.lock().unwrap() = Some(
+                        runtime
+                            .spawn(None, move || {
+                                started.send(()).unwrap();
+                                receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+                            })
+                            .unwrap(),
+                    );
+                },
+            );
+            let disable = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    fixture.store.clone(),
+                    CliInvocation {
+                        command: "tool.unlink".into(),
+                        arguments: std::collections::BTreeMap::from([(
+                            "package".into(),
+                            vec![std::ffi::OsString::from("shell")],
+                        )]),
+                    },
+                ))
+                .id();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let file = loop {
+                fixture.app.update();
+                let found = fixture
+                    .app
+                    .world_mut()
+                    .query_filtered::<(Entity, &ForwardReceipt), With<CleaningPaths>>()
+                    .iter(fixture.app.world())
+                    .find(|(_, receipt)| receipt.0.pending())
+                    .map(|(entity, _)| entity);
+                if let Some(file) = found {
+                    break file;
+                }
+                assert!(Instant::now() < deadline, "native cleanup was not queued");
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(disable)
+                .insert(OperationState::Canceled);
+            if suppress {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(file)
+                    .insert(OperationState::Canceled);
+            }
+            for _ in 0..3 {
+                fixture.app.update();
+            }
+            assert!(fixture.store.lease().is_none());
+            assert!(fixture.app.world().get::<CliResult>(disable).is_none());
+            release_tx.send(()).unwrap();
+            fixture.finish(disable);
+            assert_eq!(
+                std::fs::read(fixture.store.manifest_path()).unwrap(),
+                before
+            );
+            assert_eq!(std::fs::read(&sentinel).unwrap(), b"foreign content");
+            for path in [".zshrc", ".config/editor"] {
+                assert_eq!(
+                    vmux_path::PathIdentity::resolve(fixture.store.home().join(path)),
+                    vmux_path::PathIdentity::resolve(root.join(path))
+                );
+            }
+            for path in [
+                fixture.store.home().to_path_buf(),
+                fixture.store.home().join(".config"),
+            ] {
+                for entry in std::fs::read_dir(path).unwrap() {
+                    assert!(
+                        !entry
+                            .unwrap()
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".vmux-link-")
+                    );
+                }
+            }
+            assert!(fixture.store.lease().is_some());
+            drop(held);
+        }
+    }
+
+    #[test]
+    fn published_configuration_failure_does_not_block_link_restoration() {
+        let mut fixture = Fixture::new();
+        let root = fixture.package("shell");
+        let link = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.config-recovery.setup").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                LinkDotfilePackage::new("shell"),
+            ))
+            .id();
+        fixture.finish(link);
+        let before = crate::ToolsManifest::read(&fixture.store.manifest_path()).unwrap();
+        fixture.app.add_observer(
+            |trigger: On<Add, Saving>, work: Query<&Work>, mut commands: Commands| {
+                let owner = work.get(trigger.event_target()).unwrap();
+                commands
+                    .entity(owner.requester)
+                    .insert(OperationState::Canceled);
+            },
+        );
+        let manifest = fixture.store.manifest_path();
+        fixture
+            .app
+            .add_observer(move |_: On<Add, ConfigPublished>| {
+                std::fs::remove_file(&manifest).unwrap();
+                std::fs::create_dir(&manifest).unwrap();
+            });
+        let disable = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Operation::bundle("test.dotfile.config-recovery.disable").unwrap(),
+                ToolStoreTarget::new(fixture.source),
+                DisableDotfilePackage::new("shell"),
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            let restored = [".zshrc", ".config/editor"]
+                .iter()
+                .all(|path| fixture.store.home().join(path).symlink_metadata().is_ok());
+            if restored
+                && fixture
+                    .app
+                    .world()
+                    .get::<ToolOperationFailed>(disable)
+                    .is_some()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "configuration failure blocked link restoration"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(fixture.store.manifest_path().is_dir());
+        assert!(fixture.store.lease().is_none());
+        for path in [".zshrc", ".config/editor"] {
+            assert_eq!(
+                vmux_path::PathIdentity::resolve(fixture.store.home().join(path)),
+                vmux_path::PathIdentity::resolve(root.join(path))
+            );
+        }
+        std::fs::remove_dir(fixture.store.manifest_path()).unwrap();
+        fixture.finish(disable);
+        assert_eq!(
+            crate::ToolsManifest::read(&fixture.store.manifest_path()).unwrap(),
+            before
+        );
+        assert!(fixture.store.lease().is_some());
+    }
+
+    #[test]
+    fn discovery_distinguishes_a_missing_catalog_from_a_non_directory() {
+        for occupied in [false, true] {
+            let mut fixture = Fixture::new();
+            if occupied {
+                std::fs::write(fixture.store.dotfiles_dir(), b"foreign catalog").unwrap();
+            }
+            let request = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Operation::bundle("test.dotfile.catalog.type").unwrap(),
+                    ToolStoreTarget::new(fixture.source),
+                    DiscoverDotfilePackages,
+                ))
+                .id();
+            fixture.finish(request);
+            if occupied {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<ToolOperationFailed>(request)
+                        .is_some()
+                );
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<DiscoveredDotfilePackages>(request)
+                        .is_none()
+                );
+                assert_eq!(
+                    std::fs::read(fixture.store.dotfiles_dir()).unwrap(),
+                    b"foreign catalog"
+                );
+            } else {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<DiscoveredDotfilePackages>(request)
+                        .unwrap()
+                        .packages
+                        .is_empty()
+                );
+                assert!(!fixture.store.dotfiles_dir().exists());
+            }
+            assert!(fixture.store.lease().is_some());
+        }
     }
 
     #[test]
